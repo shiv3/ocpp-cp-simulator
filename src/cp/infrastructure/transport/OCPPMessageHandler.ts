@@ -586,17 +586,24 @@ export class OCPPMessageHandler {
    * Installed/...) fire from UpdateFirmware progression.
    */
   public sendFirmwareStatusNotification(
-    status:
-      | "Downloaded"
-      | "DownloadFailed"
-      | "Downloading"
-      | "Idle"
-      | "InstallationFailed"
-      | "Installing"
-      | "Installed",
+    status: string,
+    requestId?: number,
   ): void {
+    // 1.6 §6.24 FirmwareStatusNotification.req has no requestId (only the
+    // Whitepaper's Signed variant does), and its status set is the first
+    // seven of 2.0.1's. Anything wider is sent as given: the codec's
+    // outgoing check warns, and a CSMS that rejects it is the honest
+    // answer for a 2.0.1-only status on a 1.6 wire (#345).
+    if (requestId !== undefined) {
+      this._logger.debug(
+        `FirmwareStatusNotification carries no requestId on OCPP 1.6; dropping requestId=${requestId}`,
+        LogType.OCPP,
+      );
+    }
     const messageId = this.generateMessageId();
-    const payload: FirmwareStatusNotificationRequestV16 = { status };
+    const payload: FirmwareStatusNotificationRequestV16 = {
+      status: status as FirmwareStatusNotificationRequestV16["status"],
+    };
     this.sendRequest(OCPPAction.FirmwareStatusNotification, messageId, payload);
   }
 
@@ -605,20 +612,10 @@ export class OCPPMessageHandler {
    * carries the id from the triggering GetLog.req (TriggerMessage-driven
    * `Idle` sends have none).
    */
-  public sendLogStatusNotification(
-    status:
-      | "BadMessage"
-      | "Idle"
-      | "NotSupportedOperation"
-      | "PermissionDenied"
-      | "Uploaded"
-      | "UploadFailure"
-      | "Uploading",
-    requestId?: number,
-  ): void {
+  public sendLogStatusNotification(status: string, requestId?: number): void {
     const messageId = this.generateMessageId();
     const payload: LogStatusNotificationRequestV16 = {
-      status,
+      status: status as LogStatusNotificationRequestV16["status"],
       ...(requestId !== undefined ? { requestId } : {}),
     };
     this.sendRequest(OCPPAction.LogStatusNotification, messageId, payload);

@@ -1,3 +1,7 @@
+import type {
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../cp/domain/types/FirmwareLogStatus";
 import { getDefaultStore } from "jotai";
 import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
@@ -454,16 +458,29 @@ export class LocalChargePointService implements ChargePointService {
   async sendFirmwareStatusNotification(
     id: string,
     status: string,
+    requestId?: number,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendFirmwareStatusNotification(
-      status as
-        | "Downloaded"
-        | "DownloadFailed"
-        | "Downloading"
-        | "Idle"
-        | "InstallationFailed"
-        | "Installing"
-        | "Installed",
+    const chargePoint = this.getExistingChargePointOrThrow(id);
+    // Two-argument form only when a requestId was given (same as the
+    // registry service): the 1.6-era call shape is unchanged.
+    if (requestId === undefined) {
+      chargePoint.sendFirmwareStatusNotification(status as FirmwareStatus);
+    } else {
+      chargePoint.sendFirmwareStatusNotification(
+        status as FirmwareStatus,
+        requestId,
+      );
+    }
+  }
+
+  async sendLogStatusNotification(
+    id: string,
+    status: string,
+    requestId?: number,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).sendLogStatusNotification(
+      status as UploadLogStatus,
+      requestId,
     );
   }
 

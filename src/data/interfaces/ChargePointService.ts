@@ -430,7 +430,17 @@ export interface ChargePointService {
     opts?: StatusNotificationOptions,
   ): Promise<void>;
   sendDiagnosticsStatusNotification(id: string, status: string): Promise<void>;
-  sendFirmwareStatusNotification(id: string, status: string): Promise<void>;
+  sendFirmwareStatusNotification(
+    id: string,
+    status: string,
+    requestId?: number,
+  ): Promise<void>;
+  /** LogStatusNotification.req (#345). */
+  sendLogStatusNotification(
+    id: string,
+    status: string,
+    requestId?: number,
+  ): Promise<void>;
   sendSecurityEventNotification(
     id: string,
     type: string,

@@ -1,3 +1,4 @@
+import { UPLOAD_LOG_STATUSES } from "../cp/domain/types/FirmwareLogStatus";
 import * as readline from "readline";
 import * as fs from "fs";
 import {
@@ -192,7 +193,25 @@ export async function handleJsonCommand(
 
     case "firmware_status_notification": {
       const status = requireString(params, "status");
-      await ops.sendFirmwareStatusNotification(status);
+      const requestId =
+        params.requestId === undefined
+          ? undefined
+          : requireNonNegativeInt(params, "requestId");
+      if (requestId === undefined)
+        await ops.sendFirmwareStatusNotification(status);
+      else await ops.sendFirmwareStatusNotification(status, requestId);
+      return undefined;
+    }
+
+    case "log_status_notification": {
+      // #345: LogStatusNotification.req; the daemon's RPC schema holds the
+      // status vocabulary, standalone mode validates the same way here.
+      const status = requireEnum(params, "status", UPLOAD_LOG_STATUSES);
+      const requestId =
+        params.requestId === undefined
+          ? undefined
+          : requireNonNegativeInt(params, "requestId");
+      await ops.sendLogStatusNotification(status, requestId);
       return undefined;
     }
 

@@ -1752,10 +1752,36 @@ async function dispatchFacadeCpCommand(
     }
     case "firmware_status_notification": {
       const id = requireFacadeCpId(cpId, rawParams);
+      const requestId =
+        params.requestId === undefined
+          ? undefined
+          : requireNonNegativeInt(params, "requestId");
       await runFacadeOperation(() =>
-        chargePointService.sendFirmwareStatusNotification(
+        requestId === undefined
+          ? chargePointService.sendFirmwareStatusNotification(
+              id,
+              requireString(params, "status"),
+            )
+          : chargePointService.sendFirmwareStatusNotification(
+              id,
+              requireString(params, "status"),
+              requestId,
+            ),
+      );
+      return handled(undefined);
+    }
+    case "log_status_notification": {
+      // #345: the schema already holds `status` to the 2.0.1 vocabulary.
+      const id = requireFacadeCpId(cpId, rawParams);
+      const requestId =
+        params.requestId === undefined
+          ? undefined
+          : requireNonNegativeInt(params, "requestId");
+      await runFacadeOperation(() =>
+        chargePointService.sendLogStatusNotification(
           id,
           requireString(params, "status"),
+          requestId,
         ),
       );
       return handled(undefined);

@@ -294,8 +294,23 @@ export class RegistryChargePointService implements ChargePointService {
   async sendFirmwareStatusNotification(
     id: string,
     status: string,
+    requestId?: number,
   ): Promise<void> {
-    this.requireService(id).sendFirmwareStatusNotification(status);
+    // Two-argument form only when a requestId was given, so the 1.6-era
+    // call shape (and what its tests expect) is unchanged.
+    if (requestId === undefined) {
+      this.requireService(id).sendFirmwareStatusNotification(status);
+    } else {
+      this.requireService(id).sendFirmwareStatusNotification(status, requestId);
+    }
+  }
+
+  async sendLogStatusNotification(
+    id: string,
+    status: string,
+    requestId?: number,
+  ): Promise<void> {
+    this.requireService(id).sendLogStatusNotification(status, requestId);
   }
 
   async sendSecurityEventNotification(

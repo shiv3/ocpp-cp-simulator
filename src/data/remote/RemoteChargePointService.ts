@@ -880,8 +880,23 @@ export class RemoteChargePointService implements ChargePointService {
   async sendFirmwareStatusNotification(
     id: string,
     status: string,
+    requestId?: number,
   ): Promise<void> {
-    await this.runCpRpc(id, "firmware_status_notification", { status });
+    await this.runCpRpc(id, "firmware_status_notification", {
+      status,
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
+  }
+
+  async sendLogStatusNotification(
+    id: string,
+    status: string,
+    requestId?: number,
+  ): Promise<void> {
+    await this.runCpRpc(id, "log_status_notification", {
+      status,
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
   }
 
   async sendSecurityEventNotification(

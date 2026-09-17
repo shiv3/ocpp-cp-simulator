@@ -9,6 +9,8 @@ import type {
   BootNotificationResponseV201,
   DataTransferRequestV201,
   DataTransferResponseV201,
+  FirmwareStatusNotificationRequestV201,
+  LogStatusNotificationRequestV201,
   StatusNotificationRequestV201,
   StatusNotificationResponseV201,
   TransactionEventRequestV201,
@@ -819,28 +821,58 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  public sendFirmwareStatusNotification(_status: string): void {
-    this._logger.warn(
-      "[v2.0.1] FirmwareStatusNotification not supported in OCPP 2.0.1",
-      LogType.OCPP,
-    );
-  }
-
-  public sendLogStatusNotification(_status: string, _requestId?: number): void {
-    this._logger.warn(
-      "[v2.0.1] LogStatusNotification is a 1.6 Security Whitepaper message; not wired through this handler",
-      LogType.OCPP,
-    );
-  }
-
-  public sendSignedFirmwareStatusNotification(
-    _status: string,
-    _requestId?: number,
+  /**
+   * L01/L02 FirmwareStatusNotification.req (#345). Until this existed the
+   * method was a warn-only stub whose message said 2.0.1 had no such
+   * message; it does, and an accepted UpdateFirmware can now be followed
+   * through. `requestId` names the UpdateFirmware the report belongs to —
+   * the caller's, or the one this station last accepted.
+   */
+  public sendFirmwareStatusNotification(
+    status: string,
+    requestId?: number,
   ): void {
-    this._logger.warn(
-      "[v2.0.1] SignedFirmwareStatusNotification is a 1.6 Security Whitepaper message; not wired through this handler",
+    const id = this.generateMessageId();
+    const effectiveRequestId =
+      requestId ?? this._chargePoint.lastFirmwareRequestId;
+    const payload: FirmwareStatusNotificationRequestV201 = {
+      status: status as FirmwareStatusNotificationRequestV201["status"],
+      ...(effectiveRequestId !== undefined
+        ? { requestId: effectiveRequestId }
+        : {}),
+    };
+    this.send("FirmwareStatusNotification", id, payload);
+  }
+
+  /** N01 LogStatusNotification.req (#345); `requestId` as above, from the
+   *  GetLog this station last accepted when the caller gives none. */
+  public sendLogStatusNotification(status: string, requestId?: number): void {
+    const id = this.generateMessageId();
+    const effectiveRequestId = requestId ?? this._chargePoint.lastLogRequestId;
+    const payload: LogStatusNotificationRequestV201 = {
+      status: status as LogStatusNotificationRequestV201["status"],
+      ...(effectiveRequestId !== undefined
+        ? { requestId: effectiveRequestId }
+        : {}),
+    };
+    this.send("LogStatusNotification", id, payload);
+  }
+
+  /**
+   * 1.6 Security Whitepaper only. In 2.0.1 a signed update is the ordinary
+   * UpdateFirmware (its `firmware.signature`) followed by the ordinary
+   * FirmwareStatusNotification, whose status set is exactly the Whitepaper's
+   * — so this is that message (#345).
+   */
+  public sendSignedFirmwareStatusNotification(
+    status: string,
+    requestId?: number,
+  ): void {
+    this._logger.debug(
+      "[v2.0.1] SignedFirmwareStatusNotification is 1.6-Whitepaper-only; sending FirmwareStatusNotification, which carries the same statuses",
       LogType.OCPP,
     );
+    this.sendFirmwareStatusNotification(status, requestId);
   }
 
   public setBootStatus(

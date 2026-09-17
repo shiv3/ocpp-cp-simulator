@@ -97,8 +97,11 @@ export class Outbox implements IChargePointMessageHandler {
     status: Parameters<
       IChargePointMessageHandler["sendFirmwareStatusNotification"]
     >[0],
+    requestId?: Parameters<
+      IChargePointMessageHandler["sendFirmwareStatusNotification"]
+    >[1],
   ): ReturnType<IChargePointMessageHandler["sendFirmwareStatusNotification"]> {
-    return this.handler.sendFirmwareStatusNotification(status);
+    return this.handler.sendFirmwareStatusNotification(status, requestId);
   }
 
   sendLogStatusNotification(

@@ -51,7 +51,12 @@ export interface IChargePointMessageHandler {
   sendSecurityEventNotification(type: string, techInfo?: string): void;
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: string): void;
-  sendFirmwareStatusNotification(status: string): void;
+  /** FirmwareStatusNotification.req. `requestId` is carried on 2.0.1 (from
+   *  the UpdateFirmware that was acked when omitted); 1.6's request has no
+   *  such field and drops it (#345). */
+  sendFirmwareStatusNotification(status: string, requestId?: number): void;
+  /** LogStatusNotification.req (1.6 Security Whitepaper / 2.0.1 N01).
+   *  `requestId` defaults to the GetLog that was acked on 2.0.1 (#345). */
   sendLogStatusNotification(status: string, requestId?: number): void;
   sendSignedFirmwareStatusNotification(
     status: string,

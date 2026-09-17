@@ -496,7 +496,31 @@ export const METHODS = {
     result: ANY,
   },
   firmware_status_notification: {
-    params: z.object({ status: STR_64K }),
+    // #345: `requestId` names the UpdateFirmware the report belongs to
+    // (2.0.1 only; 1.6's request has no such field). Omitted on 2.0.1, the
+    // station uses the requestId of the UpdateFirmware it last accepted.
+    params: z.object({
+      status: STR_64K,
+      requestId: z.number().int().nonnegative().optional(),
+    }),
+    result: ANY,
+  },
+  // #345: LogStatusNotification.req (1.6 Security Whitepaper / 2.0.1 N01).
+  // `requestId` as above, defaulting to the GetLog last accepted on 2.0.1.
+  log_status_notification: {
+    params: z.object({
+      status: z.enum([
+        "BadMessage",
+        "Idle",
+        "NotSupportedOperation",
+        "PermissionDenied",
+        "Uploaded",
+        "UploadFailure",
+        "Uploading",
+        "AcceptedCanceled",
+      ]),
+      requestId: z.number().int().nonnegative().optional(),
+    }),
     result: ANY,
   },
   security_event_notification: {

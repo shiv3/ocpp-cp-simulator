@@ -1,4 +1,7 @@
-import { UPLOAD_LOG_STATUSES } from "../cp/domain/types/FirmwareLogStatus";
+import {
+  FIRMWARE_STATUSES,
+  UPLOAD_LOG_STATUSES,
+} from "../cp/domain/types/FirmwareLogStatus";
 import * as readline from "readline";
 import * as fs from "fs";
 import {
@@ -192,7 +195,7 @@ export async function handleJsonCommand(
     }
 
     case "firmware_status_notification": {
-      const status = requireString(params, "status");
+      const status = requireEnum(params, "status", FIRMWARE_STATUSES);
       const requestId =
         params.requestId === undefined
           ? undefined

@@ -168,7 +168,11 @@ export const handleGetLogAckV201 = ((
   return {
     response: {
       status: "Accepted",
-      filename: `${ctx?.chargePoint.id ?? "cp"}-${logType}-${request?.requestId ?? 0}.log`,
+      // GetLogResponse.filename is bounded at 255 in the 2.0.1 schema.
+      filename:
+        `${ctx?.chargePoint.id ?? "cp"}-${logType}-${request?.requestId ?? 0}.log`.slice(
+          -255,
+        ),
     } satisfies GetLogResponseV201,
   };
 }) satisfies V201AckHandler;

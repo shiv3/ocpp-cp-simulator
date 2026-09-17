@@ -1099,7 +1099,9 @@ export class ChargePoint {
 
   /** `requestId` of the last UpdateFirmware.req this station accepted, so a
    *  2.0.1 FirmwareStatusNotification sent without one still names the
-   *  lifecycle it belongs to (#345). Cleared by a boot. */
+   *  lifecycle it belongs to (#345). Kept until the next accepted request —
+   *  deliberately across reconnects and reboots, since a real update reports
+   *  `Installed` only after the station has rebooted on the new firmware. */
   private _lastFirmwareRequestId: number | undefined;
   /** Same for GetLog.req → LogStatusNotification. */
   private _lastLogRequestId: number | undefined;

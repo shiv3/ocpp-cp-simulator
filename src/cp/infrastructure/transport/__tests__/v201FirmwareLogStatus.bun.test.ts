@@ -17,6 +17,7 @@ import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 async function bootedChargePoint(
   csms: MockCsms,
   id: string,
+  version: "OCPP-2.0.1" | "OCPP-2.1" = "OCPP-2.0.1",
 ): Promise<ChargePoint> {
   const cp = new ChargePoint(
     id,
@@ -28,7 +29,7 @@ async function bootedChargePoint(
     null,
     {},
     [],
-    "OCPP-2.0.1",
+    version,
     {},
   );
   cp.events.on("error", () => undefined);
@@ -159,6 +160,38 @@ describe("OCPP 2.0.1 firmware / log lifecycles (#345)", () => {
         status: "Rejected",
         statusInfo: { reasonCode: "NotLocalController" },
       });
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("2.1 inherits the same lifecycle: UpdateFirmware accepted, report stamped", async () => {
+    // The 2.1 profile reuses the 2.0.1 inbound registry and outbound handler,
+    // so the change is deliberately visible there too.
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP21-FW", "OCPP-2.1");
+    try {
+      csms.send([
+        2,
+        "uf-21",
+        "UpdateFirmware",
+        {
+          requestId: 5,
+          firmware: {
+            location: "https://files.example/fw.bin",
+            retrieveDateTime: "2026-09-17T00:00:00.000Z",
+          },
+        },
+      ]);
+      expect((await csms.waitForFrame(resultFor("uf-21")))[2]).toEqual({
+        status: "Accepted",
+      });
+      cp.sendFirmwareStatusNotification("Downloaded");
+      const report = await csms.waitForFrame(
+        call("FirmwareStatusNotification"),
+      );
+      expect(report[3]).toEqual({ status: "Downloaded", requestId: 5 });
     } finally {
       cp.disconnect();
       await csms.stop();

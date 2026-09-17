@@ -30,18 +30,24 @@ async function streamToText(
   return chunks.join("");
 }
 
+/** The one place the fixture's build command is spelled. Kept as a function so
+ *  the subprocess type is inferred from `Bun.spawn` rather than restated. */
+function spawnGoBuild() {
+  return Bun.spawn(["go", "-C", "e2e/csms", "build", "-o", "e2e-csms", "."], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+}
+
 export async function buildCsms(): Promise<string> {
   // The gocpp revision the fixture builds against is pinned in
   // e2e/csms/go.mod + go.sum (#322): `go build` fetches it from the module
   // proxy, so a clean machine needs Go on PATH and network — no sibling
   // checkout. Bun.spawn throws ENOENT when `go` is missing; say so plainly.
-  let proc: ReturnType<typeof Bun.spawn<{ stdout: "pipe"; stderr: "pipe" }>>;
+  let proc: ReturnType<typeof spawnGoBuild>;
   try {
-    proc = Bun.spawn(["go", "-C", "e2e/csms", "build", "-o", "e2e-csms", "."], {
-      cwd: repoRoot,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    proc = spawnGoBuild();
   } catch (error) {
     console.error(
       "e2e: could not start `go` — the CSMS fixture is a Go program. " +

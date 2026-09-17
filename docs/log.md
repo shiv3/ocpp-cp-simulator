@@ -1092,14 +1092,6 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [GitHub issues](sources/github-issues.md): #328 row.
 - Test: `service.transactionIdZero.bun.test.ts` asserts `toBe(0)` on the re-emitted id (a truthy assertion passes with the bug present).
 
-## [2026-09-17] ingest | #354 follow-ups: restore survives a missing SOAP base; MCP `server.info` reports it
-
-- [OCPP versions & transports → callback URL precedence](concepts/ocpp-versions-and-transports.md#soap-versions-12-15-16s): step 3 now distinguishes create (error), flags (fatal) and restore (skip with a warning, row kept). Before, a SOAP charge point created under `--soap-tunnel ngrok` and restored without a base threw out of `CPRegistry.restoreFromDatabase()` and the daemon exited, healthy WebSocket rows included. Same section: a callback URL persisted before the derivation existed counts as explicit and does not follow a later base change.
-- [State persistence → charge_points](concepts/state-persistence.md): NULL `soap_callback_url` means derived; the skip is noted on the row.
-- `server.info` over MCP `call_method` answered the no-base fallback while the Socket.IO method reported the tunnel origin: `startServer` builds one `ServerInfo` and hands it to both transports. No page restated the wrong fact; [Control plane](concepts/control-plane.md#daemon-methods) already describes the method.
-- [GitHub issues](sources/github-issues.md): #183 row extended.
-- Tests: `CPRegistry.soapPublicBase.bun.test.ts` (base gone on restore), new `startServer.soapFollowups.bun.test.ts` (daemon starts, WebSocket rows restore, warning names both flags; MCP `server.info` carries the base).
-
 ## [2026-09-17] ingest | the e2e CSMS fixture builds against a pinned gocpp (#322)
 
 - [Source: e2e/README.md](sources/e2e-readme.md): requirements no longer include a `../gocpp` sibling checkout. `e2e/csms/go.mod` requires `github.com/shiv3/gocpp v0.1.7` and `go.sum` checksums it, so the oracle every e2e assertion is measured against is recorded in the repo; before, a `replace` to a filesystem path made whatever was on disk the oracle, unchecksummed. How to move the pin is on the page.

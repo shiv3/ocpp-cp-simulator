@@ -1106,3 +1106,14 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → cp.delete](concepts/control-plane.md#daemon-methods): the row says the delete cascades, stored logs included.
 - [GitHub issues](sources/github-issues.md): #326 row.
 - Test: `src/cp/domain/persistence/__tests__/tables.bun.test.ts` — every `CREATE TABLE` in `SCHEMA_SQL` has a registry row and vice versa, `perCp` matches the presence of a `cp_id` column, and both cleanup paths are exercised against a populated in-memory DB. The column half of the issue (behavioural round-trip of connector snapshots) is left open, as the issue's own comment argues it is a different kind of check.
+
+## [2026-09-17] ingest | `run_scenario_template`: gate out of the way (#318) and `once: true` (#352)
+
+- [Control plane → CP methods](concepts/control-plane.md#cp-command-methods): the `run_scenario_template` row gains `once?: boolean` and says which of "run once" / "re-arm on every connect" a caller gets by default (re-arm, #253). The load now suppresses the connector's auto-start gate, as `run_scenario_file` has since #314, so a connect-triggered template on an Available charge point no longer answers "already running" for a scenario it did load and start; the explicit start carries `strict`.
+- [Scenario format → re-arming](concepts/scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect): the run-once advice names `run_scenario_template { once: true }` beside the explicit `run_scenario`; the `strict` note covers both RPCs.
+- [MCP endpoint](entities/mcp-endpoint.md): `once?` on the `run_scenario_template` tool.
+- JSON-Lines: `strict` and `once` both reach the service — `strict` was silently dropped on this surface before.
+- Browser (`LocalChargePointService`) and remote (`RemoteChargePointService`, which now also forwards `strict`) honour `once` the same way.
+- Not added: #352's options 2 (`load_scenario_template { enabled: false }`) and 3 (`get_scenario_template`); option 1 is the one-call form the issue prefers and closes #318 by construction.
+- [GitHub issues](sources/github-issues.md): #318 and #352 rows.
+- Tests: `runScenarioTemplate.once.bun.test.ts` (control row proving the gate would have started the template; success; re-arm by default; no re-arm with `once`), `jsonMode.runScenarioTemplate.test.ts`, and the Socket.IO RPC test's expectation.

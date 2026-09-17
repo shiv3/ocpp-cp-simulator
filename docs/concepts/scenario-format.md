@@ -23,7 +23,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-12
+updated: 2026-09-17
 ---
 
 # Scenario File Format (v1.2)
@@ -154,8 +154,11 @@ re-arming is what makes the simulator answer again after it reconnects rather
 than going quietly unresponsive.
 
 If a scenario must run only once per process, drive it with an explicit
-`run_scenario` instead of `triggerOn: "connect"`. A status oscillation on a
-still-connected charge point does **not** re-fire the scenario.
+`run_scenario` instead of `triggerOn: "connect"` — or, for a built-in
+template, `run_scenario_template { "once": true }`, which loads the instance
+with `enabled: false` (the walker skips it at every connect) and starts it
+once (#352). A status oscillation on a still-connected charge point does
+**not** re-fire the scenario.
 
 ### `responseOverride` notes
 
@@ -259,7 +262,7 @@ Each assertion optionally carries a `severity` field (`"failure"` or `"warning"`
 - **`"failure"` (default)**: A normative OCPP conformance check. If it fails, the run's `conformanceVerdict` is `FAIL` and the overall scenario verdict fails.
 - **`"warning"`**: A compatibility observation (e.g., an OCTT certification quirk): behavior that is legal per the OCPP specification but has been observed to trip a particular peer. If it fails, the run's `compatibilityVerdict` is `WARNING` and the run does **not** fail. Strict mode promotes such warnings to failures when either:
   - the scenario sets `strictCompatibility: true`, or
-  - the run is started with `strict: true` (accepted by the `run_scenario`, `run_scenario_file`, and `run_scenario_template` RPCs; overrides the scenario-level setting). `run_scenario_file` suppresses the connector's auto-start gate for its own load so that the run it starts is the run the flag applies to (#314).
+  - the run is started with `strict: true` (accepted by the `run_scenario`, `run_scenario_file`, and `run_scenario_template` RPCs; overrides the scenario-level setting). `run_scenario_file` and `run_scenario_template` suppress the connector's auto-start gate for their own load so that the run they start is the run the flag applies to (#314, #318).
 
 The run report carries both axes alongside the overall `verdict`: `conformanceVerdict` (`PASS`/`FAIL`/`BLOCKED`/`SKIPPED`, from failure-severity assertions only) and `compatibilityVerdict` (`PASS`/`WARNING`/`FAIL`/`SKIPPED`, from warning-severity assertions only), plus the effective `strict` flag.
 

@@ -287,6 +287,14 @@ export interface ScenarioRunOptions {
   evSettings?: Partial<EVSettings>;
   strict?: boolean;
   /**
+   * `run_scenario_template` only (#352). `true` loads the template's instance
+   * with `enabled: false` before the explicit start, so the connect-triggered
+   * auto-start walker never re-arms it: the run this call makes is its only
+   * one. Default (`false` / absent): the instance stays enabled and re-arms on
+   * every reconnect, as every loaded connect-triggered scenario does (#253).
+   */
+  once?: boolean;
+  /**
    * Handed the exact text a scenario file was read from, for `--watch`'s reload
    * baseline (#314).
    *

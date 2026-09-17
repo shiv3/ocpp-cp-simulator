@@ -117,6 +117,7 @@ export interface SingleCpCommandOps {
     connectorId: number,
     templateId: string,
     evSettings?: Partial<EVSettings>,
+    options?: { readonly strict?: boolean; readonly once?: boolean },
   ): Promise<{ scenarioId: string }>;
   getScenarioStatus(
     connectorId: number,
@@ -276,13 +277,27 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
       service.runScenario(connectorId, scenarioId);
       return { scenarioId };
     },
-    runScenarioTemplate: async (connectorId, templateId, evSettings) => {
+    runScenarioTemplate: async (
+      connectorId,
+      templateId,
+      evSettings,
+      options,
+    ) => {
+      // Same as RegistryChargePointService.runScenarioTemplate (#318, #352):
+      // gate out of the way, one explicit start with the caller's options.
       const scenarioId = service.loadScenarioTemplate(
         templateId,
         connectorId,
         evSettings,
+        { autoStart: false, ...(options?.once ? { enabled: false } : {}) },
       );
-      service.runScenario(connectorId, scenarioId);
+      if (options?.strict === undefined) {
+        service.runScenario(connectorId, scenarioId);
+      } else {
+        service.runScenario(connectorId, scenarioId, {
+          strict: options.strict,
+        });
+      }
       return { scenarioId };
     },
     getScenarioStatus: async (connectorId, scenarioId) =>
@@ -395,10 +410,12 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.runScenario(cpId, connectorId, scenarioId),
     runScenarioFile: (connectorId, filePath) =>
       service.runScenarioFile(cpId, filePath, { connectorId }),
-    runScenarioTemplate: (connectorId, templateId, evSettings) =>
+    runScenarioTemplate: (connectorId, templateId, evSettings, options) =>
       service.runScenarioTemplate(cpId, templateId, {
         connectorId,
         evSettings,
+        ...(options?.strict === undefined ? {} : { strict: options.strict }),
+        ...(options?.once === undefined ? {} : { once: options.once }),
       }),
     getScenarioStatus: (connectorId, scenarioId) =>
       service.getScenarioStatus(cpId, connectorId, scenarioId),

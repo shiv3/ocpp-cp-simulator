@@ -12,7 +12,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/network-simulation.md
   - ../analyses/driving-from-an-ai-agent.md
-updated: 2026-09-12
+updated: 2026-09-17
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -57,7 +57,7 @@ The endpoint exposes 19 curated tools wrapping the daemon's
 | `set_meter_value`       | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                                                                                                                                                                  |
 | `send_meter_value`      | `send_meter_value`        | `cpId`, `connector`, `context?` — `ReadingContext` the readings carry (#335)                                                                                                                                                                                                  |
 | `scenario_templates`    | `scenario.templates`      | —                                                                                                                                                                                                                                                                             |
-| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`, `evSettings?`, `strict?`                                                                                                                                                                                                                   |
+| `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`, `evSettings?`, `strict?`, `once?`                                                                                                                                                                                                          |
 | `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                                                                                                                                                                                             |
 | `get_logs`              | `logs.get`                | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                                                                            |
 

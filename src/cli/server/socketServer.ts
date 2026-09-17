@@ -2227,6 +2227,8 @@ async function dispatchFacadeCpCommand(
         params.strict === undefined
           ? undefined
           : requireBoolean(params, "strict");
+      const once =
+        params.once === undefined ? undefined : requireBoolean(params, "once");
       return handled(
         await runFacadeOperation(() =>
           chargePointService.runScenarioTemplate(
@@ -2236,6 +2238,7 @@ async function dispatchFacadeCpCommand(
               connectorId: requirePositiveInt(params, "connector"),
               evSettings: params.evSettings as Partial<EVSettings> | undefined,
               strict,
+              ...(once === undefined ? {} : { once }),
             },
           ),
         ),

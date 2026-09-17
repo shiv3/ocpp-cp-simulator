@@ -1286,6 +1286,8 @@ export class RemoteChargePointService implements ChargePointService {
             evSettings: opts.evSettings as unknown as Record<string, unknown>,
           }
         : {}),
+      ...(opts.strict !== undefined ? { strict: opts.strict } : {}),
+      ...(opts.once !== undefined ? { once: opts.once } : {}),
     });
     return (data as { scenarioId: string }) ?? { scenarioId: "" };
   }

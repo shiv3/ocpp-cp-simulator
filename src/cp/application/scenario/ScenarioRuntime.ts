@@ -798,9 +798,10 @@ export const createScenarioExecutorCallbacks = (
       // (or the failure), and a scenario that needs to react to it would be
       // a different node. Swallow the rejection so it cannot surface as an
       // unhandled promise from inside a scenario step (#348).
-      void chargePoint
-        .sendDataTransfer(vendorId, messageId, data)
-        .catch(() => undefined);
+      // `Promise.resolve` so a test double that returns nothing is fine too.
+      void Promise.resolve(
+        chargePoint.sendDataTransfer(vendorId, messageId, data),
+      ).catch(() => undefined);
     },
   };
 

@@ -376,15 +376,13 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    whatever number it carries. "No id arrived" is reported as `null`, which `0`
    could not express, and `null` alone triggers retirement.
 
-   **Known limitation, and it is not fixable here.** Against a CSMS that
-   assigns `transactionId: 0` the second emission never arrives at all: the
-   daemon suppresses the `transactionIdChange` it would come from
-   (`src/cli/service.ts`, `if (transactionId === 0) return`). The cycle then
-   waits out its full assigned-id budget (95s) and **retires the charge point
-   despite a valid confirmation**, so the offered load drops — visibly, in the `retired`
-   column, but for the wrong reason. Tracked as
-   [#328](https://github.com/shiv3/ocpp-cp-simulator/issues/328); the fix
-   belongs to the daemon's event contract, not to this script.
+   A CSMS that assigns `transactionId: 0` is recognised too. Until
+   [#328](https://github.com/shiv3/ocpp-cp-simulator/issues/328) the daemon
+   suppressed the second emission for that one value, so the cycle waited out
+   its assigned-id budget and retired the charge point despite a valid
+   confirmation; the daemon now re-emits `transaction_started` with whatever
+   id the CSMS assigned, and the bench's order-based reading needs nothing
+   further.
 
    **The hold runs from when the transaction began**, not from when its id was
    confirmed. On OCPP 1.6 the cycle waits for the **CSMS-assigned** transaction

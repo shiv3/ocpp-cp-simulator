@@ -19,7 +19,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-09-12
+updated: 2026-09-17
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -713,20 +713,20 @@ Events are emitted in all modes:
 - Daemon mode emits Socket.IO `event` envelopes with `kind: "cp"` or
   `kind: "registry"` (see [Control plane → Event push and rooms](../concepts/control-plane.md#event-push-and-rooms)).
 
-| Event                   | Data Fields                               | Description                  |
-| ----------------------- | ----------------------------------------- | ---------------------------- |
-| `connected`             | -                                         | Connected to CSMS            |
-| `disconnected`          | `code`, `reason`                          | Disconnected from CSMS       |
-| `status_change`         | `status`                                  | Charge point status changed  |
-| `error`                 | `error`                                   | Error occurred               |
-| `connector_status`      | `connectorId`, `status`, `previousStatus` | Connector status changed     |
-| `transaction_started`   | `connectorId`, `transactionId`, `tagId`   | Transaction started          |
-| `transaction_stopped`   | `connectorId`, `transactionId`            | Transaction stopped          |
-| `meter_value`           | `connectorId`, `meterValue`               | Meter value updated          |
-| `scenario_started`      | `connectorId`, `scenarioId`               | Scenario execution started   |
-| `scenario_completed`    | `connectorId`, `scenarioId`               | Scenario execution completed |
-| `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed    |
-| `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed       |
+| Event                   | Data Fields                               | Description                                                                                                                                                                                                                                    |
+| ----------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connected`             | -                                         | Connected to CSMS                                                                                                                                                                                                                              |
+| `disconnected`          | `code`, `reason`                          | Disconnected from CSMS                                                                                                                                                                                                                         |
+| `status_change`         | `status`                                  | Charge point status changed                                                                                                                                                                                                                    |
+| `error`                 | `error`                                   | Error occurred                                                                                                                                                                                                                                 |
+| `connector_status`      | `connectorId`, `status`, `previousStatus` | Connector status changed                                                                                                                                                                                                                       |
+| `transaction_started`   | `connectorId`, `transactionId`, `tagId`   | Transaction started. On OCPP 1.6 it is emitted twice: once with the local placeholder id `0`, again with the id `StartTransaction.conf` assigned — whatever integer that is, `0` included (#328). Tell the two apart by order, never by value. |
+| `transaction_stopped`   | `connectorId`, `transactionId`            | Transaction stopped                                                                                                                                                                                                                            |
+| `meter_value`           | `connectorId`, `meterValue`               | Meter value updated                                                                                                                                                                                                                            |
+| `scenario_started`      | `connectorId`, `scenarioId`               | Scenario execution started                                                                                                                                                                                                                     |
+| `scenario_completed`    | `connectorId`, `scenarioId`               | Scenario execution completed                                                                                                                                                                                                                   |
+| `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed                                                                                                                                                                                                                      |
+| `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed                                                                                                                                                                                                                         |
 
 ## CLI Options
 

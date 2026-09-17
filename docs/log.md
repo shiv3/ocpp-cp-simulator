@@ -1084,3 +1084,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `server.info` over MCP `call_method` answered the no-base fallback while the Socket.IO method reported the tunnel origin: `startServer` builds one `ServerInfo` and hands it to both transports. No page restated the wrong fact; [Control plane](concepts/control-plane.md#daemon-methods) already describes the method.
 - [GitHub issues](sources/github-issues.md): #183 row extended.
 - Tests: `CPRegistry.soapPublicBase.bun.test.ts` (base gone on restore), new `startServer.soapFollowups.bun.test.ts` (daemon starts, WebSocket rows restore, warning names both flags; MCP `server.info` carries the base).
+
+## [2026-09-17] ingest | transaction_started re-emitted for a CSMS-assigned id of 0 (#328)
+
+- [CLI → events](entities/cli.md#events): the `transaction_started` row states the contract — emitted twice on OCPP 1.6 (local placeholder `0`, then the assigned id, any integer including `0`), told apart by order. Before, `CLIChargePointService` skipped the re-emission for `0`, so a conforming CSMS assigning zero was indistinguishable from "no confirmation yet".
+- [scripts/bench/README.md](sources/bench-readme.md): the "known limitation" paragraph about the assigned-zero retirement is replaced — the raw README and its summary page both.
+- [GitHub issues](sources/github-issues.md): #328 row.
+- Test: `service.transactionIdZero.bun.test.ts` asserts `toBe(0)` on the re-emitted id (a truthy assertion passes with the bug present).

@@ -1941,14 +1941,12 @@ export class TransactionStarts {
     // whatever its value — zero is a legal assignment, and testing for it was
     // what made a CSMS assigning 0 unrecognisable.
     //
-    // KNOWN LIMITATION, not fixable from here: against a CSMS that assigns
-    // `transactionId: 0` this second emission never arrives at all.
-    // `CLIChargePointService` suppresses the `transactionIdChange` it would
-    // come from (`src/cli/service.ts`, `if (transactionId === 0) return`), so
-    // the wait times out and the charge point is retired despite a valid
-    // confirmation — the fleet's offered load drops, visibly in the `retired`
-    // column but for the wrong reason. Tracked as issue #328; the fix is in
-    // the daemon's event contract, not in this script.
+    // A CSMS that assigns `transactionId: 0` is recognised too. Until #328
+    // the daemon suppressed this second emission for that one value, so the
+    // wait timed out and the charge point was retired despite a valid
+    // confirmation; `CLIChargePointService` now re-emits `transaction_started`
+    // with whatever id the CSMS assigned, and this order-based reading needs
+    // nothing further.
     this.waiters.delete(cpId);
     waiter.settle({
       started: true,

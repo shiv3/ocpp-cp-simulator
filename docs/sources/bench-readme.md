@@ -10,7 +10,7 @@ related:
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-09-06
+updated: 2026-09-17
 ---
 
 # Source: `scripts/bench/README.md`
@@ -304,15 +304,12 @@ despite a valid confirmation. The first emission after arming is the local
 start, the second the assigned id whatever it carries, and "no id arrived" is
 `null`, which `0` could not express; `null` alone triggers retirement.
 
-**Known limitation, not fixable from the bench.** Against a CSMS that assigns
-`transactionId: 0` the second emission never arrives: `CLIChargePointService`
-suppresses the `transactionIdChange` it would come from
-(`src/cli/service.ts`, `if (transactionId === 0) return`). The cycle waits its
-full bound and retires the charge point despite a valid confirmation, so the
-offered load drops — visibly in the `retired` column, but for the wrong reason.
-Tracked as issue #328: the fix belongs to the daemon's event contract, and the
-`transactionIdChange` setter is reached only from the CALLRESULT handlers, so
-removing that guard would add an emission solely in the assigned-zero case.
+**A CSMS that assigns `transactionId: 0` is recognised** (#328). The daemon used
+to suppress the second `transaction_started` for that one value, so the cycle
+waited out its bound and retired the charge point despite a valid confirmation.
+The `transactionIdChange` setter is reached only from the CALLRESULT handlers,
+so dropping that guard added an emission solely in the assigned-zero case, and
+the bench's order-based reading needed no change.
 
 **The stop waits for the assigned transaction id.** On OCPP 1.6
 `transaction_started` is emitted twice — locally with the placeholder id `0`,

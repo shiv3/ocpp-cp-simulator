@@ -1,4 +1,5 @@
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
+import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -394,6 +395,14 @@ export interface ChargePointService {
   startHeartbeat(id: string, intervalSeconds: number): Promise<void>;
   stopHeartbeat(id: string): Promise<void>;
   authorize(id: string, tagId: string): Promise<void>;
+  /** Station-initiated DataTransfer.req; resolves with the CSMS's answer
+   *  (#348). `data`: string, or an object (JSON-encoded on 1.6). */
+  sendDataTransfer(
+    id: string,
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult>;
 
   // Connector operations
   startTransaction(

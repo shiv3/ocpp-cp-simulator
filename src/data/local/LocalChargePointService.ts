@@ -1,4 +1,5 @@
 import { getDefaultStore } from "jotai";
+import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import {
   splitStopReason,
@@ -370,6 +371,19 @@ export class LocalChargePointService implements ChargePointService {
 
   async authorize(id: string, tagId: string): Promise<void> {
     this.getExistingChargePointOrThrow(id).authorize(tagId);
+  }
+
+  async sendDataTransfer(
+    id: string,
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult> {
+    return this.getExistingChargePointOrThrow(id).sendDataTransfer(
+      vendorId,
+      messageId,
+      data,
+    );
   }
 
   async startTransaction(

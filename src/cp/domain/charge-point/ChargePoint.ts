@@ -1,4 +1,5 @@
 import { EventEmitter } from "../../shared/EventEmitter";
+import type { DataTransferResult } from "../types/DataTransfer";
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
@@ -1052,8 +1053,14 @@ export class ChargePoint {
   }
 
   /** Send a CP-initiated DataTransfer.req (§4.3). */
-  sendDataTransfer(vendorId: string, messageId?: string, data?: string): void {
-    this._outbox.sendDataTransfer(vendorId, messageId, data);
+  /** Station-initiated DataTransfer.req; resolves with the CSMS's answer
+   *  (#348). See {@link IChargePointMessageHandler.sendDataTransfer}. */
+  sendDataTransfer(
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult> {
+    return this._outbox.sendDataTransfer(vendorId, messageId, data);
   }
 
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */

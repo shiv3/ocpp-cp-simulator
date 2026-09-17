@@ -1,4 +1,5 @@
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
+import type { DataTransferResult } from "../cp/domain/types/DataTransfer";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../cp/domain/persistence/Database";
 import type {
@@ -1042,6 +1043,15 @@ export class CLIChargePointService {
   authorize(tagId?: string): void {
     const resolved = tagId ?? this._chargePoint.nextIdTag() ?? DEFAULT_ID_TAG;
     this._chargePoint.authorize(resolved);
+  }
+
+  /** Station-initiated DataTransfer.req; resolves with the CSMS's answer (#348). */
+  sendDataTransfer(
+    vendorId: string,
+    messageId?: string,
+    data?: unknown,
+  ): Promise<DataTransferResult> {
+    return this._chargePoint.sendDataTransfer(vendorId, messageId, data);
   }
 
   updateConnectorStatus(

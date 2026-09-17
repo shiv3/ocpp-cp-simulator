@@ -233,6 +233,19 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "data_transfer": {
+      // #348: station-initiated DataTransfer.req; the CSMS's answer is the
+      // result line. `data` is a string or an object (validated by the RPC
+      // table's schema on the daemon; here it rides through as given).
+      const vendorId = requireString(params, "vendorId");
+      const messageId = optionalString(params, "messageId");
+      return ops.sendDataTransfer(
+        vendorId,
+        messageId,
+        optionalDataTransferData(params),
+      );
+    }
+
     case "update_connector_status": {
       // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
       // any non-negative integer here, not just positive ones.
@@ -576,6 +589,27 @@ export function requireEnum<T extends string>(
     );
   }
   return val;
+}
+
+/**
+ * `data_transfer`'s `data` (#348): a string, or a plain object — the same
+ * shape the daemon's RPC schema admits (`STR_64K | OBJ()`), so standalone
+ * JSON mode refuses the same inputs. `null` counts as absent.
+ */
+export function optionalDataTransferData(
+  params: Record<string, unknown>,
+): string | Record<string, unknown> | undefined {
+  const val = params.data;
+  if (val === undefined || val === null) return undefined;
+  const isPlainObject =
+    typeof val === "object" && !Array.isArray(val) && val !== null;
+  if (typeof val !== "string" && !isPlainObject) {
+    throw new Error("Invalid parameter: data (expected string or object)");
+  }
+  if (JSON.stringify(val).length > 65_536) {
+    throw new Error("Invalid parameter: data (over 64 KB)");
+  }
+  return val as string | Record<string, unknown>;
 }
 
 export function optionalBoolean(

@@ -22,6 +22,7 @@ const JSONMODE_COMMAND_IDS = [
   "heartbeat",
   "diagnostics_status_notification",
   "firmware_status_notification",
+  "log_status_notification",
   "security_event_notification",
   "sign_certificate",
   "start_heartbeat",

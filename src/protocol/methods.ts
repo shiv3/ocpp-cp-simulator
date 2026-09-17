@@ -7,6 +7,7 @@
 // (`requireNonNegativeInt`); every other connector-taking command requires
 // >= 1 (`requirePositiveInt`). DoS limits (Sec-4) bound every string/array.
 
+import { FIRMWARE_STATUSES } from "../cp/domain/types/FirmwareLogStatus";
 import { z } from "zod";
 
 import {
@@ -496,7 +497,34 @@ export const METHODS = {
     result: ANY,
   },
   firmware_status_notification: {
-    params: z.object({ status: STR_64K }),
+    // #345: `requestId` names the UpdateFirmware the report belongs to
+    // (2.0.1 only; 1.6's request has no such field). Omitted on 2.0.1, the
+    // station uses the requestId of the UpdateFirmware it last accepted.
+    params: z.object({
+      // The 2.0.1 FirmwareStatusEnumType, of which the seven 1.6 statuses
+      // are the first members; a 2.0.1-only status on a 1.6 wire is sent as
+      // given and the codec's outgoing check warns.
+      status: z.enum(FIRMWARE_STATUSES),
+      requestId: z.number().int().nonnegative().optional(),
+    }),
+    result: ANY,
+  },
+  // #345: LogStatusNotification.req (1.6 Security Whitepaper / 2.0.1 N01).
+  // `requestId` as above, defaulting to the GetLog last accepted on 2.0.1.
+  log_status_notification: {
+    params: z.object({
+      status: z.enum([
+        "BadMessage",
+        "Idle",
+        "NotSupportedOperation",
+        "PermissionDenied",
+        "Uploaded",
+        "UploadFailure",
+        "Uploading",
+        "AcceptedCanceled",
+      ]),
+      requestId: z.number().int().nonnegative().optional(),
+    }),
     result: ANY,
   },
   security_event_notification: {

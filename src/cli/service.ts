@@ -1,3 +1,7 @@
+import type {
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../cp/domain/types/FirmwareLogStatus";
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import type { DataTransferResult } from "../cp/domain/types/DataTransfer";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
@@ -1011,16 +1015,18 @@ export class CLIChargePointService {
     );
   }
 
-  sendFirmwareStatusNotification(status: string): void {
+  sendFirmwareStatusNotification(status: string, requestId?: number): void {
     this._chargePoint.sendFirmwareStatusNotification(
-      status as
-        | "Downloaded"
-        | "DownloadFailed"
-        | "Downloading"
-        | "Idle"
-        | "InstallationFailed"
-        | "Installing"
-        | "Installed",
+      status as FirmwareStatus,
+      requestId,
+    );
+  }
+
+  /** LogStatusNotification.req (#345): 1.6 Whitepaper / 2.0.1 N01. */
+  sendLogStatusNotification(status: string, requestId?: number): void {
+    this._chargePoint.sendLogStatusNotification(
+      status as UploadLogStatus,
+      requestId,
     );
   }
 

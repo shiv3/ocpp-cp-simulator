@@ -226,8 +226,9 @@ describe("Outbox", () => {
     outbox.sendDiagnosticsStatusNotification("Uploading");
     expectCall(handler, "sendDiagnosticsStatusNotification", ["Uploading"]);
 
-    outbox.sendFirmwareStatusNotification("Downloaded");
-    expectCall(handler, "sendFirmwareStatusNotification", ["Downloaded"]);
+    // #345: the requestId rides through to the handler too.
+    outbox.sendFirmwareStatusNotification("Downloaded", 41);
+    expectCall(handler, "sendFirmwareStatusNotification", ["Downloaded", 41]);
 
     outbox.sendLogStatusNotification("Uploading", 7);
     expectCall(handler, "sendLogStatusNotification", ["Uploading", 7]);

@@ -1,4 +1,8 @@
 import type {
+  FirmwareStatusNotificationRequestV201,
+  LogStatusNotificationRequestV201,
+} from "../../../../ocpp";
+import type {
   AuthorizeRequestV201,
   BootNotificationRequestV201,
   DataTransferRequestV201,
@@ -116,7 +120,10 @@ export type V201Action =
   | "Authorize"
   | "DataTransfer"
   | "NotifyReport"
-  | "ReportChargingProfiles";
+  | "ReportChargingProfiles"
+  // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
+  | "FirmwareStatusNotification"
+  | "LogStatusNotification";
 
 export type V201RequestPayload =
   | BootNotificationRequestV201
@@ -127,7 +134,9 @@ export type V201RequestPayload =
   | AuthorizeRequestV201
   | DataTransferRequestV201
   | NotifyReportRequestV201
-  | ReportChargingProfilesRequestV201;
+  | ReportChargingProfilesRequestV201
+  | FirmwareStatusNotificationRequestV201
+  | LogStatusNotificationRequestV201;
 
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;

@@ -1,3 +1,7 @@
+import type {
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
 import type { DataTransferResult } from "../types/DataTransfer";
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
@@ -1082,31 +1086,37 @@ export class ChargePoint {
 
   /** Send FirmwareStatusNotification.req — see OCPPMessageHandler doc. */
   sendFirmwareStatusNotification(
-    status:
-      | "Downloaded"
-      | "DownloadFailed"
-      | "Downloading"
-      | "Idle"
-      | "InstallationFailed"
-      | "Installing"
-      | "Installed",
+    status: FirmwareStatus,
+    requestId?: number,
   ): void {
-    this._outbox.sendFirmwareStatusNotification(status);
+    this._outbox.sendFirmwareStatusNotification(status, requestId);
   }
 
   /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
-  sendLogStatusNotification(
-    status:
-      | "BadMessage"
-      | "Idle"
-      | "NotSupportedOperation"
-      | "PermissionDenied"
-      | "Uploaded"
-      | "UploadFailure"
-      | "Uploading",
-    requestId?: number,
-  ): void {
+  sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
     this._outbox.sendLogStatusNotification(status, requestId);
+  }
+
+  /** `requestId` of the last UpdateFirmware.req this station accepted, so a
+   *  2.0.1 FirmwareStatusNotification sent without one still names the
+   *  lifecycle it belongs to (#345). Kept until the next accepted request —
+   *  deliberately across reconnects and reboots, since a real update reports
+   *  `Installed` only after the station has rebooted on the new firmware. */
+  private _lastFirmwareRequestId: number | undefined;
+  /** Same for GetLog.req → LogStatusNotification. */
+  private _lastLogRequestId: number | undefined;
+
+  noteFirmwareRequest(requestId: number): void {
+    this._lastFirmwareRequestId = requestId;
+  }
+  get lastFirmwareRequestId(): number | undefined {
+    return this._lastFirmwareRequestId;
+  }
+  noteLogRequest(requestId: number): void {
+    this._lastLogRequestId = requestId;
+  }
+  get lastLogRequestId(): number | undefined {
+    return this._lastLogRequestId;
   }
 
   /** Send SignedFirmwareStatusNotification.req — see OCPPMessageHandler doc. */

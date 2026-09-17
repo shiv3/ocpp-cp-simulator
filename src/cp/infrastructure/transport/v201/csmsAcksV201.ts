@@ -25,6 +25,8 @@ import type {
   SetVariableMonitoringResponseV201,
   UnpublishFirmwareResponseV201,
   UpdateFirmwareResponseV201,
+  UpdateFirmwareRequestV201,
+  GetLogRequestV201,
 } from "../../../../ocpp";
 import type {
   V201HandlerResult,
@@ -148,11 +150,32 @@ export const handleSendLocalListAckV201 = ((
   };
 }) satisfies V201AckHandler;
 
-export const handleGetLogAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies GetLogResponseV201,
-})) satisfies V201AckHandler;
+/**
+ * N01 GetLog.req (#345). Accepted with a filename, and the `requestId` is
+ * remembered for the LogStatusNotification reports that follow — driven over
+ * the control plane (`log_status_notification`); nothing is uploaded. Before,
+ * this answered `Rejected`, so no log lifecycle could start.
+ */
+export const handleGetLogAckV201 = ((
+  payload: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult => {
+  const request = payload as GetLogRequestV201;
+  if (ctx && typeof request?.requestId === "number") {
+    ctx.chargePoint.noteLogRequest(request.requestId);
+  }
+  const logType = request?.logType ?? "DiagnosticsLog";
+  return {
+    response: {
+      status: "Accepted",
+      // GetLogResponse.filename is bounded at 255 in the 2.0.1 schema.
+      filename:
+        `${ctx?.chargePoint.id ?? "cp"}-${logType}-${request?.requestId ?? 0}.log`.slice(
+          -255,
+        ),
+    } satisfies GetLogResponseV201,
+  };
+}) satisfies V201AckHandler;
 
 export const handleSetDisplayMessageAckV201 = (() => ({
   response: {
@@ -208,9 +231,17 @@ export const handleInstallCertificateAckV201 = (() => ({
   } satisfies InstallCertificateResponseV201,
 })) satisfies V201AckHandler;
 
+/** L03 PublishFirmware.req is for a Local Controller that serves firmware to
+ *  the stations behind it. This simulated station is not one, so the request
+ *  is refused — and PublishFirmwareStatusNotification is never sent (#345). */
 export const handlePublishFirmwareAckV201 = (() => ({
   response: {
     status: "Rejected",
+    statusInfo: {
+      reasonCode: "NotLocalController",
+      additionalInfo:
+        "The simulated station is not a Local Controller and publishes no firmware",
+    },
   } satisfies PublishFirmwareResponseV201,
 })) satisfies V201AckHandler;
 
@@ -220,11 +251,27 @@ export const handleUnpublishFirmwareAckV201 = (() => ({
   } satisfies UnpublishFirmwareResponseV201,
 })) satisfies V201AckHandler;
 
-export const handleUpdateFirmwareAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies UpdateFirmwareResponseV201,
-})) satisfies V201AckHandler;
+/**
+ * L01 UpdateFirmware.req (#345). Accepted, and the `requestId` is remembered
+ * so the FirmwareStatusNotification reports that follow can name this
+ * lifecycle without the caller repeating it. Nothing is downloaded: unlike the
+ * 1.6 handler, the 2.0.1 station does not walk the status machine on its own —
+ * the reports are driven over the control plane (`firmware_status_notification`),
+ * which is what a conformance suite needs to say the right things in the
+ * right order. Before, this answered `Rejected`, so no lifecycle could start.
+ */
+export const handleUpdateFirmwareAckV201 = ((
+  payload: unknown,
+  ctx?: V201InboundContext,
+): V201HandlerResult => {
+  const request = payload as UpdateFirmwareRequestV201;
+  if (ctx && typeof request?.requestId === "number") {
+    ctx.chargePoint.noteFirmwareRequest(request.requestId);
+  }
+  return {
+    response: { status: "Accepted" } satisfies UpdateFirmwareResponseV201,
+  };
+}) satisfies V201AckHandler;
 
 export const handleGetLocalListVersionAckV201 = ((
   _payload?: unknown,

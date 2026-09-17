@@ -94,7 +94,11 @@ export interface SingleCpCommandOps {
     opts?: StatusNotificationOptions,
   ): Promise<void>;
   sendDiagnosticsStatusNotification(status: string): Promise<void>;
-  sendFirmwareStatusNotification(status: string): Promise<void>;
+  sendFirmwareStatusNotification(
+    status: string,
+    requestId?: number,
+  ): Promise<void>;
+  sendLogStatusNotification(status: string, requestId?: number): Promise<void>;
   sendSecurityEventNotification(type: string, techInfo?: string): Promise<void>;
   sendSignCertificate(csr?: string): Promise<void>;
   getScenarioTemplates(): Promise<ReadonlyArray<ScenarioTemplateInfo>>;
@@ -261,8 +265,11 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendDiagnosticsStatusNotification: async (status) => {
       service.sendDiagnosticsStatusNotification(status);
     },
-    sendFirmwareStatusNotification: async (status) => {
-      service.sendFirmwareStatusNotification(status);
+    sendFirmwareStatusNotification: async (status, requestId) => {
+      service.sendFirmwareStatusNotification(status, requestId);
+    },
+    sendLogStatusNotification: async (status, requestId) => {
+      service.sendLogStatusNotification(status, requestId);
     },
     sendSecurityEventNotification: async (type, techInfo) => {
       service.sendSecurityEventNotification(type, techInfo);
@@ -396,8 +403,12 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.sendStatusNotification(cpId, connectorId, status, opts),
     sendDiagnosticsStatusNotification: (status) =>
       service.sendDiagnosticsStatusNotification(cpId, status),
-    sendFirmwareStatusNotification: (status) =>
-      service.sendFirmwareStatusNotification(cpId, status),
+    sendFirmwareStatusNotification: (status, requestId) =>
+      requestId === undefined
+        ? service.sendFirmwareStatusNotification(cpId, status)
+        : service.sendFirmwareStatusNotification(cpId, status, requestId),
+    sendLogStatusNotification: (status, requestId) =>
+      service.sendLogStatusNotification(cpId, status, requestId),
     sendSecurityEventNotification: (type, techInfo) =>
       service.sendSecurityEventNotification(cpId, type, techInfo),
     sendSignCertificate: (csr) => service.sendSignCertificate(cpId, csr),

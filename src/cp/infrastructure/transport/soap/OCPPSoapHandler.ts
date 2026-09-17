@@ -942,7 +942,11 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     }
   }
 
-  public sendFirmwareStatusNotification(status: string): void {
+  public sendFirmwareStatusNotification(
+    status: string,
+    _requestId?: number,
+  ): void {
+    // SOAP 1.x FirmwareStatusNotification carries no requestId.
     const payload: FirmwareStatusNotificationRequestV16 = {
       status: status as FirmwareStatusNotificationRequestV16["status"],
     };

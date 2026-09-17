@@ -1456,6 +1456,13 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    // The socket's real close event still arrives asynchronously and its
+    // handler logs "WebSocket closed" through this repository. Closing it
+    // here (not in teardownAfterClose, which a plain disconnect shares)
+    // drops that late line instead of buffering it — otherwise a `cp.delete`
+    // that just cascaded to `logs` gets one row back for the deleted id
+    // (#326).
+    this._logRepository.close();
   }
 
   applyRemoteReset(

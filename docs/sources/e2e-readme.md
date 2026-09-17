@@ -11,7 +11,7 @@ related:
   - ../analyses/testing-strategy.md
   - ../concepts/ocpp-versions-and-transports.md
   - example-scenarios.md
-updated: 2026-09-03
+updated: 2026-09-17
 ---
 
 # Source: `e2e/README.md`
@@ -29,10 +29,14 @@ suites: `e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`,
 "three suites" wording predates the scenario / comprehensive suites. Run a
 single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
-**Requirements (local-only).** Go 1.26+ on PATH; the gocpp repo checked out as
-a sibling (`../gocpp`, wired via a `replace` directive); Bun. CI does not
-provision these, so the suites are excluded from the default `test` /
-`test:vitest` scripts and from the `tsc -b` build graph.
+**Requirements (local-only).** Go 1.26+ on PATH and network access to the
+Go module proxy on the first build; Bun. The gocpp revision is **pinned** in
+`e2e/csms/go.mod` (`github.com/shiv3/gocpp v0.1.7`) and checksummed in
+`go.sum` (#322) — no sibling checkout; the earlier `replace` to `../gocpp`
+made an unrecorded working copy the oracle. Move the pin with
+`go get github.com/shiv3/gocpp@<tag> && go mod tidy` in `e2e/csms`. CI does
+not yet provision Go, so the suites are local-only and excluded from `test`,
+`test:vitest` and the `tsc -b` graph.
 
 **Layout.**
 

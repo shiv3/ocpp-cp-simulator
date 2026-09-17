@@ -18,14 +18,27 @@ Run a single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 ## Requirements (local-only)
 
-- **Go 1.26+** on PATH (the CSMS fixture is a Go program).
-- The **gocpp repo checked out as a sibling** of this repo: `../gocpp`
-  (the fixture's `go.mod` uses `replace github.com/shiv3/gocpp => ../../../gocpp`).
+- **Go 1.26+** on PATH (the CSMS fixture is a Go program), and network access
+  to the Go module proxy on the first build.
 - **Bun** (already required by the repo).
 
-CI does not yet provision Go + the sibling checkout, so these tests are
-**local-only** for now; they are excluded from the default `test` / `test:vitest`
-scripts and from the `tsc -b` build graph.
+The gocpp revision the fixture is measured against is **pinned** in
+`csms/go.mod` (`require github.com/shiv3/gocpp v0.1.7`) and checksummed in
+`csms/go.sum`, so every machine builds against the same oracle and a pass is
+reproducible (#322). No sibling checkout is needed or consulted — an earlier
+`replace github.com/shiv3/gocpp => ../../../gocpp` made whatever happened to be
+in `../gocpp` the oracle, unrecorded. To move the pin:
+
+```sh
+cd e2e/csms && go get github.com/shiv3/gocpp@v0.1.8 && go mod tidy
+```
+
+then run the suites and commit `go.mod` + `go.sum` together. If `go` is missing,
+`support/buildCsms.ts` says so instead of failing with an ENOENT stack.
+
+CI does not yet provision Go, so these tests are **local-only** for now; they are
+excluded from the default `test` / `test:vitest` scripts and from the `tsc -b`
+build graph. With the sibling gone, a CI job is now only a `setup-go` step away.
 
 ## Layout
 

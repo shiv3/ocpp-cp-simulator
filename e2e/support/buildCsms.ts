@@ -31,10 +31,26 @@ async function streamToText(
 }
 
 export async function buildCsms(): Promise<string> {
-  const proc = Bun.spawn(
-    ["go", "-C", "e2e/csms", "build", "-o", "e2e-csms", "."],
-    { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
-  );
+  // The gocpp revision the fixture builds against is pinned in
+  // e2e/csms/go.mod + go.sum (#322): `go build` fetches it from the module
+  // proxy, so a clean machine needs Go on PATH and network — no sibling
+  // checkout. Bun.spawn throws ENOENT when `go` is missing; say so plainly.
+  let proc: ReturnType<typeof Bun.spawn<{ stdout: "pipe"; stderr: "pipe" }>>;
+  try {
+    proc = Bun.spawn(["go", "-C", "e2e/csms", "build", "-o", "e2e-csms", "."], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (error) {
+    console.error(
+      "e2e: could not start `go` — the CSMS fixture is a Go program. " +
+        "Install Go 1.26+ (https://go.dev/dl/) and make sure `go` is on PATH; " +
+        "see e2e/README.md. " +
+        `(${error instanceof Error ? error.message : String(error)})`,
+    );
+    process.exit(1);
+  }
 
   let timedOut = false;
   const timer = setTimeout(() => {

@@ -12,7 +12,7 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/e2e-readme.md
   - scenario-templates.md
-updated: 2026-09-03
+updated: 2026-09-17
 ---
 
 # CSMS peers
@@ -47,8 +47,9 @@ Central System (Java).
 
 [gocpp](https://github.com/shiv3/gocpp) — a Go OCPP library by the same author.
 The [e2e suite](../sources/e2e-readme.md) builds a gocpp-based CSMS fixture
-(one binary, `--version=1.6|2.0.1|2.1`) and runs the simulator as a real charge
-point over a real WebSocket against it, asserting on the CSMS frame log. It is
+(one binary, `--version=1.6|2.0.1|2.1`, pinned to `gocpp v0.1.7` in
+`e2e/csms/go.mod`, #322) and runs the simulator as a real charge point over a
+real WebSocket against it, asserting on the CSMS frame log. It is
 the independent implementation that validates the simulator's multi-version
 wire output; the fixture also exposes `POST /command` so tests can issue
 CSMS-initiated calls.

@@ -8,6 +8,7 @@ import { CONSOLE_BASENAME, consolePath } from "../routes";
 import { DarkModeProvider } from "../../contexts/DarkModeContext";
 import { DataContext } from "../../data/providers/DataProvider";
 import type {
+  ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
 } from "../../data/interfaces/ChargePointService";
@@ -180,4 +181,29 @@ export async function renderConsole<
   });
 
   return { container, root, service };
+}
+
+/** Lets pending promise callbacks (a mount-time fetch, an RPC answer)
+ *  settle inside `act`, so their state updates are flushed. */
+export async function flush(hops = 5): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < hops; i += 1) await Promise.resolve();
+  });
+}
+
+/** Pushes a synthetic event through every handler the fake service recorded
+ *  via `subscribe(cpId, handler)` — simulates CP / scenario progress without
+ *  a real runtime. */
+export async function pushEvent(
+  service: FakeChargePointService,
+  cpId: string,
+  event: ChargePointEvent,
+): Promise<void> {
+  const handlers = service.__handlers.subscribe.get(cpId);
+  if (!handlers || handlers.size === 0) {
+    throw new Error(`no subscribe handler recorded for ${cpId}`);
+  }
+  await act(async () => {
+    handlers.forEach((handler) => handler(event));
+  });
 }

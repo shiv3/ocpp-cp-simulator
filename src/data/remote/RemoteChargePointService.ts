@@ -538,6 +538,7 @@ export function mapServerEventToChargePointEvent(
           type: "scenario-started",
           connectorId: data.connectorId,
           scenarioId: data.scenarioId,
+          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
         };
       }
       return null;
@@ -550,6 +551,7 @@ export function mapServerEventToChargePointEvent(
           type: "scenario-completed",
           connectorId: data.connectorId,
           scenarioId: data.scenarioId,
+          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
         };
       }
       return null;
@@ -563,6 +565,7 @@ export function mapServerEventToChargePointEvent(
           type: "scenario-error",
           connectorId: data.connectorId,
           scenarioId: data.scenarioId,
+          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
           error: data.error,
         };
       }
@@ -577,6 +580,7 @@ export function mapServerEventToChargePointEvent(
           type: "scenario-node-execute",
           connectorId: data.connectorId,
           scenarioId: data.scenarioId,
+          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
           nodeId: data.nodeId,
         };
       }

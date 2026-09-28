@@ -8,23 +8,13 @@ import type {
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ChargePointEvent } from "../../data/interfaces/ChargePointService";
 import { useDataContext } from "../../data/providers/DataProvider";
-
-/** The runtime's live execution states — the same set
- *  `useActiveScenarioRuns` lists as "active". */
-const LIVE_RUN_STATES = ["running", "paused", "stepping", "waiting"] as const;
-type LiveRunState = (typeof LIVE_RUN_STATES)[number];
+import {
+  isLiveRunState,
+  STATUS_REFRESH_DEBOUNCE_MS,
+  type LiveRunState,
+} from "./scenarioRunState";
 
 export type ScenarioRunState = "idle" | LiveRunState | "completed" | "error";
-
-/** True while a run is in flight (executing, parked waiting, paused or
- *  stepping) — i.e. there is something to Stop. */
-export function isLiveRunState(state: string): state is LiveRunState {
-  return (LIVE_RUN_STATES as readonly string[]).includes(state);
-}
-
-/** Debounce for the status re-query that follows a lifecycle event — same
- *  value as `useActiveScenarioRuns`, so both views settle together. */
-const STATUS_REFRESH_DEBOUNCE_MS = 200;
 
 export interface ScenarioRunHistoryEntry {
   /** When this page began tracking the run: the `start()` call, or — for an
@@ -50,7 +40,7 @@ export interface UseScenarioRunResult {
   /** Accumulated, in order, deduped nodeIds seen via `scenario-node-execute`. */
   executedNodeIds: string[];
   error: string | null;
-  /** Runtime run id of the tracked run (from `getScenarioStatus`); null when
+  /** Runtime run id of the latest tracked run (`runs[0].runId`); null when
    *  unknown — local mode never mints one. Kept after the run ends. */
   runId: string | null;
   /** While the tracked run is parked on a waiting node: the condition it
@@ -102,9 +92,10 @@ export interface UseScenarioRunResult {
  * auto-start trigger firing while the page is open) is attached the same
  * way. Because no event says a run is parked, each lifecycle event of the
  * tracked run schedules a debounced `getScenarioStatus` re-query — that is
- * what surfaces `waiting` and its expectation. There is no
- * `scenario-node-complete` or
- * `scenario-node-progress` event, so per-node fractional progress isn't
+ * what surfaces `waiting` and its expectation.
+ *
+ * There is no `scenario-node-complete` or `scenario-node-progress` event, so
+ * per-node fractional progress isn't
  * tracked (a node reads "done" once a later node-execute event or
  * `scenario-completed` arrives — see RunTimeline). There is also no
  * `pauseScenario`/`resumeScenario` on `ChargePointService` (only
@@ -124,7 +115,6 @@ export function useScenarioRun(
   const [executedNodeIds, setExecutedNodeIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [runs, setRuns] = useState<ScenarioRunHistoryEntry[]>([]);
-  const [runId, setRunId] = useState<string | null>(null);
   const [expectation, setExpectation] = useState<ScenarioExpectation | null>(
     null,
   );
@@ -152,10 +142,6 @@ export function useScenarioRun(
   // attached) until it ends. Distinguishes "a new run of the tracked
   // scenario started" from "the tracked run reported it started".
   const isLiveRef = useRef(false);
-  // The definition id being viewed — the runtime scenarioId an externally
-  // started run of it carries. A ref so the long-lived event handler reads
-  // the current one.
-  const viewedScenarioIdRef = useRef<string | null>(scenario?.id ?? null);
   // Every `getScenarioStatus` request captures this counter; anything that
   // makes an in-flight answer stale (target change, `start()`, the run
   // ending, a newer request) bumps it, and a stale answer is dropped.
@@ -170,63 +156,79 @@ export function useScenarioRun(
     }
   }, []);
 
-  /** Mirrors a live runtime status into the hook's state. */
-  const applyLiveStatus = useCallback((status: ScenarioExecutionContext) => {
-    setState(status.state as LiveRunState);
-    setExpectation(status.expectation ?? null);
-    setCurrentNodeStartedAt(status.currentNodeStartedAt ?? null);
-    setRunId(status.runId ?? null);
-    if (status.runId) {
-      const knownRunId = status.runId;
-      setRuns((prev) => {
-        const [head, ...rest] = prev;
-        if (!head || head.endedAt || head.runId) return prev;
-        return [{ ...head, runId: knownRunId }, ...rest];
-      });
-    }
-  }, []);
-
-  /** Starts tracking a run this hook did not start. */
-  const attachRun = useCallback((scenarioId: string, known?: string) => {
-    activeScenarioIdRef.current = scenarioId;
-    isLiveRef.current = true;
+  /** Clears the per-run view (node position, error, wait info). */
+  const resetRunView = useCallback(() => {
     currentNodeIdRef.current = null;
     setCurrentNodeId(null);
     setExecutedNodeIds([]);
     setError(null);
     setExpectation(null);
     setCurrentNodeStartedAt(null);
-    setRunId(known ?? null);
-    setState("running");
-    setRuns((prev) => [
-      {
-        startedAt: new Date(),
-        endedAt: null,
-        result: "running",
-        attached: true,
-        ...(known ? { runId: known } : {}),
-      },
-      ...prev,
-    ]);
   }, []);
+
+  /** Records the runtime run id on the open history entry, once known. */
+  const recordRunId = useCallback((runId: string | undefined) => {
+    if (!runId) return;
+    setRuns((prev) => {
+      const [head, ...rest] = prev;
+      if (!head || head.endedAt || head.runId) return prev;
+      return [{ ...head, runId }, ...rest];
+    });
+  }, []);
+
+  /** Mirrors a live runtime status into the hook's state. */
+  const applyLiveStatus = useCallback(
+    (status: ScenarioExecutionContext & { state: LiveRunState }) => {
+      setState(status.state);
+      setExpectation(status.expectation ?? null);
+      setCurrentNodeStartedAt(status.currentNodeStartedAt ?? null);
+      recordRunId(status.runId);
+    },
+    [recordRunId],
+  );
+
+  /** Starts tracking a run this hook did not start — positioned from the
+   *  runtime `status` when there is one (hydration), else from scratch. */
+  const attachRun = useCallback(
+    (
+      scenarioId: string,
+      runId: string | undefined,
+      status?: ScenarioExecutionContext & { state: LiveRunState },
+    ) => {
+      activeScenarioIdRef.current = scenarioId;
+      isLiveRef.current = true;
+      resetRunView();
+      setState("running");
+      setRuns((prev) => [
+        {
+          startedAt: new Date(),
+          endedAt: null,
+          result: "running",
+          attached: true,
+          ...(runId ? { runId } : {}),
+        },
+        ...prev,
+      ]);
+      if (status) {
+        currentNodeIdRef.current = status.currentNodeId;
+        setCurrentNodeId(status.currentNodeId);
+        setExecutedNodeIds([...new Set(status.executedNodes)]);
+        applyLiveStatus(status);
+      }
+    },
+    [resetRunView, applyLiveStatus],
+  );
 
   // Reset everything when the viewed target changes, then ask the runtime
   // whether the viewed scenario is already running — "Open run" from the
   // Active scenarios panel (and a reload of this page) land here mid-run.
   useEffect(() => {
+    resetRunView();
     setState("idle");
-    setCurrentNodeId(null);
-    setExecutedNodeIds([]);
-    setError(null);
     setRuns([]);
-    setRunId(null);
-    setExpectation(null);
-    setCurrentNodeStartedAt(null);
     setHydrated(false);
     activeScenarioIdRef.current = null;
-    currentNodeIdRef.current = null;
     isLiveRef.current = false;
-    viewedScenarioIdRef.current = scenario?.id ?? null;
     cancelStatusRefresh();
 
     const viewedId = scenario?.id;
@@ -239,27 +241,20 @@ export function useScenarioRun(
     const requestId = statusRequestRef.current;
     chargePointService
       .getScenarioStatus(cpId, connectorId, viewedId)
-      .then(
-        (status) => status,
-        (err) => {
-          console.warn(
-            `Failed to fetch scenario status for ${cpId}/${connectorId}/${viewedId}`,
-            err,
-          );
-          return null;
-        },
-      )
+      .catch((err) => {
+        console.warn(
+          `Failed to fetch scenario status for ${cpId}/${connectorId}/${viewedId}`,
+          err,
+        );
+        return null;
+      })
       .then((status) => {
         if (cancelled) return;
         setHydrated(true);
         // `start()` or an attach already took over while this was in flight.
         if (requestId !== statusRequestRef.current) return;
         if (!status || !isLiveRunState(status.state)) return;
-        attachRun(viewedId, status.runId);
-        currentNodeIdRef.current = status.currentNodeId;
-        setCurrentNodeId(status.currentNodeId);
-        setExecutedNodeIds([...new Set(status.executedNodes)]);
-        applyLiveStatus(status);
+        attachRun(viewedId, status.runId, { ...status, state: status.state });
       });
 
     return () => {
@@ -271,8 +266,8 @@ export function useScenarioRun(
     connectorId,
     scenario?.id,
     chargePointService,
+    resetRunView,
     attachRun,
-    applyLiveStatus,
     cancelStatusRefresh,
   ]);
 
@@ -292,10 +287,9 @@ export function useScenarioRun(
         .getScenarioStatus(cpId, connectorId, scenarioId)
         .then((status) => {
           if (requestId !== statusRequestRef.current) return;
-          if (!isLiveRef.current || !status) return;
-          if (!isLiveRunState(status.state)) return;
+          if (!status || !isLiveRunState(status.state)) return;
           if (status.currentNodeId !== currentNodeIdRef.current) return;
-          applyLiveStatus(status);
+          applyLiveStatus({ ...status, state: status.state });
         })
         .catch((err) => {
           console.warn(
@@ -337,6 +331,7 @@ export function useScenarioRun(
 
   useEffect(() => {
     if (!cpId) return undefined;
+    const viewedId = scenario?.id ?? null;
 
     const unsubscribe = chargePointService.subscribe(
       cpId,
@@ -347,15 +342,16 @@ export function useScenarioRun(
         // A run of the viewed scenario started by someone else (auto-start
         // trigger, daemon, another tab) while this page tracks nothing live:
         // attach to it, like the mount-time hydration does.
+        // (`start()` sets `isLiveRef` synchronously, so its own run's
+        // `scenario-started` never lands here.)
         if (
           event.type === "scenario-started" &&
           !isLiveRef.current &&
-          !isStartingRef.current &&
           (event.scenarioId === activeScenarioIdRef.current ||
             (activeScenarioIdRef.current === null &&
-              event.scenarioId === viewedScenarioIdRef.current))
+              event.scenarioId === viewedId))
         ) {
-          attachRun(event.scenarioId);
+          attachRun(event.scenarioId, event.runId);
           scheduleStatusRefresh();
           return;
         }
@@ -365,6 +361,7 @@ export function useScenarioRun(
         switch (event.type) {
           case "scenario-started":
             setState("running");
+            recordRunId(event.runId);
             scheduleStatusRefresh();
             break;
           case "scenario-node-execute":
@@ -403,9 +400,11 @@ export function useScenarioRun(
   }, [
     cpId,
     connectorId,
+    scenario?.id,
     chargePointService,
     closeActiveRun,
     attachRun,
+    recordRunId,
     scheduleStatusRefresh,
     endLiveRun,
   ]);
@@ -422,20 +421,14 @@ export function useScenarioRun(
       cancelStatusRefresh();
       isLiveRef.current = true;
 
-      setError(null);
-      setRunId(null);
-      setExpectation(null);
-      setCurrentNodeStartedAt(null);
-      // Reset node-tracking state up front, BEFORE `loadScenario` — not
-      // only on the success path below. Otherwise a retry after a prior
-      // run (completed/stopped/error) would still have `currentNodeIdRef`
+      // Reset the run view up front, BEFORE `loadScenario` — not only on
+      // the success path below. Otherwise a retry after a prior run
+      // (completed/stopped/error) would still have `currentNodeIdRef`
       // pointing at that prior run's last node, and if THIS attempt's
       // `loadScenario` rejects before any node executes, the catch below
       // would mislabel the load-time failure with that stale node as
       // `failedNodeId`.
-      currentNodeIdRef.current = null;
-      setCurrentNodeId(null);
-      setExecutedNodeIds([]);
+      resetRunView();
 
       const definitionToLoad = mode
         ? { ...scenario, defaultExecutionMode: mode }
@@ -479,6 +472,7 @@ export function useScenarioRun(
       chargePointService,
       closeActiveRun,
       cancelStatusRefresh,
+      resetRunView,
       endLiveRun,
     ],
   );
@@ -530,7 +524,7 @@ export function useScenarioRun(
     currentNodeId,
     executedNodeIds,
     error,
-    runId,
+    runId: runs[0]?.runId ?? null,
     expectation,
     currentNodeStartedAt,
     hydrated,

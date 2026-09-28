@@ -19,37 +19,16 @@ import {
 } from "../../../../cp/application/scenario/ScenarioTypes";
 import {
   createFakeChargePointService,
-  type FakeChargePointService,
+  flush,
+  pushEvent,
+  renderConsole,
 } from "../../../test/harness";
-import { renderConsole } from "../../../test/harness";
-import type { ChargePointEvent } from "../../../../data/interfaces/ChargePointService";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {
     root.unmount();
   });
   document.body.innerHTML = "";
-}
-
-async function flush(): Promise<void> {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
-async function pushEvent(
-  service: FakeChargePointService,
-  cpId: string,
-  event: ChargePointEvent,
-): Promise<void> {
-  const handlers = service.__handlers.subscribe.get(cpId);
-  if (!handlers || handlers.size === 0) {
-    throw new Error(`no subscribe handler recorded for ${cpId}`);
-  }
-  await act(async () => {
-    handlers.forEach((handler) => handler(event));
-  });
 }
 
 function linearFixture(): ScenarioDefinition {
@@ -272,7 +251,6 @@ describe("ScenarioRunPage", () => {
     );
     cleanup = () => unmount(root);
     await flush();
-    await flush();
 
     expect(getScenarioStatus).toHaveBeenCalledWith("CP-1", 1, "s1");
     expect(container.textContent).toContain("Waiting");
@@ -325,7 +303,6 @@ describe("ScenarioRunPage", () => {
     );
     cleanup = () => unmount(root);
     await flush();
-    await flush();
 
     expect(container.textContent).toContain("Idle");
     expect(container.textContent).toContain("Run run-old is no longer active");
@@ -357,7 +334,6 @@ describe("ScenarioRunPage", () => {
       { service },
     );
     cleanup = () => unmount(root);
-    await flush();
     await flush();
 
     expect(container.textContent).toContain("Running");

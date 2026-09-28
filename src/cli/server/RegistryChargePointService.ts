@@ -1050,18 +1050,21 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
         type: "scenario-started",
         connectorId: evt.data.connectorId,
         scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
       };
     case "scenario_completed":
       return {
         type: "scenario-completed",
         connectorId: evt.data.connectorId,
         scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
       };
     case "scenario_error":
       return {
         type: "scenario-error",
         connectorId: evt.data.connectorId,
         scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
         error: evt.data.error,
       };
     case "scenario_node_execute":
@@ -1069,6 +1072,7 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
         type: "scenario-node-execute",
         connectorId: evt.data.connectorId,
         scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
         nodeId: evt.data.nodeId,
       };
     case "connector_availability":

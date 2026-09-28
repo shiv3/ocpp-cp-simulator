@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import WaitingExpectation from "../../components/WaitingExpectation";
 import { formatElapsed } from "../../lib/scenarioExpectation";
+import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import { buildScenarioUrl } from "../../lib/useAllScenarios";
 import { useDataContext } from "../../../data/providers/DataProvider";
@@ -13,17 +14,6 @@ interface ActiveScenarioPanelProps {
   cpId: string;
   connectorIds: number[];
 }
-
-const STATE_BADGE_STYLES: Record<
-  "running" | "paused" | "stepping" | "waiting",
-  string
-> = {
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-  paused: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  stepping:
-    "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-  waiting: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-};
 
 const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
   cpId,
@@ -85,7 +75,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-xs font-semibold",
-                      STATE_BADGE_STYLES[run.state],
+                      LIVE_RUN_STATE_STYLES[run.state],
                     )}
                   >
                     {run.state}
@@ -124,7 +114,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
                   expectation={run.expectation}
                   currentNodeStartedAt={run.currentNodeStartedAt}
                   now={now}
-                  className="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-300"
+                  className="text-xs text-gray-600 dark:text-gray-300"
                 />
               )}
 

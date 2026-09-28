@@ -7,6 +7,8 @@ import { useScenarioRun } from "./useScenarioRun";
 import { createEmptyScenario, insertStep } from "./scenarioSteps";
 import {
   createFakeChargePointService,
+  flush,
+  pushEvent,
   type FakeChargePointService,
 } from "../test/harness";
 import { DataContext } from "../../data/providers/DataProvider";
@@ -15,7 +17,6 @@ import {
   type ScenarioDefinition,
   type ScenarioExecutionContext,
 } from "../../cp/application/scenario/ScenarioTypes";
-import type { ChargePointEvent } from "../../data/interfaces/ChargePointService";
 
 beforeAll(() => {
   (
@@ -134,23 +135,6 @@ async function unmount(root: Root): Promise<void> {
     root.unmount();
   });
   document.body.innerHTML = "";
-}
-
-/** Pushes a synthetic event through every handler the fake service recorded
- *  via `subscribe(cpId, handler)` — this is what lets a test simulate
- *  scenario progress without a real runtime. */
-async function pushEvent(
-  service: FakeChargePointService,
-  cpId: string,
-  event: ChargePointEvent,
-): Promise<void> {
-  const handlers = service.__handlers.subscribe.get(cpId);
-  if (!handlers || handlers.size === 0) {
-    throw new Error(`no subscribe handler recorded for ${cpId}`);
-  }
-  await act(async () => {
-    handlers.forEach((handler) => handler(event));
-  });
 }
 
 describe("useScenarioRun", () => {
@@ -502,14 +486,6 @@ describe("useScenarioRun", () => {
     expect(mounted.current().runs[0].failedNodeId).toBeUndefined();
   });
 });
-
-/** Lets pending promise callbacks (e.g. the hydration `getScenarioStatus`)
- *  settle inside `act`, so their state updates are flushed. */
-async function flush(): Promise<void> {
-  await act(async () => {
-    for (let i = 0; i < 5; i += 1) await Promise.resolve();
-  });
-}
 
 function waitingStatus(
   scenarioId: string,

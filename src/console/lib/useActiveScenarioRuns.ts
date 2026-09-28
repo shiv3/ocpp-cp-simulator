@@ -2,13 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ScenarioExpectation } from "../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
+import {
+  isLiveRunState,
+  STATUS_REFRESH_DEBOUNCE_MS,
+  type LiveRunState,
+} from "./scenarioRunState";
 
 export interface ActiveScenarioRun {
   connectorId: number;
   scenarioId: string;
   name: string;
   runId?: string;
-  state: "running" | "paused" | "stepping" | "waiting";
+  state: LiveRunState;
   currentNodeId: string | null;
   currentNodeLabel: string | null;
   nodeCount: number | null;
@@ -16,8 +21,6 @@ export interface ActiveScenarioRun {
   expectation: ScenarioExpectation | null;
   currentNodeStartedAt: number | null;
 }
-
-const ACTIVE_STATES = ["running", "paused", "stepping", "waiting"] as const;
 
 /** What we keep per scenario definition so repeat refreshes don't refetch it:
  *  node id → label, and the node count for the "k/N steps" display. */
@@ -80,10 +83,7 @@ export function useActiveScenarioRuns(
           connectorId,
           scenario.scenarioId,
         );
-        if (
-          !status ||
-          !(ACTIVE_STATES as readonly string[]).includes(status.state)
-        ) {
+        if (!status || !isLiveRunState(status.state)) {
           return null;
         }
 
@@ -112,7 +112,7 @@ export function useActiveScenarioRuns(
           scenarioId: scenario.scenarioId,
           name: scenario.name,
           runId: status.runId,
-          state: status.state as ActiveScenarioRun["state"],
+          state: status.state,
           currentNodeId,
           currentNodeLabel: currentNodeId
             ? cached?.labelsById.get(currentNodeId) || currentNodeId
@@ -184,7 +184,7 @@ export function useActiveScenarioRuns(
       }
       refreshTimeoutRef.current = setTimeout(() => {
         void refresh();
-      }, 200);
+      }, STATUS_REFRESH_DEBOUNCE_MS);
     });
 
     return () => {

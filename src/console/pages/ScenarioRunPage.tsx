@@ -12,24 +12,17 @@ import PageHeader from "../components/PageHeader";
 import TargetChip from "../components/TargetChip";
 import WaitingExpectation from "../components/WaitingExpectation";
 import { consolePath } from "../routes";
+import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
-import {
-  isLiveRunState,
-  useScenarioRun,
-  type ScenarioRunState,
-} from "../lib/useScenarioRun";
+import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
 import RunHistory from "./scenarios/run/RunHistory";
 import RunTimeline from "./scenarios/run/RunTimeline";
 
 const LOG_TAIL_LIMIT = 200;
 
 const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
+  ...LIVE_RUN_STATE_STYLES,
   idle: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-  waiting: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-  paused: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  stepping:
-    "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
   completed:
     "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
   error: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
@@ -123,22 +116,12 @@ const ScenarioRunPage: React.FC = () => {
 
   const isRunning = isLiveRunState(state);
 
-  // Ticks the waiting countdown; idle otherwise.
-  const [now, setNow] = useState<number>(Date.now());
-  useEffect(() => {
-    if (state !== "waiting") return undefined;
-    setNow(Date.now());
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [state]);
-
   // The run named in the URL ("Open run") has ended or been superseded by
   // another run of the same scenario. Unknowable without a runtime runId
   // (local mode), so no banner there.
   const requestedRunGone =
     hydrated &&
-    requestedRunId != null &&
-    requestedRunId !== "" &&
+    !!requestedRunId &&
     (!isRunning || (runId != null && runId !== requestedRunId));
 
   // Charge-point-scope scenarios have no connectorId to load against —
@@ -265,8 +248,7 @@ const ScenarioRunPage: React.FC = () => {
         <WaitingExpectation
           expectation={expectation}
           currentNodeStartedAt={currentNodeStartedAt}
-          now={now}
-          className="mb-4 flex flex-col gap-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
         />
       )}
 

@@ -216,6 +216,69 @@ describe("StopTransactionResultHandler (#175)", () => {
 });
 
 /**
+ * Issue #367: ChargePoint.stopTransaction already stops the meter and clears
+ * the connector when it sends StopTransaction.req, so the CALLRESULT has
+ * nothing left to tear down. When that CALLRESULT arrives late — after the
+ * next session has begun on the same connector — it must not tear down the
+ * *new* transaction: doing so stopped the new session's auto-meter and
+ * resolved the scenario's Meter Value wait on the spurious
+ * `transactionChange { transaction: null }`, so the second session of
+ * "Essential CP Behavior" sent no MeterValues and jumped to RemoteStop.
+ */
+describe("StopTransactionResultHandler (#367) — late CALLRESULT", () => {
+  it("leaves a transaction that began after the stop request untouched", () => {
+    vi.useFakeTimers();
+    const cp = buildChargePoint();
+    const connector = cp.getConnector(1)!;
+    try {
+      cp.startTransaction("TAG-1", 1);
+      connector.transactionId = 41;
+      cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      // Session 1 ends; its StopTransaction.conf is still in flight.
+      cp.stopTransaction(1);
+
+      // Session 2 begins before that CALLRESULT arrives.
+      cp.startTransaction("TAG-2", 1);
+      const second = connector.transaction;
+      connector.transactionId = 42;
+      cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      connector.startManualMeterStrategy({
+        kind: "increment",
+        intervalSeconds: 1,
+        incrementValue: 100,
+        sendMeterValues: false,
+      });
+
+      const cleared: unknown[] = [];
+      connector.events.on("transactionChange", ({ transaction }) => {
+        if (transaction === null) cleared.push(transaction);
+      });
+      const changes = trackConnectorStatus(cp);
+
+      // The late CALLRESULT for session 1.
+      new StopTransactionResultHandler(1).handle(
+        { idTagInfo: { status: "Accepted" } },
+        buildContext(cp),
+      );
+
+      expect(connector.transaction).toBe(second);
+      expect(connector.transaction?.id).toBe(42);
+      expect(connector.isAutoMeterValueActive()).toBe(true);
+      expect(cleared).toEqual([]);
+      expect(changes).toEqual([]);
+      expect(connector.status).toBe(OCPPStatus.Charging);
+
+      const before = connector.meterValue;
+      vi.advanceTimersByTime(1_000);
+      expect(connector.meterValue).toBe(before + 100);
+    } finally {
+      connector.stopAutoMeterValue();
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
  * Issue #181: StartTransaction.conf with a non-Accepted idTagInfo.status is
  * now acted on per §4.8 `StopTransactionOnInvalidId` — default true stops
  * the transaction with reason "DeAuthorized" (delegating to

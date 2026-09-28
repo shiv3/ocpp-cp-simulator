@@ -11,7 +11,7 @@ related:
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-09-03
+updated: 2026-09-29
 ---
 
 # Built-in scenario templates
@@ -46,6 +46,14 @@ without going through the loader.
 | `status-triggered-actions` | Status-Triggered Auto Actions    | Auto-execute on status change (Heartbeat loop when Available)                                                                          |
 
 All six target a single connector (`targetType: "connector"`).
+
+`essential-cp-behavior` meters every session it runs on a connector, not only
+the first. Each session starts from the cumulative register (`meterStart` of
+session N+1 is `meterStop` of session N), and its Auto MeterValue node holds
+until that session's own target is reached. The target is `meterStart`
+plus capacity × (targetSoc − initialSoc). A 1.6 `StopTransaction.conf` never
+affects a transaction that began after its request was sent, even when the
+CSMS answers late or the CALL has already timed out (#367).
 
 ## Certification templates (`cert16-*`)
 

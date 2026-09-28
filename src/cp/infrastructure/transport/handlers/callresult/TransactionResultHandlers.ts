@@ -82,6 +82,19 @@ export class StopTransactionResultHandler implements CallResultHandler<StopTrans
       LogType.TRANSACTION,
     );
     const connector = context.chargePoint.getConnector(this.connectorId);
+    // #367: ChargePoint.stopTransaction sets stopTime, stops the meter and
+    // clears the connector before StopTransaction.req goes out, so the
+    // transaction this CALLRESULT answers is never a live one. A live
+    // transaction here began after the request was sent (a late or replayed
+    // conf) — clearing it stopped that new session's auto-meter and ended
+    // its scenario's Meter Value node early. Leave it alone.
+    if (connector?.transaction && connector.transaction.stopTime === null) {
+      context.logger.info(
+        `StopTransaction.conf arrived after a new transaction began on connector ${this.connectorId}; leaving the new transaction untouched`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
     if (connector) {
       connector.transactionId = null;
       connector.stopTransaction();

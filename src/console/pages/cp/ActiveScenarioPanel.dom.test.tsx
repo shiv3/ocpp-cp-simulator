@@ -183,6 +183,9 @@ describe("ActiveScenarioPanel", () => {
     expect(openLink?.href).toContain("/scenarios/run?cp=CP-1");
     expect(openLink?.href).toContain("connector=1");
     expect(openLink?.href).toContain("id=s1");
+    // #366: the link names the live run so the run page can tell whether it
+    // is still the one executing.
+    expect(openLink?.href).toContain("run=run-1");
   });
 
   it("renders nothing when listScenarios returns only inactive items", async () => {

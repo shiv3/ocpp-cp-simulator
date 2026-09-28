@@ -13,6 +13,7 @@ import { DataContext } from "../../data/providers/DataProvider";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
+  type ScenarioExecutionContext,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ChargePointEvent } from "../../data/interfaces/ChargePointService";
 
@@ -63,6 +64,7 @@ interface Mounted {
   root: Root;
   current: () => HookResult;
   click: (testId: "start" | "stop" | "step") => Promise<void>;
+  rerender: (scenario: ScenarioDefinition | null) => Promise<void>;
 }
 
 async function mountProbe(
@@ -76,7 +78,7 @@ async function mountProbe(
   const root = createRoot(container);
   let latest: HookResult | null = null;
 
-  await act(async () => {
+  const render = (target: ScenarioDefinition | null) =>
     root.render(
       <DataContext.Provider
         value={{
@@ -90,13 +92,16 @@ async function mountProbe(
         <Probe
           cpId={cpId}
           connectorId={connectorId}
-          scenario={scenario}
+          scenario={target}
           onSnapshot={(snap) => {
             latest = snap;
           }}
         />
       </DataContext.Provider>,
     );
+
+  await act(async () => {
+    render(scenario);
   });
 
   return {
@@ -114,6 +119,11 @@ async function mountProbe(
         button.click();
         await Promise.resolve();
         await Promise.resolve();
+      });
+    },
+    rerender: async (target) => {
+      await act(async () => {
+        render(target);
       });
     },
   };
@@ -490,5 +500,326 @@ describe("useScenarioRun", () => {
     expect(mounted.current().runs).toHaveLength(2);
     expect(mounted.current().runs[0].result).toBe("error");
     expect(mounted.current().runs[0].failedNodeId).toBeUndefined();
+  });
+});
+
+/** Lets pending promise callbacks (e.g. the hydration `getScenarioStatus`)
+ *  settle inside `act`, so their state updates are flushed. */
+async function flush(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  });
+}
+
+function waitingStatus(
+  scenarioId: string,
+  currentNodeId: string,
+  executedNodes: string[],
+  overrides: Partial<ScenarioExecutionContext> = {},
+): ScenarioExecutionContext {
+  return {
+    scenarioId,
+    state: "waiting",
+    mode: "oneshot",
+    currentNodeId,
+    executedNodes,
+    loopCount: 0,
+    runId: "run-42",
+    currentNodeStartedAt: 1_000,
+    expectation: {
+      type: "ocpp_call",
+      direction: "CSMS_TO_CP",
+      action: "RemoteStopTransaction",
+      timeoutMs: 60_000,
+      nodeId: currentNodeId,
+    },
+    ...overrides,
+  };
+}
+
+describe("useScenarioRun — attaching to a run already live in the runtime (#366)", () => {
+  let cleanup: (() => Promise<void>) | null = null;
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    if (cleanup) {
+      await cleanup();
+      cleanup = null;
+    }
+  });
+
+  it("hydrates state, node position, expectation and runId from getScenarioStatus on mount", async () => {
+    const scenario = fixtureScenario();
+    const [step1, step2] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const getScenarioStatus = vi.fn(async () =>
+      waitingStatus("s1", step2.id, [step1.id, step2.id]),
+    );
+    const loadScenario = vi.fn(async () => ({ scenarioId: "s1" }));
+    const runScenario = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      getScenarioStatus,
+      loadScenario,
+      runScenario,
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+
+    expect(getScenarioStatus).toHaveBeenCalledWith("CP-1", 1, "s1");
+    const snap = mounted.current();
+    expect(snap.hydrated).toBe(true);
+    expect(snap.state).toBe("waiting");
+    expect(snap.currentNodeId).toBe(step2.id);
+    expect(snap.executedNodeIds).toEqual([step1.id, step2.id]);
+    expect(snap.runId).toBe("run-42");
+    expect(snap.expectation?.action).toBe("RemoteStopTransaction");
+    expect(snap.expectation?.timeoutMs).toBe(60_000);
+    expect(snap.currentNodeStartedAt).toBe(1_000);
+    expect(snap.runs).toHaveLength(1);
+    expect(snap.runs[0]).toMatchObject({
+      result: "running",
+      endedAt: null,
+      attached: true,
+      runId: "run-42",
+    });
+    // Opening the page must never start a run.
+    expect(loadScenario).not.toHaveBeenCalled();
+    expect(runScenario).not.toHaveBeenCalled();
+  });
+
+  it("stop() after hydration stops the attached run and closes it as stopped", async () => {
+    const scenario = fixtureScenario();
+    const [step1] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const stopScenario = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      getScenarioStatus: vi.fn(async () =>
+        waitingStatus("s1", step1.id, [step1.id]),
+      ),
+      stopScenario,
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+    await mounted.click("stop");
+
+    expect(stopScenario).toHaveBeenCalledWith("CP-1", 1, "s1");
+    expect(mounted.current().state).toBe("idle");
+    expect(mounted.current().expectation).toBeNull();
+    expect(mounted.current().runs[0].result).toBe("stopped");
+  });
+
+  it("stays idle with an empty history when the runtime reports no live run", async () => {
+    const scenario = fixtureScenario();
+    const service = createFakeChargePointService({
+      getScenarioStatus: vi.fn(async () => null),
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+
+    expect(mounted.current().hydrated).toBe(true);
+    expect(mounted.current().state).toBe("idle");
+    expect(mounted.current().runs).toEqual([]);
+    expect(mounted.current().runId).toBeNull();
+  });
+
+  it("does not attach a terminal status (a finished run is not re-opened as live)", async () => {
+    const scenario = fixtureScenario();
+    const [step1] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const service = createFakeChargePointService({
+      getScenarioStatus: vi.fn(async () =>
+        waitingStatus("s1", step1.id, [step1.id], {
+          state: "completed",
+          expectation: null,
+        }),
+      ),
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+
+    expect(mounted.current().state).toBe("idle");
+    expect(mounted.current().runs).toEqual([]);
+  });
+
+  it("ignores a hydration response that settles after the viewed scenario changed", async () => {
+    const first = fixtureScenario();
+    const second = { ...fixtureScenario(), id: "s2" };
+    const [step1] = first.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    let resolveFirst: (v: ScenarioExecutionContext | null) => void = () => {};
+    const getScenarioStatus = vi.fn(
+      (_cp: string, _conn: number, scenarioId: string) =>
+        scenarioId === "s1"
+          ? new Promise<ScenarioExecutionContext | null>((resolve) => {
+              resolveFirst = resolve;
+            })
+          : Promise.resolve(null),
+    );
+    const service = createFakeChargePointService({ getScenarioStatus });
+
+    const mounted = await mountProbe(service, "CP-1", 1, first);
+    cleanup = () => unmount(mounted.root);
+    await mounted.rerender(second);
+    await flush();
+
+    await act(async () => {
+      resolveFirst(waitingStatus("s1", step1.id, [step1.id]));
+    });
+    await flush();
+
+    expect(mounted.current().state).toBe("idle");
+    expect(mounted.current().runs).toEqual([]);
+    expect(mounted.current().currentNodeId).toBeNull();
+  });
+
+  it("attaches when the viewed scenario is started outside this page while it is open", async () => {
+    const scenario = fixtureScenario();
+    const [step1] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const getScenarioStatus = vi.fn(async () => null);
+    const service = createFakeChargePointService({ getScenarioStatus });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+    expect(mounted.current().state).toBe("idle");
+
+    // A different scenario starting on the same connector is not ours.
+    await pushEvent(service, "CP-1", {
+      type: "scenario-started",
+      connectorId: 1,
+      scenarioId: "other",
+    });
+    expect(mounted.current().state).toBe("idle");
+
+    await pushEvent(service, "CP-1", {
+      type: "scenario-started",
+      connectorId: 1,
+      scenarioId: "s1",
+    });
+    await pushEvent(service, "CP-1", {
+      type: "scenario-node-execute",
+      connectorId: 1,
+      scenarioId: "s1",
+      nodeId: step1.id,
+    });
+
+    expect(mounted.current().state).toBe("running");
+    expect(mounted.current().currentNodeId).toBe(step1.id);
+    expect(mounted.current().runs).toHaveLength(1);
+    expect(mounted.current().runs[0]).toMatchObject({
+      result: "running",
+      attached: true,
+    });
+  });
+
+  it("re-queries the runtime status after a node-execute so a parked run reads waiting", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const scenario = fixtureScenario();
+    const [step1, step2] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const getScenarioStatus = vi.fn(
+      async (): Promise<ScenarioExecutionContext | null> => null,
+    );
+    const service = createFakeChargePointService({
+      getScenarioStatus,
+      loadScenario: vi.fn(async () => ({ scenarioId: "runtime-s1" })),
+      runScenario: vi.fn(async () => undefined),
+    });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+    await mounted.click("start");
+
+    getScenarioStatus.mockResolvedValue(
+      waitingStatus("runtime-s1", step2.id, [step1.id, step2.id]),
+    );
+    await pushEvent(service, "CP-1", {
+      type: "scenario-node-execute",
+      connectorId: 1,
+      scenarioId: "runtime-s1",
+      nodeId: step2.id,
+    });
+    expect(mounted.current().state).toBe("running");
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    await flush();
+
+    expect(getScenarioStatus).toHaveBeenLastCalledWith("CP-1", 1, "runtime-s1");
+    expect(mounted.current().state).toBe("waiting");
+    expect(mounted.current().expectation?.action).toBe("RemoteStopTransaction");
+    expect(mounted.current().runId).toBe("run-42");
+  });
+
+  it("a status refresh landing after scenario-completed does not revert the terminal state", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const scenario = fixtureScenario();
+    const [step1] = scenario.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    let resolveRefresh: (v: ScenarioExecutionContext | null) => void = () => {};
+    const getScenarioStatus = vi
+      .fn()
+      .mockResolvedValueOnce(waitingStatus("s1", step1.id, [step1.id]))
+      .mockImplementationOnce(
+        () =>
+          new Promise<ScenarioExecutionContext | null>((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+    const service = createFakeChargePointService({ getScenarioStatus });
+
+    const mounted = await mountProbe(service, "CP-1", 1, scenario);
+    cleanup = () => unmount(mounted.root);
+    await flush();
+    expect(mounted.current().state).toBe("waiting");
+
+    await pushEvent(service, "CP-1", {
+      type: "scenario-node-execute",
+      connectorId: 1,
+      scenarioId: "s1",
+      nodeId: step1.id,
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    // The refresh is in flight when the run completes.
+    await pushEvent(service, "CP-1", {
+      type: "scenario-completed",
+      connectorId: 1,
+      scenarioId: "s1",
+    });
+    await act(async () => {
+      resolveRefresh(waitingStatus("s1", step1.id, [step1.id]));
+    });
+    await flush();
+
+    expect(mounted.current().state).toBe("completed");
+    expect(mounted.current().expectation).toBeNull();
+    expect(mounted.current().runs[0].result).toBe("completed");
   });
 });

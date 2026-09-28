@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-12
+updated: 2026-09-29
 ---
 
 # Log
@@ -1142,3 +1142,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Not done: e2e rows for the three on `e2e/ocpp201.gocpp.e2e.ts` are added for `responseOverride` and `inboundPolicy`; `csmsCallTrigger` is pinned at the executor level with a 2.0.1 station instead (the e2e fixture drives the CSMS side, the trigger is observed on the station side).
 - [GitHub issues](sources/github-issues.md): #349 row.
 - Tests: `csmsActionNames.test.ts`, `v201InboundPolicyOverride.bun.test.ts` (override answers once under the 1.6 name; callerror policy is sticky and clearable; ignore answers nothing; the event carries the wire name), a 2.0.1 row in `csmsCallTrigger.test.ts`.
+
+## [2026-09-29] ingest | the run console attaches to a live scenario run (#366)
+
+- [Web console](entities/web-console.md): new paragraph on the `/v3` **Active scenarios** panel and its **Open run** link. The run console used to track only a run it had started itself, so opening it mid-run showed `Idle` with no current step while the CP page showed the run `waiting`. It now hydrates from `scenario_status` (state, current and executed nodes, waiting expectation and timeout, runId), Stop acts on that run, opening or reloading never starts a run, and a run started elsewhere while the page is open is attached too. The link carries `run=<runId>`; a banner flags a run that has ended or been superseded (daemon only — local mode mints no runId).
+- Mechanism: no scenario event says a run is parked, so each lifecycle event of the tracked run schedules a debounced `getScenarioStatus` re-query (the same 200 ms as the Active scenarios panel) — that is what shows `waiting` for a run the page started too. An answer that raced a newer node or the run's end is dropped.
+- [GitHub issues](sources/github-issues.md): #366 row.
+- Tests: `useScenarioRun.dom.test.tsx` (hydration, stop on the attached run, null and terminal status stay idle, stale hydration after a target change, external start attaches, debounced re-query reads `waiting`, a late re-query does not revert a completed run), `ScenarioRunPage.dom.test.tsx` (regression: status already `waiting` before mount; stale / superseded `run=` banner), `ActiveScenarioPanel.dom.test.tsx` (`run=` in the link), `useAllScenarios.dom.test.tsx` (`buildScenarioUrl`).

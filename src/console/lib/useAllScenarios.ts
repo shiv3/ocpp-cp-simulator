@@ -153,17 +153,21 @@ export function useAllScenarios(): UseAllScenariosResult {
  * Builds the fixed nav URL for the scenario editor/run routes (Task 1's
  * route contract). `connector` is always present in the query string, as
  * an empty value for chargePoint-scope scenarios — not omitted — to match
- * the brief's exact `?cp=&connector=&id=` shape.
+ * the brief's exact `?cp=&connector=&id=` shape. `runId` (a live run's
+ * runtime id, #366) adds `&run=`, which the run page uses to tell whether
+ * the run it attaches to is still that one.
  */
 export function buildScenarioUrl(
   kind: "edit" | "run",
   cpId: string,
   connectorId: number | null,
   scenarioId: string,
+  options: { runId?: string | null } = {},
 ): string {
   const params = new URLSearchParams();
   params.set("cp", cpId);
   params.set("connector", connectorId != null ? String(connectorId) : "");
   params.set("id", scenarioId);
+  if (options.runId) params.set("run", options.runId);
   return consolePath(`/scenarios/${kind}?${params.toString()}`);
 }

@@ -11,7 +11,10 @@ import type {
   ScenarioDefinition,
   ScenarioNode,
 } from "../../../../cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunState } from "../../../lib/useScenarioRun";
+import {
+  isLiveRunState,
+  type ScenarioRunState,
+} from "../../../lib/useScenarioRun";
 
 export interface RunTimelineProps {
   scenario: ScenarioDefinition;
@@ -26,7 +29,8 @@ type StepStatus = "done" | "current" | "pending";
  * There's no `scenario-node-complete`/`scenario-node-progress` event (only
  * `scenario-node-execute`), so a step only ever reads "done" once a LATER
  * node-execute event supersedes it as `currentNodeId`, or the run leaves the
- * "running" state entirely (completed/error/stopped) — at which point
+ * live states (running / waiting / paused / stepping) entirely
+ * (completed/error/stopped) — at which point
  * whatever was still "current" settles into "done" too. No fractional
  * progress bar is possible without a progress event.
  */
@@ -37,7 +41,7 @@ function stepStatus(
   state: ScenarioRunState,
 ): StepStatus {
   if (!executedNodeIds.includes(nodeId)) return "pending";
-  if (nodeId === currentNodeId && state === "running") return "current";
+  if (nodeId === currentNodeId && isLiveRunState(state)) return "current";
   return "done";
 }
 

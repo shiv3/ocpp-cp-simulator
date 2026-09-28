@@ -15,6 +15,7 @@ import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
+  type ScenarioExecutionContext,
 } from "../../../../cp/application/scenario/ScenarioTypes";
 import {
   createFakeChargePointService,
@@ -226,6 +227,142 @@ describe("ScenarioRunPage", () => {
     await flush();
     expect(loadScenario).not.toHaveBeenCalled();
     expect(runScenario).not.toHaveBeenCalled();
+  });
+
+  it("attaches to a run already live in the runtime instead of showing a fresh idle state (#366)", async () => {
+    const fixture = linearFixture();
+    const [step1, step2] = fixture.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const getScenarioStatus = vi.fn(
+      async (): Promise<ScenarioExecutionContext | null> => ({
+        scenarioId: "s1",
+        state: "waiting",
+        mode: "oneshot",
+        currentNodeId: step2.id,
+        executedNodes: [step1.id, step2.id],
+        loopCount: 0,
+        runId: "run-42",
+        currentNodeStartedAt: Date.now(),
+        expectation: {
+          type: "ocpp_call",
+          direction: "CSMS_TO_CP",
+          action: "RemoteStopTransaction",
+          timeoutMs: 60_000,
+          nodeId: step2.id,
+        },
+      }),
+    );
+    const loadScenario = vi.fn(async () => ({ scenarioId: "s1" }));
+    const runScenario = vi.fn(async () => undefined);
+    const stopScenario = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+      getScenarioStatus,
+      loadScenario,
+      runScenario,
+      stopScenario,
+    });
+
+    // The URL "Open run" builds from the Active scenarios panel.
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1&run=run-42",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await flush();
+
+    expect(getScenarioStatus).toHaveBeenCalledWith("CP-1", 1, "s1");
+    expect(container.textContent).toContain("Waiting");
+    expect(container.textContent).not.toContain("Idle");
+    expect(container.textContent).toContain("run-42");
+    expect(container.textContent).not.toContain("no longer active");
+
+    // Timeline is positioned on the runtime's current node.
+    const markers = Array.from(
+      container.querySelectorAll("ol [aria-label]"),
+    ).map((el) => el.getAttribute("aria-label"));
+    expect(markers).toEqual(["done", "current"]);
+
+    // Waiting expectation and its timeout.
+    expect(container.textContent).toContain("Waiting for");
+    expect(container.textContent).toContain("RemoteStopTransaction");
+    expect(container.textContent).toContain("Timeout in");
+
+    // Run history lists the attached run rather than "No runs yet".
+    expect(container.textContent).not.toContain("No runs yet this session");
+    expect(container.textContent).toContain("attached");
+
+    // Opening the page never starts a run.
+    expect(loadScenario).not.toHaveBeenCalled();
+    expect(runScenario).not.toHaveBeenCalled();
+
+    // Stop acts on the existing run.
+    const stopButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Stop",
+    ) as HTMLButtonElement | undefined;
+    expect(stopButton, 'expected a "Stop" button').toBeTruthy();
+    await act(async () => {
+      stopButton!.click();
+    });
+    await flush();
+    expect(stopScenario).toHaveBeenCalledWith("CP-1", 1, "s1");
+    expect(container.textContent).toContain("stopped");
+  });
+
+  it("says so when the run named in the URL is no longer active", async () => {
+    const fixture = linearFixture();
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+      getScenarioStatus: vi.fn(async () => null),
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1&run=run-old",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain("Idle");
+    expect(container.textContent).toContain("Run run-old is no longer active");
+  });
+
+  it("names the current run when the one in the URL was superseded", async () => {
+    const fixture = linearFixture();
+    const [step1] = fixture.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+      getScenarioStatus: vi.fn(
+        async (): Promise<ScenarioExecutionContext | null> => ({
+          scenarioId: "s1",
+          state: "running",
+          mode: "oneshot",
+          currentNodeId: step1.id,
+          executedNodes: [step1.id],
+          loopCount: 0,
+          runId: "run-new",
+        }),
+      ),
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1&run=run-old",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain("Running");
+    expect(container.textContent).toContain("Run run-old is no longer active");
+    expect(container.textContent).toContain("run-new");
   });
 
   it("shows a not-found empty state for an unknown scenario id", async () => {

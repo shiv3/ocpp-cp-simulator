@@ -24,8 +24,11 @@ export class ChargePoint {
   private _error: string = "";
   public _errorCallback: (error: string) => void = () => {};
 
-  private _heartbeat: number | null = null;
-  private _autoMeterValueIntervals: Map<number, number> = new Map();
+  private _heartbeat: ReturnType<typeof setInterval> | null = null;
+  private _autoMeterValueIntervals: Map<
+    number,
+    ReturnType<typeof setInterval>
+  > = new Map();
 
   private _statusChangeCallback:
     ((status: string, message?: string) => void) | null = null;

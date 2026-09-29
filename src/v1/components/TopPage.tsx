@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import ChargePoint from "./ChargePoint.tsx";
-import { Tabs } from "flowbite-react";
+import { TabItem, Tabs } from "flowbite-react";
 import { ChargePoint as OCPPChargePoint } from "../cp/ChargePoint.ts";
 // import {HiStatusOnline, HiStatusOffline} from "react-icons/hi";
 import { useAtom } from "jotai";
@@ -210,14 +210,14 @@ const ExperimentalView: React.FC<ExperimentalProps> = ({ cps, tagIDs }) => {
       <Tabs>
         {cps.map((cp, key) => {
           return (
-            <Tabs.Item
+            <TabItem
               className="bg-gray-100 rounded p-4"
               // icon={cp.status === "Available" ? HiStatusOnline : HiStatusOffline}
               key={key}
               title={cp.id}
             >
               <ChargePoint cp={cp} TagID={tagIDs[0]} />
-            </Tabs.Item>
+            </TabItem>
           );
         })}
       </Tabs>

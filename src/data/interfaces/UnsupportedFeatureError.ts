@@ -1,7 +1,8 @@
 export type UnsupportedFeatureCode =
   | "browser_tls_unsupported"
   | "browser_scenario_file_unsupported"
-  | "browser_scenario_executor_unavailable";
+  | "browser_scenario_executor_unavailable"
+  | "browser_auto_traffic_unsupported";
 
 export class UnsupportedFeatureError extends Error {
   readonly code: UnsupportedFeatureCode;
@@ -21,3 +22,6 @@ export const BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE =
 
 export const BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE =
   "Scenario execution is only available after the browser connector UI has mounted its scenario executor.";
+
+export const BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE =
+  "Seeded background traffic is CLI/server-only; configure it on the daemon runtime.";

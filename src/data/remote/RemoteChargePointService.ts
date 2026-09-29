@@ -26,6 +26,10 @@ import type {
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
+import type {
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../cp/domain/types/FirmwareLogStatus";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
@@ -792,7 +796,11 @@ export class RemoteChargePointService implements ChargePointService {
     const result = await this.runCpRpc(id, "data_transfer", {
       vendorId,
       ...(messageId !== undefined ? { messageId } : {}),
-      ...(data !== undefined ? { data } : {}),
+      // The daemon's schema accepts a string or an object and rejects the
+      // rest, so pass the caller's value through for it to judge.
+      ...(data !== undefined
+        ? { data: data as string | Record<string, unknown> }
+        : {}),
     });
     return result as DataTransferResult;
   }
@@ -887,7 +895,9 @@ export class RemoteChargePointService implements ChargePointService {
     requestId?: number,
   ): Promise<void> {
     await this.runCpRpc(id, "firmware_status_notification", {
-      status,
+      // Validated by the daemon (z.enum(FIRMWARE_STATUSES)), which rejects
+      // an unknown status with a readable error.
+      status: status as FirmwareStatus,
       ...(requestId !== undefined ? { requestId } : {}),
     });
   }
@@ -898,7 +908,8 @@ export class RemoteChargePointService implements ChargePointService {
     requestId?: number,
   ): Promise<void> {
     await this.runCpRpc(id, "log_status_notification", {
-      status,
+      // Validated by the daemon's enum, as above.
+      status: status as UploadLogStatus,
       ...(requestId !== undefined ? { requestId } : {}),
     });
   }

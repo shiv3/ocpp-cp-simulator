@@ -376,9 +376,8 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId?: string): Promise<void> {
-    const cp = this.getExistingChargePointOrThrow(id);
-    cp.authorize(tagId ?? cp.nextIdTag() ?? DEFAULT_ID_TAG);
+  async authorize(id: string, tagId: string): Promise<void> {
+    this.getExistingChargePointOrThrow(id).authorize(tagId);
   }
 
   async sendDataTransfer(

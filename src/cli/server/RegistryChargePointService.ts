@@ -237,8 +237,14 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId?: string): Promise<void> {
+  async authorize(id: string, tagId: string): Promise<void> {
     this.requireService(id).authorize(tagId);
+  }
+
+  /** Daemon-only: the tag a control-plane call without one presents, drawn
+   *  from the charge point's idTag pool (#299). */
+  resolveIdTag(id: string, tagId?: string, connectorId?: number): string {
+    return this.requireService(id).resolveIdTag(tagId, connectorId);
   }
 
   async sendDataTransfer(

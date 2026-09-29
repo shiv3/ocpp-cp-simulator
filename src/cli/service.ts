@@ -963,13 +963,8 @@ export class CLIChargePointService {
     tagId?: string,
     options: StartTransactionCommandOptions = {},
   ): void {
-    // An explicit tag always wins; the pool only fills a gap, and a charge
-    // point without one keeps the historical literal so nothing changes for a
-    // caller that never configured a pool.
-    const resolved =
-      tagId ?? this._chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
     this._chargePoint.startTransaction(
-      resolved,
+      this.resolveIdTag(tagId, connectorId),
       connectorId,
       undefined,
       undefined,
@@ -1046,9 +1041,19 @@ export class CLIChargePointService {
     this._chargePoint.stopHeartbeat();
   }
 
-  authorize(tagId?: string): void {
-    const resolved = tagId ?? this._chargePoint.nextIdTag() ?? DEFAULT_ID_TAG;
-    this._chargePoint.authorize(resolved);
+  /**
+   * The idTag a control-plane call without one presents (#299). An explicit
+   * tag always wins; the pool only fills a gap, and a charge point without one
+   * keeps the historical literal so nothing changes for a caller that never
+   * configured a pool. OCPP messages always carry a tag, so this runs before
+   * they are built.
+   */
+  resolveIdTag(tagId: string | undefined, connectorId?: number): string {
+    return tagId ?? this._chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
+  }
+
+  authorize(tagId: string): void {
+    this._chargePoint.authorize(tagId);
   }
 
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer (#348). */

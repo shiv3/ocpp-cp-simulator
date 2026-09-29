@@ -6,10 +6,12 @@ import { DefaultBootNotification } from "../../../cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "../LocalChargePointService";
 
 /**
- * #374: `ChargePointService` declared `tagId` required on startTransaction /
- * authorize, while the control plane sends none on purpose so the charge
- * point draws from its idTag pool (#299). Browser mode now resolves a missing
- * tag the way the daemon does: pool first, then the historical default.
+ * #374: `ChargePointService.startTransaction` declared `tagId` required, while
+ * the control plane sends none on purpose so the charge point draws from its
+ * idTag pool (#299). A 2.x TransactionEvent may carry no idToken, so the tag is
+ * optional there; browser mode resolves a missing one the way the daemon
+ * does: pool first, then the historical default. (Authorize.req always
+ * carries an idTag, so `authorize` keeps a required one.)
  */
 function registeredCp(idTags: string[] = []): {
   service: LocalChargePointService;
@@ -51,21 +53,25 @@ describe("LocalChargePointService without a tagId", () => {
     );
   });
 
-  it("authorizes the default tag when the charge point has no pool", async () => {
+  it("starts with the default tag when the charge point has no pool", async () => {
     const { service, cp } = registeredCp();
-    const authorize = vi.spyOn(cp, "authorize").mockReturnValue(undefined);
+    const startTransaction = vi
+      .spyOn(cp, "startTransaction")
+      .mockResolvedValue({ started: true });
 
-    await service.authorize("CP-POOL");
+    await service.startTransaction("CP-POOL", 1);
 
-    expect(authorize).toHaveBeenCalledWith(DEFAULT_ID_TAG);
+    expect(startTransaction.mock.calls[0]?.[0]).toBe(DEFAULT_ID_TAG);
   });
 
   it("keeps an explicit tag", async () => {
     const { service, cp } = registeredCp(["POOL-A"]);
-    const authorize = vi.spyOn(cp, "authorize").mockReturnValue(undefined);
+    const startTransaction = vi
+      .spyOn(cp, "startTransaction")
+      .mockResolvedValue({ started: true });
 
-    await service.authorize("CP-POOL", "EXPLICIT");
+    await service.startTransaction("CP-POOL", 1, "EXPLICIT");
 
-    expect(authorize).toHaveBeenCalledWith("EXPLICIT");
+    expect(startTransaction.mock.calls[0]?.[0]).toBe("EXPLICIT");
   });
 });

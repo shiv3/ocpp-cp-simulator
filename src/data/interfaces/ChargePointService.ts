@@ -402,9 +402,7 @@ export interface ChargePointService {
   sendHeartbeat(id: string): Promise<void>;
   startHeartbeat(id: string, intervalSeconds: number): Promise<void>;
   stopHeartbeat(id: string): Promise<void>;
-  /** Without a `tagId` the charge point draws from its idTag pool, and
-   *  falls back to the historical default tag (#299). */
-  authorize(id: string, tagId?: string): Promise<void>;
+  authorize(id: string, tagId: string): Promise<void>;
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer
    *  (#348). `data`: string, or an object (JSON-encoded on 1.6). */
   sendDataTransfer(
@@ -415,7 +413,8 @@ export interface ChargePointService {
   ): Promise<DataTransferResult>;
 
   // Connector operations
-  /** `tagId` as for {@link authorize}. */
+  /** Without a `tagId` the charge point draws from its idTag pool, and
+   *  falls back to the historical default tag (#299). */
   startTransaction(
     id: string,
     connectorId: number,

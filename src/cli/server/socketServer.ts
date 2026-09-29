@@ -1721,8 +1721,13 @@ async function dispatchFacadeCpCommand(
     }
     case "authorize": {
       const id = requireFacadeCpId(cpId, rawParams);
+      // `tagId` is optional on the control plane (#299) but not in OCPP's
+      // Authorize.req, so a missing one is drawn from the pool here.
       await runFacadeOperation(() =>
-        chargePointService.authorize(id, optionalString(params, "tagId")),
+        chargePointService.authorize(
+          id,
+          chargePointService.resolveIdTag(id, optionalString(params, "tagId")),
+        ),
       );
       return handled(undefined);
     }

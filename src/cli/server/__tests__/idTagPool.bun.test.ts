@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -8,6 +8,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { parseCreateBody } from "../httpServer";
 import { RegistryChargePointService } from "../RegistryChargePointService";
+import { createRuntimeDeps, runRpc } from "../socketServer";
 import { registryServiceDeps } from "./registryServiceDeps";
 
 const tempFiles: string[] = [];
@@ -245,6 +246,45 @@ describe("the pool survives the control-plane path (#299)", () => {
     } finally {
       registry.shutdownAll();
     }
+  });
+});
+
+describe("authorize draws a missing tag before OCPP sees it (#299, #374)", () => {
+  // OCPP's Authorize.req always carries an idTag, so the control plane's
+  // optional `tagId` is resolved by the facade, not passed down as undefined.
+  async function authorizeOverRpc(
+    params: Record<string, unknown>,
+  ): Promise<string[]> {
+    const registry = new CPRegistry(new EventBus());
+    try {
+      const svc = registry.create(
+        parseCreateBody({
+          ...BASE,
+          cpId: "CP-AUTH",
+          idTagPool: { tags: ["A1", "A2"], distribution: "round-robin" },
+        }),
+        { seedDefault: false },
+      );
+      const cp = (
+        svc as unknown as { _chargePoint: { authorize(tag: string): void } }
+      )._chargePoint;
+      const authorize = spyOn(cp, "authorize").mockImplementation(() => {});
+      const deps = createRuntimeDeps({ registry, bus: new EventBus() });
+
+      await runRpc(deps, { cpId: "CP-AUTH", method: "authorize", params });
+
+      return authorize.mock.calls.map(([tag]) => tag);
+    } finally {
+      registry.shutdownAll();
+    }
+  }
+
+  it("presents the pool's next tag when the call names none", async () => {
+    expect(await authorizeOverRpc({})).toEqual(["A1"]);
+  });
+
+  it("never overrides an explicit tag", async () => {
+    expect(await authorizeOverRpc({ tagId: "EXPLICIT" })).toEqual(["EXPLICIT"]);
   });
 });
 

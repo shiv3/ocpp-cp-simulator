@@ -1,15 +1,15 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 
-interface StateNodeData {
+type StateNodeData = {
   status: OCPPStatus;
   label: string;
   isCurrent: boolean;
   isOperative: boolean;
-}
+};
 
-const StateNode: React.FC<NodeProps<StateNodeData>> = ({ data }) => {
+const StateNode: React.FC<NodeProps<Node<StateNodeData>>> = ({ data }) => {
   const { status, label, isCurrent, isOperative } = data;
 
   // Color settings based on state

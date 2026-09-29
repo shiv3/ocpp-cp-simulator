@@ -1,8 +1,8 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { TransactionNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const TransactionNode: React.FC<NodeProps<TransactionNodeData>> = ({
+const TransactionNode: React.FC<NodeProps<Node<TransactionNodeData>>> = ({
   data,
   selected,
 }) => {

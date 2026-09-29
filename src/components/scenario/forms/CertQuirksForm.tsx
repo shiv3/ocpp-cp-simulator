@@ -55,7 +55,7 @@ export default function CertQuirksForm({
     : [];
 
   const handleModeChange = (mode: string) => {
-    const updated = { ...value, mode };
+    const updated: NodeFormData = { ...value, mode };
     if (mode === "clear") {
       // Remove mode-specific fields for clear mode
       delete updated.preset;

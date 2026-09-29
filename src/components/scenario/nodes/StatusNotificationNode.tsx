@@ -1,5 +1,5 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { StatusNotificationNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 /**
@@ -9,7 +9,7 @@ import { StatusNotificationNodeData } from "../../../cp/application/scenario/Sce
  * paths CSMS implementations care about.
  */
 const StatusNotificationNode: React.FC<
-  NodeProps<StatusNotificationNodeData>
+  NodeProps<Node<StatusNotificationNodeData>>
 > = ({ data, selected }) => {
   return (
     <div

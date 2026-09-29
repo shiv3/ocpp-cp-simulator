@@ -209,7 +209,6 @@ const FullPanelContent: React.FC<{
     if (initialTab === "stateTransition") {
       setActiveTab("stateTransition");
     } else {
-      // Legacy "details" / "scenario" both land on the scenario editor now.
       setActiveTab("scenario");
     }
   }, [initialTab, tabResetNonce]);

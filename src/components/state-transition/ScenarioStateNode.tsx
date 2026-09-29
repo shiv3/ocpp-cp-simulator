@@ -1,5 +1,5 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 
 export type ScenarioState =
   | "idle"
@@ -10,13 +10,13 @@ export type ScenarioState =
   | "completed"
   | "error";
 
-interface ScenarioStateNodeData {
+type ScenarioStateNodeData = {
   state: ScenarioState;
   label: string;
   isCurrent: boolean;
-}
+};
 
-const ScenarioStateNode: React.FC<NodeProps<ScenarioStateNodeData>> = ({
+const ScenarioStateNode: React.FC<NodeProps<Node<ScenarioStateNodeData>>> = ({
   data,
 }) => {
   const { state, label, isCurrent } = data;

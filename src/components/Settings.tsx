@@ -132,7 +132,7 @@ const Settings: React.FC = () => {
       // subscriber state, useChargePoints snapshot) starts fresh against
       // the now-empty DB.
       window.location.reload();
-    } catch {
+    } catch (err) {
       setResetState("error");
       setResetError(err instanceof Error ? err.message : String(err));
     }

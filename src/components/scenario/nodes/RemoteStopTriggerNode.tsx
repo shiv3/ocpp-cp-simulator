@@ -1,19 +1,19 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { RemoteStopTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedRemoteStopTriggerNodeData extends RemoteStopTriggerNodeData {
+type ExtendedRemoteStopTriggerNodeData = RemoteStopTriggerNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
-}
+};
 
 // Stop-side counterpart of RemoteStartTriggerNode. Visually mirrors the
 // purple Trigger card so the pair reads as a matched set in the editor;
 // label and copy are the only deltas.
 const RemoteStopTriggerNode: React.FC<
-  NodeProps<ExtendedRemoteStopTriggerNodeData>
+  NodeProps<Node<ExtendedRemoteStopTriggerNodeData>>
 > = ({ data, selected }) => {
   const progress = data.progress;
   const progressPercent = progress

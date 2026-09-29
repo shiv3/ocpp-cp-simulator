@@ -1,12 +1,12 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { UnlockOutcomeNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 /**
  * §5.18 / §7.46: pre-arm the connector's next UnlockConnector.req response.
  * Does not emit any CSMS-bound message itself.
  */
-const UnlockOutcomeNode: React.FC<NodeProps<UnlockOutcomeNodeData>> = ({
+const UnlockOutcomeNode: React.FC<NodeProps<Node<UnlockOutcomeNodeData>>> = ({
   data,
   selected,
 }) => {

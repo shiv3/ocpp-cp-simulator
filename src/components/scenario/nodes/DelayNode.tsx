@@ -1,15 +1,15 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { DelayNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedDelayNodeData extends DelayNodeData {
+type ExtendedDelayNodeData = DelayNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
-}
+};
 
-const DelayNode: React.FC<NodeProps<ExtendedDelayNodeData>> = ({
+const DelayNode: React.FC<NodeProps<Node<ExtendedDelayNodeData>>> = ({
   data,
   selected,
 }) => {

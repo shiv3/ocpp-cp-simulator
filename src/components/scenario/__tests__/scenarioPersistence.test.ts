@@ -273,7 +273,7 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
     const remote = makeRemoteStyleService([scenario("old")]);
     const gate = deferred();
     remote.service.replaceConnectorScenarioDefinitions.mockImplementationOnce(
-      () => gate.promise as unknown as Promise<readonly ScenarioDefinition[]>,
+      () => gate.promise as unknown as Promise<ScenarioDefinition[]>,
     );
 
     let armed: Parameters<typeof shouldSuppressAppliedScenarioAutosave>[0] =

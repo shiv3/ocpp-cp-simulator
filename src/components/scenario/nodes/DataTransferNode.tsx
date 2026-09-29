@@ -1,12 +1,12 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { DataTransferNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 /**
  * §4.3 CP-initiated DataTransfer.req. The vendor / message id / payload
  * semantics are entirely vendor-specific.
  */
-const DataTransferNode: React.FC<NodeProps<DataTransferNodeData>> = ({
+const DataTransferNode: React.FC<NodeProps<Node<DataTransferNodeData>>> = ({
   data,
   selected,
 }) => {

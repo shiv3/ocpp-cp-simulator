@@ -1,8 +1,8 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { NotificationNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const NotificationNode: React.FC<NodeProps<NotificationNodeData>> = ({
+const NotificationNode: React.FC<NodeProps<Node<NotificationNodeData>>> = ({
   data,
   selected,
 }) => {

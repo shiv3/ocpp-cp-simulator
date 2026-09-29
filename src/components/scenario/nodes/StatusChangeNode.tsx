@@ -1,9 +1,9 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { StatusChangeNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 
-const StatusChangeNode: React.FC<NodeProps<StatusChangeNodeData>> = ({
+const StatusChangeNode: React.FC<NodeProps<Node<StatusChangeNodeData>>> = ({
   data,
   selected,
 }) => {

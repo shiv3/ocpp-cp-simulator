@@ -24,6 +24,7 @@ import {
   SOCKET_IO_PATH,
   type SocketIoAttachment,
 } from "../socketServer";
+import { tcpPort } from "../../../test/bunServe";
 
 export interface TestServerOptions {
   readonly host?: string;
@@ -194,7 +195,7 @@ export async function startTestServer(
     server,
     socketIo,
     url,
-    port: server.port ?? 0,
+    port: tcpPort(server),
     restored,
     fileReload,
     connectRestored: () => registry.connectRestored(restored),

@@ -1,11 +1,10 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { CancelReservationNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const CancelReservationNode: React.FC<NodeProps<CancelReservationNodeData>> = ({
-  data,
-  selected,
-}) => {
+const CancelReservationNode: React.FC<
+  NodeProps<Node<CancelReservationNodeData>>
+> = ({ data, selected }) => {
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-orange-50 dark:bg-orange-900 min-w-[180px] ${

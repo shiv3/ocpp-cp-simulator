@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { configAtom } from "../store/store.ts";
+import { configAtom, type Config } from "../store/store.ts";
 import { useAtom } from "jotai";
 import { DefaultBootNotification } from "../cp/OcppTypes.ts";
 import { useNavigate } from "react-router-dom";

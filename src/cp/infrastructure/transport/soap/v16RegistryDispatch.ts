@@ -10,7 +10,7 @@ import type { SoapDialect } from "./dialect";
 import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegistry";
 import { DataTransferHandler } from "../handlers";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
-import { v16Schemas } from "../../../../ocpp/v16";
+import { v16Schemas, type DataTransferRequestV16 } from "../../../../ocpp/v16";
 import { strictValidationErrors } from "../../../../ocpp/validate";
 import { OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 import {
@@ -362,10 +362,15 @@ export async function dispatchSoapCallViaV16Registry(input: {
   // For DataTransfer, use a fresh instance since it's not in the shared registry
   if (action === OCPPAction.DataTransfer) {
     const dataTransferHandler = new DataTransferHandler();
-    const response = dataTransferHandler.handle(coercedPayload, {
-      chargePoint,
-      logger,
-    });
+    // Same trust as the registry path below: schema-coerced for every
+    // dialect, and strictly validated against the 1.6 schema on 1.6-S.
+    const response = dataTransferHandler.handle(
+      coercedPayload as DataTransferRequestV16,
+      {
+        chargePoint,
+        logger,
+      },
+    );
     return unwrapHandlerResult(await Promise.resolve(response));
   }
 

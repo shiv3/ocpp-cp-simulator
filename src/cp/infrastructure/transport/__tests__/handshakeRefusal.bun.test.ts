@@ -6,6 +6,7 @@ import {
   buildOcppWebSocketConnectOptions,
   probeUpgradeRefusal,
 } from "../wsUrlWithBasic";
+import { tcpPort } from "../../../../test/bunServe";
 
 /**
  * #288 — a refused upgrade must say which refusal it was.
@@ -36,7 +37,7 @@ function startRefusingServer(
     },
   });
   return {
-    port: server.port,
+    port: tcpPort(server),
     requests: () => requests,
     stop: () => server.stop(true),
   };
@@ -172,11 +173,11 @@ describe("probeUpgradeRefusal", () => {
   it("carries ws://user:password@host credentials into the probe", async () => {
     // fetch drops userinfo, so without this the probe asks unauthenticated
     // and a 401 would mean "no credentials" rather than "these were refused".
-    let seen: string | null = null;
+    const seen: (string | null)[] = [];
     const server = Bun.serve({
       port: 0,
       fetch(req) {
-        seen = req.headers.get("authorization");
+        seen.push(req.headers.get("authorization"));
         return new Response("", { status: 401 });
       },
     });
@@ -189,9 +190,9 @@ describe("probeUpgradeRefusal", () => {
       });
 
       expect(result).toEqual({ status: 401 });
-      expect(seen).toBe(
+      expect(seen).toEqual([
         `Basic ${Buffer.from("CP001:s3cr3t").toString("base64")}`,
-      );
+      ]);
     } finally {
       server.stop(true);
     }

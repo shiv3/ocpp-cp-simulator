@@ -1,8 +1,8 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { ConnectorPlugNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const ConnectorPlugNode: React.FC<NodeProps<ConnectorPlugNodeData>> = ({
+const ConnectorPlugNode: React.FC<NodeProps<Node<ConnectorPlugNodeData>>> = ({
   data,
   selected,
 }) => {

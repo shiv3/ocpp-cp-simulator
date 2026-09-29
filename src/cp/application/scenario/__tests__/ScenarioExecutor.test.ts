@@ -2,13 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
+import { deferred } from "../../../../test/deferred";
 
 describe("ScenarioExecutor StatusTrigger", () => {
   it("waits for onWaitForStatus before executing the next node", async () => {
-    let resolveStatus: (() => void) | null = null;
-    const waitForStatusPromise = new Promise<void>((resolve) => {
-      resolveStatus = resolve;
-    });
+    const status = deferred();
 
     const onSetMeterValue = vi.fn();
 
@@ -60,7 +58,7 @@ describe("ScenarioExecutor StatusTrigger", () => {
     };
 
     const executor = new ScenarioExecutor(scenario, {
-      onWaitForStatus: () => waitForStatusPromise,
+      onWaitForStatus: () => status.promise,
       onSetMeterValue,
     });
 
@@ -69,7 +67,7 @@ describe("ScenarioExecutor StatusTrigger", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSetMeterValue).not.toHaveBeenCalled();
 
-    resolveStatus?.();
+    status.resolve();
     await execution;
 
     expect(onSetMeterValue).toHaveBeenCalledWith(123);

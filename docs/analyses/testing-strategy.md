@@ -1,9 +1,9 @@
 ---
 title: Testing strategy
 type: analysis
-summary: Which test runner / harness covers what — Vitest for jsdom + unit, Bun test for runtime-bound code, gocpp e2e for multi-version wire output, steve-verify for certification templates, Testcontainers for the external control-plane contract — and how coverage is merged.
+summary: Which test runner / harness covers what — the blocking tsc type-check, Vitest for jsdom + unit, Bun test for runtime-bound code, gocpp e2e for multi-version wire output, steve-verify for certification templates, Testcontainers for the external control-plane contract — and how coverage is merged.
 sources:
-  - package.json (test scripts)
+  - package.json (test and typecheck scripts)
   - .github/workflows/ci.yml
   - codecov.yml
   - e2e/README.md
@@ -15,10 +15,26 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-09-07
+updated: 2026-09-29
 ---
 
 # Testing strategy
+
+## Type-checking
+
+`bun run typecheck` (`tsc -b --noEmit`) checks every project the root
+`tsconfig.json` references: the web app (`tsconfig.app.json`, all of `src/`),
+the CLI / daemon (`tsconfig.cli.json`, under `bun-types` and without the DOM
+lib), `vite.config.ts` and `scripts/bench`. It is a **blocking** CI step and
+runs in the `pre-push` hook. Neither Vite nor Bun type-checks — both strip the
+types and run — so before this gate the code base had drifted to ~380 errors,
+several of them real bugs (#374).
+
+Test files are type-checked too. A file under `src/cli`, `src/cp` or the other
+CLI `include` paths is checked by both projects, so it must compile against
+both the DOM lib and `bun-types`. `tsc -b` also requires every file a project
+imports to be in that project's `include`: a new directory imported by the
+daemon goes into `tsconfig.cli.json`.
 
 ## Vitest vs. Bun test
 

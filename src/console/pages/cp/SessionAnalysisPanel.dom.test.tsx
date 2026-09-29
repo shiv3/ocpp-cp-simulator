@@ -18,6 +18,7 @@ import type {
 } from "../../../data/interfaces/ChargePointService";
 import { ANALYZE_DISCLAIMER } from "../../../trace/analysisDisclaimer";
 import SessionAnalysisPanel from "./SessionAnalysisPanel";
+import { deferred } from "../../../test/deferred";
 
 /** `CpDetailPage` always renders `TransactionsTab` (the default active tab),
  *  whose `useStateHistory` crashes on the harness's auto-stubbed
@@ -133,21 +134,6 @@ async function clickAnalyzeAndWait(container: HTMLElement): Promise<void> {
     await Promise.resolve();
   });
   await waitForAnalyzeSettle(container);
-}
-
-/** A promise plus its externally-callable `resolve`, for tests that need to
- *  hold an in-flight `listStoredLogs()` call open deterministically (rather
- *  than racing against real timers) while they assert on the transient
- *  "analyzing" state or exercise a stale-prop scenario. */
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-} {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
 }
 
 /** Renders `SessionAnalysisPanel` directly (not through the full console /

@@ -665,6 +665,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
         "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
       soapCallbackUrlDerived: true,
       soapPath: "/ocpp/soap",
+      bootNotification: null,
     },
   });
 

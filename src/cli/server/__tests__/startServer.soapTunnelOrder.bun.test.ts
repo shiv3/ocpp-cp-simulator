@@ -43,7 +43,7 @@ describe("startServer with --soap-tunnel: listener before tunnel, tunnel before 
     const csms = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
-      async fetch(req) {
+      async fetch(req): Promise<Response> {
         const parsed = parseSoapEnvelope(await req.text(), OCPP16_DIALECT);
         if (
           parsed.operation === "BootNotification" &&
@@ -128,7 +128,8 @@ describe("startServer with --soap-tunnel: listener before tunnel, tunnel before 
 
     // The tunnel provider sees the listener the daemon bound for it, and
     // publishes that very listener as the "public" origin.
-    let listenerStatusAtTunnelStart: number | Error | null = null;
+    // Assigned in the tunnel callback; `as` stops TS narrowing it to null.
+    let listenerStatusAtTunnelStart = null as number | Error | null;
     const startSoapTunnel = async (
       opts: SoapTunnelOptions,
     ): Promise<SoapTunnel> => {

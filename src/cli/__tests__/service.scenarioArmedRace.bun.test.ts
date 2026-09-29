@@ -1,12 +1,11 @@
 import { describe, it, expect } from "bun:test";
-import { Database as BunSqliteDatabase } from "bun:sqlite";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase as BunDb } from "../../cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * Opt-in companion to the run_scenario / RemoteStartTransaction race fix
@@ -16,19 +15,8 @@ import {
  * parking, closing the race entirely instead of just reporting it.
  */
 function newService(): CLIChargePointService {
-  const raw = new BunSqliteDatabase(":memory:");
-  const db = new BunDb(raw);
-  runMigrations(db);
-  return new CLIChargePointService(
-    {
-      cpId: "test-cp",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-    },
-    db,
-  );
+  const db = BunDb.open(":memory:");
+  return new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 }
 
 /** start -> delay(delaySeconds) -> remoteStartTrigger -> end. Mirrors the

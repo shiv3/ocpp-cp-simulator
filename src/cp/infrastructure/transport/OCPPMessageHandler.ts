@@ -57,6 +57,7 @@ import type {
   UnlockConnectorRequestV16,
   UpdateFirmwareRequestV16,
 } from "../../../ocpp";
+import { OCPPErrorCodeV16 } from "../../../ocpp";
 import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,
@@ -412,7 +413,7 @@ export class OCPPMessageHandler {
     // EVDisconnected / UnlockCommand / DeAuthorized / …).
     const reason = transaction.stopReason;
     const payload: StopTransactionRequestV16 = {
-      transactionId: transaction.id!,
+      transactionId: transaction.id,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
       timestamp: transaction.stopTime!.toISOString(),
@@ -1104,7 +1105,7 @@ export class OCPPMessageHandler {
       this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
       this.sendCallError(
         messageId,
-        "NotImplemented",
+        OCPPErrorCodeV16.NotImplemented,
         "This action is not supported",
         gen,
       );
@@ -1134,7 +1135,12 @@ export class OCPPMessageHandler {
       );
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
-      this.sendCallError(messageId, "InternalError", String(error), gen);
+      this.sendCallError(
+        messageId,
+        OCPPErrorCodeV16.InternalError,
+        String(error),
+        gen,
+      );
     }
   }
 
@@ -1162,7 +1168,7 @@ export class OCPPMessageHandler {
         handler = new StopTransactionResultHandler(request.connectorId || 1);
       } else if (action === OCPPAction.MeterValues) {
         handler = new MeterValuesResultHandler(
-          request.payload as MeterValuesRequestV16,
+          (request.payload as MeterValuesRequestV16).connectorId,
         );
       } else if (action === OCPPAction.Authorize) {
         handler = new AuthorizeResultHandler(

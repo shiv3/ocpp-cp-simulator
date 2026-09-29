@@ -1,8 +1,8 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { ReserveNowNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-const ReserveNowNode: React.FC<NodeProps<ReserveNowNodeData>> = ({
+const ReserveNowNode: React.FC<NodeProps<Node<ReserveNowNodeData>>> = ({
   data,
   selected,
 }) => {

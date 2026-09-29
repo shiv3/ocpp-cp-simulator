@@ -40,7 +40,7 @@ export default function InboundPolicyForm({
   };
 
   const handlePolicyChange = (policy: string) => {
-    const updated = { ...value, policy };
+    const updated: NodeFormData = { ...value, policy };
     // Auto-set errorCode when switching to callerror
     if (policy === "callerror" && !value.errorCode) {
       updated.errorCode = DEFAULT_ERROR_CODE;

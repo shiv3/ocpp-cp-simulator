@@ -1,5 +1,8 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  RemoteStopTransactionRequestV16,
+  RemoteStopTransactionResponseV16,
+} from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 
 export class RemoteStopTransactionHandler implements CallHandler<

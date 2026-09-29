@@ -1,18 +1,17 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { StatusTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedStatusTriggerNodeData extends StatusTriggerNodeData {
+type ExtendedStatusTriggerNodeData = StatusTriggerNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
-}
+};
 
-const StatusTriggerNode: React.FC<NodeProps<ExtendedStatusTriggerNodeData>> = ({
-  data,
-  selected,
-}) => {
+const StatusTriggerNode: React.FC<
+  NodeProps<Node<ExtendedStatusTriggerNodeData>>
+> = ({ data, selected }) => {
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100

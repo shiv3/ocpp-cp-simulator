@@ -5,6 +5,7 @@ import * as path from "path";
 import { CLIChargePointService } from "../service";
 import { setGlobalTraceWriter, TraceWriter } from "../trace/TraceWriter";
 import { LogType, type Logger } from "../../cp/shared/Logger";
+import { testCpInit } from "./testCpInit";
 
 function readRecords(filePath: string): Array<Record<string, unknown>> {
   return fs
@@ -36,13 +37,7 @@ describe("--trace-output: CLIChargePointService wiring (#188)", () => {
     setGlobalTraceWriter(new TraceWriter(filePath));
 
     const svc = new CLIChargePointService(
-      {
-        cpId: "test-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-      },
+      testCpInit({ cpId: "test-cp" }),
       null,
     );
 

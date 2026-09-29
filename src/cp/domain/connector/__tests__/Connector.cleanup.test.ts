@@ -9,7 +9,7 @@ function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
 }
 
-function makeTransaction(id: number | null = 42): Transaction {
+function makeTransaction(id = 42): Transaction {
   return {
     id,
     connectorId: 1,

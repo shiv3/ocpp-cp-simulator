@@ -1,5 +1,8 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  ChangeAvailabilityRequestV16,
+  ChangeAvailabilityResponseV16,
+} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 import {
   OCPPAvailability,

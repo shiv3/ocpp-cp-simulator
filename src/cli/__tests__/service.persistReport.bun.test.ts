@@ -5,6 +5,7 @@ import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * `onPersisted` is called exactly once, and a throwing callback cannot turn a
@@ -46,14 +47,7 @@ function definition(id: string): ScenarioDefinition {
 }
 
 function newService(): CLIChargePointService {
-  return new CLIChargePointService({
-    cpId: "cp-persist-report",
-    wsUrl: "ws://127.0.0.1:65534/never",
-    connectors: 1,
-    vendor: "v",
-    model: "m",
-    basicAuth: null,
-  });
+  return new CLIChargePointService(testCpInit({ cpId: "cp-persist-report" }));
 }
 
 describe("loadScenario's onPersisted contract (#314)", () => {

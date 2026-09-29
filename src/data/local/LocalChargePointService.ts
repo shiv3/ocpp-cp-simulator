@@ -35,6 +35,7 @@ import type {
 import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
+  BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
   BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
@@ -51,6 +52,7 @@ import {
   type EVSettings,
 } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
+import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
@@ -589,6 +591,37 @@ export class LocalChargePointService implements ChargePointService {
       config,
     );
     await this.database?.flush?.();
+  }
+
+  /** Only the daemon runs AutoTrafficRunner (#300): refuse rather than
+   *  report a success that would generate no traffic (#374). */
+  async setAutoTrafficConfig(
+    _id: string,
+    _connectorId: number,
+    _config: AutoTrafficConfig,
+  ): Promise<void> {
+    throw new UnsupportedFeatureError(
+      "browser_auto_traffic_unsupported",
+      BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
+    );
+  }
+
+  async getAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null> {
+    return this.connectorSettingsRepository.loadAutoTrafficConfig(
+      id,
+      connectorId,
+    );
+  }
+
+  async saveAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    return this.setAutoTrafficConfig(id, connectorId, config);
   }
 
   async setAutoResetToAvailable(

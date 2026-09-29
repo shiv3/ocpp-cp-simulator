@@ -12,6 +12,7 @@ import {
   EVSettings,
   getDefaultEVSettings,
 } from "../../cp/domain/connector/EVSettings";
+import { testCpInit } from "./testCpInit";
 
 /**
  * Who owns a connector's EV settings override (#105, #314).
@@ -100,14 +101,7 @@ function parkedScenario(
  * tests probe is in-memory on the connector either way.
  */
 function newService(): CLIChargePointService {
-  return new CLIChargePointService({
-    cpId: "cp-ev-owner",
-    wsUrl: "ws://127.0.0.1:65534/never",
-    connectors: 1,
-    vendor: "v",
-    model: "m",
-    basicAuth: null,
-  });
+  return new CLIChargePointService(testCpInit({ cpId: "cp-ev-owner" }));
 }
 
 /**

@@ -43,7 +43,11 @@
     "src/protocol",
     "src/scenario",
     "src/store/store.ts",
+    "src/test/bunServe.ts",
+    "src/test/deferred.ts",
     "src/trace",
+    "src/types",
+    "src/utils/blueprints",
     "src/utils/scenarioTemplates.ts"
   ]
 }

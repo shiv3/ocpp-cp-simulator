@@ -1,14 +1,13 @@
 import { describe, it, expect } from "bun:test";
-import { Database as BunSqliteDatabase } from "bun:sqlite";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase as BunDb } from "../../cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import {
   AssertionSpec,
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * #179 Phase 2b: a scenario with no external waits, completing on its own
@@ -56,19 +55,8 @@ function completingScenario(
 }
 
 function newService(): CLIChargePointService {
-  const raw = new BunSqliteDatabase(":memory:");
-  const db = new BunDb(raw);
-  runMigrations(db);
-  return new CLIChargePointService(
-    {
-      cpId: "test-cp",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-    },
-    db,
-  );
+  const db = BunDb.open(":memory:");
+  return new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 }
 
 describe("#179 Phase 2b: declarative assertions + verdict + per-run transcript", () => {

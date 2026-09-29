@@ -1,16 +1,16 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { RemoteStartTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedRemoteStartTriggerNodeData extends RemoteStartTriggerNodeData {
+type ExtendedRemoteStartTriggerNodeData = RemoteStartTriggerNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
-}
+};
 
 const RemoteStartTriggerNode: React.FC<
-  NodeProps<ExtendedRemoteStartTriggerNodeData>
+  NodeProps<Node<ExtendedRemoteStartTriggerNodeData>>
 > = ({ data, selected }) => {
   const progress = data.progress;
   const progressPercent = progress

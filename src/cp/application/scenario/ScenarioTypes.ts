@@ -86,22 +86,22 @@ export enum ScenarioNodeType {
 /**
  * Base node data
  */
-export interface BaseNodeData {
+export type BaseNodeData = {
   label: string;
   description?: string;
-}
+};
 
 /**
  * Status Change Node Data
  */
-export interface StatusChangeNodeData extends BaseNodeData {
+export type StatusChangeNodeData = BaseNodeData & {
   status: OCPPStatus;
-}
+};
 
 /**
  * Transaction Node Data
  */
-export interface TransactionNodeData extends BaseNodeData {
+export type TransactionNodeData = BaseNodeData & {
   action: "start" | "stop";
   tagId?: string; // Only for start
   batteryCapacityKwh?: number; // Battery capacity of the EV in kWh (e.g., 40, 60, 100)
@@ -110,7 +110,7 @@ export interface TransactionNodeData extends BaseNodeData {
    *  "EVDisconnected" for TC_005, "PowerLoss"). A reason captured by a
    *  preceding RemoteStopTrigger node still wins. Issue #110. */
   stopReason?: string;
-}
+};
 
 export interface RemoteStartDetails {
   tagId: string;
@@ -129,7 +129,7 @@ export interface StopTransactionOptions {
 /**
  * MeterValue Node Data
  */
-export interface MeterValueNodeData extends BaseNodeData {
+export type MeterValueNodeData = BaseNodeData & {
   value: number;
   sendMessage: boolean; // If true, send MeterValue message
   autoIncrement?: boolean; // If true, automatically increment meter value
@@ -159,37 +159,37 @@ export interface MeterValueNodeData extends BaseNodeData {
   useCurve?: boolean; // If true, use curve-based auto increment
   curvePoints?: CurvePoint[]; // Control points for the curve
   autoCalculateInterval?: boolean; // If true, derive the curve interval from curve point spacing
-}
+};
 
 /**
  * Delay Node Data
  */
-export interface DelayNodeData extends BaseNodeData {
+export type DelayNodeData = BaseNodeData & {
   delaySeconds: number;
-}
+};
 
 /**
  * Notification Node Data
  */
-export interface NotificationNodeData extends BaseNodeData {
+export type NotificationNodeData = BaseNodeData & {
   messageType: string; // e.g., "Authorize", "DataTransfer", etc.
   payload: Record<string, unknown>;
-}
+};
 
 /**
  * Connector Plug Node Data
  */
-export interface ConnectorPlugNodeData extends BaseNodeData {
+export type ConnectorPlugNodeData = BaseNodeData & {
   action: "plugin" | "plugout";
-}
+};
 
 /**
  * Remote Start Trigger Node Data
  * This node waits for a RemoteStartTransaction request from the central system
  */
-export interface RemoteStartTriggerNodeData extends BaseNodeData {
+export type RemoteStartTriggerNodeData = BaseNodeData & {
   timeout?: number; // Optional timeout in seconds (0 = no timeout)
-}
+};
 
 /**
  * Remote Stop Trigger Node Data
@@ -203,10 +203,10 @@ export interface RemoteStartTriggerNodeData extends BaseNodeData {
  * StopTransaction.req. Lets templates model "wait for CSMS to remote-stop,
  * then run the CP's stop-side cleanup" without racing the handler.
  */
-export interface RemoteStopTriggerNodeData extends BaseNodeData {
+export type RemoteStopTriggerNodeData = BaseNodeData & {
   /** Optional timeout in seconds. 0 (default) = wait forever. */
   timeout?: number;
-}
+};
 
 /**
  * CSMS Call Trigger Node Data — generic counterpart of the per-action
@@ -215,7 +215,7 @@ export interface RemoteStopTriggerNodeData extends BaseNodeData {
  * (GetConfiguration still answers from the store, Reset still reboots…);
  * this node only synchronizes the scenario with the arrival. Issue #110.
  */
-export interface CsmsCallTriggerNodeData extends BaseNodeData {
+export type CsmsCallTriggerNodeData = BaseNodeData & {
   /** Action name of the incoming CSMS call to wait for, in the 1.6 or the
    *  2.0.1 spelling — a 2.0.1 station matches `RequestStartTransaction`
    *  against `RemoteStartTransaction` too (#349). */
@@ -227,43 +227,43 @@ export interface CsmsCallTriggerNodeData extends BaseNodeData {
    *  subset (see src/scenario/deepPartialMatch.ts). Non-matching frames
    *  are not consumed — the node keeps waiting. Absent = any payload. */
   payload?: Record<string, unknown>;
-}
+};
 
 /**
  * Status Trigger Node Data
  * This node waits for the connector status to change to a specific state
  */
-export interface StatusTriggerNodeData extends BaseNodeData {
+export type StatusTriggerNodeData = BaseNodeData & {
   targetStatus: OCPPStatus; // Status to wait for
   timeout?: number; // Optional timeout in seconds (0 = no timeout)
-}
+};
 
 /**
  * Reserve Now Node Data
  * This node creates a reservation on the connector
  */
-export interface ReserveNowNodeData extends BaseNodeData {
+export type ReserveNowNodeData = BaseNodeData & {
   expiryMinutes: number; // How long the reservation is valid (in minutes)
   idTag: string; // ID tag that can use the reservation
   parentIdTag?: string; // Optional parent ID tag
   reservationId?: number; // Optional reservation ID (auto-generated if not provided)
-}
+};
 
 /**
  * Cancel Reservation Node Data
  * This node cancels an existing reservation
  */
-export interface CancelReservationNodeData extends BaseNodeData {
+export type CancelReservationNodeData = BaseNodeData & {
   reservationId: number; // ID of the reservation to cancel
-}
+};
 
 /**
  * Reservation Trigger Node Data
  * This node waits for a ReserveNow request from the central system
  */
-export interface ReservationTriggerNodeData extends BaseNodeData {
+export type ReservationTriggerNodeData = BaseNodeData & {
   timeout?: number; // Optional timeout in seconds (0 = no timeout)
-}
+};
 
 /**
  * Start Node Data — configures when the scenario auto-starts.
@@ -277,10 +277,10 @@ export interface ReservationTriggerNodeData extends BaseNodeData {
  * The default is "connect" so existing scenarios (which carry no Start
  * node data beyond `label`) keep the previous auto-start behavior.
  */
-export interface StartNodeData extends BaseNodeData {
+export type StartNodeData = BaseNodeData & {
   triggerOn?: "connect" | "status";
   targetStatus?: OCPPStatus;
-}
+};
 
 /**
  * Status Notification Node Data — sends a full StatusNotification.req with
@@ -290,7 +290,7 @@ export interface StartNodeData extends BaseNodeData {
  * Setting `connectorId` to 0 targets the CP main controller, in which
  * case `status` must be Available / Unavailable / Faulted (§7.7).
  */
-export interface StatusNotificationNodeData extends BaseNodeData {
+export type StatusNotificationNodeData = BaseNodeData & {
   status: OCPPStatus;
   errorCode?: string; // ChargePointErrorCode
   info?: string;
@@ -299,16 +299,16 @@ export interface StatusNotificationNodeData extends BaseNodeData {
   /** Override which connector this targets. Defaults to the scenario's
    *  bound connector (or 0 for chargePoint-targeted scenarios). */
   connectorId?: number;
-}
+};
 
 /**
  * Unlock Outcome Node Data — sets the connector's next UnlockConnector.req
  * response (§5.18 / §7.46). Does not emit any CSMS-bound message itself;
  * it's a pre-arm for the upcoming Central System call.
  */
-export interface UnlockOutcomeNodeData extends BaseNodeData {
+export type UnlockOutcomeNodeData = BaseNodeData & {
   outcome: "Unlocked" | "UnlockFailed" | "NotSupported";
-}
+};
 
 /**
  * Response Override Node Data — arms a one-shot canned `{ status }`
@@ -319,13 +319,13 @@ export interface UnlockOutcomeNodeData extends BaseNodeData {
  * once per action, so they're intended for single-connector certification
  * scenarios rather than multi-connector charge points.
  */
-export interface ResponseOverrideNodeData extends BaseNodeData {
+export type ResponseOverrideNodeData = BaseNodeData & {
   /** Action whose next incoming call gets the canned response, in the 1.6
    *  or the 2.0.1 spelling (#349). */
   action: string;
   /** Status string returned as `{ status }` for that call. */
   status: string;
-}
+};
 
 /**
  * Inbound Policy Node Data — sets a persistent per-action policy for
@@ -337,7 +337,7 @@ export interface ResponseOverrideNodeData extends BaseNodeData {
  * - "callerror": reply with CALLERROR(errorCode, errorDescription).
  * - "ignore": send no response (caller's timeout fires).
  */
-export interface InboundPolicyNodeData extends BaseNodeData {
+export type InboundPolicyNodeData = BaseNodeData & {
   /** Action to arm a policy for, in the 1.6 or the 2.0.1 spelling (#349). */
   action: string;
   /** Policy mode: "answer" to clear, "callerror" to reject, "ignore" to silence. */
@@ -346,7 +346,7 @@ export interface InboundPolicyNodeData extends BaseNodeData {
   errorCode?: string;
   /** Optional error description for policy === "callerror". */
   errorDescription?: string;
-}
+};
 
 /**
  * Certificate Quirks Node Data — sets or clears ChargePoint domain-specific
@@ -361,7 +361,7 @@ export interface InboundPolicyNodeData extends BaseNodeData {
  * fields override preset values. Quirks are tracked and cleared when the
  * scenario completes or stops (same lifecycle as inboundPolicy).
  */
-export interface CertQuirksNodeData extends BaseNodeData {
+export type CertQuirksNodeData = BaseNodeData & {
   /** Mode: "set" to apply quirks, "clear" to remove them. */
   mode: "set" | "clear";
   /** Optional preset name; only meaningful when mode === "set". */
@@ -374,27 +374,27 @@ export interface CertQuirksNodeData extends BaseNodeData {
   requiredCertificateSignatureAlgorithms?: string[];
   /** Hidden configuration keys (only for mode="set" and optional). */
   hiddenConfigurationKeys?: string[];
-}
+};
 
 /**
  * Config Set Node Data — applies a ChangeConfiguration locally (without
  * round-tripping through CSMS). Useful for tightening
  * MeterValueSampleInterval / changing MeterValuesSampledData mid-scenario.
  */
-export interface ConfigSetNodeData extends BaseNodeData {
+export type ConfigSetNodeData = BaseNodeData & {
   key: string;
   value: string; // string form, parsed by ConfigurationStore per the key's type
-}
+};
 
 /**
  * Data Transfer Node Data — issues a CP-initiated DataTransfer.req
  * (§4.3). Vendor / message id / payload are all user-controlled.
  */
-export interface DataTransferNodeData extends BaseNodeData {
+export type DataTransferNodeData = BaseNodeData & {
   vendorId: string;
   messageId?: string;
   data?: string;
-}
+};
 
 /**
  * Connection Trigger Node Data — waits for the charge point's WebSocket to
@@ -404,11 +404,11 @@ export interface DataTransferNodeData extends BaseNodeData {
  * disconnected span is its purpose (a "connected" wait spanning a reconnect
  * is the canonical use). Issue #240.
  */
-export interface ConnectionTriggerNodeData extends BaseNodeData {
+export type ConnectionTriggerNodeData = BaseNodeData & {
   event: "connected" | "disconnected";
   /** Optional timeout in seconds. 0 (default) = wait forever. */
   timeout?: number;
-}
+};
 
 /**
  * Union type for all node data

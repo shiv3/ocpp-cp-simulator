@@ -1,20 +1,11 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type JSX } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultEVSettings } from "../../cp/domain/connector/EVSettings";
 import { useSocMeterSync } from "./useSocMeterSync";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+import { deferred } from "../../test/deferred";
 
 interface HarnessProps {
   service: {

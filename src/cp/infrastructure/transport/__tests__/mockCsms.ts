@@ -1,6 +1,7 @@
 // Test-only mock CSMS WebSocket server backed by Bun.serve.
 // Imported by *.bun.test.ts files (runs under `bun test`, not vitest).
 import type { ServerWebSocket } from "bun";
+import { tcpPort } from "../../../../test/bunServe";
 
 export type OcppFrame = unknown[];
 
@@ -103,10 +104,7 @@ export function startMockCsms(): MockCsms {
       },
     },
   });
-  const port = server.port;
-  if (port === undefined) {
-    throw new Error("Mock CSMS server did not allocate a port");
-  }
+  const port = tcpPort(server);
 
   function waitForFrame(
     pred: (f: OcppFrame) => boolean,

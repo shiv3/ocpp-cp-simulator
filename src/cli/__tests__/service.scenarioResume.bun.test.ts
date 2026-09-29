@@ -1,12 +1,11 @@
 import { describe, it, expect } from "bun:test";
-import { Database as BunSqliteDatabase } from "bun:sqlite";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase as BunDb } from "../../cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * Reproduces the daemon-restart resume failure mode the E2E run exposed:
@@ -77,20 +76,9 @@ function buildScenarioInstance(
 
 describe("runScenario resume across daemon restart", () => {
   it("honors a persisted position even when the new scenario instance id differs from the saved key", async () => {
-    const raw = new BunSqliteDatabase(":memory:");
-    const db = new BunDb(raw);
-    runMigrations(db);
+    const db = BunDb.open(":memory:");
 
-    const svc = new CLIChargePointService(
-      {
-        cpId: "test-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-      },
-      db,
-    );
+    const svc = new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 
     const boot1Def = buildScenarioInstance("t", "test-cp", 1, "boot1");
     const boot1Id = svc.loadScenario(1, boot1Def);
@@ -145,20 +133,9 @@ describe("runScenario resume across daemon restart", () => {
   });
 
   it("falls back to a fresh run when the persisted node ids don't exist in the new scenario", async () => {
-    const raw = new BunSqliteDatabase(":memory:");
-    const db = new BunDb(raw);
-    runMigrations(db);
+    const db = BunDb.open(":memory:");
 
-    const svc = new CLIChargePointService(
-      {
-        cpId: "test-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-      },
-      db,
-    );
+    const svc = new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
     const def = buildScenarioInstance("t", "test-cp", 1, "current");
     const id = svc.loadScenario(1, def);
 
@@ -288,21 +265,8 @@ describe("a manually stopped run leaves nothing to resume from (#314)", () => {
   }
 
   it("clears and persists the position when stop_scenario ends the run", async () => {
-    // `BunDb.open` rather than the raw handle the tests above use: it runs the
-    // migrations itself, and its typed constructor keeps this file's error
-    // count where it was.
     const db = BunDb.open(":memory:");
-    const svc = new CLIChargePointService(
-      {
-        cpId: "stop-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-        basicAuth: null,
-      },
-      db,
-    );
+    const svc = new CLIChargePointService(testCpInit({ cpId: "stop-cp" }), db);
 
     const id = svc.loadScenario(1, buildParkedInstance(1));
     svc.runScenario(1, id);
@@ -330,14 +294,7 @@ describe("a manually stopped run leaves nothing to resume from (#314)", () => {
     // nothing to resume from, so the scenario replays from the start rather
     // than picking up where the operator stopped it.
     const restarted = new CLIChargePointService(
-      {
-        cpId: "stop-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-        basicAuth: null,
-      },
+      testCpInit({ cpId: "stop-cp" }),
       db,
     );
     restarted.restoreConnectorRuntimeFromDatabase();
@@ -393,14 +350,7 @@ describe("a replacement run does not inherit the old graph's remains (#314)", ()
     // the replacement starts from a clean slate.
     const db = BunDb.open(":memory:");
     const svc = new CLIChargePointService(
-      {
-        cpId: "replace-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-        basicAuth: null,
-      },
+      testCpInit({ cpId: "replace-cp" }),
       db,
     );
 
@@ -458,17 +408,7 @@ describe("a replacement run does not inherit the old graph's remains (#314)", ()
     // and skipping that on the replaced path left default-EV-settings
     // propagation blocked for the life of the connector.
     const db = BunDb.open(":memory:");
-    const svc = new CLIChargePointService(
-      {
-        cpId: "evs-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-        basicAuth: null,
-      },
-      db,
-    );
+    const svc = new CLIChargePointService(testCpInit({ cpId: "evs-cp" }), db);
     try {
       const withEv = {
         ...buildParkedInstance(1),
@@ -516,14 +456,7 @@ describe("a replacement run does not inherit the old graph's remains (#314)", ()
     // asked for. Ownership transferring is not permission to clean up.
     const db = BunDb.open(":memory:");
     const svc = new CLIChargePointService(
-      {
-        cpId: "evs-keep-cp",
-        wsUrl: "ws://127.0.0.1:65534/never",
-        connectors: 1,
-        vendor: "v",
-        model: "m",
-        basicAuth: null,
-      },
+      testCpInit({ cpId: "evs-keep-cp" }),
       db,
     );
     try {

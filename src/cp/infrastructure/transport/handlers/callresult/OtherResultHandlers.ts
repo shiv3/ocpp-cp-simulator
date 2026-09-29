@@ -1,5 +1,10 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  DataTransferResponseV16,
+  HeartbeatResponseV16,
+  MeterValuesResponseV16,
+  StatusNotificationResponseV16,
+} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
 export class HeartbeatResultHandler implements CallResultHandler<HeartbeatResponseV16> {
@@ -12,13 +17,12 @@ export class HeartbeatResultHandler implements CallResultHandler<HeartbeatRespon
 }
 
 export class MeterValuesResultHandler implements CallResultHandler<MeterValuesResponseV16> {
-  constructor(private requestPayload?: MeterValuesRequestV16) {}
+  /** `connectorId`: the connector the MeterValues.req was sent for. */
+  constructor(private readonly connectorId?: number) {}
 
   handle(payload: MeterValuesResponseV16, context: HandlerContext): void {
-    if (this.requestPayload) {
-      const connector = context.chargePoint.getConnector(
-        this.requestPayload.connectorId,
-      );
+    if (this.connectorId !== undefined) {
+      const connector = context.chargePoint.getConnector(this.connectorId);
       if (connector && connector.transaction) {
         connector.transaction.meterSent = true;
       }

@@ -4,6 +4,7 @@ import {
   StartTransactionResultHandler,
   StopTransactionResultHandler,
 } from "../TransactionResultHandlers";
+import { MeterValuesResultHandler } from "../OtherResultHandlers";
 import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
 import { OCPPStatus } from "../../../../../domain/types/OcppTypes";
 import type { BootNotification } from "../../../../../domain/types/OcppTypes";
@@ -36,11 +37,11 @@ import type { HandlerContext } from "../../MessageHandlerRegistry";
 
 const bootNotification: BootNotification = DefaultBootNotification;
 
-function buildChargePoint(): ChargePoint {
+function buildChargePoint(connectorCount = 1): ChargePoint {
   const cp = new ChargePoint(
     "test-cp-175",
     bootNotification,
-    1,
+    connectorCount,
     "ws://localhost:8080",
     null,
     null,
@@ -406,5 +407,23 @@ describe("AuthorizeResultHandler (#181)", () => {
     );
 
     expect(events).toEqual([]);
+  });
+});
+
+describe("MeterValuesResultHandler (#374)", () => {
+  // #374 narrowed the handler from the whole MeterValues.req to the connector
+  // id it reads. Two charge sessions, so the conf must reach the right one.
+  it("marks the transaction of the connector the MeterValues.req was sent for", () => {
+    const cp = buildChargePoint(2);
+    cp.startTransaction("METER-TAG-1", 1);
+    cp.startTransaction("METER-TAG-2", 2);
+    const target = cp.getConnector(1)!.transaction!;
+    const other = cp.getConnector(2)!.transaction!;
+    expect([target.meterSent, other.meterSent]).toEqual([false, false]);
+
+    new MeterValuesResultHandler(1).handle({}, buildContext(cp));
+
+    expect(target.meterSent).toBe(true);
+    expect(other.meterSent).toBe(false);
   });
 });

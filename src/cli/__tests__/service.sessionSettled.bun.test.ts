@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { CLIChargePointService } from "../service";
+import { testCpInit } from "./testCpInit";
 
 /**
  * The settled hook never runs inside the teardown that announced it (#314).
@@ -18,14 +19,14 @@ import { CLIChargePointService } from "../service";
  */
 describe("CLIChargePointService.onSessionSettled (#314)", () => {
   function service(): CLIChargePointService {
-    return new CLIChargePointService({
-      cpId: "cp-settled",
-      wsUrl: "ws://127.0.0.1:1/never-connected",
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    return new CLIChargePointService(
+      testCpInit({
+        cpId: "cp-settled",
+        wsUrl: "ws://127.0.0.1:1/never-connected",
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
   }
 
   it("announces on a later microtask, not inside the caller's stack", async () => {

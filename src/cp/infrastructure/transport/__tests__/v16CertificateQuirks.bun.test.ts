@@ -9,6 +9,7 @@ import type {
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
+import { canBindBunServe } from "../../../../test/bunServe";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
@@ -24,21 +25,6 @@ const RSA_PKCS1_ALG = {
   publicExponent: new Uint8Array([1, 0, 1]),
   hash: "SHA-256",
 } as const;
-
-function canBindBunServe(): boolean {
-  try {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Response("ok");
-      },
-    });
-    void server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function acceptBootAndDrainStartup(
   csms: ReturnType<typeof startMockCsms>,
@@ -68,7 +54,7 @@ async function acceptBootAndDrainStartup(
 }
 
 async function certificateWithAlgorithm(
-  algorithm: typeof EC_ALG | typeof RSA_PKCS1_ALG | typeof RSA_PSS_ALG,
+  algorithm: typeof EC_ALG | typeof RSA_PKCS1_ALG,
   serial: string,
 ): Promise<string> {
   const keys = await crypto.subtle.generateKey(algorithm, true, [

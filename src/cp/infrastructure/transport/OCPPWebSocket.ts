@@ -112,7 +112,6 @@ export class OCPPWebSocket {
   private _messageHandler: MessageHandler | null = null;
   private _pingInterval: number | null = null;
   private _reconnectAttempts: number = 0;
-  private _maxReconnectAttempts: number = Infinity; // Infinite retries
   private _baseReconnectDelay: number = 1000; // 1 second base delay
   private _maxReconnectDelay: number = 30000; // 30 seconds max delay
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;

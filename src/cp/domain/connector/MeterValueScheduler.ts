@@ -38,7 +38,6 @@ interface MeterValueSchedulerCallbacks {
 export class MeterValueScheduler {
   private timer: NodeJS.Timeout | null = null;
   private startTimestamp: number | null = null;
-  private strategy: MeterValueStrategy | null = null;
 
   /**
    * Sub-watt-hour energy delivered but not yet representable in the register,
@@ -103,7 +102,6 @@ export class MeterValueScheduler {
 
   start(strategy: MeterValueStrategy): void {
     this.stop();
-    this.strategy = strategy;
     this.carryWh = 0;
     // Captured before the first tick: what the curve's first point has to be
     // shifted by to land on the register this session starts from (#301).
@@ -245,7 +243,6 @@ export class MeterValueScheduler {
       this.timer = null;
     }
     this.startTimestamp = null;
-    this.strategy = null;
     this.carryWh = 0;
     this.curveOffsetWh = 0;
   }

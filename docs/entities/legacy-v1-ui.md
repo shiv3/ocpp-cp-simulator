@@ -4,9 +4,10 @@ type: entity
 summary: The original single-page web UI, kept in maintenance mode at the `/v1` route; supports URL-hash presets and an experimental multi-charger mode.
 sources:
   - public/ (v1 bundle)
+  - src/v1/
 related:
   - web-console.md
-updated: 2026-09-03
+updated: 2026-09-29
 ---
 
 # Legacy v1 UI
@@ -14,6 +15,11 @@ updated: 2026-09-03
 The original single-page web UI. Available at the `/v1` path of the
 [web console](web-console.md) origin (maintenance only — new features land in
 the classic and `/v3` consoles).
+
+The code lives in `src/v1/` and is mounted by `src/App.tsx` on `/v1/*`; it
+has no entry point of its own. Maintenance mode does not exempt it from the
+type-check: it is part of the web app project and must stay type-clean (#374,
+[Testing strategy](../analyses/testing-strategy.md#type-checking)).
 
 ## Web Version
 

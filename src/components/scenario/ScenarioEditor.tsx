@@ -17,7 +17,6 @@ import {
   useNodesState,
   useEdgesState,
   Connection,
-  Node,
   Edge,
   NodeProps,
   NodeTypes,
@@ -39,6 +38,7 @@ import {
   ScenarioExecutionMode,
   ScenarioExecutionContext,
   ScenarioExecutionState,
+  ScenarioNode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
@@ -290,7 +290,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   };
   const [executionContext, setExecutionContext] =
     useState<ScenarioExecutionContext | null>(null);
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [selectedNode, setSelectedNode] = useState<ScenarioNode | null>(null);
   const [formData, setFormData] = useState<NodeFormData>({});
   // Connector status / meter / transactionId / CP status used to drive the
   // now-removed toolbar status strip. We still take the setters from useState
@@ -329,14 +329,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Captured from `<ReactFlow onInit>` so handleAutoLayout can call
   // fitView() to re-frame the graph immediately after re-positioning.
-  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const rfInstanceRef = useRef<ReactFlowInstance<ScenarioNode, Edge> | null>(
+    null,
+  );
 
   // ── Undo / Redo history ───────────────────────────────────────────────
   // History is structural — we only push a new past entry when the graph
   // shape or node data changes. Pure position drags update the latest
   // snapshot in place so a subsequent undo still restores the right node
   // positions, but they don't pollute the stack.
-  type HistorySnapshot = { nodes: Node[]; edges: Edge[] };
+  type HistorySnapshot = { nodes: ScenarioNode[]; edges: Edge[] };
   const historyRef = useRef<{
     past: HistorySnapshot[];
     future: HistorySnapshot[];
@@ -365,19 +367,22 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [],
   );
 
-  const structuralKey = useCallback((ns: Node[], es: Edge[]): string => {
-    return JSON.stringify({
-      n: ns.map((n) => ({ id: n.id, type: n.type, data: n.data })),
-      e: es.map((e) => ({
-        id: e.id,
-        s: e.source,
-        t: e.target,
-        sh: e.sourceHandle ?? null,
-        th: e.targetHandle ?? null,
-        l: e.label ?? null,
-      })),
-    });
-  }, []);
+  const structuralKey = useCallback(
+    (ns: ScenarioNode[], es: Edge[]): string => {
+      return JSON.stringify({
+        n: ns.map((n) => ({ id: n.id, type: n.type, data: n.data })),
+        e: es.map((e) => ({
+          id: e.id,
+          s: e.source,
+          t: e.target,
+          sh: e.sourceHandle ?? null,
+          th: e.targetHandle ?? null,
+          l: e.label ?? null,
+        })),
+      });
+    },
+    [],
+  );
 
   const saveEditorScenarioLatest = useCallback(
     (scenarioToSave: ScenarioDefinition): Promise<void> => {
@@ -774,7 +779,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // Auto-save to localStorage when nodes, edges, or metadata change
   useEffect(() => {
     // Auto-detect trigger from nodes (if StatusTriggerNode exists)
-    let autoTrigger: ScenarioDefinition["trigger"] = null;
+    let autoTrigger: ScenarioDefinition["trigger"];
     const statusTriggerNode = nodes.find(
       (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
     );
@@ -1065,7 +1070,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   // Handle node/edge deletion
   const onNodesDelete = useCallback(
-    (deleted: Node[]) => {
+    (deleted: ScenarioNode[]) => {
       // Close config panel if the deleted node is currently selected
       deleted.forEach((node) => {
         if (selectedNode?.id === node.id) {
@@ -1419,7 +1424,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   // Start/End are intentionally read-only from the config panel; Start's
   // trigger summary is shown inline on the node face.
   const handleNodeDoubleClick = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
+    (_event: React.MouseEvent, node: ScenarioNode) => {
       if (!isScenarioNodeType(node.type)) {
         return;
       }
@@ -2434,7 +2439,7 @@ const NodePaletteItem: React.FC<NodePaletteItemProps> = ({
 function createNodeByType(
   type: string,
   position: { x: number; y: number },
-): Node {
+): ScenarioNode {
   const id = `${type}-${Date.now()}`;
 
   switch (type) {

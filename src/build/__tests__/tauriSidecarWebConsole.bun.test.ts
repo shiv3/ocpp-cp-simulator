@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tcpPort } from "../../test/bunServe";
 
 // Regression guard for issue #319 — "the bundled daemon exits(1) on spawn".
 //
@@ -102,7 +103,7 @@ function buildArgs(opts: {
 
 async function freePort(): Promise<number> {
   const server = Bun.serve({ port: 0, fetch: () => new Response("") });
-  const port = server.port;
+  const port = tcpPort(server);
   await server.stop(true);
   return port;
 }

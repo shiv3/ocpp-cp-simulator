@@ -1,11 +1,11 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import {
   BaseNodeData,
   StartNodeData,
 } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface StartEndNodeProps extends NodeProps<BaseNodeData> {
+interface StartEndNodeProps extends NodeProps<Node<BaseNodeData>> {
   nodeType: "start" | "end";
 }
 

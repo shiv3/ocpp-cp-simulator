@@ -56,8 +56,8 @@ const ChargePoint: React.FC<ChargePointProps> = ({
   const [panelWidthVw, setPanelWidthVw] = useState(PANEL_DEFAULT_WIDTH);
   const [isPanelFullscreen, setIsPanelFullscreen] = useState(false);
   const [initialPanelTab, setInitialPanelTab] = useState<
-    "details" | "scenario" | "stateTransition"
-  >("details");
+    "scenario" | "stateTransition"
+  >("scenario");
   // Bumped each time we want to force the panel back onto `initialPanelTab`
   // even if it's already open on a different tab.
   const [tabResetNonce, setTabResetNonce] = useState(0);
@@ -110,7 +110,7 @@ const ChargePoint: React.FC<ChargePointProps> = ({
     setSelectedConnector((current) =>
       current === connectorId ? null : connectorId,
     );
-    setInitialPanelTab("details");
+    setInitialPanelTab("scenario");
     setTabResetNonce((n) => n + 1);
     setIsPanelCollapsed(false);
   }, []);

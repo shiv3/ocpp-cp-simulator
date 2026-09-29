@@ -24,7 +24,10 @@ import type {
   SampledValue,
 } from "../../../domain/connector/MeterValueBuilder";
 import { buildSampledValues } from "../../../domain/connector/MeterValueBuilder";
-import type { Transaction } from "../../../domain/connector/Transaction";
+import type {
+  Transaction,
+  TransactionUpdateOptions,
+} from "../../../domain/connector/Transaction";
 import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
 import type {
   BootNotification,
@@ -810,6 +813,18 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     }
   }
 
+  public sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    // Every SOAP dialect is OCPP 1.x: there is no TransactionEvent, so refuse
+    // it the way the 1.6 WebSocket handler does rather than throw (#374).
+    this._logger.warn(
+      `[${this._dialect.version}] transaction_event (${options.triggerReason}) on connector ${connectorId} ignored: TransactionEvent is an OCPP 2.x message`,
+      LogType.TRANSACTION,
+    );
+  }
+
   public sendMeterValue(
     transactionId: number | undefined,
     connectorId: number,
@@ -845,7 +860,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       return;
     }
     this.enqueueRequest("MeterValues", payload, (env) => {
-      new MeterValuesResultHandler(payload).handle(
+      new MeterValuesResultHandler(connectorId).handle(
         env.payload as MeterValuesResponseV16,
         this.handlerContext(),
       );

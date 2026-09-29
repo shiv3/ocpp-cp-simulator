@@ -69,6 +69,7 @@ import {
   OcppMessageResponsePayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
+import { OCPPErrorCodeV16 } from "../../ocpp";
 import { ChargePoint } from "./ChargePoint";
 import type { Connector } from "./Connector";
 import { Transaction } from "./Transaction";
@@ -416,7 +417,7 @@ export class OCPPMessageHandler {
         this._logger.error(`Unsupported action: ${action}`);
         this.sendCallError(
           messageId,
-          "NotImplemented",
+          OCPPErrorCodeV16.NotImplemented,
           "This action is not supported",
         );
         return;

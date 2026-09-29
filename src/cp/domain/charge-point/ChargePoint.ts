@@ -55,7 +55,11 @@ import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { ChargingProfileStore } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
-import { IdTagPool, type IdTagDistribution } from "../auth/IdTagPool";
+import {
+  DEFAULT_ID_TAG,
+  IdTagPool,
+  type IdTagDistribution,
+} from "../auth/IdTagPool";
 import {
   SupervisionUrlPool,
   type UrlDistribution,
@@ -643,6 +647,16 @@ export class ChargePoint {
    */
   nextIdTag(connectorId = 0): string | null {
     return this._idTagPool?.next(connectorId) ?? null;
+  }
+
+  /**
+   * The idTag a control-plane call presents (#299): an explicit tag always
+   * wins, the pool only fills a gap, and a charge point without one keeps the
+   * historical literal. OCPP messages always carry a tag, so callers resolve
+   * before building one.
+   */
+  resolveIdTag(tagId: string | undefined, connectorId?: number): string {
+    return tagId ?? this.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
   }
 
   /**
@@ -1716,7 +1730,7 @@ export class ChargePoint {
 
     this._events.emit("transactionStopped", {
       connectorId: connector.id,
-      transactionId: transaction.id ?? 0,
+      transactionId: transaction.id,
     });
 
     // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)

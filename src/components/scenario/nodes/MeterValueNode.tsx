@@ -1,14 +1,14 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { MeterValueNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedMeterValueNodeData extends MeterValueNodeData {
+type ExtendedMeterValueNodeData = MeterValueNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
   currentValue?: number;
-}
+};
 
 function formatMeterReading(valueWh: number): string {
   if (valueWh >= 1000) {
@@ -17,7 +17,7 @@ function formatMeterReading(valueWh: number): string {
   return `${Math.round(valueWh)} Wh`;
 }
 
-const MeterValueNode: React.FC<NodeProps<ExtendedMeterValueNodeData>> = ({
+const MeterValueNode: React.FC<NodeProps<Node<ExtendedMeterValueNodeData>>> = ({
   data,
   selected,
 }) => {

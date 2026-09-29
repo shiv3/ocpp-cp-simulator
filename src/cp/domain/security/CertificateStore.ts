@@ -15,10 +15,6 @@ export interface CertificateStoreJson {
 }
 
 export class CertificateStore {
-  // Holds the CSR's generated private key so it can be paired with the signed
-  // certificate; written at CSR time and cleared on reset, not read back yet.
-  // eslint-disable-next-line no-unused-private-class-members
-  #keyPair: CryptoKeyPair | undefined;
   #pendingCsrPem: string | undefined;
   #signedChains: string[][] = [];
   #rootCerts: InstalledRootCertificate[] = [];
@@ -30,10 +26,6 @@ export class CertificateStore {
   ): Promise<string> {
     const generated = await generateCsr(serial, cpoName, options);
 
-    this.#keyPair = {
-      privateKey: generated.privateKey,
-      publicKey: generated.publicKey,
-    };
     this.#pendingCsrPem = generated.pem;
 
     return generated.pem;
@@ -68,7 +60,6 @@ export class CertificateStore {
   }
 
   clearAll(): void {
-    this.#keyPair = undefined;
     this.#pendingCsrPem = undefined;
     this.#signedChains = [];
     this.#rootCerts = [];

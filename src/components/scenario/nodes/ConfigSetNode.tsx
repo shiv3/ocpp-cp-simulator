@@ -1,5 +1,5 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { ConfigSetNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
 /**
@@ -7,7 +7,7 @@ import { ConfigSetNodeData } from "../../../cp/application/scenario/ScenarioType
  * Mirrors ChangeConfiguration.req semantics (§5.3) — useful for tightening
  * MeterValueSampleInterval / changing MeterValuesSampledData mid-scenario.
  */
-const ConfigSetNode: React.FC<NodeProps<ConfigSetNodeData>> = ({
+const ConfigSetNode: React.FC<NodeProps<Node<ConfigSetNodeData>>> = ({
   data,
   selected,
 }) => {

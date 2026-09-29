@@ -1,12 +1,11 @@
 import { describe, it, expect } from "bun:test";
-import { Database as BunSqliteDatabase } from "bun:sqlite";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase as BunDb } from "../../cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * #179 Phase 1: a scenario parked on a CSMS-call trigger must report
@@ -54,19 +53,8 @@ function parkingScenario(connectorId: number): ScenarioDefinition {
 }
 
 function newService(): CLIChargePointService {
-  const raw = new BunSqliteDatabase(":memory:");
-  const db = new BunDb(raw);
-  runMigrations(db);
-  return new CLIChargePointService(
-    {
-      cpId: "test-cp",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-    },
-    db,
-  );
+  const db = BunDb.open(":memory:");
+  return new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 }
 
 describe("#179 Phase 1: scenario expectation + runId", () => {

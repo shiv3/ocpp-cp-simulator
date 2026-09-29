@@ -173,7 +173,7 @@ describe("rpc counting sits at the request boundary (#298)", () => {
       const { createRuntimeDeps } = await import("../socketServer");
       const { EventBus } = await import("../eventBus");
       setGlobalMetricsRecorder(recorder);
-      const deps = createRuntimeDeps({ registry, eventBus: new EventBus() });
+      const deps = createRuntimeDeps({ registry, bus: new EventBus() });
 
       // Unknown method: never reaches dispatch at all.
       await expect(

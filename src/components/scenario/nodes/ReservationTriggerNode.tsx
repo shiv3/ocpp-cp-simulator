@@ -1,16 +1,16 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { ReservationTriggerNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-interface ExtendedReservationTriggerNodeData extends ReservationTriggerNodeData {
+type ExtendedReservationTriggerNodeData = ReservationTriggerNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
-}
+};
 
 const ReservationTriggerNode: React.FC<
-  NodeProps<ExtendedReservationTriggerNodeData>
+  NodeProps<Node<ExtendedReservationTriggerNodeData>>
 > = ({ data, selected }) => {
   const progress = data.progress;
   const progressPercent = progress

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
+import { cancelIfCancellable } from "../cancellable";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../../domain/connector/Connector";
@@ -12,7 +13,10 @@ import type { Connector } from "../../../domain/connector/Connector";
  * CSMS-initiated call, rather than hanging the scenario.
  */
 
-function createMockChargePoint(overrides?: Partial<ChargePoint>): ChargePoint {
+/** Mocks stand in for a member only partly, so values are not type-checked. */
+type ChargePointOverrides = { [K in keyof ChargePoint]?: unknown };
+
+function createMockChargePoint(overrides?: ChargePointOverrides): ChargePoint {
   const mocks: ChargePoint = {
     logger: {
       debug: vi.fn(),
@@ -127,9 +131,7 @@ describe("ScenarioRuntime.soap-capability", () => {
       expect(waitPromise).toBeInstanceOf(Promise);
 
       // Cancel the wait to clean up
-      if (waitPromise.cancel) {
-        waitPromise.cancel();
-      }
+      cancelIfCancellable(waitPromise);
     });
 
     it("succeeds for WebSocket versions (always can receive)", async () => {
@@ -150,9 +152,7 @@ describe("ScenarioRuntime.soap-capability", () => {
       expect(chargePoint.registerScenarioHandler).toHaveBeenCalledWith(1);
 
       // Cancel the wait
-      if (waitPromise.cancel) {
-        waitPromise.cancel();
-      }
+      cancelIfCancellable(waitPromise);
     });
   });
 
@@ -198,9 +198,7 @@ describe("ScenarioRuntime.soap-capability", () => {
       expect(chargePoint.registerScenarioStopHandler).toHaveBeenCalledWith(1);
 
       // Cancel the wait
-      if (waitPromise.cancel) {
-        waitPromise.cancel();
-      }
+      cancelIfCancellable(waitPromise);
     });
   });
 

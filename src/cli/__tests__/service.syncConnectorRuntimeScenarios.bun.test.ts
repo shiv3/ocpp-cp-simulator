@@ -5,6 +5,7 @@ import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * Unit coverage for CLIChargePointService.syncConnectorRuntimeScenarios — the
@@ -12,17 +13,7 @@ import {
  */
 function newService(): CLIChargePointService {
   const db = BunSqliteDatabase.open(":memory:");
-  return new CLIChargePointService(
-    {
-      cpId: "cp-209-unit",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
-    db,
-  );
+  return new CLIChargePointService(testCpInit({ cpId: "cp-209-unit" }), db);
 }
 
 function scenario(

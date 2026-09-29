@@ -6,6 +6,7 @@ import * as x509 from "@peculiar/x509";
 import type { Logger } from "../../../shared/Logger";
 import { OCPPWebSocket } from "../OCPPWebSocket";
 import { openOcppWebSocket } from "../wsUrlWithBasic";
+import { canBindBunServe } from "../../../../test/bunServe";
 
 x509.cryptoProvider.set(globalThis.crypto);
 
@@ -212,21 +213,6 @@ function getAvailablePort(): number {
   return nextPort++;
 }
 
-function canBindBunServe(): boolean {
-  try {
-    const server = Bun.serve({
-      port: getAvailablePort(),
-      fetch() {
-        return new Response("ok");
-      },
-    });
-    void server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function waitForOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
@@ -271,125 +257,128 @@ afterEach(async () => {
   }
 });
 
-describe.skipIf(!canBindBunServe())("OCPP 1.6 TLS security profiles", () => {
-  it("connects profile 2 with CA trust and Basic Auth", async () => {
-    const certs = await createCertificateFixture();
-    const server = startTlsWebSocketServer({
-      cert: certs.serverCert,
-      key: certs.serverKey,
-      port: getAvailablePort(),
+describe.skipIf(!canBindBunServe(getAvailablePort()))(
+  "OCPP 1.6 TLS security profiles",
+  () => {
+    it("connects profile 2 with CA trust and Basic Auth", async () => {
+      const certs = await createCertificateFixture();
+      const server = startTlsWebSocketServer({
+        cert: certs.serverCert,
+        key: certs.serverKey,
+        port: getAvailablePort(),
+      });
+
+      const ws = openOcppWebSocket({
+        baseUrl: server.url,
+        chargePointId: "CP-P2",
+        basicAuth: null,
+        securityProfile: 2,
+        authorizationKey: "001122AABB",
+        tls: { ca: certs.caCert, serverName: "localhost" },
+      });
+
+      try {
+        await waitForOpen(ws);
+        await server.waitForConnection();
+        expect(server.getAuthorization()).toBe(
+          `Basic ${Buffer.from("CP-P2:001122AABB").toString("base64")}`,
+        );
+      } finally {
+        ws.close();
+      }
     });
 
-    const ws = openOcppWebSocket({
-      baseUrl: server.url,
-      chargePointId: "CP-P2",
-      basicAuth: null,
-      securityProfile: 2,
-      authorizationKey: "001122AABB",
-      tls: { ca: certs.caCert, serverName: "localhost" },
-    });
+    it("connects profile 3 with a client certificate and no Basic Auth", async () => {
+      const certs = await createCertificateFixture();
+      const server = startTlsWebSocketServer({
+        cert: certs.serverCert,
+        key: certs.serverKey,
+        clientCa: certs.caCert,
+        port: getAvailablePort(),
+      });
 
-    try {
-      await waitForOpen(ws);
-      await server.waitForConnection();
-      expect(server.getAuthorization()).toBe(
-        `Basic ${Buffer.from("CP-P2:001122AABB").toString("base64")}`,
-      );
-    } finally {
-      ws.close();
-    }
-  });
-
-  it("connects profile 3 with a client certificate and no Basic Auth", async () => {
-    const certs = await createCertificateFixture();
-    const server = startTlsWebSocketServer({
-      cert: certs.serverCert,
-      key: certs.serverKey,
-      clientCa: certs.caCert,
-      port: getAvailablePort(),
-    });
-
-    const ws = openOcppWebSocket({
-      baseUrl: server.url,
-      chargePointId: "CP-P3",
-      basicAuth: { username: "CP-P3", password: "should-not-send" },
-      securityProfile: 3,
-      authorizationKey: "001122AABB",
-      tls: {
-        ca: certs.caCert,
-        cert: certs.clientCert,
-        key: certs.clientKey,
-        serverName: "localhost",
-      },
-    });
-
-    try {
-      await waitForOpen(ws);
-      await server.waitForConnection();
-      expect(server.getAuthorization()).toBeNull();
-    } finally {
-      ws.close();
-    }
-  });
-
-  it("rejects an untrusted server certificate by default", async () => {
-    const certs = await createCertificateFixture();
-    const server = startTlsWebSocketServer({
-      cert: certs.untrustedServerCert,
-      key: certs.untrustedServerKey,
-      port: getAvailablePort(),
-    });
-
-    const errorMessages: string[] = [];
-    const ws = new OCPPWebSocket(
-      server.url,
-      "CP-REJECT",
-      {
-        info() {},
-        warn() {},
-        error(message: string) {
-          errorMessages.push(message);
+      const ws = openOcppWebSocket({
+        baseUrl: server.url,
+        chargePointId: "CP-P3",
+        basicAuth: { username: "CP-P3", password: "should-not-send" },
+        securityProfile: 3,
+        authorizationKey: "001122AABB",
+        tls: {
+          ca: certs.caCert,
+          cert: certs.clientCert,
+          key: certs.clientKey,
+          serverName: "localhost",
         },
-      } as unknown as Logger,
-      null,
-      {},
-      [],
-      "OCPP-1.6J",
-      2,
-      "001122AABB",
-      undefined,
-      { ca: certs.caCert, serverName: "localhost" },
-    );
+      });
 
-    try {
-      const closeEvent = await expectNoUncaughtException(
-        () =>
-          new Promise<CloseEvent>((resolve, reject) => {
-            const timer = setTimeout(() => {
-              reject(new Error("Timed out waiting for TLS rejection"));
-            }, 2_000);
-            ws.connect(null, (event) => {
-              clearTimeout(timer);
-              resolve(event);
-            });
-          }),
+      try {
+        await waitForOpen(ws);
+        await server.waitForConnection();
+        expect(server.getAuthorization()).toBeNull();
+      } finally {
+        ws.close();
+      }
+    });
+
+    it("rejects an untrusted server certificate by default", async () => {
+      const certs = await createCertificateFixture();
+      const server = startTlsWebSocketServer({
+        cert: certs.untrustedServerCert,
+        key: certs.untrustedServerKey,
+        port: getAvailablePort(),
+      });
+
+      const errorMessages: string[] = [];
+      const ws = new OCPPWebSocket(
+        server.url,
+        "CP-REJECT",
+        {
+          info() {},
+          warn() {},
+          error(message: string) {
+            errorMessages.push(message);
+          },
+        } as unknown as Logger,
+        null,
+        {},
+        [],
+        "OCPP-1.6J",
+        2,
+        "001122AABB",
+        undefined,
+        { ca: certs.caCert, serverName: "localhost" },
       );
 
-      expect(closeEvent.wasClean).toBe(false);
-      // #288: this used to assert `WebSocket error type: error`, the same
-      // string every failure produced. The client's own message says which
-      // failure it was, and an untrusted certificate is one an operator can
-      // act on.
-      expect(
-        errorMessages.some((message) => message.includes("TLS handshake")),
-      ).toBe(true);
-      expect(
-        errorMessages.some((message) =>
-          message.includes("WebSocket error type:"),
-        ),
-      ).toBe(false);
-    } finally {
-      ws.disconnect();
-    }
-  });
-});
+      try {
+        const closeEvent = await expectNoUncaughtException(
+          () =>
+            new Promise<CloseEvent>((resolve, reject) => {
+              const timer = setTimeout(() => {
+                reject(new Error("Timed out waiting for TLS rejection"));
+              }, 2_000);
+              ws.connect(null, (event) => {
+                clearTimeout(timer);
+                resolve(event);
+              });
+            }),
+        );
+
+        expect(closeEvent.wasClean).toBe(false);
+        // #288: this used to assert `WebSocket error type: error`, the same
+        // string every failure produced. The client's own message says which
+        // failure it was, and an untrusted certificate is one an operator can
+        // act on.
+        expect(
+          errorMessages.some((message) => message.includes("TLS handshake")),
+        ).toBe(true);
+        expect(
+          errorMessages.some((message) =>
+            message.includes("WebSocket error type:"),
+          ),
+        ).toBe(false);
+      } finally {
+        ws.disconnect();
+      }
+    });
+  },
+);

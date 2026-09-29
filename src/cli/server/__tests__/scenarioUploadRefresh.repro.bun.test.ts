@@ -15,7 +15,7 @@ import { connectTestClient, startTestServer } from "./socketHarness";
 // scenario.definitions.list = the refresh re-fetch), with a file-backed daemon
 // SQLite so we can also simulate a daemon restart. No browser file picker.
 
-const cleanups: Array<() => Promise<void> | void> = [];
+const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });

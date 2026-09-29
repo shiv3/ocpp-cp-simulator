@@ -25,6 +25,7 @@ import {
   listWatchedScenarioFiles,
   rememberWatchedScenarioFile,
 } from "../watchedScenarioFiles";
+import { testCpInit } from "../../__tests__/testCpInit";
 
 /**
  * `--watch` over a `--scenario-template-file` fan-out (#314).
@@ -156,14 +157,15 @@ describe("--watch over a startup scenario file (#314)", () => {
       }),
       log: () => {},
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314",
-      wsUrl: csms.url,
-      connectors: 2,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314",
+        wsUrl: csms.url,
+        connectors: 2,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-startup-"));
@@ -251,14 +253,15 @@ describe("--watch over a startup scenario file (#314)", () => {
       }),
       log: () => {},
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314-target",
-      wsUrl: csms.url,
-      connectors: 2,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-target",
+        wsUrl: csms.url,
+        connectors: 2,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-target-"));
@@ -342,14 +345,15 @@ describe("--watch over a startup scenario file (#314)", () => {
       log: () => {},
       database,
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314db",
-      wsUrl: csms.url,
-      connectors: 2,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314db",
+        wsUrl: csms.url,
+        connectors: 2,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
     const templateFile = join(tmpDir, "template.json");
     writeFileSync(templateFile, template(11));
@@ -460,14 +464,14 @@ describe("--watch over a startup scenario file (#314)", () => {
       log: () => {},
       database,
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314-takeover",
-      wsUrl: csms.url,
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-takeover",
+        wsUrl: csms.url,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const scenarioFile = join(tmpDir, "scenario.json");
@@ -543,14 +547,14 @@ describe("--watch over a startup scenario file (#314)", () => {
       log: () => {},
       database,
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314-order",
-      wsUrl: csms.url,
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-order",
+        wsUrl: csms.url,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const scenarioFile = join(tmpDir, "scenario.json");
@@ -626,14 +630,13 @@ describe("--watch over a startup scenario file (#314)", () => {
       log: () => {},
       database,
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314-order-bad",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-order-bad",
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const abandoned = join(tmpDir, "abandoned.json");
@@ -673,14 +676,14 @@ describe("--watch over a startup scenario file (#314)", () => {
     const registry = new CPRegistry(new EventBus());
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-watch-nowatch-"));
     const database = BunSqliteDatabase.open(join(tmpDir, "state.sqlite"));
-    const svc = new CLIChargePointService({
-      cpId: "cp314-nowatch",
-      wsUrl: csms.url,
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-nowatch",
+        wsUrl: csms.url,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const scenarioFile = join(tmpDir, "scenario.json");
@@ -750,14 +753,13 @@ describe("--watch over a startup scenario file (#314)", () => {
     });
     const events: string[] = [];
     fileReload.setSink((event) => events.push(event.outcome));
-    const svc = new CLIChargePointService({
-      cpId: "cp314-serving",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-serving",
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     // What an RPC does while the bootstrap is still awaiting its connections:
@@ -815,14 +817,13 @@ describe("--watch over a startup scenario file (#314)", () => {
       log: () => {},
       database,
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314-2phase",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314-2phase",
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     // As a `--state-db` restore leaves it: the definition is back under the id
@@ -949,14 +950,13 @@ describe("--watch over a startup scenario file (#314)", () => {
       }),
       log: () => {},
     });
-    const svc = new CLIChargePointService({
-      cpId: "cp314",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp314",
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
     registry.registerExisting(svc);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-reconcile-"));

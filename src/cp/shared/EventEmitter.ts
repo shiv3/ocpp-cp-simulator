@@ -3,13 +3,16 @@
  * Based on EventEmitter2 with additional type safety
  */
 
-import EventEmitter2 from "eventemitter2";
+import EventEmitter2, { type ListenerFn } from "eventemitter2";
 
 export type EventListener<T = unknown> = (data: T) => void;
 
-export interface EventMap {
-  [event: string]: unknown;
-}
+/**
+ * Event name → payload map. `object` rather than an index signature so that
+ * the `interface` event maps (`ChargePointEvents`, …) satisfy it: interfaces
+ * get no implicit index signature.
+ */
+export type EventMap = object;
 
 /**
  * Type-safe wrapper around EventEmitter2
@@ -38,7 +41,7 @@ export class EventEmitter<T extends EventMap> {
    */
   on<K extends keyof T>(event: K, listener: EventListener<T[K]>): () => void;
   on(event: string, listener: EventListener<unknown>): () => void;
-  on(event: string | keyof T, listener: EventListener<unknown>): () => void {
+  on(event: string | keyof T, listener: ListenerFn): () => void {
     this.emitter.on(event as string, listener);
 
     // Return unsubscribe function
@@ -53,7 +56,7 @@ export class EventEmitter<T extends EventMap> {
    */
   once<K extends keyof T>(event: K, listener: EventListener<T[K]>): () => void;
   once(event: string, listener: EventListener<unknown>): () => void;
-  once(event: string | keyof T, listener: EventListener<unknown>): () => void {
+  once(event: string | keyof T, listener: ListenerFn): () => void {
     this.emitter.once(event as string, listener);
 
     // Return unsubscribe function
@@ -78,7 +81,7 @@ export class EventEmitter<T extends EventMap> {
    */
   off<K extends keyof T>(event: K, listener: EventListener<T[K]>): void;
   off(event: string, listener: EventListener<unknown>): void;
-  off(event: string | keyof T, listener: EventListener<unknown>): void {
+  off(event: string | keyof T, listener: ListenerFn): void {
     this.emitter.off(event as string, listener);
   }
 

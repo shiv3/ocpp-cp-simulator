@@ -13,6 +13,15 @@ import {
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
+import { canBindBunServe } from "../../../../test/bunServe";
+
+/** The CSR a SignCertificate.req carries, after checking the payload shape. */
+function csrOf(payload: unknown): x509.Pkcs10CertificateRequest {
+  if (!isValidSignCertificateRequestV16(payload)) {
+    throw new Error(`not a SignCertificate.req: ${JSON.stringify(payload)}`);
+  }
+  return new x509.Pkcs10CertificateRequest(payload.csr);
+}
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
@@ -21,21 +30,6 @@ const EC_ALG = {
   namedCurve: "P-256",
   hash: "SHA-256",
 } as const;
-
-function canBindBunServe(): boolean {
-  try {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Response("ok");
-      },
-    });
-    void server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function replyStatusNotification(
   csms: ReturnType<typeof startMockCsms>,
@@ -159,11 +153,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         const signCertificate = await csms.waitForCall("SignCertificate");
-        const signPayload =
-          signCertificate.payload as SignCertificateRequestV16;
-        expect(isValidSignCertificateRequestV16(signPayload)).toBe(true);
-
-        const csr = new x509.Pkcs10CertificateRequest(signPayload.csr);
+        const csr = csrOf(signCertificate.payload);
         expect(csr.subject).toContain("CN=CP016-SEC-CSR");
         expect(csr.subject).toContain("O=Example CPO");
         expect(await csr.verify()).toBe(true);
@@ -254,11 +244,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         const signCertificate = await csms.waitForCall("SignCertificate");
-        const signPayload =
-          signCertificate.payload as SignCertificateRequestV16;
-        expect(isValidSignCertificateRequestV16(signPayload)).toBe(true);
-
-        const csr = new x509.Pkcs10CertificateRequest(signPayload.csr);
+        const csr = csrOf(signCertificate.payload);
         expect(csr.subject).toContain("CN=CP016-SEC-CSR-RSA");
 
         // Verify public key is RSA
@@ -359,9 +345,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         let signCertificate = await csms.waitForCall("SignCertificate");
-        let csr = new x509.Pkcs10CertificateRequest(
-          signCertificate.payload.csr,
-        );
+        let csr = csrOf(signCertificate.payload);
         expect(csr.publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
         csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });
 
@@ -369,7 +353,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         signCertificate = await csms.waitForCall("SignCertificate");
-        csr = new x509.Pkcs10CertificateRequest(signCertificate.payload.csr);
+        csr = csrOf(signCertificate.payload);
         // Should still be RSA because quirks are sticky
         expect(csr.publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
         csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });

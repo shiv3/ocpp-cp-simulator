@@ -19,7 +19,6 @@ import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/diale
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
-import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
 import {
   splitStopReason,
   type MeterReadingContext,
@@ -960,16 +959,11 @@ export class CLIChargePointService {
 
   startTransaction(
     connectorId: number,
-    tagId?: string,
+    tagId: string,
     options: StartTransactionCommandOptions = {},
   ): void {
-    // An explicit tag always wins; the pool only fills a gap, and a charge
-    // point without one keeps the historical literal so nothing changes for a
-    // caller that never configured a pool.
-    const resolved =
-      tagId ?? this._chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
     this._chargePoint.startTransaction(
-      resolved,
+      tagId,
       connectorId,
       undefined,
       undefined,
@@ -1046,9 +1040,13 @@ export class CLIChargePointService {
     this._chargePoint.stopHeartbeat();
   }
 
-  authorize(tagId?: string): void {
-    const resolved = tagId ?? this._chargePoint.nextIdTag() ?? DEFAULT_ID_TAG;
-    this._chargePoint.authorize(resolved);
+  /** {@link ChargePoint.resolveIdTag}, for the daemon's control-plane facade. */
+  resolveIdTag(tagId: string | undefined, connectorId?: number): string {
+    return this._chargePoint.resolveIdTag(tagId, connectorId);
+  }
+
+  authorize(tagId: string): void {
+    this._chargePoint.authorize(tagId);
   }
 
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer (#348). */
@@ -2892,8 +2890,8 @@ export class CLIChargePointService {
       // When the CSMS confirms a StartTransaction, the connector's
       // transactionId switches from the initial placeholder (0) to the
       // assigned id. Re-emit transaction_started so remote subscribers see the
-      // accepted id. Also emit transaction_stopped when it clears (e.g.
-      // CSMS-driven stop), so remote clients see the change.
+      // accepted id. (transaction_stopped comes from ChargePoint's
+      // transactionStopped, emitted when the transaction ends.)
       //
       // #328: the assigned id is re-emitted WHATEVER it is, zero included.
       // OCPP 1.6 makes `transactionId` schema-valid for any integer, and the
@@ -2906,13 +2904,6 @@ export class CLIChargePointService {
       // sequence for one more value.
       this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", ({ transactionId }) => {
-          if (transactionId == null) {
-            this.emit({
-              event: "transaction_stopped",
-              data: { connectorId, transactionId: 0 },
-            });
-            return;
-          }
           const tagId = connector.transaction?.tagId ?? "";
           this.emit({
             event: "transaction_started",

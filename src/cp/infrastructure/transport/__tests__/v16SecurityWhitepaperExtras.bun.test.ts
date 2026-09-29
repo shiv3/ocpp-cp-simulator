@@ -10,25 +10,11 @@ import type {
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
+import { canBindBunServe } from "../../../../test/bunServe";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
 const EC_ALG = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as const;
-
-function canBindBunServe(): boolean {
-  try {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Response("ok");
-      },
-    });
-    void server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function selfSignedRootCertPem(): Promise<string> {
   const keys = await crypto.subtle.generateKey(EC_ALG, true, [

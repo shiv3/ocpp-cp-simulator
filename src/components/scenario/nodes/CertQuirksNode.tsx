@@ -2,14 +2,7 @@ import React, { memo } from "react";
 import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { CertQuirksNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-// Mapped type (not `extends`) so the result is a fresh object type that
-// satisfies xyflow v12's `Node<Record<string, unknown>>` constraint — a
-// plain interface does not.
-type CertQuirksNodeDataMapped = {
-  [K in keyof CertQuirksNodeData]: CertQuirksNodeData[K];
-};
-
-type CertQuirksFlowNode = Node<CertQuirksNodeDataMapped>;
+type CertQuirksFlowNode = Node<CertQuirksNodeData>;
 
 const CertQuirksNode: React.FC<NodeProps<CertQuirksFlowNode>> = ({
   data,

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -7,7 +7,7 @@ import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatab
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { parseCreateBody } from "../httpServer";
-import { RegistryChargePointService } from "../RegistryChargePointService";
+import { createRuntimeDeps, runRpc } from "../socketServer";
 
 const tempFiles: string[] = [];
 
@@ -203,7 +203,10 @@ describe("the pool survives the control-plane path (#299)", () => {
     // `parseCreateBody` produced the config, `toInitOptions` did not copy it,
     // and the create reported success with nothing wired up.
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = createRuntimeDeps({
+      registry,
+      bus: new EventBus(),
+    }).chargePointService;
     try {
       await service.createChargePoint(
         parseCreateBody({
@@ -222,7 +225,10 @@ describe("the pool survives the control-plane path (#299)", () => {
 
   it("clears the pool when an update omits it", async () => {
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = createRuntimeDeps({
+      registry,
+      bus: new EventBus(),
+    }).chargePointService;
     try {
       await service.createChargePoint(
         parseCreateBody({
@@ -238,6 +244,69 @@ describe("the pool survives the control-plane path (#299)", () => {
     } finally {
       registry.shutdownAll();
     }
+  });
+});
+
+describe("the facade draws a missing tag before OCPP sees it (#299, #374)", () => {
+  // Authorize.req and StartTransaction.req always carry an idTag, so the
+  // control plane's optional `tagId` is resolved by the facade rather than
+  // passed down as undefined.
+  async function tagsPresentedOverRpc(
+    method: "authorize" | "start_transaction",
+    params: Record<string, unknown>,
+  ): Promise<string[]> {
+    const registry = new CPRegistry(new EventBus());
+    try {
+      const svc = registry.create(
+        parseCreateBody({
+          ...BASE,
+          cpId: "CP-TAGS-RPC",
+          idTagPool: { tags: ["A1", "A2"], distribution: "round-robin" },
+        }),
+        { seedDefault: false },
+      );
+      const cp = (
+        svc as unknown as {
+          _chargePoint: {
+            authorize(tag: string): void;
+            startTransaction(tag: string): Promise<unknown>;
+          };
+        }
+      )._chargePoint;
+      const presented = [
+        spyOn(cp, "authorize").mockImplementation(() => {}),
+        spyOn(cp, "startTransaction").mockResolvedValue({ started: true }),
+      ];
+      const deps = createRuntimeDeps({ registry, bus: new EventBus() });
+
+      await runRpc(deps, { cpId: "CP-TAGS-RPC", method, params });
+
+      return presented.flatMap((spy) => spy.mock.calls.map(([tag]) => tag));
+    } finally {
+      registry.shutdownAll();
+    }
+  }
+
+  it("authorize presents the pool's next tag when the call names none", async () => {
+    expect(await tagsPresentedOverRpc("authorize", {})).toEqual(["A1"]);
+  });
+
+  it("start_transaction presents the pool's next tag when the call names none", async () => {
+    expect(
+      await tagsPresentedOverRpc("start_transaction", { connector: 1 }),
+    ).toEqual(["A1"]);
+  });
+
+  it("never overrides an explicit tag", async () => {
+    expect(
+      await tagsPresentedOverRpc("authorize", { tagId: "EXPLICIT" }),
+    ).toEqual(["EXPLICIT"]);
+    expect(
+      await tagsPresentedOverRpc("start_transaction", {
+        connector: 1,
+        tagId: "EXPLICIT",
+      }),
+    ).toEqual(["EXPLICIT"]);
   });
 });
 

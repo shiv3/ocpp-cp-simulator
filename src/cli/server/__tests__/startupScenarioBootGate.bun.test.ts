@@ -5,6 +5,7 @@ import {
 } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 import { CLIChargePointService } from "../../service";
 import { runStartupScenario } from "../startServer";
+import { testCpInit } from "../../__tests__/testCpInit";
 
 /**
  * OCPP CALLs are serialized one-in-flight-at-a-time (§4.1.1) — the next
@@ -70,14 +71,14 @@ function autoAckStatusNotifications(csms: MockCsms): () => void {
 describe("CLI startup-scenario boot-gate guard (issue #174)", () => {
   it("does not send StartTransaction before BootNotification is accepted, and fires promptly once it is", async () => {
     const csms = startMockCsms();
-    const svc = new CLIChargePointService({
-      cpId: "cp174",
-      wsUrl: csms.url,
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp174",
+        wsUrl: csms.url,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
 
     const stderrLines: string[] = [];
     const realWrite = process.stderr.write.bind(process.stderr);

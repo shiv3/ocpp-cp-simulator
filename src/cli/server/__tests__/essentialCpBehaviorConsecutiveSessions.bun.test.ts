@@ -85,15 +85,22 @@ async function until<T>(
 }
 
 /**
- * Answers every CALL the charge point sends, the way a CSMS would. A
- * StopTransaction.req can be held back (`holdStopTransaction`) and answered
- * later with `releaseHeldStopTransactions`.
+ * Answers every CALL the charge point sends, the way a CSMS would. The next
+ * StopTransaction.req can be held back (`holdNextStopTransaction`) and
+ * answered later with `releaseHeldStopTransactions`.
+ *
+ * The hold is a one-shot the responder consumes itself. The test used to
+ * raise a flag and lower it once the request showed up in `csms.received`,
+ * but the responder polls on its own 5 ms timer: when the test's poll saw
+ * the frame first, the flag was already down by the time the responder got
+ * to it, the conf went out promptly, and the race row quietly ran as a
+ * second control row and still passed.
  */
 function autoRespond(csms: MockCsms) {
   let cursor = 0;
   let nextTransactionId = 1001;
   const held: string[] = [];
-  const state = { holdStopTransaction: false };
+  let holdNext = false;
   const timer = setInterval(() => {
     for (; cursor < csms.received.length; cursor++) {
       const frame = csms.received[cursor] as OcppFrame;
@@ -124,8 +131,10 @@ function autoRespond(csms: MockCsms) {
           });
           break;
         case "StopTransaction":
-          if (state.holdStopTransaction) held.push(messageId);
-          else
+          if (holdNext) {
+            holdNext = false;
+            held.push(messageId);
+          } else
             csms.replyCallResult(messageId, {
               idTagInfo: { status: "Accepted" },
             });
@@ -137,8 +146,10 @@ function autoRespond(csms: MockCsms) {
   }, 5);
   stoppers.push(() => clearInterval(timer));
   return {
-    state,
     held,
+    holdNextStopTransaction() {
+      holdNext = true;
+    },
     releaseHeldStopTransactions() {
       while (held.length > 0) {
         csms.replyCallResult(held.shift()!, {
@@ -253,7 +264,9 @@ async function runTwoSessions(opts: {
 
       if (n === 2 && opts.holdFirstStopConf) {
         // Session 1's StopTransaction.conf lands only now, after session 2
-        // began on the same connector.
+        // began on the same connector. Check it really was held: otherwise
+        // this row would be a second control row.
+        expect(responder.held).toHaveLength(1);
         responder.releaseHeldStopTransactions();
       }
 
@@ -273,7 +286,7 @@ async function runTwoSessions(opts: {
         () => connector.transaction?.id,
       );
       if (n === 1 && opts.holdFirstStopConf) {
-        responder.state.holdStopTransaction = true;
+        responder.holdNextStopTransaction();
       }
       csms.send([
         2,
@@ -285,7 +298,6 @@ async function runTwoSessions(opts: {
         `session ${n} StopTransaction.req`,
         () => callsSince(csms, from, "StopTransaction")[0],
       );
-      responder.state.holdStopTransaction = false;
 
       sessions.push({
         meterStart,

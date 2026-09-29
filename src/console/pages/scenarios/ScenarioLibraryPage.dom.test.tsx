@@ -46,6 +46,51 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+/** Opens a row's `…` menu. The Radix trigger opens on pointerdown or
+ *  Enter/Space/ArrowDown, not on `click`. */
+async function openRowMenu(scenarioName: string): Promise<HTMLElement> {
+  const trigger = document.body.querySelector<HTMLButtonElement>(
+    `button[aria-label="More actions for ${scenarioName}"]`,
+  );
+  expect(trigger, "expected the row's More actions button").toBeTruthy();
+  await act(async () => {
+    trigger!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+  expect(menu, "expected the row action menu to open").toBeTruthy();
+  return menu!;
+}
+
+function menuItem(menu: HTMLElement, label: string): HTMLElement {
+  const item = Array.from(
+    menu.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ).find((el) => el.textContent?.trim() === label);
+  expect(item, `expected a "${label}" menu item`).toBeTruthy();
+  return item!;
+}
+
+async function renderLibraryWith(
+  fixture: ScenarioDefinition,
+  overrides: Parameters<typeof createFakeChargePointService>[0] = {},
+) {
+  const cp1 = snapshot({ id: "CP-1", connectors: [] });
+  const service = createFakeChargePointService({
+    snapshots: [cp1],
+    listScenarioDefinitions: vi.fn(async (_cpId: string, connectorId) =>
+      connectorId === null ? [fixture] : [],
+    ),
+    ...overrides,
+  });
+  const rendered = await renderConsole("/scenarios", { service });
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  return { ...rendered, service };
+}
+
 describe("ScenarioLibraryPage", () => {
   let cleanup: (() => Promise<void>) | null = null;
 
@@ -98,6 +143,72 @@ describe("ScenarioLibraryPage", () => {
     expect(runLink, "expected a Run link in the table row").toBeTruthy();
     expect(runLink!.getAttribute("href")).toContain("cp=CP-1");
     expect(runLink!.getAttribute("href")).toContain("id=s-demo");
+  });
+
+  it("renders the row action menu outside the table's scroll container, so the last rows' menu is never clipped (#365)", async () => {
+    const { container, root } = await renderLibraryWith(twoStepScenario());
+    cleanup = () => unmount(root);
+
+    const menu = await openRowMenu("Demo scenario");
+
+    // The shadcn Table wraps <table> in an `overflow-auto` div; a menu inside
+    // it gets clipped past the table's bottom edge.
+    const scrollContainer = container.querySelector("table")!.parentElement!;
+    expect(scrollContainer.className).toContain("overflow-auto");
+    expect(scrollContainer.contains(menu)).toBe(false);
+  });
+
+  it("row action menu: Duplicate saves a copy and closes the menu", async () => {
+    const saveScenarioDefinition = vi.fn(
+      async (
+        _cpId: string,
+        _connectorId: number | null,
+        def: ScenarioDefinition,
+      ) => def,
+    );
+    const { root } = await renderLibraryWith(twoStepScenario(), {
+      saveScenarioDefinition,
+    });
+    cleanup = () => unmount(root);
+
+    const menu = await openRowMenu("Demo scenario");
+    await act(async () => {
+      menuItem(menu, "Duplicate").click();
+      await Promise.resolve();
+    });
+
+    expect(saveScenarioDefinition).toHaveBeenCalledWith(
+      "CP-1",
+      null,
+      expect.objectContaining({
+        name: expect.stringContaining("Demo scenario"),
+      }),
+    );
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("row action menu: Delete asks for confirmation, then deletes the scenario", async () => {
+    const deleteScenarioDefinition = vi.fn(async () => undefined);
+    const { root } = await renderLibraryWith(twoStepScenario(), {
+      deleteScenarioDefinition,
+    });
+    cleanup = () => unmount(root);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const menu = await openRowMenu("Demo scenario");
+    await act(async () => {
+      menuItem(menu, "Delete").click();
+      await Promise.resolve();
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete "Demo scenario"?');
+    expect(deleteScenarioDefinition).toHaveBeenCalledWith(
+      "CP-1",
+      null,
+      "s-demo",
+    );
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+    confirmSpy.mockRestore();
   });
 
   it("shows an empty state when there are no scenarios anywhere", async () => {

@@ -1166,3 +1166,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [GitHub issues](sources/github-issues.md): #374 row.
 - [Control plane](concepts/control-plane.md): auto traffic is refused in browser local mode (`browser_auto_traffic_unsupported`).
 - Real bugs behind type errors, fixed with tests: `StateManager` logged with a non-existent `LogType.System`, so its entries were dropped, and reported every connector transition as `Faulted`. `OCPPSoapHandler` had no `sendTransactionUpdate`, so a `transaction_event` on a SOAP charge point threw. `LocalChargePointService` lacked the auto-traffic methods; browser mode now rejects them with `browser_auto_traffic_unsupported`. Settings' reset showed "Reset failed" instead of the reason. `ChargePointService.startTransaction` / `authorize` keep a required `tagId`, as OCPP's StartTransaction.req / Authorize.req do; the control plane's optional `tagId` (#299) is drawn from the idTag pool by the facade (`ChargePoint.resolveIdTag`) before the call.
+
+## [2026-09-29] ingest | scenario library row action menu no longer clipped (#365)
+
+- [Web console](entities/web-console.md): the Scenario library's per-row `…` menu (Duplicate, Export JSON, Delete) is the shared Radix `DropdownMenu`, portalled to `document.body` and collision-aware.
+- [GitHub issues](sources/github-issues.md): #365 row.
+- Mechanism: `ScenarioTable` rendered a hand-rolled `absolute` menu inside the shadcn `Table` wrapper, which is `overflow-auto`, so on the last rows the menu was clipped at the table's bottom edge. The menu now renders outside that scroll container and flips upward when there is no room below; it also gains Escape / outside-click close and menu keyboard navigation. Tests in `ScenarioLibraryPage.dom.test.tsx` assert the open menu is not inside the scroll container, and that Duplicate and Delete still reach the service and close the menu.

@@ -48,7 +48,10 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   backward-compatible bookmarks.
 - **`/v3`** — the redesigned console: a fleet of **Charge Points**,
   per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with
-  a linear step editor and a separate run console (`/v3/scenarios`), a global
+  a linear step editor and a separate run console (`/v3/scenarios`; each row's
+  `…` menu — Duplicate, Export JSON, Delete — opens in a portal and flips
+  upward near the bottom of the window, so it is never clipped by the table,
+  #365), a global
   **Message log** (`/v3/logs`), and **Settings** (`/v3/settings`, where
   global [network simulation](../concepts/network-simulation.md) and the
   **Reset all simulator data** button live).

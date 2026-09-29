@@ -413,7 +413,7 @@ export class OCPPMessageHandler {
     // EVDisconnected / UnlockCommand / DeAuthorized / …).
     const reason = transaction.stopReason;
     const payload: StopTransactionRequestV16 = {
-      transactionId: transaction.id!,
+      transactionId: transaction.id,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
       timestamp: transaction.stopTime!.toISOString(),

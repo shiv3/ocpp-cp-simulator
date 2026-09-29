@@ -17,7 +17,7 @@ import { testCpInit } from "./testCpInit";
  * subscriber could not tell "the CSMS assigned 0" from "no confirmation yet".
  *
  * The trap this file avoids: asserting on a *truthy* id passes with the bug
- * present. Every assertion below compares with `toBe(0)` / `toBe(null)`.
+ * present. Every assertion below compares with `toBe(0)`.
  */
 type Emitted = { readonly event: string; readonly data?: unknown };
 
@@ -45,10 +45,10 @@ function localStart(): Transaction {
   };
 }
 
-function startedIds(events: readonly Emitted[]): Array<number | null> {
+function startedIds(events: readonly Emitted[]): number[] {
   return events
     .filter((evt) => evt.event === "transaction_started")
-    .map((evt) => (evt.data as { transactionId: number | null }).transactionId);
+    .map((evt) => (evt.data as { transactionId: number }).transactionId);
 }
 
 describe("transaction_started re-emission carries the assigned id, zero included (#328)", () => {
@@ -82,23 +82,6 @@ describe("transaction_started re-emission carries the assigned id, zero included
       const before = startedIds(events).length;
       connector.transactionId = 4242;
       expect(startedIds(events).slice(before)).toEqual([4242]);
-    } finally {
-      svc.cleanup();
-    }
-  });
-
-  it("clearing the id still emits transaction_stopped, not transaction_started", () => {
-    const { svc, events, connector } = harness();
-    try {
-      connector.beginTransaction(localStart());
-      connector.transactionId = 0;
-      const before = events.length;
-      connector.transactionId = null;
-      const after = events.slice(before);
-      expect(after.map((evt) => evt.event)).toEqual(["transaction_stopped"]);
-      expect(
-        (after[0].data as { transactionId: number | null }).transactionId,
-      ).toBe(0);
     } finally {
       svc.cleanup();
     }

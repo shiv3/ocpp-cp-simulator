@@ -200,7 +200,9 @@ export const METER_READING_CONTEXTS = [
 export type MeterReadingContext = (typeof METER_READING_CONTEXTS)[number];
 
 export interface Transaction {
-  id: number | null;
+  /** CSMS-assigned (OCPP 1.x); `0` until StartTransaction.conf assigns it.
+   *  No transaction is `connector.transaction === null`, never a null id. */
+  id: number;
   connectorId: number;
   tagId: string;
   meterStart: number;

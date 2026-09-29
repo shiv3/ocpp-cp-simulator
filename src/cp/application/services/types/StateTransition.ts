@@ -45,7 +45,7 @@ export interface ConnectorStateSnapshot {
   availability: OCPPAvailability;
   meterValue: number;
   transaction: {
-    id: number | null;
+    id: number;
     tagId: string;
     startTime: Date;
     startMeter: number;

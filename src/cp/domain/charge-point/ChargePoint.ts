@@ -1730,7 +1730,7 @@ export class ChargePoint {
 
     this._events.emit("transactionStopped", {
       connectorId: connector.id,
-      transactionId: transaction.id ?? 0,
+      transactionId: transaction.id,
     });
 
     // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)

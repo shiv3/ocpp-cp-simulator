@@ -2890,8 +2890,8 @@ export class CLIChargePointService {
       // When the CSMS confirms a StartTransaction, the connector's
       // transactionId switches from the initial placeholder (0) to the
       // assigned id. Re-emit transaction_started so remote subscribers see the
-      // accepted id. Also emit transaction_stopped when it clears (e.g.
-      // CSMS-driven stop), so remote clients see the change.
+      // accepted id. (transaction_stopped comes from ChargePoint's
+      // transactionStopped, emitted when the transaction ends.)
       //
       // #328: the assigned id is re-emitted WHATEVER it is, zero included.
       // OCPP 1.6 makes `transactionId` schema-valid for any integer, and the
@@ -2904,13 +2904,6 @@ export class CLIChargePointService {
       // sequence for one more value.
       this._connectorUnsubscribes.push(
         connector.events.on("transactionIdChange", ({ transactionId }) => {
-          if (transactionId == null) {
-            this.emit({
-              event: "transaction_stopped",
-              data: { connectorId, transactionId: 0 },
-            });
-            return;
-          }
           const tagId = connector.transaction?.tagId ?? "";
           this.emit({
             event: "transaction_started",

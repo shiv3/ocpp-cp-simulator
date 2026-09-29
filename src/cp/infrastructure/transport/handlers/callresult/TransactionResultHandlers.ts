@@ -100,7 +100,6 @@ export class StopTransactionResultHandler implements CallResultHandler<StopTrans
       return;
     }
     if (connector) {
-      connector.transactionId = null;
       connector.stopTransaction();
       // #175: ChargePoint.stopTransaction() already drove Finishing ->
       // Available (when autoResetToAvailable) synchronously at

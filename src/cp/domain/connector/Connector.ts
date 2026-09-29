@@ -98,7 +98,7 @@ export interface ConnectorEvents {
    * without needing a polling read.
    */
   transactionChange: { transaction: Transaction | null };
-  transactionIdChange: { transactionId: number | null };
+  transactionIdChange: { transactionId: number };
   meterValueChange: { meterValue: number };
   socChange: { soc: number | null };
   availabilityChange: { availability: OCPPAvailability };
@@ -758,7 +758,7 @@ export class Connector {
     });
   }
 
-  set transactionId(transactionId: number | null) {
+  set transactionId(transactionId: number) {
     if (!this.transactionValue) return;
     this.transactionValue.id = transactionId;
     this.eventsEmitter.emit("transactionIdChange", { transactionId });

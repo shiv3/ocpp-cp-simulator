@@ -28,8 +28,7 @@ interface ConnectorGetter {
     | {
         status: string;
         availability: "Operative" | "Inoperative";
-        // `id` stays null until the CSMS assigns it (StartTransaction.conf).
-        transaction: { id: number | null } | null;
+        transaction: { id: number } | null;
         meterValue: number;
       }
     | undefined;

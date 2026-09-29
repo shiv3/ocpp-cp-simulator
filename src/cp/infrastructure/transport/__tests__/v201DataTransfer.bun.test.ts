@@ -34,9 +34,6 @@ describe("OCPP 2.0.1 CP-initiated DataTransfer", () => {
 
       await csms.waitForCall("StatusNotification");
 
-      // Answered below: an unanswered DataTransfer rejects after 25 s, and
-      // that late rejection surfaced as an unhandled error inside whichever
-      // test happened to be running then.
       const answer = cp.sendDataTransfer(
         "E2E",
         "scenario",
@@ -44,6 +41,11 @@ describe("OCPP 2.0.1 CP-initiated DataTransfer", () => {
       );
 
       const dataTransfer = await csms.waitForCall("DataTransfer");
+      // Answered before any assertion: an unanswered DataTransfer rejects
+      // after 25 s, and that late rejection surfaced as an unhandled error
+      // inside whichever test happened to be running then.
+      csms.replyCallResult(dataTransfer.messageId, { status: "Accepted" });
+
       expect(dataTransfer.payload).toEqual({
         vendorId: "E2E",
         messageId: "scenario",
@@ -52,8 +54,6 @@ describe("OCPP 2.0.1 CP-initiated DataTransfer", () => {
       expect(outgoingV201Warning("DataTransfer", dataTransfer.payload)).toBe(
         null,
       );
-
-      csms.replyCallResult(dataTransfer.messageId, { status: "Accepted" });
       expect(await answer).toEqual({ status: "Accepted" });
     } finally {
       cp.disconnect();

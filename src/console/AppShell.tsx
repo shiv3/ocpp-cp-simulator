@@ -10,7 +10,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDataContext } from "../data/providers/DataProvider";
+import { useServerInfo } from "../data/hooks/useServerInfo";
 import ThemeToggle from "../components/ThemeToggle";
+import AppBuildInfo from "../components/AppBuildInfo";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
 import { consolePath } from "./routes";
 
@@ -58,6 +60,7 @@ const NAV_ITEMS: NavItem[] = [
 const AppShell: React.FC = () => {
   const location = useLocation();
   const { mode, serverUrl } = useDataContext();
+  const serverInfo = useServerInfo();
   const isRemote = mode === "remote";
 
   return (
@@ -124,6 +127,11 @@ const AppShell: React.FC = () => {
             >
               {serverUrl}
             </div>
+            {/* Same version line as the classic UI's footer (issue #364). */}
+            <AppBuildInfo
+              className="flex-wrap"
+              daemonVersion={serverInfo?.version}
+            />
           </div>
         </aside>
 

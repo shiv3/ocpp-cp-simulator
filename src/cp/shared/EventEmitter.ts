@@ -3,7 +3,7 @@
  * Based on EventEmitter2 with additional type safety
  */
 
-import EventEmitter2 from "eventemitter2";
+import EventEmitter2, { type ListenerFn } from "eventemitter2";
 
 export type EventListener<T = unknown> = (data: T) => void;
 
@@ -13,18 +13,6 @@ export type EventListener<T = unknown> = (data: T) => void;
  * get no implicit index signature.
  */
 export type EventMap = object;
-
-/**
- * The overload implementations below take a listener for any payload type:
- * `(data: never) => void` is the one type every typed listener is assignable
- * to. EventEmitter2 stores it untyped; the public overloads are what pair
- * each listener with its event's payload.
- */
-type AnyListener = EventListener<never>;
-
-function untyped(listener: AnyListener): EventListener<unknown> {
-  return listener as EventListener<unknown>;
-}
 
 /**
  * Type-safe wrapper around EventEmitter2
@@ -53,13 +41,12 @@ export class EventEmitter<T extends EventMap> {
    */
   on<K extends keyof T>(event: K, listener: EventListener<T[K]>): () => void;
   on(event: string, listener: EventListener<unknown>): () => void;
-  on(event: string | keyof T, listener: AnyListener): () => void {
-    const handler = untyped(listener);
-    this.emitter.on(event as string, handler);
+  on(event: string | keyof T, listener: ListenerFn): () => void {
+    this.emitter.on(event as string, listener);
 
     // Return unsubscribe function
     return () => {
-      this.emitter.off(event as string, handler);
+      this.emitter.off(event as string, listener);
     };
   }
 
@@ -69,13 +56,12 @@ export class EventEmitter<T extends EventMap> {
    */
   once<K extends keyof T>(event: K, listener: EventListener<T[K]>): () => void;
   once(event: string, listener: EventListener<unknown>): () => void;
-  once(event: string | keyof T, listener: AnyListener): () => void {
-    const handler = untyped(listener);
-    this.emitter.once(event as string, handler);
+  once(event: string | keyof T, listener: ListenerFn): () => void {
+    this.emitter.once(event as string, listener);
 
     // Return unsubscribe function
     return () => {
-      this.emitter.off(event as string, handler);
+      this.emitter.off(event as string, listener);
     };
   }
 
@@ -95,8 +81,8 @@ export class EventEmitter<T extends EventMap> {
    */
   off<K extends keyof T>(event: K, listener: EventListener<T[K]>): void;
   off(event: string, listener: EventListener<unknown>): void;
-  off(event: string | keyof T, listener: AnyListener): void {
-    this.emitter.off(event as string, untyped(listener));
+  off(event: string | keyof T, listener: ListenerFn): void {
+    this.emitter.off(event as string, listener);
   }
 
   /**

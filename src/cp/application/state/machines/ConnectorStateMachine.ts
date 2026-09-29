@@ -1,12 +1,5 @@
-import {
-  createMachine,
-  state,
-  transition,
-  guard,
-  reduce,
-  type Service,
-  type Transition,
-} from "robot3";
+import { createMachine, transition, guard, reduce, type Service } from "robot3";
+import { stateFor } from "./stateFor";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 /**
@@ -39,13 +32,7 @@ export type ConnectorEvent =
   | { type: "SET_UNAVAILABLE" }
   | { type: "SET_AVAILABLE" };
 
-/**
- * robot3's `state()` infers its event type from the first transition alone,
- * so a state with several events does not type-check; pin it to the full
- * connector event union.
- */
-const connectorState = (...transitions: Transition<ConnectorEvent["type"]>[]) =>
-  state(...transitions);
+const connectorState = stateFor<ConnectorEvent["type"]>();
 
 // Guards (transition conditions)
 const isAuthorized = (ctx: ConnectorContext) => ctx.authorized === true;

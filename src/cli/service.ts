@@ -19,7 +19,6 @@ import { soapDialectForVersion } from "../cp/infrastructure/transport/soap/diale
 import { OCPPSoapServer } from "../cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "../cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
-import { DEFAULT_ID_TAG } from "../cp/domain/auth/IdTagPool";
 import {
   splitStopReason,
   type MeterReadingContext,
@@ -964,7 +963,7 @@ export class CLIChargePointService {
     options: StartTransactionCommandOptions = {},
   ): void {
     this._chargePoint.startTransaction(
-      this.resolveIdTag(tagId, connectorId),
+      this._chargePoint.resolveIdTag(tagId, connectorId),
       connectorId,
       undefined,
       undefined,
@@ -1041,15 +1040,9 @@ export class CLIChargePointService {
     this._chargePoint.stopHeartbeat();
   }
 
-  /**
-   * The idTag a control-plane call without one presents (#299). An explicit
-   * tag always wins; the pool only fills a gap, and a charge point without one
-   * keeps the historical literal so nothing changes for a caller that never
-   * configured a pool. OCPP messages always carry a tag, so this runs before
-   * they are built.
-   */
+  /** {@link ChargePoint.resolveIdTag}, for the daemon's control-plane facade. */
   resolveIdTag(tagId: string | undefined, connectorId?: number): string {
-    return tagId ?? this._chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
+    return this._chargePoint.resolveIdTag(tagId, connectorId);
   }
 
   authorize(tagId: string): void {

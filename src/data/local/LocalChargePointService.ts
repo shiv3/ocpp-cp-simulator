@@ -53,7 +53,6 @@ import {
 } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
-import { DEFAULT_ID_TAG } from "../../cp/domain/auth/IdTagPool";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
@@ -399,11 +398,9 @@ export class LocalChargePointService implements ChargePointService {
     tagId?: string,
     options: StartTransactionCommandOptions = {},
   ): Promise<void> {
-    // Resolved like the daemon's CLI service: an explicit tag wins, the pool
-    // fills a gap, and a charge point without one keeps the default (#299).
     const cp = this.getExistingChargePointOrThrow(id);
     cp.startTransaction(
-      tagId ?? cp.nextIdTag(connectorId) ?? DEFAULT_ID_TAG,
+      cp.resolveIdTag(tagId, connectorId),
       connectorId,
       undefined,
       undefined,
@@ -621,14 +618,11 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   async saveAutoTrafficConfig(
-    _id: string,
-    _connectorId: number,
-    _config: AutoTrafficConfig,
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
   ): Promise<void> {
-    throw new UnsupportedFeatureError(
-      "browser_auto_traffic_unsupported",
-      BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
-    );
+    return this.setAutoTrafficConfig(id, connectorId, config);
   }
 
   async setAutoResetToAvailable(

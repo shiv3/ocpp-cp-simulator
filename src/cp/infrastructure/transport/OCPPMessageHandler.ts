@@ -1168,7 +1168,7 @@ export class OCPPMessageHandler {
         handler = new StopTransactionResultHandler(request.connectorId || 1);
       } else if (action === OCPPAction.MeterValues) {
         handler = new MeterValuesResultHandler(
-          request.payload as MeterValuesRequestV16,
+          (request.payload as MeterValuesRequestV16).connectorId,
         );
       } else if (action === OCPPAction.Authorize) {
         handler = new AuthorizeResultHandler(

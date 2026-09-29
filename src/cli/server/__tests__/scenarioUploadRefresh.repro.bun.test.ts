@@ -15,7 +15,7 @@ import { connectTestClient, startTestServer } from "./socketHarness";
 // scenario.definitions.list = the refresh re-fetch), with a file-backed daemon
 // SQLite so we can also simulate a daemon restart. No browser file picker.
 
-const cleanups: Array<() => Promise<void> | void> = [];
+const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });
@@ -61,9 +61,7 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
 
     // Upload persist — exactly what persistEditorScenario() sends.
     const client = await connectTestClient(server);
-    cleanups.push(() => {
-      client.close();
-    });
+    cleanups.push(() => client.close());
     const replaceAck = await emitRpc(client, {
       method: "scenario.definitions.replace",
       params: {
@@ -76,9 +74,7 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
 
     // Refresh: a brand-new socket connection re-fetches the list.
     const afterRefresh = await connectTestClient(server);
-    cleanups.push(() => {
-      afterRefresh.close();
-    });
+    cleanups.push(() => afterRefresh.close());
     const listAck = await emitRpc(afterRefresh, {
       method: "scenario.definitions.list",
       params: { cpId, connectorId },
@@ -98,9 +94,7 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
       if (!server1Closed) await server1.close();
     });
     const client1 = await connectTestClient(server1);
-    cleanups.push(() => {
-      client1.close();
-    });
+    cleanups.push(() => client1.close());
     const replaceAck = await emitRpc(client1, {
       method: "scenario.definitions.replace",
       params: {
@@ -117,13 +111,9 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
     // Daemon restart: fresh server + DB adapter over the SAME file.
     const db2 = BunSqliteDatabase.open(path);
     const server2 = await startTestServer({ database: db2 });
-    cleanups.push(() => {
-      server2.close();
-    });
+    cleanups.push(() => server2.close());
     const client2 = await connectTestClient(server2);
-    cleanups.push(() => {
-      client2.close();
-    });
+    cleanups.push(() => client2.close());
     const listAck = await emitRpc(client2, {
       method: "scenario.definitions.list",
       params: { cpId, connectorId },

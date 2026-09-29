@@ -860,9 +860,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       return;
     }
     this.enqueueRequest("MeterValues", payload, (env) => {
-      // The dialect-shaped SOAP payload is not a 1.6 MeterValues.req (1.2 is
-      // flat); the result handler only needs the connector it was sent for.
-      new MeterValuesResultHandler({ connectorId }).handle(
+      new MeterValuesResultHandler(connectorId).handle(
         env.payload as MeterValuesResponseV16,
         this.handlerContext(),
       );

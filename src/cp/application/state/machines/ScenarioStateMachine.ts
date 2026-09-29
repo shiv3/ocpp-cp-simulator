@@ -1,12 +1,5 @@
-import {
-  createMachine,
-  state,
-  transition,
-  guard,
-  reduce,
-  type Service,
-  type Transition,
-} from "robot3";
+import { createMachine, transition, guard, reduce, type Service } from "robot3";
+import { stateFor } from "./stateFor";
 
 /**
  * Scenario execution mode
@@ -41,13 +34,7 @@ export type ScenarioEvent =
   | { type: "WAIT_START"; waitType: "status" | "remoteStart" | "delay" }
   | { type: "WAIT_COMPLETE" };
 
-/**
- * robot3's `state()` infers its event type from the first transition alone,
- * so a state with several events does not type-check; pin it to the full
- * scenario event union.
- */
-const scenarioState = (...transitions: Transition<ScenarioEvent["type"]>[]) =>
-  state(...transitions);
+const scenarioState = stateFor<ScenarioEvent["type"]>();
 
 // Guards (transition conditions)
 const startMode = (event: ScenarioEvent): ScenarioExecutionMode =>

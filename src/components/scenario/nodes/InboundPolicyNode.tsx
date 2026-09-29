@@ -2,14 +2,7 @@ import React, { memo } from "react";
 import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { InboundPolicyNodeData } from "../../../cp/application/scenario/ScenarioTypes";
 
-// Mapped type (not `extends`) so the result is a fresh object type that
-// satisfies xyflow v12's `Node<Record<string, unknown>>` constraint — a
-// plain interface does not.
-type InboundPolicyNodeDataMapped = {
-  [K in keyof InboundPolicyNodeData]: InboundPolicyNodeData[K];
-};
-
-type InboundPolicyFlowNode = Node<InboundPolicyNodeDataMapped>;
+type InboundPolicyFlowNode = Node<InboundPolicyNodeData>;
 
 const InboundPolicyNode: React.FC<NodeProps<InboundPolicyFlowNode>> = ({
   data,

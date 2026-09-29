@@ -167,11 +167,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         const signCertificate = await csms.waitForCall("SignCertificate");
-        const signPayload =
-          signCertificate.payload as SignCertificateRequestV16;
-        expect(isValidSignCertificateRequestV16(signPayload)).toBe(true);
-
-        const csr = new x509.Pkcs10CertificateRequest(signPayload.csr);
+        const csr = csrOf(signCertificate.payload);
         expect(csr.subject).toContain("CN=CP016-SEC-CSR");
         expect(csr.subject).toContain("O=Example CPO");
         expect(await csr.verify()).toBe(true);
@@ -262,11 +258,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         const signCertificate = await csms.waitForCall("SignCertificate");
-        const signPayload =
-          signCertificate.payload as SignCertificateRequestV16;
-        expect(isValidSignCertificateRequestV16(signPayload)).toBe(true);
-
-        const csr = new x509.Pkcs10CertificateRequest(signPayload.csr);
+        const csr = csrOf(signCertificate.payload);
         expect(csr.subject).toContain("CN=CP016-SEC-CSR-RSA");
 
         // Verify public key is RSA

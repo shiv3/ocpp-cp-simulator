@@ -209,22 +209,30 @@ export type ChargePointEvent =
       type: "scenario-started";
       connectorId: number;
       scenarioId: string;
+      /** Runtime run id (daemon only — local mode mints none). */
+      runId?: string;
     }
   | {
       type: "scenario-completed";
       connectorId: number;
       scenarioId: string;
+      /** Runtime run id (daemon only — local mode mints none). */
+      runId?: string;
     }
   | {
       type: "scenario-error";
       connectorId: number;
       scenarioId: string;
+      /** Runtime run id (daemon only — local mode mints none). */
+      runId?: string;
       error: string;
     }
   | {
       type: "scenario-node-execute";
       connectorId: number;
       scenarioId: string;
+      /** Runtime run id (daemon only — local mode mints none). */
+      runId?: string;
       nodeId: string;
     }
   | {

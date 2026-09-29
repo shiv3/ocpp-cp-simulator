@@ -3,31 +3,16 @@ import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import WaitingExpectation from "../../components/WaitingExpectation";
+import { formatElapsed } from "../../lib/scenarioExpectation";
+import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
+import { buildScenarioUrl } from "../../lib/useAllScenarios";
 import { useDataContext } from "../../../data/providers/DataProvider";
-import { consolePath } from "../../routes";
 
 interface ActiveScenarioPanelProps {
   cpId: string;
   connectorIds: number[];
-}
-
-const STATE_BADGE_STYLES: Record<
-  "running" | "paused" | "stepping" | "waiting",
-  string
-> = {
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-  paused: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  stepping:
-    "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-  waiting: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-};
-
-function formatElapsed(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
@@ -80,24 +65,6 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
           const elapsedMs = now - nodeStartedAt;
           const elapsed = formatElapsed(elapsedMs);
 
-          let remainingMs: number | null = null;
-          if (run.expectation?.timeoutMs) {
-            remainingMs = Math.max(0, run.expectation.timeoutMs - elapsedMs);
-          }
-          const remaining =
-            remainingMs !== null ? formatElapsed(remainingMs) : null;
-
-          const payloadConditioned = Boolean(
-            run.expectation?.constraints &&
-            (run.expectation.constraints as Record<string, unknown>).payload,
-          );
-          const expectationDescription = `${
-            run.expectation?.action ??
-            run.expectation?.targetStatus ??
-            run.expectation?.event ??
-            run.expectation?.type
-          }${payloadConditioned ? " (payload condition)" : ""}`;
-
           return (
             <div
               key={`${run.connectorId}:${run.scenarioId}`}
@@ -108,7 +75,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-xs font-semibold",
-                      STATE_BADGE_STYLES[run.state],
+                      LIVE_RUN_STATE_STYLES[run.state],
                     )}
                   >
                     {run.state}
@@ -143,24 +110,23 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
               </div>
 
               {run.state === "waiting" && run.expectation && (
-                <div className="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-300">
-                  <div>
-                    Waiting for{" "}
-                    <code className="font-mono text-xs bg-gray-200 px-1 py-0.5 rounded dark:bg-gray-700">
-                      {expectationDescription}
-                    </code>
-                  </div>
-                  {remaining !== null ? (
-                    <div>Timeout in {remaining}</div>
-                  ) : (
-                    <div>No timeout</div>
-                  )}
-                </div>
+                <WaitingExpectation
+                  expectation={run.expectation}
+                  currentNodeStartedAt={run.currentNodeStartedAt}
+                  now={now}
+                  className="text-xs text-gray-600 dark:text-gray-300"
+                />
               )}
 
               <Link
-                to={consolePath(
-                  `/scenarios/run?cp=${encodeURIComponent(cpId)}&connector=${run.connectorId}&id=${encodeURIComponent(run.scenarioId)}`,
+                // #366: carry the runId so the run page can tell whether the
+                // run it attaches to is still this one.
+                to={buildScenarioUrl(
+                  "run",
+                  cpId,
+                  run.connectorId,
+                  run.scenarioId,
+                  { runId: run.runId },
                 )}
                 className="text-xs text-blue-600 hover:underline dark:text-blue-400"
               >

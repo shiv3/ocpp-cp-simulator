@@ -12,7 +12,7 @@ related:
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
-updated: 2026-09-12
+updated: 2026-09-29
 ---
 
 # Web console (browser UI)
@@ -54,6 +54,18 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   **Reset all simulator data** button live).
 - **`/v1`** — the original single-page UI (maintenance only) — see
   [Legacy v1 UI](legacy-v1-ui.md).
+
+In `/v3`, a charge point's **Active scenarios** panel lists the runs executing
+or parked on its connectors, and its **Open run** link opens the scenario's run
+console (`/v3/scenarios/run?cp=…&connector=…&id=…&run=<runId>`). The run
+console **attaches** to a run that is already live in the runtime rather than
+showing a fresh idle state: it hydrates the state (`running` / `waiting` / …),
+current and already-executed nodes, the waiting expectation with its timeout
+countdown, and the runId from `scenario_status`, and its **Stop** acts on that
+run. Opening or reloading the page never starts a run; a run of the scenario
+started elsewhere while the page is open (for example an auto-start trigger)
+is attached the same way. When `run=` names a run that has ended or been
+superseded, a banner says so (daemon only — local mode mints no runId) (#366).
 
 The two consoles link to each other with a design switcher (the classic
 navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic

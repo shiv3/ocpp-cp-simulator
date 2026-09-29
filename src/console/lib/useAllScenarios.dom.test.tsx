@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { useAllScenarios } from "./useAllScenarios";
+import { buildScenarioUrl, useAllScenarios } from "./useAllScenarios";
 import { createFakeChargePointService } from "../test/harness";
 import { DataContext } from "../../data/providers/DataProvider";
 import type { ChargePointSnapshot } from "../../data/interfaces/ChargePointService";
@@ -308,5 +308,23 @@ describe("useAllScenarios", () => {
     );
     expect(latestProbeResult?.items).toHaveLength(1);
     expect(latestProbeResult?.items[0]?.scenario.id).toBe("s-new");
+  });
+});
+
+describe("buildScenarioUrl", () => {
+  it("builds a run URL from cp, connector and scenario id", () => {
+    const url = buildScenarioUrl("run", "CP 1", 2, "s1");
+    expect(url).toContain("/scenarios/run?");
+    const params = new URLSearchParams(url.split("?")[1]);
+    expect(params.get("cp")).toBe("CP 1");
+    expect(params.get("connector")).toBe("2");
+    expect(params.get("id")).toBe("s1");
+    expect(params.has("run")).toBe(false);
+  });
+
+  it("adds the runtime run id when given (#366)", () => {
+    const url = buildScenarioUrl("run", "CP-1", 1, "s1", { runId: "run-42" });
+    const params = new URLSearchParams(url.split("?")[1]);
+    expect(params.get("run")).toBe("run-42");
   });
 });

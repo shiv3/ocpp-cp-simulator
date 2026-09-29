@@ -7,7 +7,7 @@ sources:
 related:
   - ../log.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-17
+updated: 2026-09-29
 ---
 
 # Source: GitHub issues referenced by the wiki
@@ -75,3 +75,4 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | steve-community/steve #2093                      | OCTT certificate behaviors                                                                                                                                                    | [Scenario format](../concepts/scenario-format.md#inboundpolicy-and-certificate-quirks-notes)                                                                                                                                                                                                |
 | #318                                             | `run_scenario_template` no longer fails with "already running": the load suppresses the auto-start gate, the explicit start carries `strict`                                  | [Control plane](../concepts/control-plane.md#cp-command-methods)                                                                                                                                                                                                                            |
 | #352                                             | `run_scenario_template { once: true }` — run a template once instead of re-arming on every connect (open-ocpp-tck)                                                            | [Control plane](../concepts/control-plane.md#cp-command-methods), [Scenario format](../concepts/scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)                                                                                                                  |
+| #366                                             | Web console run page attaches to the live scenario run ("Open run" from Active scenarios carries `run=<runId>`)                                                               | [Web console](../entities/web-console.md)                                                                                                                                                                                                                                                   |

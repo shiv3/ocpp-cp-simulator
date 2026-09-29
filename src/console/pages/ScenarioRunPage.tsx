@@ -10,7 +10,9 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import TargetChip from "../components/TargetChip";
+import WaitingExpectation from "../components/WaitingExpectation";
 import { consolePath } from "../routes";
+import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
 import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
 import RunHistory from "./scenarios/run/RunHistory";
@@ -19,8 +21,8 @@ import RunTimeline from "./scenarios/run/RunTimeline";
 const LOG_TAIL_LIMIT = 200;
 
 const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
+  ...LIVE_RUN_STATE_STYLES,
   idle: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
   completed:
     "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
   error: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
@@ -31,7 +33,14 @@ const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
  * shows a live step timeline + correlated log tail + session run history —
  * deliberately separate from the editor. Reached via the "▶ Run" links
  * built by `buildScenarioUrl("run", cpId, connectorId, scenarioId)`
- * (`ScenarioMetaBar`, `ScenarioTable`).
+ * (`ScenarioMetaBar`, `ScenarioTable`), and by the CP page's Active
+ * scenarios "Open run" link, which adds `&run=<runId>`.
+ *
+ * The page attaches to a run that is already live in the runtime (#366):
+ * `useScenarioRun` hydrates state, current node, executed nodes, waiting
+ * expectation and runId from `getScenarioStatus`, so opening or reloading
+ * this URL mid-run shows that run — it never starts one. When the `run`
+ * param names a run that is no longer the live one, a banner says so.
  *
  * Execution goes through `useScenarioRun`, which mirrors the real
  * `loadScenario` → `runScenario` RPC sequence (see that hook's doc comment
@@ -56,6 +65,7 @@ const ScenarioRunPage: React.FC = () => {
   const connectorParam = searchParams.get("connector") ?? "";
   const connectorId = connectorParam === "" ? null : Number(connectorParam);
   const scenarioId = searchParams.get("id") ?? "";
+  const requestedRunId = searchParams.get("run");
 
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -90,8 +100,29 @@ const ScenarioRunPage: React.FC = () => {
     };
   }, [chargePointService, cpId, connectorId, scenarioId]);
 
-  const { state, currentNodeId, executedNodeIds, error, start, stop, runs } =
-    useScenarioRun(cpId || null, connectorId, scenario);
+  const {
+    state,
+    currentNodeId,
+    executedNodeIds,
+    error,
+    runId,
+    expectation,
+    currentNodeStartedAt,
+    hydrated,
+    start,
+    stop,
+    runs,
+  } = useScenarioRun(cpId || null, connectorId, scenario);
+
+  const isRunning = isLiveRunState(state);
+
+  // The run named in the URL ("Open run") has ended or been superseded by
+  // another run of the same scenario. Unknowable without a runtime runId
+  // (local mode), so no banner there.
+  const requestedRunGone =
+    hydrated &&
+    !!requestedRunId &&
+    (!isRunning || (runId != null && runId !== requestedRunId));
 
   // Charge-point-scope scenarios have no connectorId to load against —
   // `useScenarioRun.start()` early-returns on `connectorId == null` since
@@ -117,11 +148,9 @@ const ScenarioRunPage: React.FC = () => {
     ? displayedSteps.steps.filter((s) => executedNodeIds.includes(s.id)).length
     : 0;
   const stepLabel =
-    state === "running" && totalSteps > 0
+    isRunning && totalSteps > 0
       ? ` · step ${Math.min(executedStepsCount + 1, totalSteps)}/${totalSteps}`
       : "";
-
-  const isRunning = state === "running";
 
   if (isLoading) {
     return (
@@ -198,7 +227,30 @@ const ScenarioRunPage: React.FC = () => {
           {state.charAt(0).toUpperCase() + state.slice(1)}
           {stepLabel}
         </span>
+        {runId && (
+          <span
+            className="font-mono text-xs text-gray-500 dark:text-gray-400"
+            title="Runtime run id"
+          >
+            {runId}
+          </span>
+        )}
       </PageHeader>
+
+      {requestedRunGone && (
+        <div className="mb-4 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200">
+          Run {requestedRunId} is no longer active
+          {isRunning && runId ? ` — showing the current run ${runId}.` : "."}
+        </div>
+      )}
+
+      {state === "waiting" && expectation && (
+        <WaitingExpectation
+          expectation={expectation}
+          currentNodeStartedAt={currentNodeStartedAt}
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        />
+      )}
 
       {cpScopeScenario && (
         <div

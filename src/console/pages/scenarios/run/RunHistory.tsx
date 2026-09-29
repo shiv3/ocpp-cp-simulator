@@ -24,8 +24,11 @@ function formatDuration(startedAt: Date, endedAt: Date | null): string {
 
 /**
  * Session-local run history — one row per `start()` call on this page view,
- * newest first (see `useScenarioRun`'s `runs`). Cleared when the viewed
- * scenario/target changes; never persisted.
+ * plus one per run the page attached to because it was already live in the
+ * runtime (#366, tagged "attached": its time and duration count from the
+ * attach, as the runtime reports no start time), newest first (see
+ * `useScenarioRun`'s `runs`). Cleared when the viewed scenario/target
+ * changes; never persisted.
  */
 const RunHistory: React.FC<RunHistoryProps> = ({ runs }) => {
   if (runs.length === 0) {
@@ -52,6 +55,14 @@ const RunHistory: React.FC<RunHistoryProps> = ({ runs }) => {
             >
               {run.result}
             </span>
+            {run.attached && (
+              <span
+                className="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300"
+                title="Started outside this page"
+              >
+                attached
+              </span>
+            )}
             <span className="text-xs text-gray-500 dark:text-gray-400">
               {run.startedAt.toLocaleTimeString()}
             </span>

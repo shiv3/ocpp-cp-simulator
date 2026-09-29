@@ -1,4 +1,12 @@
-import { createMachine, state, transition, guard, reduce } from "robot3";
+import {
+  createMachine,
+  state,
+  transition,
+  guard,
+  reduce,
+  type Service,
+  type Transition,
+} from "robot3";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 /**
@@ -30,6 +38,14 @@ export type ConnectorEvent =
   | { type: "RESUME" }
   | { type: "SET_UNAVAILABLE" }
   | { type: "SET_AVAILABLE" };
+
+/**
+ * robot3's `state()` infers its event type from the first transition alone,
+ * so a state with several events does not type-check; pin it to the full
+ * connector event union.
+ */
+const connectorState = (...transitions: Transition<ConnectorEvent["type"]>[]) =>
+  state(...transitions);
 
 // Guards (transition conditions)
 const isAuthorized = (ctx: ConnectorContext) => ctx.authorized === true;
@@ -98,7 +114,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
   return createMachine(
     {
       // Available state
-      available: state(
+      available: connectorState(
         transition(
           "PLUGIN",
           "preparing",
@@ -114,7 +130,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // Preparing state
-      preparing: state(
+      preparing: connectorState(
         transition(
           "AUTHORIZE",
           "preparing",
@@ -150,7 +166,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // Charging state
-      charging: state(
+      charging: connectorState(
         transition("SUSPEND_EV", "suspendedEV"),
         transition("SUSPEND_EVSE", "suspendedEVSE"),
         transition(
@@ -167,7 +183,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // SuspendedEV state
-      suspendedEV: state(
+      suspendedEV: connectorState(
         transition("RESUME", "charging"),
         transition("SUSPEND_EVSE", "suspendedEVSE"),
         transition(
@@ -183,7 +199,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // SuspendedEVSE state
-      suspendedEVSE: state(
+      suspendedEVSE: connectorState(
         transition("RESUME", "charging"),
         transition("SUSPEND_EV", "suspendedEV"),
         transition(
@@ -199,7 +215,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // Finishing state
-      finishing: state(
+      finishing: connectorState(
         transition(
           "PLUGOUT",
           "available",
@@ -215,7 +231,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // Reserved state
-      reserved: state(
+      reserved: connectorState(
         transition("PLUGIN", "preparing", guard(isOperative)),
         transition(
           "CANCEL_RESERVATION",
@@ -230,11 +246,11 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // Unavailable state
-      unavailable: state(
+      unavailable: connectorState(
         transition(
           "SET_AVAILABLE",
           "available",
-          reduce((ctx: ConnectorContext) => ({
+          reduce((ctx: ConnectorContext): ConnectorContext => ({
             ...ctx,
             availability: "Operative",
           })),
@@ -243,7 +259,7 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
       ),
 
       // Faulted state
-      faulted: state(
+      faulted: connectorState(
         transition(
           "RESET",
           "available",
@@ -257,13 +273,16 @@ export function createConnectorMachine(initialContext: ConnectorContext) {
         transition("SET_UNAVAILABLE", "unavailable"),
       ),
     },
-    // Initial context
-    (initialState) => ({
-      ...initialContext,
-      current: initialState,
-    }),
+    // Initial context. robot3 passes this function the context given to
+    // `interpret`, which no caller supplies.
+    (): ConnectorContext => ({ ...initialContext }),
   );
 }
+
+/** A running (`interpret`ed) machine built by {@link createConnectorMachine}. */
+export type ConnectorMachineService = Service<
+  ReturnType<typeof createConnectorMachine>
+>;
 
 /**
  * Mapping from machine state name to OCPPStatus

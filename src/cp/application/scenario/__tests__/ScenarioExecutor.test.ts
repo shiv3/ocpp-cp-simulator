@@ -5,7 +5,8 @@ import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 describe("ScenarioExecutor StatusTrigger", () => {
   it("waits for onWaitForStatus before executing the next node", async () => {
-    let resolveStatus: (() => void) | null = null;
+    // Assigned synchronously by the Promise executor below.
+    let resolveStatus!: () => void;
     const waitForStatusPromise = new Promise<void>((resolve) => {
       resolveStatus = resolve;
     });
@@ -69,7 +70,7 @@ describe("ScenarioExecutor StatusTrigger", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSetMeterValue).not.toHaveBeenCalled();
 
-    resolveStatus?.();
+    resolveStatus();
     await execution;
 
     expect(onSetMeterValue).toHaveBeenCalledWith(123);

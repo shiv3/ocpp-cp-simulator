@@ -1,4 +1,12 @@
-import { createMachine, state, transition, guard, reduce } from "robot3";
+import {
+  createMachine,
+  state,
+  transition,
+  guard,
+  reduce,
+  type Service,
+  type Transition,
+} from "robot3";
 
 /**
  * Scenario execution mode
@@ -33,6 +41,14 @@ export type ScenarioEvent =
   | { type: "WAIT_START"; waitType: "status" | "remoteStart" | "delay" }
   | { type: "WAIT_COMPLETE" };
 
+/**
+ * robot3's `state()` infers its event type from the first transition alone,
+ * so a state with several events does not type-check; pin it to the full
+ * scenario event union.
+ */
+const scenarioState = (...transitions: Transition<ScenarioEvent["type"]>[]) =>
+  state(...transitions);
+
 // Guards (transition conditions)
 const startMode = (event: ScenarioEvent): ScenarioExecutionMode =>
   event.type === "START" ? (event.mode ?? "oneshot") : "oneshot";
@@ -50,7 +66,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
   return createMachine(
     {
       // Idle state - not executing
-      idle: state(
+      idle: scenarioState(
         transition(
           "START",
           "running",
@@ -80,7 +96,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       ),
 
       // Running state - actively executing
-      running: state(
+      running: scenarioState(
         transition("PAUSE", "paused"),
         transition(
           "WAIT_START",
@@ -120,7 +136,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       ),
 
       // Paused state - temporarily halted
-      paused: state(
+      paused: scenarioState(
         transition("RESUME", "running"),
         transition(
           "ERROR",
@@ -141,7 +157,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       ),
 
       // Waiting state - blocked on async operation
-      waiting: state(
+      waiting: scenarioState(
         transition("WAIT_COMPLETE", "running"),
         transition(
           "ERROR",
@@ -163,7 +179,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       ),
 
       // Stepping state - waiting for step command
-      stepping: state(
+      stepping: scenarioState(
         transition(
           "STEP",
           "stepping",
@@ -200,7 +216,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       ),
 
       // Completed state - successfully finished
-      completed: state(
+      completed: scenarioState(
         transition(
           "START",
           "running",
@@ -230,7 +246,7 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
       ),
 
       // Error state - error occurred
-      error: state(
+      error: scenarioState(
         transition(
           "START",
           "running",
@@ -268,13 +284,16 @@ export function createScenarioMachine(initialContext: ScenarioContext) {
         ),
       ),
     },
-    // Initial context
-    (initialState) => ({
-      ...initialContext,
-      current: initialState,
-    }),
+    // Initial context. robot3 passes this function the context given to
+    // `interpret`, which no caller supplies.
+    (): ScenarioContext => ({ ...initialContext }),
   );
 }
+
+/** A running (`interpret`ed) machine built by {@link createScenarioMachine}. */
+export type ScenarioMachineService = Service<
+  ReturnType<typeof createScenarioMachine>
+>;
 
 /**
  * Get state name from a Robot3 service

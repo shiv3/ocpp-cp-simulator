@@ -38,20 +38,17 @@ import {
   createScenarioMachine,
   getScenarioStateName,
   getScenarioContext,
+  type ScenarioMachineService,
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
+import { cancelIfCancellable } from "./cancellable";
 import type { EventEmitter } from "../../shared/EventEmitter";
 
-type MaybeCancellablePromise<T> = Promise<T> & { cancel?: () => void };
 type AutoMeterStartConfig = Parameters<
   NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
 >[0] & { sendMessage?: boolean };
 type MeterValueCallbacks = ScenarioExecutorCallbacks & {
   onGetTransactionMeterStart?: () => number | null;
-};
-
-const cancelIfCancellable = (promise: Promise<unknown>): void => {
-  (promise as MaybeCancellablePromise<unknown>).cancel?.();
 };
 
 const isMeterValueTimeout = (error: unknown): boolean =>
@@ -83,7 +80,7 @@ export interface ScenarioStartOptions {
 export class ScenarioExecutor {
   private scenario: ScenarioDefinition;
   private callbacks: ScenarioExecutorCallbacks;
-  private service: ReturnType<typeof interpret>; // Robot3 service
+  private service: ScenarioMachineService;
   private stepResolve: (() => void) | null = null;
   private pendingSteps = 0;
   private previousState: ScenarioExecutionState = "idle";
@@ -1685,7 +1682,7 @@ export class ScenarioExecutor {
   }
 
   private async waitWithOptionalForceSkip(
-    waitPromise: Promise<void>,
+    waitPromise: Promise<unknown>,
   ): Promise<void> {
     const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") {

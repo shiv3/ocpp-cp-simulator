@@ -8,6 +8,7 @@ import {
   getStatusFromMachineState,
   type ConnectorContext,
   type ConnectorEvent,
+  type ConnectorMachineService,
 } from "../state/machines/ConnectorStateMachine";
 import type {
   StateTransitionResult,
@@ -27,7 +28,8 @@ interface ConnectorGetter {
     | {
         status: string;
         availability: "Operative" | "Inoperative";
-        transaction: { id: number } | null;
+        // `id` stays null until the CSMS assigns it (StartTransaction.conf).
+        transaction: { id: number | null } | null;
         meterValue: number;
       }
     | undefined;
@@ -45,8 +47,7 @@ interface ChargePointGetter {
  * Connector state management using Robot3
  */
 export class StateManager {
-  private connectorMachines: Map<number, ReturnType<typeof interpret>> =
-    new Map();
+  private connectorMachines: Map<number, ConnectorMachineService> = new Map();
   private connectorPreviousStatus: Map<number, OCPPStatus> = new Map();
   public readonly history: StateHistory;
 
@@ -105,8 +106,10 @@ export class StateManager {
     const machine = createConnectorMachine(initialContext);
 
     // Monitor state changes
-    const service = interpret(machine, (machineState) => {
-      const status = getStatusFromMachineState(machineState.name);
+    // robot3 calls this with the service, whose `machine.current` is the
+    // state just entered.
+    const service = interpret(machine, (changed) => {
+      const status = getStatusFromMachineState(changed.machine.current);
       const previousStatus =
         this.connectorPreviousStatus.get(connectorId) || initialStatus;
 
@@ -125,7 +128,7 @@ export class StateManager {
       // Log the change
       this.logger.info(
         `[StateManager] Connector ${connectorId} status: ${previousStatus} → ${status}`,
-        LogType.System,
+        LogType.SYSTEM,
       );
 
       // Update previous status
@@ -152,7 +155,7 @@ export class StateManager {
 
     if (!service) {
       const error = `Connector ${connectorId} not initialized`;
-      this.logger.error(`[StateManager] ${error}`, LogType.System);
+      this.logger.error(`[StateManager] ${error}`, LogType.SYSTEM);
       return {
         success: false,
         error,
@@ -198,7 +201,7 @@ export class StateManager {
 
       this.logger.error(
         `[StateManager] State transition failed for connector ${connectorId}: ${errorMessage}`,
-        LogType.System,
+        LogType.SYSTEM,
       );
 
       // Record failure in history
@@ -330,7 +333,7 @@ export class StateManager {
 
     this.logger.info(
       `[StateManager] ChargePoint status: ${previousStatus} → ${status}`,
-      LogType.System,
+      LogType.SYSTEM,
     );
 
     return {

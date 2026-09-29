@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
+import { cancelIfCancellable } from "../cancellable";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { RemoteStartTransactionHandler } from "../../../infrastructure/transport/handlers/call/RemoteStartTransactionHandler";
@@ -74,7 +75,7 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
     expect(warning!.message).toMatch(/handled OUTSIDE this scenario/);
     expect(warning!.message).toMatch(/race between run_scenario/);
 
-    wait.cancel?.();
+    cancelIfCancellable(wait);
   });
 
   it("does NOT warn when the trigger node armed before RemoteStartTransaction arrived (normal order)", async () => {
@@ -132,7 +133,7 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
       logs.some((l) => l.level === "warn" && l.message.includes("race")),
     ).toBe(false);
 
-    wait.cancel?.();
+    cancelIfCancellable(wait);
   });
 
   it("warns when RemoteStopTransaction bypasses the scenario before the trigger node arms", async () => {
@@ -143,7 +144,8 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
     await cp.startTransaction("RACE-TAG", 1, undefined, undefined, {
       triggerReason: "RemoteStart",
     });
-    const txId = connector.transaction!.id;
+    const txId = connector.transaction?.id;
+    if (txId == null) throw new Error("the transaction got no id");
 
     // See the RemoteStart test above: callbacks (and runStartedAt) must
     // exist before the bypass, mirroring run_scenario building them at run
@@ -169,6 +171,6 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
     expect(warning).toBeDefined();
     expect(warning!.message).toMatch(/handled OUTSIDE this scenario/);
 
-    wait.cancel?.();
+    cancelIfCancellable(wait);
   });
 });

@@ -1,3 +1,4 @@
+import { cancellablePromise, type CancellableWait } from "./cancellable";
 import { csmsActionMatches } from "../../domain/types/csmsActionNames";
 import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { Connector } from "../../domain/connector/Connector";
@@ -108,22 +109,6 @@ const waitForStatus = (
       }, timeout * 1000);
     }
   });
-};
-
-interface CancellableWait<T> {
-  promise: Promise<T>;
-  cancel: () => void;
-}
-
-type CancellablePromise<T> = Promise<T> & { cancel?: () => void };
-
-const cancellablePromise = <T>({
-  promise,
-  cancel,
-}: CancellableWait<T>): CancellablePromise<T> => {
-  const wrapped = promise.finally(cancel) as CancellablePromise<T>;
-  wrapped.cancel = cancel;
-  return wrapped;
 };
 
 const waitForRemoteStart = (

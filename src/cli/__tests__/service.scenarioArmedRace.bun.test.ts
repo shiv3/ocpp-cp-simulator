@@ -5,6 +5,7 @@ import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * Opt-in companion to the run_scenario / RemoteStartTransaction race fix
@@ -15,17 +16,7 @@ import {
  */
 function newService(): CLIChargePointService {
   const db = BunDb.open(":memory:");
-  return new CLIChargePointService(
-    {
-      cpId: "test-cp",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
-    db,
-  );
+  return new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 }
 
 /** start -> delay(delaySeconds) -> remoteStartTrigger -> end. Mirrors the

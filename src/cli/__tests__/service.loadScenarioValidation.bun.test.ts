@@ -6,6 +6,7 @@ import {
   type ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * `loadScenario` used to store whatever it was handed and return
@@ -22,14 +23,7 @@ import {
  */
 function newService(): CLIChargePointService {
   return new CLIChargePointService(
-    {
-      cpId: "cp-load-validation",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
+    testCpInit({ cpId: "cp-load-validation" }),
     BunSqliteDatabase.open(":memory:"),
   );
 }

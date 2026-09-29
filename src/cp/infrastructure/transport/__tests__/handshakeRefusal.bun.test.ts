@@ -6,6 +6,7 @@ import {
   buildOcppWebSocketConnectOptions,
   probeUpgradeRefusal,
 } from "../wsUrlWithBasic";
+import { tcpPort } from "../../../../test/bunServe";
 
 /**
  * #288 — a refused upgrade must say which refusal it was.
@@ -35,11 +36,8 @@ function startRefusingServer(
       return new Response("", { status, headers });
     },
   });
-  // Bun types `port` as optional because a server may bind a unix socket;
-  // `port: 0` always binds a TCP one.
-  if (server.port === undefined) throw new Error("server bound no TCP port");
   return {
-    port: server.port,
+    port: tcpPort(server),
     requests: () => requests,
     stop: () => server.stop(true),
   };

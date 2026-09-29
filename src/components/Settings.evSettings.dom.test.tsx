@@ -11,10 +11,11 @@ import type { EVSettings } from "../cp/domain/connector/EVSettings";
  * Regression for #301 finding 3: the v1.2 EV settings fields
  * (`chargingCurve`, `currentType`, `phases`, `voltageV`, `powerFactor`) must
  * be reachable from the browser's "Default EV Settings" panel, not just via
- * raw JSON/RPC.
+ * raw JSON/RPC. Also covers the "Reset all simulator data" card (#374).
  */
 
 let setDefaultEvSettings: ReturnType<typeof vi.fn>;
+let resetAllState: ReturnType<typeof vi.fn<() => Promise<void>>>;
 /** The stored override the provider hands back. Mutable so a test can render
  *  the "an override is already saved" state as well as the default one. */
 let storedDefaultEv: EVSettings | null = null;
@@ -28,6 +29,7 @@ vi.mock("../data/providers/DataProvider", () => ({
     chargePointService: {
       loadConfig: vi.fn(async () => null),
       subscribeConfig: vi.fn(() => () => {}),
+      resetAllState: () => resetAllState(),
     },
   }),
 }));
@@ -91,38 +93,44 @@ async function flush(): Promise<void> {
   });
 }
 
+let cleanup: (() => Promise<void>) | null = null;
+
+beforeAll(() => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+afterEach(async () => {
+  if (cleanup) {
+    await cleanup();
+    cleanup = null;
+  }
+  storedDefaultEv = null;
+  vi.restoreAllMocks();
+});
+
+async function renderSettings(): Promise<HTMLElement> {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <MemoryRouter>
+        <Settings />
+      </MemoryRouter>,
+    );
+  });
+  cleanup = () => unmount(root);
+  await flush();
+  return container;
+}
+
 describe("Settings default EV settings panel — charging curve (#301)", () => {
-  let cleanup: (() => Promise<void>) | null = null;
-
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
-  afterEach(async () => {
-    if (cleanup) {
-      await cleanup();
-      cleanup = null;
-    }
-    vi.restoreAllMocks();
-  });
-
   it("normalizes an out-of-order charging curve before applying it", async () => {
     setDefaultEvSettings = vi.fn();
 
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Settings />
-        </MemoryRouter>,
-      );
-    });
-    cleanup = () => unmount(root);
-    await flush();
+    const container = await renderSettings();
 
     // Add two curve points — both start as { socPercent: 0, powerFraction: 1 }.
     const addPoint = findButton(container, "Add point");
@@ -162,18 +170,7 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
     // 0 the domain then quietly replaced with 1 (#301).
     setDefaultEvSettings = vi.fn();
 
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Settings />
-        </MemoryRouter>,
-      );
-    });
-    cleanup = () => unmount(root);
-    await flush();
+    const container = await renderSettings();
 
     const powerFactor = findLabeledInput(container, "Power Factor");
     expect(powerFactor.min).toBe("0.01");
@@ -194,37 +191,10 @@ describe("Settings electrical controls have accessible names (#301)", () => {
   // labels carried no `htmlFor`, so a screen reader announced four unnamed
   // controls. The five pre-1.2 fields above them have the same gap; fixing
   // those is a separate accessibility pass, not this PR's change.
-  let cleanup: (() => Promise<void>) | null = null;
-
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
-  afterEach(async () => {
-    if (cleanup) {
-      await cleanup();
-      cleanup = null;
-    }
-    vi.restoreAllMocks();
-  });
-
   it("associates each of Current Type, Phases, Voltage and Power Factor with its input", async () => {
     setDefaultEvSettings = vi.fn();
 
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Settings />
-        </MemoryRouter>,
-      );
-    });
-    cleanup = () => unmount(root);
-    await flush();
+    const container = await renderSettings();
 
     const expected: [string, string][] = [
       ["Current Type", "SELECT"],
@@ -246,38 +216,6 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
   // 1. Saving them as undefined selected the pre-1.2 conversion, which reads
   // an amp-based profile limit as three-phase — so a 16 A profile metered as
   // 48 A while this page claimed single-phase.
-  let cleanup: (() => Promise<void>) | null = null;
-
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
-  afterEach(async () => {
-    if (cleanup) {
-      await cleanup();
-      cleanup = null;
-    }
-    vi.restoreAllMocks();
-  });
-
-  async function renderSettings(): Promise<HTMLElement> {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Settings />
-        </MemoryRouter>,
-      );
-    });
-    cleanup = () => unmount(root);
-    await flush();
-    return container;
-  }
-
   it("materializes the four displayed electrical fields on Apply", async () => {
     setDefaultEvSettings = vi.fn();
     const container = await renderSettings();
@@ -363,45 +301,12 @@ describe("Apply is reachable from the default state (#301)", () => {
    * connector kept the legacy no-model conversion, which reads an amp limit
    * with no `numberPhases` as three-phase and reports 48 A for a 16 A profile.
    */
-  let cleanup: (() => Promise<void>) | null = null;
-
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
-  afterEach(async () => {
-    if (cleanup) {
-      await cleanup();
-      cleanup = null;
-    }
-    storedDefaultEv = null;
-    vi.restoreAllMocks();
-  });
-
-  async function render(): Promise<HTMLElement> {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Settings />
-        </MemoryRouter>,
-      );
-    });
-    cleanup = () => unmount(root);
-    await flush();
-    return container;
-  }
-
   const applyButton = (container: HTMLElement) =>
     findButton(container, "Apply");
 
   it("enables Apply with no stored override, and saves the displayed model", async () => {
     setDefaultEvSettings = vi.fn();
-    const container = await render();
+    const container = await renderSettings();
 
     expect(applyButton(container).disabled).toBe(false);
 
@@ -431,7 +336,7 @@ describe("Apply is reachable from the default state (#301)", () => {
       voltageV: 230,
       powerFactor: 1,
     };
-    const container = await render();
+    const container = await renderSettings();
     expect(applyButton(container).disabled).toBe(true);
   });
 
@@ -446,7 +351,29 @@ describe("Apply is reachable from the default state (#301)", () => {
       initialSoc: 20,
       targetSoc: 80,
     };
-    const container = await render();
+    const container = await renderSettings();
     expect(applyButton(container).disabled).toBe(false);
+  });
+});
+
+describe("Settings reset all simulator data (#374)", () => {
+  // The handler caught with a bare `catch {}` and then read `err`, so a failed
+  // reset threw a ReferenceError out of the handler and the page showed the
+  // generic "Reset failed" instead of the runtime's reason.
+  it("shows why the reset failed", async () => {
+    setDefaultEvSettings = vi.fn();
+    resetAllState = vi.fn(async () => {
+      throw new Error("database is locked");
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const container = await renderSettings();
+
+    await act(async () =>
+      findButton(container, "Reset all simulator data").click(),
+    );
+    await flush();
+
+    expect(resetAllState).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("database is locked");
   });
 });

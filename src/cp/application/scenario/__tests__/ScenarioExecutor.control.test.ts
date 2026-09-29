@@ -9,16 +9,7 @@ import {
 } from "../ScenarioTypes";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { EventEmitter } from "../../../shared/EventEmitter";
-
-function deferred<T = void>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+import { deferred } from "../../../../test/deferred";
 
 async function flushMicrotasks(count = 3): Promise<void> {
   for (let i = 0; i < count; i += 1) {

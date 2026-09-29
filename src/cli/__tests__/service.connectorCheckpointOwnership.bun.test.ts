@@ -6,6 +6,7 @@ import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * A connector's checkpoint belongs to the run that wrote it (#314).
@@ -97,14 +98,7 @@ interface Harness {
 
 function newHarness(db = BunSqliteDatabase.open(":memory:")): Harness {
   const svc = new CLIChargePointService(
-    {
-      cpId: "cp-checkpoint",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
+    testCpInit({ cpId: "cp-checkpoint" }),
     db,
   );
   const repo = (

@@ -7,6 +7,7 @@ import {
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * #179 Phase 2b: a scenario with no external waits, completing on its own
@@ -55,17 +56,7 @@ function completingScenario(
 
 function newService(): CLIChargePointService {
   const db = BunDb.open(":memory:");
-  return new CLIChargePointService(
-    {
-      cpId: "test-cp",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
-    db,
-  );
+  return new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 }
 
 describe("#179 Phase 2b: declarative assertions + verdict + per-run transcript", () => {

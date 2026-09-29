@@ -8,6 +8,7 @@ import {
   shouldSuppressAppliedScenarioAutosave,
 } from "../scenarioPersistence";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
+import { deferred, type Deferred } from "../../../test/deferred";
 
 const scenario = (id: string): ScenarioDefinition =>
   ({
@@ -74,21 +75,6 @@ function makeRemoteStyleService(existing: ScenarioDefinition[] = []) {
     getStored: () => stored,
     getActive: () => active,
   };
-}
-
-type Deferred = {
-  promise: Promise<void>;
-  resolve: () => void;
-  reject: (error: Error) => void;
-};
-
-function deferred(): Deferred {
-  const value = {} as Deferred;
-  value.promise = new Promise<void>((resolve, reject) => {
-    value.resolve = () => resolve();
-    value.reject = (error: Error) => reject(error);
-  });
-  return value;
 }
 
 async function flushPromises(): Promise<void> {

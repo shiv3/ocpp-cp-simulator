@@ -6,21 +6,7 @@ import {
   type NetworkSimLayerConfig,
 } from "../network-sim";
 import { startMockCsms, type MockCsms } from "./mockCsms";
-
-function canBindBunServe(): boolean {
-  try {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Response("ok");
-      },
-    });
-    void server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { canBindBunServe } from "../../../../test/bunServe";
 
 async function replyStatusNotificationV16(
   csms: MockCsms,

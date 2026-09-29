@@ -5,6 +5,7 @@ import {
   ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * #179 Phase 1: a scenario parked on a CSMS-call trigger must report
@@ -53,17 +54,7 @@ function parkingScenario(connectorId: number): ScenarioDefinition {
 
 function newService(): CLIChargePointService {
   const db = BunDb.open(":memory:");
-  return new CLIChargePointService(
-    {
-      cpId: "test-cp",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
-    db,
-  );
+  return new CLIChargePointService(testCpInit({ cpId: "test-cp" }), db);
 }
 
 describe("#179 Phase 1: scenario expectation + runId", () => {

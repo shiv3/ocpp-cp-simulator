@@ -13,6 +13,7 @@ import {
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
+import { canBindBunServe } from "../../../../test/bunServe";
 
 /** The CSR a SignCertificate.req carries, after checking the payload shape. */
 function csrOf(payload: unknown): x509.Pkcs10CertificateRequest {
@@ -29,21 +30,6 @@ const EC_ALG = {
   namedCurve: "P-256",
   hash: "SHA-256",
 } as const;
-
-function canBindBunServe(): boolean {
-  try {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Response("ok");
-      },
-    });
-    void server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function replyStatusNotification(
   csms: ReturnType<typeof startMockCsms>,

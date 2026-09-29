@@ -6,6 +6,7 @@ import {
   type ScenarioDefinition,
   ScenarioNodeType,
 } from "../../cp/application/scenario/ScenarioTypes";
+import { testCpInit } from "./testCpInit";
 
 /**
  * `scenario_status` used to go null the moment a run ended, because
@@ -19,14 +20,7 @@ import {
  */
 function newService(): CLIChargePointService {
   return new CLIChargePointService(
-    {
-      cpId: "cp-terminal-status",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
+    testCpInit({ cpId: "cp-terminal-status" }),
     BunSqliteDatabase.open(":memory:"),
   );
 }

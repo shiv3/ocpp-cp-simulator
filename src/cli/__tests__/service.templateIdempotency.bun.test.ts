@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../cp/domain/persistence/Database";
+import { testCpInit } from "./testCpInit";
 
 /**
  * Template instances get a `${templateId}-${cpId}-c${connectorId}-${Date.now()}
@@ -22,14 +23,10 @@ const CP_ID = "cp-template-idempotency";
 
 function newService(database?: Database): CLIChargePointService {
   return new CLIChargePointService(
-    {
+    testCpInit({
       cpId: CP_ID,
-      wsUrl: "ws://127.0.0.1:65534/never",
       connectors: 2,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
+    }),
     database ?? BunSqliteDatabase.open(":memory:"),
   );
 }

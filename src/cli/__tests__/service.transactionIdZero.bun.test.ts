@@ -3,6 +3,7 @@ import { describe, it, expect } from "bun:test";
 import { CLIChargePointService } from "../service";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { Transaction } from "../../cp/domain/connector/Transaction";
+import { testCpInit } from "./testCpInit";
 
 /**
  * #328: a CSMS that assigns `transactionId: 0` must be observable.
@@ -21,17 +22,7 @@ import type { Transaction } from "../../cp/domain/connector/Transaction";
 type Emitted = { readonly event: string; readonly data?: unknown };
 
 function harness() {
-  const svc = new CLIChargePointService(
-    {
-      cpId: "cp-328",
-      wsUrl: "ws://127.0.0.1:65534/never",
-      connectors: 1,
-      vendor: "v",
-      model: "m",
-      basicAuth: null,
-    },
-    null,
-  );
+  const svc = new CLIChargePointService(testCpInit({ cpId: "cp-328" }), null);
   const events: Emitted[] = [];
   svc.onEvent((evt) => events.push(evt as Emitted));
   const connector = (

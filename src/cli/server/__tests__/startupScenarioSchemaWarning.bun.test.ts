@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 import { CLIChargePointService } from "../../service";
 import { runStartupScenario } from "../startServer";
+import { testCpInit } from "../../__tests__/testCpInit";
 
 /**
  * Issue #214: import-time schema validation is advisory (WARNING-ONLY) —
@@ -24,14 +25,14 @@ import { runStartupScenario } from "../startServer";
 describe("CLI startup-scenario schema warning (issue #214, advisory only)", () => {
   it("warns to stderr but still loads and runs a schema-invalid --scenario-template-file", async () => {
     const csms = startMockCsms();
-    const svc = new CLIChargePointService({
-      cpId: "cp214",
-      wsUrl: csms.url,
-      connectors: 1,
-      vendor: "Vendor",
-      model: "Model",
-      basicAuth: null,
-    });
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp214",
+        wsUrl: csms.url,
+        vendor: "Vendor",
+        model: "Model",
+      }),
+    );
 
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-scenario-schema-warn-"));
     const templateFile = join(tmpDir, "invalid-schema-template.json");

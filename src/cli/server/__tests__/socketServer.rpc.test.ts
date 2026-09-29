@@ -536,6 +536,50 @@ describe("socket.io rpc dispatch", () => {
     ]);
   });
 
+  // #377: the status vocabularies are the domain's, held by the schema.
+  it.each([
+    [
+      "diagnostics_status_notification",
+      "sendDiagnosticsStatusNotification",
+      "Finished",
+    ],
+    [
+      "firmware_status_notification",
+      "sendFirmwareStatusNotification",
+      "Flashing",
+    ],
+    ["log_status_notification", "sendLogStatusNotification", "Done"],
+  ])(
+    "%s refuses a status outside the vocabulary with invalid_params",
+    async (method, facadeMethod, status) => {
+      const bus = new EventBus();
+      const registry = new CPRegistry(bus, null);
+      const facade = { [facadeMethod]: vi.fn().mockResolvedValue(undefined) };
+      const io = new FakeIo();
+      const socket = new FakeSocket();
+
+      registerSocketHandlers(io as never, {
+        registry,
+        bus,
+        database: null,
+        chargePointService: facade as never,
+      });
+      io.connect(socket);
+
+      const ack = await socket.emitRpc({
+        cpId: "cp-alpha",
+        method,
+        params: { status },
+      });
+
+      expect(ack).toMatchObject({
+        ok: false,
+        error: { code: "invalid_params" },
+      });
+      expect(facade[facadeMethod]).not.toHaveBeenCalled();
+    },
+  );
+
   it("dispatches representative per-CP and global methods through the facade", async () => {
     const bus = new EventBus();
     const registry = new CPRegistry(bus, null);

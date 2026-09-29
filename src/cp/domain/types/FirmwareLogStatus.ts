@@ -1,5 +1,6 @@
 /**
- * Station-initiated firmware / log status vocabularies (#345).
+ * Station-initiated firmware / log / diagnostics status vocabularies (#345,
+ * #377).
  *
  * `FIRMWARE_STATUSES` is OCPP 2.0.1 `FirmwareStatusEnumType`, which is also
  * the 1.6 Security Whitepaper `SignedFirmwareStatusNotification` set; plain
@@ -41,3 +42,23 @@ export const UPLOAD_LOG_STATUSES = [
   "AcceptedCanceled",
 ] as const;
 export type UploadLogStatus = (typeof UPLOAD_LOG_STATUSES)[number];
+
+/** OCPP 1.6 DiagnosticsStatusNotification.req statuses (2.0.1 has no such
+ *  message; GetLog / LogStatusNotification replaced it). */
+export const DIAGNOSTICS_STATUSES = [
+  "Idle",
+  "Uploaded",
+  "UploadFailed",
+  "Uploading",
+] as const;
+export type DiagnosticsStatus = (typeof DIAGNOSTICS_STATUSES)[number];
+
+/** Narrows untyped input to one of the vocabularies above (#377). */
+export function isOneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): value is T {
+  return (
+    typeof value === "string" && (allowed as readonly string[]).includes(value)
+  );
+}

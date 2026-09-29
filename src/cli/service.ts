@@ -1,9 +1,13 @@
 import type {
+  DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
 } from "../cp/domain/types/FirmwareLogStatus";
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
-import type { DataTransferResult } from "../cp/domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../cp/domain/types/DataTransfer";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../cp/domain/persistence/Database";
 import type {
@@ -1003,25 +1007,20 @@ export class CLIChargePointService {
     this._chargePoint.sendHeartbeat();
   }
 
-  sendDiagnosticsStatusNotification(status: string): void {
-    this._chargePoint.sendDiagnosticsStatusNotification(
-      status as "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
-    );
+  sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void {
+    this._chargePoint.sendDiagnosticsStatusNotification(status);
   }
 
-  sendFirmwareStatusNotification(status: string, requestId?: number): void {
-    this._chargePoint.sendFirmwareStatusNotification(
-      status as FirmwareStatus,
-      requestId,
-    );
+  sendFirmwareStatusNotification(
+    status: FirmwareStatus,
+    requestId?: number,
+  ): void {
+    this._chargePoint.sendFirmwareStatusNotification(status, requestId);
   }
 
   /** LogStatusNotification.req (#345): 1.6 Whitepaper / 2.0.1 N01. */
-  sendLogStatusNotification(status: string, requestId?: number): void {
-    this._chargePoint.sendLogStatusNotification(
-      status as UploadLogStatus,
-      requestId,
-    );
+  sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
+    this._chargePoint.sendLogStatusNotification(status, requestId);
   }
 
   sendSecurityEventNotification(type: string, techInfo?: string): void {
@@ -1053,7 +1052,7 @@ export class CLIChargePointService {
   sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this._chargePoint.sendDataTransfer(vendorId, messageId, data);
   }

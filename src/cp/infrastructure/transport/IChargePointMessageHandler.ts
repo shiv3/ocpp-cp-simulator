@@ -1,4 +1,12 @@
-import type { DataTransferResult } from "../../domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../../domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../domain/types/FirmwareLogStatus";
 import type {
   BootNotification,
   ChargePointErrorCode,
@@ -46,20 +54,23 @@ export interface IChargePointMessageHandler {
   sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult>;
   sendSecurityEventNotification(type: string, techInfo?: string): void;
   sendSignCertificate(csr?: string): Promise<void>;
-  sendDiagnosticsStatusNotification(status: string): void;
+  sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void;
   /** FirmwareStatusNotification.req. `requestId` is carried on 2.0.1 (from
    *  the UpdateFirmware that was acked when omitted); 1.6's request has no
    *  such field and drops it (#345). */
-  sendFirmwareStatusNotification(status: string, requestId?: number): void;
+  sendFirmwareStatusNotification(
+    status: FirmwareStatus,
+    requestId?: number,
+  ): void;
   /** LogStatusNotification.req (1.6 Security Whitepaper / 2.0.1 N01).
    *  `requestId` defaults to the GetLog that was acked on 2.0.1 (#345). */
-  sendLogStatusNotification(status: string, requestId?: number): void;
+  sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void;
   sendSignedFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): void;
   setBootStatus(

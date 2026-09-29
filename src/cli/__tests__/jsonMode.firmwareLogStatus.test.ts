@@ -62,4 +62,16 @@ describe("JSON-Lines firmware / log status notifications (#345)", () => {
     ).rejects.toThrow(/status/);
     expect(sendLogStatusNotification).not.toHaveBeenCalled();
   });
+
+  // #377: the diagnostics status is held to the same shared vocabulary.
+  it("diagnostics_status_notification rejects a status outside the vocabulary", async () => {
+    const sendDiagnosticsStatusNotification = vi.fn();
+    await expect(
+      handleJsonCommand(facadeTarget({ sendDiagnosticsStatusNotification }), {
+        command: "diagnostics_status_notification",
+        params: { status: "Finished" },
+      }),
+    ).rejects.toThrow(/status \(expected one of Idle, Uploaded/);
+    expect(sendDiagnosticsStatusNotification).not.toHaveBeenCalled();
+  });
 });

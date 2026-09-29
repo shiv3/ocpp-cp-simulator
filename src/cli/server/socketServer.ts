@@ -17,9 +17,15 @@ import {
   optionalString,
   optionalBoolean,
   optionalEnum,
+  optionalDataTransferData,
   requireEnum,
   requireString,
 } from "../jsonMode";
+import {
+  DIAGNOSTICS_STATUSES,
+  FIRMWARE_STATUSES,
+  UPLOAD_LOG_STATUSES,
+} from "../../cp/domain/types/FirmwareLogStatus";
 import {
   METER_READING_CONTEXTS,
   STOP_REASONS,
@@ -1744,7 +1750,7 @@ async function dispatchFacadeCpCommand(
             id,
             requireString(params, "vendorId"),
             optionalString(params, "messageId"),
-            params.data,
+            optionalDataTransferData(params),
           ),
         ),
       );
@@ -1754,26 +1760,24 @@ async function dispatchFacadeCpCommand(
       await runFacadeOperation(() =>
         chargePointService.sendDiagnosticsStatusNotification(
           id,
-          requireString(params, "status"),
+          requireEnum(params, "status", DIAGNOSTICS_STATUSES),
         ),
       );
       return handled(undefined);
     }
     case "firmware_status_notification": {
       const id = requireFacadeCpId(cpId, rawParams);
+      const status = requireEnum(params, "status", FIRMWARE_STATUSES);
       const requestId =
         params.requestId === undefined
           ? undefined
           : requireNonNegativeInt(params, "requestId");
       await runFacadeOperation(() =>
         requestId === undefined
-          ? chargePointService.sendFirmwareStatusNotification(
-              id,
-              requireString(params, "status"),
-            )
+          ? chargePointService.sendFirmwareStatusNotification(id, status)
           : chargePointService.sendFirmwareStatusNotification(
               id,
-              requireString(params, "status"),
+              status,
               requestId,
             ),
       );
@@ -1789,7 +1793,7 @@ async function dispatchFacadeCpCommand(
       await runFacadeOperation(() =>
         chargePointService.sendLogStatusNotification(
           id,
-          requireString(params, "status"),
+          requireEnum(params, "status", UPLOAD_LOG_STATUSES),
           requestId,
         ),
       );

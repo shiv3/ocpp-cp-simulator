@@ -1,7 +1,13 @@
 import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+  type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../domain/types/FirmwareLogStatus";
 import type {
   AuthorizeRequestV16,
   AuthorizeResponseV16,
@@ -19,7 +25,6 @@ import type {
   DiagnosticsStatusNotificationRequestV16,
   DiagnosticsStatusNotificationResponseV16,
   ExtendedTriggerMessageRequestV16,
-  FirmwareStatusNotificationRequestV16,
   FirmwareStatusNotificationResponseV16,
   GetCompositeScheduleRequestV16,
   GetConfigurationRequestV16,
@@ -30,7 +35,6 @@ import type {
   HeartbeatRequestV16,
   HeartbeatResponseV16,
   InstallCertificateRequestV16,
-  LogStatusNotificationRequestV16,
   LogStatusNotificationResponseV16,
   MeterValuesRequestV16,
   MeterValuesResponseV16,
@@ -467,7 +471,7 @@ export class OCPPMessageHandler {
   public sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     // sendRequest suppresses a gated CALL with a warning and nothing else;
     // a caller waiting for an answer needs the refusal as a rejection.
@@ -568,9 +572,7 @@ export class OCPPMessageHandler {
    * statuses (Uploading/Uploaded/UploadFailed) fire from GetDiagnostics
    * progression.
    */
-  public sendDiagnosticsStatusNotification(
-    status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
-  ): void {
+  public sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void {
     const messageId = this.generateMessageId();
     const payload: DiagnosticsStatusNotificationRequestV16 = { status };
     this.sendRequest(
@@ -587,7 +589,7 @@ export class OCPPMessageHandler {
    * Installed/...) fire from UpdateFirmware progression.
    */
   public sendFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): void {
     // 1.6 §6.24 FirmwareStatusNotification.req has no requestId (only the
@@ -602,21 +604,23 @@ export class OCPPMessageHandler {
       );
     }
     const messageId = this.generateMessageId();
-    const payload: FirmwareStatusNotificationRequestV16 = {
-      status: status as FirmwareStatusNotificationRequestV16["status"],
-    };
+    const payload = { status };
     this.sendRequest(OCPPAction.FirmwareStatusNotification, messageId, payload);
   }
 
   /**
    * OCPP 1.6 Security Whitepaper LogStatusNotification.req. `requestId`
    * carries the id from the triggering GetLog.req (TriggerMessage-driven
-   * `Idle` sends have none).
+   * `Idle` sends have none). The 2.0.1-only `AcceptedCanceled` is sent as
+   * given, as for firmware above.
    */
-  public sendLogStatusNotification(status: string, requestId?: number): void {
+  public sendLogStatusNotification(
+    status: UploadLogStatus,
+    requestId?: number,
+  ): void {
     const messageId = this.generateMessageId();
-    const payload: LogStatusNotificationRequestV16 = {
-      status: status as LogStatusNotificationRequestV16["status"],
+    const payload = {
+      status,
       ...(requestId !== undefined ? { requestId } : {}),
     };
     this.sendRequest(OCPPAction.LogStatusNotification, messageId, payload);
@@ -628,21 +632,7 @@ export class OCPPMessageHandler {
    * `requestId` from the triggering SignedUpdateFirmware.req.
    */
   public sendSignedFirmwareStatusNotification(
-    status:
-      | "Downloaded"
-      | "DownloadFailed"
-      | "Downloading"
-      | "DownloadScheduled"
-      | "DownloadPaused"
-      | "Idle"
-      | "InstallationFailed"
-      | "Installing"
-      | "Installed"
-      | "InstallRebooting"
-      | "InstallScheduled"
-      | "InstallVerificationFailed"
-      | "InvalidSignature"
-      | "SignatureVerified",
+    status: FirmwareStatus,
     requestId?: number,
   ): void {
     const messageId = this.generateMessageId();

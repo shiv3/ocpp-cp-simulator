@@ -1,5 +1,13 @@
 import * as fs from "fs";
-import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../../cp/domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../cp/domain/types/FirmwareLogStatus";
 
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -251,7 +259,7 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this.requireService(id).sendDataTransfer(vendorId, messageId, data);
   }
@@ -292,14 +300,14 @@ export class RegistryChargePointService implements ChargePointService {
 
   async sendDiagnosticsStatusNotification(
     id: string,
-    status: string,
+    status: DiagnosticsStatus,
   ): Promise<void> {
     this.requireService(id).sendDiagnosticsStatusNotification(status);
   }
 
   async sendFirmwareStatusNotification(
     id: string,
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): Promise<void> {
     // Two-argument form only when a requestId was given, so the 1.6-era
@@ -313,7 +321,7 @@ export class RegistryChargePointService implements ChargePointService {
 
   async sendLogStatusNotification(
     id: string,
-    status: string,
+    status: UploadLogStatus,
     requestId?: number,
   ): Promise<void> {
     this.requireService(id).sendLogStatusNotification(status, requestId);

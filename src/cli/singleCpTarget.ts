@@ -1,5 +1,13 @@
 import * as fs from "fs";
-import type { DataTransferResult } from "../cp/domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../cp/domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../cp/domain/types/FirmwareLogStatus";
 
 import type { CLIChargePointService } from "./service";
 import {
@@ -86,19 +94,22 @@ export interface SingleCpCommandOps {
   sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult>;
   updateConnectorStatus(
     connectorId: number,
     status: OCPPStatus,
     opts?: StatusNotificationOptions,
   ): Promise<void>;
-  sendDiagnosticsStatusNotification(status: string): Promise<void>;
+  sendDiagnosticsStatusNotification(status: DiagnosticsStatus): Promise<void>;
   sendFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): Promise<void>;
-  sendLogStatusNotification(status: string, requestId?: number): Promise<void>;
+  sendLogStatusNotification(
+    status: UploadLogStatus,
+    requestId?: number,
+  ): Promise<void>;
   sendSecurityEventNotification(type: string, techInfo?: string): Promise<void>;
   sendSignCertificate(csr?: string): Promise<void>;
   getScenarioTemplates(): Promise<ReadonlyArray<ScenarioTemplateInfo>>;

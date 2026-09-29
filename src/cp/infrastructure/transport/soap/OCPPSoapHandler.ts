@@ -1,14 +1,19 @@
 import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+  type DataTransferData,
   type DataTransferResult,
 } from "../../../domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../../domain/types/FirmwareLogStatus";
 import type {
   AuthorizeRequestV16,
   AuthorizeResponseV16,
   BootNotificationResponseV16,
   DataTransferRequestV16,
   DiagnosticsStatusNotificationRequestV16,
-  FirmwareStatusNotificationRequestV16,
   HeartbeatRequestV16,
   HeartbeatResponseV16,
   MeterValuesResponseV16,
@@ -870,7 +875,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   public sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     // SOAP 1.6: `data` is a string; a non-string is JSON-encoded (#348).
     const wireData =
@@ -933,10 +938,8 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     });
   }
 
-  public sendDiagnosticsStatusNotification(status: string): void {
-    const payload: DiagnosticsStatusNotificationRequestV16 = {
-      status: status as DiagnosticsStatusNotificationRequestV16["status"],
-    };
+  public sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void {
+    const payload: DiagnosticsStatusNotificationRequestV16 = { status };
     if (this._dialect.version === OCPP_1_6_SOAP) {
       // For 1.6S, actually send the DiagnosticsStatusNotification request
       this.enqueueRequest(
@@ -958,13 +961,12 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   }
 
   public sendFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     _requestId?: number,
   ): void {
-    // SOAP 1.x FirmwareStatusNotification carries no requestId.
-    const payload: FirmwareStatusNotificationRequestV16 = {
-      status: status as FirmwareStatusNotificationRequestV16["status"],
-    };
+    // SOAP 1.x FirmwareStatusNotification carries no requestId, and a
+    // 2.0.1-only status is sent as given, as on the 1.6 WebSocket wire.
+    const payload = { status };
     if (this._dialect.version === OCPP_1_6_SOAP) {
       // For 1.6S, actually send the FirmwareStatusNotification request
       this.enqueueRequest(
@@ -992,7 +994,10 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     );
   }
 
-  public sendLogStatusNotification(status: string, requestId?: number): void {
+  public sendLogStatusNotification(
+    status: UploadLogStatus,
+    requestId?: number,
+  ): void {
     this._logger.warn(
       `${this._dialect.version} SOAP has no security extension; ignoring LogStatusNotification ${JSON.stringify({ status, requestId })}`,
       LogType.OCPP,
@@ -1000,7 +1005,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   }
 
   public sendSignedFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): void {
     this._logger.warn(

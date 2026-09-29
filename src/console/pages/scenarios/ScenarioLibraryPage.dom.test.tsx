@@ -5,6 +5,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
+  findMenuItem,
+  flush,
+  openDropdownMenu,
   renderConsole,
 } from "../../test/harness";
 import { createEmptyScenario, insertStep } from "../../lib/scenarioSteps";
@@ -46,49 +49,44 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/** Opens a row's `…` menu. The Radix trigger opens on pointerdown or
- *  Enter/Space/ArrowDown, not on `click`. */
+/** Opens a row's `…` menu and returns it. */
 async function openRowMenu(scenarioName: string): Promise<HTMLElement> {
-  const trigger = document.body.querySelector<HTMLButtonElement>(
+  const trigger = document.body.querySelector(
     `button[aria-label="More actions for ${scenarioName}"]`,
   );
   expect(trigger, "expected the row's More actions button").toBeTruthy();
-  await act(async () => {
-    trigger!.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
-  });
+  await openDropdownMenu(trigger!);
   const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
   expect(menu, "expected the row action menu to open").toBeTruthy();
   return menu!;
 }
 
-function menuItem(menu: HTMLElement, label: string): HTMLElement {
-  const item = Array.from(
-    menu.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-  ).find((el) => el.textContent?.trim() === label);
+async function selectMenuItem(label: string): Promise<void> {
+  const item = findMenuItem(label);
   expect(item, `expected a "${label}" menu item`).toBeTruthy();
-  return item!;
+  await act(async () => {
+    item!.click();
+    await Promise.resolve();
+  });
 }
 
+/** Renders the library with one charge point, CP-1, whose charge-point scope
+ *  holds `fixtures`, then flushes the useAllScenarios effect's chained awaits
+ *  (listChargePoints -> listScenarioDefinitions per scope). */
 async function renderLibraryWith(
-  fixture: ScenarioDefinition,
+  fixtures: ScenarioDefinition[],
   overrides: Parameters<typeof createFakeChargePointService>[0] = {},
 ) {
-  const cp1 = snapshot({ id: "CP-1", connectors: [] });
   const service = createFakeChargePointService({
-    snapshots: [cp1],
+    snapshots: [snapshot({ id: "CP-1", connectors: [] })],
     listScenarioDefinitions: vi.fn(async (_cpId: string, connectorId) =>
-      connectorId === null ? [fixture] : [],
+      connectorId === null ? fixtures : [],
     ),
     ...overrides,
   });
   const rendered = await renderConsole("/scenarios", { service });
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  return { ...rendered, service };
+  await flush();
+  return rendered;
 }
 
 describe("ScenarioLibraryPage", () => {
@@ -101,6 +99,7 @@ describe("ScenarioLibraryPage", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (cleanup) {
       await cleanup();
       cleanup = null;
@@ -108,30 +107,8 @@ describe("ScenarioLibraryPage", () => {
   });
 
   it("shows the fixture's name, derived step count, and a Run link scoped to its CP", async () => {
-    const cp1 = snapshot({ id: "CP-1", connectors: [] });
-    const fixture = twoStepScenario();
-
-    const byScope: Record<string, ScenarioDefinition[]> = {
-      "CP-1:cp": [fixture],
-    };
-
-    const service = createFakeChargePointService({
-      snapshots: [cp1],
-      listScenarioDefinitions: vi.fn(
-        async (cpId: string, connectorId: number | null) =>
-          byScope[`${cpId}:${connectorId ?? "cp"}`] ?? [],
-      ),
-    });
-
-    const { container, root } = await renderConsole("/scenarios", { service });
+    const { container, root } = await renderLibraryWith([twoStepScenario()]);
     cleanup = () => unmount(root);
-
-    // Flush the useAllScenarios effect's chained awaits (listChargePoints ->
-    // listScenarioDefinitions per scope).
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
     expect(container.textContent).toContain("Demo scenario");
     expect(container.textContent).toContain("2 steps");
@@ -146,7 +123,7 @@ describe("ScenarioLibraryPage", () => {
   });
 
   it("renders the row action menu outside the table's scroll container, so the last rows' menu is never clipped (#365)", async () => {
-    const { container, root } = await renderLibraryWith(twoStepScenario());
+    const { container, root } = await renderLibraryWith([twoStepScenario()]);
     cleanup = () => unmount(root);
 
     const menu = await openRowMenu("Demo scenario");
@@ -166,16 +143,13 @@ describe("ScenarioLibraryPage", () => {
         def: ScenarioDefinition,
       ) => def,
     );
-    const { root } = await renderLibraryWith(twoStepScenario(), {
+    const { root } = await renderLibraryWith([twoStepScenario()], {
       saveScenarioDefinition,
     });
     cleanup = () => unmount(root);
 
-    const menu = await openRowMenu("Demo scenario");
-    await act(async () => {
-      menuItem(menu, "Duplicate").click();
-      await Promise.resolve();
-    });
+    await openRowMenu("Demo scenario");
+    await selectMenuItem("Duplicate");
 
     expect(saveScenarioDefinition).toHaveBeenCalledWith(
       "CP-1",
@@ -189,17 +163,14 @@ describe("ScenarioLibraryPage", () => {
 
   it("row action menu: Delete asks for confirmation, then deletes the scenario", async () => {
     const deleteScenarioDefinition = vi.fn(async () => undefined);
-    const { root } = await renderLibraryWith(twoStepScenario(), {
+    const { root } = await renderLibraryWith([twoStepScenario()], {
       deleteScenarioDefinition,
     });
     cleanup = () => unmount(root);
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
-    const menu = await openRowMenu("Demo scenario");
-    await act(async () => {
-      menuItem(menu, "Delete").click();
-      await Promise.resolve();
-    });
+    await openRowMenu("Demo scenario");
+    await selectMenuItem("Delete");
 
     expect(confirmSpy).toHaveBeenCalledWith('Delete "Demo scenario"?');
     expect(deleteScenarioDefinition).toHaveBeenCalledWith(
@@ -208,20 +179,11 @@ describe("ScenarioLibraryPage", () => {
       "s-demo",
     );
     expect(document.body.querySelector('[role="menu"]')).toBeNull();
-    confirmSpy.mockRestore();
   });
 
   it("shows an empty state when there are no scenarios anywhere", async () => {
-    const cp1 = snapshot({ id: "CP-1", connectors: [] });
-    const service = createFakeChargePointService({ snapshots: [cp1] });
-
-    const { container, root } = await renderConsole("/scenarios", { service });
+    const { container, root } = await renderLibraryWith([]);
     cleanup = () => unmount(root);
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
     expect(container.textContent).toContain("No scenarios");
   });
@@ -343,8 +305,5 @@ describe("ScenarioLibraryPage", () => {
         (b) => b.textContent?.trim() === "+ New scenario",
       ),
     ).toBe(true);
-
-    alertSpy.mockRestore();
-    errorSpy.mockRestore();
   });
 });

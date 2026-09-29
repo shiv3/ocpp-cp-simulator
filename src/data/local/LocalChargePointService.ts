@@ -395,12 +395,11 @@ export class LocalChargePointService implements ChargePointService {
   async startTransaction(
     id: string,
     connectorId: number,
-    tagId?: string,
+    tagId: string,
     options: StartTransactionCommandOptions = {},
   ): Promise<void> {
-    const cp = this.getExistingChargePointOrThrow(id);
-    cp.startTransaction(
-      cp.resolveIdTag(tagId, connectorId),
+    this.getExistingChargePointOrThrow(id).startTransaction(
+      tagId,
       connectorId,
       undefined,
       undefined,

@@ -1653,14 +1653,18 @@ async function dispatchFacadeCpCommand(
     }
     case "start_transaction": {
       const id = requireFacadeCpId(cpId, rawParams);
-      await runFacadeOperation(() =>
-        chargePointService.startTransaction(
+      await runFacadeOperation(() => {
+        const connectorId = requirePositiveInt(params, "connector");
+        return chargePointService.startTransaction(
           id,
-          requirePositiveInt(params, "connector"),
-          // Optional since #299: without one the charge point draws from its
-          // idTag pool. Requiring it here would have rejected the call before
-          // the pool could be consulted at all.
-          optionalString(params, "tagId"),
+          connectorId,
+          // Optional on the control plane since #299 but not in OCPP's
+          // StartTransaction.req, so a missing one is drawn from the pool here.
+          chargePointService.resolveIdTag(
+            id,
+            optionalString(params, "tagId"),
+            connectorId,
+          ),
           {
             triggerReason: optionalEnum(
               params,
@@ -1673,8 +1677,8 @@ async function dispatchFacadeCpCommand(
               TRANSACTION_CHARGING_STATES,
             ),
           },
-        ),
-      );
+        );
+      });
       return handled(undefined);
     }
     case "stop_transaction": {

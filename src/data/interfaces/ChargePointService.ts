@@ -413,12 +413,10 @@ export interface ChargePointService {
   ): Promise<DataTransferResult>;
 
   // Connector operations
-  /** Without a `tagId` the charge point draws from its idTag pool, and
-   *  falls back to the historical default tag (#299). */
   startTransaction(
     id: string,
     connectorId: number,
-    tagId?: string,
+    tagId: string,
     options?: StartTransactionCommandOptions,
   ): Promise<void>;
   stopTransaction(

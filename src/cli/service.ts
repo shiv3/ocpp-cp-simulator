@@ -959,11 +959,11 @@ export class CLIChargePointService {
 
   startTransaction(
     connectorId: number,
-    tagId?: string,
+    tagId: string,
     options: StartTransactionCommandOptions = {},
   ): void {
     this._chargePoint.startTransaction(
-      this._chargePoint.resolveIdTag(tagId, connectorId),
+      tagId,
       connectorId,
       undefined,
       undefined,

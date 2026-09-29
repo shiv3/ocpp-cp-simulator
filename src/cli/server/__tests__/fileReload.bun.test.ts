@@ -285,7 +285,8 @@ async function openSession(
 ): Promise<string | null> {
   const service = server.registry.get(cpId);
   if (!service) throw new Error(`${cpId} is not registered`);
-  service.startTransaction(1, tagId);
+  // As the control-plane facade does: a missing tag comes from the pool.
+  service.startTransaction(1, service.resolveIdTag(tagId, 1));
   await waitFor(
     () => service.hasOpenTransaction(1),
     `a transaction to open on ${cpId}`,

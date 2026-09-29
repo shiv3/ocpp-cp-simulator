@@ -259,7 +259,7 @@ export class RegistryChargePointService implements ChargePointService {
   async startTransaction(
     id: string,
     connectorId: number,
-    tagId?: string,
+    tagId: string,
     options?: StartTransactionCommandOptions,
   ): Promise<void> {
     this.requireService(id).startTransaction(connectorId, tagId, options);

@@ -806,17 +806,20 @@ describe("validateLayerConfig", () => {
       ),
     );
     const encoder = new TextEncoder();
+    // JSON.stringify does not escape "界", so each one adds exactly its UTF-8
+    // width to the serialized size. Tracking that count instead of
+    // re-serializing the whole config per character keeps this linear — the
+    // quadratic version ran past the 5 s timeout under coverage.
+    const charBytes = encoder.encode("界").byteLength;
+    let bytes = encoder.encode(JSON.stringify(withinLimit)).byteLength;
 
     outer: for (const [actionList, index] of actions) {
       while (actionList[index].length < NETWORK_SIM_LIMITS.maxActionLength) {
-        actionList[index] += "界";
-        if (
-          encoder.encode(JSON.stringify(withinLimit)).byteLength >
-          NETWORK_SIM_LIMITS.maxSerializedBytes
-        ) {
-          actionList[index] = actionList[index].slice(0, -1);
+        if (bytes + charBytes > NETWORK_SIM_LIMITS.maxSerializedBytes) {
           break outer;
         }
+        actionList[index] += "界";
+        bytes += charBytes;
       }
     }
 

@@ -45,6 +45,7 @@
     "src/store/store.ts",
     "src/trace",
     "src/types",
+    "src/utils/blueprints",
     "src/utils/scenarioTemplates.ts"
   ]
 }

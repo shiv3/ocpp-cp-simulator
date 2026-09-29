@@ -30,6 +30,14 @@ jobs:
       - name: Format check
         run: bun run format:check
 
+      # Neither Vite nor Bun type-checks: both strip the types and run, so type
+      # errors shipped unnoticed until the code base carried ~380 of them, some
+      # of them real bugs (#374). `tsc -b` checks every project the root
+      # tsconfig.json references (web app, CLI / daemon, vite config, bench
+      # scripts); any error fails the build.
+      - name: Typecheck
+        run: bun run typecheck
+
       # The desktop release compiles the CLI into a Tauri sidecar with
       # `bun build --compile`, and that is the ONLY thing here that resolves
       # every import: the runtime elides type-only ones, so a wrong path in

@@ -30,6 +30,7 @@
     "test:coverage": "vitest run --coverage",
     "test:coverage:bun": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=./coverage/bun bun.test",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

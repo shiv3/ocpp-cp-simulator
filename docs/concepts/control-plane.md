@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-17
+updated: 2026-09-29
 ---
 
 # Socket.IO control plane
@@ -259,6 +259,11 @@ counted and the loop continues; surviving those is what a load run is for.
 
 Config is persisted in `connector_settings.auto_traffic` (schema v10), and every
 runner's timers are stopped when the charge point is deleted.
+
+Only the daemon runs background traffic. In the browser's local mode, setting
+or saving a config rejects with `UnsupportedFeatureError`
+(`browser_auto_traffic_unsupported`) rather than reporting a success that
+would generate nothing (#374); reading one returns the stored row, if any.
 
 ##### Multiple supervision URLs
 

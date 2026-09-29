@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CPRegistry } from "../CPRegistry";
+import { EventBus } from "../eventBus";
 import { Logger, LogType } from "../../../cp/shared/Logger";
 import {
   CALL_DURATION_BUCKETS_SECONDS,
@@ -132,7 +133,7 @@ describe("MetricsRecorder (#298)", () => {
 
 describe("renderMetrics (#298)", () => {
   it("renders a parseable exposition ending in a newline", () => {
-    const registry = new CPRegistry();
+    const registry = new CPRegistry(new EventBus());
     try {
       const text = renderMetrics(registry, new MetricsRecorder());
       expect(text.endsWith("\n")).toBe(true);
@@ -146,7 +147,7 @@ describe("renderMetrics (#298)", () => {
   });
 
   it("declares HELP and TYPE for every metric it emits", () => {
-    const registry = new CPRegistry();
+    const registry = new CPRegistry(new EventBus());
     try {
       const recorder = new MetricsRecorder();
       recorder.observe(call("Heartbeat", "1", "2026-01-01T00:00:00.000Z"));
@@ -177,7 +178,7 @@ describe("renderMetrics (#298)", () => {
   it("carries no cpId label anywhere", () => {
     // Unbounded by construction once a daemon holds a fleet: Prometheus pays
     // for every series it has ever seen, so this is a hard rule, not taste.
-    const registry = new CPRegistry();
+    const registry = new CPRegistry(new EventBus());
     try {
       const recorder = new MetricsRecorder();
       recorder.observe(call("Heartbeat", "1", "2026-01-01T00:00:00.000Z"));
@@ -189,7 +190,7 @@ describe("renderMetrics (#298)", () => {
   });
 
   it("emits the mandatory +Inf bucket equal to the count", () => {
-    const registry = new CPRegistry();
+    const registry = new CPRegistry(new EventBus());
     try {
       const recorder = new MetricsRecorder();
       recorder.observe(call("Heartbeat", "1", "2026-01-01T00:00:00.000Z"));
@@ -219,7 +220,7 @@ describe("renderMetrics (#298)", () => {
   });
 
   it("counts an empty daemon as zero rather than omitting the metric", () => {
-    const registry = new CPRegistry();
+    const registry = new CPRegistry(new EventBus());
     try {
       const text = renderMetrics(registry, new MetricsRecorder());
       expect(text).toContain("ocppcp_transactions_active 0");

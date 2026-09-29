@@ -450,7 +450,7 @@ describe("socket.io rpc dispatch", () => {
 
     expect(ack.ok).toBe(false);
     if (ack.ok) return;
-    expect(ack.error.code).toBe("invalid_params");
+    expect(ack.error).toMatchObject({ code: "invalid_params" });
     expect(facade.createChargePoint).not.toHaveBeenCalled();
   });
 

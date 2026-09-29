@@ -42,6 +42,7 @@ describe("--trace-output: CLIChargePointService wiring (#188)", () => {
         connectors: 1,
         vendor: "v",
         model: "m",
+        basicAuth: null,
       },
       null,
     );

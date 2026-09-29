@@ -262,14 +262,15 @@ describe("httpServer MCP route", () => {
         controller.error(new Error("client aborted"));
       },
     });
-    const aborted = new Request("http://localhost/mcp", {
+    // `duplex` is required for a streaming body. Bun's RequestInit declares
+    // it, the DOM lib's does not, and this file is checked against both.
+    const abortedInit: RequestInit & { duplex: "half" } = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: abortedBody,
-      // @ts-expect-error duplex is required for streaming bodies but is
-      // missing from the RequestInit type in this TS lib version.
       duplex: "half",
-    });
+    };
+    const aborted = new Request("http://localhost/mcp", abortedInit);
     const abortedRes = await Promise.resolve(
       handlers.fetch(aborted, stubServer),
     );

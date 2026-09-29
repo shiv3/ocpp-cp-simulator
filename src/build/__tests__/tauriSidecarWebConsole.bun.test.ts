@@ -104,6 +104,8 @@ async function freePort(): Promise<number> {
   const server = Bun.serve({ port: 0, fetch: () => new Response("") });
   const port = server.port;
   await server.stop(true);
+  // Optional in Bun's types because a server may bind a unix socket.
+  if (port === undefined) throw new Error("server bound no TCP port");
   return port;
 }
 

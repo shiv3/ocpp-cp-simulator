@@ -1,8 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { Database as BunSqliteDatabase } from "bun:sqlite";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase as BunDb } from "../../cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import {
   ScenarioDefinition,
   ScenarioNodeType,
@@ -77,9 +75,7 @@ function buildScenarioInstance(
 
 describe("runScenario resume across daemon restart", () => {
   it("honors a persisted position even when the new scenario instance id differs from the saved key", async () => {
-    const raw = new BunSqliteDatabase(":memory:");
-    const db = new BunDb(raw);
-    runMigrations(db);
+    const db = BunDb.open(":memory:");
 
     const svc = new CLIChargePointService(
       {
@@ -88,6 +84,7 @@ describe("runScenario resume across daemon restart", () => {
         connectors: 1,
         vendor: "v",
         model: "m",
+        basicAuth: null,
       },
       db,
     );
@@ -145,9 +142,7 @@ describe("runScenario resume across daemon restart", () => {
   });
 
   it("falls back to a fresh run when the persisted node ids don't exist in the new scenario", async () => {
-    const raw = new BunSqliteDatabase(":memory:");
-    const db = new BunDb(raw);
-    runMigrations(db);
+    const db = BunDb.open(":memory:");
 
     const svc = new CLIChargePointService(
       {
@@ -156,6 +151,7 @@ describe("runScenario resume across daemon restart", () => {
         connectors: 1,
         vendor: "v",
         model: "m",
+        basicAuth: null,
       },
       db,
     );
@@ -288,9 +284,6 @@ describe("a manually stopped run leaves nothing to resume from (#314)", () => {
   }
 
   it("clears and persists the position when stop_scenario ends the run", async () => {
-    // `BunDb.open` rather than the raw handle the tests above use: it runs the
-    // migrations itself, and its typed constructor keeps this file's error
-    // count where it was.
     const db = BunDb.open(":memory:");
     const svc = new CLIChargePointService(
       {

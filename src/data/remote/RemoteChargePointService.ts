@@ -783,7 +783,7 @@ export class RemoteChargePointService implements ChargePointService {
     await this.runCpRpc(id, "stop_heartbeat");
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
+  async authorize(id: string, tagId?: string): Promise<void> {
     await this.runCpRpc(id, "authorize", { tagId });
   }
 
@@ -808,7 +808,7 @@ export class RemoteChargePointService implements ChargePointService {
   async startTransaction(
     id: string,
     connectorId: number,
-    tagId: string,
+    tagId?: string,
     options?: StartTransactionCommandOptions,
   ): Promise<void> {
     await this.runCpRpc(id, "start_transaction", {

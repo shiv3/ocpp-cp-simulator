@@ -237,7 +237,7 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
+  async authorize(id: string, tagId?: string): Promise<void> {
     this.requireService(id).authorize(tagId);
   }
 
@@ -253,7 +253,7 @@ export class RegistryChargePointService implements ChargePointService {
   async startTransaction(
     id: string,
     connectorId: number,
-    tagId: string,
+    tagId?: string,
     options?: StartTransactionCommandOptions,
   ): Promise<void> {
     this.requireService(id).startTransaction(connectorId, tagId, options);

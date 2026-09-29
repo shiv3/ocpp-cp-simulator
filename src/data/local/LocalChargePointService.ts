@@ -53,6 +53,7 @@ import {
 } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
+import { DEFAULT_ID_TAG } from "../../cp/domain/auth/IdTagPool";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
@@ -375,8 +376,9 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
-    this.getExistingChargePointOrThrow(id).authorize(tagId);
+  async authorize(id: string, tagId?: string): Promise<void> {
+    const cp = this.getExistingChargePointOrThrow(id);
+    cp.authorize(tagId ?? cp.nextIdTag() ?? DEFAULT_ID_TAG);
   }
 
   async sendDataTransfer(
@@ -395,11 +397,14 @@ export class LocalChargePointService implements ChargePointService {
   async startTransaction(
     id: string,
     connectorId: number,
-    tagId: string,
+    tagId?: string,
     options: StartTransactionCommandOptions = {},
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).startTransaction(
-      tagId,
+    // Resolved like the daemon's CLI service: an explicit tag wins, the pool
+    // fills a gap, and a charge point without one keeps the default (#299).
+    const cp = this.getExistingChargePointOrThrow(id);
+    cp.startTransaction(
+      tagId ?? cp.nextIdTag(connectorId) ?? DEFAULT_ID_TAG,
       connectorId,
       undefined,
       undefined,

@@ -1,8 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { Database as BunSqliteDatabase } from "bun:sqlite";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase as BunDb } from "../../cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import {
   ScenarioDefinition,
   ScenarioNodeType,
@@ -54,9 +52,7 @@ function parkingScenario(connectorId: number): ScenarioDefinition {
 }
 
 function newService(): CLIChargePointService {
-  const raw = new BunSqliteDatabase(":memory:");
-  const db = new BunDb(raw);
-  runMigrations(db);
+  const db = BunDb.open(":memory:");
   return new CLIChargePointService(
     {
       cpId: "test-cp",
@@ -64,6 +60,7 @@ function newService(): CLIChargePointService {
       connectors: 1,
       vendor: "v",
       model: "m",
+      basicAuth: null,
     },
     db,
   );

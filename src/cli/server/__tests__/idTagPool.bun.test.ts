@@ -8,6 +8,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { parseCreateBody } from "../httpServer";
 import { RegistryChargePointService } from "../RegistryChargePointService";
+import { registryServiceDeps } from "./registryServiceDeps";
 
 const tempFiles: string[] = [];
 
@@ -203,7 +204,10 @@ describe("the pool survives the control-plane path (#299)", () => {
     // `parseCreateBody` produced the config, `toInitOptions` did not copy it,
     // and the create reported success with nothing wired up.
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = new RegistryChargePointService(
+      registry,
+      registryServiceDeps(),
+    );
     try {
       await service.createChargePoint(
         parseCreateBody({
@@ -222,7 +226,10 @@ describe("the pool survives the control-plane path (#299)", () => {
 
   it("clears the pool when an update omits it", async () => {
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = new RegistryChargePointService(
+      registry,
+      registryServiceDeps(),
+    );
     try {
       await service.createChargePoint(
         parseCreateBody({

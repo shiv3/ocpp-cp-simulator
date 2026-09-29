@@ -1030,7 +1030,7 @@ for (const { name, version, dialect } of DISPATCH_COVERAGE_DIALECTS) {
                 to: `http://127.0.0.1:9700/ocpp/soap/${id}/ChargePointService`,
                 payload: MINIMAL_CS_TO_CP_PAYLOAD[op] ?? {},
                 dialect,
-                ...(meta.bidirectional ? { service: "cp" as const } : {}),
+                ...(meta?.bidirectional ? { service: "cp" as const } : {}),
               }),
             );
             const body = await res.text();

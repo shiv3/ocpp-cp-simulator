@@ -829,11 +829,14 @@ export function parseCreateBody(
   // status snapshot, the persisted `charge_points.ws_url` and every log line
   // keep seeing one string.
   const rawWsUrl = body.wsUrl;
-  const supervisionUrls: string[] | undefined = Array.isArray(rawWsUrl)
-    ? rawWsUrl.filter((u): u is string => typeof u === "string" && u.length > 0)
-    : undefined;
-  if (supervisionUrls && supervisionUrls.length !== rawWsUrl.length) {
-    throw new Error("wsUrl entries must be non-empty strings");
+  let supervisionUrls: string[] | undefined;
+  if (Array.isArray(rawWsUrl)) {
+    supervisionUrls = rawWsUrl.filter(
+      (u): u is string => typeof u === "string" && u.length > 0,
+    );
+    if (supervisionUrls.length !== rawWsUrl.length) {
+      throw new Error("wsUrl entries must be non-empty strings");
+    }
   }
   const wsUrl = supervisionUrls ? supervisionUrls[0] : rawWsUrl;
   if (typeof wsUrl !== "string" || wsUrl.length === 0) {

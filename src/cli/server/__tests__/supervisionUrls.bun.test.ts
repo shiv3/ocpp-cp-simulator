@@ -5,6 +5,7 @@ import { createParamsSchema } from "../../../protocol";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { RegistryChargePointService } from "../RegistryChargePointService";
+import { registryServiceDeps } from "./registryServiceDeps";
 import { SupervisionUrlPool } from "../../../cp/infrastructure/transport/SupervisionUrlPool";
 import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
 import { toWireCreateParams } from "../../../data/remote/RemoteChargePointService";
@@ -143,7 +144,10 @@ describe("supervision URLs survive the control-plane path (#296)", () => {
     // dropped it, so the charge point came up on the first URL with no pool
     // and `cp.create` still answered success. This asserts the whole path.
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = new RegistryChargePointService(
+      registry,
+      registryServiceDeps(),
+    );
     try {
       const init = parseCreateBody({
         cpId: "CP-POOL",
@@ -167,7 +171,10 @@ describe("supervision URLs survive the control-plane path (#296)", () => {
     // point that was just pointed at one endpoint still failing over to the
     // stale pool — and still persisting it.
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = new RegistryChargePointService(
+      registry,
+      registryServiceDeps(),
+    );
     try {
       await service.createChargePoint(
         parseCreateBody({
@@ -197,7 +204,10 @@ describe("supervision URLs survive the control-plane path (#296)", () => {
 
   it("keeps the list across an update that repeats it", async () => {
     const registry = new CPRegistry(new EventBus());
-    const service = new RegistryChargePointService(registry);
+    const service = new RegistryChargePointService(
+      registry,
+      registryServiceDeps(),
+    );
     try {
       await service.createChargePoint(
         parseCreateBody({

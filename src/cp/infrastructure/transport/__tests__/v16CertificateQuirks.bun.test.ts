@@ -68,7 +68,7 @@ async function acceptBootAndDrainStartup(
 }
 
 async function certificateWithAlgorithm(
-  algorithm: typeof EC_ALG | typeof RSA_PKCS1_ALG | typeof RSA_PSS_ALG,
+  algorithm: typeof EC_ALG | typeof RSA_PKCS1_ALG,
   serial: string,
 ): Promise<string> {
   const keys = await crypto.subtle.generateKey(algorithm, true, [

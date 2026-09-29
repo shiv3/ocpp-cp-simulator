@@ -1,5 +1,10 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  GetLocalListVersionRequestV16,
+  GetLocalListVersionResponseV16,
+  SendLocalListRequestV16,
+  SendLocalListResponseV16,
+} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 import type { SendLocalListItem } from "../../../../domain/auth/LocalAuthList";
 

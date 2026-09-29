@@ -1,5 +1,9 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  AuthorizeResponseV16,
+  StartTransactionResponseV16,
+  StopTransactionResponseV16,
+} from "../../../../../ocpp";
 import type { AuthorizeRequestV16 } from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";

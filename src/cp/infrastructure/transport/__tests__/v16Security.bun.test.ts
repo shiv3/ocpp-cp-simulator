@@ -14,6 +14,14 @@ import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
 
+/** The CSR a SignCertificate.req carries, after checking the payload shape. */
+function csrOf(payload: unknown): x509.Pkcs10CertificateRequest {
+  if (!isValidSignCertificateRequestV16(payload)) {
+    throw new Error(`not a SignCertificate.req: ${JSON.stringify(payload)}`);
+  }
+  return new x509.Pkcs10CertificateRequest(payload.csr);
+}
+
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
 const EC_ALG = {
@@ -359,9 +367,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         let signCertificate = await csms.waitForCall("SignCertificate");
-        let csr = new x509.Pkcs10CertificateRequest(
-          signCertificate.payload.csr,
-        );
+        let csr = csrOf(signCertificate.payload);
         expect(csr.publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
         csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });
 
@@ -369,7 +375,7 @@ describe.skipIf(!canBindBunServe())(
         await cp.sendSignCertificate();
 
         signCertificate = await csms.waitForCall("SignCertificate");
-        csr = new x509.Pkcs10CertificateRequest(signCertificate.payload.csr);
+        csr = csrOf(signCertificate.payload);
         // Should still be RSA because quirks are sticky
         expect(csr.publicKey.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
         csms.replyCallResult(signCertificate.messageId, { status: "Accepted" });

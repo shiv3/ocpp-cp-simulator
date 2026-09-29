@@ -1,5 +1,8 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  DataTransferRequestV16,
+  DataTransferResponseV16,
+} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
 /**

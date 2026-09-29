@@ -18,7 +18,14 @@
  */
 
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  ClearChargingProfileRequestV16,
+  ClearChargingProfileResponseV16,
+  GetCompositeScheduleRequestV16,
+  GetCompositeScheduleResponseV16,
+  SetChargingProfileRequestV16,
+  SetChargingProfileResponseV16,
+} from "../../../../../ocpp";
 import type { Connector } from "../../../../domain/connector/Connector";
 import {
   OCPPStatus,

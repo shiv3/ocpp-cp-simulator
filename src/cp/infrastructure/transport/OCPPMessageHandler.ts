@@ -57,6 +57,7 @@ import type {
   UnlockConnectorRequestV16,
   UpdateFirmwareRequestV16,
 } from "../../../ocpp";
+import { OCPPErrorCodeV16 } from "../../../ocpp";
 import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,
@@ -1104,7 +1105,7 @@ export class OCPPMessageHandler {
       this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
       this.sendCallError(
         messageId,
-        "NotImplemented",
+        OCPPErrorCodeV16.NotImplemented,
         "This action is not supported",
         gen,
       );
@@ -1134,7 +1135,12 @@ export class OCPPMessageHandler {
       );
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
-      this.sendCallError(messageId, "InternalError", String(error), gen);
+      this.sendCallError(
+        messageId,
+        OCPPErrorCodeV16.InternalError,
+        String(error),
+        gen,
+      );
     }
   }
 

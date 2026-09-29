@@ -1,6 +1,9 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
-import type {} from "../../../../../ocpp";
+import type {
+  GetDiagnosticsRequestV16,
+  GetDiagnosticsResponseV16,
+} from "../../../../../ocpp";
 import { UploadFile } from "../../../file_upload";
 import { LogType } from "../../../../shared/Logger";
 

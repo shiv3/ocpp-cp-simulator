@@ -50,6 +50,12 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     this.record("sendTransactionEvent", args);
   }
 
+  sendTransactionUpdate(
+    ...args: Parameters<IChargePointMessageHandler["sendTransactionUpdate"]>
+  ): ReturnType<IChargePointMessageHandler["sendTransactionUpdate"]> {
+    this.record("sendTransactionUpdate", args);
+  }
+
   sendMeterValue(
     ...args: Parameters<IChargePointMessageHandler["sendMeterValue"]>
   ): ReturnType<IChargePointMessageHandler["sendMeterValue"]> {
@@ -60,6 +66,7 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     ...args: Parameters<IChargePointMessageHandler["sendDataTransfer"]>
   ): ReturnType<IChargePointMessageHandler["sendDataTransfer"]> {
     this.record("sendDataTransfer", args);
+    return Promise.resolve({ status: "Accepted" });
   }
 
   sendSecurityEventNotification(
@@ -204,10 +211,16 @@ describe("Outbox", () => {
     outbox.sendTransactionEvent(event);
     expectCall(handler, "sendTransactionEvent", [event]);
 
+    const updateOptions: Parameters<
+      IChargePointMessageHandler["sendTransactionUpdate"]
+    >[1] = { triggerReason: "MeterValuePeriodic", meterValues: true };
+    outbox.sendTransactionUpdate(1, updateOptions);
+    expectCall(handler, "sendTransactionUpdate", [1, updateOptions]);
+
     outbox.sendMeterValue(42, 1, "Sample.Periodic");
     expectCall(handler, "sendMeterValue", [42, 1, "Sample.Periodic"]);
 
-    outbox.sendDataTransfer("Vendor", "Message", '{"ok":true}');
+    void outbox.sendDataTransfer("Vendor", "Message", '{"ok":true}');
     expectCall(handler, "sendDataTransfer", [
       "Vendor",
       "Message",

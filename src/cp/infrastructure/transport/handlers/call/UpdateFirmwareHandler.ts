@@ -1,6 +1,9 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
-import type {} from "../../../../../ocpp";
+import type {
+  UpdateFirmwareRequestV16,
+  UpdateFirmwareResponseV16,
+} from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
 
 /**

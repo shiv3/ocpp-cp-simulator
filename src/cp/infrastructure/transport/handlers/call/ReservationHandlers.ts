@@ -1,5 +1,10 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
-import type {} from "../../../../../ocpp";
+import type {
+  CancelReservationRequestV16,
+  CancelReservationResponseV16,
+  ReserveNowRequestV16,
+  ReserveNowResponseV16,
+} from "../../../../../ocpp";
 import {
   ReservationStatus,
   CancelReservationStatus,

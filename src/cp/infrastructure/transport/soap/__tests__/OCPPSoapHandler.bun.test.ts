@@ -27,7 +27,12 @@ import {
   OCPP16_SOAP_NAMESPACES,
 } from "../dialect";
 import { OCPPSoapHandler } from "../OCPPSoapHandler";
-import { Logger } from "../../../../shared/Logger";
+import {
+  Logger,
+  LogLevel,
+  LogType,
+  type LogEntry,
+} from "../../../../shared/Logger";
 
 interface ReceivedSoapRequest {
   readonly body: string;
@@ -1270,6 +1275,44 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
           messageId: "msg-001",
           data: "data-payload",
         });
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
+  // #374: the handler did not implement sendTransactionUpdate at all, so a
+  // transaction_event driven at a SOAP charge point threw a TypeError out of
+  // ChargePoint instead of being refused like on the 1.6 WebSocket handler.
+  it("refuses a driven TransactionEvent with a warning and sends nothing", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.6-TX-UPDATE";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.6-TX-UPDATE/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const logger = new Logger();
+      const warnings: LogEntry[] = [];
+      logger.loggingCallback = (entry) => {
+        if (entry.level === LogLevel.WARN) warnings.push(entry);
+      };
+      const handler = new OCPPSoapHandler(cp, logger, {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP16_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+
+        expect(warnings.map((w) => w.message)).toEqual([
+          expect.stringContaining("TransactionEvent is an OCPP 2.x message"),
+        ]);
+        expect(warnings[0].type).toBe(LogType.TRANSACTION);
+        expect(csms.received).toEqual([]);
       } finally {
         csms.stop();
       }

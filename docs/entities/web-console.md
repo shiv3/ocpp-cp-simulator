@@ -70,6 +70,14 @@ started elsewhere while the page is open (for example an auto-start trigger)
 is attached the same way. When `run=` names a run that has ended or been
 superseded, a banner says so (daemon only — local mode mints no runId) (#366).
 
+While a run is `waiting`, the panel and the run console both offer **+30 s**
+(only when the wait has a timeout), **Retry** and **Continue** beside the
+waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#controls-on-a-parked-wait),
+#240). The countdown follows the runtime's `waitDeadlineAt`, so an extension
+shows at once, and a control the runtime refuses is shown inline instead of
+being dropped. In Remote mode every open console re-reads the run on
+`scenario_wait_changed`, not only the one that acted.
+
 The two consoles link to each other with a design switcher (the classic
 navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic
 design** button).

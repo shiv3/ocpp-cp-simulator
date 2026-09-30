@@ -1014,6 +1014,44 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [undefined],
       },
       {
+        name: "extendScenarioWait",
+        invoke: (service) =>
+          service.extendScenarioWait("cp-1", 1, "scenario-1", 30),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "extend_scenario_wait",
+            params: { connector: 1, scenarioId: "scenario-1", seconds: 30 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "retryScenarioWait",
+        invoke: (service) => service.retryScenarioWait("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "retry_scenario_wait",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
+        name: "continueScenarioWait",
+        invoke: (service) =>
+          service.continueScenarioWait("cp-1", 1, "scenario-1"),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "continue_scenario_wait",
+            params: { connector: 1, scenarioId: "scenario-1" },
+          },
+        ],
+        results: [undefined],
+      },
+      {
         name: "stopAllScenarios",
         invoke: (service) => service.stopAllScenarios("cp-1", 1),
         expected: [

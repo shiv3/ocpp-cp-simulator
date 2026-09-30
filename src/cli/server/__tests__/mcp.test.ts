@@ -172,6 +172,7 @@ describe("MCP server", () => {
       "scenario_templates",
       "run_scenario_template",
       "scenario_status",
+      "control_scenario_wait",
       "get_logs",
       "network_sim_get",
       "network_sim_set",

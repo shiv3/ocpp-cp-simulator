@@ -681,6 +681,21 @@ export interface ScenarioExecutionContext {
    *  node is active. Lets a client compute time-on-step and, with
    *  expectation.timeoutMs, the remaining wait. */
   currentNodeStartedAt?: number | null;
+  /** #240: epoch ms when the parked wait times out; null when no wait is
+   *  parked or it waits forever. Moves when an operator extends or retries
+   *  the wait, so prefer it over expectation.timeoutMs for a countdown. */
+  waitDeadlineAt?: number | null;
+}
+
+/** #240: an operator action taken on a parked wait. */
+export interface ScenarioWaitIntervention {
+  kind: "extend" | "retry" | "continue";
+  /** The node whose wait was acted on. */
+  nodeId: string;
+  /** Epoch ms of the action. */
+  at: number;
+  /** For extend: seconds added to the deadline. */
+  seconds?: number;
 }
 
 /**
@@ -745,13 +760,14 @@ export interface ScenarioExecutorCallbacks {
   ) => Promise<void>;
   onConnectorPlug?: (action: "plugin" | "plugout") => Promise<void>;
   onDelay?: (seconds: number) => Promise<void>;
-  onWaitForRemoteStart?: (
-    timeout?: number,
-  ) => Promise<string | RemoteStartDetails>; // Returns tagId from RemoteStartTransaction
+  // #240: the trigger waits below (remote start / stop, CSMS call,
+  // connection, status, reservation) take no timeout: the executor enforces
+  // the node's timeout itself, so an operator can extend or retry it.
+  onWaitForRemoteStart?: () => Promise<string | RemoteStartDetails>; // Returns tagId from RemoteStartTransaction
   /**
    * Block until CSMS sends RemoteStopTransaction.req for the currently
    * active transaction. Returns the requested transactionId so callers
-   * can sanity-check it; if the timeout expires the promise rejects.
+   * can sanity-check it.
    * Implementations register a scenario-side handler so the default
    * RemoteStopTransactionHandler delegates instead of stopping the
    * transaction itself.
@@ -759,7 +775,7 @@ export interface ScenarioExecutorCallbacks {
   /** Resolves with `{ transactionId, reason }` so the next Transaction
    *  Stop node can pass the CSMS-supplied reason (defaults to "Remote")
    *  through to StopTransaction.req. */
-  onWaitForRemoteStop?: (timeout?: number) => Promise<{
+  onWaitForRemoteStop?: () => Promise<{
     transactionId: number;
     reason: string;
     triggerReason?: TransactionStopTriggerReason;
@@ -768,19 +784,12 @@ export interface ScenarioExecutorCallbacks {
    *  action. Resolves with the request payload for logging. */
   onWaitForCsmsCall?: (
     action: string,
-    timeout?: number,
     payload?: Record<string, unknown>,
   ) => Promise<{ action: string; payload: unknown }>;
   /** Issue #240: park until the WebSocket reaches `event`. Level-triggered;
-   *  never rejects on disconnect (only on timeout). */
-  onWaitForConnection?: (
-    event: "connected" | "disconnected",
-    timeout?: number,
-  ) => Promise<void>;
-  onWaitForStatus?: (
-    targetStatus: OCPPStatus,
-    timeout?: number,
-  ) => Promise<void>; // Waits for status change
+   *  never rejects on disconnect. */
+  onWaitForConnection?: (event: "connected" | "disconnected") => Promise<void>;
+  onWaitForStatus?: (targetStatus: OCPPStatus) => Promise<void>; // Waits for status change
   onWaitForMeterValue?: (
     targetValue: number,
     timeout?: number,
@@ -796,7 +805,7 @@ export interface ScenarioExecutorCallbacks {
     reservationId?: number,
   ) => Promise<number>; // Returns reservationId
   onCancelReservation?: (reservationId: number) => Promise<void>;
-  onWaitForReservation?: (timeout?: number) => Promise<number>; // Returns reservationId from ReserveNow request
+  onWaitForReservation?: () => Promise<number>; // Returns reservationId from ReserveNow request
   /** Apply (merge) a partial EVSettings onto the target connector. */
   onSetEVSettings?: (settings: Partial<EVSettings>) => Promise<void> | void;
   /** Read the current EVSettings; used by meterValue stopMode="evSettings". */
@@ -805,6 +814,8 @@ export interface ScenarioExecutorCallbacks {
   onNodeExecute?: (nodeId: string) => void;
   onNodeProgress?: (nodeId: string, remaining: number, total: number) => void; // Progress updates for long-running nodes
   onError?: (error: Error) => void;
+  /** #240: an operator extended, retried or continued a parked wait. */
+  onWaitIntervention?: (intervention: ScenarioWaitIntervention) => void;
   log?: (message: string, level?: "debug" | "info" | "warn" | "error") => void; // Logger callback
   /** §4.9: send a StatusNotification.req with explicit errorCode/info. */
   onSendStatusNotification?: (

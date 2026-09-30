@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import WaitControls from "../../components/WaitControls";
 import WaitingExpectation from "../../components/WaitingExpectation";
 import { formatElapsed } from "../../lib/scenarioExpectation";
 import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
+import { controlScenarioWait } from "../../lib/waitControl";
 import { buildScenarioUrl } from "../../lib/useAllScenarios";
 import { useDataContext } from "../../../data/providers/DataProvider";
 
@@ -20,7 +22,10 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
   connectorIds,
 }) => {
   const { chargePointService } = useDataContext();
-  const { runs, refresh } = useActiveScenarioRuns(cpId, connectorIds);
+  const { runs, refresh, scheduleRefresh } = useActiveScenarioRuns(
+    cpId,
+    connectorIds,
+  );
 
   const [now, setNow] = useState<number>(Date.now());
 
@@ -110,12 +115,28 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
               </div>
 
               {run.state === "waiting" && run.expectation && (
-                <WaitingExpectation
-                  expectation={run.expectation}
-                  currentNodeStartedAt={run.currentNodeStartedAt}
-                  now={now}
-                  className="text-xs text-gray-600 dark:text-gray-300"
-                />
+                <>
+                  <WaitingExpectation
+                    expectation={run.expectation}
+                    currentNodeStartedAt={run.currentNodeStartedAt}
+                    waitDeadlineAt={run.waitDeadlineAt}
+                    now={now}
+                    className="text-xs text-gray-600 dark:text-gray-300"
+                  />
+                  <WaitControls
+                    canExtend={run.waitDeadlineAt != null}
+                    onControl={(action, seconds) =>
+                      controlScenarioWait(
+                        chargePointService,
+                        cpId,
+                        run.connectorId,
+                        run.scenarioId,
+                        action,
+                        seconds,
+                      ).then(scheduleRefresh)
+                    }
+                  />
+                </>
               )}
 
               <Link

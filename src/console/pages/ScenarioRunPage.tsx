@@ -10,6 +10,7 @@ import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioT
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import TargetChip from "../components/TargetChip";
+import WaitControls from "../components/WaitControls";
 import WaitingExpectation from "../components/WaitingExpectation";
 import { consolePath } from "../routes";
 import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
@@ -108,9 +109,11 @@ const ScenarioRunPage: React.FC = () => {
     runId,
     expectation,
     currentNodeStartedAt,
+    waitDeadlineAt,
     hydrated,
     start,
     stop,
+    controlWait,
     runs,
   } = useScenarioRun(cpId || null, connectorId, scenario);
 
@@ -245,11 +248,17 @@ const ScenarioRunPage: React.FC = () => {
       )}
 
       {state === "waiting" && expectation && (
-        <WaitingExpectation
-          expectation={expectation}
-          currentNodeStartedAt={currentNodeStartedAt}
-          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-        />
+        <div className="mb-4 flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <WaitingExpectation
+            expectation={expectation}
+            currentNodeStartedAt={currentNodeStartedAt}
+            waitDeadlineAt={waitDeadlineAt}
+          />
+          <WaitControls
+            canExtend={waitDeadlineAt != null}
+            onControl={controlWait}
+          />
+        </div>
       )}
 
       {cpScopeScenario && (

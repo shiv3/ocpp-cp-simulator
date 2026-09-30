@@ -318,7 +318,7 @@ describe("ScenarioExecutor node dispatch", () => {
       { onWaitForRemoteStart },
     );
 
-    expect(onWaitForRemoteStart).toHaveBeenCalledWith(5);
+    expect(onWaitForRemoteStart).toHaveBeenCalledWith();
   });
 
   it("dispatches remoteStopTrigger nodes to onWaitForRemoteStop", async () => {
@@ -333,7 +333,7 @@ describe("ScenarioExecutor node dispatch", () => {
       { onWaitForRemoteStop },
     );
 
-    expect(onWaitForRemoteStop).toHaveBeenCalledWith(6);
+    expect(onWaitForRemoteStop).toHaveBeenCalledWith();
   });
 
   it("dispatches statusTrigger nodes to onWaitForStatus", async () => {
@@ -349,7 +349,7 @@ describe("ScenarioExecutor node dispatch", () => {
       { onWaitForStatus },
     );
 
-    expect(onWaitForStatus).toHaveBeenCalledWith(OCPPStatus.Preparing, 7);
+    expect(onWaitForStatus).toHaveBeenCalledWith(OCPPStatus.Preparing);
   });
 
   it("dispatches reserveNow nodes to onReserveNow", async () => {
@@ -391,7 +391,7 @@ describe("ScenarioExecutor node dispatch", () => {
       { onWaitForReservation },
     );
 
-    expect(onWaitForReservation).toHaveBeenCalledWith(8);
+    expect(onWaitForReservation).toHaveBeenCalledWith();
   });
 
   it("dispatches statusNotification nodes to onSendStatusNotification", async () => {

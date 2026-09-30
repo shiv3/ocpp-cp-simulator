@@ -24,6 +24,7 @@ import {
 import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
+import type { ScenarioManager } from "../../cp/application/scenario/ScenarioManager";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import {
   BootNotification,
@@ -778,7 +779,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
-    const connector = this.requireConnector(id, connectorId);
+    const manager = this.requireScenarioManager(id, connectorId);
     const template = getTemplateById(templateId);
     if (!template) throw new Error(`Unknown template: ${templateId}`);
     const definition = template.createScenario(id, connectorId);
@@ -788,8 +789,6 @@ export class LocalChargePointService implements ChargePointService {
         ...evSettings,
       };
     }
-    const manager = connector.scenarioManager;
-    if (!manager) throw new Error("Scenario manager not available");
     manager.loadScenarios([definition]);
     return { scenarioId: definition.id };
   }
@@ -799,9 +798,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     definition: ScenarioDefinition,
   ): Promise<{ scenarioId: string }> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
-    if (!manager) throw new Error("Scenario manager not available");
+    const manager = this.requireScenarioManager(id, connectorId);
     manager.loadScenarios([definition]);
     return { scenarioId: definition.id };
   }
@@ -834,9 +831,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
-    if (!manager) throw new Error("Scenario manager not available");
+    const manager = this.requireScenarioManager(id, connectorId);
     await manager.executeScenario(scenarioId);
   }
 
@@ -912,9 +907,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
     force = false,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
-    if (!manager) throw new Error("Scenario manager not available");
+    const manager = this.requireScenarioManager(id, connectorId);
     // ScenarioManager.stepScenario calls executor.step(); for forceStep we
     // dip into the executor directly via the manager's context.
     if (!force) {
@@ -927,6 +920,43 @@ export class LocalChargePointService implements ChargePointService {
       manager as unknown as { executors: Map<string, { forceStep(): void }> }
     ).executors.get(scenarioId);
     executor?.forceStep();
+  }
+
+  async extendScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): Promise<void> {
+    this.requireScenarioManager(id, connectorId).extendWait(
+      scenarioId,
+      seconds,
+    );
+  }
+
+  async retryScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireScenarioManager(id, connectorId).retryWait(scenarioId);
+  }
+
+  async continueScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireScenarioManager(id, connectorId).continueWait(scenarioId);
+  }
+
+  private requireScenarioManager(
+    id: string,
+    connectorId: number,
+  ): ScenarioManager {
+    const manager = this.requireConnector(id, connectorId).scenarioManager;
+    if (!manager) throw new Error("Scenario manager not available");
+    return manager;
   }
 
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {

@@ -593,6 +593,25 @@ export function mapServerEventToChargePointEvent(
         };
       }
       return null;
+    case "scenario_wait_changed":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string" &&
+        typeof data.nodeId === "string" &&
+        (data.kind === "extend" ||
+          data.kind === "retry" ||
+          data.kind === "continue")
+      ) {
+        return {
+          type: "scenario-wait-changed",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
+          nodeId: data.nodeId,
+          kind: data.kind,
+        };
+      }
+      return null;
     case "connector_removed":
       if (typeof data.connectorId === "number") {
         return {
@@ -1366,6 +1385,41 @@ export class RemoteChargePointService implements ChargePointService {
       connector: connectorId,
       scenarioId,
       force,
+    });
+  }
+
+  async extendScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): Promise<void> {
+    await this.runCpRpc(id, "extend_scenario_wait", {
+      connector: connectorId,
+      scenarioId,
+      seconds,
+    });
+  }
+
+  async retryScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "retry_scenario_wait", {
+      connector: connectorId,
+      scenarioId,
+    });
+  }
+
+  async continueScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    await this.runCpRpc(id, "continue_scenario_wait", {
+      connector: connectorId,
+      scenarioId,
     });
   }
 

@@ -5,6 +5,7 @@ summary: The node-graph JSON format for scripted charge-point behavior — 23 no
 sources:
   - schema/scenario.schema.json
   - src/cp/application/scenario/ScenarioTypes.ts
+  - src/cp/application/scenario/WaitControl.ts
   - src/cp/application/verification/ScenarioAssertions.ts
   - src/scenario/scenarioSchemaValidator.ts
   - src/scenario/deepPartialMatch.ts
@@ -23,7 +24,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-17
+updated: 2026-09-30
 ---
 
 # Scenario File Format (v1.2)
@@ -243,6 +244,37 @@ point's WebSocket reaches `event` (`"connected"` or `"disconnected"`).
 - This node only _observes_ the connection state — it never causes a
   disconnect itself. Simulating network drops is out of scope here (see
   issue #239) — that is what [Network simulation](network-simulation.md) does.
+
+### Controls on a parked wait
+
+**Issue #240**: while a run is parked on a trigger wait (`remoteStartTrigger`,
+`remoteStopTrigger`, `csmsCallTrigger`, `connectionTrigger`, `statusTrigger`,
+`reservationTrigger`), an operator can act on the wait through the
+`extend_scenario_wait` / `retry_scenario_wait` / `continue_scenario_wait`
+[RPCs](control-plane.md#cp-command-methods), the MCP
+`control_scenario_wait` tool, or the web console:
+
+- **Extend** pushes the timeout back by N seconds. A wait without a timeout
+  has nothing to extend (`invalid_params`). A later timeout error names the
+  effective total, e.g. `Timeout waiting for remote start (90s)` for a 60 s
+  node extended by 30 s.
+- **Retry** withdraws the wait and arms it again with the node's full
+  timeout. The node stays current; its start time restarts.
+- **Continue** releases the wait as if it were satisfied, **without** the
+  awaited event: nothing is captured from it. After a continued
+  `remoteStartTrigger` the next Start Transaction uses its own `tagId` (or
+  the charge point's idTag pool); after a continued `remoteStopTrigger` the
+  Stop Transaction sends its own `stopReason`.
+
+The executor owns the timeout of these nodes; `scenario_status` reports it as
+`waitDeadlineAt` (epoch ms). A timeout still fails the run — nothing here
+changes what an unattended run does. The auto-meter wait and `delay` are not
+trigger waits and take no controls. With parallel branches the controls act on the most recently armed wait still parked; once it settles, the previous one is reachable again.
+
+Every control is recorded in the run report's `interventions` array, in
+order: `{ kind, nodeId, at, seconds? }` (`at` in epoch ms, `seconds` for an
+extension). It is informational — the verdict still comes from the
+assertions alone, so a continued run can `PASS`.
 
 ## Edge shape
 

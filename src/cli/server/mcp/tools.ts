@@ -527,6 +527,41 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  // #240: one tool for the three controls on a parked wait; `action` picks
+  // the method, and the method's own schema rejects an extend without
+  // `seconds`.
+  mcp.tool("control_scenario_wait", {
+    description:
+      "Act on the wait a running scenario is parked on (for example a " +
+      "RemoteStart or CSMS-call trigger): 'extend' pushes its timeout back " +
+      "by `seconds`, 'retry' re-arms the wait with its full timeout, " +
+      "'continue' moves on to the next node without the awaited event. " +
+      "Each action is recorded in the run report's `interventions`.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      scenarioId: z.string().describe("Scenario identifier"),
+      action: z
+        .enum(["extend", "retry", "continue"])
+        .describe("What to do with the parked wait"),
+      seconds: METHODS.extend_scenario_wait.params.shape.seconds
+        .optional()
+        .describe("Seconds to add to the timeout (required for 'extend')"),
+    }),
+    handler: async ({ cpId, action, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: `${action}_scenario_wait`,
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("get_logs", {
     description:
       "Retrieve logs for a charge point. Returns the MOST RECENT entries: " +

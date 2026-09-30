@@ -11,6 +11,8 @@ import {
 export interface WaitingExpectationProps {
   expectation: ScenarioExpectation;
   currentNodeStartedAt: number | null;
+  /** #240: the runtime's deadline for the wait, when reported. */
+  waitDeadlineAt?: number | null;
   /** Current time (ms) from a caller that already ticks one. Omitted, the
    *  component ticks its own — and only while the countdown can move, so
    *  the second-by-second re-render stays local to it. */
@@ -23,14 +25,15 @@ export interface WaitingExpectationProps {
 const WaitingExpectation: React.FC<WaitingExpectationProps> = ({
   expectation,
   currentNodeStartedAt,
+  waitDeadlineAt,
   now,
   className,
 }) => {
   const [ownNow, setOwnNow] = useState<number>(Date.now());
   const countdownMoves =
     now === undefined &&
-    Boolean(expectation.timeoutMs) &&
-    currentNodeStartedAt != null;
+    (waitDeadlineAt != null ||
+      (Boolean(expectation.timeoutMs) && currentNodeStartedAt != null));
 
   useEffect(() => {
     if (!countdownMoves) return undefined;
@@ -43,6 +46,7 @@ const WaitingExpectation: React.FC<WaitingExpectationProps> = ({
     expectation,
     currentNodeStartedAt,
     now ?? ownNow,
+    waitDeadlineAt,
   );
   return (
     <div className={cn("flex flex-col gap-1", className)}>

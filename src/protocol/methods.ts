@@ -738,6 +738,23 @@ export const METHODS = {
     }),
     result: ANY,
   },
+  // #240: controls on the wait a running scenario is parked on.
+  extend_scenario_wait: {
+    params: z.object({
+      connector: CONN_POS,
+      scenarioId: STR_64K,
+      seconds: z.number().int().min(1).max(3600),
+    }),
+    result: ANY,
+  },
+  retry_scenario_wait: {
+    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    result: ANY,
+  },
+  continue_scenario_wait: {
+    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    result: ANY,
+  },
   stop_all_scenarios: {
     params: z.object({ connector: CONN_POS }),
     result: ANY,

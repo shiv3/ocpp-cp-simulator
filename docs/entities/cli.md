@@ -19,7 +19,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-09-17
+updated: 2026-09-30
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -727,6 +727,7 @@ Events are emitted in all modes:
 | `scenario_completed`    | `connectorId`, `scenarioId`               | Scenario execution completed                                                                                                                                                                                                                   |
 | `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed                                                                                                                                                                                                                      |
 | `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed                                                                                                                                                                                                                         |
+| `scenario_wait_changed` | `connectorId`, `scenarioId`, `kind`       | An operator extended, retried or continued the wait the scenario is parked on (`kind`: `extend` / `retry` / `continue`; also carries `nodeId` and `runId`) (#240)                                                                              |
 
 ## CLI Options
 

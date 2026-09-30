@@ -66,7 +66,7 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
 
     // The scenario now reaches its trigger node and arms — exactly what
     // ScenarioRuntime.waitForRemoteStart does via onWaitForRemoteStart.
-    const wait = callbacks.onWaitForRemoteStart!(0);
+    const wait = callbacks.onWaitForRemoteStart!();
 
     const warning = logs.find(
       (l) => l.level === "warn" && l.message.includes("RemoteStartTransaction"),
@@ -88,7 +88,7 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
       connector,
       hooks: { log: (message, level) => logs.push({ message, level }) },
     });
-    const wait = callbacks.onWaitForRemoteStart!(0);
+    const wait = callbacks.onWaitForRemoteStart!();
     expect(cp.isScenarioHandled(1)).toBe(true);
 
     new RemoteStartTransactionHandler().handle(
@@ -127,7 +127,7 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
       connector,
       hooks: { log: (message, level) => logs.push({ message, level }) },
     });
-    const wait = callbacks.onWaitForRemoteStart!(0);
+    const wait = callbacks.onWaitForRemoteStart!();
 
     expect(
       logs.some((l) => l.level === "warn" && l.message.includes("race")),
@@ -163,7 +163,7 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
     } satisfies HandlerContext);
     expect(connector.transaction).toBeNull();
 
-    const wait = callbacks.onWaitForRemoteStop!(0);
+    const wait = callbacks.onWaitForRemoteStop!();
 
     const warning = logs.find(
       (l) => l.level === "warn" && l.message.includes("RemoteStopTransaction"),

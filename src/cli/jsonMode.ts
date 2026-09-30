@@ -373,6 +373,28 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "extend_scenario_wait": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const seconds = requirePositiveInt(params, "seconds");
+      await ops.extendScenarioWait(connectorId, scenarioId, seconds);
+      return undefined;
+    }
+
+    case "retry_scenario_wait": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.retryScenarioWait(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "continue_scenario_wait": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.continueScenarioWait(connectorId, scenarioId);
+      return undefined;
+    }
+
     case "stop_all_scenarios": {
       const connectorId = requirePositiveInt(params, "connector");
       await ops.stopAllScenarios(connectorId);

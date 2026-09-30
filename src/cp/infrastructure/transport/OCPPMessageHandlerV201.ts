@@ -67,7 +67,11 @@ import {
   type V201InboundRegistry,
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
-import { ResponseEffectQueue } from "./network-sim";
+import {
+  ResponseEffectQueue,
+  type GenerationToken,
+  type Settlement,
+} from "./network-sim";
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -211,6 +215,54 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return crypto.randomUUID();
   }
 
+  /** Answer an inbound CSMS CALL with a CALLRESULT, announcing it first
+   *  (#396). */
+  private answerCall(
+    action: string,
+    messageId: string,
+    response: unknown,
+    gen: GenerationToken,
+    onSettled?: (s: Settlement) => void,
+  ): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "CallResult",
+    });
+    this._webSocket.sendResult(messageId, response, gen, onSettled);
+  }
+
+  /** Leave an inbound CSMS CALL unanswered, announcing it (#396). */
+  private ignoreCall(action: string, messageId: string): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "NoResponse",
+    });
+  }
+
+  /** Answer an inbound CSMS CALL with a CALLERROR, announcing it first
+   *  (#396). */
+  private rejectCall(
+    action: string,
+    messageId: string,
+    errorCode: OCPPErrorCode,
+    errorDescription: string,
+    gen: GenerationToken,
+  ): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "CallError",
+      errorCode,
+    });
+    this._webSocket.sendError(
+      messageId,
+      { errorCode, errorDescription, errorDetails: {} },
+      gen,
+    );
+  }
+
   private send(
     action: V201Action,
     messageId: string,
@@ -273,7 +325,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       // actions in either version's vocabulary; a 2.0.1 CALL is looked up
       // under its own name and its 1.6 alias (RequestStartTransaction ←
       // RemoteStartTransaction, …).
-      this._chargePoint.notifyIncomingCall(action, payload);
+      // #396: the control plane announces the CALL under its wire name;
+      // every answer below reports itself through answerCall / rejectCall.
+      this._chargePoint.notifyIncomingCall(action, payload, messageId);
       const aliases = csmsActionAliases(action);
       const policyName = aliases.find(
         (name) => this._chargePoint.getInboundCallPolicy(name) !== undefined,
@@ -289,13 +343,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             `[v2.0.1] Inbound policy: replied CallError(${inboundPolicy.errorCode}) to ${action}`,
             LogType.OCPP,
           );
-          this._webSocket.sendError(
+          this.rejectCall(
+            action,
             messageId,
-            {
-              errorCode: inboundPolicy.errorCode as OCPPErrorCode,
-              errorDescription: inboundPolicy.errorDescription,
-              errorDetails: {},
-            },
+            inboundPolicy.errorCode as OCPPErrorCode,
+            inboundPolicy.errorDescription,
             gen,
           );
           return;
@@ -304,6 +356,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           `[v2.0.1] Inbound policy: ignored ${action} (no response)`,
           LogType.OCPP,
         );
+        this.ignoreCall(action, messageId);
         return;
       }
       const armedUnder = aliases.find((name) =>
@@ -333,7 +386,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           // Same one call site as the 1.6 handler: the caller chose the
           // status, and every other action the responseOverride node lists
           // answers `{ status }` on 2.0.1 too.
-          this._webSocket.sendResult(
+          this.answerCall(
+            action,
             messageId,
             { status: overrideStatus },
             this._webSocket.currentGeneration(),
@@ -346,13 +400,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       if (entry) {
         if (!entry.validate(payload)) {
           const gen = this._webSocket.currentGeneration();
-          this._webSocket.sendError(
+          this.rejectCall(
+            action,
             messageId,
-            {
-              errorCode: "FormationViolation" as OCPPErrorCode,
-              errorDescription: `Invalid ${action} payload`,
-              errorDetails: {},
-            },
+            "FormationViolation" as OCPPErrorCode,
+            `Invalid ${action} payload`,
             gen,
           );
           return;
@@ -365,12 +417,22 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
         };
-        const { response, afterResult } = entry.handle(payload, ctx);
+        let handled: ReturnType<typeof entry.handle>;
+        try {
+          handled = entry.handle(payload, ctx);
+        } catch (error) {
+          // A throwing handler has always left the CALL unanswered (the
+          // socket layer logs the error); say so, so the announced call
+          // does not wait for an answer forever (#396).
+          this.ignoreCall(action, messageId);
+          throw error;
+        }
+        const { response, afterResult } = handled;
         // Register effect with queue if present, get settlement callback
         const onSettled = afterResult
           ? this._responseEffectQueue.register(gen, afterResult)
           : undefined;
-        this._webSocket.sendResult(messageId, response, gen, onSettled);
+        this.answerCall(action, messageId, response, gen, onSettled);
         return;
       }
 
@@ -379,13 +441,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         `[v2.0.1] Unsupported CSMS action ${action}`,
         LogType.OCPP,
       );
-      this._webSocket.sendError(
+      this.rejectCall(
+        action,
         messageId,
-        {
-          errorCode: "NotImplemented" as OCPPErrorCode,
-          errorDescription: "This action is not supported",
-          errorDetails: {},
-        },
+        "NotImplemented" as OCPPErrorCode,
+        "This action is not supported",
         gen,
       );
     } else if (messageType === OCPPMessageType.CALLRESULT) {

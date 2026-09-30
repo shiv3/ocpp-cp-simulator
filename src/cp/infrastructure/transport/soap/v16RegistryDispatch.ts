@@ -7,6 +7,7 @@ import type {
   SoapPayload,
 } from "./soapEnvelope";
 import type { SoapDialect } from "./dialect";
+import type { OCPP15SoapInboundResult } from "./OCPPSoapServer";
 import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegistry";
 import { DataTransferHandler } from "../handlers";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
@@ -315,7 +316,8 @@ export function coerceAndSchemaForOperation(
  * 1. Coerce the SOAP payload to proper types using the v16 JSON schema
  * 2. Validate the coerced payload against that schema (OCPP 1.6-S only)
  * 3. Look up and execute the CALL handler for the operation
- * 4. Return the response payload
+ * 4. Return the response payload, and the handler's post-response effect
+ *    for the caller to run once the reply is decided (#396)
  *
  * DataTransfer is handled specially: dispatched to a fresh DataTransferHandler()
  * instance since it must be instance-specific in full dispatch context.
@@ -326,7 +328,7 @@ export async function dispatchSoapCallViaV16Registry(input: {
   chargePoint: ChargePoint;
   logger: Logger;
   dialect: SoapDialect;
-}): Promise<SoapPayload> {
+}): Promise<OCPP15SoapInboundResult> {
   const { operation, payload, chargePoint, logger } = input;
 
   // Get the schema and action for this operation
@@ -396,13 +398,15 @@ export async function dispatchSoapCallViaV16Registry(input: {
  * wrapping the response and a post-response side effect. SOAP has no write
  * settlement to hang that effect on, so unwrap the payload — returning the
  * wrapper would serialize `kind`/`afterResponseSettled` into the response
- * body — and defer the effect past this reply, matching how the legacy Reset
- * handler schedules its own follow-up.
+ * body — and hand the effect back, deferred past the reply. Queuing it here
+ * would run it before the server has announced the answer (#396).
  */
-function unwrapHandlerResult(raw: unknown): SoapPayload {
+function unwrapHandlerResult(raw: unknown): OCPP15SoapInboundResult {
   const { payload, effect } = normalizeHandlerResult(raw as HandlerResult);
-  if (effect) queueMicrotask(effect);
-  return payload as SoapPayload;
+  return {
+    payload: payload as SoapPayload,
+    ...(effect ? { afterResponse: () => queueMicrotask(effect) } : {}),
+  };
 }
 
 /**

@@ -125,6 +125,7 @@ const createMockChargePoint = (): ChargePoint => {
   return {
     notifyOutgoingCall: vi.fn(),
     notifyIncomingCall: vi.fn(),
+    notifyIncomingCallCompleted: vi.fn(),
     notifyAuthorizeResult: vi.fn(),
     onBootNotificationAccepted: vi.fn(),
     onBootNotificationPending: vi.fn(),

@@ -1,7 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import { answerTo, bootedV201ChargePoint, startMockCsms } from "./mockCsms";
 
 /**
  * #349: on OCPP 2.0.1 the inbound CALL dispatch now consults what the 1.6
@@ -9,40 +7,6 @@ import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
  * one-shot response overrides — and a scenario may spell the action in
  * either version's vocabulary.
  */
-async function bootedChargePoint(
-  csms: MockCsms,
-  id: string,
-): Promise<ChargePoint> {
-  const cp = new ChargePoint(
-    id,
-    DefaultBootNotification,
-    1,
-    csms.url,
-    null,
-    null,
-    null,
-    {},
-    [],
-    "OCPP-2.0.1",
-    {},
-  );
-  cp.events.on("error", () => undefined);
-  cp.connect();
-  const boot = await csms.waitForCall("BootNotification");
-  csms.replyCallResult(boot.messageId, {
-    status: "Accepted",
-    currentTime: "2026-09-17T00:00:00.000Z",
-    interval: 300,
-  });
-  await csms.waitForFrame(
-    (frame) => frame[0] === 2 && frame[2] === "StatusNotification",
-  );
-  return cp;
-}
-
-const answerTo = (messageId: string) => (frame: OcppFrame) =>
-  (frame[0] === 3 || frame[0] === 4) && frame[1] === messageId;
-
 const REQUEST_START = {
   idToken: { idToken: "REMOTE-TAG", type: "ISO14443" },
   remoteStartId: 1,
@@ -52,7 +16,7 @@ const REQUEST_START = {
 describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)", () => {
   it("a responseOverride armed under the 1.6 name answers the 2.0.1 CALL once", async () => {
     const csms = startMockCsms();
-    const cp = await bootedChargePoint(csms, "CP201-OVERRIDE");
+    const cp = await bootedV201ChargePoint(csms, "CP201-OVERRIDE");
     try {
       cp.armResponseOverride("RemoteStartTransaction", "Rejected");
       csms.send([2, "rs-1", "RequestStartTransaction", REQUEST_START]);
@@ -73,7 +37,7 @@ describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)
 
   it("an inboundPolicy of kind callerror answers with the CALLERROR it names", async () => {
     const csms = startMockCsms();
-    const cp = await bootedChargePoint(csms, "CP201-POLICY-ERR");
+    const cp = await bootedV201ChargePoint(csms, "CP201-POLICY-ERR");
     try {
       cp.setInboundCallPolicy("Reset", {
         kind: "callerror",
@@ -102,7 +66,7 @@ describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)
 
   it("an inboundPolicy of kind ignore answers nothing", async () => {
     const csms = startMockCsms();
-    const cp = await bootedChargePoint(csms, "CP201-POLICY-IGNORE");
+    const cp = await bootedV201ChargePoint(csms, "CP201-POLICY-IGNORE");
     try {
       cp.setInboundCallPolicy("RequestStopTransaction", { kind: "ignore" });
       csms.send([
@@ -122,7 +86,7 @@ describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)
 
   it("every incoming CALL is surfaced to the scenario layer under its wire name", async () => {
     const csms = startMockCsms();
-    const cp = await bootedChargePoint(csms, "CP201-TRIGGER");
+    const cp = await bootedV201ChargePoint(csms, "CP201-TRIGGER");
     try {
       const seen: Array<{ action: string }> = [];
       cp.events.on("incomingCallReceived", (evt: { action: string }) =>
@@ -139,7 +103,7 @@ describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)
 
   it("an override armed as ChangeConfiguration is not honoured for SetVariables — the handler answers", async () => {
     const csms = startMockCsms();
-    const cp = await bootedChargePoint(csms, "CP201-OVERRIDE-SETVARS");
+    const cp = await bootedV201ChargePoint(csms, "CP201-OVERRIDE-SETVARS");
     try {
       cp.armResponseOverride("ChangeConfiguration", "Rejected");
       csms.send([
@@ -172,7 +136,7 @@ describe("OCPP 2.0.1 inbound policy / response override / csmsCallTrigger (#349)
 
   it("an override armed under both spellings is consumed once, under both", async () => {
     const csms = startMockCsms();
-    const cp = await bootedChargePoint(csms, "CP201-OVERRIDE-BOTH");
+    const cp = await bootedV201ChargePoint(csms, "CP201-OVERRIDE-BOTH");
     try {
       cp.armResponseOverride("RemoteStartTransaction", "Rejected");
       cp.armResponseOverride("RequestStartTransaction", "Rejected");

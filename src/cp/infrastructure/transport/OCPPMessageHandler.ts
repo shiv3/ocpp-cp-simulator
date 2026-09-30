@@ -1036,8 +1036,10 @@ export class OCPPMessageHandler {
     const gen = this._webSocket.currentGeneration();
 
     // Issue #110: surface every incoming CSMS call to the scenario layer
-    // (csmsCallTrigger nodes), regardless of handler outcome.
-    this._chargePoint.notifyIncomingCall(action, payload);
+    // (csmsCallTrigger nodes), regardless of handler outcome. #396: the
+    // control plane announces it too, and every answer below reports
+    // itself through sendCallResult / sendCallError.
+    this._chargePoint.notifyIncomingCall(action, payload, messageId);
 
     // Issue #247: inbound call policy — if set, enforce it before handler lookup.
     // Unlike responseOverride (one-shot), policies are sticky and survive reconnects.
@@ -1049,6 +1051,7 @@ export class OCPPMessageHandler {
           LogType.OCPP,
         );
         this.sendCallError(
+          action,
           messageId,
           inboundPolicy.errorCode as OCPPErrorCode,
           inboundPolicy.errorDescription,
@@ -1060,6 +1063,7 @@ export class OCPPMessageHandler {
           `Inbound policy: ignored ${action} (no response)`,
           LogType.OCPP,
         );
+        this.ignoreCall(action, messageId);
         return;
       }
     }
@@ -1079,6 +1083,7 @@ export class OCPPMessageHandler {
       // string (e.g. "Rejected" for TC_026); the closed response union
       // can't express that, so assert the shape at this one call site.
       this.sendCallResult(
+        action,
         messageId,
         {
           status: overrideStatus,
@@ -1094,6 +1099,7 @@ export class OCPPMessageHandler {
     if (!handler) {
       this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
       this.sendCallError(
+        action,
         messageId,
         OCPPErrorCodeV16.NotImplemented,
         "This action is not supported",
@@ -1118,6 +1124,7 @@ export class OCPPMessageHandler {
         ? this._responseEffectQueue.register(gen, effect)
         : undefined;
       this.sendCallResult(
+        action,
         messageId,
         normalizedPayload as OcppMessageResponsePayload,
         gen,
@@ -1126,6 +1133,7 @@ export class OCPPMessageHandler {
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
       this.sendCallError(
+        action,
         messageId,
         OCPPErrorCodeV16.InternalError,
         String(error),
@@ -1254,11 +1262,17 @@ export class OCPPMessageHandler {
   // See src/cp/handlers/ directory
 
   private sendCallResult(
+    action: string,
     messageId: string,
     payload: OcppMessageResponsePayload,
     gen?: ReturnType<typeof this._webSocket.currentGeneration>,
     onSettled?: (s: Settlement) => void,
   ): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "CallResult",
+    });
     // Callers without a dispatch-captured generation (response overrides,
     // unsupported-action errors) respond in the current generation.
     this._webSocket.sendResult(
@@ -1269,13 +1283,29 @@ export class OCPPMessageHandler {
     );
   }
 
+  /** Leave an inbound CSMS CALL unanswered, announcing it (#396). */
+  private ignoreCall(action: string, messageId: string): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "NoResponse",
+    });
+  }
+
   private sendCallError(
+    action: string,
     messageId: string,
     errorCode: OCPPErrorCode,
     errorDescription: string,
     gen?: ReturnType<typeof this._webSocket.currentGeneration>,
     onSettled?: (s: Settlement) => void,
   ): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "CallError",
+      errorCode,
+    });
     const errorDetails = {
       errorCode: errorCode,
       errorDescription: errorDescription,

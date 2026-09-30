@@ -455,11 +455,15 @@ describe("dispatchSoapCallViaV16Registry", () => {
 
     // The 1.6 handlers are shared with the JSON transport and may wrap their
     // response in a HandlerOutcome; SOAP must reply with the bare payload.
-    expect(response).toEqual({ status: "Accepted" });
-    expect(response).not.toHaveProperty("kind");
-    expect(response).not.toHaveProperty("afterResponseSettled");
+    expect(response.payload).toEqual({ status: "Accepted" });
+    expect(response.payload).not.toHaveProperty("kind");
+    expect(response.payload).not.toHaveProperty("afterResponseSettled");
 
-    // …and still run the handler's deferred follow-up.
+    // …and hand the deferred follow-up back to the server, which runs it
+    // once the reply is decided (#396).
+    await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+    expect(sent).toEqual([]);
+    response.afterResponse?.();
     await new Promise((resolve) => queueMicrotask(() => resolve(null)));
     expect(sent).toEqual([1]);
   });
@@ -473,7 +477,7 @@ describe("dispatchSoapCallViaV16Registry", () => {
       dialect: OCPP16_DIALECT,
     });
 
-    expect(response).toEqual({ status: "Accepted" });
+    expect(response).toEqual({ payload: { status: "Accepted" } });
   });
 });
 
@@ -587,7 +591,7 @@ describe("inbound request validation (#285)", () => {
         logger: silentLogger(),
         dialect: OCPP16_DIALECT,
       });
-      expect(response).toHaveProperty("status");
+      expect(response.payload).toHaveProperty("status");
     }
   });
 
@@ -655,7 +659,7 @@ describe("inbound request validation (#285)", () => {
 
     await expect(reserve("not-a-date")).rejects.toThrow('format "date-time"');
     await expect(reserve("2026-01-01T00:00:00Z")).resolves.toHaveProperty(
-      "status",
+      "payload.status",
     );
   });
 
@@ -682,7 +686,7 @@ describe("inbound request validation (#285)", () => {
       dialect: OCPP16_DIALECT,
     });
 
-    expect(response).toHaveProperty("status");
+    expect(response.payload).toHaveProperty("status");
   });
 
   it("leaves the 1.5 dialect alone, which has no schemas of its own", async () => {
@@ -696,6 +700,6 @@ describe("inbound request validation (#285)", () => {
       dialect: OCPP15_DIALECT,
     });
 
-    expect(response).toHaveProperty("status");
+    expect(response.payload).toHaveProperty("status");
   });
 });

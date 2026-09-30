@@ -544,6 +544,9 @@ socket.on("event", (envelope) => {
 
 CP event envelope (the `evt` payloads are the CLI [event list](../entities/cli.md#events)):
 
+Every inbound CSMS CALL is pushed as a correlated `csms_call_received` /
+`csms_call_completed` pair — see [CLI → CSMS call events](../entities/cli.md#csms-call-events) (#396).
+
 ```json
 {
   "kind": "cp",

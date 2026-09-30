@@ -93,6 +93,10 @@ export class OCPPSoapServer {
     let envelope: ParsedSoapEnvelope;
     // Held so the fault path below can name the operation it is answering.
     let faultOperation: string | undefined;
+    // #396: set once the call is announced, so the answer — a response or a
+    // Fault — is reported for exactly the calls that were.
+    let announced:
+      { readonly action: string; readonly messageId?: string } | undefined;
     try {
       envelope = parseSoapEnvelope(xml, this.dialect);
       faultOperation = envelope.operation;
@@ -124,11 +128,17 @@ export class OCPPSoapServer {
       // (csmsCallTrigger), but ONLY once we know it has a dispatch path —
       // emitting for a not-implemented op would wrongly resolve a waiting
       // trigger. Mirrors the JSON path, which notifies for calls it handles.
-      const notifyIncomingCall = () =>
+      const notifyIncomingCall = () => {
+        announced = {
+          action: envelope.operation,
+          messageId: envelope.messageId,
+        };
         this.target.chargePoint?.notifyIncomingCall(
           envelope.operation,
           envelope.payload,
+          envelope.messageId,
         );
+      };
 
       // Wire lines for the CS→CP direction. `OCPPSoapHandler` logs the two
       // outbound ones ("SOAP POST" / "SOAP response"); without these, every
@@ -173,13 +183,15 @@ export class OCPPSoapServer {
         // Dispatch through the shared v16 registry. 1.2 narrows a few enum
         // tokens afterwards; 1.5 shares 1.6's enums so needs no transform.
         try {
-          responsePayload = await dispatchSoapCallViaV16Registry({
+          const dispatched = await dispatchSoapCallViaV16Registry({
             operation: envelope.operation,
             payload: envelope.payload,
             chargePoint: this.target.chargePoint,
             logger: this.target.logger,
             dialect: this.dialect,
           });
+          responsePayload = dispatched.payload;
+          afterResponse = dispatched.afterResponse;
 
           // Transform response for 1.2 (narrow enum mapping)
           if (isV12Supported) {
@@ -226,6 +238,12 @@ export class OCPPSoapServer {
         `SOAP reply ${envelope.operation}: ${responseXml}`,
         LogType.OCPP,
       );
+      if (announced) {
+        this.target.chargePoint?.notifyIncomingCallCompleted({
+          ...announced,
+          outcome: "CallResult",
+        });
+      }
       afterResponse?.();
       return new Response(responseXml, {
         status: 200,
@@ -249,10 +267,18 @@ export class OCPPSoapServer {
           LogType.OCPP,
         );
       }
-      if (err instanceof OCPPSoapFaultError) {
-        return soapFaultResponse(errorMessage(err), err.status, err.code);
+      const fault =
+        err instanceof OCPPSoapFaultError
+          ? { status: err.status, code: err.code }
+          : { status: 400, code: "Sender" as const };
+      if (announced) {
+        this.target.chargePoint?.notifyIncomingCallCompleted({
+          ...announced,
+          outcome: "CallError",
+          errorCode: fault.code,
+        });
       }
-      return soapFaultResponse(errorMessage(err), 400);
+      return soapFaultResponse(errorMessage(err), fault.status, fault.code);
     }
   }
 

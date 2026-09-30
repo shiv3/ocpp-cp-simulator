@@ -32,8 +32,27 @@ type Replacement = {
   value: string;
 };
 
+/** `AuthorizationKey`, `authorization_key` and `authorization-key` alike. */
+export function normalizeKeyName(key: string): string {
+  return key.replace(/[-_]/g, "").toLowerCase();
+}
+
 export function isSensitiveKeyName(key: string): boolean {
-  return SENSITIVE_KEY_NAMES.has(key.replace(/[-_]/g, "").toLowerCase());
+  return SENSITIVE_KEY_NAMES.has(normalizeKeyName(key));
+}
+
+/**
+ * OCPP 2.0.1 variables whose `attributeValue` is a secret (#396): the key
+ * names above plus `BasicAuthPassword`, which is not one of them because it
+ * is also a config field name that must survive redaction.
+ */
+function isSensitiveVariable(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const name = (value as { name?: unknown }).name;
+  return (
+    typeof name === "string" &&
+    (isSensitiveKeyName(name) || normalizeKeyName(name) === "basicauthpassword")
+  );
 }
 
 /**
@@ -75,10 +94,17 @@ export function redactSensitiveValue(value: unknown): unknown {
     ([key, nested]) =>
       key === "key" && typeof nested === "string" && isSensitiveKeyName(nested),
   );
+  // 2.0.1 SetVariableData: `{ component, variable: { name }, attributeValue }`.
+  const sensitiveVariable = isSensitiveVariable(
+    (value as { variable?: unknown }).variable,
+  );
   const out: Record<string, unknown> = {};
   for (const [key, nested] of entries) {
     if (isSensitiveKeyName(key)) continue;
-    if (ocppKeyValueObject && key === "value") {
+    if (
+      (ocppKeyValueObject && key === "value") ||
+      (sensitiveVariable && key === "attributeValue")
+    ) {
       out[key] = REDACTED_VALUE;
       continue;
     }

@@ -165,3 +165,28 @@ describe("URL credentials (#288)", () => {
     expect(redactSensitiveText(text)).toBe(text);
   });
 });
+
+describe("OCPP 2.0.1 SetVariables secrets (#396)", () => {
+  const setVariables = (name: string, attributeValue: string) => ({
+    setVariableData: [
+      {
+        component: { name: "SecurityCtrlr" },
+        variable: { name },
+        attributeValue,
+      },
+    ],
+  });
+
+  it("redacts the attributeValue of BasicAuthPassword and AuthorizationKey", () => {
+    for (const name of ["BasicAuthPassword", "AuthorizationKey"]) {
+      expect(redactSensitiveValue(setVariables(name, "s3cret"))).toEqual(
+        setVariables(name, REDACTED_VALUE),
+      );
+    }
+  });
+
+  it("leaves other variables alone", () => {
+    const payload = setVariables("HeartbeatInterval", "60");
+    expect(redactSensitiveValue(payload)).toEqual(payload);
+  });
+});

@@ -728,6 +728,45 @@ Events are emitted in all modes:
 | `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed                                                                                                                                                                                                                      |
 | `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed                                                                                                                                                                                                                         |
 | `scenario_wait_changed` | `connectorId`, `scenarioId`, `kind`       | An operator extended, retried or continued the wait the scenario is parked on (`kind`: `extend` / `retry` / `continue`; also carries `nodeId` and `runId`) (#240)                                                                              |
+| `csms_call_received`    | `action`, `messageId`, `payload`          | The CSMS sent a CALL (any action, 1.6J / 2.x / SOAP), announced before it is handled; see [CSMS call events](#csms-call-events) (#396)                                                                                                         |
+| `csms_call_completed`   | `action`, `messageId`, `outcome`          | The simulator decided its answer to that CALL: `CallResult`, `CallError` (with `errorCode`) or `NoResponse`; see [CSMS call events](#csms-call-events) (#396)                                                                                  |
+
+### CSMS call events
+
+`csms_call_received` and `csms_call_completed` give an orchestrator direct
+evidence that a command came through the CSMS, rather than inferring it from
+the state change it caused (#396). They cover every inbound CALL generically;
+the operation handlers, scenario hooks and the OCPP answer are unchanged.
+
+- **Correlation.** `messageId` is the CALL's UniqueId (the WS-Addressing
+  `MessageID` on SOAP, omitted when the request has none). Repeated calls of
+  the same action are told apart by it. `action` is the name on the wire: a
+  2.x station reports `RequestStartTransaction`, not its 1.6 alias.
+- **Order.** `csms_call_received` is emitted as the CALL enters dispatch,
+  before any `inboundPolicy`, `responseOverride` or operation handler runs.
+  `csms_call_completed` is emitted once the answer is decided, just before it
+  is handed to the transport: after the handler's synchronous work (a 1.6J
+  `RemoteStartTransaction` has already started the transaction) and before
+  any post-response effect (a `Reset` reboots after it).
+- **Outcome.** `CallResult` for a response — including one chosen by a
+  `responseOverride`; `CallError` for a CALLERROR (an `inboundPolicy`, a 2.x
+  `FormationViolation`, `NotImplemented`, a handler failure's
+  `InternalError`), with `errorCode`; `NoResponse` when no answer is sent:
+  an `inboundPolicy` of kind `ignore`, or a 2.x handler that throws (such a
+  CALL has always been left unanswered). On SOAP a Fault is a `CallError` whose `errorCode` is the
+  Fault code (`Sender` / `Receiver`); a request refused before dispatch (wrong
+  charge point, not implemented) emits neither event.
+- **Not delivery.** The outcome is the answer chosen, not proof it reached the
+  CSMS: a socket that closes, or a [network-simulation](../concepts/network-simulation.md)
+  drop, can still lose it.
+- **Redaction.** `payload` is redacted before either channel sees it: a
+  `ChangeConfiguration` of `AuthorizationKey` and a 2.x `SetVariables` of
+  `BasicAuthPassword` / `AuthorizationKey` carry `[redacted]` as the value.
+
+```json
+{"event":"csms_call_received","data":{"action":"Reset","messageId":"b7e1…","payload":{"type":"Soft"}},"timestamp":"…"}
+{"event":"csms_call_completed","data":{"action":"Reset","messageId":"b7e1…","outcome":"CallResult"},"timestamp":"…"}
+```
 
 ## CLI Options
 

@@ -12,7 +12,10 @@ import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
 import { Connector } from "../connector/Connector";
-import type { ChargePointEvents } from "./ChargePointEvents";
+import type {
+  ChargePointEvents,
+  IncomingCallCompletion,
+} from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
@@ -840,8 +843,17 @@ export class ChargePoint {
     return ts !== undefined && ts >= sinceMs ? ts : null;
   }
 
-  notifyIncomingCall(action: string, payload: unknown): void {
-    this._events.emit("incomingCallReceived", { action, payload });
+  notifyIncomingCall(
+    action: string,
+    payload: unknown,
+    messageId?: string,
+  ): void {
+    this._events.emit("incomingCallReceived", { action, messageId, payload });
+  }
+
+  /** #396: the answer to an incoming CSMS CALL is decided. */
+  notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
+    this._events.emit("incomingCallCompleted", completion);
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf

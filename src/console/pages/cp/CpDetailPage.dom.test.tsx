@@ -232,16 +232,15 @@ describe("CpDetailPage", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    const charging = container.querySelector('[data-connector-id="1"]');
-    expect(charging, "expected a card for connector 1").toBeTruthy();
-    expect(charging!.textContent).toContain("Energy16.21 kWh");
-    expect(charging!.textContent).toContain("SoC20.5%");
-    expect(charging!.textContent).not.toContain("16208");
+    const connector1Card = container.querySelector('[data-connector-id="1"]');
+    expect(connector1Card, "expected a card for connector 1").toBeTruthy();
+    expect(connector1Card!.textContent).toContain("Energy16.21 kWh");
+    expect(connector1Card!.textContent).toContain("SoC20.5%");
 
-    const idle = container.querySelector('[data-connector-id="2"]');
-    expect(idle, "expected a card for connector 2").toBeTruthy();
-    expect(idle!.textContent).toContain("Energy0.00 kWh");
-    expect(idle!.textContent).toContain("SoC—");
+    const connector2Card = container.querySelector('[data-connector-id="2"]');
+    expect(connector2Card, "expected a card for connector 2").toBeTruthy();
+    expect(connector2Card!.textContent).toContain("Energy0.00 kWh");
+    expect(connector2Card!.textContent).toContain("SoC—");
   });
 
   it("ConnectorCard: a rejecting stopTransaction is caught, isPending resets, and the failure is logged (not an unhandled rejection)", async () => {

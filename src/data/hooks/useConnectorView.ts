@@ -14,6 +14,7 @@ import { useDataContext } from "../providers/DataProvider";
 interface ConnectorViewState {
   status: OCPPStatus;
   availability: OCPPAvailability;
+  /** Energy register, in Wh. */
   meterValue: number;
   soc: number | null;
   transactionId: number | null;

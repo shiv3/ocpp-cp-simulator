@@ -1188,9 +1188,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [GitHub issues](sources/github-issues.md): #377 row.
 - Tests: `LocalChargePointService.portSurface.test.ts` checks that an unknown diagnostics / firmware / log status rejects with `RpcFailure` `invalid_params` and sends nothing. `socketServer.rpc.test.ts` checks the daemon refuses the same with `invalid_params`. `jsonMode.firmwareLogStatus.test.ts` checks JSON-Lines diagnostics names the vocabulary.
 
-## [2026-09-30] ingest | `/v3` connector card formats energy and SoC (#368)
+## [2026-09-30] ingest | `/v3` dashboard and connector cards format energy and SoC (#368)
 
-- [Web console](entities/web-console.md): new paragraph — both consoles show a connector's meter value (Wh) as kWh with 2 decimals and its SoC with 1 decimal; the `/v3` connector card shows `—` without a SoC. It used to print the raw Wh with a `kWh` suffix (`16208 kWh`) and the raw float SoC (`20.462666666666667%`).
-- Mechanism: the formatting moved into `src/lib/connectorFormat.ts` (`formatEnergyKwh`, `formatSoc`), used by `ConnectorCard`, `Connector` and `ConnectorSidePanel` so the two consoles cannot drift.
+- [Web console](entities/web-console.md): new paragraph — both consoles show a connector's meter value (Wh) as kWh with 2 decimals and its SoC with 1 decimal; the `/v3` connector card shows `—` without a SoC. The `/v3` dashboard and connector cards used to print the raw Wh with a `kWh` suffix (`16208 kWh`) and the raw float SoC (`20.462666666666667%`).
+- Mechanism: the formatting moved into `src/lib/connectorFormat.ts` (`formatEnergyKwh`, `formatSoc`), used by `ConnectorCard`, `CpCard`, `Connector`, `ConnectorSidePanel` and `BatteryVisualization` so the two consoles cannot drift. `ConnectorSnapshot.meterValue` and the connector view now document the unit (Wh).
 - [GitHub issues](sources/github-issues.md): #368 row.
-- Tests: `connectorFormat.test.ts` (Wh → kWh, SoC rounding), `CpDetailPage.dom.test.tsx` (card shows `16.21 kWh` / `20.5%`, and `—` without a SoC).
+- Tests: `connectorFormat.test.ts` (Wh → kWh, SoC rounding), `CpDetailPage.dom.test.tsx` (card shows `16.21 kWh` / `20.5%`, and `—` without a SoC), `DashboardPage.dom.test.tsx` (CP card shows `16.21 kWh`).

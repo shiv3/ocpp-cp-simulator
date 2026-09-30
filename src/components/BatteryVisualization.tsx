@@ -1,5 +1,6 @@
 import React from "react";
 import { calculateChargingTimeMinutes } from "../cp/domain/connector/EVSettings";
+import { formatSoc } from "../lib/connectorFormat";
 
 interface BatteryVisualizationProps {
   currentSoc: number;
@@ -66,7 +67,7 @@ export const BatteryVisualization: React.FC<BatteryVisualizationProps> = ({
           {/* Percentage text */}
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-sm font-bold text-gray-900 dark:text-white drop-shadow-sm">
-              {currentSoc.toFixed(1)}%
+              {formatSoc(currentSoc)}
             </span>
           </div>
         </div>

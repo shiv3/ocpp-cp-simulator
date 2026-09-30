@@ -90,8 +90,9 @@ does a daemon that predates `server.info`.
 
 Both consoles show a connector's live readings the same way
 (`src/lib/connectorFormat.ts`): the meter value, which is in Wh, as kWh with
-2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`). The
-`/v3` connector card shows `—` when no SoC is reported (#368).
+2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`) — the
+`/v3` dashboard and connector cards included. The `/v3` connector card shows
+`—` when no SoC is reported (#368).
 
 The redesign reuses the existing data layer, scenario engine, and per-step
 forms unchanged; scenarios, charge points, and logs are simply promoted to

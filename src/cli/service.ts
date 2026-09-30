@@ -8,6 +8,10 @@ import type {
   DataTransferData,
   DataTransferResult,
 } from "../cp/domain/types/DataTransfer";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../cp/domain/types/OcppCall";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type { Database } from "../cp/domain/persistence/Database";
 import type {
@@ -1076,6 +1080,11 @@ export class CLIChargePointService {
     data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this._chargePoint.sendDataTransfer(vendorId, messageId, data);
+  }
+
+  /** Expert OCPP call (#389); see `ChargePoint.sendOcppCall`. */
+  sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+    return this._chargePoint.sendOcppCall(request);
   }
 
   updateConnectorStatus(

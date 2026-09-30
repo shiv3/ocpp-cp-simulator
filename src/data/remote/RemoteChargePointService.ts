@@ -3,6 +3,10 @@ import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
 
 import type {
   ChargePointEvent,
@@ -822,6 +826,15 @@ export class RemoteChargePointService implements ChargePointService {
       ...(data !== undefined ? { data } : {}),
     });
     return result as DataTransferResult;
+  }
+
+  async sendOcppCall(
+    id: string,
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    return (await this.runCpRpc(id, "send_ocpp_call", {
+      ...request,
+    })) as OcppCallOutcome;
   }
 
   async startTransaction(

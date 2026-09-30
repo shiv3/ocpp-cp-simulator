@@ -4,6 +4,10 @@ import type {
   DataTransferResult,
 } from "../cp/domain/types/DataTransfer";
 import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../cp/domain/types/OcppCall";
+import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
@@ -96,6 +100,7 @@ export interface SingleCpCommandOps {
     messageId?: string,
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
+  sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
   updateConnectorStatus(
     connectorId: number,
     status: OCPPStatus,
@@ -277,6 +282,7 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     },
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(vendorId, messageId, data),
+    sendOcppCall: (request) => service.sendOcppCall(request),
     updateConnectorStatus: async (connectorId, status, opts) => {
       service.updateConnectorStatus(connectorId, status, opts);
     },
@@ -426,6 +432,7 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     authorize: (tagId) => service.authorize(cpId, tagId),
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(cpId, vendorId, messageId, data),
+    sendOcppCall: (request) => service.sendOcppCall(cpId, request),
     updateConnectorStatus: (connectorId, status, opts) =>
       service.sendStatusNotification(cpId, connectorId, status, opts),
     sendDiagnosticsStatusNotification: (status) =>

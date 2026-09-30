@@ -4,6 +4,10 @@ import type {
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
 import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
+import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
@@ -262,6 +266,13 @@ export class RegistryChargePointService implements ChargePointService {
     data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this.requireService(id).sendDataTransfer(vendorId, messageId, data);
+  }
+
+  async sendOcppCall(
+    id: string,
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    return this.requireService(id).sendOcppCall(request);
   }
 
   async startTransaction(

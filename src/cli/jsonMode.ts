@@ -12,7 +12,8 @@ import {
   OCPPStatus,
   type StatusNotificationOptions,
 } from "../cp/domain/types/OcppTypes";
-import { dataTransferDataSchema } from "../protocol";
+import { dataTransferDataSchema, METHODS } from "../protocol";
+import type { OcppCallRequest } from "../cp/domain/types/OcppCall";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -269,6 +270,11 @@ export async function handleJsonCommand(
         optionalDataTransferData(params),
       );
     }
+
+    case "send_ocpp_call":
+      // #389: validated against the daemon's own schema, so JSON-Lines mode
+      // admits exactly what the control plane admits.
+      return ops.sendOcppCall(ocppCallRequest(params));
 
     case "update_connector_status": {
       // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
@@ -649,6 +655,18 @@ export function optionalDataTransferData(
     throw new Error(
       "Invalid parameter: data (expected a string of at most 64K characters or an object of at most 64 KB)",
     );
+  }
+  return parsed.data;
+}
+
+/** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
+function ocppCallRequest(params: Record<string, unknown>): OcppCallRequest {
+  const parsed = METHODS.send_ocpp_call.params.safeParse(params);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
   }
   return parsed.data;
 }

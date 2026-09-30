@@ -264,7 +264,7 @@ describe("ScenarioExecutor wait controls (#240)", () => {
     expect(executor.getContext().state).toBe("completed");
   });
 
-  it("hands the controls back to a parallel branch's wait once the other settles", async () => {
+  it("reports the wait that becomes active again, whole, once a parallel wait settles", async () => {
     const { arms, onWaitForRemoteStart } = armableRemoteStart();
     const status = deferred<void>();
     const nodes = [
@@ -272,6 +272,10 @@ describe("ScenarioExecutor wait controls (#240)", () => {
       node("remote-start", ScenarioNodeType.REMOTE_START_TRIGGER, {
         label: "Wait RemoteStart",
         timeout: 60,
+      }),
+      node("delay", ScenarioNodeType.DELAY, {
+        label: "Delay",
+        delaySeconds: 1,
       }),
       node("status", ScenarioNodeType.STATUS_TRIGGER, {
         label: "Wait Charging",
@@ -285,22 +289,37 @@ describe("ScenarioExecutor wait controls (#240)", () => {
         nodes,
         edges: [
           { id: "e-a", source: "start", target: "remote-start" },
-          { id: "e-b", source: "start", target: "status" },
+          { id: "e-b", source: "start", target: "delay" },
+          { id: "e-c", source: "delay", target: "status" },
         ],
       },
       { onWaitForRemoteStart, onWaitForStatus: () => status.promise },
     );
 
+    const startedAt = Date.now();
     const run = executor.start();
-    await vi.advanceTimersByTimeAsync(0);
-    // Both branches are parked; the controls act on the latest-armed wait.
-    expect(executor.getContext().waitDeadlineAt).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000);
+    // Both branches are parked; the latest-armed wait is reported, whole.
+    expect(executor.getContext()).toMatchObject({
+      state: "waiting",
+      currentNodeId: "status",
+      currentNodeStartedAt: startedAt + 1_000,
+      expectation: expect.objectContaining({ nodeId: "status" }),
+      waitDeadlineAt: null,
+    });
 
     status.resolve();
     await vi.advanceTimersByTimeAsync(0);
 
-    // The RemoteStart wait is still parked and reachable again.
-    expect(executor.getContext().waitDeadlineAt).toBe(Date.now() + 60_000);
+    // The RemoteStart wait is still parked: node, start time, expectation
+    // and deadline all describe it again, and it takes the controls.
+    expect(executor.getContext()).toMatchObject({
+      state: "waiting",
+      currentNodeId: "remote-start",
+      currentNodeStartedAt: startedAt,
+      expectation: expect.objectContaining({ nodeId: "remote-start" }),
+      waitDeadlineAt: startedAt + 60_000,
+    });
     executor.continueWait();
     await run;
 

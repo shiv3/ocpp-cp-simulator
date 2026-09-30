@@ -87,11 +87,11 @@ describe("DashboardPage", () => {
     }
   });
 
-  it("renders registered/connected CPs with connector rows, an active Tx, and wires Disconnect to the service", async () => {
+  it("renders registered/connected CPs with connector rows (energy in kWh), an active Tx, and wires Disconnect to the service", async () => {
     const cpA = snapshot({
       id: "CP-A",
       status: OCPPStatus.Available,
-      connectors: [connector({ id: 1, meterValue: 12.5 })],
+      connectors: [connector({ id: 1, meterValue: 16208 })],
     });
     const cpB = snapshot({
       id: "CP-B",
@@ -130,6 +130,8 @@ describe("DashboardPage", () => {
 
     const cardA = container.querySelector('[data-cp-id="CP-A"]');
     expect(cardA, "expected a card for CP-A").toBeTruthy();
+    // The meter value is in Wh (#368).
+    expect(cardA!.textContent).toContain("16.21 kWh");
     const disconnectButton = Array.from(cardA!.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "Disconnect",
     );

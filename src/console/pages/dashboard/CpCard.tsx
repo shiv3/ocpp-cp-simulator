@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { formatEnergyKwh } from "@/lib/connectorFormat";
 import { cn } from "@/lib/utils";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
@@ -131,7 +132,7 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
                 #{connector.id}
               </span>
               <StatusPill status={connector.status} />
-              <span>{connector.meterValue} kWh</span>
+              <span>{formatEnergyKwh(connector.meterValue)}</span>
               {connector.transactionId != null && (
                 <span className="text-gray-500 dark:text-gray-400">
                   Tx #{connector.transactionId}

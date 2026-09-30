@@ -55,6 +55,7 @@ export interface ConnectorSnapshot {
   id: number;
   status: OCPPStatus;
   availability: OCPPAvailability;
+  /** Energy register, in Wh. */
   meterValue: number;
   transactionId: number | null;
   soc: number | null;

@@ -11,6 +11,7 @@ import {
 import { useConnectorView } from "@/data/hooks/useConnectorView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
+import { formatEnergyKwh, formatSoc } from "@/lib/connectorFormat";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
 import StatusPill from "../../components/StatusPill";
@@ -128,13 +129,13 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         <div className="rounded-md bg-gray-50 px-2 py-1.5 dark:bg-gray-800">
           <div className="text-gray-500 dark:text-gray-400">Energy</div>
           <div className="font-mono tabular-nums text-gray-900 dark:text-gray-100">
-            {view.meterValue} kWh
+            {formatEnergyKwh(view.meterValue)}
           </div>
         </div>
         <div className="rounded-md bg-gray-50 px-2 py-1.5 dark:bg-gray-800">
           <div className="text-gray-500 dark:text-gray-400">SoC</div>
           <div className="font-mono tabular-nums text-gray-900 dark:text-gray-100">
-            {view.soc != null ? `${view.soc}%` : "—"}
+            {view.soc != null ? formatSoc(view.soc) : "—"}
           </div>
         </div>
       </div>

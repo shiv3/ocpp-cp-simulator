@@ -1,5 +1,8 @@
 import { io, type Socket } from "socket.io-client";
-import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../../cp/domain/types/DataTransfer";
 
 import type {
   ChargePointEvent,
@@ -27,6 +30,7 @@ import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
+  DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
 } from "../../cp/domain/types/FirmwareLogStatus";
@@ -791,16 +795,12 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     const result = await this.runCpRpc(id, "data_transfer", {
       vendorId,
       ...(messageId !== undefined ? { messageId } : {}),
-      // The daemon's schema accepts a string or an object and rejects the
-      // rest, so pass the caller's value through for it to judge.
-      ...(data !== undefined
-        ? { data: data as string | Record<string, unknown> }
-        : {}),
+      ...(data !== undefined ? { data } : {}),
     });
     return result as DataTransferResult;
   }
@@ -884,32 +884,29 @@ export class RemoteChargePointService implements ChargePointService {
 
   async sendDiagnosticsStatusNotification(
     id: string,
-    status: string,
+    status: DiagnosticsStatus,
   ): Promise<void> {
     await this.runCpRpc(id, "diagnostics_status_notification", { status });
   }
 
   async sendFirmwareStatusNotification(
     id: string,
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): Promise<void> {
     await this.runCpRpc(id, "firmware_status_notification", {
-      // Validated by the daemon (z.enum(FIRMWARE_STATUSES)), which rejects
-      // an unknown status with a readable error.
-      status: status as FirmwareStatus,
+      status,
       ...(requestId !== undefined ? { requestId } : {}),
     });
   }
 
   async sendLogStatusNotification(
     id: string,
-    status: string,
+    status: UploadLogStatus,
     requestId?: number,
   ): Promise<void> {
     await this.runCpRpc(id, "log_status_notification", {
-      // Validated by the daemon's enum, as above.
-      status: status as UploadLogStatus,
+      status,
       ...(requestId !== undefined ? { requestId } : {}),
     });
   }

@@ -19,6 +19,14 @@ export interface DataTransferResult {
   readonly data?: unknown;
 }
 
+/**
+ * The `data` a station-initiated DataTransfer.req carries (#377): a string,
+ * sent as-is on every version, or an object, passed through on 2.0.1 and
+ * JSON-encoded on 1.6 (whose `data` is a string). The control-plane schema
+ * admits the same two shapes.
+ */
+export type DataTransferData = string | Record<string, unknown>;
+
 /** How long a control-plane `data_transfer` waits for the CSMS's answer
  *  before its promise rejects. The CALL itself is not withdrawn: a late
  *  CALLRESULT is still logged by the ordinary result handler. Kept under the

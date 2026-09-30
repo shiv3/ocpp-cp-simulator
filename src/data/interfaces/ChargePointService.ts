@@ -1,5 +1,13 @@
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
-import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../../cp/domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../cp/domain/types/FirmwareLogStatus";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
@@ -409,7 +417,7 @@ export interface ChargePointService {
     id: string,
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult>;
 
   // Connector operations
@@ -437,16 +445,21 @@ export interface ChargePointService {
     status: OCPPStatus,
     opts?: StatusNotificationOptions,
   ): Promise<void>;
-  sendDiagnosticsStatusNotification(id: string, status: string): Promise<void>;
+  // #377: the statuses are the domain vocabularies; untyped input is
+  // narrowed where it enters, not cast here.
+  sendDiagnosticsStatusNotification(
+    id: string,
+    status: DiagnosticsStatus,
+  ): Promise<void>;
   sendFirmwareStatusNotification(
     id: string,
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): Promise<void>;
   /** LogStatusNotification.req (#345). */
   sendLogStatusNotification(
     id: string,
-    status: string,
+    status: UploadLogStatus,
     requestId?: number,
   ): Promise<void>;
   sendSecurityEventNotification(

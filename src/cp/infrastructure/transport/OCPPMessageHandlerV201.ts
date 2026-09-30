@@ -1,7 +1,13 @@
 import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+  type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../domain/types/FirmwareLogStatus";
 import {
   csmsActionAliases,
   V201_ACTIONS_WITHOUT_STATUS_RESPONSE,
@@ -837,10 +843,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     const id = this.generateMessageId();
-    // 2.0.1: `data` is any JSON — passed through as the caller gave it.
+    // 2.0.1: `data` is any JSON — passed through as the caller gave it. The
+    // generated request type narrows the schema's `anyType` to an object,
+    // hence the cast for a string `data`.
     const payload = {
       vendorId,
       ...(messageId !== undefined ? { messageId } : {}),
@@ -894,7 +902,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  public sendDiagnosticsStatusNotification(_status: string): void {
+  public sendDiagnosticsStatusNotification(_status: DiagnosticsStatus): void {
     this._logger.warn(
       "[v2.0.1] DiagnosticsStatusNotification not supported in OCPP 2.0.1",
       LogType.OCPP,
@@ -909,14 +917,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * the caller's, or the one this station last accepted.
    */
   public sendFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): void {
     const id = this.generateMessageId();
     const effectiveRequestId =
       requestId ?? this._chargePoint.lastFirmwareRequestId;
     const payload: FirmwareStatusNotificationRequestV201 = {
-      status: status as FirmwareStatusNotificationRequestV201["status"],
+      status,
       ...(effectiveRequestId !== undefined
         ? { requestId: effectiveRequestId }
         : {}),
@@ -926,11 +934,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /** N01 LogStatusNotification.req (#345); `requestId` as above, from the
    *  GetLog this station last accepted when the caller gives none. */
-  public sendLogStatusNotification(status: string, requestId?: number): void {
+  public sendLogStatusNotification(
+    status: UploadLogStatus,
+    requestId?: number,
+  ): void {
     const id = this.generateMessageId();
     const effectiveRequestId = requestId ?? this._chargePoint.lastLogRequestId;
     const payload: LogStatusNotificationRequestV201 = {
-      status: status as LogStatusNotificationRequestV201["status"],
+      status,
       ...(effectiveRequestId !== undefined
         ? { requestId: effectiveRequestId }
         : {}),
@@ -945,7 +956,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * — so this is that message (#345).
    */
   public sendSignedFirmwareStatusNotification(
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): void {
     this._logger.debug(

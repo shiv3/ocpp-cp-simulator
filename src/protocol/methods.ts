@@ -7,7 +7,11 @@
 // (`requireNonNegativeInt`); every other connector-taking command requires
 // >= 1 (`requirePositiveInt`). DoS limits (Sec-4) bound every string/array.
 
-import { FIRMWARE_STATUSES } from "../cp/domain/types/FirmwareLogStatus";
+import {
+  DIAGNOSTICS_STATUSES,
+  FIRMWARE_STATUSES,
+  UPLOAD_LOG_STATUSES,
+} from "../cp/domain/types/FirmwareLogStatus";
 import { z } from "zod";
 
 import {
@@ -493,7 +497,8 @@ export const METHODS = {
 
   // -- status notifications --
   diagnostics_status_notification: {
-    params: z.object({ status: STR_64K }),
+    // The four 1.6 statuses (#377); 2.0.1 has no such message.
+    params: z.object({ status: z.enum(DIAGNOSTICS_STATUSES) }),
     result: ANY,
   },
   firmware_status_notification: {
@@ -513,16 +518,7 @@ export const METHODS = {
   // `requestId` as above, defaulting to the GetLog last accepted on 2.0.1.
   log_status_notification: {
     params: z.object({
-      status: z.enum([
-        "BadMessage",
-        "Idle",
-        "NotSupportedOperation",
-        "PermissionDenied",
-        "Uploaded",
-        "UploadFailure",
-        "Uploading",
-        "AcceptedCanceled",
-      ]),
+      status: z.enum(UPLOAD_LOG_STATUSES),
       requestId: z.number().int().nonnegative().optional(),
     }),
     result: ANY,

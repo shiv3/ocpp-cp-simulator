@@ -68,6 +68,31 @@ describe("LocalChargePointService A1.1d port methods", () => {
     expect(spy).toHaveBeenCalledWith("Downloaded");
   });
 
+  // #377: same refusal as the daemon's schema; see `requireStatus`.
+  it.each([
+    ["sendDiagnosticsStatusNotification", "Finished"],
+    ["sendFirmwareStatusNotification", "Flashing"],
+    ["sendLogStatusNotification", "Done"],
+  ] as const)(
+    "%s rejects a status outside the vocabulary with invalid_params",
+    async (method, status) => {
+      const setup = await serviceWithChargePoint();
+      service = setup.service;
+      const spy = vi
+        .spyOn(setup.chargePoint, method)
+        .mockImplementation(() => undefined);
+
+      await expect(
+        service[method]("CP-PORT", status as never),
+      ).rejects.toMatchObject({
+        name: "RpcFailure",
+        code: "invalid_params",
+        message: expect.stringContaining("status"),
+      });
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
+
   it("sends SecurityEventNotification through the local charge point", async () => {
     const setup = await serviceWithChargePoint();
     service = setup.service;

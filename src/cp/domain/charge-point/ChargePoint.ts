@@ -1,9 +1,13 @@
 import type {
+  DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
-import type { DataTransferResult } from "../types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../types/DataTransfer";
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
@@ -1076,7 +1080,7 @@ export class ChargePoint {
   sendDataTransfer(
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this._outbox.sendDataTransfer(vendorId, messageId, data);
   }
@@ -1092,9 +1096,7 @@ export class ChargePoint {
   }
 
   /** Send DiagnosticsStatusNotification.req — see OCPPMessageHandler doc. */
-  sendDiagnosticsStatusNotification(
-    status: "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
-  ): void {
+  sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void {
     this._outbox.sendDiagnosticsStatusNotification(status);
   }
 
@@ -1135,21 +1137,7 @@ export class ChargePoint {
 
   /** Send SignedFirmwareStatusNotification.req — see OCPPMessageHandler doc. */
   sendSignedFirmwareStatusNotification(
-    status:
-      | "Downloaded"
-      | "DownloadFailed"
-      | "Downloading"
-      | "DownloadScheduled"
-      | "DownloadPaused"
-      | "Idle"
-      | "InstallationFailed"
-      | "Installing"
-      | "Installed"
-      | "InstallRebooting"
-      | "InstallScheduled"
-      | "InstallVerificationFailed"
-      | "InvalidSignature"
-      | "SignatureVerified",
+    status: FirmwareStatus,
     requestId?: number,
   ): void {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
@@ -1192,9 +1180,12 @@ export class ChargePoint {
     this._firmwareUpdateInFlight = true;
 
     const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
-    const sequence: Array<
-      "Downloading" | "Downloaded" | "Installing" | "Installed"
-    > = ["Downloading", "Downloaded", "Installing", "Installed"];
+    const sequence: readonly FirmwareStatus[] = [
+      "Downloading",
+      "Downloaded",
+      "Installing",
+      "Installed",
+    ];
     const failureMode = this._configuration.getString(
       "SimulatedFirmwareUpdateFailure",
     );
@@ -1263,13 +1254,7 @@ export class ChargePoint {
     this._signedFirmwareUpdateInFlight = true;
 
     const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
-    const sequence: Array<
-      | "Downloading"
-      | "Downloaded"
-      | "SignatureVerified"
-      | "Installing"
-      | "Installed"
-    > = [
+    const sequence: readonly FirmwareStatus[] = [
       "Downloading",
       "Downloaded",
       "SignatureVerified",

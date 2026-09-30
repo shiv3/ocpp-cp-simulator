@@ -1,7 +1,10 @@
 import {
+  DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
+  isOneOf,
   UPLOAD_LOG_STATUSES,
 } from "../cp/domain/types/FirmwareLogStatus";
+import type { DataTransferData } from "../cp/domain/types/DataTransfer";
 import * as readline from "readline";
 import * as fs from "fs";
 import {
@@ -189,7 +192,7 @@ export async function handleJsonCommand(
     }
 
     case "diagnostics_status_notification": {
-      const status = requireString(params, "status");
+      const status = requireEnum(params, "status", DIAGNOSTICS_STATUSES);
       await ops.sendDiagnosticsStatusNotification(status);
       return undefined;
     }
@@ -257,8 +260,8 @@ export async function handleJsonCommand(
 
     case "data_transfer": {
       // #348: station-initiated DataTransfer.req; the CSMS's answer is the
-      // result line. `data` is a string or an object (validated by the RPC
-      // table's schema on the daemon; here it rides through as given).
+      // result line. `data` is a string or an object, as the daemon's RPC
+      // schema admits.
       const vendorId = requireString(params, "vendorId");
       const messageId = optionalString(params, "messageId");
       return ops.sendDataTransfer(
@@ -588,15 +591,12 @@ export function optionalEnum<T extends string>(
 ): T | undefined {
   const val = params[key];
   if (val === undefined || val === null) return undefined;
-  if (
-    typeof val !== "string" ||
-    !(allowed as readonly string[]).includes(val)
-  ) {
+  if (!isOneOf(val, allowed)) {
     throw new Error(
       `Invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
     );
   }
-  return val as T;
+  return val;
 }
 
 export function requireEnum<T extends string>(
@@ -620,7 +620,7 @@ export function requireEnum<T extends string>(
  */
 export function optionalDataTransferData(
   params: Record<string, unknown>,
-): string | Record<string, unknown> | undefined {
+): DataTransferData | undefined {
   const val = params.data;
   if (val === undefined || val === null) return undefined;
   const isPlainObject =
@@ -631,7 +631,7 @@ export function optionalDataTransferData(
   if (JSON.stringify(val).length > 65_536) {
     throw new Error("Invalid parameter: data (over 64 KB)");
   }
-  return val as string | Record<string, unknown>;
+  return val as DataTransferData;
 }
 
 export function optionalBoolean(

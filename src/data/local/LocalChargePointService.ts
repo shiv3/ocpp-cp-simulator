@@ -1,9 +1,18 @@
-import type {
-  FirmwareStatus,
-  UploadLogStatus,
+import {
+  DIAGNOSTICS_STATUSES,
+  FIRMWARE_STATUSES,
+  isOneOf,
+  UPLOAD_LOG_STATUSES,
+  type DiagnosticsStatus,
+  type FirmwareStatus,
+  type UploadLogStatus,
 } from "../../cp/domain/types/FirmwareLogStatus";
 import { getDefaultStore } from "jotai";
-import type { DataTransferResult } from "../../cp/domain/types/DataTransfer";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "../../cp/domain/types/DataTransfer";
+import { RpcFailure } from "../../protocol/errors";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import {
   splitStopReason,
@@ -156,6 +165,21 @@ function assertBrowserLocalTlsSupported(
     throw new UnsupportedFeatureError(
       "browser_tls_unsupported",
       BROWSER_TLS_UNSUPPORTED_MESSAGE,
+    );
+  }
+}
+
+/**
+ * Browser mode has no control-plane schema in front of it, so this adapter
+ * is where an untyped caller's status is narrowed (#377). It refuses an
+ * unknown value with the `invalid_params` failure the daemon path surfaces,
+ * instead of letting it reach the wire.
+ */
+function requireStatus(status: string, allowed: readonly string[]): void {
+  if (!isOneOf(status, allowed)) {
+    throw new RpcFailure(
+      "invalid_params",
+      `Invalid parameter: status (expected one of ${allowed.join(", ")})`,
     );
   }
 }
@@ -383,7 +407,7 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     vendorId: string,
     messageId?: string,
-    data?: unknown,
+    data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this.getExistingChargePointOrThrow(id).sendDataTransfer(
       vendorId,
@@ -450,38 +474,38 @@ export class LocalChargePointService implements ChargePointService {
 
   async sendDiagnosticsStatusNotification(
     id: string,
-    status: string,
+    status: DiagnosticsStatus,
   ): Promise<void> {
+    requireStatus(status, DIAGNOSTICS_STATUSES);
     this.getExistingChargePointOrThrow(id).sendDiagnosticsStatusNotification(
-      status as "Idle" | "Uploaded" | "UploadFailed" | "Uploading",
+      status,
     );
   }
 
   async sendFirmwareStatusNotification(
     id: string,
-    status: string,
+    status: FirmwareStatus,
     requestId?: number,
   ): Promise<void> {
+    requireStatus(status, FIRMWARE_STATUSES);
     const chargePoint = this.getExistingChargePointOrThrow(id);
     // Two-argument form only when a requestId was given (same as the
     // registry service): the 1.6-era call shape is unchanged.
     if (requestId === undefined) {
-      chargePoint.sendFirmwareStatusNotification(status as FirmwareStatus);
+      chargePoint.sendFirmwareStatusNotification(status);
     } else {
-      chargePoint.sendFirmwareStatusNotification(
-        status as FirmwareStatus,
-        requestId,
-      );
+      chargePoint.sendFirmwareStatusNotification(status, requestId);
     }
   }
 
   async sendLogStatusNotification(
     id: string,
-    status: string,
+    status: UploadLogStatus,
     requestId?: number,
   ): Promise<void> {
+    requireStatus(status, UPLOAD_LOG_STATUSES);
     this.getExistingChargePointOrThrow(id).sendLogStatusNotification(
-      status as UploadLogStatus,
+      status,
       requestId,
     );
   }

@@ -101,6 +101,21 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
     field: "scenarioId",
   },
   {
+    method: "extend_scenario_wait",
+    valid: { connector: 1, scenarioId: "s", seconds: 30 },
+    field: "scenarioId",
+  },
+  {
+    method: "retry_scenario_wait",
+    valid: { connector: 1, scenarioId: "s" },
+    field: "scenarioId",
+  },
+  {
+    method: "continue_scenario_wait",
+    valid: { connector: 1, scenarioId: "s" },
+    field: "scenarioId",
+  },
+  {
     method: "remove_scenario",
     valid: { connector: 1, scenarioId: "s" },
     field: "scenarioId",

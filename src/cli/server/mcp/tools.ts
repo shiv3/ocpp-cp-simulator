@@ -7,6 +7,7 @@ import {
   EXPLICIT_METHODS,
   METHODS,
   RpcFailure,
+  scenarioWaitExtensionSecondsSchema,
 } from "../../../protocol";
 import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
 import {
@@ -570,11 +571,11 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
       connector: z.number().int().min(1).describe("Connector identifier"),
-      scenarioId: z.string().describe("Scenario identifier"),
+      scenarioId: z.string().min(1).describe("Scenario identifier"),
       action: z
         .enum(["extend", "retry", "continue"])
         .describe("What to do with the parked wait"),
-      seconds: METHODS.extend_scenario_wait.params.shape.seconds
+      seconds: scenarioWaitExtensionSecondsSchema
         .optional()
         .describe("Seconds to add to the timeout (required for 'extend')"),
     }),

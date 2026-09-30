@@ -61,6 +61,8 @@ interface ParkedWait {
   nodeId: string;
   control: WaitControl;
   expectation: ScenarioExpectation | null;
+  /** Epoch ms the node started parking; restarts on a retry. */
+  startedAt: number;
 }
 
 const isMeterValueTimeout = (error: unknown): boolean =>
@@ -1449,6 +1451,9 @@ export class ScenarioExecutor {
     // #179: surface the already-valid "waiting" state — and the awaited
     // condition — from the parked wait. Only override an otherwise-"running"
     // machine so a paused / stepping / stopped scenario keeps its real state.
+    // #240: while a wait is parked, the current node and its start time are
+    // that wait's too, so the whole waiting context describes one node even
+    // after a parallel branch moved the executor-wide fields elsewhere.
     const parked = this.parkedWaits.at(-1);
     const state: ScenarioExecutionState =
       parked && stateName === "running"
@@ -1459,12 +1464,12 @@ export class ScenarioExecutor {
       scenarioId: context.scenarioId,
       state,
       mode: context.mode,
-      currentNodeId: this.currentNodeId,
+      currentNodeId: parked?.nodeId ?? this.currentNodeId,
       executedNodes: [...this.executedNodes],
       loopCount: context.loopCount,
       error: context.error,
       expectation: parked?.expectation ?? null,
-      currentNodeStartedAt: this.currentNodeStartedAt,
+      currentNodeStartedAt: parked?.startedAt ?? this.currentNodeStartedAt,
       waitDeadlineAt: parked?.control.deadlineAt ?? null,
     };
   }
@@ -1627,11 +1632,12 @@ export class ScenarioExecutor {
       : null;
 
     for (;;) {
+      const startedAt = Date.now();
       const control = new WaitControl(
         timeoutMs,
         (seconds) => new Error(timeoutMessage(seconds)),
       );
-      this.parkedWaits.push({ nodeId, control, expectation });
+      this.parkedWaits.push({ nodeId, control, expectation, startedAt });
       this.notifyStateChange();
       const stopProgress = this.reportWaitProgress(nodeId, control);
       let waitPromise: Promise<T> | undefined;
@@ -1660,7 +1666,6 @@ export class ScenarioExecutor {
 
       if (outcome === "settled") return answer;
       if (outcome === "continue" || this.aborted) return null;
-      this.currentNodeStartedAt = Date.now();
     }
   }
 

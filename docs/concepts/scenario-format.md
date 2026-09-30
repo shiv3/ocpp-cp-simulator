@@ -290,7 +290,7 @@ any station-initiated CALL of the station's OCPP-J version (`action`), with
 The executor owns the timeout of these nodes; `scenario_status` reports it as
 `waitDeadlineAt` (epoch ms). A timeout still fails the run — nothing here
 changes what an unattended run does. The auto-meter wait and `delay` are not
-trigger waits and take no controls. With parallel branches the controls act on the most recently armed wait still parked; once it settles, the previous one is reachable again.
+trigger waits and take no controls. With parallel branches the controls act on the most recently armed wait still parked; once it settles, the previous one is reachable again. While a wait is parked, `scenario_status` describes that one wait: `currentNodeId`, `currentNodeStartedAt` (restarted by a retry), `expectation` and `waitDeadlineAt` all belong to it, and so does the `timeout` a stop mid-wait records in the report.
 
 Every control is recorded in the run report's `interventions` array, in
 order: `{ kind, nodeId, at, seconds? }` (`at` in epoch ms, `seconds` for an

@@ -102,7 +102,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForRemoteStart!(30);
+      const waitPromise = callbacks.onWaitForRemoteStart!();
       await expect(waitPromise).rejects.toThrow(
         /RemoteStartTransaction trigger requires a transport that can receive CSMS-initiated calls/,
       );
@@ -122,7 +122,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForRemoteStart!(30);
+      const waitPromise = callbacks.onWaitForRemoteStart!();
 
       // Should register the handler before waiting
       expect(chargePoint.registerScenarioHandler).toHaveBeenCalledWith(1);
@@ -146,7 +146,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForRemoteStart!(30);
+      const waitPromise = callbacks.onWaitForRemoteStart!();
 
       // Should register the handler
       expect(chargePoint.registerScenarioHandler).toHaveBeenCalledWith(1);
@@ -172,7 +172,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForRemoteStop!(30);
+      const waitPromise = callbacks.onWaitForRemoteStop!();
       await expect(waitPromise).rejects.toThrow(
         /RemoteStopTransaction trigger requires a transport that can receive CSMS-initiated calls/,
       );
@@ -192,7 +192,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForRemoteStop!(30);
+      const waitPromise = callbacks.onWaitForRemoteStop!();
 
       // Should register the handler
       expect(chargePoint.registerScenarioStopHandler).toHaveBeenCalledWith(1);
@@ -218,7 +218,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForReservation!(30);
+      const waitPromise = callbacks.onWaitForReservation!();
       await expect(waitPromise).rejects.toThrow(
         /Reservation trigger requires ReserveNow capability/,
       );
@@ -238,7 +238,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForReservation!(30);
+      const waitPromise = callbacks.onWaitForReservation!();
 
       // The promise should be pending, not rejected
       expect(waitPromise).toBeInstanceOf(Promise);
@@ -260,7 +260,7 @@ describe("ScenarioRuntime.soap-capability", () => {
         connector,
       });
 
-      const waitPromise = callbacks.onWaitForReservation!(30);
+      const waitPromise = callbacks.onWaitForReservation!();
       const result = await waitPromise;
 
       expect(result).toBe(12345);

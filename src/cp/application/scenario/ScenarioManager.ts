@@ -1,6 +1,7 @@
 import { Connector } from "../../domain/connector/Connector";
 import { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { ScenarioExecutor } from "./ScenarioExecutor";
+import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import {
   ScenarioDefinition,
   ScenarioExecutorCallbacks,
@@ -382,6 +383,29 @@ export class ScenarioManager {
     if (executor) {
       executor.step();
     }
+  }
+
+  /** #240: push the parked wait's deadline back by `seconds`. */
+  extendWait(scenarioId: string, seconds: number): void {
+    this.requireExecutor(scenarioId).extendWait(seconds);
+  }
+
+  /** #240: withdraw the parked wait and arm it again with its full timeout. */
+  retryWait(scenarioId: string): void {
+    this.requireExecutor(scenarioId).retryWait();
+  }
+
+  /** #240: move past the parked wait without the awaited event. */
+  continueWait(scenarioId: string): void {
+    this.requireExecutor(scenarioId).continueWait();
+  }
+
+  private requireExecutor(scenarioId: string): ScenarioExecutor {
+    const executor = this.executors.get(scenarioId);
+    if (!executor) {
+      throw new ScenarioRunStateError(`Scenario ${scenarioId} is not running`);
+    }
+    return executor;
   }
 
   /**

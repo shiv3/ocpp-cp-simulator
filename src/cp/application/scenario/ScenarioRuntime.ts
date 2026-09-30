@@ -8,6 +8,7 @@ import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 import type {
   ScenarioExecutionContext,
   ScenarioExecutorCallbacks,
+  ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 
 export interface ScenarioRuntimeHooks {
@@ -15,6 +16,8 @@ export interface ScenarioRuntimeHooks {
   onNodeExecute?: (nodeId: string) => void;
   onNodeProgress?: (nodeId: string, remaining: number, total: number) => void;
   onError?: (error: Error) => void;
+  /** #240: an operator extended, retried or continued a parked wait. */
+  onWaitIntervention?: (intervention: ScenarioWaitIntervention) => void;
   /**
    * Fired the moment this run has *actually* applied its EV settings to the
    * connector — after `applyEvSettingsOverride` returns, never before, and
@@ -76,45 +79,38 @@ const buildLogger = (
 const waitForStatus = (
   connector: Connector,
   targetStatus: OCPPStatus,
-  timeout?: number,
-): Promise<void> => {
+): CancellableWait<void> => {
   if (connector.status === targetStatus) {
-    return Promise.resolve();
+    return { promise: Promise.resolve(), cancel: () => {} };
   }
 
-  return new Promise<void>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
+  let cleanupFn: (() => void) | null = null;
+
+  const promise = new Promise<void>((resolve) => {
+    const cleanup = () => {
+      connector.events.off("statusChange", statusChangeHandler);
+    };
+    cleanupFn = cleanup;
 
     const statusChangeHandler = (data: {
       status: OCPPStatus;
       previousStatus: OCPPStatus;
     }) => {
       if (data.status === targetStatus) {
-        if (timeoutId) clearTimeout(timeoutId);
-        connector.events.off("statusChange", statusChangeHandler);
+        cleanup();
         resolve();
       }
     };
 
     connector.events.on("statusChange", statusChangeHandler);
-
-    if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
-        connector.events.off("statusChange", statusChangeHandler);
-        reject(
-          new Error(
-            `Timeout waiting for status: ${targetStatus} (${timeout}s)`,
-          ),
-        );
-      }, timeout * 1000);
-    }
   });
+
+  return { promise, cancel: () => cleanupFn?.() };
 };
 
 const waitForRemoteStart = (
   chargePoint: ChargePoint,
   connector: Connector,
-  timeout: number | undefined,
   log: NonNullable<ScenarioExecutorCallbacks["log"]>,
   runStartedAt: number,
 ): CancellableWait<{ tagId: string; remoteStartId?: number }> => {
@@ -165,13 +161,11 @@ const waitForRemoteStart = (
 
   const promise = new Promise<{ tagId: string; remoteStartId?: number }>(
     (resolve, reject) => {
-      let timeoutId: NodeJS.Timeout | null = null;
       let settled = false;
 
       const cleanup = () => {
         if (settled) return;
         settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
         chargePoint.events.off("remoteStartReceived", handler);
         chargePoint.events.off("disconnected", disconnectHandler);
         chargePoint.unregisterScenarioHandler(connector.id);
@@ -201,13 +195,6 @@ const waitForRemoteStart = (
 
       chargePoint.events.on("remoteStartReceived", handler);
       chargePoint.events.on("disconnected", disconnectHandler);
-
-      if (timeout && timeout > 0) {
-        timeoutId = setTimeout(() => {
-          cleanup();
-          reject(new Error(`Timeout waiting for remote start (${timeout}s)`));
-        }, timeout * 1000);
-      }
     },
   );
 
@@ -223,11 +210,11 @@ const waitForRemoteStart = (
  *  `remoteStopReceived` event. Resolves with the transactionId AND the
  *  OCPP §6.21 stop reason ("Remote" for the CSMS-initiated path) so the
  *  subsequent Transaction Stop node can pass it through to
- *  StopTransaction.req. Rejects on disconnect or timeout. */
+ *  StopTransaction.req. Rejects on disconnect; the executor owns the
+ *  timeout (#240). */
 const waitForRemoteStop = (
   chargePoint: ChargePoint,
   connector: Connector,
-  timeout: number | undefined,
   log: NonNullable<ScenarioExecutorCallbacks["log"]>,
   runStartedAt: number,
 ): CancellableWait<{
@@ -277,13 +264,11 @@ const waitForRemoteStop = (
     reason: string;
     triggerReason: "RemoteStop";
   }>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
     let settled = false;
 
     const cleanup = () => {
       if (settled) return;
       settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
       chargePoint.events.off("remoteStopReceived", handler);
       chargePoint.events.off("disconnected", disconnectHandler);
       chargePoint.unregisterScenarioStopHandler(connector.id);
@@ -311,13 +296,6 @@ const waitForRemoteStop = (
 
     chargePoint.events.on("remoteStopReceived", handler);
     chargePoint.events.on("disconnected", disconnectHandler);
-
-    if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timeout waiting for remote stop (${timeout}s)`));
-      }, timeout * 1000);
-    }
   });
 
   return {
@@ -333,7 +311,6 @@ const waitForRemoteStop = (
 const waitForCsmsCall = (
   chargePoint: ChargePoint,
   action: string,
-  timeout?: number,
   payload?: Record<string, unknown>,
 ): CancellableWait<{ action: string; payload: unknown }> => {
   // Fail-fast if this transport can never receive CSMS-initiated calls.
@@ -352,13 +329,11 @@ const waitForCsmsCall = (
 
   const promise = new Promise<{ action: string; payload: unknown }>(
     (resolve, reject) => {
-      let timeoutId: NodeJS.Timeout | null = null;
       let settled = false;
 
       const cleanup = () => {
         if (settled) return;
         settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
         chargePoint.events.off("incomingCallReceived", handler);
         chargePoint.events.off("disconnected", disconnectHandler);
       };
@@ -384,19 +359,6 @@ const waitForCsmsCall = (
 
       chargePoint.events.on("incomingCallReceived", handler);
       chargePoint.events.on("disconnected", disconnectHandler);
-
-      if (timeout && timeout > 0) {
-        timeoutId = setTimeout(() => {
-          cleanup();
-          reject(
-            new Error(
-              `Timeout waiting for CSMS call ${action}${
-                payload ? " matching payload" : ""
-              } (${timeout}s)`,
-            ),
-          );
-        }, timeout * 1000);
-      }
     },
   );
 
@@ -414,7 +376,6 @@ const waitForCsmsCall = (
 const waitForConnection = (
   chargePoint: ChargePoint,
   event: "connected" | "disconnected",
-  timeout?: number,
 ): CancellableWait<void> => {
   const inTargetState = () =>
     event === "connected"
@@ -427,8 +388,7 @@ const waitForConnection = (
 
   let cleanupFn: (() => void) | null = null;
 
-  const promise = new Promise<void>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
+  const promise = new Promise<void>((resolve) => {
     let settled = false;
 
     const handler = () => {
@@ -440,17 +400,9 @@ const waitForConnection = (
     const cleanup = () => {
       if (settled) return;
       settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
       off();
     };
     cleanupFn = cleanup;
-
-    if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timeout waiting for ${event} (${timeout}s)`));
-      }, timeout * 1000);
-    }
   });
 
   return { promise, cancel: () => cleanupFn?.() };
@@ -459,8 +411,7 @@ const waitForConnection = (
 const waitForReservation = (
   chargePoint: ChargePoint,
   connector: Connector,
-  timeout?: number,
-): Promise<number> => {
+): CancellableWait<number> => {
   // §4.9 S3: fail-fast if the charge point cannot receive ReserveNow
   if (!chargePoint.canReceiveCsmsCall("ReserveNow")) {
     const version = chargePoint.ocppVersion;
@@ -472,7 +423,7 @@ const waitForReservation = (
     const errorMsg =
       `Reservation trigger requires ReserveNow capability; ` +
       `this charge point (${versionDesc}) does not support it — the scenario would wait forever`;
-    return Promise.reject(new Error(errorMsg));
+    return { promise: Promise.reject(new Error(errorMsg)), cancel: () => {} };
   }
 
   const getReservationId = (): number | null => {
@@ -483,17 +434,17 @@ const waitForReservation = (
 
   const existing = getReservationId();
   if (existing !== null) {
-    return Promise.resolve(existing);
+    return { promise: Promise.resolve(existing), cancel: () => {} };
   }
 
-  return new Promise<number>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
+  let cleanupFn: (() => void) | null = null;
 
+  const promise = new Promise<number>((resolve) => {
     const cleanup = () => {
-      if (timeoutId) clearTimeout(timeoutId);
       connector.events.off("statusChange", statusChangeHandler);
       clearInterval(pollingId);
     };
+    cleanupFn = cleanup;
 
     const tryResolve = () => {
       const reservationId = getReservationId();
@@ -510,14 +461,9 @@ const waitForReservation = (
     connector.events.on("statusChange", statusChangeHandler);
 
     const pollingId = setInterval(tryResolve, 250);
-
-    if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timeout waiting for reservation (${timeout}s)`));
-      }, timeout * 1000);
-    }
   });
+
+  return { promise, cancel: () => cleanupFn?.() };
 };
 
 const waitForMeterValue = (
@@ -681,26 +627,24 @@ export const createScenarioExecutorCallbacks = (
     onDelay: async (seconds) => {
       await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
     },
-    onWaitForRemoteStart: (timeout) => {
+    onWaitForRemoteStart: () => {
       return cancellablePromise(
-        waitForRemoteStart(chargePoint, connector, timeout, log, runStartedAt),
+        waitForRemoteStart(chargePoint, connector, log, runStartedAt),
       );
     },
-    onWaitForRemoteStop: (timeout) => {
+    onWaitForRemoteStop: () => {
       return cancellablePromise(
-        waitForRemoteStop(chargePoint, connector, timeout, log, runStartedAt),
+        waitForRemoteStop(chargePoint, connector, log, runStartedAt),
       );
     },
-    onWaitForCsmsCall: (action, timeout, payload) => {
-      return cancellablePromise(
-        waitForCsmsCall(chargePoint, action, timeout, payload),
-      );
+    onWaitForCsmsCall: (action, payload) => {
+      return cancellablePromise(waitForCsmsCall(chargePoint, action, payload));
     },
-    onWaitForConnection: (event, timeout) => {
-      return cancellablePromise(waitForConnection(chargePoint, event, timeout));
+    onWaitForConnection: (event) => {
+      return cancellablePromise(waitForConnection(chargePoint, event));
     },
-    onWaitForStatus: async (targetStatus, timeout) =>
-      waitForStatus(connector, targetStatus, timeout),
+    onWaitForStatus: (targetStatus) =>
+      cancellablePromise(waitForStatus(connector, targetStatus)),
     onWaitForMeterValue: async (targetValue, timeout) =>
       waitForMeterValue(connector, targetValue, timeout),
     onReserveNow: async (expiryMinutes, idTag, parentIdTag, reservationId) => {
@@ -736,12 +680,13 @@ export const createScenarioExecutorCallbacks = (
         }
       }
     },
-    onWaitForReservation: async (timeout) =>
-      waitForReservation(chargePoint, connector, timeout),
+    onWaitForReservation: () =>
+      cancellablePromise(waitForReservation(chargePoint, connector)),
     onStateChange: hooks?.onStateChange,
     onNodeExecute: hooks?.onNodeExecute,
     onNodeProgress: hooks?.onNodeProgress,
     onError: hooks?.onError,
+    onWaitIntervention: hooks?.onWaitIntervention,
     log,
     // §4.9: connectorId === -1 sentinel means "use the scenario's bound
     // connector"; otherwise the node specified an explicit target (0 for

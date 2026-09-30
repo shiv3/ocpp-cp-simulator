@@ -31,6 +31,7 @@ import {
   StartTransactionOptions,
   StopTransactionOptions,
   ScenarioExpectation,
+  ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
@@ -42,6 +43,8 @@ import {
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
 import { cancelIfCancellable } from "./cancellable";
+import { WaitControl, type WaitSignal } from "./WaitControl";
+import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
 
 type AutoMeterStartConfig = Parameters<
@@ -50,6 +53,14 @@ type AutoMeterStartConfig = Parameters<
 type MeterValueCallbacks = ScenarioExecutorCallbacks & {
   onGetTransactionMeterStart?: () => number | null;
 };
+
+/** #240: a parked trigger wait — what it awaits and the controls of its
+ *  armed attempt. */
+interface ParkedWait {
+  nodeId: string;
+  control: WaitControl;
+  expectation: ScenarioExpectation | null;
+}
 
 const isMeterValueTimeout = (error: unknown): boolean =>
   error instanceof Error &&
@@ -107,11 +118,14 @@ export class ScenarioExecutor {
   // node is active. Lets a client compute time-on-step and, with
   // expectation.timeoutMs, the remaining wait.
   private currentNodeStartedAt: number | null = null;
-  // #179: the normalized condition the currently-parked node is waiting on
-  // (null when no node is parked). The robot3 machine stays "running" while a
-  // node awaits an external event (the "waiting" state is never entered), so
-  // getContext() derives the reported "waiting" state from this field.
-  private currentExpectation: ScenarioExpectation | null = null;
+  // #179 / #240: the trigger waits currently parked, oldest first, each with
+  // the condition it awaits and the deadline and operator controls (extend /
+  // retry / continue) of its armed attempt. The robot3 machine stays
+  // "running" while a node parks (its "waiting" state is never entered), so
+  // getContext() derives the reported "waiting" state from this list.
+  // Parallel branches can park several; the latest still parked is the one
+  // reported and controlled.
+  private parkedWaits: ParkedWait[] = [];
   private executedNodes: string[] = [];
   // Issue #110: track which response overrides were armed during this run,
   // so they can be cleared when the run ends (both normal completion and stop()).
@@ -183,7 +197,7 @@ export class ScenarioExecutor {
     this.aborted = false;
     this.currentNodeId = null;
     this.currentNodeStartedAt = null;
-    this.currentExpectation = null;
+    this.parkedWaits = [];
     this.executedNodes = [];
     this.stepResolve = null;
     this.pendingSteps = 0;
@@ -392,7 +406,6 @@ export class ScenarioExecutor {
     // Clear current node
     this.currentNodeId = null;
     this.currentNodeStartedAt = null;
-    this.currentExpectation = null;
   }
 
   /**
@@ -530,22 +543,7 @@ export class ScenarioExecutor {
       node.type !== ScenarioNodeType.START &&
       node.type !== ScenarioNodeType.END
     ) {
-      // #179: while a node that parks on an external event is awaiting, expose
-      // its normalized expectation (and a reported "waiting" state) through
-      // getContext(). deriveExpectation returns null for non-waiting nodes, so
-      // this is a no-op for them. Cleared as soon as the node resolves.
-      this.currentExpectation = deriveExpectation(node, this.scenario.targetId);
-      if (this.currentExpectation) {
-        this.notifyStateChange();
-      }
-      try {
-        await this.executeNode(node);
-      } finally {
-        if (this.currentExpectation) {
-          this.currentExpectation = null;
-          this.notifyStateChange();
-        }
-      }
+      await this.executeNode(node);
     }
 
     // Dispatch NODE_COMPLETE event
@@ -1178,97 +1176,33 @@ export class ScenarioExecutor {
     nodeId: string,
     data: RemoteStartTriggerNodeData,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForRemoteStart) return;
+    const waitForRemoteStart = this.callbacks.onWaitForRemoteStart;
+    if (!waitForRemoteStart) return;
 
-    const timeout = data.timeout || 0;
-
-    // Wrap the promise to capture the resolved tagId
-    let resolvedTagId: string | null = null;
-    let resolvedOptions: StartTransactionOptions | null = null;
-    const captureTagId = (
-      promise: ReturnType<
-        NonNullable<ScenarioExecutorCallbacks["onWaitForRemoteStart"]>
-      >,
-    ): Promise<void> =>
-      promise.then((result) => {
-        if (typeof result === "string") {
-          resolvedTagId = result;
-          resolvedOptions = { triggerReason: "RemoteStart" };
-          return;
-        }
-        resolvedTagId = result.tagId;
-        resolvedOptions = {
-          triggerReason: "RemoteStart",
-          ...(result.remoteStartId !== undefined
-            ? { remoteStartId: result.remoteStartId }
-            : {}),
-        };
-      });
-
-    // If no timeout, just wait without progress
-    if (!timeout || timeout === 0) {
-      const waitPromise = this.callbacks.onWaitForRemoteStart(timeout);
-      try {
-        await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
-        this.remoteStartTagId = resolvedTagId;
-        this.remoteStartOptions = resolvedOptions;
-      } finally {
-        cancelIfCancellable(waitPromise);
-      }
-      return;
-    }
-
-    // Start timeout countdown with progress updates
-    const startTime = Date.now();
-    const timeoutMs = timeout * 1000;
-
-    const progressInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
-
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, remaining, timeout);
-      }
-
-      // Emit node progress events
-      const progressData = {
-        scenarioId: this.scenario.id,
+    const answer = (
+      await this.runTriggerWait(
         nodeId,
-        remaining,
-        total: timeout,
+        data.timeout,
+        (seconds) => `Timeout waiting for remote start (${seconds}s)`,
+        () => waitForRemoteStart(),
+      )
+    )?.value;
+    // A wait continued past (#240) captures nothing, so the next Transaction
+    // node falls back to its own tag.
+    if (answer === undefined) {
+      this.remoteStartTagId = null;
+      this.remoteStartOptions = null;
+    } else if (typeof answer === "string") {
+      this.remoteStartTagId = answer;
+      this.remoteStartOptions = { triggerReason: "RemoteStart" };
+    } else {
+      this.remoteStartTagId = answer.tagId;
+      this.remoteStartOptions = {
+        triggerReason: "RemoteStart",
+        ...(answer.remoteStartId !== undefined
+          ? { remoteStartId: answer.remoteStartId }
+          : {}),
       };
-      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-
-      if (remaining <= 0) {
-        clearInterval(progressInterval);
-      }
-    }, 100);
-
-    try {
-      const waitPromise = this.callbacks.onWaitForRemoteStart(timeout);
-      try {
-        await this.waitWithOptionalForceSkip(captureTagId(waitPromise));
-      } finally {
-        cancelIfCancellable(waitPromise);
-      }
-      this.remoteStartTagId = resolvedTagId;
-      this.remoteStartOptions = resolvedOptions;
-    } finally {
-      clearInterval(progressInterval);
-
-      // Clear progress
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, 0, timeout);
-      }
-
-      // Emit final progress event
-      this.eventEmitter?.emit("nodeProgress", {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining: 0,
-        total: timeout,
-      });
     }
   }
 
@@ -1277,78 +1211,29 @@ export class ScenarioExecutor {
    * but for the CSMS-initiated stop side. Parks the scenario until the
    * runtime callback resolves (the runtime installs a scenario-stop
    * handler on the CP so the default RemoteStopTransactionHandler defers
-   * to us). Returns the transactionId from the request; we don't surface
-   * it on the scenario yet but capture it for parity with the start node.
+   * to us).
    */
   private async executeRemoteStopTrigger(
     nodeId: string,
     data: RemoteStopTriggerNodeData,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForRemoteStop) return;
+    const waitForRemoteStop = this.callbacks.onWaitForRemoteStop;
+    if (!waitForRemoteStop) return;
 
-    const timeout = data.timeout || 0;
-    // Wrap the resolved {transactionId, reason} so the next Transaction
-    // Stop node can pass `reason` through to StopTransaction.req. The
-    // runtime hard-codes "Remote" for the CSMS path (§6.21); we keep
-    // the wrapping here so it survives waitWithOptionalForceSkip.
-    if (!timeout || timeout === 0) {
-      const waitPromise = this.callbacks.onWaitForRemoteStop(timeout);
-      try {
-        await this.waitWithOptionalForceSkip(
-          waitPromise.then((res) => {
-            this.remoteStopReason = res?.reason ?? null;
-            this.remoteStopOptions = {
-              triggerReason: res?.triggerReason ?? "RemoteStop",
-            };
-          }),
-        );
-      } finally {
-        cancelIfCancellable(waitPromise);
-      }
-      return;
-    }
-
-    const startTime = Date.now();
-    const timeoutMs = timeout * 1000;
-    const progressInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
-      this.callbacks.onNodeProgress?.(nodeId, remaining, timeout);
-      const progressData = {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining,
-        total: timeout,
-      };
-      this.eventEmitter?.emit("nodeProgress", progressData);
-      this.eventEmitter?.emit("node.progress", progressData);
-      if (remaining <= 0) clearInterval(progressInterval);
-    }, 100);
-
-    try {
-      const waitPromise = this.callbacks.onWaitForRemoteStop(timeout);
-      try {
-        await this.waitWithOptionalForceSkip(
-          waitPromise.then((res) => {
-            this.remoteStopReason = res?.reason ?? null;
-            this.remoteStopOptions = {
-              triggerReason: res?.triggerReason ?? "RemoteStop",
-            };
-          }),
-        );
-      } finally {
-        cancelIfCancellable(waitPromise);
-      }
-    } finally {
-      clearInterval(progressInterval);
-      this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
-      this.eventEmitter?.emit("nodeProgress", {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining: 0,
-        total: timeout,
-      });
-    }
+    // Capture {reason, triggerReason} so the next Transaction Stop node can
+    // pass `reason` through to StopTransaction.req. The runtime hard-codes
+    // "Remote" for the CSMS path (§6.21). A continued wait (#240) captures
+    // nothing, so that node falls back to its own stopReason.
+    const result = await this.runTriggerWait(
+      nodeId,
+      data.timeout,
+      (seconds) => `Timeout waiting for remote stop (${seconds}s)`,
+      () => waitForRemoteStop(),
+    );
+    this.remoteStopReason = result?.value?.reason ?? null;
+    this.remoteStopOptions = result
+      ? { triggerReason: result.value?.triggerReason ?? "RemoteStop" }
+      : null;
   }
 
   /**
@@ -1359,65 +1244,16 @@ export class ScenarioExecutor {
     nodeId: string,
     data: StatusTriggerNodeData,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForStatus) return;
+    const waitForStatus = this.callbacks.onWaitForStatus;
+    if (!waitForStatus) return;
 
-    const timeout = data.timeout || 0;
-
-    // If no timeout, just wait without progress
-    if (!timeout || timeout === 0) {
-      await this.waitWithOptionalForceSkip(
-        this.callbacks.onWaitForStatus(data.targetStatus, timeout),
-      );
-      return;
-    }
-
-    // Start timeout countdown with progress updates
-    const startTime = Date.now();
-    const timeoutMs = timeout * 1000;
-
-    const progressInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
-
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, remaining, timeout);
-      }
-
-      // Emit node progress events
-      const progressData = {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining,
-        total: timeout,
-      };
-      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-
-      if (remaining <= 0) {
-        clearInterval(progressInterval);
-      }
-    }, 100);
-
-    try {
-      await this.waitWithOptionalForceSkip(
-        this.callbacks.onWaitForStatus(data.targetStatus, timeout),
-      );
-    } finally {
-      clearInterval(progressInterval);
-
-      // Clear progress
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, 0, timeout);
-      }
-
-      // Emit final progress event
-      this.eventEmitter?.emit("nodeProgress", {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining: 0,
-        total: timeout,
-      });
-    }
+    await this.runTriggerWait(
+      nodeId,
+      data.timeout,
+      (seconds) =>
+        `Timeout waiting for status: ${data.targetStatus} (${seconds}s)`,
+      () => waitForStatus(data.targetStatus),
+    );
   }
 
   /**
@@ -1456,65 +1292,15 @@ export class ScenarioExecutor {
     nodeId: string,
     data: ReservationTriggerNodeData,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForReservation) return;
+    const waitForReservation = this.callbacks.onWaitForReservation;
+    if (!waitForReservation) return;
 
-    const timeout = data.timeout || 0;
-
-    // If no timeout, just wait without progress
-    if (!timeout || timeout === 0) {
-      await this.waitWithOptionalForceSkip(
-        this.callbacks.onWaitForReservation(timeout),
-      );
-      return;
-    }
-
-    // Start timeout countdown with progress updates
-    const startTime = Date.now();
-    const timeoutMs = timeout * 1000;
-
-    const progressInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
-
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, remaining, timeout);
-      }
-
-      // Emit node progress events
-      const progressData = {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining,
-        total: timeout,
-      };
-      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-
-      if (remaining <= 0) {
-        clearInterval(progressInterval);
-      }
-    }, 100);
-
-    try {
-      await this.waitWithOptionalForceSkip(
-        this.callbacks.onWaitForReservation(timeout),
-      );
-    } finally {
-      clearInterval(progressInterval);
-
-      // Clear progress
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, 0, timeout);
-      }
-
-      // Emit final progress event
-      this.eventEmitter?.emit("nodeProgress", {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining: 0,
-        total: timeout,
-      });
-    }
+    await this.runTriggerWait(
+      nodeId,
+      data.timeout,
+      (seconds) => `Timeout waiting for reservation (${seconds}s)`,
+      () => waitForReservation(),
+    );
   }
 
   /**
@@ -1558,7 +1344,8 @@ export class ScenarioExecutor {
     this.aborted = true;
     this.currentNodeId = null;
     this.currentNodeStartedAt = null;
-    this.currentExpectation = null;
+    for (const wait of this.parkedWaits) wait.control.dispose();
+    this.parkedWaits = [];
     this.abortResolve?.();
     // Stop the connector's auto-meter now; otherwise a pending maxTime/maxValue
     // could later resume the flow and fire a downstream Stop Transaction on a
@@ -1620,12 +1407,10 @@ export class ScenarioExecutor {
     const stateName = getScenarioStateName(this.service);
     const context = getScenarioContext(this.service);
 
-    // #179: the robot3 machine stays "running" while a node parks on an
-    // external event (the "waiting" state is never dispatched), so surface
-    // the already-valid "waiting" state — and the awaited condition — from
-    // currentExpectation. Only override an otherwise-"running" machine so a
-    // paused / stepping / stopped scenario keeps its real state.
-    const parked = this.currentExpectation;
+    // #179: surface the already-valid "waiting" state — and the awaited
+    // condition — from the parked wait. Only override an otherwise-"running"
+    // machine so a paused / stepping / stopped scenario keeps its real state.
+    const parked = this.parkedWaits.at(-1);
     const state: ScenarioExecutionState =
       parked && stateName === "running"
         ? "waiting"
@@ -1639,9 +1424,65 @@ export class ScenarioExecutor {
       executedNodes: [...this.executedNodes],
       loopCount: context.loopCount,
       error: context.error,
-      expectation: parked ?? null,
+      expectation: parked?.expectation ?? null,
       currentNodeStartedAt: this.currentNodeStartedAt,
+      waitDeadlineAt: parked?.control.deadlineAt ?? null,
     };
+  }
+
+  /** #240: push the parked wait's deadline back by `seconds`. */
+  public extendWait(seconds: number): void {
+    const wait = this.requireParkedWait();
+    wait.control.extend(seconds * 1000);
+    this.reportIntervention({
+      kind: "extend",
+      nodeId: wait.nodeId,
+      at: Date.now(),
+      seconds,
+    });
+  }
+
+  /** #240: withdraw the parked wait and arm it again with its full timeout. */
+  public retryWait(): void {
+    this.signalWait("retry");
+  }
+
+  /** #240: treat the parked wait as satisfied and move on to the next node,
+   *  without the awaited event (so nothing is captured from it). */
+  public continueWait(): void {
+    this.signalWait("continue");
+  }
+
+  private signalWait(kind: WaitSignal): void {
+    const wait = this.requireParkedWait();
+    this.unpark(wait.control);
+    wait.control.request(kind);
+    this.reportIntervention({ kind, nodeId: wait.nodeId, at: Date.now() });
+  }
+
+  private requireParkedWait(): ParkedWait {
+    const wait = this.parkedWaits.at(-1);
+    if (!wait) {
+      throw new ScenarioRunStateError(
+        `Scenario ${this.scenario.id} is not waiting`,
+      );
+    }
+    return wait;
+  }
+
+  private unpark(control: WaitControl): void {
+    this.parkedWaits = this.parkedWaits.filter((w) => w.control !== control);
+  }
+
+  private reportIntervention(intervention: ScenarioWaitIntervention): void {
+    this.callbacks.log?.(
+      `[${this.scenario.name}] Operator ${intervention.kind} on ${intervention.nodeId}${
+        intervention.seconds !== undefined ? ` (+${intervention.seconds}s)` : ""
+      }`,
+      "info",
+    );
+    this.callbacks.onWaitIntervention?.(intervention);
+    this.notifyStateChange();
   }
 
   /**
@@ -1726,64 +1567,95 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Run a trigger wait with the 100ms remaining-time progress events that
-   * timeout-bearing waiting nodes surface. Extracted from
-   * executeCsmsCallTrigger (#240) so connectionTrigger shares it instead of
-   * copying the interval bookkeeping a third time.
+   * Park on a trigger wait (#240). The executor owns the node's timeout
+   * through a {@link WaitControl} instead of the runtime, so an operator can
+   * extend it, retry the wait (withdraw it and arm it again with the full
+   * timeout) or continue past it without the awaited event. Resolves with
+   * the awaited answer, or null when there is none (continued, force-skipped
+   * or stopped). Timeout-bearing waits also surface 100ms remaining-time
+   * progress events.
    */
-  private async runTriggerWait(
+  private async runTriggerWait<T>(
     nodeId: string,
-    timeoutSeconds: number,
-    startWait: () => Promise<unknown>,
-    onResolved?: (value: unknown) => void,
-  ): Promise<void> {
-    const timeout = Math.max(0, timeoutSeconds || 0);
+    timeoutSeconds: number | undefined,
+    timeoutMessage: (seconds: number) => string,
+    startWait: () => Promise<T>,
+  ): Promise<{ value: T } | null> {
+    const timeoutMs = Math.max(0, timeoutSeconds || 0) * 1000;
+    const node = this.scenario.nodes.find((n) => n.id === nodeId);
+    const expectation = node
+      ? deriveExpectation(node, this.scenario.targetId)
+      : null;
 
-    const awaitOnce = async () => {
-      const waitPromise = startWait();
+    for (;;) {
+      const control = new WaitControl(
+        timeoutMs,
+        (seconds) => new Error(timeoutMessage(seconds)),
+      );
+      this.parkedWaits.push({ nodeId, control, expectation });
+      this.notifyStateChange();
+      const stopProgress = this.reportWaitProgress(nodeId, control);
+      let waitPromise: Promise<T> | undefined;
+      // Only this attempt's own answer is returned: a withdrawn attempt that
+      // answers late (e.g. with a stale RemoteStart tag) never reaches the run.
+      let answer = null as { value: T } | null;
+      let outcome: WaitSignal | "settled";
       try {
-        await this.waitWithOptionalForceSkip(
-          onResolved ? waitPromise.then(onResolved) : waitPromise,
-        );
+        waitPromise = startWait();
+        outcome = await Promise.race([
+          this.waitWithOptionalForceSkip(
+            waitPromise.then((value) => {
+              answer = { value };
+            }),
+          ).then(() => "settled" as const),
+          control.expired,
+          control.signal,
+        ]);
       } finally {
-        cancelIfCancellable(waitPromise);
+        if (waitPromise) cancelIfCancellable(waitPromise);
+        control.dispose();
+        stopProgress();
+        this.unpark(control);
+        this.notifyStateChange();
       }
-    };
 
-    if (!timeout) {
-      await awaitOnce();
-      return;
+      if (outcome === "settled") return answer;
+      if (outcome === "continue" || this.aborted) return null;
+      this.currentNodeStartedAt = Date.now();
     }
+  }
 
-    const startTime = Date.now();
-    const timeoutMs = timeout * 1000;
+  /** Emit the 100ms remaining-time progress of a timeout-bearing wait;
+   *  returns the function that stops it. */
+  private reportWaitProgress(nodeId: string, control: WaitControl): () => void {
+    if (control.deadlineAt === null) return () => {};
+
     const progressInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, (timeoutMs - elapsed) / 1000);
-      this.callbacks.onNodeProgress?.(nodeId, remaining, timeout);
+      const remaining = (control.remainingMs() ?? 0) / 1000;
+      const total = control.totalSeconds;
+      this.callbacks.onNodeProgress?.(nodeId, remaining, total);
       const progressData = {
         scenarioId: this.scenario.id,
         nodeId,
         remaining,
-        total: timeout,
+        total,
       };
-      this.eventEmitter?.emit("nodeProgress", progressData);
-      this.eventEmitter?.emit("node.progress", progressData);
+      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
+      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
       if (remaining <= 0) clearInterval(progressInterval);
     }, 100);
 
-    try {
-      await awaitOnce();
-    } finally {
+    return () => {
       clearInterval(progressInterval);
-      this.callbacks.onNodeProgress?.(nodeId, 0, timeout);
+      const total = control.totalSeconds;
+      this.callbacks.onNodeProgress?.(nodeId, 0, total);
       this.eventEmitter?.emit("nodeProgress", {
         scenarioId: this.scenario.id,
         nodeId,
         remaining: 0,
-        total: timeout,
+        total,
       });
-    }
+    };
   }
 
   /**
@@ -1795,7 +1667,8 @@ export class ScenarioExecutor {
     nodeId: string,
     data: CsmsCallTriggerNodeData,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForCsmsCall) return;
+    const waitForCsmsCall = this.callbacks.onWaitForCsmsCall;
+    if (!waitForCsmsCall) return;
     if (
       data.payload !== undefined &&
       (typeof data.payload !== "object" ||
@@ -1806,18 +1679,21 @@ export class ScenarioExecutor {
         `csmsCallTrigger(${data.action}): payload condition must be a JSON object`,
       );
     }
-    const timeout = Math.max(0, data.timeout || 0);
-    await this.runTriggerWait(
+    const result = await this.runTriggerWait(
       nodeId,
-      timeout,
-      () =>
-        this.callbacks.onWaitForCsmsCall!(data.action, timeout, data.payload),
-      (res) =>
-        this.callbacks.log?.(
-          `CSMS call received: ${(res as { action: string }).action}`,
-          "info",
-        ),
+      data.timeout,
+      (seconds) =>
+        `Timeout waiting for CSMS call ${data.action}${
+          data.payload ? " matching payload" : ""
+        } (${seconds}s)`,
+      () => waitForCsmsCall(data.action, data.payload),
     );
+    if (result) {
+      this.callbacks.log?.(
+        `CSMS call received: ${result.value.action}`,
+        "info",
+      );
+    }
   }
 
   /** Issue #240: park until the WebSocket reaches data.event. */
@@ -1825,13 +1701,14 @@ export class ScenarioExecutor {
     nodeId: string,
     data: ConnectionTriggerNodeData,
   ): Promise<void> {
-    if (!this.callbacks.onWaitForConnection) return;
-    const timeout = Math.max(0, data.timeout || 0);
-    await this.runTriggerWait(
+    const waitForConnection = this.callbacks.onWaitForConnection;
+    if (!waitForConnection) return;
+    const result = await this.runTriggerWait(
       nodeId,
-      timeout,
-      () => this.callbacks.onWaitForConnection!(data.event, timeout),
-      () => this.callbacks.log?.(`Connection event: ${data.event}`, "info"),
+      data.timeout,
+      (seconds) => `Timeout waiting for ${data.event} (${seconds}s)`,
+      () => waitForConnection(data.event),
     );
+    if (result) this.callbacks.log?.(`Connection event: ${data.event}`, "info");
   }
 }

@@ -525,7 +525,7 @@ Guarantees a conformance driver can rely on:
 | `config.save`                                                  | `{ "config": object \| null }`                                                                      | Replace the daemon-wide simulator config; `null` clears it.                                                                                                                                                      |
 | `scenario.templates`                                           | `{}`                                                                                                | Built-in template catalogue (`id`, `name`, `description`, `targetType`) — the daemon-level twin of the CP-scoped `list_scenario_templates`; what the MCP `scenario_templates` tool calls.                        |
 | `scenario.definitions.list` / `.save` / `.replace` / `.delete` | `{ "cpId", "connectorId", … }` plus `definition` / `definitions[]` / `definitionId`                 | CRUD over persisted scenario definitions for one connector — the web console's scenario library; `list_scenarios` / `load_scenario` are the run-time view of the same rows.                                      |
-| `scenario.runs.list`                                           | `{ "cpId"?, "connectorId"?, "scenarioId"?, "verdict"?, "executionState"?, "limit"?, "offset"? }`    | Finished scenario runs across charge points, newest first, filtered and paged — see [Scenario run history](#scenario-run-history) (#388).                                                                        |
+| `scenario.runs.list`                                           | `{ "runId"?, "cpId"?, "connectorId"?, "scenarioId"?, "verdict"?, "executionState"?, … }`            | Finished scenario runs across charge points, newest first, filtered and paged — see [Scenario run history](#scenario-run-history) (#388).                                                                        |
 | `connector_settings.auto_meter.get` / `.save`                  | `{ "cpId", "connectorId" }` (+ `config` on save)                                                    | Persisted automatic-meter-value config per connector (`connector_settings` table); `set_auto_meter_config` is the CP-scoped live equivalent.                                                                     |
 | `connector_settings.auto_traffic.get` / `.save`                | `{ "cpId", "connectorId" }` (+ `config` on save)                                                    | Persisted [background-traffic](#background-traffic) config per connector (`connector_settings` table, schema v10); `set_auto_traffic_config` is the CP-scoped live equivalent.                                   |
 | `connector_settings.soc_meter_sync.get` / `.save`              | `{ "cpId", "connectorId" }` (+ `enabled` on save)                                                   | Persisted SoC↔meter sync flag per connector.                                                                                                                                                                     |
@@ -552,10 +552,12 @@ daemon's run history (#388). One history serves the whole daemon:
   `verdict`, `conformanceVerdict`, `compatibilityVerdict`, `timeoutNodeId`,
   `errorCount` and `assertions: { total, failed }` — newest first by start
   time. Every filter is an exact match and they combine; a filter never returns
-  another charge point's, connector's or scenario's run. `total` counts the
-  filtered runs before paging. `limit` defaults to 50 and is capped at 200;
-  `offset` skips the newest runs. An out-of-range `limit`, an unknown
-  `verdict` / `executionState` or a `connectorId` below 1 is `invalid_params`.
+  another charge point's, connector's or scenario's run. `runId` finds one run
+  wherever it sits in the history (a run id is unique per charge point, so add
+  `cpId` to be exact). `total` counts the filtered runs before paging. `limit`
+  defaults to 50 and is capped at 200; `offset` skips the newest runs. An
+  out-of-range `limit`, an empty `runId`, an unknown `verdict` /
+  `executionState` or a `connectorId` below 1 is `invalid_params`.
 - **Detail.** A summary carries no transcript; `scenario_report` with the
   run's `cpId`, `connector`, `scenarioId` and `runId` returns the full report.
   Without `runId` it still returns the scenario's latest recorded run.

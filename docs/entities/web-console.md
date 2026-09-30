@@ -87,12 +87,16 @@ errors, assertion results, wait interventions and the run's OCPP transcript,
 downloadable as JSON. **View all runs** opens the **Run History** page
 (`/v3/scenarios/runs`), which lists every recorded run across charge points
 with filters on charge point, connector, scenario id, verdict and execution
-state, pages of 50, and the selected run's report beside the list; filters and
-the selected run are kept in the URL (`?cp=&connector=&scenario=&verdict=
-&state=&run=`). Both re-list when the daemon records a run
+state, pages of 50, and the selected run's report beside the list. Filters, the
+page and the selected run are kept in the URL (`?cp=&connector=&scenario=
+&verdict=&state=&offset=&run=`), so a copied URL reopens the same view; a
+linked run that is no longer on that page (newer runs pushed it down) is
+looked up by `runId` and its report still opens. Both re-list when the daemon
+records a run, and when a charge point is deleted or the simulator reset
 ([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
 In Local mode the run console keeps a history of this page view only, and the
-Run History page says it needs the daemon.
+Run History page says it needs the daemon — local run reports are tracked in
+#394.
 
 The two consoles link to each other with a design switcher (the classic
 navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic

@@ -55,4 +55,9 @@ overridden.
 - The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
   run console's recorded history and the `/v3/scenarios/runs` page need Remote
   mode. In Local mode the run console lists only the runs started or attached
-  while the page is open, and forgets them when it closes.
+  while the page is open, and forgets them when it closes. This is a deferred
+  part of #388, not a design choice: the browser runtime builds no run
+  reports (the transcript capture, assertion evaluation and verdict live in
+  the daemon's service), so it has nothing to record. Moving that report
+  builder to the shared application layer and recording local runs in the
+  sql.js `scenario_runs` table is tracked in #394.

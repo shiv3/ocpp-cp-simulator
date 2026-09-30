@@ -191,6 +191,29 @@ export async function flush(hops = 5): Promise<void> {
   });
 }
 
+/** Opens a Radix `DropdownMenu`: its trigger opens on pointerdown (or
+ *  Enter / Space / ArrowDown), not on `click`. The content renders in a
+ *  portal, so query it from `document.body`. */
+export async function openDropdownMenu(trigger: Element): Promise<void> {
+  await act(async () => {
+    trigger.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      }),
+    );
+    await Promise.resolve();
+  });
+}
+
+/** The open (portalled) menu item whose trimmed text is `label`. */
+export function findMenuItem(label: string): HTMLElement | undefined {
+  return Array.from(
+    document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ).find((el) => el.textContent?.trim() === label);
+}
+
 /** Pushes a synthetic event through every handler the fake service recorded
  *  via `subscribe(cpId, handler)` — simulates CP / scenario progress without
  *  a real runtime. */

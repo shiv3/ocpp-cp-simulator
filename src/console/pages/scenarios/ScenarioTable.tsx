@@ -3,6 +3,12 @@ import { Link } from "react-router-dom";
 import { MoreHorizontal } from "lucide-react";
 
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Table,
   TableBody,
   TableCell,
@@ -42,8 +48,6 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
   onExport,
   onDelete,
 }) => {
-  const [openMenuId, setOpenMenuId] = React.useState<string | null>(null);
-
   return (
     <Table>
       <TableHeader>
@@ -118,52 +122,40 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
                   >
                     Edit
                   </Link>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      aria-label={`More actions for ${scenario.name}`}
-                      onClick={() =>
-                        setOpenMenuId(openMenuId === rowKey ? null : rowKey)
-                      }
-                      className="rounded-md border border-gray-200 p-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                    {openMenuId === rowKey && (
-                      <div className="absolute right-0 z-10 mt-1 w-40 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            onDuplicate(item);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-                        >
-                          Duplicate
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            onExport(item);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-                        >
-                          Export JSON
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            onDelete(item);
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`More actions for ${scenario.name}`}
+                        className="rounded-md border border-gray-200 p-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    {/* Portalled + collision-aware: flips upward on the last
+                        rows instead of being clipped by the table's
+                        overflow-auto wrapper (#365). */}
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem
+                        onSelect={() => onDuplicate(item)}
+                        className="text-xs"
+                      >
+                        Duplicate
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => onExport(item)}
+                        className="text-xs"
+                      >
+                        Export JSON
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => onDelete(item)}
+                        className="text-xs text-rose-600 focus:bg-rose-50 focus:text-rose-600 dark:text-rose-400 dark:focus:bg-rose-950 dark:focus:text-rose-400"
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </TableCell>
             </TableRow>

@@ -6,14 +6,17 @@ import { useDataContext } from "../providers/DataProvider";
 import type { RemoteConnectionState } from "../remote/RemoteChargePointService";
 
 /**
- * `server.info` is fixed for one daemon run, and the pages that need it are
- * exclusive routes, so one fetch per connection is enough: a later mount
- * resolves from the cache instead of flashing "no public base" until the
- * round trip lands. The cache is dropped when the connection comes back —
- * the console may have reconnected to a restarted daemon whose tunnel URL
- * differs (free-tier ngrok) — and on failure, so the next connection retries.
+ * `server.info` is fixed for one daemon run, so one fetch per connection is
+ * enough, shared by every component that reads it: a later mount resolves
+ * from the cache instead of flashing "no public base" until the round trip
+ * lands. The cache is dropped when the connection comes back — the console
+ * may have reconnected to a restarted daemon whose tunnel URL differs
+ * (free-tier ngrok) — and on failure, so the next connection retries.
  */
 const cache = new WeakMap<ChargePointService, Promise<ServerInfo | null>>();
+
+/** Services whose reconnects already drop the cache (see watchReconnects). */
+const watched = new WeakSet<ChargePointService>();
 
 interface ConnectionAwareService {
   onConnectionChange(
@@ -54,6 +57,31 @@ function loadServerInfo(
 }
 
 /**
+ * Drops the service's cache on each reconnect, once per service rather than
+ * once per hook: always-mounted readers (the version line, #364) sit beside
+ * the pages that read it, and a per-hook drop would let each one discard the
+ * fetch the previous handler just started — one RPC per reader per reconnect.
+ * Subscribed before any hook's own handler, so the cache is already dropped
+ * when the hooks refresh. It lives as long as the service does.
+ */
+function watchReconnects(
+  service: ChargePointService & ConnectionAwareService,
+): void {
+  if (watched.has(service)) return;
+  watched.add(service);
+  // The subscription replays the current state, so the first "connected" is
+  // the initial connection, not a reconnect.
+  let replay = true;
+  let wasConnected = false;
+  service.onConnectionChange((state) => {
+    const connected = state === "connected";
+    if (connected && !wasConnected && !replay) cache.delete(service);
+    wasConnected = connected;
+    replay = false;
+  });
+}
+
+/**
  * The daemon's `server.info`. Null in local mode, on a daemon that predates
  * the method, or while loading — callers treat every one of those the same
  * way: no public base to derive from.
@@ -75,18 +103,11 @@ export function useServerInfo(): ServerInfo | null {
         cancelled = true;
       };
     }
-    // The subscription replays the current state, so the first "connected"
-    // is also the initial fetch; every later one is a fresh connection whose
-    // daemon may not be the one the cache describes.
-    let replay = true;
-    let wasConnected = false;
+    watchReconnects(chargePointService);
+    // The replayed "connected" is the initial fetch; a later one reads the
+    // cache watchReconnects has just dropped, so it fetches the new daemon's.
     const unsubscribe = chargePointService.onConnectionChange((state) => {
-      const connected = state === "connected";
-      const reconnected = connected && !wasConnected && !replay;
-      wasConnected = connected;
-      replay = false;
-      if (reconnected) cache.delete(chargePointService);
-      if (connected) refresh();
+      if (state === "connected") refresh();
     });
     return () => {
       cancelled = true;

@@ -48,7 +48,10 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   backward-compatible bookmarks.
 - **`/v3`** — the redesigned console: a fleet of **Charge Points**,
   per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with
-  a linear step editor and a separate run console (`/v3/scenarios`), a global
+  a linear step editor and a separate run console (`/v3/scenarios`; each row's
+  `…` menu — Duplicate, Export JSON, Delete — opens in a portal and flips
+  upward near the bottom of the window, so it is never clipped by the table,
+  #365), a global
   **Message log** (`/v3/logs`), and **Settings** (`/v3/settings`, where
   global [network simulation](../concepts/network-simulation.md) and the
   **Reset all simulator data** button live).
@@ -70,6 +73,20 @@ superseded, a banner says so (daemon only — local mode mints no runId) (#366).
 The two consoles link to each other with a design switcher (the classic
 navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic
 design** button).
+
+Both consoles show the running build as `ocpp-cp-simulator vX.Y.Z · GitHub` —
+in the classic UI's footer (#93) and at the bottom of the `/v3` sidebar
+(#364). The two render the same component from the same source
+(`src/lib/appBuildLabel.ts`): the package version stamped by the release
+tooling (`__APP_VERSION__`), falling back to the short commit SHA on the
+GitHub Pages deploy (`__APP_COMMIT__`, built from `main`); an unstamped dev
+build shows no version rather than `v0.0.0`. In Remote mode the line also
+shows the connected daemon's version, `· daemon vX.Y.Z`, from the `version`
+of [`server.info`](../concepts/control-plane.md) (re-read on reconnect), since
+the UI bundle and the daemon can be different releases — e.g. the hosted
+console pointed at a self-hosted daemon. An unstamped daemon reports
+`0.0.0-dev`. Local mode has no daemon and shows no daemon version; neither
+does a daemon that predates `server.info`.
 
 The redesign reuses the existing data layer, scenario engine, and per-step
 forms unchanged; scenarios, charge points, and logs are simply promoted to

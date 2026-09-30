@@ -5,6 +5,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
+  findMenuItem,
+  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -288,22 +290,7 @@ describe("CpDetailPage", () => {
     );
     expect(trigger, "expected a Set status trigger").toBeTruthy();
 
-    const openDropdown = async () => {
-      await act(async () => {
-        trigger!.dispatchEvent(
-          new PointerEvent("pointerdown", {
-            bubbles: true,
-            cancelable: true,
-            button: 0,
-          }),
-        );
-        await Promise.resolve();
-      });
-    };
-    const findMenuItem = (label: string) =>
-      Array.from(
-        document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-      ).find((el) => el.textContent?.trim() === label);
+    const openDropdown = () => openDropdownMenu(trigger!);
 
     await openDropdown();
     const firstItem = findMenuItem(OCPPStatus.Charging);

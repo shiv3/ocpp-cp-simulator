@@ -85,7 +85,7 @@ const LOADABLE_SCENARIO_OBJ = () =>
  * tool from this schema is what stops the two from disagreeing again.
  */
 const cpParamsBaseSchema = z.object({
-  cpId: STR_64K.describe("Charge point identifier"),
+  cpId: STR_64K.min(1).describe("Charge point identifier"),
   wsUrl: z
     .union([STR_64K, ARRAY_1000(STR_64K).min(1)])
     .describe(
@@ -745,7 +745,8 @@ export const METHODS = {
     result: z.object({ id: STR_256 }),
   },
   "blueprint.delete": {
-    params: z.object({ id: STR_256 }),
+    // `.min(1)` like `blueprintSchema.id`: an empty id names no blueprint.
+    params: z.object({ id: STR_256.min(1) }),
     result: z.object({ ok: z.literal(true) }),
   },
   "cp.create_many": {
@@ -756,21 +757,21 @@ export const METHODS = {
     }),
   },
   "cp.update": { params: updateParamsSchema, result: ANY },
-  "cp.delete": { params: z.object({ cpId: STR_64K }), result: ANY },
+  "cp.delete": { params: z.object({ cpId: STR_64K.min(1) }), result: ANY },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
   // controls the direction of the returned window ("asc" = oldest first).
   "logs.get": {
     params: z.object({
-      cpId: STR_64K,
+      cpId: STR_64K.min(1),
       limit: z.number().int().positive().optional(),
       offset: z.number().int().min(0).optional(),
       order: z.enum(["asc", "desc"]).optional(),
     }),
     result: ANY,
   },
-  "logs.clear": { params: z.object({ cpId: STR_64K }), result: ANY },
+  "logs.clear": { params: z.object({ cpId: STR_64K.min(1) }), result: ANY },
   "state.reset": { params: EMPTY, result: ANY },
   "config.get": {
     params: EMPTY,

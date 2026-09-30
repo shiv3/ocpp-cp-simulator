@@ -20,6 +20,7 @@ export {
   blueprintSchema,
   createManyFromBlueprintSchema,
   createManyToolSchema,
+  dataTransferDataSchema,
   serverInfoSchema,
   SCENARIO_MODES,
 } from "./methods";

@@ -64,6 +64,12 @@ const OBJ = () => boundedObject(OBJ_MAX_BYTES);
 /** A bounded scenario-definition object param: ≤ 256 KB. */
 const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
 /**
+ * `data_transfer`'s `data` (#348): a string or a bounded object. Exported so
+ * JSON-Lines mode, which never sees this table, validates against the same
+ * schema rather than a copy of its bounds (#382).
+ */
+export const dataTransferDataSchema = z.union([STR_64K, OBJ()]);
+/**
  * A scenario definition that is actually loadable: bounded, plus the fields the
  * runtime keys on. `load_scenario` used to take a free-form bounded object, so a
  * payload with no `id` was accepted and stored under the key `undefined` —
@@ -510,7 +516,7 @@ export const METHODS = {
     params: z.object({
       vendorId: NON_EMPTY_STR,
       messageId: NON_EMPTY_STR.optional(),
-      data: z.union([STR_64K, OBJ()]).optional(),
+      data: dataTransferDataSchema.optional(),
     }),
     result: ANY,
   },

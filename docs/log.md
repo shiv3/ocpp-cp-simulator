@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 # Log
@@ -1194,6 +1194,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Mechanism: the formatting moved into `src/lib/connectorFormat.ts` (`formatEnergyKwh`, `formatSoc`), used by `ConnectorCard`, `CpCard`, `Connector`, `ConnectorSidePanel` and `BatteryVisualization` so the two consoles cannot drift. `ConnectorSnapshot.meterValue` and the connector view now document the unit (Wh).
 - [GitHub issues](sources/github-issues.md): #368 row.
 - Tests: `connectorFormat.test.ts` (Wh → kWh, SoC rounding), `CpDetailPage.dom.test.tsx` (card shows `16.21 kWh` / `20.5%`, and `—` without a SoC), `DashboardPage.dom.test.tsx` (CP card shows `16.21 kWh`).
+
+## [2026-09-30] ingest | data_transfer string data bounded by its length (#382)
+
+- [Control plane](concepts/control-plane.md#cp-command-methods): the `data_transfer` row states the `data` caps — a string at 65,536 characters, an object at 65,536 characters serialized — and that JSON-Lines mode applies the same bounds. Before the fix, the facade's re-check (`optionalDataTransferData`, added to the daemon path by #381) measured a string by its JSON-encoded length. A 65,535–65,536-character string, or a shorter one full of characters JSON escapes, passed the schema, then failed with `internal` over Socket.IO. JSON-Lines mode had refused the same strings since #348.
+- Mechanism: `optionalDataTransferData` validates `data` against `dataTransferDataSchema` (`src/protocol/methods.ts`), the schema the `data_transfer` params use. It no longer keeps its own copy of the bounds. The facade re-narrowing itself is tracked in #383.
+- [GitHub issues](sources/github-issues.md): #382 row.
+- Tests: `jsonMode.dataTransfer.test.ts` and `socketServer.rpc.test.ts` check that a 65,536-character string and 40,000 `"` are accepted, and that a 65,537-character string is refused (`invalid_params` over Socket.IO). The JSON-Lines test also checks an oversized object and an array.
 
 ## [2026-09-30] ingest | RPC handlers receive the zod-parsed params (#383)
 

@@ -7,34 +7,9 @@ import {
   type Socket as SocketIoSocket,
 } from "socket.io";
 
-import {
-  handleJsonCommand,
-  requireBoolean,
-  requireNonNegativeInt,
-  requireNumber,
-  requireObject,
-  requirePositiveInt,
-  optionalString,
-  optionalBoolean,
-  optionalEnum,
-  optionalDataTransferData,
-  requireEnum,
-  requireString,
-} from "../jsonMode";
-import {
-  DIAGNOSTICS_STATUSES,
-  FIRMWARE_STATUSES,
-  UPLOAD_LOG_STATUSES,
-} from "../../cp/domain/types/FirmwareLogStatus";
-import {
-  METER_READING_CONTEXTS,
-  STOP_REASONS,
-  TRANSACTION_CHARGING_STATES,
-  TRANSACTION_EVENT_TRIGGER_REASONS,
-} from "../../cp/domain/connector/Transaction";
+import { handleJsonCommand } from "../jsonMode";
 import type { CLIChargePointService } from "../service";
 import {
-  EXPLICIT_METHODS,
   INFLIGHT_CAP,
   MAX_HTTP_BUFFER,
   METHODS,
@@ -42,9 +17,7 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
-  blueprintSchema,
   type Blueprint,
-  createManyFromBlueprintSchema,
   createManyParamsSchema,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
@@ -55,7 +28,9 @@ import {
   statusToWire,
   subscribeResultSchema,
   type CpListItem,
+  type Params,
   type RpcAck,
+  type RpcCall,
   type RpcErrorCode,
   type ServerInfo,
   type SimulatorConfigInput,
@@ -74,7 +49,6 @@ import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRep
 import {
   isScenarioDefinitionShape,
   type ScenarioDefinition,
-  type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
@@ -82,13 +56,11 @@ import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
 import {
   hasStatusNotificationOptions,
-  OCPPStatus,
   type StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "../../cp/shared/redaction";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
-import { z } from "zod";
 import {
   DEFAULT_SOAP_PATH,
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
@@ -204,16 +176,10 @@ type FacadeDispatchResult =
   | { readonly handled: true; readonly value: unknown }
   | { readonly handled: false };
 
-const EXPLICIT_METHOD_SET = new Set<string>(EXPLICIT_METHODS);
 const CONFIG_KEY = "global_config";
 const CONFIG_EVENTS_SCOPE = "config";
 const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
 const FILE_RELOAD_EVENTS_SCOPE = "file-reload";
-const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
-  "manual",
-  "scenario",
-];
-const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
 export interface SocketConfigRepository extends RegistryConfigRepository {}
 
@@ -298,22 +264,35 @@ export function registerSocketHandlers(
     // event-consuming client makes first.
     socket.on("events.subscribe", (request: unknown, ack?: DirectAckFn) => {
       if (typeof ack !== "function") return;
-      void subscribeSocket(socket, state, runtimeDeps, request).then(
-        (result) => {
-          getGlobalMetricsRecorder()?.countRpc("events.subscribe", "ok");
-          ack(result);
-        },
-        (err) => {
-          getGlobalMetricsRecorder()?.countRpc("events.subscribe", "error");
-          ack(directError(err));
-        },
-      );
+      void Promise.resolve()
+        .then(() =>
+          subscribeSocket(
+            socket,
+            state,
+            runtimeDeps,
+            parseRpcParams("events.subscribe", request),
+          ),
+        )
+        .then(
+          (result) => {
+            getGlobalMetricsRecorder()?.countRpc("events.subscribe", "ok");
+            ack(result);
+          },
+          (err) => {
+            getGlobalMetricsRecorder()?.countRpc("events.subscribe", "error");
+            ack(directError(err));
+          },
+        );
     });
 
     socket.on("events.unsubscribe", (request: unknown, ack?: DirectAckFn) => {
       if (typeof ack !== "function") return;
       try {
-        unsubscribeSocket(socket, state, request);
+        unsubscribeSocket(
+          socket,
+          state,
+          parseRpcParams("events.unsubscribe", request),
+        );
         getGlobalMetricsRecorder()?.countRpc("events.unsubscribe", "ok");
         ack({ ok: true });
       } catch (err) {
@@ -421,97 +400,133 @@ async function dispatchRpc(
 
   if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
 
-  const params = METHODS[method].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
+  const call = parseRpcCall(method, rawParams);
   const result = await dispatchValidatedRpc(
     socket,
     state,
     deps,
-    method,
-    cpId,
-    rawParams,
+    call,
+    rpcTarget(cpId, rawParams),
   );
   const parsedResult = METHODS[method].result.safeParse(result);
   if (!parsedResult.success) throw new Error("RPC result failed validation");
   return parsedResult.data;
 }
 
+/**
+ * The one narrowing step on the daemon path (#383): the method's schema
+ * validates the params, and the handlers receive what it parsed rather than
+ * re-deriving it from the raw value. A second pass could only drift from the
+ * schema (#382) and report its own failures as `internal`.
+ *
+ * The casts here are the only place a method and its params are paired: TS
+ * cannot correlate `METHODS[method]` with the union member for `method`.
+ */
+function parseRpcCall(method: RpcMethod, rawParams: unknown): RpcCall {
+  return { method, params: parseRpcParams(method, rawParams) } as RpcCall;
+}
+
+/** {@link parseRpcCall} for a caller that already knows its method. */
+function parseRpcParams<M extends RpcMethod>(
+  method: M,
+  rawParams: unknown,
+): Params<M> {
+  const params = METHODS[method].params.safeParse(rawParams);
+  if (!params.success) throw new RpcFailure("invalid_params", "");
+  return params.data as Params<M>;
+}
+
+/**
+ * Where a request is aimed. `cpIdInParams` is read off the raw params because
+ * the schema strips an undeclared `cpId`, and it is the only way to tell the
+ * caller that theirs is in the wrong place (#286).
+ */
+interface RpcTarget {
+  readonly cpId: string | undefined;
+  readonly cpIdInParams: boolean;
+}
+
+function rpcTarget(cpId: string | undefined, rawParams: unknown): RpcTarget {
+  return {
+    cpId,
+    cpIdInParams: typeof rawParamsAsRecord(rawParams).cpId === "string",
+  };
+}
+
 // Socket-free RPC dispatch for use by non-socket transports (e.g., MCP HTTP endpoint).
 // Throws RpcFailure for events.subscribe/unsubscribe (socket-only operations).
 export async function dispatchRpcCore(
   deps: RuntimeSocketIoDeps,
-  method: RpcMethod,
-  cpId: string | undefined,
-  rawParams: unknown,
+  call: RpcCall,
+  target: RpcTarget,
 ): Promise<unknown> {
   // Not counted here. The metric is recorded at the two boundaries that
   // produce a final ack — `handleRpc` for socket.io and `runRpc` for the MCP
   // tools and the CLI client — because parameter validation, the deadline and
   // result validation all sit outside this function.
-  switch (method) {
+  switch (call.method) {
     case "cp.list":
       return listCps(deps.chargePointService);
     case "cp.create":
-      return createCp(deps, rawParams);
+      return createCp(deps, call.params);
     case "cp.create_many":
-      return createManyCps(deps, rawParams);
+      return createManyCps(deps, call.params);
     case "blueprint.list":
       // Built-ins first, then stored ones. Ids are unique across both because
       // `blueprint.save` refuses a built-in id.
       return [...builtInBlueprints(), ...deps.blueprints.list()];
     case "blueprint.save":
-      return saveBlueprint(deps, rawParams);
+      return saveBlueprint(deps, call.params);
     case "blueprint.delete":
-      return deleteBlueprint(deps, rawParams);
+      return deleteBlueprint(deps, call.params);
     case "cp.update":
-      return updateCp(deps, rawParams);
+      return updateCp(deps, call.params);
     case "cp.delete":
-      return deleteCp(deps, rawParams);
+      return deleteCp(deps, call.params);
     case "logs.get":
-      return getLogs(deps, rawParams);
+      return getLogs(deps, call.params);
     case "logs.clear":
-      return clearLogs(deps, rawParams);
+      return clearLogs(deps, call.params);
     case "state.reset":
       return resetState(deps);
     case "config.get":
       return getConfig(deps.chargePointService);
     case "config.save":
-      return saveConfig(deps, rawParams);
+      return saveConfig(deps, call.params);
     case "network_sim.global.get":
       return getNetworkSimGlobal(deps);
     case "network_sim.global.save":
-      return saveNetworkSimGlobal(deps, rawParams);
+      return saveNetworkSimGlobal(deps, call.params);
     case "network_sim.cp.get":
-      return getNetworkSimCp(deps, rawParams);
+      return getNetworkSimCp(deps, call.params);
     case "network_sim.cp.save":
-      return saveNetworkSimCp(deps, rawParams);
+      return saveNetworkSimCp(deps, call.params);
     case "network_sim.disconnect.trigger":
-      return triggerNetworkSimDisconnect(deps, rawParams);
+      return triggerNetworkSimDisconnect(deps, call.params);
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
     case "scenario.definitions.list":
-      return listScenarioDefinitions(deps, rawParams);
+      return listScenarioDefinitions(deps, call.params);
     case "scenario.definitions.save":
-      return saveScenarioDefinition(deps, rawParams);
+      return saveScenarioDefinition(deps, call.params);
     case "scenario.definitions.replace":
-      return replaceConnectorScenarioDefinitions(deps, rawParams);
+      return replaceConnectorScenarioDefinitions(deps, call.params);
     case "scenario.definitions.delete":
-      return deleteScenarioDefinition(deps, rawParams);
+      return deleteScenarioDefinition(deps, call.params);
     case "connector_settings.auto_meter.get":
-      return getAutoMeterConfig(deps, rawParams);
+      return getAutoMeterConfig(deps, call.params);
     case "connector_settings.auto_meter.save":
-      return saveAutoMeterConfig(deps, rawParams);
+      return saveAutoMeterConfig(deps, call.params);
     case "connector_settings.auto_traffic.get":
-      return getAutoTrafficSetting(deps, rawParams);
+      return getAutoTrafficSetting(deps, call.params);
     case "connector_settings.auto_traffic.save":
-      return saveAutoTrafficSetting(deps, rawParams);
+      return saveAutoTrafficSetting(deps, call.params);
     case "connector_settings.soc_meter_sync.get":
-      return getSocMeterSync(deps, rawParams);
+      return getSocMeterSync(deps, call.params);
     case "connector_settings.soc_meter_sync.save":
-      return saveSocMeterSync(deps, rawParams);
+      return saveSocMeterSync(deps, call.params);
     case "ev_settings.apply_default":
-      return applyDefaultEVSettingsRpc(deps, rawParams);
+      return applyDefaultEVSettingsRpc(deps, call.params);
     case "server.shutdown":
       return shutdownServer(deps);
     case "server.info":
@@ -530,49 +545,41 @@ export async function dispatchRpcCore(
       break;
   }
 
-  if (EXPLICIT_METHOD_SET.has(method)) {
-    throw new RpcFailure("not_found", "");
-  }
-
+  // Every method past the switch is CP-scoped.
+  const cpId = requireFacadeCpId(target);
   const facadeResult = await dispatchFacadeCpCommand(
     deps.chargePointService,
-    method,
+    call,
     cpId,
-    rawParams,
     deps.fileReload ?? null,
     deps.database ?? null,
   );
   if (facadeResult.handled) return facadeResult.value;
 
-  if (!cpId) throw missingCpId(rawParams);
   const service = deps.registry.get(cpId);
   if (!service) throw new RpcFailure("not_found", "");
 
-  const result = await handleJsonCommand(service, {
-    command: method,
-    params: rawParamsAsRecord(rawParams),
+  return handleJsonCommand(service, {
+    command: call.method,
+    params: call.params as Record<string, unknown>,
   });
-  return method === "status"
-    ? statusToWire(result as Parameters<typeof statusToWire>[0])
-    : result;
 }
 
 async function dispatchValidatedRpc(
   socket: SocketIoSocket,
   state: SocketRpcState,
   deps: RuntimeSocketIoDeps,
-  method: RpcMethod,
-  cpId: string | undefined,
-  rawParams: unknown,
+  call: RpcCall,
+  target: RpcTarget,
 ): Promise<unknown> {
-  switch (method) {
+  switch (call.method) {
     case "events.subscribe":
-      return subscribeSocket(socket, state, deps, rawParams);
+      return subscribeSocket(socket, state, deps, call.params);
     case "events.unsubscribe":
-      unsubscribeSocket(socket, state, rawParams);
+      unsubscribeSocket(socket, state, call.params);
       return { ok: true };
     default:
-      return dispatchRpcCore(deps, method, cpId, rawParams);
+      return dispatchRpcCore(deps, call, target);
   }
 }
 
@@ -590,11 +597,9 @@ export async function runRpc(
   try {
     if (!isRpcMethod(method)) throw new RpcFailure("not_found", "");
 
-    const params = METHODS[method].params.safeParse(rawParams);
-    if (!params.success) throw new RpcFailure("invalid_params", "");
-
+    const call = parseRpcCall(method, rawParams);
     const result = await withRpcDeadline(
-      dispatchRpcCore(deps, method, cpId, rawParams),
+      dispatchRpcCore(deps, call, rpcTarget(cpId, rawParams)),
     );
     const parsedResult = METHODS[method].result.safeParse(result);
     if (!parsedResult.success) throw new Error("RPC result failed validation");
@@ -624,9 +629,9 @@ async function listCps(
  */
 async function createOneCp(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"cp.create">,
 ): Promise<string> {
-  const init = parseCreateInput(deps, rawParams);
+  const init = parseCreateInput(deps, params);
   if (isSoapVersion(init.ocppVersion) && init.soapCallbackUrl) {
     const suffixWarning = soapCallbackUrlSuffixWarning(init.soapCallbackUrl);
     if (suffixWarning) {
@@ -638,7 +643,7 @@ async function createOneCp(
       init as unknown as CreateChargePointParams,
     ),
   );
-  if (rawParamsAsRecord(rawParams).autoConnect === true) {
+  if (params.autoConnect === true) {
     void deps.chargePointService.connect(init.cpId).catch((err) => {
       process.stderr.write(
         `[server] autoConnect failed for ${init.cpId}: ${safeLogMessage(err)}\n`,
@@ -650,9 +655,9 @@ async function createOneCp(
 
 async function createCp(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"cp.create">,
 ): Promise<{ cpId: string }> {
-  return { cpId: await createOneCp(deps, rawParams) };
+  return { cpId: await createOneCp(deps, params) };
 }
 
 /**
@@ -684,16 +689,8 @@ function stripUndefined<T extends Record<string, unknown>>(value: T): T {
 
 function saveBlueprint(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  { blueprint }: Params<"blueprint.save">,
 ): { id: string } {
-  const parsed = z.object({ blueprint: blueprintSchema }).safeParse(rawParams);
-  if (!parsed.success) {
-    throw new RpcFailure(
-      "invalid_params",
-      parsed.error.issues[0]?.message ?? "",
-    );
-  }
-  const { blueprint } = parsed.data;
   if (isBuiltInBlueprint(blueprint.id)) {
     // Refused rather than shadowed: `blueprint.delete` cannot restore a
     // built-in, so an accidental overwrite would be permanent for that daemon.
@@ -721,12 +718,8 @@ function saveBlueprint(
 
 function deleteBlueprint(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  { id }: Params<"blueprint.delete">,
 ): { ok: true } {
-  const id = rawParamsAsRecord(rawParams).id;
-  if (typeof id !== "string" || id.length === 0) {
-    throw new RpcFailure("invalid_params", "");
-  }
   if (isBuiltInBlueprint(id)) {
     throw new RpcFailure(
       "invalid_params",
@@ -791,25 +784,16 @@ export function soapCallbackRouteCpId(callbackUrl: string): string | null {
 
 async function createManyCps(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"cp.create_many">,
 ): Promise<{
   created: string[];
   failed: Array<{ cpId: string; reason: string }>;
 }> {
-  const parsed = createManyFromBlueprintSchema.safeParse(rawParams);
-  if (!parsed.success) {
-    throw new RpcFailure(
-      "invalid_params",
-      parsed.error.issues[0]?.message ?? "",
-    );
-  }
   // A blueprint supplies the parameter block; anything given alongside it
   // wins, so a fleet can share hardware and differ in one field. Resolved
   // before validation of the merged result, since the merge is what the
   // charge points are actually created from.
-  const { blueprintId, ...requested } = parsed.data as typeof parsed.data & {
-    blueprintId?: string;
-  };
+  const { blueprintId, ...requested } = params;
   let merged = requested;
   let defaults: Pick<Blueprint, "evSettings" | "scenarioTemplateId"> = {};
   if (blueprintId !== undefined) {
@@ -974,18 +958,17 @@ async function applyBlueprintDefaults(
 
 async function updateCp(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"cp.update">,
 ): Promise<{ cpId: string }> {
-  const cpId = stringParam(rawParams, "cpId");
-  const existing = deps.registry.get(cpId);
+  const existing = deps.registry.get(params.cpId);
   if (!existing) throw new RpcFailure("not_found", "");
-  const init = parseCreateInput(deps, mergeUpdateParams(rawParams, existing));
+  const init = parseCreateInput(deps, mergeUpdateParams(params, existing));
   await runFacadeOperation(() =>
     deps.chargePointService.updateChargePoint(
       init as unknown as CreateChargePointParams,
     ),
   );
-  if (rawParamsAsRecord(rawParams).autoConnect === true) {
+  if (params.autoConnect === true) {
     void deps.chargePointService.connect(init.cpId).catch((err) => {
       process.stderr.write(
         `[server] reconnect after update failed for ${init.cpId}: ${safeLogMessage(err)}\n`,
@@ -997,9 +980,8 @@ async function updateCp(
 
 async function deleteCp(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  { cpId }: Params<"cp.delete">,
 ): Promise<{ ok: true }> {
-  const cpId = stringParam(rawParams, "cpId");
   await runFacadeOperation(() =>
     deps.chargePointService.removeChargePoint(cpId),
   );
@@ -1008,28 +990,25 @@ async function deleteCp(
 
 async function getLogs(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"logs.get">,
 ): Promise<ReadonlyArray<unknown>> {
-  const params = rawParamsAsRecord(rawParams);
-  const cpId = stringParam(params, "cpId");
   const entries = await runFacadeOperation(() =>
-    deps.chargePointService.listStoredLogs(cpId),
+    deps.chargePointService.listStoredLogs(params.cpId),
   );
   // `limit` selects the NEWEST n (see selectLogWindow). It used to take the
   // oldest n, which made the parameter useless on a long-running charge point:
   // no limit could reach recent activity.
   return selectLogWindow(entries, {
-    limit: typeof params.limit === "number" ? params.limit : undefined,
-    offset: typeof params.offset === "number" ? params.offset : undefined,
-    order: params.order === "desc" ? "desc" : "asc",
+    limit: params.limit,
+    offset: params.offset,
+    order: params.order ?? "asc",
   });
 }
 
 async function clearLogs(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  { cpId }: Params<"logs.clear">,
 ): Promise<{ ok: true }> {
-  const cpId = stringParam(rawParams, "cpId");
   await runFacadeOperation(() => deps.chargePointService.clearStoredLogs(cpId));
   return { ok: true };
 }
@@ -1051,13 +1030,10 @@ async function getConfig(
 
 async function saveConfig(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"config.save">,
 ): Promise<{ ok: true }> {
-  const params = METHODS["config.save"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   const saved = await runFacadeOperation(async () => {
-    await deps.chargePointService.saveConfig(params.data.config);
+    await deps.chargePointService.saveConfig(params.config);
     return deps.chargePointService.loadConfig();
   });
   deps.registryEvents?.emitConfigChanged(saved);
@@ -1075,15 +1051,12 @@ async function getNetworkSimGlobal(
 
 async function saveNetworkSimGlobal(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"network_sim.global.save">,
 ): Promise<{ ok: true }> {
-  const params = METHODS["network_sim.global.save"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   try {
     await runFacadeOperation(() =>
       deps.chargePointService.saveNetworkSimGlobal(
-        params.data.config as NetworkSimLayerConfig | null,
+        params.config as NetworkSimLayerConfig | null,
       ),
     );
   } catch (err) {
@@ -1095,28 +1068,22 @@ async function saveNetworkSimGlobal(
 
 async function getNetworkSimCp(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"network_sim.cp.get">,
 ): Promise<unknown> {
-  const params = METHODS["network_sim.cp.get"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   return runFacadeOperation(() =>
-    deps.chargePointService.getNetworkSimCp(params.data.cpId),
+    deps.chargePointService.getNetworkSimCp(params.cpId),
   );
 }
 
 async function saveNetworkSimCp(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"network_sim.cp.save">,
 ): Promise<{ ok: true }> {
-  const params = METHODS["network_sim.cp.save"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   try {
     await runFacadeOperation(() =>
       deps.chargePointService.saveNetworkSimCp(
-        params.data.cpId,
-        params.data.config as NetworkSimLayerConfig | null,
+        params.cpId,
+        params.config as NetworkSimLayerConfig | null,
       ),
     );
   } catch (err) {
@@ -1128,31 +1095,23 @@ async function saveNetworkSimCp(
 
 async function triggerNetworkSimDisconnect(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"network_sim.disconnect.trigger">,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const params =
-    METHODS["network_sim.disconnect.trigger"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   return runFacadeOperation(() =>
     deps.chargePointService.triggerNetworkSimDisconnect(
-      params.data.cpId,
-      params.data.ruleId,
+      params.cpId,
+      params.ruleId,
     ),
   );
 }
 
 async function applyDefaultEVSettingsRpc(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"ev_settings.apply_default">,
 ): Promise<undefined> {
-  const params =
-    METHODS["ev_settings.apply_default"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   await runFacadeOperation(() =>
     deps.chargePointService.applyDefaultEVSettings(
-      params.data.settings as unknown as EVSettings,
+      params.settings as unknown as EVSettings,
     ),
   );
   return undefined;
@@ -1160,41 +1119,29 @@ async function applyDefaultEVSettingsRpc(
 
 async function listScenarioDefinitions(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"scenario.definitions.list">,
 ): Promise<ScenarioDefinition[]> {
-  const params =
-    METHODS["scenario.definitions.list"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   return runFacadeOperation(() =>
     deps.chargePointService.listScenarioDefinitions(
-      params.data.cpId,
-      params.data.connectorId,
+      params.cpId,
+      params.connectorId,
     ),
   );
 }
 
 async function saveScenarioDefinition(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"scenario.definitions.save">,
 ): Promise<ScenarioDefinition> {
-  const params =
-    METHODS["scenario.definitions.save"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
-  const definition = params.data.definition as unknown as ScenarioDefinition;
+  const definition = params.definition as unknown as ScenarioDefinition;
   const saved = await runFacadeOperation(() =>
     deps.chargePointService.saveScenarioDefinition(
-      params.data.cpId,
-      params.data.connectorId,
+      params.cpId,
+      params.connectorId,
       definition,
     ),
   );
-  await emitScenarioDefinitionsChanged(
-    deps,
-    params.data.cpId,
-    params.data.connectorId,
-  );
+  await emitScenarioDefinitionsChanged(deps, params.cpId, params.connectorId);
   return saved;
 }
 
@@ -1295,35 +1242,30 @@ function detachConnectorScenarioFiles(
 
 async function replaceConnectorScenarioDefinitions(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"scenario.definitions.replace">,
 ): Promise<ScenarioDefinition[]> {
-  const params =
-    METHODS["scenario.definitions.replace"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
-  const definitions = params.data
-    .definitions as unknown as ScenarioDefinition[];
+  const definitions = params.definitions as unknown as ScenarioDefinition[];
   const saved = await runFacadeOperation(() =>
     deps.chargePointService.replaceConnectorScenarioDefinitions(
-      params.data.cpId,
-      params.data.connectorId,
+      params.cpId,
+      params.connectorId,
       definitions,
     ),
   );
   // #314: the console has just become the source of truth for this connector's
   // whole definition set. A file still watched behind one of these ids would
   // overwrite the upload at its next edit.
-  if (params.data.connectorId !== null) {
+  if (params.connectorId !== null) {
     detachConnectorScenarioFiles(
       deps.fileReload,
       deps.database,
-      params.data.cpId,
-      params.data.connectorId,
+      params.cpId,
+      params.connectorId,
     );
   }
   deps.registryEvents?.emitScenarioDefinitionsChanged(
-    params.data.cpId,
-    params.data.connectorId,
+    params.cpId,
+    params.connectorId,
     saved,
   );
   return saved;
@@ -1331,36 +1273,28 @@ async function replaceConnectorScenarioDefinitions(
 
 async function deleteScenarioDefinition(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"scenario.definitions.delete">,
 ): Promise<{ ok: true }> {
-  const params =
-    METHODS["scenario.definitions.delete"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   await runFacadeOperation(() =>
     deps.chargePointService.deleteScenarioDefinition(
-      params.data.cpId,
-      params.data.connectorId,
-      params.data.definitionId,
+      params.cpId,
+      params.connectorId,
+      params.definitionId,
     ),
   );
   // #314: this deletes the stored row and leaves the runtime scenario loaded,
   // so without dropping the watch the next edit of the file behind it would
   // pass `stillLoaded`, reload, and persist the definition just deleted.
-  if (params.data.connectorId !== null) {
+  if (params.connectorId !== null) {
     detachScenarioFile(
       deps.fileReload,
       deps.database,
-      params.data.cpId,
-      params.data.connectorId,
-      params.data.definitionId,
+      params.cpId,
+      params.connectorId,
+      params.definitionId,
     );
   }
-  await emitScenarioDefinitionsChanged(
-    deps,
-    params.data.cpId,
-    params.data.connectorId,
-  );
+  await emitScenarioDefinitionsChanged(deps, params.cpId, params.connectorId);
   return { ok: true };
 }
 
@@ -1391,33 +1325,22 @@ async function emitScenarioDefinitionsChanged(
 
 async function getAutoMeterConfig(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"connector_settings.auto_meter.get">,
 ): Promise<AutoMeterValueConfig | null> {
-  const params =
-    METHODS["connector_settings.auto_meter.get"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   return runFacadeOperation(() =>
-    deps.chargePointService.getAutoMeterConfig(
-      params.data.cpId,
-      params.data.connectorId,
-    ),
+    deps.chargePointService.getAutoMeterConfig(params.cpId, params.connectorId),
   );
 }
 
 async function saveAutoMeterConfig(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"connector_settings.auto_meter.save">,
 ): Promise<{ ok: true }> {
-  const params =
-    METHODS["connector_settings.auto_meter.save"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   await runFacadeOperation(() =>
     deps.chargePointService.saveAutoMeterConfig(
-      params.data.cpId,
-      params.data.connectorId,
-      params.data.config as unknown as AutoMeterValueConfig,
+      params.cpId,
+      params.connectorId,
+      params.config as unknown as AutoMeterValueConfig,
     ),
   );
   return { ok: true };
@@ -1425,33 +1348,25 @@ async function saveAutoMeterConfig(
 
 async function getAutoTrafficSetting(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"connector_settings.auto_traffic.get">,
 ): Promise<AutoTrafficConfig | null> {
-  const params =
-    METHODS["connector_settings.auto_traffic.get"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   return runFacadeOperation(() =>
     deps.chargePointService.getAutoTrafficConfig(
-      params.data.cpId,
-      params.data.connectorId,
+      params.cpId,
+      params.connectorId,
     ),
   );
 }
 
 async function saveAutoTrafficSetting(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"connector_settings.auto_traffic.save">,
 ): Promise<{ ok: true }> {
-  const params =
-    METHODS["connector_settings.auto_traffic.save"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   await runFacadeOperation(() =>
     deps.chargePointService.saveAutoTrafficConfig(
-      params.data.cpId,
-      params.data.connectorId,
-      params.data.config as unknown as AutoTrafficConfig,
+      params.cpId,
+      params.connectorId,
+      params.config as unknown as AutoTrafficConfig,
     ),
   );
   return { ok: true };
@@ -1459,37 +1374,22 @@ async function saveAutoTrafficSetting(
 
 async function getSocMeterSync(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"connector_settings.soc_meter_sync.get">,
 ): Promise<boolean> {
-  const params =
-    METHODS["connector_settings.soc_meter_sync.get"].params.safeParse(
-      rawParams,
-    );
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   return runFacadeOperation(() =>
-    deps.chargePointService.getSocMeterSync(
-      params.data.cpId,
-      params.data.connectorId,
-    ),
+    deps.chargePointService.getSocMeterSync(params.cpId, params.connectorId),
   );
 }
 
 async function saveSocMeterSync(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"connector_settings.soc_meter_sync.save">,
 ): Promise<{ ok: true }> {
-  const params =
-    METHODS["connector_settings.soc_meter_sync.save"].params.safeParse(
-      rawParams,
-    );
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
   await runFacadeOperation(() =>
     deps.chargePointService.saveSocMeterSync(
-      params.data.cpId,
-      params.data.connectorId,
-      params.data.enabled,
+      params.cpId,
+      params.connectorId,
+      params.enabled,
     ),
   );
   return { ok: true };
@@ -1607,9 +1507,8 @@ function warnOnScenarioSchemaMismatch(source: string, value: unknown): void {
 
 async function dispatchFacadeCpCommand(
   chargePointService: RegistryChargePointService,
-  method: RpcMethod,
-  cpId: string | undefined,
-  rawParams: unknown,
+  call: RpcCall,
+  id: string,
   /** Null unless the daemon runs with `--watch` (#314). */
   fileReload: FileReloadManager | null = null,
   /** The `--state-db`, when there is one. Separate from `fileReload` on
@@ -1617,161 +1516,110 @@ async function dispatchFacadeCpCommand(
    *  invalidating it must not depend on this daemon happening to watch (#314). */
   database: Database | null = null,
 ): Promise<FacadeDispatchResult> {
-  const params = rawParamsAsRecord(rawParams);
-
-  switch (method) {
+  switch (call.method) {
     case "connect": {
-      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.connect(id));
       return handled(undefined);
     }
     case "disconnect": {
-      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.disconnect(id));
       return handled(undefined);
     }
     case "status": {
-      const snapshot = await requireChargePointSnapshot(
-        chargePointService,
-        requireFacadeCpId(cpId, rawParams),
-      );
+      const snapshot = await requireChargePointSnapshot(chargePointService, id);
       return handled(snapshotToWireStatus(snapshot));
     }
     case "heartbeat": {
-      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.sendHeartbeat(id));
       return handled(undefined);
     }
     case "start_heartbeat": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.startHeartbeat(
-          id,
-          requireNumber(params, "interval"),
-        ),
+        chargePointService.startHeartbeat(id, params.interval),
       );
       return handled(undefined);
     }
     case "stop_heartbeat": {
-      const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() => chargePointService.stopHeartbeat(id));
       return handled(undefined);
     }
     case "start_transaction": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() => {
-        const connectorId = requirePositiveInt(params, "connector");
+        const connectorId = params.connector;
         return chargePointService.startTransaction(
           id,
           connectorId,
           // Optional on the control plane since #299 but not in OCPP's
           // StartTransaction.req, so a missing one is drawn from the pool here.
-          chargePointService.resolveIdTag(
-            id,
-            optionalString(params, "tagId"),
-            connectorId,
-          ),
+          chargePointService.resolveIdTag(id, params.tagId, connectorId),
           {
-            triggerReason: optionalEnum(
-              params,
-              "triggerReason",
-              TRANSACTION_EVENT_TRIGGER_REASONS,
-            ),
-            chargingState: optionalEnum(
-              params,
-              "chargingState",
-              TRANSACTION_CHARGING_STATES,
-            ),
+            triggerReason: params.triggerReason,
+            chargingState: params.chargingState,
           },
         );
       });
       return handled(undefined);
     }
     case "stop_transaction": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.stopTransaction(
-          id,
-          requirePositiveInt(params, "connector"),
-          {
-            reason: optionalEnum(params, "reason", STOP_REASONS),
-            triggerReason: optionalEnum(
-              params,
-              "triggerReason",
-              TRANSACTION_EVENT_TRIGGER_REASONS,
-            ),
-          },
-        ),
+        chargePointService.stopTransaction(id, params.connector, {
+          reason: params.reason,
+          triggerReason: params.triggerReason,
+        }),
       );
       return handled(undefined);
     }
     case "transaction_event": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.sendTransactionUpdate(
-          id,
-          requirePositiveInt(params, "connector"),
-          {
-            triggerReason: requireEnum(
-              params,
-              "triggerReason",
-              TRANSACTION_EVENT_TRIGGER_REASONS,
-            ),
-            chargingState: optionalEnum(
-              params,
-              "chargingState",
-              TRANSACTION_CHARGING_STATES,
-            ),
-            meterValues: optionalBoolean(params, "meterValues"),
-            context: optionalEnum(params, "context", METER_READING_CONTEXTS),
-          },
-        ),
+        chargePointService.sendTransactionUpdate(id, params.connector, {
+          triggerReason: params.triggerReason,
+          chargingState: params.chargingState,
+          meterValues: params.meterValues,
+          context: params.context,
+        }),
       );
       return handled(undefined);
     }
     case "authorize": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       // `tagId` is optional on the control plane (#299) but not in OCPP's
       // Authorize.req, so a missing one is drawn from the pool here.
       await runFacadeOperation(() =>
         chargePointService.authorize(
           id,
-          chargePointService.resolveIdTag(id, optionalString(params, "tagId")),
+          chargePointService.resolveIdTag(id, params.tagId),
         ),
       );
       return handled(undefined);
     }
     case "data_transfer": {
+      const { params } = call;
       // #348: the answer is the point of the message, so it is the result.
-      const id = requireFacadeCpId(cpId, rawParams);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.sendDataTransfer(
             id,
-            requireString(params, "vendorId"),
-            optionalString(params, "messageId"),
-            optionalDataTransferData(params),
+            params.vendorId,
+            params.messageId,
+            params.data,
           ),
         ),
       );
     }
     case "diagnostics_status_notification": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.sendDiagnosticsStatusNotification(
-          id,
-          requireEnum(params, "status", DIAGNOSTICS_STATUSES),
-        ),
+        chargePointService.sendDiagnosticsStatusNotification(id, params.status),
       );
       return handled(undefined);
     }
     case "firmware_status_notification": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const status = requireEnum(params, "status", FIRMWARE_STATUSES);
-      const requestId =
-        params.requestId === undefined
-          ? undefined
-          : requireNonNegativeInt(params, "requestId");
+      const { params } = call;
+      const { status, requestId } = params;
       await runFacadeOperation(() =>
         requestId === undefined
           ? chargePointService.sendFirmwareStatusNotification(id, status)
@@ -1784,92 +1632,64 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "log_status_notification": {
+      const { params } = call;
       // #345: the schema already holds `status` to the 2.0.1 vocabulary.
-      const id = requireFacadeCpId(cpId, rawParams);
-      const requestId =
-        params.requestId === undefined
-          ? undefined
-          : requireNonNegativeInt(params, "requestId");
       await runFacadeOperation(() =>
         chargePointService.sendLogStatusNotification(
           id,
-          requireEnum(params, "status", UPLOAD_LOG_STATUSES),
-          requestId,
+          params.status,
+          params.requestId,
         ),
       );
       return handled(undefined);
     }
     case "security_event_notification": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const techInfo =
-        params.techInfo === undefined
-          ? undefined
-          : requireString(params, "techInfo");
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.sendSecurityEventNotification(
           id,
-          requireString(params, "type"),
-          techInfo,
+          params.type,
+          params.techInfo,
         ),
       );
       return handled(undefined);
     }
     case "sign_certificate": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const csr =
-        params.csr === undefined ? undefined : requireString(params, "csr");
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.sendSignCertificate(id, csr),
+        chargePointService.sendSignCertificate(id, params.csr),
       );
       return handled(undefined);
     }
     case "update_connector_status": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const status = requireString(params, "status");
-      if (!VALID_STATUSES.has(status as OCPPStatus)) {
-        throw new Error(
-          `Invalid status: ${status}. Valid: ${[...VALID_STATUSES].join(", ")}`,
-        );
-      }
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.sendStatusNotification(
           id,
-          requireNonNegativeInt(params, "connector"),
-          status as OCPPStatus,
+          params.connector,
+          params.status,
           readStatusNotificationOptions(params),
         ),
       );
       return handled(undefined);
     }
     case "set_meter_value": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const value = requireNumber(params, "value");
-      if (value < 0 || !Number.isInteger(value)) {
-        throw new Error("value must be a non-negative integer (Wh)");
-      }
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.setMeterValue(
-          id,
-          requirePositiveInt(params, "connector"),
-          value,
-        ),
+        chargePointService.setMeterValue(id, params.connector, params.value),
       );
       return handled(undefined);
     }
     case "send_meter_value": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.sendMeterValue(
-          id,
-          requirePositiveInt(params, "connector"),
-          optionalEnum(params, "context", METER_READING_CONTEXTS),
-        ),
+        chargePointService.sendMeterValue(id, params.connector, params.context),
       );
       return handled(undefined);
     }
     case "remove_connector": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const connectorId = requirePositiveInt(params, "connector");
+      const { params } = call;
+      const connectorId = params.connector;
       const before = await requireChargePointSnapshot(chargePointService, id);
       await runFacadeOperation(() =>
         chargePointService.removeConnector(id, connectorId),
@@ -1882,143 +1702,108 @@ async function dispatchFacadeCpCommand(
       });
     }
     case "set_ev_settings": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.setEVSettings(
           id,
-          requirePositiveInt(params, "connector"),
-          requireObject(params, "settings") as unknown as EVSettings,
+          params.connector,
+          params.settings as unknown as EVSettings,
         ),
       );
       return handled(undefined);
     }
     case "get_ev_settings": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
-          chargePointService.getEVSettings(
-            id,
-            requirePositiveInt(params, "connector"),
-          ),
+          chargePointService.getEVSettings(id, params.connector),
         ),
       );
     }
     case "set_auto_traffic_config": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.setAutoTrafficConfig(
           id,
-          requirePositiveInt(params, "connector"),
-          requireObject(params, "config") as unknown as AutoTrafficConfig,
+          params.connector,
+          params.config as unknown as AutoTrafficConfig,
         ),
       );
       return handled(undefined);
     }
     case "get_auto_traffic_config": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
-          chargePointService.getAutoTrafficConfig(
-            id,
-            requirePositiveInt(params, "connector"),
-          ),
+          chargePointService.getAutoTrafficConfig(id, params.connector),
         ),
       );
     }
     case "set_auto_meter_config": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.setAutoMeterValueConfig(
           id,
-          requirePositiveInt(params, "connector"),
-          requireObject(params, "config") as unknown as AutoMeterValueConfig,
+          params.connector,
+          params.config as unknown as AutoMeterValueConfig,
         ),
       );
       return handled(undefined);
     }
     case "get_auto_meter_config": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
-          chargePointService.getAutoMeterValueConfig(
-            id,
-            requirePositiveInt(params, "connector"),
-          ),
+          chargePointService.getAutoMeterValueConfig(id, params.connector),
         ),
       );
     }
     case "set_auto_reset_to_available": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.setAutoResetToAvailable(
           id,
-          requirePositiveInt(params, "connector"),
-          requireBoolean(params, "enabled"),
+          params.connector,
+          params.enabled,
         ),
       );
       return handled(undefined);
     }
     case "set_mode": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const mode = requireString(params, "mode");
-      if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
-        throw new Error(
-          `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
-        );
-      }
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.setConnectorMode(
-          id,
-          requirePositiveInt(params, "connector"),
-          mode as ScenarioMode,
-        ),
+        chargePointService.setConnectorMode(id, params.connector, params.mode),
       );
       return handled(undefined);
     }
     case "set_soc": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const rawSoc = params.soc;
-      const soc: number | null =
-        rawSoc === null || rawSoc === undefined
-          ? null
-          : typeof rawSoc === "number"
-            ? rawSoc
-            : (() => {
-                throw new Error("'soc' must be a number or null");
-              })();
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.setConnectorSoc(
-          id,
-          requirePositiveInt(params, "connector"),
-          soc,
-        ),
+        chargePointService.setConnectorSoc(id, params.connector, params.soc),
       );
       return handled(undefined);
     }
     case "set_soc_meter_sync": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.setConnectorSocMeterSync(
           id,
-          requirePositiveInt(params, "connector"),
-          requireBoolean(params, "enabled"),
+          params.connector,
+          params.enabled,
         ),
       );
       return handled(undefined);
     }
     case "get_charging_profiles": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
-          chargePointService.getChargingProfiles(
-            id,
-            requirePositiveInt(params, "connector"),
-          ),
+          chargePointService.getChargingProfiles(id, params.connector),
         ),
       );
     }
     case "get_state_history": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getStateHistory(
@@ -2029,10 +1814,7 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "list_scenario_templates": {
-      await requireChargePointSnapshot(
-        chargePointService,
-        requireFacadeCpId(cpId, rawParams),
-      );
+      await requireChargePointSnapshot(chargePointService, id);
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenarioTemplates(),
@@ -2040,21 +1822,21 @@ async function dispatchFacadeCpCommand(
       );
     }
     case "load_scenario_template": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
           chargePointService.loadScenarioTemplate(
             id,
-            requireString(params, "templateId"),
-            requirePositiveInt(params, "connector"),
+            params.templateId,
+            params.connector,
             params.evSettings as Partial<EVSettings> | undefined,
           ),
         ),
       );
     }
     case "load_scenario": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const connectorId = requirePositiveInt(params, "connector");
+      const { params } = call;
+      const connectorId = params.connector;
       if (typeof params.file === "string") {
         // Kept, not re-read: the reload baseline has to be the bytes this
         // definition came from, or a write between here and the watch starting
@@ -2088,7 +1870,7 @@ async function dispatchFacadeCpCommand(
           chargePointService.loadScenario(
             id,
             connectorId,
-            params.scenario as ScenarioDefinition,
+            params.scenario as unknown as ScenarioDefinition,
           ),
         );
         // #314: an inline definition replaces whatever was under this id, file
@@ -2109,31 +1891,21 @@ async function dispatchFacadeCpCommand(
       throw new Error("Either 'file' or 'scenario' parameter is required");
     }
     case "list_scenarios": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
-          chargePointService.listScenarios(
-            id,
-            requirePositiveInt(params, "connector"),
-          ),
+          chargePointService.listScenarios(id, params.connector),
         ),
       );
     }
     case "run_scenario": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const strict =
-        params.strict === undefined
-          ? undefined
-          : requireBoolean(params, "strict");
-      const awaitArmed =
-        params.awaitArmed === undefined
-          ? undefined
-          : requireBoolean(params, "awaitArmed");
+      const { params } = call;
+      const { strict, awaitArmed } = params;
       await runFacadeOperation(() =>
         chargePointService.runScenario(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
+          params.connector,
+          params.scenarioId,
           strict !== undefined || awaitArmed !== undefined
             ? { strict, awaitArmed }
             : undefined,
@@ -2142,92 +1914,87 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "scenario_status": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenarioStatus(
             id,
-            requirePositiveInt(params, "connector"),
-            requireString(params, "scenarioId"),
+            params.connector,
+            params.scenarioId,
           ),
         ),
       );
     }
     case "scenario_report": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenarioReport(
             id,
-            requirePositiveInt(params, "connector"),
-            requireString(params, "scenarioId"),
-            params.runId === undefined
-              ? undefined
-              : requireString(params, "runId"),
+            params.connector,
+            params.scenarioId,
+            params.runId,
           ),
         ),
       );
     }
     case "get_scenario": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       return handled(
         await runFacadeOperation(() =>
           chargePointService.getScenario(
             id,
-            requirePositiveInt(params, "connector"),
-            requireString(params, "scenarioId"),
+            params.connector,
+            params.scenarioId,
           ),
         ),
       );
     }
     case "stop_scenario": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.stopScenario(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
+          params.connector,
+          params.scenarioId,
         ),
       );
       return handled(undefined);
     }
     case "scenario_reset": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.resetScenario(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
+          params.connector,
+          params.scenarioId,
         ),
       );
       return handled(undefined);
     }
     case "step_scenario": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.stepScenario(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
+          params.connector,
+          params.scenarioId,
           params.force === true,
         ),
       );
       return handled(undefined);
     }
     case "stop_all_scenarios": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
-        chargePointService.stopAllScenarios(
-          id,
-          requirePositiveInt(params, "connector"),
-        ),
+        chargePointService.stopAllScenarios(id, params.connector),
       );
       return handled(undefined);
     }
     case "remove_scenario": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const connectorId = requirePositiveInt(params, "connector");
-      const scenarioId = requireString(params, "scenarioId");
+      const { params } = call;
+      const connectorId = params.connector;
+      const scenarioId = params.scenarioId;
       const before = await runFacadeOperation(() =>
         chargePointService.listScenarios(id, connectorId),
       );
@@ -2248,18 +2015,14 @@ async function dispatchFacadeCpCommand(
       });
     }
     case "run_scenario_file": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const strict =
-        params.strict === undefined
-          ? undefined
-          : requireBoolean(params, "strict");
-      const filePath = requireString(params, "file");
-      const connectorId = requirePositiveInt(params, "connector");
+      const { params } = call;
+      const filePath = params.file;
+      const connectorId = params.connector;
       let loadedText: string | undefined;
       const started = await runFacadeOperation(() =>
         chargePointService.runScenarioFile(id, filePath, {
           connectorId,
-          strict,
+          strict: params.strict,
           onSourceText: (text) => {
             loadedText = text;
           },
@@ -2275,25 +2038,16 @@ async function dispatchFacadeCpCommand(
       return handled(started);
     }
     case "run_scenario_template": {
-      const id = requireFacadeCpId(cpId, rawParams);
-      const strict =
-        params.strict === undefined
-          ? undefined
-          : requireBoolean(params, "strict");
-      const once =
-        params.once === undefined ? undefined : requireBoolean(params, "once");
+      const { params } = call;
+      const once = params.once;
       return handled(
         await runFacadeOperation(() =>
-          chargePointService.runScenarioTemplate(
-            id,
-            requireString(params, "templateId"),
-            {
-              connectorId: requirePositiveInt(params, "connector"),
-              evSettings: params.evSettings as Partial<EVSettings> | undefined,
-              strict,
-              ...(once === undefined ? {} : { once }),
-            },
-          ),
+          chargePointService.runScenarioTemplate(id, params.templateId, {
+            connectorId: params.connector,
+            evSettings: params.evSettings as Partial<EVSettings> | undefined,
+            strict: params.strict,
+            ...(once === undefined ? {} : { once }),
+          }),
         ),
       );
     }
@@ -2306,12 +2060,8 @@ async function subscribeSocket(
   socket: SocketIoSocket,
   state: SocketRpcState,
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  { scope }: Params<"events.subscribe">,
 ): Promise<SubscribeResult> {
-  const params = METHODS["events.subscribe"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-
-  const { scope } = params.data;
   if (!isValidSubscribeScope(deps.registry, scope)) {
     throw new RpcFailure("invalid_params", "");
   }
@@ -2330,11 +2080,8 @@ async function subscribeSocket(
 function unsubscribeSocket(
   socket: SocketIoSocket,
   state: SocketRpcState,
-  rawParams: unknown,
+  { scope }: Params<"events.unsubscribe">,
 ): void {
-  const params = METHODS["events.unsubscribe"].params.safeParse(rawParams);
-  if (!params.success) throw new RpcFailure("invalid_params", "");
-  const { scope } = params.data;
   void socket.leave(scope);
   state.joinedScopes.delete(scope);
 }
@@ -2450,22 +2197,15 @@ async function runFacadeOperation<T>(
  * every CP-scoped method takes it as a SIBLING of `method` — so the message
  * names the confusion when the params object is where it ended up.
  */
-function requireFacadeCpId(
-  cpId: string | undefined,
-  rawParams?: unknown,
-): string {
-  if (!cpId) throw missingCpId(rawParams);
-  return cpId;
+function requireFacadeCpId(target: RpcTarget): string {
+  if (!target.cpId) throw missingCpId(target);
+  return target.cpId;
 }
 
-function missingCpId(rawParams?: unknown): RpcFailure {
-  const inParams =
-    typeof rawParams === "object" &&
-    rawParams !== null &&
-    typeof (rawParams as { cpId?: unknown }).cpId === "string";
+function missingCpId(target: RpcTarget): RpcFailure {
   return new RpcFailure(
     "invalid_params",
-    inParams
+    target.cpIdInParams
       ? 'missing cpId: it belongs beside "method", not inside "params"'
       : "missing cpId",
   );
@@ -2571,10 +2311,10 @@ function toIsoStringOrNull(value: Date | string | null): string | null {
 
 function parseCreateInput(
   deps: RuntimeSocketIoDeps,
-  rawParams: unknown,
+  params: Params<"cp.create"> | Record<string, unknown>,
 ): ReturnType<typeof parseCreateBody> {
   try {
-    return parseCreateBody(rawParams, {
+    return parseCreateBody(params, {
       soapCallbackUrlDerivable: deps.registry.canDeriveSoapCallbackUrl(),
     });
   } catch {
@@ -2615,10 +2355,9 @@ function isRecord(rawParams: unknown): rawParams is Record<string, unknown> {
 }
 
 function mergeUpdateParams(
-  rawParams: unknown,
+  params: Params<"cp.update">,
   existing: CLIChargePointService,
 ): Record<string, unknown> {
-  const params = rawParamsAsRecord(rawParams);
   const init = existing.getInit();
   const merged: Record<string, unknown> = { ...params };
 
@@ -2665,68 +2404,23 @@ function preserveWhenMissing(
   }
 }
 
-function stringParam(rawParams: unknown, key: string): string {
-  const value = rawParamsAsRecord(rawParams)[key];
-  if (typeof value !== "string" || value.length === 0) {
-    throw new RpcFailure("invalid_params", "");
-  }
-  return value;
-}
-
-function readStatusNotificationOptions(
-  params: Record<string, unknown>,
-): StatusNotificationOptions | undefined {
-  const opts: StatusNotificationOptions = {};
-  readOptionalString(params, "errorCode", opts);
-  readOptionalString(params, "info", opts);
-  readOptionalString(params, "vendorErrorCode", opts);
-  readOptionalString(params, "vendorId", opts);
-  readOptionalTimestamp(params, "timestamp", opts);
-  readOptionalBoolean(params, "suppressChargingStateTransactionEvent", opts);
+function readStatusNotificationOptions({
+  errorCode,
+  info,
+  vendorErrorCode,
+  vendorId,
+  timestamp,
+  suppressChargingStateTransactionEvent,
+}: Params<"update_connector_status">): StatusNotificationOptions | undefined {
+  const opts: StatusNotificationOptions = stripUndefined({
+    errorCode,
+    info,
+    vendorErrorCode,
+    vendorId,
+    timestamp: timestamp === undefined ? undefined : new Date(timestamp),
+    suppressChargingStateTransactionEvent,
+  });
   return hasStatusNotificationOptions(opts) ? opts : undefined;
-}
-
-function readOptionalString(
-  params: Record<string, unknown>,
-  key: "errorCode" | "info" | "vendorErrorCode" | "vendorId",
-  target: StatusNotificationOptions,
-): void {
-  const val = params[key];
-  if (val === undefined) return;
-  if (typeof val !== "string") {
-    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
-  }
-  target[key] = val;
-}
-
-function readOptionalTimestamp(
-  params: Record<string, unknown>,
-  key: "timestamp",
-  target: StatusNotificationOptions,
-): void {
-  const val = params[key];
-  if (val === undefined) return;
-  const date =
-    val instanceof Date ? val : typeof val === "string" ? new Date(val) : null;
-  if (!date || Number.isNaN(date.getTime())) {
-    throw new Error(
-      `Missing or invalid parameter: ${key} (expected ISO timestamp)`,
-    );
-  }
-  target[key] = date;
-}
-
-function readOptionalBoolean(
-  params: Record<string, unknown>,
-  key: "suppressChargingStateTransactionEvent",
-  target: StatusNotificationOptions,
-): void {
-  const val = params[key];
-  if (val === undefined) return;
-  if (typeof val !== "boolean") {
-    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
-  }
-  target[key] = val;
 }
 
 function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {

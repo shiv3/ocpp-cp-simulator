@@ -741,12 +741,13 @@ the OCPP answer are unchanged.
 - **Scope.** On OCPP-J (1.6J, 2.0.1, 2.1) every inbound CALL gets exactly one
   pair, whatever the action — an unsupported one completes as
   `CallError` / `NotImplemented`. On SOAP (1.2, 1.5, 1.6S) only a
-  **dispatchable** call does: one the station has a handler for, addressed to
-  it. A SOAP request refused before dispatch — not implemented, wrong charge
-  point, not a request — is answered with a Fault and emits neither event,
-  because announcing it would also release a scenario `csmsCallTrigger`
-  waiting on that action (#257).
-
+  **dispatchable** call does: a CS→CP operation of the station's dialect,
+  addressed to it. A SOAP request refused before dispatch — an operation the
+  dialect does not define (a 1.6-only `TriggerMessage` sent to a 1.5
+  station), another charge point's identity, a response instead of a request
+  — is answered with a Fault and emits neither event, because announcing it
+  would also release a scenario `csmsCallTrigger` waiting on that action
+  (#257).
 - **Correlation.** `messageId` is the CALL's UniqueId (the WS-Addressing
   `MessageID` on SOAP, omitted when the request has none). Repeated calls of
   the same action are told apart by it. `action` is the name on the wire: a
@@ -766,10 +767,11 @@ the OCPP answer are unchanged.
   scenario reaches its `transaction` (`action: "start"`) node, if at all.
 - **Outcome.** `CallResult` for a response — including one chosen by a
   `responseOverride`; `CallError` for a CALLERROR (an `inboundPolicy`, a 2.x
-  `FormationViolation`, `NotImplemented`, a handler failure's
+  `FormationViolation`, `NotImplemented`, a 1.6J handler failure's
   `InternalError`), with `errorCode`; `NoResponse` when no answer is sent:
-  an `inboundPolicy` of kind `ignore`, or a 2.x handler that throws (such a
-  CALL has always been left unanswered). On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
+  an `inboundPolicy` of kind `ignore`, or a 2.x handler that throws — such a
+  CALL has always been left unanswered on 2.x, where 1.6J answers
+  `InternalError` (#399). On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
 - **Not delivery.** The outcome is the answer chosen, not proof it reached the
   CSMS: a socket that closes, or a [network-simulation](../concepts/network-simulation.md)
   drop, can still lose it.

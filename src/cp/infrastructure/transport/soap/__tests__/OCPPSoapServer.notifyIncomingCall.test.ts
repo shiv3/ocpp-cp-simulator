@@ -236,19 +236,24 @@ describe("OCPPSoapServer reports the answer to an inbound call (#396)", () => {
     expect(order).toEqual([]);
   });
 
-  it("reports nothing for a call the station cannot dispatch", async () => {
-    // Unlike OCPP-J, where it completes as CallError / NotImplemented: a
-    // SOAP call without a dispatch path is not announced, so it must not
-    // be completed either (#257 keeps it from releasing a csmsCallTrigger).
+  it("reports nothing for an operation the station's dialect does not define", async () => {
+    // A CSMS sending a 1.6-only TriggerMessage to a 1.5 station, with the
+    // logger production always supplies. The request is refused as it is
+    // parsed, before any dispatch: unlike OCPP-J, where an unsupported
+    // action completes as CallError / NotImplemented, it is neither
+    // announced nor completed, so it cannot release a csmsCallTrigger (#257).
     const order: string[] = [];
-    // No logger: the shared v16 registry is unavailable, so only the legacy
-    // Reset handler can answer.
-    const res = await serverWith(order).handleRequest(
-      "CP",
-      callXml("ClearCache", "uuid:clear-cache", {}),
-    );
+    const xml = callXml("ClearCache", "uuid:trigger-on-15", {})
+      .replaceAll("clearCacheRequest", "triggerMessageRequest")
+      .replaceAll("/ClearCache", "/TriggerMessage");
+    const res = await serverWith(order, {
+      logger: new Logger(LogLevel.ERROR),
+    }).handleRequest("CP", xml);
 
-    expect(await res.text()).toContain("is not implemented");
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain(
+      "Unsupported SOAP body wrapper: triggerMessageRequest",
+    );
     expect(order).toEqual([]);
   });
 });

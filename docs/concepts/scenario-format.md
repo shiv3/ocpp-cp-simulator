@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.2)
+title: Scenario file format (v1.3)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 23 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 24 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - schema/scenario.schema.json
   - src/cp/application/scenario/ScenarioTypes.ts
@@ -27,7 +27,7 @@ related:
 updated: 2026-09-30
 ---
 
-# Scenario File Format (v1.2)
+# Scenario File Format (v1.3)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -75,7 +75,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.2"` (current); `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                    |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.3"` (current); `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                           |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                 |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).               |
 | `name`                  | string                                                                          | Yes      |                                                                                                                                                             |
@@ -135,6 +135,7 @@ shape depends on `type`).
 | `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                       |
 | `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below. |
 | `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                |
+| `ocppCall`           | `action`, `payload`                                              | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                 |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -244,6 +245,26 @@ point's WebSocket reaches `event` (`"connected"` or `"disconnected"`).
 - This node only _observes_ the connection state — it never causes a
   disconnect itself. Simulating network drops is out of scope here (see
   issue #239) — that is what [Network simulation](network-simulation.md) does.
+
+### `ocppCall` notes
+
+**Issue #389**: `ocppCall` sends an [expert OCPP call](expert-ocpp-calls.md) —
+any station-initiated CALL of the station's OCPP-J version (`action`), with
+`payload` as authored — and waits for the answer.
+
+- A CALLRESULT is logged at `info`, a CALLERROR at `warn`, and the flow goes
+  on either way: provoking a CALLERROR is a legitimate test step.
+- A refused call — SOAP station, an action the station does not send, a
+  schema-invalid `payload` without `skipValidation`, the OCPP 1.6 boot gate —
+  or no answer within 25 s **fails the run**.
+- `skipValidation: true` sends a schema-invalid `payload` for this node only;
+  `applyResponse: true` lets the answer change the station's state (boot,
+  transaction, authorization), which by default it does not.
+- The action is checked when the node runs, not by the schema: the same file
+  can target 1.6 and 2.x stations only if the action exists on both.
+- `notification` is not an alternative: in the simulator it knows only
+  `Heartbeat` and `StatusNotification` (and reads only `payload.status` of the
+  latter). `export-k6` sends both nodes as authored.
 
 ### Controls on a parked wait
 
@@ -909,6 +930,9 @@ does not hold.
 
 ## Changelog
 
+- **v1.3**: Issue #389. Adds the `ocppCall` node type (an expert OCPP call:
+  `action`, `payload`, optional `skipValidation` / `applyResponse`). Purely
+  additive — `1.2`, `1.1` and `1.0` files remain valid.
 - **v1.2 (amended)**: Issue #332. `curvePoint.value` gains `minimum: 0`, and
   the prose rule that a curve's ordinates never decrease with time. **No
   version bump**: this narrows an existing field rather than adding one, and

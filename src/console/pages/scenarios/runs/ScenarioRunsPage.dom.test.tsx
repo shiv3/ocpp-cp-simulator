@@ -339,18 +339,23 @@ describe("ScenarioRunsPage (#388)", () => {
     const total = 120;
     const listScenarioRuns = vi.fn(
       async ({
+        runId,
         limit = 50,
         offset = 0,
       }: {
+        runId?: string;
         limit?: number;
         offset?: number;
-      }) => ({
-        runs: Array.from(
-          { length: Math.max(0, Math.min(limit, total - offset)) },
-          (_, i) => summary(`r${offset + i}`),
-        ),
-        total,
-      }),
+      }) =>
+        runId
+          ? { runs: [summary(runId)], total: 1 }
+          : {
+              runs: Array.from(
+                { length: Math.max(0, Math.min(limit, total - offset)) },
+                (_, i) => summary(`r${offset + i}`),
+              ),
+              total,
+            },
     );
     const service = createFakeChargePointService({
       snapshots,
@@ -363,8 +368,10 @@ describe("ScenarioRunsPage (#388)", () => {
     cleanup = () => unmount(root);
     await flush();
 
+    // The page, then the uniqueness check a link without `runCp` needs.
     expect(listScenarioRuns.mock.calls.map(([q]) => q)).toEqual([
       { limit: 50, offset: 50 },
+      { runId: "r60", limit: 2 },
     ]);
     expect(container.textContent).toContain("51–100 of 120");
     expect(
@@ -481,6 +488,31 @@ describe("ScenarioRunsPage (#388)", () => {
         limit: 2,
       });
       expect(getScenarioReport).toHaveBeenCalledWith("CP-2", 3, "s1", "dup#1");
+    });
+
+    it("opens no report for a link without runCp when the other match is on another page", async () => {
+      // CP-1's run is on this page, CP-2's is not: the id is still ambiguous.
+      const { service, listScenarioRuns, getScenarioReport } = serviceListing([
+        shared[0],
+      ]);
+      const { container, root } = await renderConsole(
+        "/scenarios/runs?run=dup%231",
+        { service },
+      );
+      cleanup = () => unmount(root);
+      await flush();
+
+      expect(listScenarioRuns).toHaveBeenCalledWith({
+        runId: "dup#1",
+        limit: 2,
+      });
+      expect(getScenarioReport).not.toHaveBeenCalled();
+      expect(row(container, "CP-1")!.getAttribute("aria-pressed")).toBe(
+        "false",
+      );
+      expect(container.textContent).toContain(
+        "Run dup#1 was recorded on several charge points",
+      );
     });
 
     it("opens no report for a link that names no charge point and matches two", async () => {

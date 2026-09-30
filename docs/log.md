@@ -1258,3 +1258,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md): the Run History page identifies a run by its charge point and `runId` — row keys, the selected row and the URL (`run` + `runCp`) — because a runId is unique per charge point only (`scenario.runs.list { runId }` can return one run per charge point). A copied link resolves the run on the charge point it names, on or off the current page; a link without `runCp` that matches runs on several charge points opens none and says so.
 - Tests: `runHistoryRows.test.ts` (rows of two charge points sharing a runId get distinct keys) and `ScenarioRunsPage.dom.test.tsx` (two charge points sharing a runId: no duplicate React key, clicking one opens that charge point's report, a copied link opens the named charge point's run on and off the page, an ambiguous legacy link opens none).
+
+## [2026-09-30] ingest | legacy run links check uniqueness across pages (#388 review)
+
+- [Web console](entities/web-console.md): a Run History link without `runCp` is always checked against the whole history (`scenario.runs.list { runId, limit: 2 }`), not only when the run is off the current page; a match on this page no longer hides a second one on another page, so such a link opens its run only when the id is unique, as documented.
+- Tests: `ScenarioRunsPage.dom.test.tsx` — one duplicate on the current page and the other off it: no report opens and the page says the id is ambiguous.

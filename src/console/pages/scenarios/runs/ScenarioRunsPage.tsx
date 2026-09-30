@@ -72,18 +72,19 @@ const ScenarioRunsPage: React.FC = () => {
   );
   const rows = useMemo(() => page.runs.map(summaryToRow), [page.runs]);
   // A run is identified by its charge point and runId (`run` + `runCp`): a
-  // runId is unique per charge point only. A link without `runCp` still opens
-  // a run whose id is unambiguous.
+  // runId is unique per charge point only. A link without `runCp` opens its
+  // run only when the id names a single one across the whole history.
   const selectedRunId = searchParams.get("run");
   const selectedCpId = searchParams.get("runCp");
   const isSelected = (r: { runId: string; cpId: string }) =>
     r.runId === selectedRunId && (!selectedCpId || r.cpId === selectedCpId);
-  const candidates = page.runs.filter(isSelected);
-  // A linked run that is not on this page (the history moved since the link
-  // was copied, or it was never on it) is looked up by id instead; asking for
-  // two tells an ambiguous id from a unique one.
+  const onPage = page.runs.find(isSelected) ?? null;
+  // Looked up by id when the named run is not on this page (the history
+  // moved since the link was copied, or it never was), and always for a link
+  // without `runCp`: a match on this page does not rule out one on another
+  // page. Asking for two tells an ambiguous id from a unique one.
   const lookup = useScenarioRunHistory(
-    selectedRunId && !isLoading && candidates.length === 0
+    selectedRunId && !isLoading && (!selectedCpId || !onPage)
       ? {
           runId: selectedRunId,
           cpId: selectedCpId ?? undefined,
@@ -92,10 +93,14 @@ const ScenarioRunsPage: React.FC = () => {
       : null,
     [],
   );
-  const found = candidates.length > 0 ? candidates : lookup.page.runs;
-  const selected = found.length === 1 ? found[0] : null;
-  const ambiguous =
-    candidates.length > 1 || (candidates.length === 0 && lookup.page.total > 1);
+  // Filtered again: the lookup keeps its previous answer while it re-asks.
+  const lookedUp = lookup.page.runs.filter(isSelected);
+  const selected = selectedCpId
+    ? (onPage ?? lookedUp[0] ?? null)
+    : lookedUp.length === 1
+      ? lookedUp[0]
+      : null;
+  const ambiguous = !selectedCpId && lookedUp.length > 1;
 
   // The history shrank under the current page (retention, `cp.delete`,
   // `state.reset`): step back to its last page instead of showing an empty one.

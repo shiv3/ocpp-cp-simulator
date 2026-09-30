@@ -12,7 +12,7 @@ related:
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 # Web console (browser UI)
@@ -87,6 +87,11 @@ the UI bundle and the daemon can be different releases — e.g. the hosted
 console pointed at a self-hosted daemon. An unstamped daemon reports
 `0.0.0-dev`. Local mode has no daemon and shows no daemon version; neither
 does a daemon that predates `server.info`.
+
+Both consoles show a connector's live readings the same way
+(`src/lib/connectorFormat.ts`): the meter value, which is in Wh, as kWh with
+2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`). The
+`/v3` connector card shows `—` when no SoC is reported (#368).
 
 The redesign reuses the existing data layer, scenario engine, and per-step
 forms unchanged; scenarios, charge points, and logs are simply promoted to

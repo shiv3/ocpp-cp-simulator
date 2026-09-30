@@ -1187,3 +1187,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Mechanism: `ChargePointService`, `SingleCpCommandOps`, `CLIChargePointService`, the registry service and `IChargePointMessageHandler` take `DiagnosticsStatus` / `FirmwareStatus` / `UploadLogStatus` and `DataTransferData` (`string | Record<string, unknown>`) instead of `string` / `unknown`. Input is narrowed once where it enters: the zod schema, `requireEnum` in the Socket.IO facade and JSON-Lines mode, and a guard in `LocalChargePointService`. The adapters' casts are gone. On 1.6 a 2.0.1-only firmware or log status is still sent as given, and the codec's outgoing check still warns.
 - [GitHub issues](sources/github-issues.md): #377 row.
 - Tests: `LocalChargePointService.portSurface.test.ts` checks that an unknown diagnostics / firmware / log status rejects with `RpcFailure` `invalid_params` and sends nothing. `socketServer.rpc.test.ts` checks the daemon refuses the same with `invalid_params`. `jsonMode.firmwareLogStatus.test.ts` checks JSON-Lines diagnostics names the vocabulary.
+
+## [2026-09-30] ingest | `/v3` connector card formats energy and SoC (#368)
+
+- [Web console](entities/web-console.md): new paragraph — both consoles show a connector's meter value (Wh) as kWh with 2 decimals and its SoC with 1 decimal; the `/v3` connector card shows `—` without a SoC. It used to print the raw Wh with a `kWh` suffix (`16208 kWh`) and the raw float SoC (`20.462666666666667%`).
+- Mechanism: the formatting moved into `src/lib/connectorFormat.ts` (`formatEnergyKwh`, `formatSoc`), used by `ConnectorCard`, `Connector` and `ConnectorSidePanel` so the two consoles cannot drift.
+- [GitHub issues](sources/github-issues.md): #368 row.
+- Tests: `connectorFormat.test.ts` (Wh → kWh, SoC rounding), `CpDetailPage.dom.test.tsx` (card shows `16.21 kWh` / `20.5%`, and `—` without a SoC).

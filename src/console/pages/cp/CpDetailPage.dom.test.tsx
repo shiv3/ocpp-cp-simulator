@@ -209,6 +209,41 @@ describe("CpDetailPage", () => {
     expect(service.stopTransaction).toHaveBeenCalledWith("CP-1", 2);
   });
 
+  it("ConnectorCard: shows the Wh meter value in kWh and a rounded SoC, or — without a SoC", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      connectors: [
+        connector({
+          id: 1,
+          status: OCPPStatus.Charging,
+          transactionId: 7,
+          meterValue: 16208,
+          soc: 20.462666666666667,
+        }),
+        connector({ id: 2, meterValue: 0, soc: null }),
+      ],
+    });
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const charging = container.querySelector('[data-connector-id="1"]');
+    expect(charging, "expected a card for connector 1").toBeTruthy();
+    expect(charging!.textContent).toContain("Energy16.21 kWh");
+    expect(charging!.textContent).toContain("SoC20.5%");
+    expect(charging!.textContent).not.toContain("16208");
+
+    const idle = container.querySelector('[data-connector-id="2"]');
+    expect(idle, "expected a card for connector 2").toBeTruthy();
+    expect(idle!.textContent).toContain("Energy0.00 kWh");
+    expect(idle!.textContent).toContain("SoC—");
+  });
+
   it("ConnectorCard: a rejecting stopTransaction is caught, isPending resets, and the failure is logged (not an unhandled rejection)", async () => {
     const cp = snapshot({
       id: "CP-1",

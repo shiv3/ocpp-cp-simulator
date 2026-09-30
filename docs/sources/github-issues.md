@@ -7,7 +7,7 @@ sources:
 related:
   - ../log.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 # Source: GitHub issues referenced by the wiki
@@ -81,3 +81,4 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #367                                             | A late 1.6 `StopTransaction.conf` no longer ends the next session's transaction, so "Essential CP Behavior" meters every consecutive session                                  | [Built-in scenario templates](../entities/scenario-templates.md#general-purpose-templates)                                                                                                                                                                                                  |
 | #374                                             | Type-checking (`bun run typecheck`, `tsc -b`) is a blocking CI step; the ~380 existing errors were fixed, including the real bugs behind some of them                         | [Testing strategy](../analyses/testing-strategy.md#type-checking), [Legacy v1 UI](../entities/legacy-v1-ui.md)                                                                                                                                                                              |
 | #377                                             | Diagnostics / firmware / log status params typed with the domain vocabulary; an unknown status is `invalid_params` in daemon and browser                                      | [Control plane](../concepts/control-plane.md#cp-command-methods)                                                                                                                                                                                                                            |
+| #368                                             | `/v3` connector card shows energy in kWh (the meter value is in Wh) and a rounded SoC, like the classic UI                                                                    | [Web console](../entities/web-console.md)                                                                                                                                                                                                                                                   |

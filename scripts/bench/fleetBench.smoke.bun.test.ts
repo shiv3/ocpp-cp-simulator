@@ -453,13 +453,12 @@ describe("fleet-bench end to end (#302)", () => {
 
     // 3. The instrument's own cost, measured against a real daemon rather than
     //    argued. Two charge points, one accepted boot each, no reconnects — so
-    //    the reapplication must cost exactly two RPCs. It observes twice that
-    //    many events, because `onBootNotificationAccepted` emits `statusChange`
-    //    from `updateConnectorStatus(0, Available)` and again from the status
-    //    setter; without the coalescing window those four events would be four
-    //    RPCs. This is the assertion that keeps the fix for the heartbeat drift
-    //    from becoming its own unreported load.
-    expect(report.heartbeatOverride.bootsObserved).toBe(4);
+    //    the reapplication must cost exactly two RPCs, and it observes exactly
+    //    two boots: `boot_notification` is emitted once per BootNotification.conf
+    //    (#395), where the `status_change` it replaced fired twice per boot.
+    //    This is the assertion that keeps the fix for the heartbeat drift from
+    //    becoming its own unreported load.
+    expect(report.heartbeatOverride.bootsObserved).toBe(2);
     expect(report.heartbeatOverride.rpcsIssued).toBe(2);
     expect(report.heartbeatOverride.failed).toBe(0);
     // Nothing dropped, so the idle axis's degrade path was never taken.
@@ -530,7 +529,7 @@ describe("fleet-bench end to end (#302)", () => {
     // this repo that can settle it.
     //
     // `cp.start_heartbeat` does not *pin* an interval. Every accepted boot runs
-    // `ChargePoint.onBootNotificationAccepted`, which calls
+    // `ChargePoint.onBootNotificationResult`, which calls
     // `startHeartbeat(BootNotification.conf.interval)` — so the CSMS's value
     // replaces the flag's on every reconnect, and reconnects are exactly what
     // begins to happen as a sweep approaches the knee. Arming once per cohort
@@ -607,9 +606,9 @@ describe("fleet-bench end to end (#302)", () => {
       // NOTE: `reapplied >= 1` is *not* the reconnect discriminator — the
       // initial boot fires the hook too. The wire count above is. What this
       // adds is the instrument's cost across a reconnect: one charge point,
-      // two accepted boots (creation and the reconnect), two RPCs — not the
-      // four its four `statusChange` events would otherwise produce.
-      expect(report.heartbeatOverride.bootsObserved).toBe(4);
+      // two accepted boots (creation and the reconnect), two
+      // `boot_notification` events, two RPCs.
+      expect(report.heartbeatOverride.bootsObserved).toBe(2);
       expect(report.heartbeatOverride.rpcsIssued).toBe(2);
       expect(report.heartbeatOverride.reapplied).toBe(2);
       expect(report.heartbeatOverride.failed).toBe(0);

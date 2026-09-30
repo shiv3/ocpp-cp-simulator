@@ -27,6 +27,7 @@ import {
   CertQuirksNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
+  OcppCallNodeData,
   ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
@@ -676,6 +677,10 @@ export class ScenarioExecutor {
         await this.executeDataTransfer(node.data as DataTransferNodeData);
         break;
 
+      case ScenarioNodeType.OCPP_CALL:
+        await this.executeOcppCall(node.data as OcppCallNodeData);
+        break;
+
       case ScenarioNodeType.CONNECTION_TRIGGER:
         await this.executeConnectionTrigger(
           node.id,
@@ -878,6 +883,40 @@ export class ScenarioExecutor {
     }
     this.callbacks.onSendDataTransfer(data.vendorId, data.messageId, data.data);
     this.callbacks.log?.(`DataTransfer vendorId=${data.vendorId}`, "info");
+  }
+
+  /** Send an expert OCPP call (#389) and log the answer. A CALLERROR is an
+   *  answer — often the one the scenario is after — so the flow goes on; a
+   *  refusal or no answer throws and fails the run. */
+  private async executeOcppCall(data: OcppCallNodeData): Promise<void> {
+    if (!this.callbacks.onSendOcppCall) {
+      this.callbacks.log?.(
+        "OCPP call: no onSendOcppCall callback wired",
+        "warn",
+      );
+      return;
+    }
+    const outcome = await this.callbacks.onSendOcppCall({
+      action: data.action,
+      payload: data.payload,
+      ...(data.skipValidation !== undefined
+        ? { skipValidation: data.skipValidation }
+        : {}),
+      ...(data.applyResponse !== undefined
+        ? { applyResponse: data.applyResponse }
+        : {}),
+    });
+    if (outcome.kind === "callResult") {
+      this.callbacks.log?.(
+        `OCPP call ${data.action} → CALLRESULT ${JSON.stringify(outcome.payload)}`,
+        "info",
+      );
+    } else {
+      this.callbacks.log?.(
+        `OCPP call ${data.action} → CALLERROR ${outcome.errorCode}: ${outcome.errorDescription}`,
+        "warn",
+      );
+    }
   }
 
   /**

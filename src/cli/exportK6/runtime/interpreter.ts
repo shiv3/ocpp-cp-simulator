@@ -211,6 +211,15 @@ async function executeNode(
         payload: asRecord(d.payload),
       });
       return;
+    case "ocppCall":
+      // #389: the authored CALL as-is. The k6 runtime validates no outgoing
+      // payload and keeps no station state, so skipValidation and
+      // applyResponse have nothing to switch.
+      await host.call({
+        action: str(d.action) ?? "Heartbeat",
+        payload: asRecord(d.payload),
+      });
+      return;
     case "connectorPlug":
       await notifyStatus(d.action === "plugout" ? "Available" : "Preparing");
       return;

@@ -9,6 +9,7 @@ import {
   CSMS_CALL_TRIGGER_ACTIONS,
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
+  type OcppCallNodeData,
   type DelayNodeData,
   INBOUND_POLICY_ACTIONS,
   INBOUND_POLICY_ERROR_CODES,
@@ -45,6 +46,7 @@ import EndForm from "./EndForm";
 import InboundPolicyForm from "./InboundPolicyForm";
 import MeterValueForm from "./MeterValueForm";
 import NotificationForm from "./NotificationForm";
+import OcppCallForm from "./OcppCallForm";
 import RemoteStartTriggerForm from "./RemoteStartTriggerForm";
 import RemoteStopTriggerForm from "./RemoteStopTriggerForm";
 import ResponseOverrideForm from "./ResponseOverrideForm";
@@ -626,6 +628,27 @@ function dataTransferFormToNodeData(
   }) as DataTransferNodeData;
 }
 
+function ocppCallNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  const data = nodeData as Partial<OcppCallNodeData>;
+  return compactDefined({
+    ...baseToForm(nodeData),
+    action: stringValue(data.action),
+    payload: payloadValue(data.payload),
+    skipValidation: optionalBoolean(data.skipValidation),
+    applyResponse: optionalBoolean(data.applyResponse),
+  });
+}
+
+function ocppCallFormToNodeData(formData: NodeFormData): OcppCallNodeData {
+  return compactDefined({
+    ...baseFromForm(formData),
+    action: stringValue(formData.action),
+    payload: payloadValue(formData.payload) as Record<string, unknown>,
+    skipValidation: optionalBoolean(formData.skipValidation),
+    applyResponse: optionalBoolean(formData.applyResponse),
+  }) as OcppCallNodeData;
+}
+
 function csmsCallTriggerNodeDataToForm(
   nodeData: ScenarioNodeData,
 ): NodeFormData {
@@ -939,6 +962,12 @@ export const NODE_FORM_REGISTRY = {
     Component: DataTransferForm,
     nodeDataToForm: dataTransferNodeDataToForm,
     formToNodeData: dataTransferFormToNodeData,
+  },
+  [ScenarioNodeType.OCPP_CALL]: {
+    title: "OCPP Call (expert)",
+    Component: OcppCallForm,
+    nodeDataToForm: ocppCallNodeDataToForm,
+    formToNodeData: ocppCallFormToNodeData,
   },
   [ScenarioNodeType.CONNECTION_TRIGGER]: {
     title: "Connection Trigger",

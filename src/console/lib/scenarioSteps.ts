@@ -12,6 +12,7 @@ import {
   type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
+  type OcppCallNodeData,
   type RemoteStartTriggerNodeData,
   type RemoteStopTriggerNodeData,
   type ReservationTriggerNodeData,
@@ -423,6 +424,17 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           vendorId: "com.example",
         } satisfies DataTransferNodeData,
       };
+    case ScenarioNodeType.OCPP_CALL:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "OCPP call",
+          action: "Heartbeat",
+          payload: {},
+        } satisfies OcppCallNodeData,
+      };
     case ScenarioNodeType.CSMS_CALL_TRIGGER:
       return {
         id,
@@ -638,6 +650,10 @@ export function stepSummary(node: ScenarioNode): string {
       const d = node.data as NotificationNodeData;
       return d.messageType;
     }
+    case ScenarioNodeType.OCPP_CALL: {
+      const d = node.data as OcppCallNodeData;
+      return d.skipValidation ? `${d.action} (unvalidated)` : d.action;
+    }
     default:
       return label;
   }
@@ -688,6 +704,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
       ScenarioNodeType.CONFIG_SET,
       ScenarioNodeType.DATA_TRANSFER,
       ScenarioNodeType.NOTIFICATION,
+      ScenarioNodeType.OCPP_CALL,
       ScenarioNodeType.RESERVE_NOW,
       ScenarioNodeType.CANCEL_RESERVATION,
     ],

@@ -129,4 +129,19 @@ describe("NODE_FORM_REGISTRY", () => {
       ),
     );
   });
+
+  it("round-trips an ocppCall node and drops runtime fields (#389)", () => {
+    const formData: NodeFormData = {
+      label: "Faulted",
+      action: "StatusNotification",
+      payload: { connectorId: 1, errorCode: "NoError", status: "Faulted" },
+      skipValidation: true,
+      applyResponse: false,
+    };
+    expectFormRoundTrip(ScenarioNodeType.OCPP_CALL, formData);
+    expectUnknownFieldsDropped(
+      ScenarioNodeType.OCPP_CALL,
+      NODE_FORM_REGISTRY[ScenarioNodeType.OCPP_CALL].formToNodeData(formData),
+    );
+  });
 });

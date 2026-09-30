@@ -303,6 +303,30 @@ describe("runScenario", () => {
     expect(sent?.payload).toEqual({});
   });
 
+  it("sends an ocppCall node's action and payload as authored (#389)", async () => {
+    const host = new FakeHost();
+    const payload = { connectorId: 1, errorCode: "NoError", status: "Faulted" };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "ocppCall",
+          data: { action: "StatusNotification", payload, skipValidation: true },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    expect(host.sent).toContainEqual(
+      expect.objectContaining({ action: "StatusNotification", payload }),
+    );
+  });
+
   it("csmsCallTrigger with a payload condition skips non-matching calls (#240)", async () => {
     const host = new FakeHost();
     const events: Array<{ action: string; payload: Record<string, unknown> }> =

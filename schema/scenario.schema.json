@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.2)",
-  "$comment": "Scenario file format v1.2 (issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.3)",
+  "$comment": "Scenario file format v1.3 (issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389). Mirrors src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -241,7 +241,8 @@
             "responseOverride",
             "inboundPolicy",
             "certQuirks",
-            "connectionTrigger"
+            "connectionTrigger",
+            "ocppCall"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -522,6 +523,23 @@
                   "vendorId": { "type": "string" },
                   "messageId": { "type": "string" },
                   "data": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ocppCall" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "#389 expert OCPP call. `action` must be a station-initiated CALL of the station's OCPP-J version (see docs/concepts/expert-ocpp-calls.md); checked at run time, not here.",
+                "required": ["action", "payload"],
+                "properties": {
+                  "action": { "type": "string", "minLength": 1 },
+                  "payload": { "type": "object" },
+                  "skipValidation": { "type": "boolean" },
+                  "applyResponse": { "type": "boolean" }
                 }
               }
             }

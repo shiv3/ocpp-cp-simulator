@@ -112,6 +112,7 @@ function createRuntimeMocks(connectorIds = [1]) {
     sendHeartbeat: vi.fn(),
     sendStatusNotificationRaw: vi.fn(),
     sendDataTransfer: vi.fn(),
+    sendOcppCall: vi.fn(),
     getConnector: vi.fn((connectorId: number) =>
       connectorsById.get(connectorId),
     ),
@@ -660,5 +661,102 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
     );
     expect(connector2Shape.status).toBe(OCPPStatus.Available);
     expect(connector1Shape.status).toBe(OCPPStatus.Reserved);
+  });
+});
+
+describe("ocppCall node (#389)", () => {
+  const request = {
+    action: "StatusNotification",
+    payload: { connectorId: 1, errorCode: "NoError", status: "Faulted" },
+    skipValidation: true,
+    applyResponse: false,
+  };
+
+  function executorFor(callbacks: ScenarioExecutorCallbacks) {
+    return new ScenarioExecutor(
+      scenarioWithMiddleNodes("ocpp-call", [
+        node("call", ScenarioNodeType.OCPP_CALL, {
+          label: "OCPP call",
+          ...request,
+        }),
+      ]),
+      callbacks,
+    );
+  }
+
+  it("sends the node's request and logs the CALLRESULT", async () => {
+    const onSendOcppCall = vi.fn().mockResolvedValue({
+      kind: "callResult",
+      messageId: "m1",
+      sentFrame: "[]",
+      payload: {},
+    });
+    const log = vi.fn();
+    const executor = executorFor({ onSendOcppCall, log });
+
+    await executor.start();
+
+    expect(onSendOcppCall).toHaveBeenCalledWith(request);
+    expect(executor.getContext().state).toBe("completed");
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("StatusNotification → CALLRESULT {}"),
+      "info",
+    );
+  });
+
+  it("logs a CALLERROR as an answer and carries on", async () => {
+    const onSendOcppCall = vi.fn().mockResolvedValue({
+      kind: "callError",
+      messageId: "m1",
+      sentFrame: "[]",
+      errorCode: "FormationViolation",
+      errorDescription: "bad frame",
+      errorDetails: {},
+    });
+    const log = vi.fn();
+    const executor = executorFor({ onSendOcppCall, log });
+
+    await executor.start();
+
+    expect(executor.getContext().state).toBe("completed");
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "StatusNotification → CALLERROR FormationViolation: bad frame",
+      ),
+      "warn",
+    );
+  });
+
+  it("fails the run when the call is refused or gets no answer", async () => {
+    const onSendOcppCall = vi
+      .fn()
+      .mockRejectedValue(new Error("Reset is not a station call"));
+    const onError = vi.fn();
+    const executor = executorFor({ onSendOcppCall, onError });
+
+    await executor.start();
+
+    expect(executor.getContext().state).toBe("error");
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Reset is not a station call" }),
+    );
+  });
+
+  it("is wired by the runtime to ChargePoint.sendOcppCall", async () => {
+    const { chargePoint, chargePointShape, connector } = createRuntimeMocks();
+    chargePointShape.sendOcppCall.mockResolvedValue({
+      kind: "callResult",
+      messageId: "m1",
+      sentFrame: "[]",
+      payload: {},
+    });
+    const executor = executorFor(
+      createScenarioExecutorCallbacks({ chargePoint, connector }),
+    );
+
+    await executor.start();
+
+    expect(chargePointShape.sendOcppCall).toHaveBeenCalledWith(request);
+    expect(executor.getContext().state).toBe("completed");
   });
 });

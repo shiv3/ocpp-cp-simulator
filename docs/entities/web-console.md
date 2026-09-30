@@ -51,7 +51,7 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   a linear step editor and a separate run console (`/v3/scenarios`; each row's
   `…` menu — Duplicate, Export JSON, Delete — opens in a portal and flips
   upward near the bottom of the window, so it is never clipped by the table,
-  #365), a global
+  #365), a cross-CP **Run history** (`/v3/scenarios/runs`, #388), a global
   **Message log** (`/v3/logs`), and **Settings** (`/v3/settings`, where
   global [network simulation](../concepts/network-simulation.md) and the
   **Reset all simulator data** button live).
@@ -77,6 +77,22 @@ waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#
 shows at once, and a control the runtime refuses is shown inline instead of
 being dropped. In Remote mode every open console re-reads the run on
 `scenario_wait_changed`, not only the one that acted.
+
+The run console's **Run history** lists the daemon's recorded runs of that
+scenario on that connector — the latest 20, newest first, with each run's
+result and verdict — plus the run the page is tracking until the daemon records
+it, so the history survives navigating away and back or a daemon restart with
+`--state-db`. Selecting a recorded run opens its report: verdicts, timing,
+errors, assertion results, wait interventions and the run's OCPP transcript,
+downloadable as JSON. **View all runs** opens the **Run History** page
+(`/v3/scenarios/runs`), which lists every recorded run across charge points
+with filters on charge point, connector, scenario id, verdict and execution
+state, pages of 50, and the selected run's report beside the list; filters and
+the selected run are kept in the URL (`?cp=&connector=&scenario=&verdict=
+&state=&run=`). Both re-list when the daemon records a run
+([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
+In Local mode the run console keeps a history of this page view only, and the
+Run History page says it needs the daemon.
 
 The two consoles link to each other with a design switcher (the classic
 navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic

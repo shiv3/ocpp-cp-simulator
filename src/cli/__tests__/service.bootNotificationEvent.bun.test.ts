@@ -145,9 +145,12 @@ describe("boot_notification control-plane event (#395)", () => {
     expect(after).not.toContain("boot_notification");
   });
 
-  it("OCPP 2.0.1: the same event from the 2.0.1 response path", async () => {
-    const { events } = await bootWith("Accepted", 120, "OCPP-2.0.1");
+  it.each(["OCPP-2.0.1", "OCPP-2.1"])(
+    "%s: the same event from the 2.x response path",
+    async (ocppVersion) => {
+      const { events } = await bootWith("Accepted", 120, ocppVersion);
 
-    expectSingleBoot(events, "Accepted", 120);
-  });
+      expectSingleBoot(events, "Accepted", 120);
+    },
+  );
 });

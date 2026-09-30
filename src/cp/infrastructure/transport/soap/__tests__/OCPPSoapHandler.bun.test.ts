@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { BootNotificationResult } from "../../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../../domain/connector/Transaction";
 import {
   BootNotification,
@@ -450,6 +451,10 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
         },
       );
       cp.events.on("error", () => undefined);
+      const bootResults: BootNotificationResult[] = [];
+      cp.events.on("bootNotificationResult", (result) => {
+        bootResults.push(result);
+      });
 
       try {
         cp.connect();
@@ -473,6 +478,15 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
 
         await waitForOperationCount(csms.received, "StatusNotification", 2);
         await waitUntil(() => cp.status === OCPPStatus.Available);
+        // #395: the SOAP response path reaches the same boot funnel as the
+        // WebSocket ones. OCPP 1.5 names the interval `heartbeatInterval`.
+        expect(bootResults).toEqual([
+          {
+            status: "Accepted",
+            interval: 0,
+            currentTime: "2026-06-30T00:00:00Z",
+          },
+        ]);
 
         cp.sendHeartbeat();
         const heartbeat = await waitForOperationCount(

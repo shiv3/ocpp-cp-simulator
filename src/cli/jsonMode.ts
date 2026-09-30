@@ -12,6 +12,7 @@ import {
   OCPPStatus,
   type StatusNotificationOptions,
 } from "../cp/domain/types/OcppTypes";
+import { OBJ_MAX_BYTES, STR_64K_MAX } from "../protocol";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -615,8 +616,10 @@ export function requireEnum<T extends string>(
 
 /**
  * `data_transfer`'s `data` (#348): a string, or a plain object — the same
- * shape the daemon's RPC schema admits (`STR_64K | OBJ()`), so standalone
- * JSON mode refuses the same inputs. `null` counts as absent.
+ * shape and bounds the daemon's RPC schema admits (`STR_64K | OBJ()`), so
+ * standalone JSON mode refuses the same inputs. A string is bounded by its
+ * length and an object by its serialized length, as the schema measures them
+ * (#382). `null` counts as absent.
  */
 export function optionalDataTransferData(
   params: Record<string, unknown>,
@@ -628,7 +631,11 @@ export function optionalDataTransferData(
   if (typeof val !== "string" && !isPlainObject) {
     throw new Error("Invalid parameter: data (expected string or object)");
   }
-  if (JSON.stringify(val).length > 65_536) {
+  const withinCap =
+    typeof val === "string"
+      ? val.length <= STR_64K_MAX
+      : JSON.stringify(val).length <= OBJ_MAX_BYTES;
+  if (!withinCap) {
     throw new Error("Invalid parameter: data (over 64 KB)");
   }
   return val as DataTransferData;

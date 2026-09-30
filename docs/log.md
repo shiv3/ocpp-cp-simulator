@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 # Log
@@ -1187,3 +1187,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Mechanism: `ChargePointService`, `SingleCpCommandOps`, `CLIChargePointService`, the registry service and `IChargePointMessageHandler` take `DiagnosticsStatus` / `FirmwareStatus` / `UploadLogStatus` and `DataTransferData` (`string | Record<string, unknown>`) instead of `string` / `unknown`. Input is narrowed once where it enters: the zod schema, `requireEnum` in the Socket.IO facade and JSON-Lines mode, and a guard in `LocalChargePointService`. The adapters' casts are gone. On 1.6 a 2.0.1-only firmware or log status is still sent as given, and the codec's outgoing check still warns.
 - [GitHub issues](sources/github-issues.md): #377 row.
 - Tests: `LocalChargePointService.portSurface.test.ts` checks that an unknown diagnostics / firmware / log status rejects with `RpcFailure` `invalid_params` and sends nothing. `socketServer.rpc.test.ts` checks the daemon refuses the same with `invalid_params`. `jsonMode.firmwareLogStatus.test.ts` checks JSON-Lines diagnostics names the vocabulary.
+
+## [2026-09-30] ingest | data_transfer string data bounded by its length (#382)
+
+- [Control plane](concepts/control-plane.md#cp-command-methods): the `data_transfer` row states the `data` caps — a string at 65,536 characters, an object at 65,536 characters serialized — and that JSON-Lines mode applies the same bounds. Before the fix, the facade's re-check (`optionalDataTransferData`, added to the daemon path by #381) measured a string by its JSON-encoded length. A 65,535–65,536-character string, or a shorter one full of characters JSON escapes, passed the schema, then failed with `internal` over Socket.IO. JSON-Lines mode had refused the same strings since #348.
+- Mechanism: `optionalDataTransferData` bounds a string by `STR_64K_MAX` and an object by `OBJ_MAX_BYTES`, both from `src/protocol/limits.ts`. The facade re-narrowing itself is tracked in #383.
+- [GitHub issues](sources/github-issues.md): #382 row.
+- Tests: `jsonMode.dataTransfer.test.ts` and `socketServer.rpc.test.ts` check that a 65,536-character string and 40,000 `"` are accepted, and that a 65,537-character string is refused (`invalid_params` over Socket.IO). The JSON-Lines test also checks an oversized object.

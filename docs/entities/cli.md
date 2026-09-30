@@ -728,15 +728,24 @@ Events are emitted in all modes:
 | `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed                                                                                                                                                                                                                      |
 | `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed                                                                                                                                                                                                                         |
 | `scenario_wait_changed` | `connectorId`, `scenarioId`, `kind`       | An operator extended, retried or continued the wait the scenario is parked on (`kind`: `extend` / `retry` / `continue`; also carries `nodeId` and `runId`) (#240)                                                                              |
-| `csms_call_received`    | `action`, `messageId`, `payload`          | The CSMS sent a CALL (any action, 1.6J / 2.x / SOAP), announced before it is handled; see [CSMS call events](#csms-call-events) (#396)                                                                                                         |
+| `csms_call_received`    | `action`, `messageId`, `payload`          | The CSMS sent a CALL (any OCPP-J action; a dispatchable SOAP one), announced before it is handled; see [CSMS call events](#csms-call-events) (#396)                                                                                            |
 | `csms_call_completed`   | `action`, `messageId`, `outcome`          | The simulator decided its answer to that CALL: `CallResult`, `CallError` (with `errorCode`) or `NoResponse`; see [CSMS call events](#csms-call-events) (#396)                                                                                  |
 
 ### CSMS call events
 
 `csms_call_received` and `csms_call_completed` give an orchestrator direct
 evidence that a command came through the CSMS, rather than inferring it from
-the state change it caused (#396). They cover every inbound CALL generically;
-the operation handlers, scenario hooks and the OCPP answer are unchanged.
+the state change it caused (#396). The operation handlers, scenario hooks and
+the OCPP answer are unchanged.
+
+- **Scope.** On OCPP-J (1.6J, 2.0.1, 2.1) every inbound CALL gets exactly one
+  pair, whatever the action — an unsupported one completes as
+  `CallError` / `NotImplemented`. On SOAP (1.2, 1.5, 1.6S) only a
+  **dispatchable** call does: one the station has a handler for, addressed to
+  it. A SOAP request refused before dispatch — not implemented, wrong charge
+  point, not a request — is answered with a Fault and emits neither event,
+  because announcing it would also release a scenario `csmsCallTrigger`
+  waiting on that action (#257).
 
 - **Correlation.** `messageId` is the CALL's UniqueId (the WS-Addressing
   `MessageID` on SOAP, omitted when the request has none). Repeated calls of
@@ -745,17 +754,22 @@ the operation handlers, scenario hooks and the OCPP answer are unchanged.
 - **Order.** `csms_call_received` is emitted as the CALL enters dispatch,
   before any `inboundPolicy`, `responseOverride` or operation handler runs.
   `csms_call_completed` is emitted once the answer is decided, just before it
-  is handed to the transport: after the handler's synchronous work (a 1.6J
-  `RemoteStartTransaction` has already started the transaction) and before
+  is handed to the transport: after the handler's synchronous work and before
   any post-response effect (a `Reset` reboots after it).
+- **Answer, not state.** `csms_call_completed` confirms the OCPP answer the
+  station chose, never the state transition the call leads to. Watch the
+  state events for that. On the default 1.6J path a
+  `RemoteStartTransaction` handler starts the transaction itself, so
+  `transaction_started` precedes `csms_call_completed`. When a scenario owns
+  the remote start (`remoteStartTrigger`), the handler only hands the call to
+  the scenario and answers `Accepted`; the transaction starts later, when the
+  scenario reaches its `transaction` (`action: "start"`) node, if at all.
 - **Outcome.** `CallResult` for a response — including one chosen by a
   `responseOverride`; `CallError` for a CALLERROR (an `inboundPolicy`, a 2.x
   `FormationViolation`, `NotImplemented`, a handler failure's
   `InternalError`), with `errorCode`; `NoResponse` when no answer is sent:
   an `inboundPolicy` of kind `ignore`, or a 2.x handler that throws (such a
-  CALL has always been left unanswered). On SOAP a Fault is a `CallError` whose `errorCode` is the
-  Fault code (`Sender` / `Receiver`); a request refused before dispatch (wrong
-  charge point, not implemented) emits neither event.
+  CALL has always been left unanswered). On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
 - **Not delivery.** The outcome is the answer chosen, not proof it reached the
   CSMS: a socket that closes, or a [network-simulation](../concepts/network-simulation.md)
   drop, can still lose it.

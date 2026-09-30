@@ -235,4 +235,20 @@ describe("OCPPSoapServer reports the answer to an inbound call (#396)", () => {
     expect(res.status).toBe(403);
     expect(order).toEqual([]);
   });
+
+  it("reports nothing for a call the station cannot dispatch", async () => {
+    // Unlike OCPP-J, where it completes as CallError / NotImplemented: a
+    // SOAP call without a dispatch path is not announced, so it must not
+    // be completed either (#257 keeps it from releasing a csmsCallTrigger).
+    const order: string[] = [];
+    // No logger: the shared v16 registry is unavailable, so only the legacy
+    // Reset handler can answer.
+    const res = await serverWith(order).handleRequest(
+      "CP",
+      callXml("ClearCache", "uuid:clear-cache", {}),
+    );
+
+    expect(await res.text()).toContain("is not implemented");
+    expect(order).toEqual([]);
+  });
 });

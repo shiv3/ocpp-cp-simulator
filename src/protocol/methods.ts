@@ -4,8 +4,11 @@
 // The dotted keys are the non-jsonMode explicit ops.
 //
 // Connector rule (PB3): only `update_connector_status` accepts connector 0
-// (`requireNonNegativeInt`); every other connector-taking command requires
-// >= 1 (`requirePositiveInt`). DoS limits (Sec-4) bound every string/array.
+// (`CONN_NONNEG`); every other connector-taking command requires >= 1
+// (`CONN_POS`). DoS limits (Sec-4) bound every string/array.
+//
+// On the daemon the handlers receive the value these schemas parsed (#383), so
+// a rule about the params themselves belongs here rather than in a handler.
 
 import {
   DIAGNOSTICS_STATUSES,
@@ -37,11 +40,18 @@ import {
   TRANSACTION_CHARGING_STATES,
   TRANSACTION_EVENT_TRIGGER_REASONS,
 } from "../cp/domain/connector/Transaction";
+import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
 const CONN_DEF = CONN_POS.nullable();
 const EMPTY = z.object({});
+/** The connector modes `set_mode` accepts. */
+const SCENARIO_MODES = [
+  "manual",
+  "scenario",
+] as const satisfies readonly ScenarioMode[];
 const ANY = z.unknown();
 /** A bounded free-form object param (settings/config/options): ≤ 64 KB. */
 const OBJ = () => boundedObject(OBJ_MAX_BYTES);
@@ -55,11 +65,12 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
  * `list_scenarios` as an entry that could be neither run nor removed.
  *
  * Failing here is what turns that into a proper `invalid_params` for both
- * Socket.IO and MCP (see dispatchRpc's params.safeParse). An intersection keeps
- * the byte bound and stays permissive about unknown keys — real editor exports
- * carry xyflow UI fields. `CLIChargePointService.loadScenario` re-checks the
- * same invariants for the paths that never see this schema (`file`, the startup
- * loaders). Full schema conformance remains advisory (issue #214).
+ * Socket.IO and MCP (see `parseRpcParams` in socketServer.ts). An intersection
+ * keeps the byte bound and stays permissive about unknown keys — real editor
+ * exports carry xyflow UI fields. `CLIChargePointService.loadScenario`
+ * re-checks the same invariants for the paths that never see this schema
+ * (`file`, the startup loaders). Full schema conformance remains advisory
+ * (issue #214).
  */
 const LOADABLE_SCENARIO_OBJ = () =>
   z.intersection(
@@ -536,12 +547,17 @@ export const METHODS = {
   update_connector_status: {
     params: z.object({
       connector: CONN_NONNEG,
-      status: STR_64K,
+      // #383: the vocabulary is the schema's to enforce. A value outside it
+      // used to pass here and fail in the handler, answering `internal`.
+      status: z.enum(OCPPStatus),
       errorCode: STR_64K.optional(),
       info: STR_64K.optional(),
       vendorErrorCode: STR_64K.optional(),
       vendorId: STR_64K.optional(),
-      timestamp: STR_64K.optional(),
+      // Anything `Date` can read, as before; the handler passes it on as one.
+      timestamp: STR_64K.refine((v) => !Number.isNaN(Date.parse(v)), {
+        message: "timestamp must be a date string",
+      }).optional(),
       suppressChargingStateTransactionEvent: z.boolean().optional(),
     }),
     result: ANY,
@@ -585,7 +601,7 @@ export const METHODS = {
     result: ANY,
   },
   set_mode: {
-    params: z.object({ connector: CONN_POS, mode: STR_64K }),
+    params: z.object({ connector: CONN_POS, mode: z.enum(SCENARIO_MODES) }),
     result: ANY,
   },
   set_soc: {
@@ -618,11 +634,16 @@ export const METHODS = {
     result: ANY,
   },
   load_scenario: {
-    params: z.object({
-      connector: CONN_POS,
-      file: STR_64K.optional(),
-      scenario: LOADABLE_SCENARIO_OBJ().optional(),
-    }),
+    params: z
+      .object({
+        connector: CONN_POS,
+        file: STR_64K.optional(),
+        scenario: LOADABLE_SCENARIO_OBJ().optional(),
+      })
+      // #383: refused here rather than by the handler, which answered `internal`.
+      .refine((v) => v.file !== undefined || v.scenario !== undefined, {
+        message: "load_scenario needs a file or a scenario",
+      }),
     result: ANY,
   },
   list_scenarios: { params: z.object({ connector: CONN_POS }), result: ANY },

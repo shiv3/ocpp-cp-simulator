@@ -50,7 +50,6 @@ import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRep
 import {
   isScenarioDefinitionShape,
   type ScenarioDefinition,
-  type ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
@@ -58,7 +57,6 @@ import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
 import {
   hasStatusNotificationOptions,
-  OCPPStatus,
   type StatusNotificationOptions,
 } from "../../cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "../../cp/shared/redaction";
@@ -184,11 +182,6 @@ const CONFIG_KEY = "global_config";
 const CONFIG_EVENTS_SCOPE = "config";
 const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
 const FILE_RELOAD_EVENTS_SCOPE = "file-reload";
-const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
-  "manual",
-  "scenario",
-];
-const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
 export interface SocketConfigRepository extends RegistryConfigRepository {}
 
@@ -1696,17 +1689,11 @@ async function dispatchFacadeCpCommand(
     case "update_connector_status": {
       const { params } = call;
       const id = requireFacadeCpId(target);
-      const status = params.status;
-      if (!VALID_STATUSES.has(status as OCPPStatus)) {
-        throw new Error(
-          `Invalid status: ${status}. Valid: ${[...VALID_STATUSES].join(", ")}`,
-        );
-      }
       await runFacadeOperation(() =>
         chargePointService.sendStatusNotification(
           id,
           params.connector,
-          status as OCPPStatus,
+          params.status,
           readStatusNotificationOptions(params),
         ),
       );
@@ -1821,18 +1808,8 @@ async function dispatchFacadeCpCommand(
     case "set_mode": {
       const { params } = call;
       const id = requireFacadeCpId(target);
-      const mode = params.mode;
-      if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
-        throw new Error(
-          `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
-        );
-      }
       await runFacadeOperation(() =>
-        chargePointService.setConnectorMode(
-          id,
-          params.connector,
-          mode as ScenarioMode,
-        ),
+        chargePointService.setConnectorMode(id, params.connector, params.mode),
       );
       return handled(undefined);
     }
@@ -2485,60 +2462,23 @@ function preserveWhenMissing(
   }
 }
 
-function readStatusNotificationOptions(
-  params: Record<string, unknown>,
-): StatusNotificationOptions | undefined {
-  const opts: StatusNotificationOptions = {};
-  readOptionalString(params, "errorCode", opts);
-  readOptionalString(params, "info", opts);
-  readOptionalString(params, "vendorErrorCode", opts);
-  readOptionalString(params, "vendorId", opts);
-  readOptionalTimestamp(params, "timestamp", opts);
-  readOptionalBoolean(params, "suppressChargingStateTransactionEvent", opts);
+function readStatusNotificationOptions({
+  errorCode,
+  info,
+  vendorErrorCode,
+  vendorId,
+  timestamp,
+  suppressChargingStateTransactionEvent,
+}: Params<"update_connector_status">): StatusNotificationOptions | undefined {
+  const opts: StatusNotificationOptions = stripUndefined({
+    errorCode,
+    info,
+    vendorErrorCode,
+    vendorId,
+    timestamp: timestamp === undefined ? undefined : new Date(timestamp),
+    suppressChargingStateTransactionEvent,
+  });
   return hasStatusNotificationOptions(opts) ? opts : undefined;
-}
-
-function readOptionalString(
-  params: Record<string, unknown>,
-  key: "errorCode" | "info" | "vendorErrorCode" | "vendorId",
-  target: StatusNotificationOptions,
-): void {
-  const val = params[key];
-  if (val === undefined) return;
-  if (typeof val !== "string") {
-    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
-  }
-  target[key] = val;
-}
-
-function readOptionalTimestamp(
-  params: Record<string, unknown>,
-  key: "timestamp",
-  target: StatusNotificationOptions,
-): void {
-  const val = params[key];
-  if (val === undefined) return;
-  const date =
-    val instanceof Date ? val : typeof val === "string" ? new Date(val) : null;
-  if (!date || Number.isNaN(date.getTime())) {
-    throw new Error(
-      `Missing or invalid parameter: ${key} (expected ISO timestamp)`,
-    );
-  }
-  target[key] = date;
-}
-
-function readOptionalBoolean(
-  params: Record<string, unknown>,
-  key: "suppressChargingStateTransactionEvent",
-  target: StatusNotificationOptions,
-): void {
-  const val = params[key];
-  if (val === undefined) return;
-  if (typeof val !== "boolean") {
-    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
-  }
-  target[key] = val;
 }
 
 function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {

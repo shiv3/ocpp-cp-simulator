@@ -79,6 +79,34 @@ describe("RPC params are narrowed by the schema alone (#383)", () => {
     );
   });
 
+  it("update_connector_status refuses a status outside the OCPP vocabulary as invalid_params", async () => {
+    const sendStatusNotification = vi.fn();
+    const error = await rpcError(
+      { sendStatusNotification },
+      {
+        cpId: "cp-alpha",
+        method: "update_connector_status",
+        params: { connector: 1, status: "Sleeping" },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(sendStatusNotification).not.toHaveBeenCalled();
+  });
+
+  it("update_connector_status refuses an unparseable timestamp as invalid_params", async () => {
+    const sendStatusNotification = vi.fn();
+    const error = await rpcError(
+      { sendStatusNotification },
+      {
+        cpId: "cp-alpha",
+        method: "update_connector_status",
+        params: { connector: 1, status: "Available", timestamp: "yesterday" },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(sendStatusNotification).not.toHaveBeenCalled();
+  });
+
   it("update_connector_status passes a valid timestamp on as a Date", async () => {
     const sendStatusNotification = vi.fn().mockResolvedValue(undefined);
     await runRpc(depsWith({ sendStatusNotification }), {
@@ -97,6 +125,30 @@ describe("RPC params are narrowed by the schema alone (#383)", () => {
       "Available",
       { info: "boot", timestamp: new Date("2026-09-30T08:00:00.000Z") },
     );
+  });
+
+  it("set_mode refuses an unknown mode as invalid_params", async () => {
+    const setConnectorMode = vi.fn();
+    const error = await rpcError(
+      { setConnectorMode },
+      {
+        cpId: "cp-alpha",
+        method: "set_mode",
+        params: { connector: 1, mode: "turbo" },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(setConnectorMode).not.toHaveBeenCalled();
+  });
+
+  it("load_scenario naming neither file nor scenario is invalid_params", async () => {
+    const loadScenario = vi.fn();
+    const error = await rpcError(
+      { loadScenario },
+      { cpId: "cp-alpha", method: "load_scenario", params: { connector: 1 } },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(loadScenario).not.toHaveBeenCalled();
   });
 
   it.each([

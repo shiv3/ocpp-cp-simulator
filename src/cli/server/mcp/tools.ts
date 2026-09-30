@@ -340,9 +340,9 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .int()
         .min(0)
         .describe("Connector identifier (0 for all)"),
-      status: z
-        .string()
-        .describe("Connector status (e.g., Available, Occupied, Faulted)"),
+      status: METHODS.update_connector_status.params.shape.status.describe(
+        "Connector status (e.g. Available, Charging, Faulted)",
+      ),
       errorCode: z
         .string()
         .optional()

@@ -12,7 +12,10 @@ import {
   OCPPStatus,
   type StatusNotificationOptions,
 } from "../cp/domain/types/OcppTypes";
-import { dataTransferDataSchema } from "../protocol";
+import {
+  dataTransferDataSchema,
+  scenarioWaitExtensionSecondsSchema,
+} from "../protocol";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -376,7 +379,7 @@ export async function handleJsonCommand(
     case "extend_scenario_wait": {
       const connectorId = requirePositiveInt(params, "connector");
       const scenarioId = requireString(params, "scenarioId");
-      const seconds = requirePositiveInt(params, "seconds");
+      const seconds = requireWaitExtensionSeconds(params);
       await ops.extendScenarioWait(connectorId, scenarioId, seconds);
       return undefined;
     }
@@ -648,6 +651,20 @@ export function optionalDataTransferData(
   if (!parsed.success) {
     throw new Error(
       "Invalid parameter: data (expected a string of at most 64K characters or an object of at most 64 KB)",
+    );
+  }
+  return parsed.data;
+}
+
+/** `extend_scenario_wait`'s `seconds`, validated by the control plane's own
+ *  schema (#240); only the error message repeats its 1–3600 bounds. */
+export function requireWaitExtensionSeconds(
+  params: Record<string, unknown>,
+): number {
+  const parsed = scenarioWaitExtensionSecondsSchema.safeParse(params.seconds);
+  if (!parsed.success) {
+    throw new Error(
+      "Missing or invalid parameter: seconds (expected an integer from 1 to 3600)",
     );
   }
   return parsed.data;

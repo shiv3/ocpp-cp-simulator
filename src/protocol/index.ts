@@ -21,6 +21,7 @@ export {
   createManyFromBlueprintSchema,
   createManyToolSchema,
   dataTransferDataSchema,
+  scenarioWaitExtensionSecondsSchema,
   serverInfoSchema,
   SCENARIO_MODES,
 } from "./methods";

@@ -70,6 +70,15 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
  */
 export const dataTransferDataSchema = z.union([STR_64K, OBJ()]);
 /**
+ * `extend_scenario_wait`'s `seconds` (#240): a whole number of seconds,
+ * 1–3600. Exported for the same reason as `dataTransferDataSchema`.
+ */
+export const scenarioWaitExtensionSecondsSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(3600);
+/**
  * A scenario definition that is actually loadable: bounded, plus the fields the
  * runtime keys on. `load_scenario` used to take a free-form bounded object, so a
  * payload with no `id` was accepted and stored under the key `undefined` —
@@ -742,17 +751,17 @@ export const METHODS = {
   extend_scenario_wait: {
     params: z.object({
       connector: CONN_POS,
-      scenarioId: STR_64K,
-      seconds: z.number().int().min(1).max(3600),
+      scenarioId: NON_EMPTY_STR,
+      seconds: scenarioWaitExtensionSecondsSchema,
     }),
     result: ANY,
   },
   retry_scenario_wait: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
   continue_scenario_wait: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
   stop_all_scenarios: {

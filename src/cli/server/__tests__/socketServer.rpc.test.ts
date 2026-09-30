@@ -12,7 +12,7 @@ import { EventBus } from "../eventBus";
 import { createRegistryEventBridge } from "../registryEvents";
 import { registerSocketHandlers } from "../socketServer";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
-import type { SimulatorConfigInput } from "../../../protocol";
+import { STR_64K_MAX, type SimulatorConfigInput } from "../../../protocol";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 
 type Handler = (...args: unknown[]) => void;
@@ -536,6 +536,21 @@ describe("socket.io rpc dispatch", () => {
     ]);
   });
 
+  /** Wires the handlers around a bare facade stub and connects one socket. */
+  function connectFacade(facade: Record<string, unknown>): FakeSocket {
+    const bus = new EventBus();
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    registerSocketHandlers(io as never, {
+      registry: new CPRegistry(bus, null),
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+    return socket;
+  }
+
   // #377: the status vocabularies are the domain's, held by the schema.
   it.each([
     [
@@ -552,19 +567,8 @@ describe("socket.io rpc dispatch", () => {
   ])(
     "%s refuses a status outside the vocabulary with invalid_params",
     async (method, facadeMethod, status) => {
-      const bus = new EventBus();
-      const registry = new CPRegistry(bus, null);
       const facade = { [facadeMethod]: vi.fn().mockResolvedValue(undefined) };
-      const io = new FakeIo();
-      const socket = new FakeSocket();
-
-      registerSocketHandlers(io as never, {
-        registry,
-        bus,
-        database: null,
-        chargePointService: facade as never,
-      });
-      io.connect(socket);
+      const socket = connectFacade(facade);
 
       const ack = await socket.emitRpc({
         cpId: "cp-alpha",
@@ -579,6 +583,49 @@ describe("socket.io rpc dispatch", () => {
       expect(facade[facadeMethod]).not.toHaveBeenCalled();
     },
   );
+
+  // #382: the facade must not re-bound `data` more tightly than the schema,
+  // which caps a string by its length, not by its JSON-encoded length.
+  it.each([
+    ["a string at the cap", "a".repeat(STR_64K_MAX)],
+    ["a quote-heavy string under the cap", '"'.repeat(40_000)],
+  ])("data_transfer accepts %s (#382)", async (_label, data) => {
+    const facade = {
+      sendDataTransfer: vi.fn().mockResolvedValue({ status: "Accepted" }),
+    };
+    const socket = connectFacade(facade);
+
+    const ack = await socket.emitRpc({
+      cpId: "cp-alpha",
+      method: "data_transfer",
+      params: { vendorId: "VendorX", data },
+    });
+
+    expect(ack).toEqual({ ok: true, result: { status: "Accepted" } });
+    expect(facade.sendDataTransfer).toHaveBeenCalledWith(
+      "cp-alpha",
+      "VendorX",
+      undefined,
+      data,
+    );
+  });
+
+  it("data_transfer refuses a string past the cap with invalid_params (#382)", async () => {
+    const facade = { sendDataTransfer: vi.fn() };
+    const socket = connectFacade(facade);
+
+    const ack = await socket.emitRpc({
+      cpId: "cp-alpha",
+      method: "data_transfer",
+      params: { vendorId: "VendorX", data: "a".repeat(STR_64K_MAX + 1) },
+    });
+
+    expect(ack).toMatchObject({
+      ok: false,
+      error: { code: "invalid_params" },
+    });
+    expect(facade.sendDataTransfer).not.toHaveBeenCalled();
+  });
 
   it("dispatches representative per-CP and global methods through the facade", async () => {
     const bus = new EventBus();

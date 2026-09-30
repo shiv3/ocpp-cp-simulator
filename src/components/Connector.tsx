@@ -14,6 +14,7 @@ import { createScenarioExecutorCallbacks } from "../cp/application/scenario/Scen
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useDataContext } from "../data/providers/DataProvider";
+import { formatEnergyKwh, formatSoc } from "../lib/connectorFormat";
 
 interface ConnectorProps {
   id: number;
@@ -478,7 +479,7 @@ const Connector: React.FC<ConnectorProps> = ({
               <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
                 <span>Energy</span>
                 <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">
-                  {(liveMeterValue / 1000).toFixed(2)} kWh
+                  {formatEnergyKwh(liveMeterValue)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
@@ -487,7 +488,7 @@ const Connector: React.FC<ConnectorProps> = ({
                 </span>
                 {liveSoc !== null ? (
                   <span className="text-gray-600 dark:text-gray-400 font-mono">
-                    SoC {liveSoc.toFixed(1)}%
+                    SoC {formatSoc(liveSoc)}
                   </span>
                 ) : null}
               </div>

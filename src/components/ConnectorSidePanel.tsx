@@ -31,6 +31,7 @@ import { createScenarioExecutorCallbacks } from "../cp/application/scenario/Scen
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useDataContext } from "../data/providers/DataProvider";
+import { formatEnergyKwh, formatSoc } from "../lib/connectorFormat";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import { saveConnectorAutoMeterConfig } from "./connectorAutoMeterConfig";
 import { useSocMeterSync } from "./hooks/useSocMeterSync";
@@ -926,7 +927,7 @@ const FullPanelContent: React.FC<{
                         Energy
                       </span>
                       <span className="font-mono font-medium text-green-800 dark:text-green-200 truncate">
-                        {(liveMeterValue / 1000).toFixed(2)} kWh
+                        {formatEnergyKwh(liveMeterValue)}
                       </span>
                     </div>
                   </div>
@@ -1010,11 +1011,9 @@ const FullPanelContent: React.FC<{
                   </label>
                 </div>
                 <div className="text-xs text-gray-700 dark:text-gray-300">
-                  {liveSoc !== null
-                    ? `${liveSoc.toFixed(1)}%`
-                    : "SoC not reported"}
+                  {liveSoc !== null ? formatSoc(liveSoc) : "SoC not reported"}
                   {" · "}
-                  {(liveMeterValue / 1000).toFixed(2)} kWh
+                  {formatEnergyKwh(liveMeterValue)}
                   {` · target ${evSettings.targetSoc}%`}
                 </div>
 

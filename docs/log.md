@@ -1188,6 +1188,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [GitHub issues](sources/github-issues.md): #377 row.
 - Tests: `LocalChargePointService.portSurface.test.ts` checks that an unknown diagnostics / firmware / log status rejects with `RpcFailure` `invalid_params` and sends nothing. `socketServer.rpc.test.ts` checks the daemon refuses the same with `invalid_params`. `jsonMode.firmwareLogStatus.test.ts` checks JSON-Lines diagnostics names the vocabulary.
 
+## [2026-09-30] ingest | `/v3` dashboard and connector cards format energy and SoC (#368)
+
+- [Web console](entities/web-console.md): new paragraph — the `/v3` dashboard and connector cards and the classic connector card and expanded side panel show a connector's meter value (Wh) as kWh with 2 decimals and its SoC with 1 decimal; the `/v3` connector card shows `—` without a SoC, and the classic collapsed rail keeps a whole-percent SoC. The `/v3` cards used to print the raw Wh with a `kWh` suffix (`16208 kWh`), and the connector card the raw float SoC (`20.462666666666667%`).
+- Mechanism: the formatting moved into `src/lib/connectorFormat.ts` (`formatEnergyKwh`, `formatSoc`), used by `ConnectorCard`, `CpCard`, `Connector`, `ConnectorSidePanel` and `BatteryVisualization` so the two consoles cannot drift. `ConnectorSnapshot.meterValue` and the connector view now document the unit (Wh).
+- [GitHub issues](sources/github-issues.md): #368 row.
+- Tests: `connectorFormat.test.ts` (Wh → kWh, SoC rounding), `CpDetailPage.dom.test.tsx` (card shows `16.21 kWh` / `20.5%`, and `—` without a SoC), `DashboardPage.dom.test.tsx` (CP card shows `16.21 kWh`).
+
 ## [2026-09-30] ingest | data_transfer string data bounded by its length (#382)
 
 - [Control plane](concepts/control-plane.md#cp-command-methods): the `data_transfer` row states the `data` caps — a string at 65,536 characters, an object at 65,536 characters serialized — and that JSON-Lines mode applies the same bounds. Before the fix, the facade's re-check (`optionalDataTransferData`, added to the daemon path by #381) measured a string by its JSON-encoded length. A 65,535–65,536-character string, or a shorter one full of characters JSON escapes, passed the schema, then failed with `internal` over Socket.IO. JSON-Lines mode had refused the same strings since #348.

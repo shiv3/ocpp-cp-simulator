@@ -292,6 +292,88 @@ describe("ScenarioRunsPage (#388)", () => {
     );
   });
 
+  it("reopens a copied URL for a run beyond the first page", async () => {
+    // 130 runs, newest first: r0 … r129. r120 is on the third page.
+    const total = 130;
+    const listScenarioRuns = vi.fn(
+      async (query: { runId?: string; limit?: number; offset?: number }) => {
+        if (query.runId) {
+          return {
+            runs: [summary(query.runId, { cpId: "CP-2", connectorId: 3 })],
+            total: 1,
+          };
+        }
+        const { limit = 50, offset = 0 } = query;
+        return {
+          runs: Array.from(
+            { length: Math.max(0, Math.min(limit, total - offset)) },
+            (_, i) => summary(`r${offset + i}`),
+          ),
+          total,
+        };
+      },
+    );
+    const getScenarioReport = vi.fn(async () => null);
+    const service = createFakeChargePointService({
+      snapshots,
+      listScenarioRuns,
+      getScenarioReport,
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/runs?run=r120",
+      {
+        service,
+      },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(listScenarioRuns).toHaveBeenCalledWith({ runId: "r120", limit: 1 });
+    expect(getScenarioReport).toHaveBeenCalledWith("CP-2", 3, "s1", "r120");
+    expect(container.textContent).toContain(
+      "The report for run r120 is no longer available.",
+    );
+  });
+
+  it("reads the page from the URL, so a copied page reopens on it", async () => {
+    const total = 120;
+    const listScenarioRuns = vi.fn(
+      async ({
+        limit = 50,
+        offset = 0,
+      }: {
+        limit?: number;
+        offset?: number;
+      }) => ({
+        runs: Array.from(
+          { length: Math.max(0, Math.min(limit, total - offset)) },
+          (_, i) => summary(`r${offset + i}`),
+        ),
+        total,
+      }),
+    );
+    const service = createFakeChargePointService({
+      snapshots,
+      listScenarioRuns,
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/runs?offset=50&run=r60",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(listScenarioRuns.mock.calls.map(([q]) => q)).toEqual([
+      { limit: 50, offset: 50 },
+    ]);
+    expect(container.textContent).toContain("51–100 of 120");
+    expect(
+      container
+        .querySelector('[data-run-id="r60"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
   it("explains that local mode keeps no run history", async () => {
     const listScenarioRuns = vi.fn();
     const service = createFakeChargePointService({

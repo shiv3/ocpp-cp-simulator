@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -47,9 +47,11 @@ function queryFromParams(params: URLSearchParams): ScenarioRunQuery {
  * Run history (#388): every scenario run the daemon recorded, across charge
  * points, newest first — filtered and paged by the daemon
  * (`scenario.runs.list`), with the selected run's report beside the list.
- * Filters and the selected run live in the URL (`?cp=&connector=&scenario=
- * &verdict=&state=&run=`), so a view can be linked; the run page's "View all
- * runs" link opens it filtered on that scenario. Local mode records no runs.
+ * Filters, the page and the selected run live in the URL (`?cp=&connector=
+ * &scenario=&verdict=&state=&offset=&run=`), so a view can be linked; a
+ * linked run no longer on that page is looked up by id. The run page's "View
+ * all runs" link opens it filtered on that scenario. Local mode records no
+ * runs.
  */
 const ScenarioRunsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -57,14 +59,10 @@ const ScenarioRunsPage: React.FC = () => {
   const { chargePoints } = useChargePoints(config, {
     isLoading: configLoading,
   });
-  // The page offset belongs to one set of filters: under new filters it reads
-  // as 0 at once, so the first query already asks for the first page.
-  const [paging, setPaging] = useState({ filterKey: "", offset: 0 });
-
   const filters = queryFromParams(searchParams);
-  const filterKey = JSON.stringify(filters);
-  const offset = paging.filterKey === filterKey ? paging.offset : 0;
-  const setOffset = (next: number) => setPaging({ filterKey, offset: next });
+  const offsetParam = Number(searchParams.get("offset"));
+  const offset =
+    Number.isInteger(offsetParam) && offsetParam > 0 ? offsetParam : 0;
 
   const { page, isLoading, error, supported, refresh } = useScenarioRunHistory(
     { ...filters, limit: PAGE_SIZE, offset },
@@ -73,27 +71,53 @@ const ScenarioRunsPage: React.FC = () => {
   );
   const rows = useMemo(() => page.runs.map(summaryToRow), [page.runs]);
   const selectedRunId = searchParams.get("run");
-  const selected = page.runs.find((r) => r.runId === selectedRunId) ?? null;
+  const onPage = page.runs.find((r) => r.runId === selectedRunId) ?? null;
+  // A linked run that is not on this page (the history moved since the link
+  // was copied, or it was never on it) is looked up by id instead.
+  const lookup = useScenarioRunHistory(
+    selectedRunId && !isLoading && !onPage
+      ? { runId: selectedRunId, limit: 1 }
+      : null,
+    [],
+  );
+  const selected =
+    onPage ?? lookup.page.runs.find((r) => r.runId === selectedRunId) ?? null;
 
   // The history shrank under the current page (retention, `cp.delete`,
   // `state.reset`): step back to its last page instead of showing an empty one.
   const lastPageOffset =
     page.total === 0 ? 0 : Math.floor((page.total - 1) / PAGE_SIZE) * PAGE_SIZE;
+  const setParams = (
+    changes: Record<string, string | null>,
+    { replace }: { replace: boolean },
+  ) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    setSearchParams(next, { replace });
+  };
+  // Editing a filter replaces the history entry — typing a scenario id must
+  // not leave one Back step per keystroke — and goes back to the first page.
+  const setFilter = (key: string, value: string) =>
+    setParams({ [key]: value, offset: null, run: null }, { replace: true });
+  // Paging and selecting a run are navigation.
+  const setOffset = (next: number) =>
+    setParams({ offset: next > 0 ? String(next) : null }, { replace: false });
+  const selectRun = (runId: string | null) =>
+    setParams({ run: runId }, { replace: false });
+
   useEffect(() => {
     if (!isLoading && offset > lastPageOffset) {
-      setPaging({ filterKey, offset: lastPageOffset });
+      setParams(
+        { offset: lastPageOffset > 0 ? String(lastPageOffset) : null },
+        { replace: true },
+      );
     }
-  }, [isLoading, offset, lastPageOffset, filterKey]);
-
-  const setParam = (key: string, value: string | null) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    if (key !== "run") next.delete("run");
-    // Editing a filter replaces the history entry: typing a scenario id must
-    // not leave one Back step per keystroke. Selecting a run is navigation.
-    setSearchParams(next, { replace: key !== "run" });
-  };
+    // setParams is rebuilt each render; the offsets are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, offset, lastPageOffset]);
 
   if (!supported) {
     return (
@@ -131,7 +155,7 @@ const ScenarioRunsPage: React.FC = () => {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <select
           value={filters.cpId ?? ""}
-          onChange={(e) => setParam("cp", e.target.value)}
+          onChange={(e) => setFilter("cp", e.target.value)}
           className={FILTER_SELECT_CLASS}
           aria-label="Filter by charge point"
         >
@@ -146,7 +170,7 @@ const ScenarioRunsPage: React.FC = () => {
           type="number"
           min={1}
           value={filters.connectorId ?? ""}
-          onChange={(e) => setParam("connector", e.target.value)}
+          onChange={(e) => setFilter("connector", e.target.value)}
           placeholder="Connector"
           aria-label="Filter by connector"
           className={`${FILTER_INPUT_CLASS} w-28`}
@@ -154,14 +178,14 @@ const ScenarioRunsPage: React.FC = () => {
         <input
           type="text"
           value={filters.scenarioId ?? ""}
-          onChange={(e) => setParam("scenario", e.target.value)}
+          onChange={(e) => setFilter("scenario", e.target.value)}
           placeholder="Scenario id"
           aria-label="Filter by scenario id"
           className={FILTER_INPUT_CLASS}
         />
         <select
           value={filters.verdict ?? ""}
-          onChange={(e) => setParam("verdict", e.target.value)}
+          onChange={(e) => setFilter("verdict", e.target.value)}
           className={FILTER_SELECT_CLASS}
           aria-label="Filter by verdict"
         >
@@ -174,7 +198,7 @@ const ScenarioRunsPage: React.FC = () => {
         </select>
         <select
           value={filters.executionState ?? ""}
-          onChange={(e) => setParam("state", e.target.value)}
+          onChange={(e) => setFilter("state", e.target.value)}
           className={FILTER_SELECT_CLASS}
           aria-label="Filter by execution state"
         >
@@ -201,7 +225,7 @@ const ScenarioRunsPage: React.FC = () => {
             showTarget
             selectedRunId={selectedRunId}
             onSelect={(row) =>
-              setParam("run", row.runId === selectedRunId ? null : row.runId!)
+              selectRun(row.runId === selectedRunId ? null : row.runId!)
             }
           />
           <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -242,7 +266,9 @@ const ScenarioRunsPage: React.FC = () => {
           ) : (
             <p className="text-sm text-gray-500 dark:text-gray-400">
               {selectedRunId
-                ? `Run ${selectedRunId} is not on this page.`
+                ? isLoading || lookup.isLoading
+                  ? "Loading…"
+                  : `Run ${selectedRunId} is no longer recorded.`
                 : "Select a run to see its report and transcript."}
             </p>
           )}

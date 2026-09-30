@@ -328,7 +328,7 @@ describe("ScenarioRunsPage (#388)", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    expect(listScenarioRuns).toHaveBeenCalledWith({ runId: "r120", limit: 1 });
+    expect(listScenarioRuns).toHaveBeenCalledWith({ runId: "r120", limit: 2 });
     expect(getScenarioReport).toHaveBeenCalledWith("CP-2", 3, "s1", "r120");
     expect(container.textContent).toContain(
       "The report for run r120 is no longer available.",
@@ -372,6 +372,131 @@ describe("ScenarioRunsPage (#388)", () => {
         .querySelector('[data-run-id="r60"]')
         ?.getAttribute("aria-pressed"),
     ).toBe("true");
+  });
+
+  describe("two charge points sharing a runId", () => {
+    // A runId is unique per charge point only.
+    const shared = [
+      summary("dup#1", { cpId: "CP-1", connectorId: 1 }),
+      summary("dup#1", { cpId: "CP-2", connectorId: 3 }),
+    ];
+
+    /** The page lists `onPage`; a `runId` lookup searches `shared`. */
+    function serviceListing(onPage: ScenarioRunSummary[]) {
+      const listScenarioRuns = vi.fn(
+        async (query: { runId?: string; cpId?: string; limit?: number }) => {
+          if (query.runId === undefined) {
+            return { runs: onPage, total: onPage.length };
+          }
+          const found = shared.filter(
+            (r) =>
+              r.runId === query.runId &&
+              (query.cpId === undefined || r.cpId === query.cpId),
+          );
+          return { runs: found.slice(0, query.limit), total: found.length };
+        },
+      );
+      const getScenarioReport = vi.fn(async () => null);
+      const service = createFakeChargePointService({
+        snapshots,
+        listScenarioRuns,
+        getScenarioReport,
+      });
+      return { service, listScenarioRuns, getScenarioReport };
+    }
+
+    const row = (container: HTMLElement, cpId: string) =>
+      container.querySelector<HTMLButtonElement>(
+        `[data-run-id="dup#1"][data-cp-id="${cpId}"]`,
+      );
+
+    it("keeps both rows apart and opens the report of the one clicked", async () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { service, getScenarioReport } = serviceListing(shared);
+      const { container, root } = await renderConsole("/scenarios/runs", {
+        service,
+      });
+      cleanup = async () => {
+        errors.mockRestore();
+        await unmount(root);
+      };
+      await flush();
+
+      expect(row(container, "CP-1")).not.toBeNull();
+      expect(row(container, "CP-2")).not.toBeNull();
+      expect(
+        errors.mock.calls.some((args) => String(args[0]).includes("same key")),
+      ).toBe(false);
+
+      await act(async () => {
+        row(container, "CP-2")!.click();
+      });
+      await flush();
+
+      expect(getScenarioReport).toHaveBeenLastCalledWith(
+        "CP-2",
+        3,
+        "s1",
+        "dup#1",
+      );
+      expect(row(container, "CP-2")!.getAttribute("aria-pressed")).toBe("true");
+      expect(row(container, "CP-1")!.getAttribute("aria-pressed")).toBe(
+        "false",
+      );
+    });
+
+    it("reopens a copied link on the charge point it names, on the page", async () => {
+      const { service, getScenarioReport } = serviceListing(shared);
+      const { container, root } = await renderConsole(
+        "/scenarios/runs?run=dup%231&runCp=CP-2",
+        { service },
+      );
+      cleanup = () => unmount(root);
+      await flush();
+
+      expect(getScenarioReport).toHaveBeenCalledWith("CP-2", 3, "s1", "dup#1");
+      expect(getScenarioReport).not.toHaveBeenCalledWith(
+        "CP-1",
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(row(container, "CP-2")!.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("reopens a copied link on the charge point it names, off the page", async () => {
+      const { service, listScenarioRuns, getScenarioReport } = serviceListing(
+        [],
+      );
+      const { root } = await renderConsole(
+        "/scenarios/runs?run=dup%231&runCp=CP-2",
+        { service },
+      );
+      cleanup = () => unmount(root);
+      await flush();
+
+      expect(listScenarioRuns).toHaveBeenCalledWith({
+        runId: "dup#1",
+        cpId: "CP-2",
+        limit: 2,
+      });
+      expect(getScenarioReport).toHaveBeenCalledWith("CP-2", 3, "s1", "dup#1");
+    });
+
+    it("opens no report for a link that names no charge point and matches two", async () => {
+      const { service, getScenarioReport } = serviceListing([]);
+      const { container, root } = await renderConsole(
+        "/scenarios/runs?run=dup%231",
+        { service },
+      );
+      cleanup = () => unmount(root);
+      await flush();
+
+      expect(getScenarioReport).not.toHaveBeenCalled();
+      expect(container.textContent).toContain(
+        "Run dup#1 was recorded on several charge points",
+      );
+    });
   });
 
   it("explains that local mode keeps no run history", async () => {

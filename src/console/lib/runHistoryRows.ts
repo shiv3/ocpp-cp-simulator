@@ -15,9 +15,14 @@ export interface RunHistoryRow {
   summary?: ScenarioRunSummary;
 }
 
+/** A recorded run's identity: a runId is unique per charge point only. */
+export function runRowKey(cpId: string, runId: string): string {
+  return JSON.stringify([cpId, runId]);
+}
+
 export function summaryToRow(summary: ScenarioRunSummary): RunHistoryRow {
   return {
-    key: summary.runId,
+    key: runRowKey(summary.cpId, summary.runId),
     result:
       summary.executionState === "error"
         ? "error"

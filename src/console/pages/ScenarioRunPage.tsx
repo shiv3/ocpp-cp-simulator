@@ -17,7 +17,7 @@ import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
 import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
 import { useScenarioRunHistory } from "../lib/useScenarioRunHistory";
-import { mergeRunHistory } from "../lib/runHistoryRows";
+import { mergeRunHistory, runRowKey } from "../lib/runHistoryRows";
 import { buildRunHistoryUrl } from "../lib/useAllScenarios";
 import RunHistory from "./scenarios/run/RunHistory";
 import RunReportView from "./scenarios/run/RunReportView";
@@ -349,7 +349,9 @@ const ScenarioRunPage: React.FC = () => {
                   ? "No runs recorded yet."
                   : "No runs yet this session."
               }
-              selectedRunId={selectedRunId}
+              selectedKey={
+                selectedRunId ? runRowKey(cpId, selectedRunId) : null
+              }
               onSelect={(row) =>
                 setSelection({
                   target,

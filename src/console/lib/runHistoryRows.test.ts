@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ScenarioRunSummary } from "../../cp/application/verification/ScenarioRunSummary";
 import { scenarioRunSummary } from "../../test/scenarioRunFixtures";
-import { mergeRunHistory, summaryToRow } from "./runHistoryRows";
+import { mergeRunHistory, runRowKey, summaryToRow } from "./runHistoryRows";
 import type { ScenarioRunHistoryEntry } from "./useScenarioRun";
 
 function summary(
@@ -20,11 +20,18 @@ describe("summaryToRow (#388)", () => {
     ).toBe("error");
   });
 
+  it("keys a row by charge point and runId, which is unique per charge point only", () => {
+    const a = summaryToRow(summary({ cpId: "CP-1" }));
+    const b = summaryToRow(summary({ cpId: "CP-2" }));
+    expect(a.runId).toBe(b.runId);
+    expect(a.key).not.toBe(b.key);
+    expect(a.key).toBe(runRowKey("CP-1", "s1#1"));
+  });
+
   it("carries the recorded times, the timeout node and the summary", () => {
     const recorded = summary({ timeoutNodeId: "wait-1" });
     const row = summaryToRow(recorded);
     expect(row).toMatchObject({
-      key: "s1#1",
       runId: "s1#1",
       failedNodeId: "wait-1",
       summary: recorded,

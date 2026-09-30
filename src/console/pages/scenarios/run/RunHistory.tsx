@@ -8,8 +8,8 @@ export interface RunHistoryProps {
   rows: RunHistoryRow[];
   /** Shown when there are no rows. */
   emptyText: string;
-  /** Highlights this run's row. */
-  selectedRunId?: string | null;
+  /** Highlights the row with this key (`runRowKey` for a recorded run). */
+  selectedKey?: string | null;
   /** Makes recorded rows clickable (their report can be opened). */
   onSelect?: (row: RunHistoryRow) => void;
   /** Also show the charge point, connector and scenario of each run — for a
@@ -35,7 +35,7 @@ const RESULT_STYLES: Record<RunHistoryRow["result"], string> = {
 const RunHistory: React.FC<RunHistoryProps> = ({
   rows,
   emptyText,
-  selectedRunId,
+  selectedKey,
   onSelect,
   showTarget = false,
 }) => {
@@ -49,7 +49,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
     <ul className="space-y-1.5">
       {rows.map((row) => {
         const selectable = !!row.summary && !!onSelect;
-        const selected = !!row.runId && row.runId === selectedRunId;
+        const selected = row.key === selectedKey;
         const content = (
           <>
             <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -110,6 +110,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
               <button
                 type="button"
                 data-run-id={row.runId}
+                data-cp-id={row.summary?.cpId}
                 aria-pressed={selected}
                 className={cn(
                   className,

@@ -16,7 +16,7 @@ import {
   FILTER_SELECT_CLASS,
 } from "../../../components/filterStyles";
 import PageHeader from "../../../components/PageHeader";
-import { summaryToRow } from "../../../lib/runHistoryRows";
+import { runRowKey, summaryToRow } from "../../../lib/runHistoryRows";
 import { useScenarioRunHistory } from "../../../lib/useScenarioRunHistory";
 import RunHistory from "../run/RunHistory";
 import RunReportView from "../run/RunReportView";
@@ -48,8 +48,9 @@ function queryFromParams(params: URLSearchParams): ScenarioRunQuery {
  * points, newest first — filtered and paged by the daemon
  * (`scenario.runs.list`), with the selected run's report beside the list.
  * Filters, the page and the selected run live in the URL (`?cp=&connector=
- * &scenario=&verdict=&state=&offset=&run=`), so a view can be linked; a
- * linked run no longer on that page is looked up by id. The run page's "View
+ * &scenario=&verdict=&state=&offset=&run=&runCp=`), so a view can be linked; a
+ * linked run no longer on that page is looked up by id. A run is its charge
+ * point plus its runId, which is unique per charge point only. The run page's "View
  * all runs" link opens it filtered on that scenario. Local mode records no
  * runs.
  */
@@ -70,18 +71,31 @@ const ScenarioRunsPage: React.FC = () => {
     filters.cpId ? [filters.cpId] : chargePoints.map((cp) => cp.id),
   );
   const rows = useMemo(() => page.runs.map(summaryToRow), [page.runs]);
+  // A run is identified by its charge point and runId (`run` + `runCp`): a
+  // runId is unique per charge point only. A link without `runCp` still opens
+  // a run whose id is unambiguous.
   const selectedRunId = searchParams.get("run");
-  const onPage = page.runs.find((r) => r.runId === selectedRunId) ?? null;
+  const selectedCpId = searchParams.get("runCp");
+  const isSelected = (r: { runId: string; cpId: string }) =>
+    r.runId === selectedRunId && (!selectedCpId || r.cpId === selectedCpId);
+  const candidates = page.runs.filter(isSelected);
   // A linked run that is not on this page (the history moved since the link
-  // was copied, or it was never on it) is looked up by id instead.
+  // was copied, or it was never on it) is looked up by id instead; asking for
+  // two tells an ambiguous id from a unique one.
   const lookup = useScenarioRunHistory(
-    selectedRunId && !isLoading && !onPage
-      ? { runId: selectedRunId, limit: 1 }
+    selectedRunId && !isLoading && candidates.length === 0
+      ? {
+          runId: selectedRunId,
+          cpId: selectedCpId ?? undefined,
+          limit: 2,
+        }
       : null,
     [],
   );
-  const selected =
-    onPage ?? lookup.page.runs.find((r) => r.runId === selectedRunId) ?? null;
+  const found = candidates.length > 0 ? candidates : lookup.page.runs;
+  const selected = found.length === 1 ? found[0] : null;
+  const ambiguous =
+    candidates.length > 1 || (candidates.length === 0 && lookup.page.total > 1);
 
   // The history shrank under the current page (retention, `cp.delete`,
   // `state.reset`): step back to its last page instead of showing an empty one.
@@ -101,12 +115,18 @@ const ScenarioRunsPage: React.FC = () => {
   // Editing a filter replaces the history entry — typing a scenario id must
   // not leave one Back step per keystroke — and goes back to the first page.
   const setFilter = (key: string, value: string) =>
-    setParams({ [key]: value, offset: null, run: null }, { replace: true });
+    setParams(
+      { [key]: value, offset: null, run: null, runCp: null },
+      { replace: true },
+    );
   // Paging and selecting a run are navigation.
   const setOffset = (next: number) =>
     setParams({ offset: next > 0 ? String(next) : null }, { replace: false });
-  const selectRun = (runId: string | null) =>
-    setParams({ run: runId }, { replace: false });
+  const selectRun = (run: { runId: string; cpId: string } | null) =>
+    setParams(
+      { run: run?.runId ?? null, runCp: run?.cpId ?? null },
+      { replace: false },
+    );
 
   useEffect(() => {
     if (!isLoading && offset > lastPageOffset) {
@@ -223,9 +243,15 @@ const ScenarioRunsPage: React.FC = () => {
             rows={rows}
             emptyText="No runs match these filters."
             showTarget
-            selectedRunId={selectedRunId}
+            selectedKey={
+              selected ? runRowKey(selected.cpId, selected.runId) : null
+            }
             onSelect={(row) =>
-              selectRun(row.runId === selectedRunId ? null : row.runId!)
+              selectRun(
+                selected && row.key === runRowKey(selected.cpId, selected.runId)
+                  ? null
+                  : row.summary!,
+              )
             }
           />
           <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -268,7 +294,9 @@ const ScenarioRunsPage: React.FC = () => {
               {selectedRunId
                 ? isLoading || lookup.isLoading
                   ? "Loading…"
-                  : `Run ${selectedRunId} is no longer recorded.`
+                  : ambiguous
+                    ? `Run ${selectedRunId} was recorded on several charge points — select it in the list.`
+                    : `Run ${selectedRunId} is no longer recorded.`
                 : "Select a run to see its report and transcript."}
             </p>
           )}

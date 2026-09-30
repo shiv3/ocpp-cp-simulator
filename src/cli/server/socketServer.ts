@@ -1986,35 +1986,35 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "extend_scenario_wait": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.extendScenarioWait(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
-          requirePositiveInt(params, "seconds"),
+          params.connector,
+          params.scenarioId,
+          params.seconds,
         ),
       );
       return handled(undefined);
     }
     case "retry_scenario_wait": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.retryScenarioWait(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
+          params.connector,
+          params.scenarioId,
         ),
       );
       return handled(undefined);
     }
     case "continue_scenario_wait": {
-      const id = requireFacadeCpId(cpId, rawParams);
+      const { params } = call;
       await runFacadeOperation(() =>
         chargePointService.continueScenarioWait(
           id,
-          requirePositiveInt(params, "connector"),
-          requireString(params, "scenarioId"),
+          params.connector,
+          params.scenarioId,
         ),
       );
       return handled(undefined);

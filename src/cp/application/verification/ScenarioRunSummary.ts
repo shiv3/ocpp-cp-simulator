@@ -50,6 +50,8 @@ export interface ScenarioRunSummary {
 
 /** Filters are exact matches, and all of them apply. */
 export interface ScenarioRunQuery {
+  /** One run, wherever it sits in the history (unique per charge point). */
+  runId?: string;
   cpId?: string;
   connectorId?: number;
   scenarioId?: string;
@@ -96,11 +98,17 @@ export function summarizeRun(result: ScenarioRunResult): ScenarioRunSummary {
 export function matchesRunQuery(
   run: Pick<
     ScenarioRunSummary,
-    "cpId" | "connectorId" | "scenarioId" | "verdict" | "executionState"
+    | "runId"
+    | "cpId"
+    | "connectorId"
+    | "scenarioId"
+    | "verdict"
+    | "executionState"
   >,
   query: ScenarioRunQuery,
 ): boolean {
   return (
+    (query.runId === undefined || run.runId === query.runId) &&
     (query.cpId === undefined || run.cpId === query.cpId) &&
     (query.connectorId === undefined ||
       run.connectorId === query.connectorId) &&

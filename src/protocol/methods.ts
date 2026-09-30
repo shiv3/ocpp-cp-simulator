@@ -865,6 +865,7 @@ export const METHODS = {
   // before paging.
   "scenario.runs.list": {
     params: z.object({
+      runId: NON_EMPTY_STR.optional(),
       cpId: NON_EMPTY_STR.optional(),
       connectorId: CONN_POS.optional(),
       scenarioId: NON_EMPTY_STR.optional(),

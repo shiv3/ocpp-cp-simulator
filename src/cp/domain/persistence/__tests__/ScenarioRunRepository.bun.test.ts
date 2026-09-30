@@ -163,6 +163,19 @@ describe.each(implementations)("ScenarioRunRepository (%s)", (_, create) => {
     expect(repo.list({ cpId: "CP-C" })).toEqual({ runs: [], total: 0 });
   });
 
+  it("finds one run by id, wherever it sits in the history", () => {
+    const repo = create();
+    const target = run();
+    repo.record(target);
+    for (let i = 0; i < 60; i++) repo.record(run());
+    repo.record(run({ cpId: "CP-B", runId: target.runId }));
+
+    const page = repo.list({ runId: target.runId, cpId: "CP-A" });
+    expect(page).toEqual({ runs: [summarizeRun(target)], total: 1 });
+    // A runId is unique per charge point only.
+    expect(repo.list({ runId: target.runId }).total).toBe(2);
+  });
+
   it("filters by verdict and execution state", () => {
     const repo = create();
     const pass = run({ verdict: "PASS" });

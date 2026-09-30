@@ -156,6 +156,19 @@ describe("#388 scenario.runs.list over RPC", () => {
     expect(page.runs.map((r: any) => r.runId)).toEqual([all.runs[1].runId]);
   }, 20_000);
 
+  it("finds a run by runId whatever page it is on", async () => {
+    const { server, socket } = await serverWithClient();
+    createCp(server, "CP-A");
+    for (let i = 0; i < 3; i++) await runOnce(socket, "CP-A", 1, "s1");
+    const all = (await rpc(socket, "scenario.runs.list", {})).result;
+    const oldest = all.runs[2];
+
+    const found = (
+      await rpc(socket, "scenario.runs.list", { runId: oldest.runId, limit: 1 })
+    ).result;
+    expect(found).toEqual({ runs: [oldest], total: 1 });
+  }, 20_000);
+
   it("rejects out-of-range paging and unknown filter values", async () => {
     const { socket } = await serverWithClient();
     for (const params of [

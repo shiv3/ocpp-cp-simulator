@@ -91,6 +91,7 @@ export class SqliteScenarioRunRepository implements ScenarioRunRepository {
       clauses.push(`${column} = ?`);
       params.push(value);
     };
+    filter("run_id", query.runId);
     filter("cp_id", query.cpId);
     filter("connector_id", query.connectorId);
     filter("scenario_id", query.scenarioId);

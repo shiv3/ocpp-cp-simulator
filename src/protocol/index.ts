@@ -21,6 +21,7 @@ export {
   createManyFromBlueprintSchema,
   createManyToolSchema,
   serverInfoSchema,
+  SCENARIO_MODES,
 } from "./methods";
 export type { Blueprint, ServerInfo } from "./methods";
 

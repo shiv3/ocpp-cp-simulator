@@ -41,28 +41,11 @@ async function rpcError(
 }
 
 describe("RPC params are narrowed by the schema alone (#383)", () => {
-  it("data_transfer accepts a string at the schema's length cap (#382)", async () => {
+  it.each([
+    ["a string at the schema's length cap", "x".repeat(STR_64K_MAX)],
+    ["a string only JSON escaping would push past the cap", '"'.repeat(40_000)],
+  ])("data_transfer accepts %s (#382)", async (_label, data) => {
     const sendDataTransfer = vi.fn().mockResolvedValue({ status: "Accepted" });
-    const data = "x".repeat(STR_64K_MAX);
-
-    await expect(
-      runRpc(depsWith({ sendDataTransfer }), {
-        cpId: "cp-alpha",
-        method: "data_transfer",
-        params: { vendorId: "acme", data },
-      }),
-    ).resolves.toEqual({ status: "Accepted" });
-    expect(sendDataTransfer).toHaveBeenCalledWith(
-      "cp-alpha",
-      "acme",
-      undefined,
-      data,
-    );
-  });
-
-  it("data_transfer accepts a string that only JSON escaping would push past the cap (#382)", async () => {
-    const sendDataTransfer = vi.fn().mockResolvedValue({ status: "Accepted" });
-    const data = '"'.repeat(40_000);
 
     await expect(
       runRpc(depsWith({ sendDataTransfer }), {

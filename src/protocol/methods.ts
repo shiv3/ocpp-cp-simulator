@@ -47,8 +47,10 @@ const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
 const CONN_DEF = CONN_POS.nullable();
 const EMPTY = z.object({});
+/** A charge point id a handler looks up: an empty one names nothing. */
+const CP_ID = STR_64K.min(1);
 /** The connector modes `set_mode` accepts. */
-const SCENARIO_MODES = [
+export const SCENARIO_MODES = [
   "manual",
   "scenario",
 ] as const satisfies readonly ScenarioMode[];
@@ -96,7 +98,7 @@ const LOADABLE_SCENARIO_OBJ = () =>
  * tool from this schema is what stops the two from disagreeing again.
  */
 const cpParamsBaseSchema = z.object({
-  cpId: STR_64K.min(1).describe("Charge point identifier"),
+  cpId: CP_ID.describe("Charge point identifier"),
   wsUrl: z
     .union([STR_64K, ARRAY_1000(STR_64K).min(1)])
     .describe(
@@ -778,21 +780,21 @@ export const METHODS = {
     }),
   },
   "cp.update": { params: updateParamsSchema, result: ANY },
-  "cp.delete": { params: z.object({ cpId: STR_64K.min(1) }), result: ANY },
+  "cp.delete": { params: z.object({ cpId: CP_ID }), result: ANY },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
   // controls the direction of the returned window ("asc" = oldest first).
   "logs.get": {
     params: z.object({
-      cpId: STR_64K.min(1),
+      cpId: CP_ID,
       limit: z.number().int().positive().optional(),
       offset: z.number().int().min(0).optional(),
       order: z.enum(["asc", "desc"]).optional(),
     }),
     result: ANY,
   },
-  "logs.clear": { params: z.object({ cpId: STR_64K.min(1) }), result: ANY },
+  "logs.clear": { params: z.object({ cpId: CP_ID }), result: ANY },
   "state.reset": { params: EMPTY, result: ANY },
   "config.get": {
     params: EMPTY,

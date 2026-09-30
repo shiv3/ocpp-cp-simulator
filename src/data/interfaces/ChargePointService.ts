@@ -22,7 +22,7 @@ import type { ScenarioRunResult } from "../../cp/application/verification/Scenar
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
-} from "../../cp/domain/persistence/ScenarioRunRepository";
+} from "../../cp/application/verification/ScenarioRunSummary";
 import type {
   HistoryOptions,
   StateHistoryEntry,

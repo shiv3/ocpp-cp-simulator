@@ -14,8 +14,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * Resolve once boot has been accepted for `connectorId` — signaled by
  * EITHER the connector itself reaching Available (`connectorStatusChange`)
  * OR the CP-level boot gate opening (`statusChange` -> Available; see
- * `ChargePoint.onBootNotificationAccepted`). The CP-level fallback matters
- * for a connector restored mid-transaction: `onBootNotificationAccepted`
+ * `ChargePoint.onBootNotificationResult`). The CP-level fallback matters
+ * for a connector restored mid-transaction: an accepted boot
  * deliberately leaves its status alone (Charging/Preparing/etc.) instead of
  * resetting it to Available, so that connector alone would never emit the
  * Available transition this helper would otherwise wait for forever.

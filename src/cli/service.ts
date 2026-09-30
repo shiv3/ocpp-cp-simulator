@@ -9,6 +9,7 @@ import type {
   DataTransferResult,
 } from "../cp/domain/types/DataTransfer";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
+import type { BootNotificationResult } from "../cp/domain/charge-point/ChargePointEvents";
 import type { Database } from "../cp/domain/persistence/Database";
 import type {
   BootNotification,
@@ -103,6 +104,12 @@ import { appVersion } from "./appVersion";
 
 export type CLIEvent =
   | { readonly event: "connected"; readonly data: Record<string, never> }
+  | {
+      // #395: the CSMS's answer to BootNotification, once processed.
+      // `connected` stays transport-only.
+      readonly event: "boot_notification";
+      readonly data: Readonly<BootNotificationResult>;
+    }
   | {
       readonly event: "disconnected";
       readonly data: { readonly code: number; readonly reason: string };
@@ -2657,6 +2664,12 @@ export class CLIChargePointService {
     this._unsubscribes.push(
       this._chargePoint.events.on("connected", () => {
         this.emit({ event: "connected", data: {} });
+      }),
+    );
+
+    this._unsubscribes.push(
+      this._chargePoint.events.on("bootNotificationResult", (result) => {
+        this.emit({ event: "boot_notification", data: { ...result } });
       }),
     );
 

@@ -479,16 +479,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         `[v2.0.1] BootNotification response: ${bootResult.status}`,
         LogType.OCPP,
       );
-      if (bootResult.status === "Accepted") {
-        this._chargePoint.onBootNotificationAccepted(
-          bootResult.currentTime,
-          bootResult.interval,
-        );
-      } else if (bootResult.status === "Pending") {
-        this._chargePoint.onBootNotificationPending(bootResult.interval);
-      } else {
-        this._chargePoint.onBootNotificationRejected(bootResult.interval);
-      }
+      this._chargePoint.onBootNotificationResult({
+        status: bootResult.status,
+        interval: bootResult.interval,
+        currentTime: bootResult.currentTime,
+      });
     }
   }
 

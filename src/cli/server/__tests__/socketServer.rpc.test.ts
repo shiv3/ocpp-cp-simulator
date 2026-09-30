@@ -536,6 +536,21 @@ describe("socket.io rpc dispatch", () => {
     ]);
   });
 
+  /** Wires the handlers around a bare facade stub and connects one socket. */
+  function connectFacade(facade: Record<string, unknown>): FakeSocket {
+    const bus = new EventBus();
+    const io = new FakeIo();
+    const socket = new FakeSocket();
+    registerSocketHandlers(io as never, {
+      registry: new CPRegistry(bus, null),
+      bus,
+      database: null,
+      chargePointService: facade as never,
+    });
+    io.connect(socket);
+    return socket;
+  }
+
   // #377: the status vocabularies are the domain's, held by the schema.
   it.each([
     [
@@ -552,19 +567,8 @@ describe("socket.io rpc dispatch", () => {
   ])(
     "%s refuses a status outside the vocabulary with invalid_params",
     async (method, facadeMethod, status) => {
-      const bus = new EventBus();
-      const registry = new CPRegistry(bus, null);
       const facade = { [facadeMethod]: vi.fn().mockResolvedValue(undefined) };
-      const io = new FakeIo();
-      const socket = new FakeSocket();
-
-      registerSocketHandlers(io as never, {
-        registry,
-        bus,
-        database: null,
-        chargePointService: facade as never,
-      });
-      io.connect(socket);
+      const socket = connectFacade(facade);
 
       const ack = await socket.emitRpc({
         cpId: "cp-alpha",
@@ -582,29 +586,14 @@ describe("socket.io rpc dispatch", () => {
 
   // #382: the facade must not re-bound `data` more tightly than the schema,
   // which caps a string by its length, not by its JSON-encoded length.
-  function registerDataTransferFacade() {
-    const bus = new EventBus();
-    const registry = new CPRegistry(bus, null);
-    const facade = {
-      sendDataTransfer: vi.fn().mockResolvedValue({ status: "Accepted" }),
-    };
-    const io = new FakeIo();
-    const socket = new FakeSocket();
-    registerSocketHandlers(io as never, {
-      registry,
-      bus,
-      database: null,
-      chargePointService: facade as never,
-    });
-    io.connect(socket);
-    return { facade, socket };
-  }
-
   it.each([
     ["a string at the cap", "a".repeat(STR_64K_MAX)],
     ["a quote-heavy string under the cap", '"'.repeat(40_000)],
   ])("data_transfer accepts %s (#382)", async (_label, data) => {
-    const { facade, socket } = registerDataTransferFacade();
+    const facade = {
+      sendDataTransfer: vi.fn().mockResolvedValue({ status: "Accepted" }),
+    };
+    const socket = connectFacade(facade);
 
     const ack = await socket.emitRpc({
       cpId: "cp-alpha",
@@ -622,7 +611,8 @@ describe("socket.io rpc dispatch", () => {
   });
 
   it("data_transfer refuses a string past the cap with invalid_params (#382)", async () => {
-    const { facade, socket } = registerDataTransferFacade();
+    const facade = { sendDataTransfer: vi.fn() };
+    const socket = connectFacade(facade);
 
     const ack = await socket.emitRpc({
       cpId: "cp-alpha",

@@ -85,6 +85,7 @@ describe("JSON-Lines data_transfer (#348)", () => {
   it.each([
     ["a string past the cap", "a".repeat(STR_64K_MAX + 1)],
     ["an object past the cap", { blob: "a".repeat(OBJ_MAX_BYTES) }],
+    ["an array", ["a"]],
   ])("refuses %s (#382)", async (_label, data) => {
     const sendDataTransfer = vi.fn();
     await expect(

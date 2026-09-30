@@ -12,7 +12,7 @@ import {
   OCPPStatus,
   type StatusNotificationOptions,
 } from "../cp/domain/types/OcppTypes";
-import { OBJ_MAX_BYTES, STR_64K_MAX } from "../protocol";
+import { dataTransferDataSchema } from "../protocol";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -615,30 +615,22 @@ export function requireEnum<T extends string>(
 }
 
 /**
- * `data_transfer`'s `data` (#348): a string, or a plain object — the same
- * shape and bounds the daemon's RPC schema admits (`STR_64K | OBJ()`), so
- * standalone JSON mode refuses the same inputs. A string is bounded by its
- * length and an object by its serialized length, as the schema measures them
- * (#382). `null` counts as absent.
+ * `data_transfer`'s `data` (#348): validated against the daemon's own schema
+ * (`dataTransferDataSchema`), so standalone JSON mode admits exactly what the
+ * control plane admits (#382). `null` counts as absent.
  */
 export function optionalDataTransferData(
   params: Record<string, unknown>,
 ): DataTransferData | undefined {
   const val = params.data;
   if (val === undefined || val === null) return undefined;
-  const isPlainObject =
-    typeof val === "object" && !Array.isArray(val) && val !== null;
-  if (typeof val !== "string" && !isPlainObject) {
-    throw new Error("Invalid parameter: data (expected string or object)");
+  const parsed = dataTransferDataSchema.safeParse(val);
+  if (!parsed.success) {
+    throw new Error(
+      "Invalid parameter: data (expected a string of at most 64K characters or an object of at most 64 KB)",
+    );
   }
-  const withinCap =
-    typeof val === "string"
-      ? val.length <= STR_64K_MAX
-      : JSON.stringify(val).length <= OBJ_MAX_BYTES;
-  if (!withinCap) {
-    throw new Error("Invalid parameter: data (over 64 KB)");
-  }
-  return val as DataTransferData;
+  return parsed.data;
 }
 
 export function optionalBoolean(

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
+  pushEvent,
   renderConsole,
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
@@ -527,5 +528,143 @@ describe("ActiveScenarioPanel", () => {
     });
     await flush();
     expect(listScenarios.mock.calls.length).toBe(settledCalls + 1);
+  });
+
+  describe("wait controls (#240)", () => {
+    function waitingStatus(
+      overrides: Partial<ScenarioExecutionContext> = {},
+    ): ScenarioExecutionContext {
+      return {
+        scenarioId: "s1",
+        state: "waiting",
+        mode: "oneshot",
+        currentNodeId: "n2",
+        executedNodes: ["n1", "n2"],
+        loopCount: 0,
+        runId: "run-1",
+        expectation: {
+          type: "ocpp_call",
+          action: "RemoteStartTransaction",
+          timeoutMs: 60_000,
+          nodeId: "n2",
+        },
+        currentNodeStartedAt: Date.now() - 50_000,
+        waitDeadlineAt: Date.now() + 40_000,
+        ...overrides,
+      };
+    }
+
+    async function renderPanel(
+      getScenarioStatus: () => Promise<ScenarioExecutionContext | null>,
+    ) {
+      const service = createFakeChargePointService({
+        snapshots: [
+          snapshot({
+            id: "CP-1",
+            status: OCPPStatus.Available,
+            connectors: [connector({ id: 1 })],
+          }),
+        ],
+        listScenarios: vi.fn(async () => [
+          { scenarioId: "s1", name: "Cert probe", active: true },
+        ]),
+        getScenarioStatus: vi.fn(getScenarioStatus),
+        getScenario: vi.fn(async () => scenarioDefinitionFixture),
+        getStateHistory: vi.fn(async () => []),
+      });
+      const { container, root } = await renderConsole("/cp/CP-1", { service });
+      cleanup = () => unmount(root);
+      await flush();
+      return { container, service };
+    }
+
+    const buttonLabels = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll("button")).map((b) =>
+        b.textContent?.trim(),
+      );
+
+    it("counts down to the reported deadline, not the configured timeout", async () => {
+      const { container } = await renderPanel(async () => waitingStatus());
+
+      // timeoutMs − elapsed would read 0:10; the extended deadline is 0:40.
+      expect(container.textContent).toMatch(/Timeout in 0:(39|40)/);
+    });
+
+    it("offers extend / retry / continue on a waiting run and extends it", async () => {
+      const { container, service } = await renderPanel(async () =>
+        waitingStatus(),
+      );
+
+      expect(buttonLabels(container)).toEqual(
+        expect.arrayContaining(["+30 s", "Retry", "Continue", "Stop"]),
+      );
+
+      const extend = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "+30 s",
+      );
+      await act(async () => {
+        extend!.click();
+      });
+      await flush();
+
+      expect(service.extendScenarioWait).toHaveBeenCalledWith(
+        "CP-1",
+        1,
+        "s1",
+        30,
+      );
+    });
+
+    it("hides +30 s for a wait with no timeout", async () => {
+      const { container } = await renderPanel(async () =>
+        waitingStatus({
+          expectation: {
+            type: "ocpp_call",
+            action: "RemoteStartTransaction",
+            nodeId: "n2",
+          },
+          waitDeadlineAt: null,
+        }),
+      );
+
+      expect(buttonLabels(container)).not.toContain("+30 s");
+      expect(buttonLabels(container)).toContain("Continue");
+    });
+
+    it("shows no wait controls on a run that is not waiting", async () => {
+      const { container } = await renderPanel(async () =>
+        waitingStatus({ state: "running", expectation: null }),
+      );
+
+      expect(buttonLabels(container)).toContain("Stop");
+      expect(buttonLabels(container)).not.toContain("Continue");
+    });
+
+    it("re-reads the run when another client changes its wait", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { service } = await renderPanel(async () => waitingStatus());
+        const calls = vi.mocked(service.getScenarioStatus).mock.calls.length;
+
+        await pushEvent(service, "CP-1", {
+          type: "scenario-wait-changed",
+          connectorId: 1,
+          scenarioId: "s1",
+          runId: "run-1",
+          nodeId: "n2",
+          kind: "extend",
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+        });
+        await flush();
+
+        expect(
+          vi.mocked(service.getScenarioStatus).mock.calls.length,
+        ).toBeGreaterThan(calls);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

@@ -13,6 +13,7 @@ import {
   STATUS_REFRESH_DEBOUNCE_MS,
   type LiveRunState,
 } from "./scenarioRunState";
+import { controlScenarioWait, type WaitControlAction } from "./waitControl";
 
 export type ScenarioRunState = "idle" | LiveRunState | "completed" | "error";
 
@@ -49,6 +50,9 @@ export interface UseScenarioRunResult {
   /** Epoch ms when the current node began executing, per the runtime; null
    *  when unknown or no run is live. */
   currentNodeStartedAt: number | null;
+  /** #240: when the parked wait times out, per the runtime; null when no
+   *  wait is parked or it waits forever. */
+  waitDeadlineAt: number | null;
   /** The initial `getScenarioStatus` query for the viewed target settled —
    *  until then `state` is "idle" only because nothing is known yet. */
   hydrated: boolean;
@@ -72,6 +76,10 @@ export interface UseScenarioRunResult {
    *  control (console redesign review, Finding 3) because it would be a
    *  dead button today. */
   step(): Promise<void>;
+  /** #240: a control on the tracked run's parked wait (`seconds`: extend
+   *  only). Acts on the active runtime scenarioId (no-op without one),
+   *  rejects with the runtime's error, and re-reads the status on success. */
+  controlWait(action: WaitControlAction, seconds?: number): Promise<void>;
   /** Session-local, newest first. */
   runs: ScenarioRunHistoryEntry[];
 }
@@ -121,6 +129,7 @@ export function useScenarioRun(
   const [currentNodeStartedAt, setCurrentNodeStartedAt] = useState<
     number | null
   >(null);
+  const [waitDeadlineAt, setWaitDeadlineAt] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   // Refs mirror the corresponding state so the event handler (registered
@@ -164,6 +173,7 @@ export function useScenarioRun(
     setError(null);
     setExpectation(null);
     setCurrentNodeStartedAt(null);
+    setWaitDeadlineAt(null);
   }, []);
 
   /** Records the runtime run id on the open history entry, once known. */
@@ -182,6 +192,7 @@ export function useScenarioRun(
       setState(status.state);
       setExpectation(status.expectation ?? null);
       setCurrentNodeStartedAt(status.currentNodeStartedAt ?? null);
+      setWaitDeadlineAt(status.waitDeadlineAt ?? null);
       recordRunId(status.runId);
     },
     [recordRunId],
@@ -312,6 +323,7 @@ export function useScenarioRun(
     cancelStatusRefresh();
     setExpectation(null);
     setCurrentNodeStartedAt(null);
+    setWaitDeadlineAt(null);
   }, [cancelStatusRefresh]);
 
   const closeActiveRun = useCallback(
@@ -376,8 +388,14 @@ export function useScenarioRun(
               setState("running");
               setExpectation(null);
               setCurrentNodeStartedAt(null);
+              setWaitDeadlineAt(null);
               scheduleStatusRefresh();
             }
+            break;
+          case "scenario-wait-changed":
+            // #240: the parked wait was extended or retried (here or in
+            // another client) — its deadline moved.
+            if (isLiveRef.current) scheduleStatusRefresh();
             break;
           case "scenario-completed":
             endLiveRun();
@@ -519,6 +537,23 @@ export function useScenarioRun(
     await chargePointService.stepScenario(cpId, connectorId, scenarioId);
   }, [cpId, connectorId, chargePointService]);
 
+  const controlWait = useCallback(
+    async (action: WaitControlAction, seconds?: number) => {
+      const scenarioId = activeScenarioIdRef.current;
+      if (!cpId || connectorId == null || !scenarioId) return;
+      await controlScenarioWait(
+        chargePointService,
+        cpId,
+        connectorId,
+        scenarioId,
+        action,
+        seconds,
+      );
+      scheduleStatusRefresh();
+    },
+    [cpId, connectorId, chargePointService, scheduleStatusRefresh],
+  );
+
   return {
     state,
     currentNodeId,
@@ -527,10 +562,12 @@ export function useScenarioRun(
     runId: runs[0]?.runId ?? null,
     expectation,
     currentNodeStartedAt,
+    waitDeadlineAt,
     hydrated,
     start,
     stop,
     step,
+    controlWait,
     runs,
   };
 }

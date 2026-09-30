@@ -25,12 +25,17 @@ export function describeExpectation(expectation: ScenarioExpectation): string {
 }
 
 /** Ms left before the parked node times out, or null when it waits forever.
- *  An unknown node start time counts as "just started". */
+ *  The runtime's `waitDeadlineAt` wins when reported — it moves when an
+ *  operator extends or retries the wait (#240); otherwise the configured
+ *  timeout counts from the node start, an unknown start counting as "just
+ *  started". */
 export function remainingWaitMs(
   expectation: ScenarioExpectation,
   currentNodeStartedAt: number | null,
   now: number,
+  waitDeadlineAt?: number | null,
 ): number | null {
+  if (waitDeadlineAt != null) return Math.max(0, waitDeadlineAt - now);
   if (!expectation.timeoutMs) return null;
   const elapsedMs = now - (currentNodeStartedAt ?? now);
   return Math.max(0, expectation.timeoutMs - elapsedMs);

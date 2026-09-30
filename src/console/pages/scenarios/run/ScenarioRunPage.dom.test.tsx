@@ -290,6 +290,64 @@ describe("ScenarioRunPage", () => {
     expect(container.textContent).toContain("stopped");
   });
 
+  it("offers the wait controls on an attached waiting run (#240)", async () => {
+    const fixture = linearFixture();
+    const [step1, step2] = fixture.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    const continueScenarioWait = vi.fn(async () => undefined);
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+      getScenarioStatus: vi.fn(
+        async (): Promise<ScenarioExecutionContext | null> => ({
+          scenarioId: "s1",
+          state: "waiting",
+          mode: "oneshot",
+          currentNodeId: step2.id,
+          executedNodes: [step1.id, step2.id],
+          loopCount: 0,
+          runId: "run-42",
+          currentNodeStartedAt: Date.now() - 55_000,
+          waitDeadlineAt: Date.now() + 35_000,
+          expectation: {
+            type: "ocpp_call",
+            direction: "CSMS_TO_CP",
+            action: "RemoteStopTransaction",
+            timeoutMs: 60_000,
+            nodeId: step2.id,
+          },
+        }),
+      ),
+      continueScenarioWait,
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1&run=run-42",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    // The countdown follows the runtime's (extended) deadline.
+    expect(container.textContent).toMatch(/Timeout in 0:(34|35)/);
+    const labels = Array.from(container.querySelectorAll("button")).map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(labels).toEqual(
+      expect.arrayContaining(["+30 s", "Retry", "Continue"]),
+    );
+
+    const continueButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((b) => b.textContent?.trim() === "Continue");
+    await act(async () => {
+      continueButton!.click();
+    });
+    await flush();
+    expect(continueScenarioWait).toHaveBeenCalledWith("CP-1", 1, "s1");
+  });
+
   it("says so when the run named in the URL is no longer active", async () => {
     const fixture = linearFixture();
     const service = createFakeChargePointService({

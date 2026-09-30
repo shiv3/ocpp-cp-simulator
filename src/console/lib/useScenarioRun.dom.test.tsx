@@ -798,4 +798,127 @@ describe("useScenarioRun — attaching to a run already live in the runtime (#36
     expect(mounted.current().expectation).toBeNull();
     expect(mounted.current().runs[0].result).toBe("completed");
   });
+
+  describe("wait controls (#240)", () => {
+    async function mountWaiting(
+      getScenarioStatus: () => Promise<ScenarioExecutionContext | null>,
+    ) {
+      const scenario = fixtureScenario();
+      const [step1, step2] = scenario.nodes.filter(
+        (n) =>
+          n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+      );
+      const service = createFakeChargePointService({
+        getScenarioStatus: vi.fn(getScenarioStatus),
+        loadScenario: vi.fn(async () => ({ scenarioId: "runtime-s1" })),
+        runScenario: vi.fn(async () => undefined),
+      });
+      const mounted = await mountProbe(service, "CP-1", 1, scenario);
+      cleanup = () => unmount(mounted.root);
+      await flush();
+      return { mounted, service, step1: step1!, step2: step2! };
+    }
+
+    it("exposes the runtime's wait deadline", async () => {
+      const scenario = fixtureScenario();
+      const [step1, step2] = scenario.nodes.filter(
+        (n) =>
+          n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+      );
+      const { mounted } = await mountWaiting(async () =>
+        waitingStatus("s1", step2!.id, [step1!.id, step2!.id], {
+          waitDeadlineAt: 99_000,
+        }),
+      );
+
+      expect(mounted.current().waitDeadlineAt).toBe(99_000);
+    });
+
+    it("acts on the tracked runtime scenario and re-reads its status", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { mounted, service, step1, step2 } = await mountWaiting(
+          async () => null,
+        );
+        await mounted.click("start");
+        await pushEvent(service, "CP-1", {
+          type: "scenario-node-execute",
+          connectorId: 1,
+          scenarioId: "runtime-s1",
+          nodeId: step2.id,
+        });
+
+        vi.mocked(service.getScenarioStatus).mockResolvedValue(
+          waitingStatus("runtime-s1", step2.id, [step1.id, step2.id], {
+            waitDeadlineAt: 120_000,
+          }),
+        );
+        await act(async () => {
+          await mounted.current().controlWait("extend", 30);
+          await mounted.current().controlWait("retry");
+          await mounted.current().controlWait("continue");
+          vi.advanceTimersByTime(250);
+        });
+        await flush();
+
+        expect(service.extendScenarioWait).toHaveBeenCalledWith(
+          "CP-1",
+          1,
+          "runtime-s1",
+          30,
+        );
+        expect(service.retryScenarioWait).toHaveBeenCalledWith(
+          "CP-1",
+          1,
+          "runtime-s1",
+        );
+        expect(service.continueScenarioWait).toHaveBeenCalledWith(
+          "CP-1",
+          1,
+          "runtime-s1",
+        );
+        expect(mounted.current().waitDeadlineAt).toBe(120_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("re-reads the status when another client changes the wait", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const scenario = fixtureScenario();
+        const [step1, step2] = scenario.nodes.filter(
+          (n) =>
+            n.type !== ScenarioNodeType.START &&
+            n.type !== ScenarioNodeType.END,
+        );
+        const status = waitingStatus("s1", step2!.id, [step1!.id, step2!.id], {
+          waitDeadlineAt: 90_000,
+        });
+        const { mounted, service } = await mountWaiting(async () => status);
+        expect(mounted.current().waitDeadlineAt).toBe(90_000);
+
+        vi.mocked(service.getScenarioStatus).mockResolvedValue({
+          ...status,
+          waitDeadlineAt: 150_000,
+        });
+        await pushEvent(service, "CP-1", {
+          type: "scenario-wait-changed",
+          connectorId: 1,
+          scenarioId: "s1",
+          runId: "run-42",
+          nodeId: step2!.id,
+          kind: "extend",
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(250);
+        });
+        await flush();
+
+        expect(mounted.current().waitDeadlineAt).toBe(150_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

@@ -20,6 +20,8 @@ export interface ActiveScenarioRun {
   executedCount: number;
   expectation: ScenarioExpectation | null;
   currentNodeStartedAt: number | null;
+  /** #240: when the parked wait times out; null without one. */
+  waitDeadlineAt: number | null;
 }
 
 /** What we keep per scenario definition so repeat refreshes don't refetch it:
@@ -34,12 +36,16 @@ interface CachedDefinition {
  * charge point's connectors (#240). Queries listScenarios/getScenarioStatus
  * on mount and re-queries (debounced) whenever a scenario lifecycle event
  * arrives on the CP's event stream; live countdowns are the consumer's job
- * (compute from `currentNodeStartedAt` / `expectation.timeoutMs`).
+ * (compute from `waitDeadlineAt`, see remainingWaitMs).
  */
 export function useActiveScenarioRuns(
   cpId: string | null,
   connectorIds: number[],
-): { runs: ActiveScenarioRun[]; refresh: () => Promise<void> } {
+): {
+  runs: ActiveScenarioRun[];
+  refresh: () => Promise<void>;
+  scheduleRefresh: () => void;
+} {
   const { chargePointService } = useDataContext();
 
   const [runs, setRuns] = useState<ActiveScenarioRun[]>([]);
@@ -121,6 +127,7 @@ export function useActiveScenarioRuns(
           executedCount: status.executedNodes.length,
           expectation: status.expectation ?? null,
           currentNodeStartedAt: status.currentNodeStartedAt ?? null,
+          waitDeadlineAt: status.waitDeadlineAt ?? null,
         };
       } catch (err) {
         console.warn(
@@ -165,26 +172,30 @@ export function useActiveScenarioRuns(
     void refresh();
   }, [refresh]);
 
+  /** Debounced refresh: collapses a burst of triggers (node transitions, a
+   *  control and its own `scenario-wait-changed` echo) into one re-query. */
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    refreshTimeoutRef.current = setTimeout(() => {
+      void refresh();
+    }, STATUS_REFRESH_DEBOUNCE_MS);
+  }, [refresh]);
+
   useEffect(() => {
     if (!cpId) return undefined;
 
     const unsubscribe = chargePointService.subscribe(cpId, (event) => {
-      if (!(
+      if (
         event.type === "scenario-started" ||
         event.type === "scenario-node-execute" ||
         event.type === "scenario-completed" ||
-        event.type === "scenario-error"
-      )) {
-        return;
+        event.type === "scenario-error" ||
+        event.type === "scenario-wait-changed"
+      ) {
+        scheduleRefresh();
       }
-
-      // Collapse bursts of node transitions into one re-query.
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-      refreshTimeoutRef.current = setTimeout(() => {
-        void refresh();
-      }, STATUS_REFRESH_DEBOUNCE_MS);
     });
 
     return () => {
@@ -193,7 +204,7 @@ export function useActiveScenarioRuns(
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-  }, [cpId, chargePointService, refresh]);
+  }, [cpId, chargePointService, scheduleRefresh]);
 
-  return { runs, refresh };
+  return { runs, refresh, scheduleRefresh };
 }

@@ -16,10 +16,16 @@ import { consolePath } from "../routes";
 import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
 import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
+import { useScenarioRunHistory } from "../lib/useScenarioRunHistory";
+import { mergeRunHistory } from "../lib/runHistoryRows";
+import { buildRunHistoryUrl } from "../lib/useAllScenarios";
 import RunHistory from "./scenarios/run/RunHistory";
+import RunReportView from "./scenarios/run/RunReportView";
 import RunTimeline from "./scenarios/run/RunTimeline";
 
 const LOG_TAIL_LIMIT = 200;
+/** How many recorded runs the panel lists; the run history page has the rest. */
+const RECORDED_RUNS_LIMIT = 20;
 
 const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
   ...LIVE_RUN_STATE_STYLES,
@@ -31,7 +37,7 @@ const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
 
 /**
  * Scenario Run console (Task 8): a dedicated view that runs a scenario and
- * shows a live step timeline + correlated log tail + session run history —
+ * shows a live step timeline + correlated log tail + run history —
  * deliberately separate from the editor. Reached via the "▶ Run" links
  * built by `buildScenarioUrl("run", cpId, connectorId, scenarioId)`
  * (`ScenarioMetaBar`, `ScenarioTable`), and by the CP page's Active
@@ -118,6 +124,28 @@ const ScenarioRunPage: React.FC = () => {
   } = useScenarioRun(cpId || null, connectorId, scenario);
 
   const isRunning = isLiveRunState(state);
+
+  // #388: the daemon's recorded runs of this target, so the history outlives
+  // this page view; the runs the page tracked itself fill in the live one
+  // (and every run in local mode, which records none).
+  const recorded = useScenarioRunHistory(
+    cpId && connectorId != null && scenarioId
+      ? { cpId, connectorId, scenarioId, limit: RECORDED_RUNS_LIMIT }
+      : null,
+    cpId ? [cpId] : [],
+  );
+  const historyRows = useMemo(
+    () => mergeRunHistory(runs, recorded.page.runs),
+    [runs, recorded.page.runs],
+  );
+  // The selection belongs to the viewed target: under another one it reads
+  // as none at once, so no report is fetched for the old run.
+  const target = `${cpId}\n${connectorParam}\n${scenarioId}`;
+  const [selection, setSelection] = useState({
+    target,
+    runId: null as string | null,
+  });
+  const selectedRunId = selection.target === target ? selection.runId : null;
 
   // The run named in the URL ("Open run") has ended or been superseded by
   // another run of the same scenario. Unknowable without a runtime runId
@@ -296,10 +324,50 @@ const ScenarioRunPage: React.FC = () => {
             <LogViewer logs={tailLogs} onClear={view.clearLogs} />
           </div>
           <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-            <h2 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Run history
-            </h2>
-            <RunHistory runs={runs} />
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Run history
+              </h2>
+              {recorded.supported && (
+                <Link
+                  to={buildRunHistoryUrl(cpId, connectorId, scenarioId)}
+                  className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  View all runs
+                </Link>
+              )}
+            </div>
+            {recorded.error && (
+              <p className="mb-2 text-xs text-rose-700 dark:text-rose-300">
+                Could not load the recorded runs: {recorded.error}
+              </p>
+            )}
+            <RunHistory
+              rows={historyRows}
+              emptyText={
+                recorded.supported
+                  ? "No runs recorded yet."
+                  : "No runs yet this session."
+              }
+              selectedRunId={selectedRunId}
+              onSelect={(row) =>
+                setSelection({
+                  target,
+                  runId:
+                    selectedRunId === row.runId ? null : (row.runId ?? null),
+                })
+              }
+            />
+            {selectedRunId && connectorId != null && (
+              <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-800">
+                <RunReportView
+                  cpId={cpId}
+                  connectorId={connectorId}
+                  scenarioId={scenarioId}
+                  runId={selectedRunId}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

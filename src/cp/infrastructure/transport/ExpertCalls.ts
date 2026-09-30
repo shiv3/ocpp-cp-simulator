@@ -4,14 +4,22 @@ import {
   type OcppCallRequest,
 } from "../../domain/types/OcppCall";
 import { OcppCallNoAnswerError } from "../../domain/errors/OcppCallErrors";
-import { OCPPMessageType } from "../../domain/types/OcppTypes";
 import { CallWaiters } from "./CallWaiters";
+import { encodeCallFrame } from "./callFrame";
+
+/** The fields of a CALLERROR, as a CSMS may (not) send them. */
+export interface CallErrorFields {
+  readonly errorCode?: string;
+  readonly errorDescription?: string;
+  readonly errorDetails?: unknown;
+}
 
 /**
  * The expert calls (#389) a handler has in flight. Both JSON handlers route
- * every CALLRESULT / CALLERROR through here first: an expert call's answer
- * resolves its caller, and when the caller did not ask to `applyResponse`
- * the handler stops there, before any station state changes.
+ * every CALLRESULT / CALLERROR through `claimResult` / `claimError` first: an
+ * expert call's answer resolves its caller, and unless the caller asked to
+ * `applyResponse` the claim says the answer stops there, before any station
+ * state changes.
  *
  * When the caller's wait expires, `withdraw` asks the handler to take the
  * CALL back if it has not gone out yet (1.6 queues CALLs behind the one in
@@ -41,12 +49,11 @@ export class ExpertCalls {
   /** Track a CALL about to be sent under `messageId`; resolves with the
    *  CSMS's answer. */
   start(messageId: string, request: OcppCallRequest): Promise<OcppCallOutcome> {
-    const sentFrame = JSON.stringify([
-      OCPPMessageType.CALL,
+    const sentFrame = encodeCallFrame(
       messageId,
       request.action,
       request.payload,
-    ]);
+    );
     this._calls.set(messageId, {
       sentFrame,
       applyResponse: request.applyResponse ?? false,
@@ -54,44 +61,29 @@ export class ExpertCalls {
     return this._waiters.register(messageId);
   }
 
-  /** Null when `messageId` is not an expert call; otherwise whether the
-   *  answer should also reach the station's normal response handling. */
-  onResult(
-    messageId: string,
-    payload: unknown,
-  ): { applyResponse: boolean } | null {
-    const call = this.take(messageId);
-    if (!call) return null;
-    this._waiters.resolve(messageId, {
+  /** Settle the caller of an expert call answered with a CALLRESULT. True
+   *  when the answer stops here: an expert call without `applyResponse`. */
+  claimResult(messageId: string, payload: unknown): boolean {
+    return this.claim(messageId, (sentFrame) => ({
       kind: "callResult",
       messageId,
-      sentFrame: call.sentFrame,
+      sentFrame,
       payload,
-    });
-    return { applyResponse: call.applyResponse };
+    }));
   }
 
-  onError(
-    messageId: string,
-    error: {
-      errorCode?: string;
-      errorDescription?: string;
-      errorDetails?: unknown;
-    },
-  ): { applyResponse: boolean } | null {
-    const call = this.take(messageId);
-    if (!call) return null;
-    this._waiters.resolve(messageId, {
+  /** As {@link claimResult}, for a CALLERROR. */
+  claimError(messageId: string, error: CallErrorFields): boolean {
+    return this.claim(messageId, (sentFrame) => ({
       kind: "callError",
       messageId,
-      sentFrame: call.sentFrame,
+      sentFrame,
       // A non-conformant CSMS may send other types; the answer is shown as
       // received, but these two stay strings.
       errorCode: String(error.errorCode ?? ""),
       errorDescription: String(error.errorDescription ?? ""),
       errorDetails: error.errorDetails ?? {},
-    });
-    return { applyResponse: call.applyResponse };
+    }));
   }
 
   /** The CALL never reached the wire. */
@@ -116,6 +108,16 @@ export class ExpertCalls {
           `OCPP call ${id} dropped (socket_closed)`,
         ),
     );
+  }
+
+  private claim(
+    messageId: string,
+    outcome: (sentFrame: string) => OcppCallOutcome,
+  ): boolean {
+    const call = this.take(messageId);
+    if (!call) return false;
+    this._waiters.resolve(messageId, outcome(call.sentFrame));
+    return !call.applyResponse;
   }
 
   private take(messageId: string) {

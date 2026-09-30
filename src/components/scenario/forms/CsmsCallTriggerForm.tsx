@@ -1,18 +1,11 @@
 import {
   NumberField,
+  JsonTextareaField,
   SelectField,
-  TextareaField,
   TextField,
 } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 import { CSMS_CALL_TRIGGER_ACTIONS } from "../../../cp/application/scenario/ScenarioTypes";
-
-function payloadText(payload: unknown): string {
-  if (payload === undefined) return "";
-  return typeof payload === "string"
-    ? payload
-    : JSON.stringify(payload || {}, null, 2);
-}
 
 export default function CsmsCallTriggerForm({
   value,
@@ -48,17 +41,12 @@ export default function CsmsCallTriggerForm({
         </p>
       </div>
       <div>
-        <TextareaField
+        <JsonTextareaField
           label="Payload condition (JSON, optional)"
-          value={payloadText(value.payload)}
-          onChange={(payload) => {
-            try {
-              onChange({ ...value, payload: JSON.parse(payload) });
-            } catch {
-              onChange({ ...value, payload });
-            }
-          }}
+          value={value.payload}
+          onChange={(payload) => onChange({ ...value, payload })}
           placeholder='{"key": "HeartbeatInterval"}'
+          optional
         />
         <p className="text-xs text-muted mt-1">
           Partial match against the incoming call payload. Empty = any payload.

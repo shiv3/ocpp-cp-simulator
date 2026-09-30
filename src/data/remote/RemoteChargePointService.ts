@@ -832,9 +832,11 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
-    return (await this.runCpRpc(id, "send_ocpp_call", {
-      ...request,
-    })) as OcppCallOutcome;
+    return (await this.runCpRpc(
+      id,
+      "send_ocpp_call",
+      request,
+    )) as OcppCallOutcome;
   }
 
   async startTransaction(

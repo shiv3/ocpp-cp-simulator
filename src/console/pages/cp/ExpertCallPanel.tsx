@@ -85,9 +85,9 @@ const ExpertCallForm: React.FC<{
   connected: boolean;
 }> = ({ cpId, ocppVersion, catalog, connected }) => {
   const { chargePointService } = useDataContext();
-  const firstAction = catalog.actions.includes("Heartbeat")
-    ? "Heartbeat"
-    : catalog.actions[0];
+  // Every OCPP-J version has it (ocppCallCatalog.test.ts), and it needs no
+  // payload.
+  const firstAction = "Heartbeat";
   const [action, setAction] = useState(firstAction);
   const [payloadText, setPayloadText] = useState(() =>
     pretty(catalog.defaultPayload(firstAction)),

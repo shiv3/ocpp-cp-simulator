@@ -1,10 +1,13 @@
 import { describe, it, expect } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import {
-  DefaultBootNotification,
-  OCPPStatus,
-} from "../../../domain/types/OcppTypes";
+  answerEverythingElse,
+  bootedChargePoint,
+  callOf,
+  callsOf,
+} from "./stationHarness";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { getOcppCallCatalog } from "../codec/ocppCallCatalog";
 import {
   OcppCallNoAnswerError,
@@ -17,71 +20,28 @@ import {
  * CALLRESULT or CALLERROR — plus the frame exactly as it went out.
  */
 type Version = "OCPP-2.0.1" | "OCPP-2.1" | "OCPP-1.6J";
-
-async function bootedChargePoint(
-  csms: MockCsms,
-  id: string,
-  version: Version | "OCPP-1.6S",
-  connectors = 1,
-): Promise<ChargePoint> {
-  const cp = new ChargePoint(
-    id,
-    DefaultBootNotification,
-    connectors,
-    csms.url,
-    null,
-    null,
-    null,
-    {},
-    [],
-    version,
-    {},
-  );
-  cp.events.on("error", () => undefined);
-  if (version === "OCPP-1.6S") return cp;
-  cp.connect();
-  const boot = await csms.waitForCall("BootNotification");
-  csms.replyCallResult(boot.messageId, {
-    status: "Accepted",
-    currentTime: "2026-09-17T00:00:00.000Z",
-    interval: 300,
-  });
-  await csms.waitForFrame(
-    (frame) => frame[0] === 2 && frame[2] === "StatusNotification",
-  );
-  return cp;
-}
-
-/** Answer every CALL but the ones `skip` names with an empty CALLRESULT, so
- *  1.6's serial queue (#176) keeps moving. */
-type Skip = readonly string[] | ((frame: OcppFrame) => boolean);
-
-function answerEverythingElse(csms: MockCsms, skip: Skip): () => void {
-  const skipped =
-    typeof skip === "function"
-      ? skip
-      : (frame: OcppFrame) => skip.includes(frame[2] as string);
-  const answered = new Set<string>();
-  const tick = setInterval(() => {
-    for (const frame of csms.received) {
-      if (frame[0] !== 2) continue;
-      const id = frame[1] as string;
-      if (answered.has(id) || skipped(frame)) continue;
-      answered.add(id);
-      if (frame[2] === "BootNotification") continue;
-      csms.replyCallResult(id, {});
-    }
-  }, 5);
-  return () => clearInterval(tick);
-}
-
-const callOf = (action: string) => (frame: OcppFrame) =>
-  frame[0] === 2 && frame[2] === action;
+type Skip = Parameters<typeof answerEverythingElse>[1];
 
 const statusNotifications = (csms: MockCsms) =>
   csms.received.filter(callOf("StatusNotification")).length;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let sentinels = 0;
+/** Send a DataTransfer and wait for it on the wire. Frames go out in order,
+ *  so anything the station wrote before it has arrived by then: the way to
+ *  assert that something was *not* sent. */
+async function drainWire(cp: ChargePoint, csms: MockCsms): Promise<void> {
+  const vendorId = `sentinel-${++sentinels}`;
+  void cp
+    .sendOcppCall({ action: "DataTransfer", payload: { vendorId } })
+    .catch(() => undefined);
+  await csms.waitForFrame(
+    (f) =>
+      callOf("DataTransfer")(f) &&
+      (f[3] as { vendorId?: string }).vendorId === vendorId,
+  );
+}
 
 async function withStation(
   version: Version,
@@ -90,12 +50,9 @@ async function withStation(
   connectors = 1,
 ): Promise<void> {
   const csms = startMockCsms();
-  const cp = await bootedChargePoint(
-    csms,
-    `CP-${version}`,
-    version,
+  const cp = await bootedChargePoint(csms, `CP-${version}`, version, {
     connectors,
-  );
+  });
   const stop = answerEverythingElse(csms, skip);
   try {
     await body(cp, csms);
@@ -185,7 +142,7 @@ describe("sendOcppCall (#389)", () => {
         await expect(answer).rejects.toMatchObject({
           reason: "invalid_payload",
         });
-        await sleep(50);
+        await drainWire(cp, csms);
         expect(csms.received.slice(before).some(callOf("Heartbeat"))).toBe(
           false,
         );
@@ -274,9 +231,9 @@ describe("sendOcppCall (#389)", () => {
           currentTime: "2026-09-30T00:00:00.000Z",
           interval: 300,
         };
-        const boots = () => csms.received.filter(callOf("BootNotification"));
+        const boots = () => callsOf(csms, "BootNotification");
 
-        await sleep(50);
+        await drainWire(cp, csms);
         const quiet = statusNotifications(csms);
         const first = cp.sendOcppCall({ action: "BootNotification", payload });
         await csms.waitForFrame(
@@ -284,7 +241,7 @@ describe("sendOcppCall (#389)", () => {
         );
         csms.replyCallResult(boots()[1][1] as string, accepted);
         expect((await first).kind).toBe("callResult");
-        await sleep(100);
+        await drainWire(cp, csms);
         expect(statusNotifications(csms)).toBe(quiet);
 
         const second = cp.sendOcppCall({
@@ -353,7 +310,13 @@ describe("sendOcppCall (#389)", () => {
             idTagInfo: { status: "Accepted" },
           });
           await answer;
-          await sleep(50);
+          await csms.waitForFrame(
+            (f) =>
+              callOf("StatusNotification")(f) &&
+              (f[3] as { connectorId?: number; status?: string })
+                .connectorId === 2 &&
+              (f[3] as { status?: string }).status === "Charging",
+          );
           expect(cp.getConnector(2)?.status).toBe(OCPPStatus.Charging);
           expect(cp.getConnector(1)?.status).not.toBe(OCPPStatus.Charging);
         },
@@ -390,33 +353,28 @@ describe("sendOcppCall (#389)", () => {
 
     it("the boot gate refuses a call before BootNotification is Accepted, and writes nothing", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
-        "CP-GATE",
-        DefaultBootNotification,
-        1,
-        csms.url,
-        null,
-        null,
-        null,
-        {},
-        [],
-        "OCPP-1.6J",
-        {},
-      );
-      cp.events.on("error", () => undefined);
+      const cp = await bootedChargePoint(csms, "CP-GATE", "OCPP-1.6J", {
+        bootStatus: "Pending",
+      });
       try {
-        cp.connect();
-        const boot = await csms.waitForCall("BootNotification");
-        csms.replyCallResult(boot.messageId, {
-          status: "Pending",
-          currentTime: "2026-09-30T00:00:00.000Z",
-          interval: 300,
-        });
+        // Nothing on the wire says the Pending answer was processed.
         await sleep(50);
         await expect(
           cp.sendOcppCall({ action: "Heartbeat", payload: {} }),
         ).rejects.toMatchObject({ reason: "boot_gate" });
-        await sleep(50);
+        // BootNotification passes the gate; once it is on the wire, a
+        // Heartbeat written before it would be too.
+        void cp
+          .sendOcppCall({
+            action: "BootNotification",
+            payload: { chargePointVendor: "V", chargePointModel: "M" },
+          })
+          .catch(() => undefined);
+        await csms.waitForFrame(
+          (f) =>
+            callsOf(csms, "BootNotification").length === 2 &&
+            f[2] === "BootNotification",
+        );
         expect(csms.received.some(callOf("Heartbeat"))).toBe(false);
       } finally {
         cp.disconnect();
@@ -458,7 +416,7 @@ describe("sendOcppCall (#389)", () => {
             expect(err).toMatchObject({ reason: "dropped" });
           }
 
-          const boots = () => csms.received.filter(callOf("BootNotification"));
+          const boots = () => callsOf(csms, "BootNotification");
           await csms.waitForFrame(
             (f) => boots().length === 2 && f === boots()[1],
             10_000,
@@ -468,7 +426,12 @@ describe("sendOcppCall (#389)", () => {
             currentTime: "2026-09-30T00:00:00.000Z",
             interval: 300,
           });
-          await sleep(300);
+          // The reconnected station re-announces its connectors once the
+          // gate is open; a replayed MeterValues would go out before the
+          // sentinel.
+          const announced = statusNotifications(csms);
+          await csms.waitForFrame(() => statusNotifications(csms) > announced);
+          await drainWire(cp, csms);
           expect(csms.received.some(callOf("MeterValues"))).toBe(false);
         },
       );

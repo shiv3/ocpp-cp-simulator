@@ -898,15 +898,12 @@ export class ScenarioExecutor {
       );
       return;
     }
+    const { action, payload, skipValidation, applyResponse } = data;
     const outcome = await this.callbacks.onSendOcppCall({
-      action: data.action,
-      payload: data.payload,
-      ...(data.skipValidation !== undefined
-        ? { skipValidation: data.skipValidation }
-        : {}),
-      ...(data.applyResponse !== undefined
-        ? { applyResponse: data.applyResponse }
-        : {}),
+      action,
+      payload,
+      skipValidation,
+      applyResponse,
     });
     if (outcome.kind === "callResult") {
       this.callbacks.log?.(

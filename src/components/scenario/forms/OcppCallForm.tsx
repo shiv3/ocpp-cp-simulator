@@ -1,11 +1,5 @@
-import { CheckboxField, TextareaField, TextField } from "./FormFields";
+import { CheckboxField, JsonTextareaField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
-
-function payloadText(payload: unknown): string {
-  return typeof payload === "string"
-    ? payload
-    : JSON.stringify(payload || {}, null, 2);
-}
 
 /** #389: an expert OCPP call — action, JSON payload and the per-call expert
  *  switches. The action must be a station-initiated CALL of the station's
@@ -27,16 +21,10 @@ export default function OcppCallForm({
         onChange={(action) => onChange({ ...value, action })}
         placeholder="e.g., Heartbeat, StatusNotification, MeterValues"
       />
-      <TextareaField
+      <JsonTextareaField
         label="Payload (JSON)"
-        value={payloadText(value.payload)}
-        onChange={(payload) => {
-          try {
-            onChange({ ...value, payload: JSON.parse(payload) });
-          } catch {
-            onChange({ ...value, payload });
-          }
-        }}
+        value={value.payload}
+        onChange={(payload) => onChange({ ...value, payload })}
         placeholder="{}"
       />
       <CheckboxField

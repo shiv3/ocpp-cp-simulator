@@ -1,6 +1,7 @@
 import { schemas } from "../../../../ocpp";
 import { parseOcppVersion } from "../../../domain/types/OcppVersion";
 import { defaultPayloadFromSchema } from "./defaultPayload";
+import { requestSchemaKey } from "./requestSchemaKey";
 import { outgoingV16Warning } from "./validateV16";
 import { outgoingV201Warning } from "./validateV201";
 import { outgoingV21Warning } from "./validateV21";
@@ -88,7 +89,7 @@ const V21_ACTIONS = [
 function buildCatalog(
   actions: readonly string[],
   schemaMap: Record<string, object>,
-  schemaSuffix: string,
+  version: "V16" | "V201" | "V21",
   outgoingWarning: (action: string, payload: unknown) => string | null,
 ): OcppCallCatalog {
   const supported = new Set(actions);
@@ -97,8 +98,7 @@ function buildCatalog(
     isSupported: (action) => supported.has(action),
     validate: outgoingWarning,
     defaultPayload: (action) => {
-      const key = `${action.charAt(0).toLowerCase()}${action.slice(1)}Request${schemaSuffix}`;
-      const schema = schemaMap[key];
+      const schema = schemaMap[requestSchemaKey(action, version)];
       return schema
         ? (defaultPayloadFromSchema(schema) as Record<string, unknown>)
         : {};

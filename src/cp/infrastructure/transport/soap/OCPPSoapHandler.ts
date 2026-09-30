@@ -880,12 +880,12 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
   /** SOAP envelopes are built per operation: there is no arbitrary-action
    *  path (#389). `ChargePoint.sendOcppCall` refuses first; this is the
    *  handler's own answer. */
-  public sendOcppCall(_request: OcppCallRequest): Promise<OcppCallOutcome> {
-    return Promise.reject(
-      new OcppCallRejectedError(
-        "unsupported_transport",
-        "Expert OCPP calls are not available over SOAP",
-      ),
+  public async sendOcppCall(
+    _request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    throw new OcppCallRejectedError(
+      "unsupported_transport",
+      "Expert OCPP calls are not available over SOAP",
     );
   }
 

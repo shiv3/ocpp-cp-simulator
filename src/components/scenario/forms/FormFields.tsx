@@ -159,3 +159,43 @@ export function TextareaField({
     </div>
   );
 }
+
+interface JsonTextareaFieldProps {
+  label: string;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  placeholder?: string;
+  /** Show an absent value as an empty field rather than `{}`. */
+  optional?: boolean;
+}
+
+/** A JSON value edited as text. Text that does not parse is passed on as the
+ *  raw string, so the field keeps exactly what is being typed. */
+export function JsonTextareaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  optional = false,
+}: JsonTextareaFieldProps) {
+  const text =
+    typeof value === "string"
+      ? value
+      : optional && value === undefined
+        ? ""
+        : JSON.stringify(value || {}, null, 2);
+  return (
+    <TextareaField
+      label={label}
+      value={text}
+      onChange={(next) => {
+        try {
+          onChange(JSON.parse(next));
+        } catch {
+          onChange(next);
+        }
+      }}
+      placeholder={placeholder}
+    />
+  );
+}

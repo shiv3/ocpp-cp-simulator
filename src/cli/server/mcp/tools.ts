@@ -335,25 +335,16 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   mcp.tool("send_ocpp_call", {
     description:
       "Expert OCPP call (#389): send any station-initiated OCPP CALL (e.g. Heartbeat, StatusNotification, MeterValues, DataTransfer) of the charge point's OCPP-J version with the payload as given, and return the CSMS's CALLRESULT or CALLERROR with the frame as sent. The payload must pass the OCPP schema unless skipValidation is set; the answer changes the charge point's state only with applyResponse. SOAP charge points are refused.",
-    inputSchema: z.object({
+    // The method's own schema, so the tool advertises what it enforces.
+    inputSchema: METHODS.send_ocpp_call.params.extend({
       cpId: z.string().describe("Charge point identifier"),
-      // Taken from the method so the tool advertises what it enforces.
-      action: METHODS.send_ocpp_call.params.shape.action,
-      payload: METHODS.send_ocpp_call.params.shape.payload,
-      skipValidation: METHODS.send_ocpp_call.params.shape.skipValidation,
-      applyResponse: METHODS.send_ocpp_call.params.shape.applyResponse,
     }),
-    handler: async (args) => {
+    handler: async ({ cpId, ...params }) => {
       try {
         const result = await runRpc(deps, {
-          cpId: args.cpId,
+          cpId,
           method: "send_ocpp_call",
-          params: {
-            action: args.action,
-            payload: args.payload,
-            skipValidation: args.skipValidation,
-            applyResponse: args.applyResponse,
-          },
+          params,
         });
         return successResult(result);
       } catch (err) {

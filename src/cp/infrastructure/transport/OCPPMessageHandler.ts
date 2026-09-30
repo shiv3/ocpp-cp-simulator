@@ -237,8 +237,9 @@ interface SerialEntry {
   id: string;
   payload: OcppMessageRequestPayload;
   connectorId?: number;
-  /** An expert call (#389): never salvaged; its caller is told instead. */
-  expert?: true;
+  /** A caller waits for this CALL's answer: when it is dropped the caller
+   *  is told, instead of the CALL being salvaged or silently discarded. */
+  onDropped?: (reason: string) => void;
 }
 
 export class OCPPMessageHandler {
@@ -513,46 +514,50 @@ export class OCPPMessageHandler {
       ...(wireData !== undefined ? { data: wireData } : {}),
     };
     const answer = this._dataTransferWaiters.register(id);
-    this.sendRequest(OCPPAction.DataTransfer, id, payload);
+    this.sendRequest(
+      OCPPAction.DataTransfer,
+      id,
+      payload,
+      undefined,
+      (reason) =>
+        this._dataTransferWaiters.reject(
+          id,
+          new Error(`DataTransfer ${id} dropped (${reason})`),
+        ),
+    );
     return answer;
   }
 
   /** Expert OCPP call (#389). Rides the §4.1.1 serial queue like any CALL,
    *  but its answer goes to the caller, and to the result handlers only
    *  when `applyResponse` is set. */
-  public sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+  public async sendOcppCall(
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
     // ChargePoint.sendOcppCall checked the action against the 1.6 catalog,
     // every entry of which is an OCPPAction.
     const action = request.action as OCPPAction;
     if (!this.isCallAllowed(action)) {
-      return Promise.reject(
-        new OcppCallRejectedError(
-          "boot_gate",
-          `${action} blocked by the boot gate — BootNotification not yet Accepted`,
-        ),
+      throw new OcppCallRejectedError(
+        "boot_gate",
+        `${action} blocked by the boot gate — BootNotification not yet Accepted`,
       );
     }
     const warning = this._codec.outgoingWarning(action, request.payload);
-    if (warning) {
-      if (!request.skipValidation) {
-        return Promise.reject(
-          new OcppCallRejectedError("invalid_payload", warning),
-        );
-      }
-      this._logger.warn(`${warning} (sent: skipValidation)`, LogType.OCPP);
+    if (warning && !request.skipValidation) {
+      throw new OcppCallRejectedError("invalid_payload", warning);
     }
     const id = this.generateMessageId();
     const answer = this._expertCalls.start(id, request);
-    const connectorId = this.connectorOf(request.payload);
-    this._serialQueue.push({
+    // Deliberately unchecked when skipValidation is set: sendRequest logs the
+    // codec warning, as for every CALL.
+    this.sendRequest(
       action,
       id,
-      // Deliberately unchecked when skipValidation is set.
-      payload: request.payload as unknown as OcppMessageRequestPayload,
-      ...(connectorId !== undefined ? { connectorId } : {}),
-      expert: true,
-    });
-    this.pumpSerialQueue();
+      request.payload as unknown as OcppMessageRequestPayload,
+      this.connectorOf(request.payload),
+      (reason) => this._expertCalls.onDropped(id, reason),
+    );
     return answer;
   }
 
@@ -775,6 +780,7 @@ export class OCPPMessageHandler {
     id: string,
     payload: OcppMessageRequestPayload,
     connectorId?: number,
+    onDropped?: (reason: string) => void,
   ): void {
     if (!this.isCallAllowed(action)) {
       this._logger.warn(
@@ -790,22 +796,22 @@ export class OCPPMessageHandler {
     // §4.1.1: queue here, pumpSerialQueue does the actual `ws.sendAction`
     // one CALL at a time. The previous CALL's CALLRESULT/CALLERROR (or
     // timeout) releases the slot via `settleSerialInFlight`.
-    this._serialQueue.push({ action, id, payload, connectorId });
+    this._serialQueue.push({ action, id, payload, connectorId, onDropped });
     this.pumpSerialQueue();
   }
 
   /**
-   * Centralize custody: salvage transaction-related messages or drop informational ones.
-   * Transaction-related messages (StartTransaction/StopTransaction/MeterValues) are
-   * queued for retry; others are logged and discarded.
+   * Centralize custody: a CALL with a waiting caller tells it; otherwise
+   * transaction-related messages (StartTransaction/StopTransaction/MeterValues)
+   * are queued for retry and others are logged and discarded.
    */
   private salvageOrDiscard(entry: SerialEntry, reason: string): void {
-    if (entry.expert) {
+    if (entry.onDropped) {
       this._logger.warn(
-        `Dropping expert ${entry.action} (${reason})`,
+        `Dropping ${entry.action} (${reason}); its caller is told`,
         LogType.OCPP,
       );
-      this._expertCalls.onDropped(entry.id, reason);
+      entry.onDropped(reason);
       return;
     }
     if (isTransactionRelated(entry.action)) {
@@ -822,10 +828,6 @@ export class OCPPMessageHandler {
       this._logger.warn(
         `Dropping ${entry.action} (informational, ${reason})`,
         LogType.OCPP,
-      );
-      this._dataTransferWaiters.reject(
-        entry.id,
-        new Error(`DataTransfer ${entry.id} dropped (${reason})`),
       );
     }
   }
@@ -1196,8 +1198,7 @@ export class OCPPMessageHandler {
     messageId: string,
     payload: OcppMessagePayloadCallResult,
   ): void {
-    const expert = this._expertCalls.onResult(messageId, payload);
-    if (expert && !expert.applyResponse) {
+    if (this._expertCalls.claimResult(messageId, payload)) {
       this.forgetAnsweredCall(messageId);
       return;
     }
@@ -1273,8 +1274,7 @@ export class OCPPMessageHandler {
       `Received CALLERROR for message ${messageId} (action=${request?.action ?? "unknown"}): ${JSON.stringify(error)}`,
       LogType.OCPP,
     );
-    const expert = this._expertCalls.onError(messageId, error);
-    if (expert && !expert.applyResponse) {
+    if (this._expertCalls.claimError(messageId, error)) {
       this.forgetAnsweredCall(messageId);
       return;
     }

@@ -33,7 +33,7 @@ import type {
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";
-import { ExpertCalls } from "./ExpertCalls";
+import { ExpertCalls, type CallErrorFields } from "./ExpertCalls";
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
@@ -403,20 +403,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const pending = this._pendingRequests.get(messageId);
       this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
-      const expert = this._expertCalls.onError(
-        messageId,
-        payload as {
-          errorCode?: string;
-          errorDescription?: string;
-          errorDetails?: unknown;
-        },
-      );
-      if (expert && !expert.applyResponse) return;
+      const error = payload as CallErrorFields;
+      if (this._expertCalls.claimError(messageId, error)) return;
       if (pending?.action === "DataTransfer") {
-        const error = payload as {
-          errorCode?: string;
-          errorDescription?: string;
-        };
         this._dataTransferWaiters.reject(
           messageId,
           new Error(
@@ -450,8 +439,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const pending = this._pendingRequests.get(messageId);
     this._pendingRequests.delete(messageId);
 
-    const expert = this._expertCalls.onResult(messageId, payload);
-    if (expert && !expert.applyResponse) return;
+    if (this._expertCalls.claimResult(messageId, payload)) return;
 
     if (pending?.action === "DataTransfer") {
       const answer = payload as DataTransferResponseV201;
@@ -888,13 +876,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  was checked by ChargePoint.sendOcppCall). Its answer goes to the
    *  caller, and through the normal response handling only when
    *  `applyResponse` is set. */
-  public sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+  public async sendOcppCall(
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
     const warning =
       this._codec?.outgoingWarning(request.action, request.payload) ?? null;
     if (warning && !request.skipValidation) {
-      return Promise.reject(
-        new OcppCallRejectedError("invalid_payload", warning),
-      );
+      throw new OcppCallRejectedError("invalid_payload", warning);
     }
     const id = this.generateMessageId();
     const answer = this._expertCalls.start(id, request);

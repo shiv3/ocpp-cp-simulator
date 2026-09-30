@@ -29,32 +29,36 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
+type PanelProps = { ocppVersion?: string; connected?: boolean };
+
+function panel(service: FakeChargePointService, props: PanelProps) {
+  return (
+    <DataContext.Provider
+      value={{
+        mode: "remote",
+        serverUrl: "http://test",
+        defaultEvSettings: null,
+        setDefaultEvSettings: () => {},
+        chargePointService: service,
+      }}
+    >
+      <ExpertCallPanel
+        cpId="CP-1"
+        ocppVersion={props.ocppVersion ?? "OCPP-1.6J"}
+        connected={props.connected ?? true}
+      />
+    </DataContext.Provider>
+  );
+}
+
 async function renderPanel(
   service: FakeChargePointService,
-  props: { ocppVersion?: string; connected?: boolean } = {},
+  props: PanelProps = {},
 ): Promise<HTMLElement> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => {
-    root!.render(
-      <DataContext.Provider
-        value={{
-          mode: "remote",
-          serverUrl: "http://test",
-          defaultEvSettings: null,
-          setDefaultEvSettings: () => {},
-          chargePointService: service,
-        }}
-      >
-        <ExpertCallPanel
-          cpId="CP-1"
-          ocppVersion={props.ocppVersion ?? "OCPP-1.6J"}
-          connected={props.connected ?? true}
-        />
-      </DataContext.Provider>,
-    );
-  });
+  await act(async () => root!.render(panel(service, props)));
   return container;
 }
 
@@ -62,21 +66,7 @@ async function rerenderPanel(
   service: FakeChargePointService,
   ocppVersion: string,
 ): Promise<void> {
-  await act(async () => {
-    root!.render(
-      <DataContext.Provider
-        value={{
-          mode: "remote",
-          serverUrl: "http://test",
-          defaultEvSettings: null,
-          setDefaultEvSettings: () => {},
-          chargePointService: service,
-        }}
-      >
-        <ExpertCallPanel cpId="CP-1" ocppVersion={ocppVersion} connected />
-      </DataContext.Provider>,
-    );
-  });
+  await act(async () => root!.render(panel(service, { ocppVersion })));
 }
 
 /** Drive a controlled field the way React's synthetic onChange expects. */

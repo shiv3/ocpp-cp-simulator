@@ -12,8 +12,8 @@ describe("CallWaiters", () => {
   it("resolves the waiter registered under an id, once", async () => {
     const waiters = make();
     const answer = waiters.register("a");
-    expect(waiters.resolve("a", "ok")).toBe(true);
-    expect(waiters.resolve("a", "again")).toBe(false);
+    waiters.resolve("a", "ok");
+    waiters.resolve("a", "again");
     await expect(answer).resolves.toBe("ok");
   });
 
@@ -22,7 +22,8 @@ describe("CallWaiters", () => {
     const answer = waiters.register("a");
     vi.advanceTimersByTime(100);
     await expect(answer).rejects.toThrow("a timed out");
-    expect(waiters.reject("a", new Error("late"))).toBe(false);
+    // Settling a forgotten id is a no-op.
+    waiters.reject("a", new Error("late"));
   });
 
   it("rejects every pending waiter", async () => {
@@ -36,6 +37,6 @@ describe("CallWaiters", () => {
   });
 
   it("ignores an id nobody waits for", () => {
-    expect(make().resolve("nobody", "x")).toBe(false);
+    expect(() => make().resolve("nobody", "x")).not.toThrow();
   });
 });

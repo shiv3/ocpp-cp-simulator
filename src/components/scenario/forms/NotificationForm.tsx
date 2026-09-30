@@ -1,11 +1,5 @@
-import { TextareaField, TextField } from "./FormFields";
+import { JsonTextareaField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
-
-function payloadText(payload: unknown): string {
-  return typeof payload === "string"
-    ? payload
-    : JSON.stringify(payload || {}, null, 2);
-}
 
 export default function NotificationForm({
   value,
@@ -24,16 +18,10 @@ export default function NotificationForm({
         onChange={(messageType) => onChange({ ...value, messageType })}
         placeholder="e.g., Heartbeat, DataTransfer"
       />
-      <TextareaField
+      <JsonTextareaField
         label="Payload (JSON)"
-        value={payloadText(value.payload)}
-        onChange={(payload) => {
-          try {
-            onChange({ ...value, payload: JSON.parse(payload) });
-          } catch {
-            onChange({ ...value, payload });
-          }
-        }}
+        value={value.payload}
+        onChange={(payload) => onChange({ ...value, payload })}
         placeholder='{"key": "value"}'
       />
     </div>

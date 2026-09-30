@@ -29,16 +29,12 @@ export class CallWaiters<T> {
     });
   }
 
-  resolve(id: string, value: T): boolean {
-    const waiter = this.take(id);
-    waiter?.resolve(value);
-    return waiter !== undefined;
+  resolve(id: string, value: T): void {
+    this.take(id)?.resolve(value);
   }
 
-  reject(id: string, error: Error): boolean {
-    const waiter = this.take(id);
-    waiter?.reject(error);
-    return waiter !== undefined;
+  reject(id: string, error: Error): void {
+    this.take(id)?.reject(error);
   }
 
   rejectAll(errorFor: (id: string) => Error): void {

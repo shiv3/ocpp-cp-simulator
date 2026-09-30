@@ -1093,14 +1093,12 @@ export class ChargePoint {
    * OCPP-J version, with the payload as given. See
    * {@link IChargePointMessageHandler.sendOcppCall}.
    */
-  sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+  async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
     const catalog = getOcppCallCatalog(this._ocppVersion);
     if (!catalog) {
-      return Promise.reject(
-        new OcppCallRejectedError(
-          "unsupported_transport",
-          `Expert OCPP calls need an OCPP-J station; ${this._ocppVersion} is SOAP`,
-        ),
+      throw new OcppCallRejectedError(
+        "unsupported_transport",
+        `Expert OCPP calls need an OCPP-J station; ${this._ocppVersion} is SOAP`,
       );
     }
     // Checked here, not by the schema, so skipValidation cannot waive it:
@@ -1111,19 +1109,15 @@ export class ChargePoint {
       payload === null ||
       Array.isArray(payload)
     ) {
-      return Promise.reject(
-        new OcppCallRejectedError(
-          "invalid_payload",
-          "The payload of an OCPP call must be a JSON object",
-        ),
+      throw new OcppCallRejectedError(
+        "invalid_payload",
+        "The payload of an OCPP call must be a JSON object",
       );
     }
     if (!catalog.isSupported(request.action)) {
-      return Promise.reject(
-        new OcppCallRejectedError(
-          "unsupported_action",
-          `${request.action} is not a station-initiated call on ${this._ocppVersion}; expected one of ${catalog.actions.join(", ")}`,
-        ),
+      throw new OcppCallRejectedError(
+        "unsupported_action",
+        `${request.action} is not a station-initiated call on ${this._ocppVersion}; expected one of ${catalog.actions.join(", ")}`,
       );
     }
     return this._outbox.sendOcppCall(request);

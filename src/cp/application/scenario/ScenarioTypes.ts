@@ -409,12 +409,7 @@ export type DataTransferNodeData = BaseNodeData & {
  * as authored, and the two per-call expert switches. A CALLERROR answer is
  * logged and the flow goes on; a refused call or no answer fails the run.
  */
-export type OcppCallNodeData = BaseNodeData & {
-  action: string;
-  payload: Record<string, unknown>;
-  skipValidation?: boolean;
-  applyResponse?: boolean;
-};
+export type OcppCallNodeData = BaseNodeData & OcppCallRequest;
 
 /**
  * Connection Trigger Node Data — waits for the charge point's WebSocket to

@@ -4,7 +4,7 @@
  * and logging. The console, the control plane and the scenario `ocppCall`
  * node all go through `ChargePoint.sendOcppCall`.
  */
-export interface OcppCallRequest {
+export type OcppCallRequest = {
   readonly action: string;
   readonly payload: Record<string, unknown>;
   /** Send even when the payload fails the outgoing schema check. Applies to
@@ -14,7 +14,7 @@ export interface OcppCallRequest {
    *  (boot, transaction, authorize…). Off by default: the answer is only
    *  logged and returned. */
   readonly applyResponse?: boolean;
-}
+};
 
 /** The CSMS's answer. A CALLERROR is an answer too, not a failure: provoking
  *  one is often the point of an interoperability test. `sentFrame` is the

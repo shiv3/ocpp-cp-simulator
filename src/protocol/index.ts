@@ -22,6 +22,7 @@ export {
   createManyToolSchema,
   dataTransferDataSchema,
   serverInfoSchema,
+  SCENARIO_MODES,
 } from "./methods";
 export type { Blueprint, ServerInfo } from "./methods";
 
@@ -32,6 +33,15 @@ export type RpcMethod = keyof typeof METHODS;
 export type Params<M extends RpcMethod> = z.infer<
   (typeof METHODS)[M]["params"]
 >;
+
+/**
+ * A method paired with its validated params, as a discriminated union: a
+ * `switch (call.method)` narrows `call.params` to that method's schema, so a
+ * field renamed in `METHODS` breaks its handler at type-check time.
+ */
+export type RpcCall = {
+  [M in RpcMethod]: { readonly method: M; readonly params: Params<M> };
+}[RpcMethod];
 
 /** The result type for a given method. */
 export type Result<M extends RpcMethod> = z.infer<

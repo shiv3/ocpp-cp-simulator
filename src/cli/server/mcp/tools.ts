@@ -335,14 +335,14 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     description: "Update the status of a connector",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
-      connector: z
-        .number()
-        .int()
-        .min(0)
-        .describe("Connector identifier (0 for all)"),
-      status: z
-        .string()
-        .describe("Connector status (e.g., Available, Occupied, Faulted)"),
+      // Taken from the method so the tool advertises what it enforces (#383).
+      connector:
+        METHODS.update_connector_status.params.shape.connector.describe(
+          "Connector identifier (0 for all)",
+        ),
+      status: METHODS.update_connector_status.params.shape.status.describe(
+        "Connector status (e.g. Available, Charging, Faulted)",
+      ),
       errorCode: z
         .string()
         .optional()
@@ -356,10 +356,10 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .string()
         .optional()
         .describe("Optional vendor id for vendorErrorCode"),
-      timestamp: z
-        .string()
-        .optional()
-        .describe("Optional ISO 8601 timestamp for the status change"),
+      timestamp:
+        METHODS.update_connector_status.params.shape.timestamp.describe(
+          "Optional ISO 8601 timestamp for the status change",
+        ),
       suppressChargingStateTransactionEvent: z
         .boolean()
         .optional()

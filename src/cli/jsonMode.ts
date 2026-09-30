@@ -29,6 +29,7 @@ import {
   TRANSACTION_CHARGING_STATES,
   TRANSACTION_EVENT_TRIGGER_REASONS,
 } from "../cp/domain/connector/Transaction";
+import { SCENARIO_MODES } from "../protocol";
 import {
   cleanupSingleCpTarget,
   getSingleCpCommandOps,
@@ -37,10 +38,7 @@ import {
   type SingleCpProcessTarget,
 } from "./singleCpTarget";
 
-const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = [
-  "manual",
-  "scenario",
-];
+const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = SCENARIO_MODES;
 
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 

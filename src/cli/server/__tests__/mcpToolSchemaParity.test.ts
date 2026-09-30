@@ -429,3 +429,17 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     );
   });
 });
+
+describe("MCP tools advertise the vocabularies their method enforces (#383)", () => {
+  it("set_connector_status lists the connector statuses update_connector_status accepts", async () => {
+    // The tool used to take any string and suggest "Occupied", which is not a
+    // connector status; since the method's schema holds `status` to the
+    // vocabulary, following that hint answered `invalid_params`.
+    const { properties } = await toolInputSchema("set_connector_status");
+    const accepted = methodInputSchema("update_connector_status").properties
+      .status as { enum: string[] };
+    expect(accepted.enum).toContain("Available");
+    expect(properties.status).toMatchObject({ enum: accepted.enum });
+    expect(JSON.stringify(properties.status)).not.toContain("Occupied");
+  });
+});

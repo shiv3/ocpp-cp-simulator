@@ -32,6 +32,7 @@ import type {
 } from "../../../ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
+import { CallWaiters } from "./CallWaiters";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -160,14 +161,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   >();
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
-  private readonly _dataTransferWaiters = new Map<
-    string,
-    {
-      resolve: (result: DataTransferResult) => void;
-      reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
+  private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
+    DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+    (id) =>
+      new Error(
+        `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
+      ),
+  );
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
   private _bootStatus:
@@ -399,11 +399,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           errorCode?: string;
           errorDescription?: string;
         };
-        this.settleDataTransferWaiter(messageId, {
-          error: new Error(
+        this._dataTransferWaiters.reject(
+          messageId,
+          new Error(
             `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode ?? "?"}: ${error.errorDescription ?? ""}`,
           ),
-        });
+        );
       }
 
       // Issue #181: a CALLERROR answering Authorize.req is a definite
@@ -437,11 +438,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         `[v2.0.1] DataTransfer response: ${JSON.stringify(answer)}`,
         LogType.OCPP,
       );
-      this.settleDataTransferWaiter(messageId, {
-        result: {
-          status: answer.status,
-          ...(answer.data !== undefined ? { data: answer.data } : {}),
-        },
+      this._dataTransferWaiters.resolve(messageId, {
+        status: answer.status,
+        ...(answer.data !== undefined ? { data: answer.data } : {}),
       });
       return;
     }
@@ -854,35 +853,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       ...(messageId !== undefined ? { messageId } : {}),
       ...(data !== undefined ? { data } : {}),
     } as unknown as DataTransferRequestV201;
-    const answer = new Promise<DataTransferResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this._dataTransferWaiters.delete(id);
-        reject(
-          new Error(
-            `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
-          ),
-        );
-      }, DATA_TRANSFER_RESPONSE_TIMEOUT_MS);
-      this._dataTransferWaiters.set(id, { resolve, reject, timer });
-    });
+    const answer = this._dataTransferWaiters.register(id, undefined);
     this.send("DataTransfer", id, payload, (reason) =>
-      this.settleDataTransferWaiter(id, {
-        error: new Error(`DataTransfer ${id} dropped (${reason})`),
-      }),
+      this._dataTransferWaiters.reject(
+        id,
+        new Error(`DataTransfer ${id} dropped (${reason})`),
+      ),
     );
     return answer;
-  }
-
-  private settleDataTransferWaiter(
-    messageId: string,
-    outcome: { result: DataTransferResult } | { error: Error },
-  ): void {
-    const waiter = this._dataTransferWaiters.get(messageId);
-    if (!waiter) return;
-    this._dataTransferWaiters.delete(messageId);
-    clearTimeout(waiter.timer);
-    if ("result" in outcome) waiter.resolve(outcome.result);
-    else waiter.reject(outcome.error);
   }
 
   public sendSecurityEventNotification(

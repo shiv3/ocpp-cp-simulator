@@ -76,6 +76,7 @@ import {
   type HandlerResult,
 } from "./network-sim";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
+import { CallWaiters } from "./CallWaiters";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import {
   Transaction,
@@ -237,14 +238,13 @@ export class OCPPMessageHandler {
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id. Settled by handleCallResult / handleCallError,
    *  rejected when the CALL is dropped, or by their own timer. */
-  private readonly _dataTransferWaiters = new Map<
-    string,
-    {
-      resolve: (result: DataTransferResult) => void;
-      reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
+  private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
+    DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+    (id) =>
+      new Error(
+        `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
+      ),
+  );
 
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
   // arrives we restrict outgoing CALLs. The BootNotification.req itself
@@ -496,31 +496,9 @@ export class OCPPMessageHandler {
       ...(messageId !== undefined ? { messageId } : {}),
       ...(wireData !== undefined ? { data: wireData } : {}),
     };
-    const answer = new Promise<DataTransferResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this._dataTransferWaiters.delete(id);
-        reject(
-          new Error(
-            `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
-          ),
-        );
-      }, DATA_TRANSFER_RESPONSE_TIMEOUT_MS);
-      this._dataTransferWaiters.set(id, { resolve, reject, timer });
-    });
+    const answer = this._dataTransferWaiters.register(id, undefined);
     this.sendRequest(OCPPAction.DataTransfer, id, payload);
     return answer;
-  }
-
-  private settleDataTransferWaiter(
-    messageId: string,
-    outcome: { result: DataTransferResult } | { error: Error },
-  ): void {
-    const waiter = this._dataTransferWaiters.get(messageId);
-    if (!waiter) return;
-    this._dataTransferWaiters.delete(messageId);
-    clearTimeout(waiter.timer);
-    if ("result" in outcome) waiter.resolve(outcome.result);
-    else waiter.reject(outcome.error);
   }
 
   /** OCPP 1.6 Security Whitepaper: CP-initiated security event. */
@@ -775,9 +753,10 @@ export class OCPPMessageHandler {
         `Dropping ${entry.action} (informational, ${reason})`,
         LogType.OCPP,
       );
-      this.settleDataTransferWaiter(entry.id, {
-        error: new Error(`DataTransfer ${entry.id} dropped (${reason})`),
-      });
+      this._dataTransferWaiters.reject(
+        entry.id,
+        new Error(`DataTransfer ${entry.id} dropped (${reason})`),
+      );
     }
   }
 
@@ -941,11 +920,9 @@ export class OCPPMessageHandler {
     }
     // No answer can reach a waiter over a closed socket; say so now rather
     // than at the timer.
-    for (const id of [...this._dataTransferWaiters.keys()]) {
-      this.settleDataTransferWaiter(id, {
-        error: new Error(`DataTransfer ${id} dropped (socket_closed)`),
-      });
-    }
+    this._dataTransferWaiters.rejectAll(
+      (id) => new Error(`DataTransfer ${id} dropped (socket_closed)`),
+    );
     // Salvage every UNSENT queued CALL (they never reached the wire) in FIFO order.
     for (const entry of this._serialQueue) {
       this.salvageOrDiscard(entry, "socket_closed");
@@ -1189,11 +1166,9 @@ export class OCPPMessageHandler {
 
     if (action === OCPPAction.DataTransfer) {
       const answer = payload as DataTransferResponseV16;
-      this.settleDataTransferWaiter(messageId, {
-        result: {
-          status: answer.status,
-          ...(answer.data !== undefined ? { data: answer.data } : {}),
-        },
+      this._dataTransferWaiters.resolve(messageId, {
+        status: answer.status,
+        ...(answer.data !== undefined ? { data: answer.data } : {}),
       });
     }
 
@@ -1239,11 +1214,12 @@ export class OCPPMessageHandler {
       this._chargePoint.notifyAuthorizeResult(idTag, "Invalid");
     }
 
-    this.settleDataTransferWaiter(messageId, {
-      error: new Error(
+    this._dataTransferWaiters.reject(
+      messageId,
+      new Error(
         `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode}: ${error.errorDescription}`,
       ),
-    });
+    );
 
     this._requests.remove(messageId);
     // §4.1.1: CALLERROR also settles the in-flight CALL.

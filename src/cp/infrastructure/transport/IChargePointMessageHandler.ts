@@ -3,6 +3,10 @@ import type {
   DataTransferResult,
 } from "../../domain/types/DataTransfer";
 import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../domain/types/OcppCall";
+import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
@@ -56,6 +60,16 @@ export interface IChargePointMessageHandler {
     messageId?: string,
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
+  /**
+   * Expert OCPP call (#389): send `request.action` with the payload as given.
+   * The caller (`ChargePoint.sendOcppCall`) has already checked the action
+   * against the version's catalog. Resolves with the CALLRESULT or CALLERROR;
+   * rejects with `OcppCallRejectedError` before writing anything (invalid
+   * payload without `skipValidation`, boot gate, SOAP) and with
+   * `OcppCallNoAnswerError` on a drop, a close or after
+   * {@link OCPP_CALL_RESPONSE_TIMEOUT_MS}.
+   */
+  sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
   sendSecurityEventNotification(type: string, techInfo?: string): void;
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void;

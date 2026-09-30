@@ -7,24 +7,19 @@ describe("CallWaiters", () => {
   afterEach(() => vi.useRealTimers());
 
   const make = () =>
-    new CallWaiters<string, { tag: string }>(
-      100,
-      (id) => new Error(`${id} timed out`),
-    );
+    new CallWaiters<string>(100, (id) => new Error(`${id} timed out`));
 
   it("resolves the waiter registered under an id, once", async () => {
     const waiters = make();
-    const answer = waiters.register("a", { tag: "t" });
-    expect(waiters.get("a")).toEqual({ tag: "t" });
+    const answer = waiters.register("a");
     expect(waiters.resolve("a", "ok")).toBe(true);
     expect(waiters.resolve("a", "again")).toBe(false);
-    expect(waiters.get("a")).toBeUndefined();
     await expect(answer).resolves.toBe("ok");
   });
 
   it("rejects on its timer and forgets the id", async () => {
     const waiters = make();
-    const answer = waiters.register("a", { tag: "t" });
+    const answer = waiters.register("a");
     vi.advanceTimersByTime(100);
     await expect(answer).rejects.toThrow("a timed out");
     expect(waiters.reject("a", new Error("late"))).toBe(false);
@@ -32,8 +27,8 @@ describe("CallWaiters", () => {
 
   it("rejects every pending waiter", async () => {
     const waiters = make();
-    const a = waiters.register("a", { tag: "1" });
-    const b = waiters.register("b", { tag: "2" });
+    const a = waiters.register("a");
+    const b = waiters.register("b");
     waiters.rejectAll((id) => new Error(`${id} closed`));
     await expect(a).rejects.toThrow("a closed");
     await expect(b).rejects.toThrow("b closed");

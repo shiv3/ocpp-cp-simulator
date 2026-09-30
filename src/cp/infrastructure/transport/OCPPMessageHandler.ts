@@ -77,6 +77,12 @@ import {
 } from "./network-sim";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";
+import { ExpertCalls } from "./ExpertCalls";
+import {
+  type OcppCallOutcome,
+  type OcppCallRequest,
+} from "../../domain/types/OcppCall";
+import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import {
   Transaction,
@@ -225,6 +231,16 @@ class RequestHistory {
   }
 }
 
+/** A CALL waiting for, or holding, the §4.1.1 serialization slot. */
+interface SerialEntry {
+  action: OCPPAction;
+  id: string;
+  payload: OcppMessageRequestPayload;
+  connectorId?: number;
+  /** An expert call (#389): never salvaged; its caller is told instead. */
+  expert?: true;
+}
+
 export class OCPPMessageHandler {
   private _chargePoint: ChargePoint;
   private _webSocket: OCPPWebSocket;
@@ -246,6 +262,11 @@ export class OCPPMessageHandler {
       ),
   );
 
+  /** Expert calls (#389) in flight; their answers are routed here first. */
+  private readonly _expertCalls = new ExpertCalls((id) =>
+    this.withdrawQueued(id),
+  );
+
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
   // arrives we restrict outgoing CALLs. The BootNotification.req itself
   // is exempt so the handshake can complete.
@@ -263,12 +284,7 @@ export class OCPPMessageHandler {
   // in-flight at a time. Without this, real CSMS implementations drop
   // post-Boot StatusNotification fan-outs at the application layer and
   // then issue TriggerMessage to recover (observed in dev env).
-  private _serialQueue: Array<{
-    action: OCPPAction;
-    id: string;
-    payload: OcppMessageRequestPayload;
-    connectorId?: number;
-  }> = [];
+  private _serialQueue: SerialEntry[] = [];
   private _serialInFlight:
     | { phase: "queued"; action: OCPPAction; id: string }
     | {
@@ -496,9 +512,63 @@ export class OCPPMessageHandler {
       ...(messageId !== undefined ? { messageId } : {}),
       ...(wireData !== undefined ? { data: wireData } : {}),
     };
-    const answer = this._dataTransferWaiters.register(id, undefined);
+    const answer = this._dataTransferWaiters.register(id);
     this.sendRequest(OCPPAction.DataTransfer, id, payload);
     return answer;
+  }
+
+  /** Expert OCPP call (#389). Rides the §4.1.1 serial queue like any CALL,
+   *  but its answer goes to the caller, and to the result handlers only
+   *  when `applyResponse` is set. */
+  public sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+    // ChargePoint.sendOcppCall checked the action against the 1.6 catalog,
+    // every entry of which is an OCPPAction.
+    const action = request.action as OCPPAction;
+    if (!this.isCallAllowed(action)) {
+      return Promise.reject(
+        new OcppCallRejectedError(
+          "boot_gate",
+          `${action} blocked by the boot gate — BootNotification not yet Accepted`,
+        ),
+      );
+    }
+    const warning = this._codec.outgoingWarning(action, request.payload);
+    if (warning) {
+      if (!request.skipValidation) {
+        return Promise.reject(
+          new OcppCallRejectedError("invalid_payload", warning),
+        );
+      }
+      this._logger.warn(`${warning} (sent: skipValidation)`, LogType.OCPP);
+    }
+    const id = this.generateMessageId();
+    const answer = this._expertCalls.start(id, request);
+    const connectorId = this.connectorOf(request.payload);
+    this._serialQueue.push({
+      action,
+      id,
+      // Deliberately unchecked when skipValidation is set.
+      payload: request.payload as unknown as OcppMessageRequestPayload,
+      ...(connectorId !== undefined ? { connectorId } : {}),
+      expert: true,
+    });
+    this.pumpSerialQueue();
+    return answer;
+  }
+
+  /** The connector an expert call concerns, for the result handlers that
+   *  key on it when `applyResponse` is set: the payload's `connectorId`
+   *  (StartTransaction, MeterValues, StatusNotification), else the connector
+   *  running its `transactionId` (StopTransaction). */
+  private connectorOf(payload: Record<string, unknown>): number | undefined {
+    if (typeof payload.connectorId === "number") return payload.connectorId;
+    if (typeof payload.transactionId !== "number") return undefined;
+    for (const connector of this._chargePoint.connectors.values()) {
+      if (connector.transaction?.id === payload.transactionId) {
+        return connector.id;
+      }
+    }
+    return undefined;
   }
 
   /** OCPP 1.6 Security Whitepaper: CP-initiated security event. */
@@ -729,15 +799,15 @@ export class OCPPMessageHandler {
    * Transaction-related messages (StartTransaction/StopTransaction/MeterValues) are
    * queued for retry; others are logged and discarded.
    */
-  private salvageOrDiscard(
-    entry: {
-      action: OCPPAction;
-      id: string;
-      payload: OcppMessageRequestPayload;
-      connectorId?: number;
-    },
-    reason: string,
-  ): void {
+  private salvageOrDiscard(entry: SerialEntry, reason: string): void {
+    if (entry.expert) {
+      this._logger.warn(
+        `Dropping expert ${entry.action} (${reason})`,
+        LogType.OCPP,
+      );
+      this._expertCalls.onDropped(entry.id, reason);
+      return;
+    }
     if (isTransactionRelated(entry.action)) {
       this._pendingQueue.enqueue({
         action: entry.action,
@@ -821,15 +891,7 @@ export class OCPPMessageHandler {
    * (socket_closed, disposed, write_failed). Handles the phase transition from
    * "queued" → "written" and manages custody (salvage vs. drop) on failure.
    */
-  private onSerialSettled(
-    head: {
-      action: OCPPAction;
-      id: string;
-      payload: OcppMessageRequestPayload;
-      connectorId?: number;
-    },
-    settlement: Settlement,
-  ): void {
+  private onSerialSettled(head: SerialEntry, settlement: Settlement): void {
     const cur = this._serialInFlight;
     // Staleness guard: ignore a settlement that no longer matches the current slot.
     if (!cur || cur.id !== head.id) return;
@@ -874,6 +936,24 @@ export class OCPPMessageHandler {
       return;
     }
     // queue_overflow cannot occur for a CALL (sendAction returns false on overflow -> the send-false path).
+  }
+
+  /** Take an expert CALL back out of the serial queue if it has not been
+   *  sent yet (#389): its caller has already been told "no answer". */
+  private withdrawQueued(messageId: string): boolean {
+    const index = this._serialQueue.findIndex(
+      (entry) => entry.id === messageId,
+    );
+    if (index === -1) return false;
+    this._serialQueue.splice(index, 1);
+    return true;
+  }
+
+  /** An answered CALL whose answer stops here (#389 expert call without
+   *  `applyResponse`): forget it and free the serialization slot. */
+  private forgetAnsweredCall(messageId: string): void {
+    this._requests.remove(messageId);
+    this.settleSerialInFlight(messageId);
   }
 
   /** Release the serialization slot when a response settles the in-flight
@@ -923,6 +1003,7 @@ export class OCPPMessageHandler {
     this._dataTransferWaiters.rejectAll(
       (id) => new Error(`DataTransfer ${id} dropped (socket_closed)`),
     );
+    this._expertCalls.onClosed();
     // Salvage every UNSENT queued CALL (they never reached the wire) in FIFO order.
     for (const entry of this._serialQueue) {
       this.salvageOrDiscard(entry, "socket_closed");
@@ -1115,6 +1196,11 @@ export class OCPPMessageHandler {
     messageId: string,
     payload: OcppMessagePayloadCallResult,
   ): void {
+    const expert = this._expertCalls.onResult(messageId, payload);
+    if (expert && !expert.applyResponse) {
+      this.forgetAnsweredCall(messageId);
+      return;
+    }
     const request = this._requests.get(messageId);
     if (!request) {
       this._logger.warn(
@@ -1187,6 +1273,11 @@ export class OCPPMessageHandler {
       `Received CALLERROR for message ${messageId} (action=${request?.action ?? "unknown"}): ${JSON.stringify(error)}`,
       LogType.OCPP,
     );
+    const expert = this._expertCalls.onError(messageId, error);
+    if (expert && !expert.applyResponse) {
+      this.forgetAnsweredCall(messageId);
+      return;
+    }
 
     // Recover connector state when StartTransaction fails
     if (request?.action === OCPPAction.StartTransaction) {

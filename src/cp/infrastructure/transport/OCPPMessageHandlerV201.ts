@@ -33,6 +33,12 @@ import type {
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";
+import { ExpertCalls } from "./ExpertCalls";
+import {
+  type OcppCallOutcome,
+  type OcppCallRequest,
+} from "../../domain/types/OcppCall";
+import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -168,6 +174,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
       ),
   );
+  /** Expert calls (#389) in flight; their answers are routed here first. */
+  // 2.x writes a CALL at once or drops it: nothing is ever left to withdraw.
+  private readonly _expertCalls = new ExpertCalls(() => false);
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
   private _bootStatus:
@@ -394,6 +403,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const pending = this._pendingRequests.get(messageId);
       this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
+      const expert = this._expertCalls.onError(
+        messageId,
+        payload as {
+          errorCode?: string;
+          errorDescription?: string;
+          errorDetails?: unknown;
+        },
+      );
+      if (expert && !expert.applyResponse) return;
       if (pending?.action === "DataTransfer") {
         const error = payload as {
           errorCode?: string;
@@ -431,6 +449,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   ): void {
     const pending = this._pendingRequests.get(messageId);
     this._pendingRequests.delete(messageId);
+
+    const expert = this._expertCalls.onResult(messageId, payload);
+    if (expert && !expert.applyResponse) return;
 
     if (pending?.action === "DataTransfer") {
       const answer = payload as DataTransferResponseV201;
@@ -853,12 +874,37 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       ...(messageId !== undefined ? { messageId } : {}),
       ...(data !== undefined ? { data } : {}),
     } as unknown as DataTransferRequestV201;
-    const answer = this._dataTransferWaiters.register(id, undefined);
+    const answer = this._dataTransferWaiters.register(id);
     this.send("DataTransfer", id, payload, (reason) =>
       this._dataTransferWaiters.reject(
         id,
         new Error(`DataTransfer ${id} dropped (${reason})`),
       ),
+    );
+    return answer;
+  }
+
+  /** Expert OCPP call (#389): any 2.0.1 / 2.1 station CALL (the catalog
+   *  was checked by ChargePoint.sendOcppCall). Its answer goes to the
+   *  caller, and through the normal response handling only when
+   *  `applyResponse` is set. */
+  public sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+    const warning =
+      this._codec?.outgoingWarning(request.action, request.payload) ?? null;
+    if (warning && !request.skipValidation) {
+      return Promise.reject(
+        new OcppCallRejectedError("invalid_payload", warning),
+      );
+    }
+    const id = this.generateMessageId();
+    const answer = this._expertCalls.start(id, request);
+    // `send` logs the codec warning, if any, as for every CALL; with
+    // skipValidation the payload is deliberately unchecked.
+    this.send(
+      request.action as V201Action,
+      id,
+      request.payload as unknown as V201RequestPayload,
+      (reason) => this._expertCalls.onDropped(id, reason),
     );
     return answer;
   }
@@ -968,6 +1014,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // Clear written-but-unanswered correlation entries on disconnect.
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
+    this._expertCalls.onClosed();
   }
 
   public flushPendingQueue(): void {

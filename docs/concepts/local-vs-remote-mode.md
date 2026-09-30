@@ -12,7 +12,7 @@ related:
   - ../entities/docker-image.md
   - state-persistence.md
   - control-plane.md
-updated: 2026-09-03
+updated: 2026-09-30
 ---
 
 # Local vs Remote mode (browser)
@@ -47,3 +47,8 @@ overridden.
   and clears the local DB in Local mode.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
+- The scenario wait controls (extend / retry / continue, #240) work in both
+  modes and refuse an idle scenario the same way. The run report that records
+  them (`interventions`) and the `scenario_wait_changed` event that refreshes
+  other consoles exist only on the daemon — Local mode has no run reports and
+  no scenario events.

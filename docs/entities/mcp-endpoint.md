@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 19 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 20 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -12,7 +12,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/network-simulation.md
   - ../analyses/driving-from-an-ai-agent.md
-updated: 2026-09-17
+updated: 2026-09-30
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -36,7 +36,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 19 curated tools wrapping the daemon's
+The endpoint exposes 20 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                    | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -59,6 +59,7 @@ The endpoint exposes 19 curated tools wrapping the daemon's
 | `scenario_templates`    | `scenario.templates`      | —                                                                                                                                                                                                                                                                             |
 | `run_scenario_template` | `run_scenario_template`   | `cpId`, `connector`, `templateId`, `evSettings?`, `strict?`, `once?`                                                                                                                                                                                                          |
 | `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                                                                                                                                                                                             |
+| `control_scenario_wait` | `<action>_scenario_wait`  | `cpId`, `connector`, `scenarioId`, `action` (`extend` / `retry` / `continue`), `seconds?` — required by `extend` (#240)                                                                                                                                                       |
 | `get_logs`              | `logs.get`                | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                                                                            |
 
 Most of these tools hand-declare a copy of their method's fields rather than
@@ -68,8 +69,10 @@ a field the method later gains, or an optional field the tool over-tightened
 to required, could silently drift out of reach of an MCP agent (#284, #299).
 `mcpToolSchemaParity.test.ts` guards against both directions for every
 curated tool except the ones noted in its own comments (`network_sim_get` /
-`network_sim_set`, which dispatch to one of two methods, and the generic
-`call_method` / `list_methods`).
+`network_sim_set`, which dispatch to one of two methods, `control_scenario_wait`,
+which dispatches to one of three, and the generic `call_method` /
+`list_methods`); the multi-method tools are checked against every method
+they can call.
 
 ### Network-simulation tools
 

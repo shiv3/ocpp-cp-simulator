@@ -89,9 +89,12 @@ downloadable as JSON. **View all runs** opens the **Run History** page
 with filters on charge point, connector, scenario id, verdict and execution
 state, pages of 50, and the selected run's report beside the list. Filters, the
 page and the selected run are kept in the URL (`?cp=&connector=&scenario=
-&verdict=&state=&offset=&run=`), so a copied URL reopens the same view; a
-linked run that is no longer on that page (newer runs pushed it down) is
-looked up by `runId` and its report still opens. Both re-list when the daemon
+&verdict=&state=&offset=&run=&runCp=`), so a copied URL reopens the same view;
+a linked run that is no longer on that page (newer runs pushed it down) is
+looked up by `runId` and its report still opens. A run is identified by its
+charge point and its `runId` (`runCp` + `run`), since a runId is unique per
+charge point only; a link without `runCp` opens its run only when that id
+names a single one. Both re-list when the daemon
 records a run, and when a charge point is deleted or the simulator reset
 ([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
 In Local mode the run console keeps a history of this page view only, and the

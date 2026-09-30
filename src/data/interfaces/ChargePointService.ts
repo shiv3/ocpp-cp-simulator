@@ -20,6 +20,10 @@ import type {
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "../../cp/domain/persistence/ScenarioRunRepository";
+import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
@@ -245,6 +249,14 @@ export type ChargePointEvent =
       nodeId: string;
     }
   | {
+      /** #388: a finished run's report was added to the daemon's run
+       *  history; re-list runs. Daemon only. */
+      type: "scenario-run-recorded";
+      connectorId: number;
+      scenarioId: string;
+      runId: string;
+    }
+  | {
       /** #240: an operator extended, retried or continued the parked wait;
        *  re-read the scenario status for the new deadline. */
       type: "scenario-wait-changed";
@@ -391,6 +403,12 @@ export interface ChargePointService {
    *  by the Download Logs button — the returned shape is what the JSONL
    *  file ends up containing, one JSON object per line. */
   listStoredLogs?(cpId: string): Promise<StoredLogEntry[]>;
+
+  /** #388: the daemon's finished scenario runs across every charge point,
+   *  newest first, filtered and paged (`scenario.runs.list`). Summaries only —
+   *  {@link getScenarioReport} returns a run's full report. Remote only:
+   *  local mode keeps no run history. */
+  listScenarioRuns?(query: ScenarioRunQuery): Promise<ScenarioRunPage>;
 
   // Persisted simulator config. Reads may be redacted over wire adapters.
   loadConfig(): Promise<WireSimulatorConfig | null>;

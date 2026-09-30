@@ -1,5 +1,5 @@
 import type { ScenarioRunResult } from "../../application/verification/ScenarioAssertions";
-import type { Database } from "./Database";
+import type { Database, SqlParam } from "./Database";
 import {
   summarizeRun,
   type ScenarioRunPage,
@@ -85,8 +85,8 @@ export class SqliteScenarioRunRepository implements ScenarioRunRepository {
 
   list(query: ScenarioRunQuery): ScenarioRunPage {
     const clauses: string[] = [];
-    const params: unknown[] = [];
-    const filter = (column: string, value: unknown): void => {
+    const params: SqlParam[] = [];
+    const filter = (column: string, value: SqlParam | undefined): void => {
       if (value === undefined) return;
       clauses.push(`${column} = ?`);
       params.push(value);

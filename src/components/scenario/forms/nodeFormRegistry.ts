@@ -628,12 +628,23 @@ function dataTransferFormToNodeData(
   }) as DataTransferNodeData;
 }
 
+/** An ocppCall payload as saved (#389): an object as is; anything else as
+ *  the text that was authored, never replaced by `{}` — the run then refuses
+ *  the step instead of silently sending a different, valid payload. */
+function ocppCallPayload(value: unknown): Record<string, unknown> | string {
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return JSON.stringify(value) ?? "";
+}
+
 function ocppCallNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
   const data = nodeData as Partial<OcppCallNodeData>;
   return compactDefined({
     ...baseToForm(nodeData),
     action: stringValue(data.action),
-    payload: payloadValue(data.payload),
+    payload: ocppCallPayload(data.payload),
     skipValidation: optionalBoolean(data.skipValidation),
     applyResponse: optionalBoolean(data.applyResponse),
   });
@@ -643,7 +654,7 @@ function ocppCallFormToNodeData(formData: NodeFormData): OcppCallNodeData {
   return compactDefined({
     ...baseFromForm(formData),
     action: stringValue(formData.action),
-    payload: payloadValue(formData.payload) as Record<string, unknown>,
+    payload: ocppCallPayload(formData.payload) as Record<string, unknown>,
     skipValidation: optionalBoolean(formData.skipValidation),
     applyResponse: optionalBoolean(formData.applyResponse),
   }) as OcppCallNodeData;

@@ -181,9 +181,11 @@ export function JsonTextareaField({
   const text =
     typeof value === "string"
       ? value
-      : optional && value === undefined
-        ? ""
-        : JSON.stringify(value || {}, null, 2);
+      : value === undefined
+        ? optional
+          ? ""
+          : "{}"
+        : JSON.stringify(value, null, 2);
   return (
     <TextareaField
       label={label}

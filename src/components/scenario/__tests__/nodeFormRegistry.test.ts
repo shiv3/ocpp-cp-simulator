@@ -144,4 +144,22 @@ describe("NODE_FORM_REGISTRY", () => {
       NODE_FORM_REGISTRY[ScenarioNodeType.OCPP_CALL].formToNodeData(formData),
     );
   });
+
+  it.each([
+    ["an array", [], "[]"],
+    ["null", null, "null"],
+    ["a number", 3, "3"],
+    ["unparsed text", '{"a":', '{"a":'],
+  ])(
+    "keeps %s authored as an ocppCall payload as its text, never as {} (#389)",
+    (_label, payload, saved) => {
+      const entry = NODE_FORM_REGISTRY[ScenarioNodeType.OCPP_CALL];
+      const data = entry.formToNodeData({
+        label: "Call",
+        action: "Heartbeat",
+        payload,
+      }) as unknown as { payload: unknown };
+      expect(data.payload).toBe(saved);
+    },
+  );
 });

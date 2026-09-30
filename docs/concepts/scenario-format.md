@@ -260,11 +260,17 @@ any station-initiated CALL of the station's OCPP-J version (`action`), with
 - `skipValidation: true` sends a schema-invalid `payload` for this node only;
   `applyResponse: true` lets the answer change the station's state (boot,
   transaction, authorization), which by default it does not.
+- Stopping the run while the call waits for its answer ends the run at once;
+  the answer, or the call's failure, is then ignored.
 - The action is checked when the node runs, not by the schema: the same file
   can target 1.6 and 2.x stations only if the action exists on both.
+- A `payload` that is not a JSON object (an array, `null`, a number, or text
+  that does not parse) is saved as the text that was typed — never replaced by
+  `{}` — and the editor flags it; the run then fails on that step.
 - `notification` is not an alternative: in the simulator it knows only
   `Heartbeat` and `StatusNotification` (and reads only `payload.status` of the
-  latter). `export-k6` sends both nodes as authored.
+  latter). `export-k6` sends both nodes as authored and, for `ocppCall`,
+  carries on after a CALLERROR too.
 
 ### Controls on a parked wait
 

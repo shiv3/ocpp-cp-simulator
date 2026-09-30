@@ -742,6 +742,36 @@ describe("ocppCall node (#389)", () => {
     );
   });
 
+  it("stops at once while the call is pending, and a later failure of that call is not a run error", async () => {
+    let rejectCall: (err: Error) => void = () => undefined;
+    const onSendOcppCall = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectCall = reject;
+        }),
+    );
+    const onError = vi.fn();
+    const log = vi.fn();
+    const executor = executorFor({ onSendOcppCall, onError, log });
+
+    const run = executor.start();
+    await vi.waitFor(() => expect(onSendOcppCall).toHaveBeenCalled());
+    executor.stop();
+    const settled = await Promise.race([
+      run.then(() => "settled"),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), 200)),
+    ]);
+    expect(settled).toBe("settled");
+
+    rejectCall(new Error("OCPP call m1: no answer within 25000ms"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onError).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalledWith(
+      expect.stringContaining("Scenario execution failed"),
+      "error",
+    );
+  });
+
   it("is wired by the runtime to ChargePoint.sendOcppCall", async () => {
     const { chargePoint, chargePointShape, connector } = createRuntimeMocks();
     chargePointShape.sendOcppCall.mockResolvedValue({

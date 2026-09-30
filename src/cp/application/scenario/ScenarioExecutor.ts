@@ -899,12 +899,23 @@ export class ScenarioExecutor {
       return;
     }
     const { action, payload, skipValidation, applyResponse } = data;
-    const outcome = await this.callbacks.onSendOcppCall({
+    const call = this.callbacks.onSendOcppCall({
       action,
       payload,
       skipValidation,
       applyResponse,
     });
+    // stop() must not wait up to 25 s for the answer. Once stopped, the call's
+    // fate is no longer this run's: a later rejection is swallowed rather than
+    // reported as a run error after `execution.stopped`.
+    const outcome = await Promise.race([
+      call,
+      this.abortPromise.then(() => null),
+    ]);
+    if (outcome === null) {
+      call.catch(() => undefined);
+      return;
+    }
     if (outcome.kind === "callResult") {
       this.callbacks.log?.(
         `OCPP call ${data.action} → CALLRESULT ${JSON.stringify(outcome.payload)}`,

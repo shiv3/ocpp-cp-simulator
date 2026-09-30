@@ -62,6 +62,21 @@ export interface TranscriptEntry {
   timeMs: number;
 }
 
+/** A sent call the CSMS answered with a CALLERROR. It is an answer, not a
+ *  transport failure: the `ocppCall` node (#389) carries on after one, as the
+ *  simulator's does, while timeouts and connection failures still fail the
+ *  run. */
+export class CallErrorAnswer extends Error {
+  constructor(
+    readonly action: string,
+    readonly errorCode: string,
+    readonly errorDescription: string,
+  ) {
+    super(`${action} CALLERROR ${errorCode}: ${errorDescription}`);
+    this.name = "CallErrorAnswer";
+  }
+}
+
 export interface WireCall {
   action: string;
   payload: Record<string, unknown>;

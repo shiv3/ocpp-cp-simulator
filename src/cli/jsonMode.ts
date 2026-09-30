@@ -656,8 +656,8 @@ export function optionalDataTransferData(
   return parsed.data;
 }
 
-/** `extend_scenario_wait`'s `seconds`, held to the control plane's schema
- *  (1–3600) rather than a copy of its bounds (#240). */
+/** `extend_scenario_wait`'s `seconds`, validated by the control plane's own
+ *  schema (#240); only the error message repeats its 1–3600 bounds. */
 export function requireWaitExtensionSeconds(
   params: Record<string, unknown>,
 ): number {

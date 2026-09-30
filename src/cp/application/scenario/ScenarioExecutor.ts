@@ -1592,11 +1592,8 @@ export class ScenarioExecutor {
       ? deriveExpectation(node, this.scenario.targetId)
       : null;
 
-    // Armed synchronously from executeSingleNode, so this is still the
-    // node's own start time.
-    let startedAt = this.currentNodeStartedAt ?? Date.now();
-
     for (;;) {
+      const startedAt = Date.now();
       const control = new WaitControl(
         timeoutMs,
         (seconds) => new Error(timeoutMessage(seconds)),
@@ -1630,7 +1627,6 @@ export class ScenarioExecutor {
 
       if (outcome === "settled") return answer;
       if (outcome === "continue" || this.aborted) return null;
-      startedAt = Date.now();
     }
   }
 

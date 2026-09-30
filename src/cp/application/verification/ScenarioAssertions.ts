@@ -26,6 +26,7 @@ import type {
   AssertionStatus,
   ScenarioVerdict,
   CompatibilityVerdict,
+  ScenarioWaitIntervention,
 } from "../scenario/ScenarioTypes";
 import {
   redactSensitiveText,
@@ -594,6 +595,9 @@ export interface ScenarioRunResult {
   transcript: TranscriptEntry[];
   errors: string[];
   timeout: { nodeId: string; expectation?: unknown } | null;
+  /** #240: operator actions taken on the run's parked waits, in order.
+   *  Informational: the verdict still comes from the assertions alone. */
+  interventions: ScenarioWaitIntervention[];
   initialState: ScenarioStateSnapshot;
   finalState: ScenarioStateSnapshot;
 }

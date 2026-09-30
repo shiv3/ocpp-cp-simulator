@@ -337,6 +337,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       "cp_create_many",
       "network_sim_get",
       "network_sim_set",
+      "control_scenario_wait",
       "call_method",
       "list_methods",
     ]);
@@ -345,6 +346,27 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     const allTools = await listToolNames();
     const uncovered = allTools.filter((name) => !covered.has(name));
     expect(uncovered).toEqual([]);
+  });
+
+  // #240: control_scenario_wait picks one of three methods from `action`, so
+  // it must carry the fields of all three, with `seconds` (extend only)
+  // left optional.
+  it("control_scenario_wait is not narrower than any wait-control method it dispatches to", async () => {
+    const advertised = await toolInputSchema("control_scenario_wait");
+    for (const method of [
+      "extend_scenario_wait",
+      "retry_scenario_wait",
+      "continue_scenario_wait",
+    ] as const) {
+      const canonical = methodInputSchema(method);
+      for (const field of Object.keys(canonical.properties)) {
+        expect(advertised.properties).toHaveProperty(field);
+      }
+    }
+    expect(advertised.required).not.toContain("seconds");
+    expect(advertised.required).toEqual(
+      expect.arrayContaining(["cpId", "connector", "scenarioId", "action"]),
+    );
   });
 
   // network_sim_get / network_sim_set pick between a global and a per-CP

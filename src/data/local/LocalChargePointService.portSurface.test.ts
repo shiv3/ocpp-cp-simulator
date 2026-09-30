@@ -204,6 +204,35 @@ describe("LocalChargePointService A1.1d port methods", () => {
     expect(manager.executeScenario).toHaveBeenCalledWith(result.scenarioId);
   });
 
+  it("forwards the wait controls to the connector's scenario manager (#240)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const manager = {
+      extendWait: vi.fn(),
+      retryWait: vi.fn(),
+      continueWait: vi.fn(),
+      destroy: vi.fn(),
+    } as unknown as ScenarioManager;
+    setup.chargePoint.getConnector(1)?.setScenarioManager(manager);
+
+    await service.extendScenarioWait("CP-PORT", 1, "s1", 30);
+    await service.retryScenarioWait("CP-PORT", 1, "s1");
+    await service.continueScenarioWait("CP-PORT", 1, "s1");
+
+    expect(manager.extendWait).toHaveBeenCalledWith("s1", 30);
+    expect(manager.retryWait).toHaveBeenCalledWith("s1");
+    expect(manager.continueWait).toHaveBeenCalledWith("s1");
+  });
+
+  it("rejects a wait control when the browser executor is unavailable (#240)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+
+    await expect(
+      service.continueScenarioWait("CP-PORT", 1, "s1"),
+    ).rejects.toThrow("Scenario manager not available");
+  });
+
   it("rejects runScenarioTemplate when the browser executor is unavailable", async () => {
     const setup = await serviceWithChargePoint();
     service = setup.service;

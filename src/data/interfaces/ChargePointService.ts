@@ -245,6 +245,17 @@ export type ChargePointEvent =
       nodeId: string;
     }
   | {
+      /** #240: an operator extended, retried or continued the parked wait;
+       *  re-read the scenario status for the new deadline. */
+      type: "scenario-wait-changed";
+      connectorId: number;
+      scenarioId: string;
+      /** Runtime run id (daemon only — local mode mints none). */
+      runId?: string;
+      nodeId: string;
+      kind: "extend" | "retry" | "continue";
+    }
+  | {
       /** §4.6 Heartbeat state. `intervalSeconds=0` means the CSMS has not
        *  configured a heartbeat (or set it to 0 to disable). `lastSentAt` is
        *  an ISO string so the same shape works over the remote-mode events
@@ -643,6 +654,26 @@ export interface ChargePointService {
     connectorId: number,
     scenarioId: string,
     force?: boolean,
+  ): Promise<void>;
+  /** #240: push the parked wait's deadline back by `seconds`. Rejects when
+   *  the run is not running, not waiting, or its wait has no timeout. */
+  extendScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): Promise<void>;
+  /** #240: withdraw the parked wait and arm it again with its full timeout. */
+  retryScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void>;
+  /** #240: move past the parked wait without the awaited event. */
+  continueScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
   ): Promise<void>;
   stopAllScenarios(id: string, connectorId: number): Promise<void>;
   /** Drop a single scenario from the runtime + persistence. Used by the

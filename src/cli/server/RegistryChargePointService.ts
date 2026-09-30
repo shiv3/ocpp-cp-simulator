@@ -749,6 +749,35 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).stepScenario(connectorId, scenarioId, force);
   }
 
+  async extendScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): Promise<void> {
+    this.requireService(id).extendScenarioWait(
+      connectorId,
+      scenarioId,
+      seconds,
+    );
+  }
+
+  async retryScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).retryScenarioWait(connectorId, scenarioId);
+  }
+
+  async continueScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).continueScenarioWait(connectorId, scenarioId);
+  }
+
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {
     this.requireService(id).stopAllScenarios(connectorId);
   }
@@ -1088,6 +1117,15 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
         scenarioId: evt.data.scenarioId,
         runId: evt.data.runId,
         nodeId: evt.data.nodeId,
+      };
+    case "scenario_wait_changed":
+      return {
+        type: "scenario-wait-changed",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+        nodeId: evt.data.nodeId,
+        kind: evt.data.kind,
       };
     case "connector_availability":
       return {

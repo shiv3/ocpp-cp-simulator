@@ -160,6 +160,13 @@ export interface SingleCpCommandOps {
     scenarioId: string,
     force?: boolean,
   ): Promise<void>;
+  extendScenarioWait(
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): Promise<void>;
+  retryScenarioWait(connectorId: number, scenarioId: string): Promise<void>;
+  continueScenarioWait(connectorId: number, scenarioId: string): Promise<void>;
   stopAllScenarios(connectorId: number): Promise<void>;
   removeScenario(connectorId: number, scenarioId: string): Promise<boolean>;
   setEVSettings(connectorId: number, settings: EVSettings): Promise<void>;
@@ -341,6 +348,15 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     stepScenario: async (connectorId, scenarioId, force) => {
       service.stepScenario(connectorId, scenarioId, force);
     },
+    extendScenarioWait: async (connectorId, scenarioId, seconds) => {
+      service.extendScenarioWait(connectorId, scenarioId, seconds);
+    },
+    retryScenarioWait: async (connectorId, scenarioId) => {
+      service.retryScenarioWait(connectorId, scenarioId);
+    },
+    continueScenarioWait: async (connectorId, scenarioId) => {
+      service.continueScenarioWait(connectorId, scenarioId);
+    },
     stopAllScenarios: async (connectorId) => {
       service.stopAllScenarios(connectorId);
     },
@@ -461,6 +477,12 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.resetScenario(cpId, connectorId, scenarioId),
     stepScenario: (connectorId, scenarioId, force) =>
       service.stepScenario(cpId, connectorId, scenarioId, force),
+    extendScenarioWait: (connectorId, scenarioId, seconds) =>
+      service.extendScenarioWait(cpId, connectorId, scenarioId, seconds),
+    retryScenarioWait: (connectorId, scenarioId) =>
+      service.retryScenarioWait(cpId, connectorId, scenarioId),
+    continueScenarioWait: (connectorId, scenarioId) =>
+      service.continueScenarioWait(cpId, connectorId, scenarioId),
     stopAllScenarios: (connectorId) =>
       service.stopAllScenarios(cpId, connectorId),
     removeScenario: async (connectorId, scenarioId) => {

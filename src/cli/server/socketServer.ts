@@ -95,6 +95,7 @@ import {
 } from "../soapPath";
 import { appVersion } from "../appVersion";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
+import { ScenarioRunStateError } from "../../cp/domain/errors/ScenarioRunStateError";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
@@ -2214,6 +2215,40 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "extend_scenario_wait": {
+      const id = requireFacadeCpId(cpId, rawParams);
+      await runFacadeOperation(() =>
+        chargePointService.extendScenarioWait(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+          requirePositiveInt(params, "seconds"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "retry_scenario_wait": {
+      const id = requireFacadeCpId(cpId, rawParams);
+      await runFacadeOperation(() =>
+        chargePointService.retryScenarioWait(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+        ),
+      );
+      return handled(undefined);
+    }
+    case "continue_scenario_wait": {
+      const id = requireFacadeCpId(cpId, rawParams);
+      await runFacadeOperation(() =>
+        chargePointService.continueScenarioWait(
+          id,
+          requirePositiveInt(params, "connector"),
+          requireString(params, "scenarioId"),
+        ),
+      );
+      return handled(undefined);
+    }
     case "stop_all_scenarios": {
       const id = requireFacadeCpId(cpId, rawParams);
       await runFacadeOperation(() =>
@@ -2417,6 +2452,12 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
     err.message.startsWith("Connection timeout")
   ) {
     return new RpcFailure("connect_failed", err.message);
+  }
+  // #240: a scenario control aimed at a scenario that cannot take it (unknown,
+  // not running, not parked on a wait, …) is a caller error, not a daemon
+  // fault. The message names only the scenario id.
+  if (err instanceof ScenarioRunStateError) {
+    return new RpcFailure("invalid_params", err.message);
   }
   return null;
 }

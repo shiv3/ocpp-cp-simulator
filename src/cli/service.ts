@@ -52,6 +52,7 @@ import type {
   ConnectorStatus,
 } from "./types";
 import { ScenarioExecutor } from "../cp/application/scenario/ScenarioExecutor";
+import { ScenarioRunStateError } from "../cp/domain/errors/ScenarioRunStateError";
 import type { ScenarioEvents } from "../cp/application/scenario/ScenarioTypes";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { EventEmitter } from "../cp/shared/EventEmitter";
@@ -61,6 +62,7 @@ import type {
   ScenarioExecutionMode,
   ScenarioExecutionState,
   ScenarioMode,
+  ScenarioWaitIntervention,
   StartNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
@@ -181,6 +183,18 @@ export type CLIEvent =
         readonly scenarioId: string;
         readonly nodeId: string;
         readonly runId: string;
+      };
+    }
+  | {
+      // #240: an operator extended, retried or continued the parked wait,
+      // so a client showing its countdown must re-read scenario_status.
+      readonly event: "scenario_wait_changed";
+      readonly data: {
+        readonly connectorId: number;
+        readonly scenarioId: string;
+        readonly runId: string;
+        readonly nodeId: string;
+        readonly kind: ScenarioWaitIntervention["kind"];
       };
     }
   | {
@@ -441,6 +455,13 @@ export class CLIChargePointService {
   // Per-run strict flag, keyed like _executors/_runIdByScenario by scenarioId.
   // Stores the per-run strict option if provided, consulted by finalizeScenarioRun.
   private readonly _strictByScenario: Map<string, boolean> = new Map();
+  // #240: operator actions (extend / retry / continue) taken on the parked
+  // waits of the currently-executing run, keyed like _strictByScenario and
+  // copied into the run report by finalizeScenarioRun.
+  private readonly _interventionsByScenario: Map<
+    string,
+    ScenarioWaitIntervention[]
+  > = new Map();
   // #179 Phase 2b: bounded history of per-run verdicts + assertion results,
   // keyed by runId. Capped so a long-lived daemon doesn't accumulate
   // results forever; recordRunResult evicts the oldest entry past the cap.
@@ -1509,6 +1530,7 @@ export class CLIChargePointService {
     }
     this._runStartByScenario.delete(scenarioId);
     this._strictByScenario.delete(scenarioId);
+    this._interventionsByScenario.delete(scenarioId);
   }
 
   /**
@@ -1644,6 +1666,9 @@ export class CLIChargePointService {
       this._strictByScenario.delete(scenarioId);
     }
 
+    const interventions: ScenarioWaitIntervention[] = [];
+    this._interventionsByScenario.set(scenarioId, interventions);
+
     // #179 Phase 2b: capture the OCPP wire transcript for this run so its
     // declared assertions (if any) can be evaluated once it ends.
     const transcript = new TranscriptBuffer(this._chargePoint.logger);
@@ -1694,6 +1719,19 @@ export class CLIChargePointService {
           this.emit({
             event: "scenario_node_execute",
             data: { connectorId, scenarioId, nodeId, runId },
+          });
+        },
+        onWaitIntervention: (intervention) => {
+          interventions.push(intervention);
+          this.emit({
+            event: "scenario_wait_changed",
+            data: {
+              connectorId,
+              scenarioId,
+              runId,
+              nodeId: intervention.nodeId,
+              kind: intervention.kind,
+            },
           });
         },
         onError: (error) => {
@@ -2094,19 +2132,47 @@ export class CLIChargePointService {
   }
 
   stepScenario(connectorId: number, scenarioId: string, force = false): void {
+    const executor = this.requireRunningExecutor(connectorId, scenarioId);
+    if (force) executor.forceStep();
+    else executor.step();
+  }
+
+  /** #240: push the parked wait's deadline back by `seconds`. */
+  extendScenarioWait(
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): void {
+    this.requireRunningExecutor(connectorId, scenarioId).extendWait(seconds);
+  }
+
+  /** #240: withdraw the parked wait and arm it again with its full timeout. */
+  retryScenarioWait(connectorId: number, scenarioId: string): void {
+    this.requireRunningExecutor(connectorId, scenarioId).retryWait();
+  }
+
+  /** #240: move past the parked wait without the awaited event. */
+  continueScenarioWait(connectorId: number, scenarioId: string): void {
+    this.requireRunningExecutor(connectorId, scenarioId).continueWait();
+  }
+
+  private requireRunningExecutor(
+    connectorId: number,
+    scenarioId: string,
+  ): ScenarioExecutor {
     const entry = this._scenarios.get(scenarioId);
-    if (!entry) throw new Error(`Scenario ${scenarioId} not found`);
+    if (!entry)
+      throw new ScenarioRunStateError(`Scenario ${scenarioId} not found`);
     if (entry.connectorId !== connectorId) {
-      throw new Error(
+      throw new ScenarioRunStateError(
         `Scenario ${scenarioId} is not loaded for connector ${connectorId}`,
       );
     }
     const executor = this._executors.get(scenarioId);
     if (!executor) {
-      throw new Error(`Scenario ${scenarioId} is not running`);
+      throw new ScenarioRunStateError(`Scenario ${scenarioId} is not running`);
     }
-    if (force) executor.forceStep();
-    else executor.step();
+    return executor;
   }
 
   /**
@@ -2167,6 +2233,7 @@ export class CLIChargePointService {
       // The run is over: nothing is parked and no node is mid-execution.
       expectation: null,
       currentNodeStartedAt: null,
+      waitDeadlineAt: null,
       ...(errors.length > 0 ? { error: errors[0] } : {}),
       runId,
     });
@@ -2252,6 +2319,8 @@ export class CLIChargePointService {
     // Effective strict: per-run option, then the scenario definition, then off.
     const perRunStrict = this._strictByScenario.get(scenarioId);
     this._strictByScenario.delete(scenarioId);
+    const interventions = this._interventionsByScenario.get(scenarioId) ?? [];
+    this._interventionsByScenario.delete(scenarioId);
     const effectiveStrict =
       perRunStrict !== undefined
         ? perRunStrict
@@ -2300,6 +2369,7 @@ export class CLIChargePointService {
       transcript: transcriptEntries,
       errors,
       timeout,
+      interventions,
       initialState,
       finalState,
     });
@@ -2322,7 +2392,7 @@ export class CLIChargePointService {
   stopScenario(connectorId: number, scenarioId: string): void {
     const executor = this._executors.get(scenarioId);
     if (!executor) {
-      throw new Error(`Scenario ${scenarioId} is not running`);
+      throw new ScenarioRunStateError(`Scenario ${scenarioId} is not running`);
     }
     this.tearDownStoppedRun(connectorId, scenarioId, executor);
   }

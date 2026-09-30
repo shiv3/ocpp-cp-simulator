@@ -4,6 +4,7 @@ import type {
   ScenarioRunPage,
   ScenarioRunQuery,
 } from "../../cp/application/verification/ScenarioRunSummary";
+import { canSubscribeRegistry } from "../../data/hooks/useChargePoints";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { STATUS_REFRESH_DEBOUNCE_MS } from "./scenarioRunState";
 
@@ -39,8 +40,9 @@ function mayMatch(
  * `scenario.runs.list`). Lists on mount and whenever the query changes, and
  * re-lists (debounced) when one of `watchCpIds` records a run the query can
  * match — the `scenario-run-recorded` event fires after the write, so the
- * re-list sees it. `query = null` lists nothing (the caller's target is not
- * known yet).
+ * re-list sees it — and when the registry reports a charge point deleted or
+ * the simulator reset, which drop runs. `query = null` lists nothing (the
+ * caller's target is not known yet).
  *
  * The history lives in the daemon, not in this hook, so it survives
  * navigating away and back.
@@ -55,7 +57,9 @@ export function useScenarioRunHistory(
     typeof chargePointService.listScenarioRuns === "function";
 
   const [page, setPage] = useState<ScenarioRunPage>(EMPTY_PAGE);
-  const [isLoading, setIsLoading] = useState(false);
+  // Loading from the first render when there is something to list, so a
+  // caller never mistakes "not asked yet" for an empty answer.
+  const [isLoading, setIsLoading] = useState(supported && query !== null);
   const [error, setError] = useState<string | null>(null);
   // Generation counter: a slower answer to an older query (or one landing
   // after unmount) must not overwrite the current one.
@@ -108,29 +112,49 @@ export function useScenarioRunHistory(
     queryRef.current = stableQuery;
   }, [refresh, stableQuery]);
 
+  /** Debounced re-list: collapses a burst of triggers into one query. */
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scheduleRefresh = useCallback(() => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(
+      () => void refreshRef.current(),
+      STATUS_REFRESH_DEBOUNCE_MS,
+    );
+  }, []);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
   useEffect(() => {
     if (!supported || watchKey === "") return undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribes = watchKey.split("\n").map((cpId) =>
       chargePointService.subscribe(cpId, (event) => {
         if (
-          event.type !== "scenario-run-recorded" ||
-          !mayMatch(queryRef.current, cpId, event)
+          event.type === "scenario-run-recorded" &&
+          mayMatch(queryRef.current, cpId, event)
         ) {
-          return;
+          scheduleRefresh();
         }
-        clearTimeout(timer);
-        timer = setTimeout(
-          () => void refreshRef.current(),
-          STATUS_REFRESH_DEBOUNCE_MS,
-        );
       }),
     );
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
-      clearTimeout(timer);
     };
-  }, [chargePointService, supported, watchKey]);
+  }, [chargePointService, scheduleRefresh, supported, watchKey]);
+
+  // Deleting a charge point or resetting the simulator drops runs without
+  // recording one; the registry stream is what announces it.
+  useEffect(() => {
+    if (!supported || !canSubscribeRegistry(chargePointService)) {
+      return undefined;
+    }
+    return chargePointService.subscribeRegistry((event) => {
+      if (
+        event.type === "change" &&
+        (event.change === "removed" || event.change === "reset")
+      ) {
+        scheduleRefresh();
+      }
+    });
+  }, [chargePointService, scheduleRefresh, supported]);
 
   return { page, isLoading, error, supported, refresh };
 }

@@ -26,7 +26,7 @@ interface RegistrySubscribableService {
   ): () => void;
 }
 
-function canSubscribeRegistry(
+export function canSubscribeRegistry(
   service: unknown,
 ): service is RegistrySubscribableService {
   return (

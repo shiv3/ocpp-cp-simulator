@@ -160,6 +160,54 @@ describe("useScenarioRunHistory (#388)", () => {
     expect(service.subscribe).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    [
+      "a charge point is deleted",
+      { type: "change", change: "removed", cp: { id: "CP-1" } },
+    ],
+    ["the simulator state is reset", { type: "change", change: "reset" }],
+  ])("re-lists when %s", async (_, registryEvent) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const listScenarioRuns = vi
+      .fn()
+      .mockResolvedValueOnce({ runs: [summary("r1")], total: 1 })
+      .mockResolvedValue({ runs: [], total: 0 });
+    const service = createFakeChargePointService({ listScenarioRuns });
+    // Filtered on the charge point: its watch list does not change when the
+    // registry does, so only the registry event can trigger the re-list.
+    const hook = await mount(service, { cpId: "CP-1" }, { watch: ["CP-1"] });
+    expect(hook.current().page.total).toBe(1);
+
+    await act(async () => {
+      service.__handlers.subscribeRegistry.forEach((handler) =>
+        handler(registryEvent),
+      );
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    await flush();
+
+    expect(listScenarioRuns).toHaveBeenCalledTimes(2);
+    expect(hook.current().page).toEqual({ runs: [], total: 0 });
+  });
+
+  it("does not re-list when a charge point is only updated", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const listScenarioRuns = vi.fn(async () => ({ runs: [], total: 0 }));
+    const service = createFakeChargePointService({ listScenarioRuns });
+    await mount(service, {}, { watch: ["CP-1"] });
+
+    await act(async () => {
+      service.__handlers.subscribeRegistry.forEach((handler) =>
+        handler({ type: "change", change: "updated", cp: { id: "CP-1" } }),
+      );
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(listScenarioRuns).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores a run recorded outside the query", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const listScenarioRuns = vi.fn(async () => ({ runs: [], total: 0 }));

@@ -583,6 +583,10 @@ export interface ScenarioRunResult {
   endedAt: string;
   durationMs: number;
   executionState: "completed" | "error";
+  /** #388: true when an operator stopped the run (`scenario_stop`) rather
+   *  than it reaching an end node or failing. Absent on reports recorded
+   *  before the field existed, which reads as not stopped. */
+  stopped?: boolean;
   /** Overall verdict combining conformance and compatibility axes. */
   verdict: ScenarioVerdict;
   /** Verdict for failure-severity assertions only (conformance). */

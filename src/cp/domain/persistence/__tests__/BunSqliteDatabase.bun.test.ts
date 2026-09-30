@@ -12,6 +12,13 @@ import { SqliteConnectorRuntimeRepository } from "../SqliteConnectorRuntimeRepos
 import type { ConnectorRuntimeSnapshot } from "../ConnectorRuntimeRepository";
 import { OCPPStatus } from "../../types/OcppTypes";
 
+/** Names of the tables in `db`. */
+function tables(db: BunSqliteDatabase): string[] {
+  return db
+    .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'")
+    .map((t) => t.name);
+}
+
 describe("BunSqliteDatabase", () => {
   it("opens an in-memory DB and applies the schema", () => {
     const db = BunSqliteDatabase.open(":memory:");
@@ -433,14 +440,6 @@ describe("file hot-reload schema, v13 (#314)", () => {
       .map((c) => c.name);
   }
 
-  function tables(db: BunSqliteDatabase): string[] {
-    return db
-      .all<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type='table'",
-      )
-      .map((t) => t.name);
-  }
-
   it("migrates a database `main` stamped 12 — the released number", () => {
     // The case the renumber exists for. A database that came from `main` has
     // `soc_awaits_next_transaction` and neither of this feature's tables, and
@@ -518,6 +517,28 @@ describe("file hot-reload schema, v13 (#314)", () => {
       runMigrations(db);
       expect(columns(db, "charge_points")).toContain("id_tag_file");
       expect(tables(db)).toContain("watched_scenario_files");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("scenario run history schema, v14 (#388)", () => {
+  it("creates scenario_runs on a database stamped 13", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE scenario_runs");
+      db.run("UPDATE schema_meta SET value = '13' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("scenario_runs");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("scenario_runs");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(14);
+      expect(SCHEMA_VERSION).toBe(14);
     } finally {
       db.close();
     }

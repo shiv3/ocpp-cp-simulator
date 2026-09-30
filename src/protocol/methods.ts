@@ -47,8 +47,12 @@ const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
 const CONN_DEF = CONN_POS.nullable();
 const EMPTY = z.object({});
-/** A charge point id a handler looks up: an empty one names nothing. */
-const CP_ID = STR_64K.min(1);
+/**
+ * A string that names something — an id, a tag, a vendor, a path. Empty names
+ * nothing, and the handlers do not re-check (#383): an empty `tagId` would
+ * skip the idTag pool, an empty `scenarioId` would look up no scenario.
+ */
+const NON_EMPTY_STR = STR_64K.min(1);
 /** The connector modes `set_mode` accepts. */
 export const SCENARIO_MODES = [
   "manual",
@@ -98,7 +102,7 @@ const LOADABLE_SCENARIO_OBJ = () =>
  * tool from this schema is what stops the two from disagreeing again.
  */
 const cpParamsBaseSchema = z.object({
-  cpId: CP_ID.describe("Charge point identifier"),
+  cpId: NON_EMPTY_STR.describe("Charge point identifier"),
   wsUrl: z
     .union([STR_64K, ARRAY_1000(STR_64K).min(1)])
     .describe(
@@ -431,7 +435,7 @@ export const METHODS = {
     // event; OCPP 1.6 ignores them.
     params: z.object({
       connector: CONN_POS,
-      tagId: STR_64K.optional(),
+      tagId: NON_EMPTY_STR.optional(),
       triggerReason: z
         .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
         .optional()
@@ -494,15 +498,18 @@ export const METHODS = {
     }),
     result: ANY,
   },
-  authorize: { params: z.object({ tagId: STR_64K.optional() }), result: ANY },
+  authorize: {
+    params: z.object({ tagId: NON_EMPTY_STR.optional() }),
+    result: ANY,
+  },
   // #348: station-initiated DataTransfer.req. The result is the CSMS's
   // answer, `{ status, data? }`. `data` is a string or an object: a string
   // goes on the wire as-is on every version; an object is passed through on
   // 2.0.1 and JSON-encoded on 1.6 (whose `data` is a string).
   data_transfer: {
     params: z.object({
-      vendorId: STR_64K,
-      messageId: STR_64K.optional(),
+      vendorId: NON_EMPTY_STR,
+      messageId: NON_EMPTY_STR.optional(),
       data: z.union([STR_64K, OBJ()]).optional(),
     }),
     result: ANY,
@@ -537,11 +544,14 @@ export const METHODS = {
     result: ANY,
   },
   security_event_notification: {
-    params: z.object({ type: STR_64K, techInfo: STR_64K.optional() }),
+    params: z.object({
+      type: NON_EMPTY_STR,
+      techInfo: NON_EMPTY_STR.optional(),
+    }),
     result: ANY,
   },
   sign_certificate: {
-    params: z.object({ csr: STR_64K.optional() }),
+    params: z.object({ csr: NON_EMPTY_STR.optional() }),
     result: ANY,
   },
 
@@ -630,7 +640,7 @@ export const METHODS = {
   load_scenario_template: {
     params: z.object({
       connector: CONN_POS,
-      templateId: STR_64K,
+      templateId: NON_EMPTY_STR,
       evSettings: OBJ().optional(),
     }),
     result: ANY,
@@ -652,7 +662,7 @@ export const METHODS = {
   run_scenario: {
     params: z.object({
       connector: CONN_POS,
-      scenarioId: STR_64K,
+      scenarioId: NON_EMPTY_STR,
       strict: z.boolean().optional(),
       // Opt-in: block the RPC response until the run has either parked on
       // its first expectation (armed — e.g. a RemoteStartTransaction
@@ -668,7 +678,7 @@ export const METHODS = {
   run_scenario_file: {
     params: z.object({
       connector: CONN_POS,
-      file: STR_64K,
+      file: NON_EMPTY_STR,
       strict: z.boolean().optional(),
     }),
     result: ANY,
@@ -676,7 +686,7 @@ export const METHODS = {
   run_scenario_template: {
     params: z.object({
       connector: CONN_POS,
-      templateId: STR_64K,
+      templateId: NON_EMPTY_STR,
       evSettings: OBJ().optional(),
       strict: z.boolean().optional(),
       // #352: run once — the instance is loaded disabled, so it does not
@@ -686,7 +696,7 @@ export const METHODS = {
     result: ANY,
   },
   scenario_status: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
   // #179 Phase 3: the machine-readable per-run certification report
@@ -696,28 +706,28 @@ export const METHODS = {
   scenario_report: {
     params: z.object({
       connector: CONN_POS,
-      scenarioId: STR_64K,
-      runId: STR_64K.optional(),
+      scenarioId: NON_EMPTY_STR,
+      runId: NON_EMPTY_STR.optional(),
       format: z.enum(["json"]).optional(),
     }),
     result: ANY,
   },
   get_scenario: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
   stop_scenario: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
   scenario_reset: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
   step_scenario: {
     params: z.object({
       connector: CONN_POS,
-      scenarioId: STR_64K,
+      scenarioId: NON_EMPTY_STR,
       force: z.boolean().optional(),
     }),
     result: ANY,
@@ -727,7 +737,7 @@ export const METHODS = {
     result: ANY,
   },
   remove_scenario: {
-    params: z.object({ connector: CONN_POS, scenarioId: STR_64K }),
+    params: z.object({ connector: CONN_POS, scenarioId: NON_EMPTY_STR }),
     result: ANY,
   },
 
@@ -780,21 +790,21 @@ export const METHODS = {
     }),
   },
   "cp.update": { params: updateParamsSchema, result: ANY },
-  "cp.delete": { params: z.object({ cpId: CP_ID }), result: ANY },
+  "cp.delete": { params: z.object({ cpId: NON_EMPTY_STR }), result: ANY },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
   // controls the direction of the returned window ("asc" = oldest first).
   "logs.get": {
     params: z.object({
-      cpId: CP_ID,
+      cpId: NON_EMPTY_STR,
       limit: z.number().int().positive().optional(),
       offset: z.number().int().min(0).optional(),
       order: z.enum(["asc", "desc"]).optional(),
     }),
     result: ANY,
   },
-  "logs.clear": { params: z.object({ cpId: CP_ID }), result: ANY },
+  "logs.clear": { params: z.object({ cpId: NON_EMPTY_STR }), result: ANY },
   "state.reset": { params: EMPTY, result: ANY },
   "config.get": {
     params: EMPTY,

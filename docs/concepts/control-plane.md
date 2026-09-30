@@ -62,8 +62,10 @@ On the daemon, Socket.IO and MCP parse a method's params once, against its
 schema (#383). Keys a schema does not declare are dropped before the handler
 runs. A handler no longer re-checks the params the schema describes: the
 rules it used to repeat — a connector status or mode outside its vocabulary,
-an unparseable timestamp, an empty `cpId`, a `load_scenario` naming neither
-`file` nor `scenario` — are the schema's, and a params refusal is
+an unparseable timestamp, an empty string where a name is expected (`cpId`,
+`tagId`, `vendorId`, `messageId`, `type`, `techInfo`, `csr`, `templateId`,
+`scenarioId`, `runId`, `run_scenario_file`'s `file`), a `load_scenario`
+naming neither `file` nor `scenario` — are the schema's, and a params refusal is
 `invalid_params`, never `internal`. Checks that need more than the params
 still run after the schema, and answer `invalid_params` too: `cp.create`'s
 OCPP version, URL scheme and SOAP callback rules, the merged blueprint block

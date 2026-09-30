@@ -144,6 +144,34 @@ describe("RPC params are narrowed by the schema alone (#383)", () => {
     expect(error.code).toBe("invalid_params");
   });
 
+  // The handlers used to refuse these with `requireString` / `optionalString`
+  // (answering `internal`); the schema refuses them now. An empty `tagId`
+  // reaching the service would skip the idTag pool, since `resolveIdTag`
+  // only falls back on a missing tag. Every field is listed in
+  // src/protocol/__tests__/nonEmptyParams.test.ts.
+  it.each([
+    ["start_transaction", { connector: 1, tagId: "" }, "startTransaction"],
+    ["authorize", { tagId: "" }, "authorize"],
+    ["data_transfer", { vendorId: "" }, "sendDataTransfer"],
+    ["run_scenario", { connector: 1, scenarioId: "" }, "runScenario"],
+    ["run_scenario_file", { connector: 1, file: "" }, "runScenarioFile"],
+  ])(
+    "%s refuses an empty string as invalid_params and sends nothing",
+    async (method, params, operation) => {
+      const facade = {
+        [operation]: vi.fn(),
+        resolveIdTag: vi.fn((_id: string, tagId?: string) => tagId ?? "POOL"),
+      };
+      const error = await rpcError(facade, {
+        cpId: "cp-alpha",
+        method,
+        params,
+      });
+      expect(error.code).toBe("invalid_params");
+      expect(facade[operation]).not.toHaveBeenCalled();
+    },
+  );
+
   it("still names a cpId misplaced inside params, although the schema strips it (#286)", async () => {
     const error = await rpcError(
       {},

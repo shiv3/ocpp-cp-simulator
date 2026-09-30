@@ -32,6 +32,31 @@ function Consumer(): JSX.Element {
   );
 }
 
+/** A connection that, like RemoteChargePointService, replays the current state
+ *  to each new subscriber and broadcasts every change to all of them. */
+function fakeConnection(unsubscribe: () => void = () => {}) {
+  const handlers = new Set<(state: RemoteConnectionState) => void>();
+  let current: RemoteConnectionState = "connected";
+  return {
+    onConnectionChange: vi.fn(
+      (handler: (state: RemoteConnectionState) => void) => {
+        handlers.add(handler);
+        handler(current);
+        return () => {
+          handlers.delete(handler);
+          unsubscribe();
+        };
+      },
+    ),
+    emit: async (state: RemoteConnectionState) => {
+      current = state;
+      await act(async () => {
+        for (const handler of handlers) handler(state);
+      });
+    },
+  };
+}
+
 async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -93,30 +118,22 @@ describe("useServerInfo (#183)", () => {
   });
 
   it("refetches when the daemon connection comes back: a restarted daemon may have a new tunnel URL", async () => {
-    let connection: ((state: RemoteConnectionState) => void) | null = null;
     const unsubscribe = vi.fn();
+    const connection = fakeConnection(unsubscribe);
     const getServerInfo = vi
       .fn<() => Promise<ServerInfo | null>>()
       .mockResolvedValueOnce(info("https://run-one.ngrok-free.app"))
       .mockResolvedValueOnce(info("https://run-two.ngrok-free.app"));
     service = {
       getServerInfo,
-      onConnectionChange: vi.fn((handler) => {
-        connection = handler;
-        handler("connected");
-        return unsubscribe;
-      }),
+      onConnectionChange: connection.onConnectionChange,
     };
     const rendered = await renderConsumer();
     roots.push(rendered.root);
     expect(base(rendered.container)).toBe("https://run-one.ngrok-free.app");
 
-    await act(async () => {
-      connection?.("connecting");
-    });
-    await act(async () => {
-      connection?.("connected");
-    });
+    await connection.emit("connecting");
+    await connection.emit("connected");
     await flush();
     expect(base(rendered.container)).toBe("https://run-two.ngrok-free.app");
     expect(getServerInfo).toHaveBeenCalledTimes(2);
@@ -129,7 +146,7 @@ describe("useServerInfo (#183)", () => {
   });
 
   it("retries after a failed request instead of staying null", async () => {
-    let connection: ((state: RemoteConnectionState) => void) | null = null;
+    const connection = fakeConnection();
     const getServerInfo = vi
       .fn<() => Promise<ServerInfo | null>>()
       .mockRejectedValueOnce(new Error("boom"))
@@ -137,23 +154,38 @@ describe("useServerInfo (#183)", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     service = {
       getServerInfo,
-      onConnectionChange: vi.fn((handler) => {
-        connection = handler;
-        handler("connected");
-        return () => {};
-      }),
+      onConnectionChange: connection.onConnectionChange,
     };
     const rendered = await renderConsumer();
     roots.push(rendered.root);
     expect(base(rendered.container)).toBe("none");
 
-    await act(async () => {
-      connection?.("connecting");
-    });
-    await act(async () => {
-      connection?.("connected");
-    });
+    await connection.emit("connecting");
+    await connection.emit("connected");
     await flush();
     expect(base(rendered.container)).toBe("https://recovered.test");
+  });
+
+  it("refetches once per reconnect however many components read it (#364: the version line is always mounted)", async () => {
+    const connection = fakeConnection();
+    const getServerInfo = vi
+      .fn<() => Promise<ServerInfo | null>>()
+      .mockResolvedValueOnce(info("https://run-one.ngrok-free.app"))
+      .mockResolvedValue(info("https://run-two.ngrok-free.app"));
+    service = {
+      getServerInfo,
+      onConnectionChange: connection.onConnectionChange,
+    };
+    const first = await renderConsumer();
+    const second = await renderConsumer();
+    roots.push(first.root, second.root);
+    expect(getServerInfo).toHaveBeenCalledTimes(1);
+
+    await connection.emit("connecting");
+    await connection.emit("connected");
+    await flush();
+    expect(base(first.container)).toBe("https://run-two.ngrok-free.app");
+    expect(base(second.container)).toBe("https://run-two.ngrok-free.app");
+    expect(getServerInfo).toHaveBeenCalledTimes(2);
   });
 });

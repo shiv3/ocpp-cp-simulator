@@ -15,6 +15,7 @@ import { Connector } from "../connector/Connector";
 import type {
   BootNotificationResult,
   ChargePointEvents,
+  IncomingCallCompletion,
   RegistrationStatus,
 } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
@@ -847,8 +848,17 @@ export class ChargePoint {
     return ts !== undefined && ts >= sinceMs ? ts : null;
   }
 
-  notifyIncomingCall(action: string, payload: unknown): void {
-    this._events.emit("incomingCallReceived", { action, payload });
+  notifyIncomingCall(
+    action: string,
+    payload: unknown,
+    messageId?: string,
+  ): void {
+    this._events.emit("incomingCallReceived", { action, messageId, payload });
+  }
+
+  /** #396: the answer to an incoming CSMS CALL is decided. */
+  notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
+    this._events.emit("incomingCallCompleted", completion);
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf

@@ -2,6 +2,8 @@
 // Imported by *.bun.test.ts files (runs under `bun test`, not vitest).
 import type { ServerWebSocket } from "bun";
 import { tcpPort } from "../../../../test/bunServe";
+import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 export type OcppFrame = unknown[];
 
@@ -248,3 +250,40 @@ function normalizeValue(value: unknown): unknown {
 export function normalizeTranscript(frames: OcppFrame[]): OcppFrame[] {
   return frames.map((frame) => normalizeValue(frame) as OcppFrame);
 }
+
+/** A 2.0.1 charge point connected to `csms`, booted and past its first
+ *  StatusNotification. */
+export async function bootedV201ChargePoint(
+  csms: MockCsms,
+  id: string,
+): Promise<ChargePoint> {
+  const cp = new ChargePoint(
+    id,
+    DefaultBootNotification,
+    1,
+    csms.url,
+    null,
+    null,
+    null,
+    {},
+    [],
+    "OCPP-2.0.1",
+    {},
+  );
+  cp.events.on("error", () => undefined);
+  cp.connect();
+  const boot = await csms.waitForCall("BootNotification");
+  csms.replyCallResult(boot.messageId, {
+    status: "Accepted",
+    currentTime: "2026-09-17T00:00:00.000Z",
+    interval: 300,
+  });
+  await csms.waitForFrame(
+    (frame) => frame[0] === 2 && frame[2] === "StatusNotification",
+  );
+  return cp;
+}
+
+/** Matches the CALLRESULT or CALLERROR answering `messageId`. */
+export const answerTo = (messageId: string) => (frame: OcppFrame) =>
+  (frame[0] === 3 || frame[0] === 4) && frame[1] === messageId;

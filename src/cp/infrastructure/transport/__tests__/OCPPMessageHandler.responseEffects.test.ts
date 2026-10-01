@@ -16,6 +16,7 @@ const mockChargePoint = {
   id: "test-cp",
   database: null,
   notifyIncomingCall: vi.fn(),
+  notifyIncomingCallCompleted: vi.fn(),
   consumeResponseOverride: vi.fn(() => null),
   getInboundCallPolicy: vi.fn(() => undefined),
   configuration: {

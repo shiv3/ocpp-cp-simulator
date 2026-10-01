@@ -1307,3 +1307,31 @@ other. Reworded on all three pages to say what is and is not watched (the
   two real boots" — a retry after `Rejected` and a CSMS `TriggerMessage` for
   `BootNotification` re-send the request on the same socket, so a second
   `boot_notification` without a `disconnected` is a real boot.
+
+## [2026-09-30] ingest | generic inbound CSMS CALL events (#396)
+
+- [CLI](entities/cli.md#csms-call-events): `csms_call_received` / `csms_call_completed` rows and a new "CSMS call events" section — correlation by `messageId`, documented order (received before policy / override / handler; completed once the answer is decided, before post-response effects), `outcome` vocabulary (`CallResult` / `CallError` + `errorCode` / `NoResponse`), SOAP Faults, "not delivery", payload redaction.
+- [Control plane](concepts/control-plane.md#event-push-and-rooms): pointer from the event push section.
+- [GitHub issues](sources/github-issues.md): #396 row.
+- Mechanism: the domain event `incomingCallReceived` (#110) now carries the `messageId`, and a new `incomingCallCompleted` is emitted by the 1.6J handler (`sendCallResult` / `sendCallError`), the 2.x handler (`answerCall` / `rejectCall`) and the SOAP server (before `afterResponse`, or on a Fault once the call was announced). The SOAP v16-registry dispatcher now hands a handler's post-response effect back to the server (as the `afterResponse` of an `OCPP15SoapInboundResult`) instead of queuing it itself, so it runs after `completed` like the legacy Reset's. A 2.x handler that throws still leaves the CALL unanswered and now reports `NoResponse`. `CLIChargePointService` forwards both; JSON Lines and the Socket.IO bridge needed no change. `redactSensitiveValue` now also redacts the `attributeValue` of a 2.x `SetVariableData` naming `BasicAuthPassword` / `AuthorizationKey` (scenario reports benefit too).
+- Tests: `inboundCallEvents.test.ts` (1.6J order around Reset and RemoteStartTransaction, correlation, NotImplemented, InternalError, policy / override), `v201InboundCallEvents.bun.test.ts`, the SOAP rows in `OCPPSoapServer.notifyIncomingCall.test.ts` (including a TriggerMessage effect ordered after `completed`), `v16RegistryDispatch.test.ts` (effect handed back), `redaction.test.ts`, `service.csmsCallEvents.bun.test.ts`, and a Socket.IO push row in `registryEvents.bun.test.ts`.
+
+## [2026-09-30] ingest | #396 review: CSMS call events scope and "answer, not state"
+
+- [CLI](entities/cli.md#csms-call-events): new **Scope** bullet — every OCPP-J CALL gets one pair (an unsupported action completes as `CallError` / `NotImplemented`), but on SOAP only a dispatchable call does; a SOAP request refused before dispatch (not implemented, wrong charge point) gets a Fault and neither event, so it cannot release a `csmsCallTrigger` (#257). New **Answer, not state** bullet — `csms_call_completed` confirms the chosen OCPP answer, never the resulting transition: `transaction_started` precedes it only on the default 1.6J `RemoteStartTransaction` path; when a scenario owns the remote start, the transaction starts later, if at all. The events-table row now says which CALLs are covered.
+- Follow-ups filed from the known gaps: #399 (2.x throwing handler answers nothing, 1.6J answers `InternalError`), #400 (logged 2.x `SetVariables` secrets not redacted), #401 (`SetNetworkProfile` APN password / VPN key not redacted).
+- Tests: `OCPPSoapServer.notifyIncomingCall.test.ts` pins that a non-dispatchable SOAP call emits neither event.
+
+## [2026-09-30] ingest | #396 review: SOAP scope wording propagated
+
+- [CLI](entities/cli.md#csms-call-events): the **Scope** bullet names what a SOAP station actually refuses before dispatch — an operation its dialect does not define (e.g. a 1.6-only `TriggerMessage` sent to a 1.5 station), another charge point's identity, a response — instead of "not implemented": with the charge point and logger production always supplies, every CS→CP operation of the dialect dispatches. The **Outcome** bullet qualifies `InternalError` as the 1.6J handler-failure answer; 2.x reports `NoResponse` (#399).
+- [Control plane](concepts/control-plane.md#event-push-and-rooms), [GitHub issues](sources/github-issues.md): "every OCPP-J CSMS CALL and every dispatchable SOAP one" instead of "every inbound CSMS CALL".
+- Tests: the SOAP no-event case in `OCPPSoapServer.notifyIncomingCall.test.ts` now sends a 1.6-only `TriggerMessage` to a 1.5 station with a logger (refused at parse: `Unsupported SOAP body wrapper`), replacing a case made non-dispatchable only by omitting the logger. It goes red if a Fault is ever reported as a completion without an announcement.
+
+## [2026-10-01] lint | CSMS call events: envelope lead-in, `messageId` always set (#396 review)
+
+- [Control plane](concepts/control-plane.md): the #396 paragraph had landed between "CP
+  event envelope" and the JSON it introduces; moved above the lead-in.
+- [CLI](entities/cli.md#csms-call-events), `ChargePointEvents.ts`: a SOAP request without a
+  WS-Addressing `MessageID` never reaches dispatch (the envelope parser
+  requires it), so `messageId` is never omitted on the wire.

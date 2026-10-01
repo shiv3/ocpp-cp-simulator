@@ -13,7 +13,11 @@ import type {
   OcppCallRequest,
 } from "../cp/domain/types/OcppCall";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
-import type { BootNotificationResult } from "../cp/domain/charge-point/ChargePointEvents";
+import type {
+  BootNotificationResult,
+  ChargePointEvents,
+  IncomingCallCompletion,
+} from "../cp/domain/charge-point/ChargePointEvents";
 import type { Database } from "../cp/domain/persistence/Database";
 import type {
   BootNotification,
@@ -101,7 +105,10 @@ import {
   type ScenarioRunResult,
   type ScenarioStateSnapshot,
 } from "../cp/application/verification/ScenarioAssertions";
-import { redactSensitiveText } from "../cp/shared/redaction";
+import {
+  redactSensitiveText,
+  redactSensitiveValue,
+} from "../cp/shared/redaction";
 import {
   assertLoadableScenario,
   validateLoadableScenario,
@@ -287,6 +294,17 @@ export type CLIEvent =
         readonly intervalSeconds: number;
         readonly lastSentAt: string | null;
       };
+    }
+  | {
+      // #396: a CSMS CALL entered dispatch, before any inbound policy,
+      // response override or handler ran. The payload is redacted.
+      readonly event: "csms_call_received";
+      readonly data: ChargePointEvents["incomingCallReceived"];
+    }
+  | {
+      // #396: the answer to that CALL is decided and about to be sent.
+      readonly event: "csms_call_completed";
+      readonly data: IncomingCallCompletion;
     };
 
 type EventHandler = (evt: CLIEvent) => void;
@@ -2791,6 +2809,20 @@ export class CLIChargePointService {
           });
         },
       ),
+    );
+
+    this._unsubscribes.push(
+      this._chargePoint.events.on("incomingCallReceived", (call) => {
+        this.emit({
+          event: "csms_call_received",
+          // JSON Lines writes events verbatim, so the redaction the
+          // Socket.IO wire applies is not enough on its own.
+          data: { ...call, payload: redactSensitiveValue(call.payload) },
+        });
+      }),
+      this._chargePoint.events.on("incomingCallCompleted", (completion) => {
+        this.emit({ event: "csms_call_completed", data: completion });
+      }),
     );
 
     this._unsubscribes.push(

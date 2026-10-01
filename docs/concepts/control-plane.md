@@ -586,6 +586,9 @@ socket.on("event", (envelope) => {
 });
 ```
 
+Every OCPP-J CSMS CALL, and every dispatchable SOAP one, is pushed as a
+correlated `csms_call_received` / `csms_call_completed` pair — see [CLI → CSMS call events](../entities/cli.md#csms-call-events) (#396).
+
 CP event envelope (the `evt` payloads are the CLI [event list](../entities/cli.md#events)):
 
 ```json

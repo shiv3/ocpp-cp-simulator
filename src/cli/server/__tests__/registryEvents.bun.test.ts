@@ -115,6 +115,42 @@ describe("socket.io registry event bridge", () => {
     }
   });
 
+  it("pushes an inbound CSMS CALL and its answer to CP subscribers (#396)", async () => {
+    const server = await serverWithCp("cp-csms-call", 1);
+    const socket = await connectTestClient(server);
+    try {
+      await subscribe(socket, "cp-csms-call");
+      const cp = (server.registry.get("cp-csms-call") as any)._chargePoint;
+      const pushed = await collectEvents(socket, () => {
+        cp.notifyIncomingCall("Reset", { type: "Soft" }, "m-1");
+        cp.notifyIncomingCallCompleted({
+          action: "Reset",
+          messageId: "m-1",
+          outcome: "CallResult",
+        });
+      });
+
+      expect(
+        cpEvents(pushed)
+          .filter((e) => e.evt.event.startsWith("csms_call_"))
+          .map((e) => [e.cpId, e.evt.event, e.evt.data]),
+      ).toEqual([
+        [
+          "cp-csms-call",
+          "csms_call_received",
+          { action: "Reset", messageId: "m-1", payload: { type: "Soft" } },
+        ],
+        [
+          "cp-csms-call",
+          "csms_call_completed",
+          { action: "Reset", messageId: "m-1", outcome: "CallResult" },
+        ],
+      ]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
   it("does not leak CP passwords or embedded URL credentials through registry or CP pushes", async () => {
     const server = await startAndTrack();
     const socket = await connectTestClient(server);

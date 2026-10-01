@@ -9,7 +9,7 @@
 // `password` and `AuthorizationKey` as a belt-and-suspenders guard.
 
 import { z } from "zod";
-import { redactSensitiveValue } from "../cp/shared/redaction";
+import { normalizeKeyName, redactSensitiveValue } from "../cp/shared/redaction";
 import { OBJ_MAX_BYTES, STR_64K, boundedObject } from "./limits";
 import type { OcppSecurityProfile } from "../cp/infrastructure/transport/wsUrlWithBasic";
 
@@ -375,7 +375,7 @@ function deepRedact(value: unknown): unknown {
       Object.entries(withoutSecrets as Record<string, unknown>).map(
         ([k, v]) => [
           k,
-          normalizedKey(k) === "tls" ? redactTlsMaterial(v) : deepRedact(v),
+          normalizeKeyName(k) === "tls" ? redactTlsMaterial(v) : deepRedact(v),
         ],
       ),
     );
@@ -389,13 +389,9 @@ function redactTlsMaterial(value: unknown): unknown {
 
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => !TLS_MATERIAL_KEY_NAMES.has(normalizedKey(key)))
+      .filter(([key]) => !TLS_MATERIAL_KEY_NAMES.has(normalizeKeyName(key)))
       .map(([key, nested]) => [key, redactTlsMaterial(nested)]),
   );
-}
-
-function normalizedKey(key: string): string {
-  return key.replace(/[-_]/g, "").toLowerCase();
 }
 
 /** Bound + defensively redact a CLIEvent for the wire. */

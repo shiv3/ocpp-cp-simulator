@@ -9,6 +9,21 @@ export interface BootNotificationResult {
   currentTime: string;
 }
 
+/** How the simulator answered an incoming CSMS CALL (#396). `NoResponse`
+ *  means the CALL is left unanswered (an inbound `ignore` policy). */
+export type IncomingCallCompletion =
+  | {
+      action: string;
+      messageId?: string;
+      outcome: "CallResult" | "NoResponse";
+    }
+  | {
+      action: string;
+      messageId?: string;
+      outcome: "CallError";
+      errorCode: string;
+    };
+
 /**
  * ChargePoint event types
  */
@@ -71,11 +86,20 @@ export interface ChargePointEvents {
   /** Emitted for every CSMS-initiated CALL as it enters the dispatch
    *  layer, before (and regardless of) handler execution or a response
    *  override. Lets scenario csmsCallTrigger nodes park on arbitrary
-   *  incoming actions without per-action wiring (issue #110). */
+   *  incoming actions without per-action wiring (issue #110). `messageId`
+   *  is the CALL's UniqueId (#396) — the WS-Addressing MessageID on SOAP,
+   *  which the envelope parser requires. Every transport sets it; it is
+   *  optional only for callers outside the transports (tests). */
   incomingCallReceived: {
     action: string;
     payload: unknown;
+    messageId?: string;
   };
+  /** Emitted once the answer to an incoming CSMS CALL is decided, just
+   *  before it is handed to the transport (#396): after the handler's
+   *  synchronous work, before any post-response effect. It reports the
+   *  answer chosen, not its delivery. */
+  incomingCallCompleted: IncomingCallCompletion;
   transactionStarted: {
     connectorId: number;
     transactionId: number;

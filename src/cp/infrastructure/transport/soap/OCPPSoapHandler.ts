@@ -24,6 +24,11 @@ import type {
   StopTransactionResponseV16,
 } from "../../../../ocpp";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import {
+  type OcppCallOutcome,
+  type OcppCallRequest,
+} from "../../../domain/types/OcppCall";
+import { OcppCallRejectedError } from "../../../domain/errors/OcppCallErrors";
 import type {
   ReadingContext,
   SampledValue,
@@ -870,6 +875,18 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
         this.handlerContext(),
       );
     });
+  }
+
+  /** SOAP envelopes are built per operation: there is no arbitrary-action
+   *  path (#389). `ChargePoint.sendOcppCall` refuses first; this is the
+   *  handler's own answer. */
+  public async sendOcppCall(
+    _request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    throw new OcppCallRejectedError(
+      "unsupported_transport",
+      "Expert OCPP calls are not available over SOAP",
+    );
   }
 
   public sendDataTransfer(

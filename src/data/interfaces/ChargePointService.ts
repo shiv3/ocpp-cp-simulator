@@ -1,5 +1,9 @@
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
+import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
@@ -449,6 +453,10 @@ export interface ChargePointService {
     messageId?: string,
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
+  /** Expert OCPP call (#389): any station-initiated CALL, payload as given;
+   *  resolves with the CALLRESULT or CALLERROR. See
+   *  `ChargePoint.sendOcppCall`. */
+  sendOcppCall(id: string, request: OcppCallRequest): Promise<OcppCallOutcome>;
 
   // Connector operations
   startTransaction(

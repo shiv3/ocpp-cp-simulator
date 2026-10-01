@@ -19,7 +19,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-09-17
+updated: 2026-09-30
 ---
 
 # OCPP versions and transports
@@ -250,6 +250,8 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 ### SOAP limitations elsewhere in the simulator
 
 - [Network simulation](network-simulation.md) applies to WebSocket CPs only.
+- [Expert OCPP calls](expert-ocpp-calls.md) (#389) need an OCPP-J CP: a SOAP
+  CP refuses them, because each envelope is built per operation.
 - `--trace-output` does not capture SOAP frames yet; the
   [trace format](trace-format.md) already reserves `transport: "soap"`.
 - [`analyze`](../entities/analyze.md) excludes SOAP records.

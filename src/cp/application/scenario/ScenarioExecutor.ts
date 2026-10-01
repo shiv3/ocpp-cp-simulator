@@ -27,6 +27,7 @@ import {
   CertQuirksNodeData,
   ConfigSetNodeData,
   DataTransferNodeData,
+  OcppCallNodeData,
   ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
@@ -678,6 +679,10 @@ export class ScenarioExecutor {
         await this.executeDataTransfer(node.data as DataTransferNodeData);
         break;
 
+      case ScenarioNodeType.OCPP_CALL:
+        await this.executeOcppCall(node.data as OcppCallNodeData);
+        break;
+
       case ScenarioNodeType.CONNECTION_TRIGGER:
         await this.executeConnectionTrigger(
           node.id,
@@ -880,6 +885,48 @@ export class ScenarioExecutor {
     }
     this.callbacks.onSendDataTransfer(data.vendorId, data.messageId, data.data);
     this.callbacks.log?.(`DataTransfer vendorId=${data.vendorId}`, "info");
+  }
+
+  /** Send an expert OCPP call (#389) and log the answer. A CALLERROR is an
+   *  answer — often the one the scenario is after — so the flow goes on; a
+   *  refusal or no answer throws and fails the run. */
+  private async executeOcppCall(data: OcppCallNodeData): Promise<void> {
+    if (!this.callbacks.onSendOcppCall) {
+      this.callbacks.log?.(
+        "OCPP call: no onSendOcppCall callback wired",
+        "warn",
+      );
+      return;
+    }
+    const { action, payload, skipValidation, applyResponse } = data;
+    const call = this.callbacks.onSendOcppCall({
+      action,
+      payload,
+      skipValidation,
+      applyResponse,
+    });
+    // stop() must not wait up to 25 s for the answer. Once stopped, the call's
+    // fate is no longer this run's: a later rejection is swallowed rather than
+    // reported as a run error after `execution.stopped`.
+    const outcome = await Promise.race([
+      call,
+      this.abortPromise.then(() => null),
+    ]);
+    if (outcome === null) {
+      call.catch(() => undefined);
+      return;
+    }
+    if (outcome.kind === "callResult") {
+      this.callbacks.log?.(
+        `OCPP call ${data.action} → CALLRESULT ${JSON.stringify(outcome.payload)}`,
+        "info",
+      );
+    } else {
+      this.callbacks.log?.(
+        `OCPP call ${data.action} → CALLERROR ${outcome.errorCode}: ${outcome.errorDescription}`,
+        "warn",
+      );
+    }
   }
 
   /**

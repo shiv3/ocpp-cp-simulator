@@ -47,6 +47,10 @@ overridden.
   and clears the local DB in Local mode.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
+- [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the
+  console's Expert tab calls the in-tab charge point in Local mode and
+  `send_ocpp_call` on the daemon in Remote mode, which is also the method the
+  MCP tool and JSON-Lines mode use.
 - The scenario wait controls (extend / retry / continue, #240) work in both
   modes and refuse an idle scenario the same way. The run report that records
   them (`interventions`) and the `scenario_wait_changed` event that refreshes

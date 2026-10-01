@@ -829,4 +829,40 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     );
     expect(container.textContent).not.toContain("derived from");
   });
+
+  it("Expert tab offers the station calls of the CP's OCPP version (#389)", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      connectors: [connector({ id: 1 })],
+      config: { ocppVersion: "OCPP-2.0.1" } as ChargePointSnapshot["config"],
+    });
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      getStateHistory: vi.fn(async () => []),
+    });
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const expertTab = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ).find((el) => el.textContent?.trim() === "Expert");
+    expect(expertTab, "expected an Expert tab").toBeTruthy();
+    await act(async () => {
+      expertTab!.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      expertTab!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    const actions = Array.from(
+      container.querySelectorAll<HTMLOptionElement>(
+        'select[aria-label="Action"] option',
+      ),
+    ).map((o) => o.value);
+    expect(actions).toContain("TransactionEvent");
+    expect(actions).not.toContain("StartTransaction");
+  });
 });

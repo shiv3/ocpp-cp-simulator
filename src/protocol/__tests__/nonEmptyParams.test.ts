@@ -30,6 +30,11 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
     field: "messageId",
   },
   {
+    method: "send_ocpp_call",
+    valid: { action: "Heartbeat", payload: {} },
+    field: "action",
+  },
+  {
     method: "security_event_notification",
     valid: { type: "t", techInfo: "i" },
     field: "type",

@@ -12,6 +12,7 @@ related:
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
+  - ../concepts/expert-ocpp-calls.md
 updated: 2026-09-30
 ---
 
@@ -77,6 +78,17 @@ waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#
 shows at once, and a control the runtime refuses is shown inline instead of
 being dropped. In Remote mode every open console re-reads the run on
 `scenario_wait_changed`, not only the one that acted.
+
+A charge point's **Expert** tab sends an
+[expert OCPP call](../concepts/expert-ocpp-calls.md) (#389): pick any
+station-initiated action of the CP's OCPP-J version, edit the JSON payload —
+pre-filled with the smallest schema-valid one, **Reset to default** restores
+it — and **Send**. The schema check runs as you type; a schema-invalid payload
+is sent only with **Skip schema validation** ticked, and text that is not a
+JSON object never is. **Apply the answer to the station's state** is off by
+default. The tab shows the frame as sent and the CALLRESULT or CALLERROR, or
+why the call was refused; a SOAP CP gets a notice instead of the form. It
+works in both modes.
 
 The run console's **Run history** lists the daemon's recorded runs of that
 scenario on that connector — the latest 20, newest first, with each run's

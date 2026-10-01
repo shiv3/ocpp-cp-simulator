@@ -687,6 +687,7 @@ detail — the table above is where those differences live.
 | `inboundPolicy`      | No       |
 | `certQuirks`         | No       |
 | `connectionTrigger`  | No       |
+| `ocppCall`           | Yes      |
 
 A scenario containing a node type marked "No" is refused by `export-k6` with
 the offending type named, rather than exported and silently skipped.

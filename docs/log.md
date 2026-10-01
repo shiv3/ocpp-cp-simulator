@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Log
@@ -1244,3 +1244,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [GitHub issues](sources/github-issues.md): #395 row.
 - Mechanism: every transport (1.6J, 1.6S / 1.5 / 1.2 SOAP, 2.0.1 / 2.1) ends in the single `ChargePoint.onBootNotificationResult` (which replaces `onBootNotificationAccepted` / `Pending` / `Rejected`, so the transport handlers are pass-throughs); it emits the domain event `bootNotificationResult` after the boot gate took the new status; `CLIChargePointService` forwards it as `boot_notification`, and JSON Lines and Socket.IO pass it through unchanged. `interval` is the CSMS's (non-positive → `0`), not the 60 s retry a `Rejected` with interval `0` falls back to.
 - Tests: `service.bootNotificationEvent.bun.test.ts` (mock CSMS, the three answers, ordering, `Rejected` with interval `0`, re-`connect` on an open socket, OCPP 2.0.1), `bootNotificationEvent.bun.test.ts` (daemon Socket.IO envelope), `output.formatEvent.test.ts`, `fleetBench.smoke.bun.test.ts` expectations.
+
+## [2026-10-01] lint | boot_notification: a re-boot on the open socket (#395 review)
+
+- `concepts/control-plane.md`: dropped "a `disconnected` always comes between
+  two real boots" — a retry after `Rejected` and a CSMS `TriggerMessage` for
+  `BootNotification` re-send the request on the same socket, so a second
+  `boot_notification` without a `disconnected` is a real boot.

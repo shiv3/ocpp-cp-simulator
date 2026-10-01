@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Socket.IO control plane
@@ -567,10 +567,13 @@ after the `connected` of that socket and before the `connector_status` /
 socket that is already open sends no new `BootNotification.req`, but still
 emits `connected` so a caller waiting on it unblocks. That `connected` is not a
 new boot, and no `boot_notification` follows it: an orchestrator must keep the
-state the last `boot_notification` gave, not fall back to Booting. A
-`disconnected` always comes between two real boots. Do not infer registration
-from `status_change`: it fires twice per accepted boot and on changes that are
-not boots at all (#395).
+state the last `boot_notification` gave, not fall back to Booting. The
+converse also holds: a second `boot_notification` on the same socket, with no
+`disconnected` / `connected` between, is a real boot — a retry after
+`Rejected` and a CSMS `TriggerMessage` for `BootNotification` both re-send
+`BootNotification.req` on the open socket. Do not infer registration from
+`status_change`: it fires twice per accepted boot and on changes that are not
+boots at all (#395).
 
 Registry event envelope:
 

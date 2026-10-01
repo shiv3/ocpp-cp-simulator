@@ -51,9 +51,7 @@ function setup() {
     connectors: new Map(),
     configuration: { transactionMessageAttempts: () => 3 },
     notifyOutgoingCall: vi.fn(),
-    onBootNotificationAccepted: vi.fn(),
-    onBootNotificationPending: vi.fn(),
-    onBootNotificationRejected: vi.fn(),
+    onBootNotificationResult: vi.fn(),
   };
   const codec: ProtocolCodec = { outgoingWarning: () => null };
   const handler = new OCPPMessageHandler(
@@ -101,7 +99,7 @@ describe("1.6 expert calls after the caller's wait (#389)", () => {
     await vi.advanceTimersByTimeAsync(OCPP_CALL_RESPONSE_TIMEOUT_MS);
     expect(await late).toMatchObject({ reason: "timeout" });
     socket.answer(socket.written[0].id, accepted);
-    expect(chargePoint.onBootNotificationAccepted).not.toHaveBeenCalled();
+    expect(chargePoint.onBootNotificationResult).not.toHaveBeenCalled();
 
     const applied = handler
       .sendOcppCall({
@@ -113,6 +111,7 @@ describe("1.6 expert calls after the caller's wait (#389)", () => {
     await vi.advanceTimersByTimeAsync(OCPP_CALL_RESPONSE_TIMEOUT_MS);
     expect(await applied).toMatchObject({ reason: "timeout" });
     socket.answer(socket.written[1].id, accepted);
-    expect(chargePoint.onBootNotificationAccepted).toHaveBeenCalledTimes(1);
+    expect(chargePoint.onBootNotificationResult).toHaveBeenCalledTimes(1);
+    expect(chargePoint.onBootNotificationResult).toHaveBeenCalledWith(accepted);
   });
 });

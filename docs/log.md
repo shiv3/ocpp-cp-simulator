@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Log
@@ -1263,3 +1263,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md): a Run History link without `runCp` is always checked against the whole history (`scenario.runs.list { runId, limit: 2 }`), not only when the run is off the current page; a match on this page no longer hides a second one on another page, so such a link opens its run only when the id is unique, as documented.
 - Tests: `ScenarioRunsPage.dom.test.tsx` — one duplicate on the current page and the other off it: no report opens and the page says the id is ambiguous.
+
+## [2026-10-01] ingest | run history review: discarded runs, loading state (#388 review)
+
+- `concepts/control-plane.md`: a run discarded mid-flight (scenario deleted
+  or replaced, charge point edited) leaves no report — the "every finished
+  run" sentence now says so.
+- `analyses/fleet-load-and-observability-roadmap.md`: `SCHEMA_VERSION` is 14.
+- Code: `useScenarioRunHistory` reports `isLoading` from the render a query
+  change lands in, so the Run History page's offset clamp never reads the
+  previous query's `total`.

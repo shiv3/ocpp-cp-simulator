@@ -57,9 +57,12 @@ export function useScenarioRunHistory(
     typeof chargePointService.listScenarioRuns === "function";
 
   const [page, setPage] = useState<ScenarioRunPage>(EMPTY_PAGE);
-  // Loading from the first render when there is something to list, so a
-  // caller never mistakes "not asked yet" for an empty answer.
-  const [isLoading, setIsLoading] = useState(supported && query !== null);
+  const [refreshing, setRefreshing] = useState(false);
+  // The query `page` answers. Until the current query has been answered the
+  // hook is loading — from the very first render, and again from the render
+  // a query change lands in, before the effect that asks runs — so a caller
+  // never reads a stale `page` (another query's `total`) as this query's.
+  const [answeredKey, setAnsweredKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Generation counter: a slower answer to an older query (or one landing
   // after unmount) must not overwrite the current one.
@@ -73,16 +76,20 @@ export function useScenarioRunHistory(
     [queryKey],
   );
   const watchKey = watchCpIds.join("\n");
+  const isLoading =
+    refreshing ||
+    (supported && stableQuery !== null && answeredKey !== queryKey);
 
   const refresh = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     if (!supported || stableQuery === null) {
       setPage(EMPTY_PAGE);
       setError(null);
-      setIsLoading(false);
+      setAnsweredKey(queryKey);
+      setRefreshing(false);
       return;
     }
-    setIsLoading(true);
+    setRefreshing(true);
     try {
       const result = await chargePointService.listScenarioRuns!(stableQuery);
       if (requestId !== requestIdRef.current) return;
@@ -92,9 +99,12 @@ export function useScenarioRunHistory(
       if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (requestId === requestIdRef.current) setIsLoading(false);
+      if (requestId === requestIdRef.current) {
+        setAnsweredKey(queryKey);
+        setRefreshing(false);
+      }
     }
-  }, [chargePointService, stableQuery, supported]);
+  }, [chargePointService, queryKey, stableQuery, supported]);
 
   useEffect(() => {
     void refresh();

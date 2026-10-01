@@ -57,12 +57,15 @@ async function mount(
   opts: { watch?: string[]; mode?: "local" | "remote" } = {},
 ): Promise<{
   current: () => HookResult;
+  /** Every render's result, oldest first. */
+  renders: HookResult[];
   rerender: (query: ScenarioRunQuery | null) => Promise<void>;
 }> {
   const container = document.createElement("div");
   const created = createRoot(container);
   root = created;
   let latest: HookResult | null = null;
+  const renders: HookResult[] = [];
   const render = (q: ScenarioRunQuery | null) =>
     created.render(
       <DataContext.Provider
@@ -79,6 +82,7 @@ async function mount(
           watch={opts.watch ?? []}
           onSnapshot={(snap) => {
             latest = snap;
+            renders.push(snap);
           }}
         />
       </DataContext.Provider>,
@@ -90,6 +94,7 @@ async function mount(
       if (!latest) throw new Error("no snapshot yet");
       return latest;
     },
+    renders,
     rerender: async (q) => {
       await act(async () => render(q));
       await flush();
@@ -257,6 +262,35 @@ describe("useScenarioRunHistory (#388)", () => {
     await flush();
 
     expect(hook.current().page.runs.map((r) => r.runId)).toEqual(["new-run"]);
+  });
+
+  it("is loading from the render a new query lands in, until that query is answered", async () => {
+    // A caller that reads `page.total` (the run history page clamps its
+    // `offset` to the last page) must not take the previous query's answer
+    // for this one's: in the render the query changes, before the effect that
+    // asks runs, the hook already says it is loading.
+    let answer: (page: ScenarioRunPage) => void = () => {};
+    const listScenarioRuns = vi
+      .fn()
+      .mockResolvedValueOnce({ runs: [summary("r1")], total: 1 })
+      .mockImplementationOnce(
+        () => new Promise<ScenarioRunPage>((resolve) => (answer = resolve)),
+      );
+    const service = createFakeChargePointService({ listScenarioRuns });
+    const hook = await mount(service, { cpId: "CP-1" });
+    expect(hook.current().isLoading).toBe(false);
+    expect(hook.current().page.total).toBe(1);
+
+    const before = hook.renders.length;
+    await hook.rerender({ cpId: "CP-1", verdict: "FAIL", offset: 50 });
+    expect(hook.renders[before].isLoading).toBe(true);
+    expect(hook.current().isLoading).toBe(true);
+
+    const page: ScenarioRunPage = { runs: [], total: 60 };
+    await act(async () => answer(page));
+    await flush();
+    expect(hook.current().isLoading).toBe(false);
+    expect(hook.current().page).toEqual(page);
   });
 
   it("reports an empty page when the service answers nothing", async () => {

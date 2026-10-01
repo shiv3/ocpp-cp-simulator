@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Socket.IO control plane
@@ -536,7 +536,9 @@ Guarantees a conformance driver can rely on:
 
 Every finished scenario run — natural end, error or operator stop — leaves its
 report (the object [`scenario_report`](#cp-command-methods) returns) in the
-daemon's run history (#388). One history serves the whole daemon:
+daemon's run history (#388). A run that is still in flight when its scenario
+is deleted or replaced, or when the charge point is edited, is discarded
+without a verdict and leaves no report. One history serves the whole daemon:
 
 - **Storage.** With `--state-db` it is the `scenario_runs` table
   ([State persistence](state-persistence.md#tables)), so the history and every

@@ -25,6 +25,7 @@ import {
   redactSimulatorConfig,
   registryCpToWire,
   rpcRequestSchema,
+  SCENARIO_RUNS_PAGE_DEFAULT,
   statusToWire,
   subscribeResultSchema,
   type CpListItem,
@@ -37,6 +38,7 @@ import {
   type StatusWire,
   type SubscribeResult,
 } from "../../protocol";
+import type { ScenarioRunPage } from "../../cp/application/verification/ScenarioRunSummary";
 import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
@@ -68,6 +70,10 @@ import {
 import { appVersion } from "../appVersion";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "../../cp/domain/errors/ScenarioRunStateError";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../cp/domain/errors/OcppCallErrors";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
@@ -506,6 +512,8 @@ export async function dispatchRpcCore(
       return triggerNetworkSimDisconnect(deps, call.params);
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
+    case "scenario.runs.list":
+      return listScenarioRuns(deps, call.params);
     case "scenario.definitions.list":
       return listScenarioDefinitions(deps, call.params);
     case "scenario.definitions.save":
@@ -1118,6 +1126,16 @@ async function applyDefaultEVSettingsRpc(
   return undefined;
 }
 
+async function listScenarioRuns(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"scenario.runs.list">,
+): Promise<ScenarioRunPage> {
+  return deps.chargePointService.listScenarioRuns({
+    ...params,
+    limit: params.limit ?? SCENARIO_RUNS_PAGE_DEFAULT,
+  });
+}
+
 async function listScenarioDefinitions(
   deps: RuntimeSocketIoDeps,
   params: Params<"scenario.definitions.list">,
@@ -1608,6 +1626,15 @@ async function dispatchFacadeCpCommand(
             params.messageId,
             params.data,
           ),
+        ),
+      );
+    }
+    case "send_ocpp_call": {
+      const { params } = call;
+      // #389: a CALLERROR is an answer too, so it comes back as the result.
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.sendOcppCall(id, params),
         ),
       );
     }
@@ -2205,6 +2232,20 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   // fault. The message names only the scenario id.
   if (err instanceof ScenarioRunStateError) {
     return new RpcFailure("invalid_params", err.message);
+  }
+  // #389: an expert OCPP call refused before anything was written (SOAP
+  // station, action the station does not send, schema-invalid payload
+  // without skipValidation, boot gate) is a caller error; the message says
+  // which. No answer is a timeout, or a disconnect when the CALL never
+  // reached the wire or the socket closed first.
+  if (err instanceof OcppCallRejectedError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  if (err instanceof OcppCallNoAnswerError) {
+    return new RpcFailure(
+      err.reason === "timeout" ? "timeout" : "disconnected",
+      err.message,
+    );
   }
   return null;
 }

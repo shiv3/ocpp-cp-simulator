@@ -687,6 +687,7 @@ detail — the table above is where those differences live.
 | `inboundPolicy`      | No       |
 | `certQuirks`         | No       |
 | `connectionTrigger`  | No       |
+| `ocppCall`           | Yes      |
 
 A scenario containing a node type marked "No" is refused by `export-k6` with
 the offending type named, rather than exported and silently skipped.
@@ -715,7 +716,8 @@ Events are emitted in all modes:
 
 | Event                   | Data Fields                               | Description                                                                                                                                                                                                                                    |
 | ----------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connected`             | -                                         | Connected to CSMS                                                                                                                                                                                                                              |
+| `connected`             | -                                         | WebSocket to the CSMS opened — transport only, not registration: see `boot_notification`                                                                                                                                                       |
+| `boot_notification`     | `status`, `interval`, `currentTime`       | Answer to BootNotification.conf processed: `status` is `Accepted` / `Pending` / `Rejected`, `interval` and `currentTime` the CSMS's. Once per BootNotification.conf, after `connected` and before its status changes (#395)                    |
 | `disconnected`          | `code`, `reason`                          | Disconnected from CSMS                                                                                                                                                                                                                         |
 | `status_change`         | `status`                                  | Charge point status changed                                                                                                                                                                                                                    |
 | `error`                 | `error`                                   | Error occurred                                                                                                                                                                                                                                 |
@@ -728,6 +730,7 @@ Events are emitted in all modes:
 | `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed                                                                                                                                                                                                                      |
 | `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed                                                                                                                                                                                                                         |
 | `scenario_wait_changed` | `connectorId`, `scenarioId`, `kind`       | An operator extended, retried or continued the wait the scenario is parked on (`kind`: `extend` / `retry` / `continue`; also carries `nodeId` and `runId`) (#240)                                                                              |
+| `scenario_run_recorded` | `connectorId`, `scenarioId`, `runId`      | A finished run's report was added to the daemon's [run history](../concepts/control-plane.md#scenario-run-history), so a client listing runs can re-list (#388)                                                                                |
 | `csms_call_received`    | `action`, `messageId`, `payload`          | The CSMS sent a CALL (any OCPP-J action; a dispatchable SOAP one), announced before it is handled; see [CSMS call events](#csms-call-events) (#396)                                                                                            |
 | `csms_call_completed`   | `action`, `messageId`, `outcome`          | The simulator decided its answer to that CALL: `CallResult`, `CallError` (with `errorCode`) or `NoResponse`; see [CSMS call events](#csms-call-events) (#396)                                                                                  |
 

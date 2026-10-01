@@ -10,7 +10,7 @@ related:
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-09-17
+updated: 2026-09-30
 ---
 
 # Source: `scripts/bench/README.md`
@@ -507,15 +507,15 @@ contract is that a run drives heartbeats at `--heartbeat-interval` for its whole
 length, including across reconnects, and it was not true until #302's
 round-nine fix. `cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`
 and nothing pins it: every accepted boot runs
-`ChargePoint.onBootNotificationAccepted`, which calls
+`ChargePoint.onBootNotificationResult`, which calls
 `startHeartbeat(BootNotification.conf.interval)`, so the CSMS's value replaces
 the flag's on every reconnect — and reconnects are exactly what begins to
 happen as the sweep approaches the knee, so the offered load changed at the
 point the benchmark exists to measure and every later step inherited the drift.
-The run therefore watches for `status_change` → `Available` (the charge-point
-boot gate opening, the same signal
-`src/cli/server/waitForBootAccepted.ts` uses, emitted unconditionally by
-`ChargePoint`'s status setter) and issues a fresh `start_heartbeat` on each one.
+The run therefore watches for `boot_notification` with `status: "Accepted"` —
+emitted once per processed `BootNotification.conf` (#395), see
+[Control plane → event push](../concepts/control-plane.md#event-push-and-rooms)
+— and issues a fresh `start_heartbeat` on each one.
 `connected` is deliberately **not** the hook: it fires before
 `BootNotification.conf` and would race the interval it exists to overwrite. A
 boot observed while an earlier reapplication is in flight is re-issued rather
@@ -525,35 +525,35 @@ in `--out`.
 
 Not covered, and documented rather than tested: a CSMS that sends
 `ChangeConfiguration HeartbeatInterval` mid-run reaches `startHeartbeat`
-directly and emits no `status_change`, so the override is not put back; a boot
-answered `Pending` or `Rejected` never reaches `onBootNotificationAccepted` at
-all. The reapplication RPCs are also paced through the same socket pool as the
+directly and emits no `boot_notification`, so the override is not put back; a
+boot answered `Pending` or `Rejected` emits `boot_notification` with that
+status, which the run ignores, and stops the heartbeat. The reapplication RPCs are also paced through the same socket pool as the
 transaction cycle, so a wave of reconnects at the knee makes the instrument
 compete with the load at its busiest moment.
 
 **What the reapplication costs, since a fix that adds load at the knee is the
-fixed defect with the sign flipped.** One boot emits `statusChange` **twice**
-(from `updateConnectorStatus(0, Available)` and from the status setter), so
-issuing per event cost two RPCs per boot for no added coverage. Observed boots
-are gathered for `BOOT_COALESCE_MS` (50ms) and flushed to one RPC per charge
-point. Any window is correct — every observed event had already run
-`startHeartbeat(csmsInterval)` before it was emitted, so an RPC issued after
-the last event of a window overwrites every CSMS interval that window saw — and
-50ms sits four orders of magnitude above the microseconds separating one boot's
-two emissions and well below the 1s minimum reconnect backoff, so it never
-merges two genuine boots. The in-flight case is untouched: a boot observed
-after an RPC was issued is still owed its own. The collapse is **measured**,
-not asserted: the smoke test's two-step sweep reports `bootsObserved: 4,
-rpcsIssued: 2` against a real daemon, and removing the window makes it 4 and 4.
+fixed defect with the sign flipped.** The earlier `status_change` hook fired
+**twice** per boot (from `updateConnectorStatus(0, Available)` and from the
+status setter), so issuing per event cost two RPCs per boot; `boot_notification`
+fires once, which removes the doubling at the source. Observed boots are still
+gathered for `BOOT_COALESCE_MS` (50ms) and flushed to one RPC per charge point,
+one timer per reconnect wave. Any window is correct — every observed event is
+emitted in the same synchronous frame as the `startHeartbeat(csmsInterval)` it
+announces, so an RPC issued after the last event of a window overwrites every
+CSMS interval that window saw — and 50ms sits well below the 1s minimum
+reconnect backoff, so it never merges two genuine boots. The in-flight case is
+untouched: a boot observed after an RPC was issued is still owed its own. The
+cost is **measured**, not asserted: the smoke test's two-step sweep reports
+`bootsObserved: 2, rpcsIssued: 2` against a real daemon — one RPC per boot.
 
 **Whether the knee moves is a standing limitation, not outstanding work.** It
 is recorded the same way as the closing stop's unverifiable delivery, because
 it has the same shape: it cannot be established from here, so carrying it as
 something still owed would let it quietly become a claim nobody checks.
 
-- _Measured_: the collapse. `bootsObserved: 4, rpcsIssued: 2` against a real
-  daemon; `4` and `4` without the window. Two charge points on loopback against
-  a mock CSMS — enough to prove the collapse, nothing at all about the knee.
+- _Measured_: the cost per boot. `bootsObserved: 2, rpcsIssued: 2` against a
+  real daemon. Two charge points on loopback against a mock CSMS — enough to
+  prove one RPC per boot, nothing at all about the knee.
 - _Argued_: that the residual cannot perturb the measurement. One RPC per
   reconnecting charge point — 2000 at the largest accepted fleet — paced by
   token buckets that cap _total_ control-plane traffic at
@@ -569,8 +569,8 @@ something still owed would let it quietly become a claim nobody checks.
   [Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
   is waiting on.
 - _Counters that settle it_: `heartbeatOverride.bootsObserved` / `rpcsIssued`
-  (their ratio is the instrument's own cost — 2:1 healthy, 1:1 means the window
-  stopped collapsing), `heartbeatOverride.failed`, the per-row `reconnects`,
+  (their ratio is the instrument's own cost — 1:1 expected, fewer RPCs than
+  boots means boots were merged inside one window), `heartbeatOverride.failed`, the per-row `reconnects`,
   and the `hb.load` column, which reads `drift` on any row whose cadence could
   not be shown to be the configured one. All already in every `--out` file.
 

@@ -18,7 +18,7 @@ related:
   - ../concepts/file-hot-reload.md
   - ../analyses/fleet-load-and-observability-roadmap.md
   - ../sources/bench-readme.md
-updated: 2026-09-12
+updated: 2026-09-30
 ---
 
 # Daemon (server mode)
@@ -496,7 +496,8 @@ in either direction undetectably. The latency numbers are unaffected — what
 cannot be attributed is the fleet size they are reported against. Its
 `--heartbeat-interval` is a **contract**: the run drives heartbeats at that
 cadence for its whole length, including across reconnects, by reapplying
-`start_heartbeat` after every accepted boot — `onBootNotificationAccepted`
+`start_heartbeat` after every accepted boot (the `boot_notification` event
+with `status: "Accepted"`, #395) — `onBootNotificationResult`
 otherwise reinstalls the CSMS's `BootNotification.conf` interval, and reconnects
 are exactly what start happening near the knee. See
 [Source: bench README](../sources/bench-readme.md) for what that does and does
@@ -506,7 +507,7 @@ ceiling). The contract is audited per row in the `hb.load` column, which reads
 `set` only when all three of its preconditions hold — the initial arm
 succeeded, every reapplication succeeded, and the event socket driving them is
 still up — and `drift` for anything it cannot establish. **Whether that moves the knee is a stated limitation, not pending
-work**: the collapse to one RPC per boot is measured, the residual's bound is
+work**: one RPC per accepted boot is measured, the residual's bound is
 argued from the pool's 640 RPC/s ceiling, and settling it needs a sweep against
 a real CSMS at fleet size run with and without the reapplication — the same
 missing ingredient as the number this section is waiting on. Every result file

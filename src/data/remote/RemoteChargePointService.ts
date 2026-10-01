@@ -3,6 +3,10 @@ import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
 
 import type {
   ChargePointEvent,
@@ -42,6 +46,10 @@ import type {
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
+import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "../../cp/application/verification/ScenarioRunSummary";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -593,6 +601,20 @@ export function mapServerEventToChargePointEvent(
         };
       }
       return null;
+    case "scenario_run_recorded":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string" &&
+        typeof data.runId === "string"
+      ) {
+        return {
+          type: "scenario-run-recorded",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+          runId: data.runId,
+        };
+      }
+      return null;
     case "scenario_wait_changed":
       if (
         typeof data.connectorId === "number" &&
@@ -822,6 +844,17 @@ export class RemoteChargePointService implements ChargePointService {
       ...(data !== undefined ? { data } : {}),
     });
     return result as DataTransferResult;
+  }
+
+  async sendOcppCall(
+    id: string,
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    return (await this.runCpRpc(
+      id,
+      "send_ocpp_call",
+      request,
+    )) as OcppCallOutcome;
   }
 
   async startTransaction(
@@ -1584,6 +1617,10 @@ export class RemoteChargePointService implements ChargePointService {
   async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
     const rows = await this.rpc("logs.get", { cpId });
     return Array.isArray(rows) ? (rows as StoredLogEntry[]) : [];
+  }
+
+  async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
+    return (await this.rpc("scenario.runs.list", query)) as ScenarioRunPage;
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

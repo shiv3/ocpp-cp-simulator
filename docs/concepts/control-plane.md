@@ -15,6 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
+  - expert-ocpp-calls.md
 updated: 2026-10-01
 ---
 
@@ -54,7 +55,7 @@ Error codes are closed over:
 | `internal`       | The daemon itself failed. If you see this for a connection problem, it is a bug.                                                                                                         |
 | `unauthorized`   | The web-console Basic Auth gate rejected the caller ([Access control](access-control.md)).                                                                                               |
 | `timeout`        | The 30 s deadline elapsed. The server returns it when a handler exceeds the deadline (`withRpcDeadline`), and the Socket.IO client also synthesises it when no ack arrives at all.       |
-| `disconnected`   | The socket dropped before the ack — client-synthesised.                                                                                                                                  |
+| `disconnected`   | The socket dropped before the ack — client-synthesised. The daemon answers it too for a [`send_ocpp_call`](expert-ocpp-calls.md#errors) whose CALL was dropped.                          |
 
 A scenario control (`stop_scenario`, `step_scenario`, the wait controls)
 aimed at an unknown scenario, or at one that is not running, not parked on a
@@ -129,7 +130,7 @@ bucket with the same numbers).
 | `run_scenario_file`               | `{ "connector": number, "file": string, "strict"?: boolean }`                                                             | Load a scenario file and run it **with the options given**. The connector's auto-start gate is suppressed for this load, so `strict` always reaches the run this call starts; an id that was already running before the call is an error, never a silent success (#314).                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `run_scenario_template`           | `{ "connector": number, "templateId": string, "evSettings"?: object, "strict"?: boolean, "once"?: boolean }`              | Load and run a built-in template. The load keeps the connector's auto-start gate out of the way and the explicit start carries `strict`, so a connect-triggered template on an Available charge point no longer fails with "already running" (#318). By default the instance stays enabled and **re-arms on every connect** ([#253](scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)); `once: true` loads it disabled, so the run this call makes is its only one (#352).                                                                                                                                                                                                                |
 | `scenario_status`                 | `{ "connector": number, "scenarioId": string }`                                                                           | Return scenario execution status: the live context while a run is in flight, otherwise the **terminal** state (`completed` / `error`) and `runId` of the last run, until the scenario is removed. `null` only for a scenarioId with no run on record — which is how a poller tells "unknown scenario" from "already finished". While a run is parked, `waitDeadlineAt` (epoch ms; `null` without a timeout) is when the wait times out — it moves when the wait is extended or retried (#240).                                                                                                                                                                                                                     |
-| `scenario_report`                 | `{ "connector": number, "scenarioId": string, "runId"?: string, "format"?: "json" }`                                      | Machine-readable verdict of a finished run (`verdict`, `conformanceVerdict`, `compatibilityVerdict`, `assertions[]` with `frameRefs`, `transcript`, `interventions` (#240), `simulatorVersion`). Used by the [Testcontainers harness](../sources/testcontainers-java-readme.md).                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `scenario_report`                 | `{ "connector": number, "scenarioId": string, "runId"?: string, "format"?: "json" }`                                      | Machine-readable verdict of a finished run (`verdict`, `conformanceVerdict`, `compatibilityVerdict`, `assertions[]` with `frameRefs`, `transcript`, `interventions` (#240), `simulatorVersion`). Used by the [Testcontainers harness](../sources/testcontainers-java-readme.md). Reads the [run history](#scenario-run-history) (#388): `runId` can be any recorded run of the charge point, and with `--state-db` a report survives a daemon restart.                                                                                                                                                                                                                                                             |
 | `get_scenario`                    | `{ "connector": number, "scenarioId": string }`                                                                           | Return a loaded scenario definition.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `stop_scenario`                   | `{ "connector": number, "scenarioId": string }`                                                                           | Stop one scenario.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `step_scenario`                   | `{ "connector": number, "scenarioId": string, "force"?: boolean }`                                                        | Step a scenario.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -139,7 +140,8 @@ bucket with the same numbers).
 | `scenario_reset`                  | `{ "connector": number, "scenarioId": string }`                                                                           | Stop the scenario, return the connector to `Available` (emitting the StatusNotification so a CSMS stays in sync) and drop the persisted scenario position.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `stop_all_scenarios`              | `{ "connector": number }`                                                                                                 | Stop every scenario on a connector.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `remove_scenario`                 | `{ "connector": number, "scenarioId": string }`                                                                           | Remove a loaded scenario.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `data_transfer`                   | `{ "vendorId": string, "messageId"?: string, "data"?: string \| object }`                                                 | Send a station-initiated `DataTransfer.req` and **return the CSMS's answer** `{ "status", "data"? }` as the result (#348). `data` is a string, or an object: passed through on 2.0.1, JSON-encoded on 1.6 and 1.6S (whose `data` is a string). A string is capped at 65,536 characters and an object at 65,536 characters once serialized — the same bounds in JSON-Lines mode; a string made of characters JSON escapes counts at its own length (#382). Rejects on CALLERROR, when the CALL is dropped (boot gate, socket closed, OCPP 1.2, which has no DataTransfer, and the simulator's 1.5 SOAP dialect, which does not send it), or after 30 s without an answer. Reachable over MCP through `call_method`. |
+| `data_transfer`                   | `{ "vendorId": string, "messageId"?: string, "data"?: string \| object }`                                                 | Send a station-initiated `DataTransfer.req` and **return the CSMS's answer** `{ "status", "data"? }` as the result (#348). `data` is a string, or an object: passed through on 2.0.1, JSON-encoded on 1.6 and 1.6S (whose `data` is a string). A string is capped at 65,536 characters and an object at 65,536 characters once serialized — the same bounds in JSON-Lines mode; a string made of characters JSON escapes counts at its own length (#382). Rejects on CALLERROR, when the CALL is dropped (boot gate, socket closed, OCPP 1.2, which has no DataTransfer, and the simulator's 1.5 SOAP dialect, which does not send it), or after 25 s without an answer. Reachable over MCP through `call_method`. |
+| `send_ocpp_call`                  | `{ "action": string, "payload": object, "skipValidation"?: boolean, "applyResponse"?: boolean }`                          | Send any station-initiated OCPP-J CALL with the payload as given and **return the CSMS's answer** — `{ "kind": "callResult", "payload" }` or `{ "kind": "callError", "errorCode", "errorDescription", "errorDetails" }`, each with `messageId` and the `sentFrame` as written (#389). The payload must pass the OCPP schema unless `skipValidation`; the answer changes the CP's state only with `applyResponse`. A refused call (SOAP CP, action the CP does not send, invalid payload, boot gate) is `invalid_params`; no answer in 25 s is `timeout`, a dropped CALL `disconnected`. See [Expert OCPP calls](expert-ocpp-calls.md).                                                                             |
 
 > Scenario definitions (the `scenario` param above, and the file read by
 > `load_scenario`'s `file` param / `run_scenario_file`) follow
@@ -525,11 +527,53 @@ Guarantees a conformance driver can rely on:
 | `config.save`                                                  | `{ "config": object \| null }`                                                                      | Replace the daemon-wide simulator config; `null` clears it.                                                                                                                                                      |
 | `scenario.templates`                                           | `{}`                                                                                                | Built-in template catalogue (`id`, `name`, `description`, `targetType`) — the daemon-level twin of the CP-scoped `list_scenario_templates`; what the MCP `scenario_templates` tool calls.                        |
 | `scenario.definitions.list` / `.save` / `.replace` / `.delete` | `{ "cpId", "connectorId", … }` plus `definition` / `definitions[]` / `definitionId`                 | CRUD over persisted scenario definitions for one connector — the web console's scenario library; `list_scenarios` / `load_scenario` are the run-time view of the same rows.                                      |
+| `scenario.runs.list`                                           | `{ "runId"?, "cpId"?, "connectorId"?, "scenarioId"?, "verdict"?, "executionState"?, … }`            | Finished scenario runs across charge points, newest first, filtered and paged — see [Scenario run history](#scenario-run-history) (#388).                                                                        |
 | `connector_settings.auto_meter.get` / `.save`                  | `{ "cpId", "connectorId" }` (+ `config` on save)                                                    | Persisted automatic-meter-value config per connector (`connector_settings` table); `set_auto_meter_config` is the CP-scoped live equivalent.                                                                     |
 | `connector_settings.auto_traffic.get` / `.save`                | `{ "cpId", "connectorId" }` (+ `config` on save)                                                    | Persisted [background-traffic](#background-traffic) config per connector (`connector_settings` table, schema v10); `set_auto_traffic_config` is the CP-scoped live equivalent.                                   |
 | `connector_settings.soc_meter_sync.get` / `.save`              | `{ "cpId", "connectorId" }` (+ `enabled` on save)                                                   | Persisted SoC↔meter sync flag per connector.                                                                                                                                                                     |
 | `ev_settings.apply_default`                                    | `{ "settings": object }`                                                                            | Push default EV settings onto every connector of every CP that has no explicit / scenario override (issue #105). Distinct from the per-CP `set_ev_settings`, which always marks an override.                     |
 | `network_sim.*`                                                | see [Network simulation → RPC methods](network-simulation.md#rpc-methods)                           | Global / per-CP fault-injection config and manual disconnect trigger.                                                                                                                                            |
+
+### Scenario run history
+
+Every finished scenario run — natural end, error or operator stop — leaves its
+report (the object [`scenario_report`](#cp-command-methods) returns) in the
+daemon's run history (#388). A run that is still in flight when its scenario
+is deleted or replaced, or when the charge point is edited, is discarded
+without a verdict and leaves no report. One history serves the whole daemon:
+
+- **Storage.** With `--state-db` it is the `scenario_runs` table
+  ([State persistence](state-persistence.md#tables)), so the history and every
+  report survive a restart. Without it the history is in memory and lost on
+  exit.
+- **Retention.** At most **100 runs per charge point**: recording a run past
+  the cap evicts that charge point's oldest run, never another charge point's.
+  `cp.delete` drops the charge point's runs and `state.reset` drops them all.
+  Deleting or replacing a scenario does not — a run outlives its definition.
+- **`scenario.runs.list`** returns `{ runs, total }`. `runs` are summaries —
+  `runId`, `cpId`, `connectorId`, `scenarioId`, `scenarioName`, `startedAt`,
+  `endedAt`, `durationMs`, `executionState` (`completed` / `error`), `stopped`,
+  `verdict`, `conformanceVerdict`, `compatibilityVerdict`, `timeoutNodeId`,
+  `errorCount` and `assertions: { total, failed }` — newest first by start
+  time. Every filter is an exact match and they combine; a filter never returns
+  another charge point's, connector's or scenario's run. `runId` finds one run
+  wherever it sits in the history (a run id is unique per charge point, so add
+  `cpId` to be exact). `total` counts the filtered runs before paging. `limit`
+  defaults to 50 and is capped at 200; `offset` skips the newest runs. An
+  out-of-range `limit`, an empty `runId`, an unknown `verdict` /
+  `executionState` or a `connectorId` below 1 is `invalid_params`.
+- **Detail.** A summary carries no transcript; `scenario_report` with the
+  run's `cpId`, `connector`, `scenarioId` and `runId` returns the full report.
+  Without `runId` it still returns the scenario's latest recorded run.
+- **Refresh signal.** Recording a run emits `scenario_run_recorded`
+  (`connectorId`, `scenarioId`, `runId`) on the charge point's event stream
+  ([CLI → Events](../entities/cli.md#events)) after the write, so a client that
+  re-lists on it sees the run. A failed write never fails the run: the run's
+  report is lost and an error lands on the charge point's log (`logs.get`).
+- **`stopped`** is `true` when an operator stopped the run; a report recorded
+  before the field existed has none, which reads as not stopped.
+
+Local mode records no runs ([Local vs Remote mode](local-vs-remote-mode.md#consequences)).
 
 ## Event push and rooms
 
@@ -558,6 +602,25 @@ CP event envelope (the `evt` payloads are the CLI [event list](../entities/cli.m
   }
 }
 ```
+
+Commissioning state for an orchestrator — `Connecting → Booting → Online` —
+reads two events and nothing else: `connected` means the WebSocket opened (the
+station is booting), and `boot_notification` carries the CSMS's answer to
+`BootNotification.req` once it has been processed (`status`: `Accepted`,
+`Pending` or `Rejected`, plus `interval` and `currentTime`). It is emitted once
+per `BootNotification.conf` — first boot, reconnect, retry after `Rejected` —
+after the `connected` of that socket and before the `connector_status` /
+`status_change` events the answer causes. One exception: a `connect` on a
+socket that is already open sends no new `BootNotification.req`, but still
+emits `connected` so a caller waiting on it unblocks. That `connected` is not a
+new boot, and no `boot_notification` follows it: an orchestrator must keep the
+state the last `boot_notification` gave, not fall back to Booting. The
+converse also holds: a second `boot_notification` on the same socket, with no
+`disconnected` / `connected` between, is a real boot — a retry after
+`Rejected` and a CSMS `TriggerMessage` for `BootNotification` both re-send
+`BootNotification.req` on the open socket. Do not infer registration from
+`status_change`: it fires twice per accepted boot and on changes that are not
+boots at all (#395).
 
 Registry event envelope:
 

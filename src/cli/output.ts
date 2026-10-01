@@ -26,6 +26,8 @@ export function formatEvent(event: string, data: unknown): string {
       return `[EVENT] connector ${d.connectorId}: ${d.previousStatus} -> ${d.status}`;
     case "connected":
       return "[EVENT] connected to CSMS";
+    case "boot_notification":
+      return `[EVENT] BootNotification ${d.status} (interval: ${d.interval}s)`;
     case "disconnected":
       return `[EVENT] disconnected (code: ${d.code}, reason: ${d.reason})`;
     case "status_change":

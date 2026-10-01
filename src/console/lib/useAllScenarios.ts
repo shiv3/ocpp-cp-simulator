@@ -171,3 +171,17 @@ export function buildScenarioUrl(
   if (options.runId) params.set("run", options.runId);
   return consolePath(`/scenarios/${kind}?${params.toString()}`);
 }
+
+/** The run history page (#388) filtered on one scenario's runs on a
+ *  connector — the `?cp=&connector=&scenario=` of its URL. */
+export function buildRunHistoryUrl(
+  cpId: string,
+  connectorId: number | null,
+  scenarioId: string,
+): string {
+  const params = new URLSearchParams();
+  params.set("cp", cpId);
+  if (connectorId != null) params.set("connector", String(connectorId));
+  params.set("scenario", scenarioId);
+  return consolePath(`/scenarios/runs?${params.toString()}`);
+}

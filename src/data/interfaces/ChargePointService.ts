@@ -1,5 +1,9 @@
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
+import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
@@ -19,6 +23,10 @@ import type {
   ScenarioMode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
+import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "../../cp/application/verification/ScenarioRunSummary";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -245,6 +253,14 @@ export type ChargePointEvent =
       nodeId: string;
     }
   | {
+      /** #388: a finished run's report was added to the daemon's run
+       *  history; re-list runs. Daemon only. */
+      type: "scenario-run-recorded";
+      connectorId: number;
+      scenarioId: string;
+      runId: string;
+    }
+  | {
       /** #240: an operator extended, retried or continued the parked wait;
        *  re-read the scenario status for the new deadline. */
       type: "scenario-wait-changed";
@@ -392,6 +408,12 @@ export interface ChargePointService {
    *  file ends up containing, one JSON object per line. */
   listStoredLogs?(cpId: string): Promise<StoredLogEntry[]>;
 
+  /** #388: the daemon's finished scenario runs across every charge point,
+   *  newest first, filtered and paged (`scenario.runs.list`). Summaries only —
+   *  {@link getScenarioReport} returns a run's full report. Remote only:
+   *  local mode keeps no run history. */
+  listScenarioRuns?(query: ScenarioRunQuery): Promise<ScenarioRunPage>;
+
   // Persisted simulator config. Reads may be redacted over wire adapters.
   loadConfig(): Promise<WireSimulatorConfig | null>;
   saveConfig(config: SimulatorConfigInput | null): Promise<void>;
@@ -431,6 +453,10 @@ export interface ChargePointService {
     messageId?: string,
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
+  /** Expert OCPP call (#389): any station-initiated CALL, payload as given;
+   *  resolves with the CALLRESULT or CALLERROR. See
+   *  `ChargePoint.sendOcppCall`. */
+  sendOcppCall(id: string, request: OcppCallRequest): Promise<OcppCallOutcome>;
 
   // Connector operations
   startTransaction(

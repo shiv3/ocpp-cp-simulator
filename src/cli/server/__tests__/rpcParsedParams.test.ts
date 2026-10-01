@@ -9,6 +9,10 @@ import { EventBus } from "../eventBus";
 import { createRuntimeDeps, errorCodeFrom, runRpc } from "../socketServer";
 import { METHODS, type Params } from "../../../protocol";
 import { STR_64K_MAX } from "../../../protocol/limits";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../../cp/domain/errors/OcppCallErrors";
 
 // #383: the zod schema in `METHODS` is the one narrowing step on the daemon
 // path. These pin what that means at the edges: a schema-valid request is
@@ -199,5 +203,89 @@ describe("RPC params are narrowed by the schema alone (#383)", () => {
     expectTypeOf<Params<"logs.get">["order"]>().toEqualTypeOf<
       "asc" | "desc" | undefined
     >();
+  });
+});
+
+describe("send_ocpp_call (#389)", () => {
+  const outcome = {
+    kind: "callError",
+    messageId: "m1",
+    sentFrame: '[2,"m1","Heartbeat",{}]',
+    errorCode: "NotImplemented",
+    errorDescription: "no",
+    errorDetails: {},
+  };
+
+  it("passes the parsed request through and returns the CALLERROR as a result", async () => {
+    const sendOcppCall = vi.fn().mockResolvedValue(outcome);
+    await expect(
+      runRpc(depsWith({ sendOcppCall }), {
+        cpId: "cp-alpha",
+        method: "send_ocpp_call",
+        params: {
+          action: "Heartbeat",
+          payload: {},
+          skipValidation: true,
+          applyResponse: false,
+        },
+      }),
+    ).resolves.toEqual(outcome);
+    expect(sendOcppCall).toHaveBeenCalledWith("cp-alpha", {
+      action: "Heartbeat",
+      payload: {},
+      skipValidation: true,
+      applyResponse: false,
+    });
+  });
+
+  it("refuses a payload that is not an object as invalid_params", async () => {
+    const sendOcppCall = vi.fn();
+    const error = await rpcError(
+      { sendOcppCall },
+      {
+        cpId: "cp-alpha",
+        method: "send_ocpp_call",
+        params: { action: "Heartbeat", payload: [1] },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(sendOcppCall).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new OcppCallRejectedError(
+        "unsupported_action",
+        "Reset is not a station call",
+      ),
+      "invalid_params",
+      "Reset is not a station call",
+    ],
+    [
+      new OcppCallRejectedError("invalid_payload", "Outgoing Heartbeat failed"),
+      "invalid_params",
+      "Outgoing Heartbeat failed",
+    ],
+    [
+      new OcppCallRejectedError("boot_gate", "blocked by the boot gate"),
+      "invalid_params",
+      "blocked by the boot gate",
+    ],
+    [new OcppCallNoAnswerError("timeout", "no answer"), "timeout", "no answer"],
+    [
+      new OcppCallNoAnswerError("dropped", "dropped (socket_closed)"),
+      "disconnected",
+      "dropped (socket_closed)",
+    ],
+  ])("maps %s to %s", async (thrown, code, message) => {
+    const error = await rpcError(
+      { sendOcppCall: vi.fn().mockRejectedValue(thrown) },
+      {
+        cpId: "cp-alpha",
+        method: "send_ocpp_call",
+        params: { action: "Heartbeat", payload: {} },
+      },
+    );
+    expect(error).toEqual({ code, message });
   });
 });

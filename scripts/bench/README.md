@@ -696,7 +696,7 @@ whole run, including across reconnects.** That sentence is the reason this
 section exists, and it was not true before #302's round-nine fix.
 
 `cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`; nothing pins it
-there. Every accepted boot runs `ChargePoint.onBootNotificationAccepted`, which
+there. Every accepted boot runs `ChargePoint.onBootNotificationResult`, which
 calls `startHeartbeat(BootNotification.conf.interval)` — so the CSMS's value
 replaces the flag's the moment a charge point reconnects. Arming the heartbeat
 once per cohort was therefore only true until that charge point's first
@@ -707,22 +707,19 @@ in the table said so. A benchmark that changes its own workload as it nears the
 interesting region is not measuring that region.
 
 So the run watches for accepted boots on its event socket and puts the override
-back on each one. The signal is the `status_change` → `Available` event: the
-charge-point-level boot gate opening, which is the same signal the daemon's own
-`src/cli/server/waitForBootAccepted.ts` treats as "boot has been accepted".
-`ChargePoint`'s status setter emits it unconditionally — no change detection —
-so it fires on the first boot and on every reboot after a reconnect alike,
-because `teardownAfterClose` has moved the status to `Unavailable` in between.
+back on each one. The signal is the `boot_notification` event with
+`status: "Accepted"`: the CSMS's `BootNotification.conf`, processed. It is
+emitted exactly once per `BootNotification.conf` (#395), so it fires on the
+first boot and on every reboot after a reconnect alike, and on nothing else.
 
 Two things it deliberately does not do:
 
 - **It does not hook `connected`.** That event fires _before_
   `BootNotification.conf` arrives, so reacting to it would race the very
-  interval it exists to overwrite. `status_change` is emitted from inside
-  `onBootNotificationAccepted`, one statement before `startHeartbeat(csms)` in
-  the same synchronous frame — and the reapplication is issued from a different
-  process, so it can only ever land afterwards. There is no `boot_accepted`
-  event on the control plane to hook instead.
+  interval it exists to overwrite. `boot_notification` is emitted from inside
+  `onBootNotificationResult`, before `startHeartbeat(csms)` in the same
+  synchronous frame — and the reapplication is issued from a different process,
+  so it can only ever land afterwards.
 - **It does not merge a second boot into an in-flight reapplication.** An RPC is
   issued _after every event_. Dropping one because an earlier RPC had not come
   back would lose the case that matters: the daemon may run that RPC's handler
@@ -735,28 +732,29 @@ A fix for "the instrument changes the workload at the knee" that issues a wave
 of control-plane RPCs at the knee is the same defect with the sign flipped, so
 the cost is collapsed where it can be and measured where it cannot.
 
-**One boot emitted two events, and that is collapsed.**
-`onBootNotificationAccepted` emits `statusChange` twice — once from
-`updateConnectorStatus(0, Available)`, once from the status setter — for a
-single boot. Issuing per event meant one boot cost two RPCs, for no added
-coverage. Observed boots are therefore gathered for `BOOT_COALESCE_MS` (50ms)
-and flushed to **one RPC per charge point**. Any window is correct here: every
-observed event has already run `startHeartbeat(csmsInterval)` on the daemon
-before it was emitted, so an RPC issued strictly after the last event of a
-window overwrites every CSMS interval that window saw — collapsing merges boots
-that are already covered, it never drops one. 50ms sits between two numbers
-four orders of magnitude apart: the two emissions of one boot are microseconds
-apart, and the fastest a charge point can boot _again_ is a socket close plus
-`OCPPWebSocket`'s 1s first reconnect backoff plus a connect and a
-BootNotification round trip. The in-flight case is untouched — a boot observed
-_after_ an RPC was issued is still owed its own RPC, because the daemon may run
-that RPC's handler before the later boot's frame.
+**One boot costs one RPC.** The hook used to be `status_change` → `Available`,
+which `onBootNotificationResult` emits twice for a single boot — once from
+`updateConnectorStatus(0, Available)`, once from the status setter — so issuing
+per event cost two RPCs per boot. `boot_notification` is emitted once per boot,
+which removes that doubling at the source. Observed boots are still gathered for
+`BOOT_COALESCE_MS` (50ms) and flushed to **one RPC per charge point**, with one
+timer for a whole reconnect wave. Any window is correct here: every observed
+event is emitted in the same synchronous frame as the
+`startHeartbeat(csmsInterval)` it announces, so an RPC issued strictly after the
+last event of a window overwrites every CSMS interval that window saw —
+collapsing merges boots that are already covered, it never drops one. 50ms sits
+between two numbers four orders of magnitude apart: events of one synchronous
+frame are microseconds apart, and the fastest a charge point can boot _again_
+is a socket close plus `OCPPWebSocket`'s 1s first reconnect backoff plus a
+connect and a BootNotification round trip. The in-flight case is untouched — a
+boot observed _after_ an RPC was issued is still owed its own RPC, because the
+daemon may run that RPC's handler before the later boot's frame.
 
-The collapse is measured, not asserted: the smoke test's two-step sweep reports
-`bootsObserved: 4, rpcsIssued: 2` against a real daemon, and removing the
-window makes it `4` and `4` — a clean 2×.
+The cost is measured, not asserted: the smoke test's two-step sweep reports
+`bootsObserved: 2, rpcsIssued: 2` against a real daemon — one event and one RPC
+per accepted boot.
 
-**The residual is bounded by the pool, not by hope.** After the collapse a
+**The residual is bounded by the pool, not by hope.** A
 reconnect wave costs **one RPC per charge point that reconnected**: 2000 calls
 at the largest fleet this tool accepts. Those calls are paced by the same token
 buckets as everything else, which cap _total_ control-plane traffic at
@@ -771,15 +769,12 @@ report, per row.
 
 **What is not measured** is whether the knee _moves_, and that is recorded as a
 standing limitation rather than as work outstanding — see "Known limitations".
-The short version: the collapse is measured, the residual's bound is argued,
+The short version: one RPC per boot is measured (the coalescing window itself
+is unit-tested only, in `lib.bun.test.ts`), the residual's bound is argued,
 and settling the question needs a real CSMS at fleet size that this repository
 does not have. Every run records `bootsObserved`, `rpcsIssued` and `failed` in
 `--out` beside the per-row `reconnects` and the `hb.load` column, so the
 perturbation is in the record whenever someone does run it.
-
-`status_change` also fires on occasions that are not boots at all (a
-`ChangeAvailability`, a connector-0 status update). Those cost one RPC each and
-are counted in `bootsObserved` like any other.
 
 **How the fix is known to hold, and what is still unverified.** The evidence is
 in `fleetBench.smoke.bun.test.ts`: a mock CSMS answers `BootNotification` with
@@ -1019,25 +1014,23 @@ a spare machine and a CSMS.
   interval by hand.** `ChangeConfiguration HeartbeatInterval` reaches
   `ChargePoint`'s configuration listener
   (`src/cp/domain/charge-point/ChargePoint.ts`, the `HeartbeatInterval` case)
-  and calls `startHeartbeat` directly, emitting **no** `status_change` — so
-  nothing here observes it and the override is not put back. Real CSMSes do
+  and calls `startHeartbeat` directly, emitting **no** `boot_notification` —
+  so nothing here observes it and the override is not put back. Real CSMSes do
   send that message; the mock in the smoke test does not, so this gap is
   documented rather than tested. If a run's `heartbeat` latency column looks
   like a cadence nobody configured, suspect that first. The same applies to a
-  boot the CSMS answers `Pending` or `Rejected`: neither reaches
-  `onBootNotificationAccepted`, both stop the heartbeat, and neither emits the
-  `Available` this hooks — such a charge point contributes no heartbeat load
-  until it is finally accepted.
+  boot the CSMS answers `Pending` or `Rejected`: both emit `boot_notification`
+  with that status, which this ignores, and both stop the heartbeat — such a
+  charge point contributes no heartbeat load until it is finally accepted.
 - **Whether keeping `--heartbeat-interval` in force moves the knee is not
   measured, and will not be measured from this repository.** Stated the same
   way as the closing stop above, and for the same reason: it cannot be
   established here, so it is a limitation rather than a task.
 
-  _What is measured._ The **collapse** — that one accepted boot costs one RPC
-  and not two. The smoke sweep reports `bootsObserved: 4, rpcsIssued: 2`
-  against a real daemon; removing the coalescing window makes it `4` and `4`.
-  That is two charge points on loopback against a mock CSMS, which is enough
-  to prove the collapse and nothing at all about the knee.
+  _What is measured._ The **cost per boot** — that one accepted boot costs one
+  RPC. The smoke sweep reports `bootsObserved: 2, rpcsIssued: 2` against a
+  real daemon. That is two charge points on loopback against a mock CSMS,
+  which is enough to prove the cost per boot and nothing at all about the knee.
 
   _What is only argued._ That the residual cannot perturb the measurement. One
   RPC per reconnecting charge point — 2000 at the largest accepted fleet —
@@ -1060,8 +1053,9 @@ a spare machine and a CSMS.
 
   _Which counters settle it when someone does._ `heartbeatOverride.bootsObserved`
   and `heartbeatOverride.rpcsIssued` in `--out` (their ratio is the instrument's
-  own cost — 2:1 is healthy, approaching 1:1 means the window stopped
-  collapsing), `heartbeatOverride.failed`, the per-row `reconnects`, and the
+  own cost — 1:1 is expected since `boot_notification` fires once per boot;
+  fewer RPCs than boots means boots were merged inside one window),
+  `heartbeatOverride.failed`, the per-row `reconnects`, and the
   `hb.load` column, which reads `drift` on any row whose cadence could not be
   shown to be the configured one. All of them are in every result file already, so the
   perturbation is in the record and can be checked rather than re-argued.

@@ -56,6 +56,27 @@ describe("LocalChargePointService A1.1d port methods", () => {
     expect(spy).toHaveBeenCalledWith("Uploading");
   });
 
+  it("sends an expert OCPP call through the local charge point (#389)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const outcome = {
+      kind: "callResult" as const,
+      messageId: "m1",
+      sentFrame: '[2,"m1","Heartbeat",{}]',
+      payload: {},
+    };
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendOcppCall")
+      .mockResolvedValue(outcome);
+    const request = { action: "Heartbeat", payload: {}, applyResponse: true };
+
+    await expect(service.sendOcppCall("CP-PORT", request)).resolves.toBe(
+      outcome,
+    );
+
+    expect(spy).toHaveBeenCalledWith(request);
+  });
+
   it("sends FirmwareStatusNotification through the local charge point", async () => {
     const setup = await serviceWithChargePoint();
     service = setup.service;

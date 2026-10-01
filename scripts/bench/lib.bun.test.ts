@@ -2520,14 +2520,11 @@ describe("HeartbeatOverride", () => {
     };
   }
 
-  it("collapses one boot's two events into one RPC", () => {
-    // `onBootNotificationAccepted` emits `statusChange` twice for ONE boot —
-    // once from `updateConnectorStatus(0, Available)`, once from the status
-    // setter. An RPC per event doubled the control-plane traffic a reconnect
-    // wave costs, which is load the benchmark offers without reporting, at the
-    // exact N it exists to characterise. Both events are already covered by a
-    // single RPC issued after them, because each had run
-    // `startHeartbeat(csmsInterval)` before it was emitted.
+  it("collapses two events for one charge point into one RPC", () => {
+    // A repeated event for one charge point inside one window must not
+    // become a second RPC: both are covered by a single RPC issued after
+    // them, because each was emitted in the same synchronous frame as its
+    // `startHeartbeat(csmsInterval)`.
     const h = harness();
     h.override.noteBootAccepted("cp-1");
     h.override.noteBootAccepted("cp-1");
@@ -2587,7 +2584,7 @@ describe("HeartbeatOverride", () => {
 
   it("ignores a charge point this run did not create", () => {
     // `--allow-existing` puts strangers' charge points on the same daemon, and
-    // they emit `status_change` too. Rewriting their heartbeat interval would
+    // they emit `boot_notification` too. Rewriting their heartbeat interval would
     // make the benchmark a side effect on someone else's fleet.
     const h = harness((cpId) => cpId === "mine");
     h.override.noteBootAccepted("theirs");

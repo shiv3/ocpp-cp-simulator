@@ -7,6 +7,10 @@ import type {
   TransactionStopTriggerReason,
 } from "../../domain/connector/Transaction";
 import type { StartTransactionOutcome } from "../../domain/charge-point/ChargePoint";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../domain/types/OcppCall";
 
 /**
  * Scenario execution mode
@@ -81,6 +85,10 @@ export enum ScenarioNodeType {
   // Level-triggered (already in the target state → resolve immediately)
   // and observe-only — causing disconnects is network simulation (#239).
   CONNECTION_TRIGGER = "connectionTrigger",
+  // Issue #389: expert OCPP call — any station-initiated CALL of the
+  // station's OCPP-J version with an authored payload. Waits for the answer
+  // and logs it; see ChargePoint.sendOcppCall.
+  OCPP_CALL = "ocppCall",
 }
 
 /**
@@ -397,6 +405,13 @@ export type DataTransferNodeData = BaseNodeData & {
 };
 
 /**
+ * OCPP Call Node Data (#389) — an expert OCPP call: the action, the payload
+ * as authored, and the two per-call expert switches. A CALLERROR answer is
+ * logged and the flow goes on; a refused call or no answer fails the run.
+ */
+export type OcppCallNodeData = BaseNodeData & OcppCallRequest;
+
+/**
  * Connection Trigger Node Data — waits for the charge point's WebSocket to
  * reach `event`. Level-triggered like statusTrigger: if the connection is
  * already in the target state the node resolves immediately. Unlike every
@@ -434,6 +449,7 @@ export type ScenarioNodeData =
   | CertQuirksNodeData
   | ConfigSetNodeData
   | DataTransferNodeData
+  | OcppCallNodeData
   | StartNodeData
   | ConnectionTriggerNodeData
   | BaseNodeData;
@@ -463,7 +479,7 @@ export interface ScenarioTrigger {
  * See `schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.2";
+export const SCENARIO_SCHEMA_VERSION = "1.3";
 
 /**
  * Scenario definition
@@ -863,6 +879,9 @@ export interface ScenarioExecutorCallbacks {
   onClearCertificateQuirks?: () => void;
   /** §5.3: apply a Configuration key change locally. */
   onConfigSet?: (key: string, value: string) => void;
+  /** #389: send an expert OCPP call; resolves with the CSMS's answer and
+   *  rejects when the call is refused or gets no answer. */
+  onSendOcppCall?: (request: OcppCallRequest) => Promise<OcppCallOutcome>;
   /** §4.3: send CP-initiated DataTransfer.req. */
   onSendDataTransfer?: (
     vendorId: string,

@@ -32,6 +32,13 @@ import type {
 } from "../../../ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
+import { CallWaiters } from "./CallWaiters";
+import { ExpertCalls, type CallErrorFields } from "./ExpertCalls";
+import {
+  type OcppCallOutcome,
+  type OcppCallRequest,
+} from "../../domain/types/OcppCall";
+import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -164,14 +171,16 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   >();
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
-  private readonly _dataTransferWaiters = new Map<
-    string,
-    {
-      resolve: (result: DataTransferResult) => void;
-      reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
+  private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
+    DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+    (id) =>
+      new Error(
+        `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
+      ),
+  );
+  /** Expert calls (#389) in flight; their answers are routed here first. */
+  // 2.x writes a CALL at once or drops it: nothing is ever left to withdraw.
+  private readonly _expertCalls = new ExpertCalls(() => false);
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
   private _bootStatus:
@@ -454,16 +463,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const pending = this._pendingRequests.get(messageId);
       this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
+      const error = payload as CallErrorFields;
+      if (this._expertCalls.claimError(messageId, error)) return;
       if (pending?.action === "DataTransfer") {
-        const error = payload as {
-          errorCode?: string;
-          errorDescription?: string;
-        };
-        this.settleDataTransferWaiter(messageId, {
-          error: new Error(
+        this._dataTransferWaiters.reject(
+          messageId,
+          new Error(
             `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode ?? "?"}: ${error.errorDescription ?? ""}`,
           ),
-        });
+        );
       }
 
       // Issue #181: a CALLERROR answering Authorize.req is a definite
@@ -491,17 +499,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const pending = this._pendingRequests.get(messageId);
     this._pendingRequests.delete(messageId);
 
+    if (this._expertCalls.claimResult(messageId, payload)) return;
+
     if (pending?.action === "DataTransfer") {
       const answer = payload as DataTransferResponseV201;
       this._logger.info(
         `[v2.0.1] DataTransfer response: ${JSON.stringify(answer)}`,
         LogType.OCPP,
       );
-      this.settleDataTransferWaiter(messageId, {
-        result: {
-          status: answer.status,
-          ...(answer.data !== undefined ? { data: answer.data } : {}),
-        },
+      this._dataTransferWaiters.resolve(messageId, {
+        status: answer.status,
+        ...(answer.data !== undefined ? { data: answer.data } : {}),
       });
       return;
     }
@@ -539,16 +547,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         `[v2.0.1] BootNotification response: ${bootResult.status}`,
         LogType.OCPP,
       );
-      if (bootResult.status === "Accepted") {
-        this._chargePoint.onBootNotificationAccepted(
-          bootResult.currentTime,
-          bootResult.interval,
-        );
-      } else if (bootResult.status === "Pending") {
-        this._chargePoint.onBootNotificationPending(bootResult.interval);
-      } else {
-        this._chargePoint.onBootNotificationRejected(bootResult.interval);
-      }
+      this._chargePoint.onBootNotificationResult({
+        status: bootResult.status,
+        interval: bootResult.interval,
+        currentTime: bootResult.currentTime,
+      });
     }
   }
 
@@ -914,35 +917,39 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       ...(messageId !== undefined ? { messageId } : {}),
       ...(data !== undefined ? { data } : {}),
     } as unknown as DataTransferRequestV201;
-    const answer = new Promise<DataTransferResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this._dataTransferWaiters.delete(id);
-        reject(
-          new Error(
-            `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
-          ),
-        );
-      }, DATA_TRANSFER_RESPONSE_TIMEOUT_MS);
-      this._dataTransferWaiters.set(id, { resolve, reject, timer });
-    });
+    const answer = this._dataTransferWaiters.register(id);
     this.send("DataTransfer", id, payload, (reason) =>
-      this.settleDataTransferWaiter(id, {
-        error: new Error(`DataTransfer ${id} dropped (${reason})`),
-      }),
+      this._dataTransferWaiters.reject(
+        id,
+        new Error(`DataTransfer ${id} dropped (${reason})`),
+      ),
     );
     return answer;
   }
 
-  private settleDataTransferWaiter(
-    messageId: string,
-    outcome: { result: DataTransferResult } | { error: Error },
-  ): void {
-    const waiter = this._dataTransferWaiters.get(messageId);
-    if (!waiter) return;
-    this._dataTransferWaiters.delete(messageId);
-    clearTimeout(waiter.timer);
-    if ("result" in outcome) waiter.resolve(outcome.result);
-    else waiter.reject(outcome.error);
+  /** Expert OCPP call (#389): any 2.0.1 / 2.1 station CALL (the catalog
+   *  was checked by ChargePoint.sendOcppCall). Its answer goes to the
+   *  caller, and through the normal response handling only when
+   *  `applyResponse` is set. */
+  public async sendOcppCall(
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    const warning =
+      this._codec?.outgoingWarning(request.action, request.payload) ?? null;
+    if (warning && !request.skipValidation) {
+      throw new OcppCallRejectedError("invalid_payload", warning);
+    }
+    const id = this.generateMessageId();
+    const answer = this._expertCalls.start(id, request);
+    // `send` logs the codec warning, if any, as for every CALL; with
+    // skipValidation the payload is deliberately unchecked.
+    this.send(
+      request.action as V201Action,
+      id,
+      request.payload as unknown as V201RequestPayload,
+      (reason) => this._expertCalls.onDropped(id, reason),
+    );
+    return answer;
   }
 
   public sendSecurityEventNotification(
@@ -1050,6 +1057,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // Clear written-but-unanswered correlation entries on disconnect.
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
+    this._expertCalls.onClosed();
   }
 
   public flushPendingQueue(): void {

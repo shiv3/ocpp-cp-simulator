@@ -13,8 +13,10 @@ import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
 import { Connector } from "../connector/Connector";
 import type {
+  BootNotificationResult,
   ChargePointEvents,
   IncomingCallCompletion,
+  RegistrationStatus,
 } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
@@ -27,6 +29,9 @@ import type {
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
+import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
+import { type OcppCallOutcome, type OcppCallRequest } from "../types/OcppCall";
+import { OcppCallRejectedError } from "../errors/OcppCallErrors";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
 import type {
@@ -1097,6 +1102,41 @@ export class ChargePoint {
     return this._outbox.sendDataTransfer(vendorId, messageId, data);
   }
 
+  /**
+   * Expert OCPP call (#389): any station-initiated CALL of this station's
+   * OCPP-J version, with the payload as given. See
+   * {@link IChargePointMessageHandler.sendOcppCall}.
+   */
+  async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+    const catalog = getOcppCallCatalog(this._ocppVersion);
+    if (!catalog) {
+      throw new OcppCallRejectedError(
+        "unsupported_transport",
+        `Expert OCPP calls need an OCPP-J station; ${this._ocppVersion} is SOAP`,
+      );
+    }
+    // Checked here, not by the schema, so skipValidation cannot waive it:
+    // the scenario editor can store unparsed JSON text as the payload.
+    const { payload } = request;
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      throw new OcppCallRejectedError(
+        "invalid_payload",
+        "The payload of an OCPP call must be a JSON object",
+      );
+    }
+    if (!catalog.isSupported(request.action)) {
+      throw new OcppCallRejectedError(
+        "unsupported_action",
+        `${request.action} is not a station-initiated call on ${this._ocppVersion}; expected one of ${catalog.actions.join(", ")}`,
+      );
+    }
+    return this._outbox.sendOcppCall(request);
+  }
+
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */
   sendSecurityEventNotification(type: string, techInfo?: string): void {
     this._outbox.sendSecurityEventNotification(type, techInfo);
@@ -1319,13 +1359,62 @@ export class ChargePoint {
     }, retryAfterSeconds * 1000);
   }
 
-  onBootNotificationAccepted(
-    _currentTime: string | undefined,
-    intervalSeconds: number,
-  ): void {
-    const interval = intervalSeconds > 0 ? intervalSeconds : 0;
-    this._logger.info("Boot notification accepted", LogType.OCPP);
-    this.markBootAccepted();
+  /**
+   * The single entry point for a processed BootNotification.conf, whatever
+   * the OCPP version or transport. A status outside the three the spec
+   * defines is treated as Rejected. The boot gate takes the new status first,
+   * then `bootNotificationResult` is emitted, then the answer's own effects
+   * run — so the event precedes every status change it causes (#395).
+   */
+  onBootNotificationResult(result: BootNotificationResult): void {
+    const status: RegistrationStatus =
+      result.status === "Accepted" || result.status === "Pending"
+        ? result.status
+        : "Rejected";
+    const interval =
+      typeof result.interval === "number" && result.interval > 0
+        ? result.interval
+        : 0;
+    switch (status) {
+      case "Accepted":
+        this._logger.info("Boot notification accepted", LogType.OCPP);
+        this.markBootAccepted();
+        break;
+      case "Pending":
+        this._logger.warn(
+          `BootNotification Pending — only CSMS-initiated traffic allowed${
+            interval > 0 ? `, retry interval=${interval}s` : ""
+          }`,
+          LogType.OCPP,
+        );
+        // Spec: stay quiet but keep the WebSocket open. No retry timer here;
+        // CSMS can move us to Accepted/Rejected via subsequent flow.
+        this.markBootPending();
+        break;
+      case "Rejected": {
+        const wait = interval > 0 ? interval : 60;
+        this._logger.error(
+          `BootNotification Rejected — silent for ${wait}s before retry`,
+          LogType.OCPP,
+        );
+        this.markBootRejected(wait);
+        break;
+      }
+    }
+    // The CSMS's interval, not the 60s retry a Rejected with 0 falls back to.
+    this._events.emit("bootNotificationResult", {
+      status,
+      interval,
+      currentTime: result.currentTime,
+    });
+    if (status === "Accepted") {
+      this.applyBootAccepted(interval);
+    } else {
+      this.stopHeartbeat();
+    }
+  }
+
+  private applyBootAccepted(interval: number): void {
     // Send connector 0 (charge point level) status first
     this.updateConnectorStatus(0, OCPPStatus.Available);
     this.connectors.forEach((connector) => {
@@ -1356,30 +1445,6 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
     }
-  }
-
-  onBootNotificationPending(intervalSeconds: number): void {
-    const interval = intervalSeconds > 0 ? intervalSeconds : 0;
-    this._logger.warn(
-      `BootNotification Pending — only CSMS-initiated traffic allowed${
-        interval > 0 ? `, retry interval=${interval}s` : ""
-      }`,
-      LogType.OCPP,
-    );
-    this.markBootPending();
-    this.stopHeartbeat();
-    // Spec: stay quiet but keep the WebSocket open. No retry timer here;
-    // CSMS can move us to Accepted/Rejected via subsequent flow.
-  }
-
-  onBootNotificationRejected(intervalSeconds: number): void {
-    const wait = intervalSeconds > 0 ? intervalSeconds : 60;
-    this._logger.error(
-      `BootNotification Rejected — silent for ${wait}s before retry`,
-      LogType.OCPP,
-    );
-    this.markBootRejected(wait);
-    this.stopHeartbeat();
   }
 
   boot(): void {

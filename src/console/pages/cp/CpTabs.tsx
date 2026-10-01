@@ -8,6 +8,7 @@ const TAB_ITEMS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "analysis", label: "Session Analysis" },
   { value: "config", label: "Configuration" },
   { value: "diagnostics", label: "Diagnostics" },
+  { value: "expert", label: "Expert" },
 ];
 
 export interface CpTabsProps {
@@ -19,7 +20,7 @@ export interface CpTabsProps {
 
 /**
  * Tab shell for the CP detail page (Transactions / Message Log /
- * Configuration / Diagnostics). Thin wrapper around the shared Radix
+ * Configuration / Diagnostics / Expert). Thin wrapper around the shared Radix
  * `Tabs` primitive — content panels are supplied by the caller as children
  * so this file stays free of any page-specific logic.
  */

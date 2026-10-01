@@ -9,7 +9,7 @@ import { waitForBootAccepted } from "../waitForBootAccepted";
  * acceptance. `waitForBootAccepted` is the extracted signal the fix waits
  * on before firing a startup scenario. These tests drive a REAL
  * `ChargePoint` (no mocked event emitter, no mocked ChargePoint) through
- * its actual `onBootNotificationAccepted` production code path — the same
+ * its actual `onBootNotificationResult` production code path — the same
  * method `BootNotificationResultHandler` calls when a real
  * BootNotification.conf(Accepted) arrives — and assert the promise
  * behaves correctly around that transition.
@@ -47,7 +47,11 @@ describe("waitForBootAccepted", () => {
     expect(raceResult).toBe(PENDING);
 
     // Drive the real production boot-accept path.
-    cp.onBootNotificationAccepted(new Date().toISOString(), 300);
+    cp.onBootNotificationResult({
+      status: "Accepted",
+      interval: 300,
+      currentTime: new Date().toISOString(),
+    });
 
     const result = await promise;
     expect(result).toBe(true);
@@ -55,7 +59,11 @@ describe("waitForBootAccepted", () => {
 
   it("resolves immediately when boot was already accepted before the wait started", async () => {
     const cp = makeChargePoint("CP002");
-    cp.onBootNotificationAccepted(new Date().toISOString(), 300);
+    cp.onBootNotificationResult({
+      status: "Accepted",
+      interval: 300,
+      currentTime: new Date().toISOString(),
+    });
 
     const start = Date.now();
     const result = await waitForBootAccepted(cp, 1, { timeoutMs: 5_000 });

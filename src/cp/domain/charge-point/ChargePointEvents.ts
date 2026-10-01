@@ -1,5 +1,14 @@
 import { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 
+/** The CSMS's answer to BootNotification.req, as every OCPP version words it. */
+export type RegistrationStatus = "Accepted" | "Pending" | "Rejected";
+
+export interface BootNotificationResult {
+  status: RegistrationStatus;
+  interval: number;
+  currentTime: string;
+}
+
 /** How the simulator answered an incoming CSMS CALL (#396). `NoResponse`
  *  means the CALL is left unanswered (an inbound `ignore` policy). */
 export type IncomingCallCompletion =
@@ -25,6 +34,11 @@ export interface ChargePointEvents {
 
   // Connection events
   connected: void;
+  /** Emitted once per processed BootNotification.conf, whatever the OCPP
+   *  version or transport, after the boot gate took the new status and before
+   *  any status transition the answer causes (#395). `connected` only means
+   *  the socket opened; this is what says the CSMS registered the station. */
+  bootNotificationResult: BootNotificationResult;
   disconnected: { code: number; reason: string };
   reconnecting: { attempt: number; maxAttempts: number };
 

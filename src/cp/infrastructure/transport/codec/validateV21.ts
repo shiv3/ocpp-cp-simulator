@@ -3,15 +3,11 @@ import {
   schemas,
   validationErrors,
 } from "../../../../ocpp";
+import { requestSchemaKey } from "./requestSchemaKey";
 
 export interface V21ValidationResult {
   valid: boolean;
   errors: string[];
-}
-
-// `schemas.v21` keys are camelCase, e.g. "BootNotification" -> "bootNotificationRequestV21".
-function requestSchemaKey(action: string): string {
-  return `${action.charAt(0).toLowerCase()}${action.slice(1)}RequestV21`;
 }
 
 const v21Schemas = schemas.v21 as Record<string, unknown>;
@@ -31,7 +27,7 @@ export function validateV21Request(
   if (validate(payload)) {
     return { valid: true, errors: [] };
   }
-  const schema = v21Schemas[requestSchemaKey(action)];
+  const schema = v21Schemas[requestSchemaKey(action, "V21")];
   const errors = schema
     ? validationErrors(
         schema as Parameters<typeof validationErrors>[0],

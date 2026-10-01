@@ -477,29 +477,12 @@ class FleetWatcher {
         }
       | undefined;
     if (env?.kind !== "cp") return;
-    // The charge-point-level boot gate opening. This is the same signal the
-    // daemon's own `waitForBootAccepted` (src/cli/server/waitForBootAccepted.ts)
-    // treats as "boot has been accepted": `onBootNotificationAccepted` sets
-    // `ChargePoint.status = Available`, whose setter emits `statusChange`
-    // unconditionally — no change-detection — so it fires on the first boot and
-    // on every reboot after a reconnect alike (`teardownAfterClose` has moved
-    // the status to Unavailable in between). There is no `boot_accepted` event
-    // on the wire to hook instead; `connected` exists but fires *before*
-    // `BootNotification.conf`, so reacting to it would race the CSMS interval
-    // it is meant to overwrite.
-    //
-    // This over-fires, and by a known factor rather than "slightly":
-    // `onBootNotificationAccepted` emits `statusChange` **twice** — once from
-    // `updateConnectorStatus(0, Available)` and once from the status setter —
-    // and an RPC follows every event by design, so an accepted boot costs two
-    // `start_heartbeat` calls, and the first boot a third from `armLoad`'s own
-    // arming. `status_change` also fires on occasions that are not boots at all
-    // (a ChangeAvailability, a connector-0 status update). A reconnect wave at
-    // the top of a 2000-CP sweep is therefore ~4000 paced RPCs. That is the
-    // price taken over the alternative, which is the offered load drifting to
-    // the CSMS's cadence at the exact N the sweep is trying to characterise.
-    if (env.evt?.event === "status_change") {
-      if (env.evt.data?.status === "Available" && env.cpId !== undefined) {
+    // One event per BootNotification.conf, emitted in the same synchronous
+    // frame as the `startHeartbeat(csmsInterval)` an accepted boot runs, so
+    // the reapplication issued from this process can only land afterwards.
+    // `connected` fires *before* BootNotification.conf and would race it.
+    if (env.evt?.event === "boot_notification") {
+      if (env.evt.data?.status === "Accepted" && env.cpId !== undefined) {
         this.onBootAccepted(env.cpId);
       }
       return;
@@ -2102,9 +2085,9 @@ async function main(): Promise<void> {
         if (hbRpcs > 0) {
           // Both numbers, not just the RPC count: their ratio is the run's own
           // statement of how much control-plane traffic the instrument spent
-          // to keep the load honest. One boot emits two events, so a healthy
-          // ratio is 2:1; anything approaching 1:1 means the coalescing window
-          // is not collapsing them and the traffic is twice what it should be.
+          // to keep the load honest. `boot_notification` fires once per boot,
+          // so 1:1 is expected; fewer RPCs than boots means boots were merged
+          // inside one coalescing window.
           process.stderr.write(
             `[bench] N=${n}: reapplied --heartbeat-interval ` +
               `${opts.heartbeatIntervalSec}s with ${hbRpcs} start_heartbeat RPC(s) ` +
@@ -2254,8 +2237,8 @@ async function main(): Promise<void> {
         // cadence for part of the run.
         heartbeatOverride: {
           // `bootsObserved` beside `rpcsIssued` is the instrument reporting its
-          // own cost: two events per accepted boot go in, one RPC per charge
-          // point per coalescing window comes out. A collected result therefore
+          // own cost: one `boot_notification` per accepted boot goes in, one RPC
+          // per charge point per coalescing window comes out. A collected result therefore
           // states how much control-plane traffic the reapplication added,
           // rather than leaving a reader to infer it from the fleet size.
           bootsObserved: heartbeatOverride.bootsObserved(),

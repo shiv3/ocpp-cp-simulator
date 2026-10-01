@@ -1258,8 +1258,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-10-01] lint | CSMS call events: envelope lead-in, `messageId` always set (#396 review)
 
-- `concepts/control-plane.md`: the #396 paragraph had landed between "CP
+- [Control plane](concepts/control-plane.md): the #396 paragraph had landed between "CP
   event envelope" and the JSON it introduces; moved above the lead-in.
-- `entities/cli.md`, `ChargePointEvents.ts`: a SOAP request without a
+- [CLI](entities/cli.md#csms-call-events), `ChargePointEvents.ts`: a SOAP request without a
   WS-Addressing `MessageID` never reaches dispatch (the envelope parser
   requires it), so `messageId` is never omitted on the wire.

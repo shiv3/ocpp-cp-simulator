@@ -1344,3 +1344,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [CLI](entities/cli.md#installing-as-the-ocpp-cp-sim-command): how the package reaches the npm registry and why the install command is not advertised until the first publish has happened (#321). Bun stays the run time.
 - Mechanism: `package.json` drops `private` and gains the registry metadata (description, license, repository, keywords, `publishConfig.access`); `cli-release.yml` gains a `publish-npm` job that downloads the tag's own release asset and publishes it with npm trusted publishing (OIDC, provenance), skipped unless the repository variable `NPM_PUBLISH` is `true`, idempotent on re-runs, and `next`-tagged for SemVer prereleases.
+
+## [2026-10-01] ingest | the two release trains keep out of each other's way
+
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): `cli-v*` releases are published with `make_latest: false`, and release-drafter uses `tag-prefix: "v"`. Cutting `cli-v0.4.1` after `v0.8.0` had taken the "Latest" badge and produced a desktop draft named `v0.4.1`.

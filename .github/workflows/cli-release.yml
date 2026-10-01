@@ -125,6 +125,10 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: CLI ${{ steps.version.outputs.tag }}
+          # The repository's "Latest" release belongs to the desktop `v*`
+          # train (docs/entities/cli.md, "Why cli-latest"): a CLI release
+          # published after a desktop one must not take the badge.
+          make_latest: false
           files: |
             ${{ steps.pack.outputs.tarball }}
             ocpp-cp-simulator.tgz

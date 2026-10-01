@@ -107,7 +107,10 @@ https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-
 It is scoped to the CLI train, so it stays correct without anyone remembering
 to bump a version number, and it is kept a pre-release precisely so it can
 never itself become the repository's "Latest" release, which the desktop train
-owns.
+owns. The per-tag `cli-vX.Y.Z` releases are published with `make_latest:
+false` for the same reason, and release-drafter resolves the next desktop
+version from `v*` tags only (`tag-prefix: "v"`), so a CLI release never
+becomes the baseline of a desktop draft.
 
 **Rollout status.** The pointer exists since `cli-v0.4.0` (2026-10-01), the
 first CLI release cut after it was introduced, and this page and

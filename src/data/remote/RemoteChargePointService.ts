@@ -47,6 +47,10 @@ import type {
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
 import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "../../cp/application/verification/ScenarioRunSummary";
+import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
@@ -594,6 +598,20 @@ export function mapServerEventToChargePointEvent(
           scenarioId: data.scenarioId,
           ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
           nodeId: data.nodeId,
+        };
+      }
+      return null;
+    case "scenario_run_recorded":
+      if (
+        typeof data.connectorId === "number" &&
+        typeof data.scenarioId === "string" &&
+        typeof data.runId === "string"
+      ) {
+        return {
+          type: "scenario-run-recorded",
+          connectorId: data.connectorId,
+          scenarioId: data.scenarioId,
+          runId: data.runId,
         };
       }
       return null;
@@ -1599,6 +1617,10 @@ export class RemoteChargePointService implements ChargePointService {
   async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
     const rows = await this.rpc("logs.get", { cpId });
     return Array.isArray(rows) ? (rows as StoredLogEntry[]) : [];
+  }
+
+  async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
+    return (await this.rpc("scenario.runs.list", query)) as ScenarioRunPage;
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

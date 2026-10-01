@@ -25,6 +25,7 @@ import {
   redactSimulatorConfig,
   registryCpToWire,
   rpcRequestSchema,
+  SCENARIO_RUNS_PAGE_DEFAULT,
   statusToWire,
   subscribeResultSchema,
   type CpListItem,
@@ -37,6 +38,7 @@ import {
   type StatusWire,
   type SubscribeResult,
 } from "../../protocol";
+import type { ScenarioRunPage } from "../../cp/application/verification/ScenarioRunSummary";
 import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
@@ -510,6 +512,8 @@ export async function dispatchRpcCore(
       return triggerNetworkSimDisconnect(deps, call.params);
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
+    case "scenario.runs.list":
+      return listScenarioRuns(deps, call.params);
     case "scenario.definitions.list":
       return listScenarioDefinitions(deps, call.params);
     case "scenario.definitions.save":
@@ -1120,6 +1124,16 @@ async function applyDefaultEVSettingsRpc(
     ),
   );
   return undefined;
+}
+
+async function listScenarioRuns(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"scenario.runs.list">,
+): Promise<ScenarioRunPage> {
+  return deps.chargePointService.listScenarioRuns({
+    ...params,
+    limit: params.limit ?? SCENARIO_RUNS_PAGE_DEFAULT,
+  });
 }
 
 async function listScenarioDefinitions(

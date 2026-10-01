@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-09-12
+updated: 2026-10-01
 ---
 
 # Fleet, load and observability roadmap
@@ -495,7 +495,8 @@ does to a CP mid-transaction: nothing. The new definition is _held_ and applied
 when the session ends; it is never dropped. A malformed file is rejected and the
 previous good copy stays. Every reload pushes a `file-reload` event with an
 `applied` / `deferred` / `rejected` outcome. `charge_points.id_tag_file`
-(added by the v12 → v13 migration; `SCHEMA_VERSION` is 13) persists the pool's
+(added by the v12 → v13 migration; `SCHEMA_VERSION` is 14 since the
+`scenario_runs` table of #388) persists the pool's
 source path so a restarted `--watch` daemon
 re-watches it.
 

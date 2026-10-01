@@ -409,6 +409,32 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [[]],
       },
       {
+        name: "listScenarioRuns",
+        invoke: (service) =>
+          service.listScenarioRuns({
+            cpId: "cp-1",
+            connectorId: 1,
+            scenarioId: "s1",
+            verdict: "FAIL",
+            limit: 10,
+            offset: 20,
+          }),
+        expected: [
+          {
+            method: "scenario.runs.list",
+            params: {
+              cpId: "cp-1",
+              connectorId: 1,
+              scenarioId: "s1",
+              verdict: "FAIL",
+              limit: 10,
+              offset: 20,
+            },
+          },
+        ],
+        results: [{ runs: [], total: 0 }],
+      },
+      {
         name: "loadConfig",
         invoke: (service) => service.loadConfig(),
         expected: [{ method: "config.get", params: {} }],

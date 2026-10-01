@@ -45,6 +45,7 @@
     "src/store/store.ts",
     "src/test/bunServe.ts",
     "src/test/deferred.ts",
+    "src/test/scenarioRunFixtures.ts",
     "src/trace",
     "src/types",
     "src/utils/blueprints",

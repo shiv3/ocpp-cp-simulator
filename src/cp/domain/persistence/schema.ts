@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -210,6 +210,31 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
   updated_at                       TEXT NOT NULL,
   PRIMARY KEY (cp_id, connector_id)
 );
+
+-- Finished scenario runs (#388): the history \`scenario.runs.list\` pages
+-- through, and the full reports \`scenario_report\` returns. The columns
+-- are what the listing filters and sorts on; \`summary_json\` is the listing
+-- row and \`report_json\` the whole report, so a page of runs never parses a
+-- transcript. \`seq\` is record order: retention evicts a charge point's
+-- lowest ones (ScenarioRunRepository.MAX_RUNS_PER_CP).
+CREATE TABLE IF NOT EXISTS scenario_runs (
+  seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+  cp_id           TEXT NOT NULL,
+  run_id          TEXT NOT NULL,
+  connector_id    INTEGER NOT NULL,
+  scenario_id     TEXT NOT NULL,
+  started_at      TEXT NOT NULL,
+  ended_at        TEXT NOT NULL,
+  execution_state TEXT NOT NULL,
+  verdict         TEXT NOT NULL,
+  summary_json    TEXT NOT NULL,
+  report_json     TEXT NOT NULL,
+  UNIQUE (cp_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS scenario_runs_cp_started
+  ON scenario_runs (cp_id, started_at);
+CREATE INDEX IF NOT EXISTS scenario_runs_cp_scenario
+  ON scenario_runs (cp_id, scenario_id);
 `;
 
 /**
@@ -249,6 +274,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "blueprints", perCp: false, resetOnStateReset: true },
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
+  { name: "scenario_runs", perCp: true, resetOnStateReset: true },
 ];
 
 /** Names of the tables `state.reset` truncates, in `TABLES` order. */
@@ -502,6 +528,10 @@ export function runMigrations(db: Database): void {
         "PRIMARY KEY (cp_id, connector_id, scenario_id))",
     );
   }
+
+  // v13 → v14 (#388): the `scenario_runs` history table and its indexes. All
+  // are `IF NOT EXISTS` in SCHEMA_SQL, which already ran above; the step is
+  // here so the version bump has a recorded reason.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

@@ -42,6 +42,10 @@ import {
 } from "../cp/domain/connector/Transaction";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
+import {
+  SCENARIO_RUN_EXECUTION_STATES,
+  SCENARIO_VERDICTS,
+} from "../cp/application/verification/ScenarioRunSummary";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
@@ -59,6 +63,11 @@ export const SCENARIO_MODES = [
   "scenario",
 ] as const satisfies readonly ScenarioMode[];
 const ANY = z.unknown();
+
+/** #388: `scenario.runs.list` page size — the default, and the most a page
+ *  may ask for. */
+export const SCENARIO_RUNS_PAGE_DEFAULT = 50;
+export const SCENARIO_RUNS_PAGE_MAX = 200;
 /** A bounded free-form object param (settings/config/options): ≤ 64 KB. */
 const OBJ = () => boundedObject(OBJ_MAX_BYTES);
 /** A bounded scenario-definition object param: ≤ 256 KB. */
@@ -893,6 +902,26 @@ export const METHODS = {
     params: EMPTY,
     result: ARRAY_1000(scenarioTemplateInfoSchema),
   },
+  // #388: the daemon's finished runs across charge points, newest first by
+  // start time. Summaries only — `scenario_report` returns one run's full
+  // report. Every filter is an exact match; `total` counts the filtered runs
+  // before paging.
+  "scenario.runs.list": {
+    params: z.object({
+      runId: NON_EMPTY_STR.optional(),
+      cpId: NON_EMPTY_STR.optional(),
+      connectorId: CONN_POS.optional(),
+      scenarioId: NON_EMPTY_STR.optional(),
+      verdict: z.enum(SCENARIO_VERDICTS).optional(),
+      executionState: z.enum(SCENARIO_RUN_EXECUTION_STATES).optional(),
+      limit: z.number().int().min(1).max(SCENARIO_RUNS_PAGE_MAX).optional(),
+      offset: z.number().int().min(0).optional(),
+    }),
+    result: z.object({
+      runs: z.array(ANY).max(SCENARIO_RUNS_PAGE_MAX),
+      total: z.number().int().min(0),
+    }),
+  },
   "scenario.definitions.list": {
     params: z.object({ cpId: STR_64K, connectorId: CONN_DEF }),
     result: ARRAY_1000(SCENARIO_OBJ()),
@@ -981,6 +1010,7 @@ export const EXPLICIT_METHODS = [
   "config.get",
   "config.save",
   "scenario.templates",
+  "scenario.runs.list",
   "scenario.definitions.list",
   "scenario.definitions.save",
   "scenario.definitions.replace",

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Log
@@ -1253,3 +1253,41 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Scenario format](concepts/scenario-format.md#ocppcall-notes): stopping a run while an `ocppCall` waits for its answer ends the run at once, and the call's later answer or failure is ignored — it used to keep `stop` pending up to 25 s and could report a run error after `execution.stopped`. A payload that is not a JSON object is kept as the typed text and flagged by the editor instead of being saved as `{}`. `export-k6` carries on after an `ocppCall` CALLERROR, as the simulator does.
 - Mechanism: `ScenarioExecutor.executeOcppCall` races the call against the executor's abort promise and detaches a late rejection. The ocppCall form saves a non-object payload through `ocppCallPayload` (text kept) rather than `payloadValue` (`{}`), and `JsonTextareaField` shows `null` as `null`. The k6 runtime rejects a CALLERROR with a typed `CallErrorAnswer`, which the `ocppCall` node treats as an answer; timeouts and connection failures still end the walk.
 - Tests: `ScenarioExecutor.nodes.test.ts` (stop while pending, then reject), `nodeFormRegistry.test.ts` and `OcppCallForm.dom.test.tsx` (payload kept and flagged), `interpreter.test.ts` (k6: CALLERROR carries on, a failure does not).
+
+## [2026-09-30] ingest | persisted scenario run history (#388)
+
+- [Control plane](concepts/control-plane.md#scenario-run-history): new "Scenario run history" section and a `scenario.runs.list` row under daemon methods — finished runs across charge points, newest first, exact-match filters on `cpId` / `connectorId` / `scenarioId` / `verdict` / `executionState`, `limit` (default 50, max 200) / `offset`, `{ runs, total }` with summaries only. The `scenario_report` row notes it reads the same history: any recorded run of the charge point, and with `--state-db` across a restart. **Behaviour change:** the history used to be 20 runs per charge point in memory; it is now 100 per charge point, persisted with `--state-db`, dropped by `cp.delete` / `state.reset`, and kept when a scenario is deleted. Reports gain `stopped`.
+- [CLI](entities/cli.md#events): `scenario_run_recorded` event, emitted after the write.
+- [State persistence](concepts/state-persistence.md#tables): `scenario_runs` table (schema v14), in the `.tables` listing and the `cp.delete` cascade list.
+- [Web console](entities/web-console.md): the run console's Run history comes from the daemon and opens a run's report (verdicts, assertions, interventions, transcript, JSON download); new Run History page at `/v3/scenarios/runs` with URL-backed filters and paging.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): the history is daemon-only; Local mode keeps the page-view history.
+- [GitHub issues](sources/github-issues.md): #388 row.
+- Mechanism: `ScenarioRunRepository` (`src/cp/domain/persistence/`) with an in-memory and a SQLite implementation; `CPRegistry` owns one instance and hands it to every `CLIChargePointService`, which records into it from `finalizeScenarioRun` instead of its own capped map. A standalone REPL / JSON-mode service defaults to its own store.
+- Tests: `ScenarioRunRepository.bun.test.ts` (contract run on both implementations: ordering, filters, paging, per-CP retention, reopen), the v14 migration case in `BunSqliteDatabase.bun.test.ts`, `service.scenarioRunHistory.bun.test.ts`, `scenarioRunsList.bun.test.ts` (RPC contract, restart on the same DB), `mapServerEvent.runRecorded.test.ts`, the remote adapter table, `runHistoryRows.test.ts`, `useScenarioRunHistory.dom.test.tsx`, `ScenarioRunPage.history.dom.test.tsx` and `ScenarioRunsPage.dom.test.tsx`.
+
+## [2026-09-30] ingest | scenario run history review follow-ups (#388)
+
+- [Control plane](concepts/control-plane.md#scenario-run-history): `scenario.runs.list` takes a `runId` filter that finds one run wherever it sits in the history; an empty `runId` is `invalid_params`.
+- [Web console](entities/web-console.md): the Run History page keeps the page (`offset`) in the URL alongside the filters and the selected run, and looks a linked run up by `runId` when it is no longer on that page, so a copied URL reopens the same report. The run lists re-list when a charge point is deleted or the simulator reset (registry `removed` / `reset`), not only when a run is recorded; a deleted charge point's runs used to stay on screen until a manual Refresh.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): the Local-mode gap is stated as a deferred part of #388, tracked in #394.
+- Tests: the `runId` filter in `ScenarioRunRepository.bun.test.ts` and `scenarioRunsList.bun.test.ts`; `useScenarioRunHistory.dom.test.tsx` re-lists on a deleted charge point and on a reset, and not on an update; `ScenarioRunsPage.dom.test.tsx` reopens a copied URL for a run beyond the first page and reads the page from the URL.
+
+## [2026-09-30] ingest | run history identity is charge point + runId (#388 review)
+
+- [Web console](entities/web-console.md): the Run History page identifies a run by its charge point and `runId` — row keys, the selected row and the URL (`run` + `runCp`) — because a runId is unique per charge point only (`scenario.runs.list { runId }` can return one run per charge point). A copied link resolves the run on the charge point it names, on or off the current page; a link without `runCp` that matches runs on several charge points opens none and says so.
+- Tests: `runHistoryRows.test.ts` (rows of two charge points sharing a runId get distinct keys) and `ScenarioRunsPage.dom.test.tsx` (two charge points sharing a runId: no duplicate React key, clicking one opens that charge point's report, a copied link opens the named charge point's run on and off the page, an ambiguous legacy link opens none).
+
+## [2026-09-30] ingest | legacy run links check uniqueness across pages (#388 review)
+
+- [Web console](entities/web-console.md): a Run History link without `runCp` is always checked against the whole history (`scenario.runs.list { runId, limit: 2 }`), not only when the run is off the current page; a match on this page no longer hides a second one on another page, so such a link opens its run only when the id is unique, as documented.
+- Tests: `ScenarioRunsPage.dom.test.tsx` — one duplicate on the current page and the other off it: no report opens and the page says the id is ambiguous.
+
+## [2026-10-01] ingest | run history review: discarded runs, loading state (#388 review)
+
+- [Control plane](concepts/control-plane.md#scenario-run-history): a run discarded mid-flight (scenario deleted
+  or replaced, charge point edited) leaves no report — the "every finished
+  run" sentence now says so.
+- [Fleet load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): `SCHEMA_VERSION` is 14.
+- Code: `useScenarioRunHistory` reports `isLoading` from the render a query
+  change lands in, so the Run History page's offset clamp never reads the
+  previous query's `total`.

@@ -6,6 +6,7 @@ import { deepPartialMatch } from "./assertions";
 import { evaluateCurveKwh, sortCurvePoints, type CurvePoint } from "./curve";
 import {
   bool,
+  CallErrorAnswer,
   num,
   str,
   type ScenarioJson,
@@ -210,6 +211,20 @@ async function executeNode(
         action: str(d.messageType) ?? "DataTransfer",
         payload: asRecord(d.payload),
       });
+      return;
+    case "ocppCall":
+      // #389: the authored CALL as-is. The k6 runtime validates no outgoing
+      // payload and keeps no station state, so skipValidation and
+      // applyResponse have nothing to switch. A CALLERROR is an answer and
+      // the walk goes on, as in the simulator; any other failure ends it.
+      try {
+        await host.call({
+          action: str(d.action) ?? "Heartbeat",
+          payload: asRecord(d.payload),
+        });
+      } catch (err) {
+        if (!(err instanceof CallErrorAnswer)) throw err;
+      }
       return;
     case "connectorPlug":
       await notifyStatus(d.action === "plugout" ? "Available" : "Preparing");

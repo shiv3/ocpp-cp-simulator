@@ -528,6 +528,30 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [undefined],
       },
       {
+        name: "sendOcppCall",
+        invoke: (service) =>
+          service.sendOcppCall("cp-1", {
+            action: "Heartbeat",
+            payload: {},
+            skipValidation: true,
+          }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "send_ocpp_call",
+            params: { action: "Heartbeat", payload: {}, skipValidation: true },
+          },
+        ],
+        results: [
+          {
+            kind: "callResult",
+            messageId: "m1",
+            sentFrame: '[2,"m1","Heartbeat",{}]',
+            payload: {},
+          },
+        ],
+      },
+      {
         name: "startTransaction",
         invoke: (service) => service.startTransaction("cp-1", 1, "TAG-1"),
         expected: [

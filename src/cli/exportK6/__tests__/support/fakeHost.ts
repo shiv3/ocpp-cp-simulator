@@ -4,7 +4,7 @@
 // so the cross-runtime agreement test drives the same interpreter path the
 // interpreter tests do rather than a second stand-in (#329).
 import type { ScenarioHost } from "../../runtime/interpreter";
-import type { WireCall } from "../../runtime/types";
+import { CallErrorAnswer, type WireCall } from "../../runtime/types";
 
 export class FakeHost implements ScenarioHost {
   connectorId = 1;
@@ -15,6 +15,10 @@ export class FakeHost implements ScenarioHost {
   unlock: string | null = null;
   /** Scripted responses by action; default {} */
   responses = new Map<string, Record<string, unknown>>();
+  /** Actions the CSMS answers with a CALLERROR carrying this code. */
+  callErrors = new Map<string, string>();
+  /** Actions whose call fails outright (timeout, send or connection failure). */
+  failures = new Map<string, Error>();
   /** Pending incoming-call waiters, resolved via emitCsmsCall(). */
   private waiters: Array<{
     actions: readonly string[];
@@ -24,6 +28,10 @@ export class FakeHost implements ScenarioHost {
 
   async call(c: WireCall): Promise<Record<string, unknown>> {
     this.sent.push(c);
+    const failure = this.failures.get(c.action);
+    if (failure) throw failure;
+    const errorCode = this.callErrors.get(c.action);
+    if (errorCode) throw new CallErrorAnswer(c.action, errorCode, "scripted");
     return this.responses.get(c.action) ?? {};
   }
   waitForCsmsCall(actions: readonly string[], _timeoutMs: number | null) {

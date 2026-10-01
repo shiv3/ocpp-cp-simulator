@@ -69,6 +69,24 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
  * schema rather than a copy of its bounds (#382).
  */
 export const dataTransferDataSchema = z.union([STR_64K, OBJ()]);
+/** `send_ocpp_call`'s result (#389): the CSMS's CALLRESULT or CALLERROR,
+ *  with the frame exactly as it was written. */
+const ocppCallOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("callResult"),
+    messageId: z.string(),
+    sentFrame: z.string(),
+    payload: z.unknown(),
+  }),
+  z.object({
+    kind: z.literal("callError"),
+    messageId: z.string(),
+    sentFrame: z.string(),
+    errorCode: z.string(),
+    errorDescription: z.string(),
+    errorDetails: z.unknown(),
+  }),
+]);
 /**
  * `extend_scenario_wait`'s `seconds` (#240): a whole number of seconds,
  * 1–3600. Exported for the same reason as `dataTransferDataSchema`.
@@ -528,6 +546,31 @@ export const METHODS = {
       data: dataTransferDataSchema.optional(),
     }),
     result: ANY,
+  },
+  // #389: expert OCPP call — any station-initiated CALL of the station's
+  // OCPP-J version, payload as given. A CALLERROR is a result, not an error;
+  // refusals (unsupported action/transport, schema-invalid payload without
+  // skipValidation, boot gate) are invalid_params.
+  send_ocpp_call: {
+    params: z.object({
+      action: NON_EMPTY_STR.describe(
+        "Station-initiated OCPP action, e.g. Heartbeat or StatusNotification",
+      ),
+      payload: OBJ().describe("The CALL payload, sent as given"),
+      skipValidation: z
+        .boolean()
+        .optional()
+        .describe(
+          "Send even if the payload fails the outgoing OCPP schema check (this call only)",
+        ),
+      applyResponse: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also apply the CSMS's answer to the station's state (default: only log and return it)",
+        ),
+    }),
+    result: ocppCallOutcomeSchema,
   },
 
   // -- status notifications --

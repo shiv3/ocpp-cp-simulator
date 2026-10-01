@@ -39,6 +39,7 @@ export const SUPPORTED_NODE_TYPES = new Set([
   "dataTransfer",
   "csmsCallTrigger",
   "responseOverride",
+  "ocppCall",
 ]);
 
 export async function runExportK6(args: ExportK6Args): Promise<number> {

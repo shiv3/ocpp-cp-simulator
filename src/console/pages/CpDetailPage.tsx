@@ -31,6 +31,7 @@ import type { ChargePoint } from "@/cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
 import EmptyState from "../components/EmptyState";
+import ExpertCallPanel from "./cp/ExpertCallPanel";
 import PageHeader from "../components/PageHeader";
 import StatusPill from "../components/StatusPill";
 import NetworkSimBadge from "../components/network-sim/NetworkSimBadge";
@@ -49,7 +50,8 @@ const StateTransitionViewer = lazy(
 );
 const SessionAnalysisPanel = lazy(() => import("./cp/SessionAnalysisPanel"));
 
-type TabValue = "transactions" | "logs" | "config" | "diagnostics" | "analysis";
+type TabValue =
+  "transactions" | "logs" | "config" | "diagnostics" | "analysis" | "expert";
 
 /**
  * Builds the `ChargePointConfig` shape `ChargePointConfigModal` expects,
@@ -477,6 +479,13 @@ const CpDetailPage: React.FC = () => {
               hint="The state transition diagram is available in local mode only."
             />
           )}
+        </TabsContent>
+        <TabsContent value="expert">
+          <ExpertCallPanel
+            cpId={cpId}
+            ocppVersion={resolvedOcppVersion}
+            connected={isConnected}
+          />
         </TabsContent>
       </CpTabs>
 

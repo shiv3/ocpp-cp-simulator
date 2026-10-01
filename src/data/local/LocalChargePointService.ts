@@ -12,6 +12,10 @@ import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
 import { RpcFailure } from "../../protocol/errors";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import {
@@ -415,6 +419,13 @@ export class LocalChargePointService implements ChargePointService {
       messageId,
       data,
     );
+  }
+
+  async sendOcppCall(
+    id: string,
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    return this.getExistingChargePointOrThrow(id).sendOcppCall(request);
   }
 
   async startTransaction(

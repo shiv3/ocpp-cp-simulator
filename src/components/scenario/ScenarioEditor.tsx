@@ -95,6 +95,7 @@ import StatusNotificationNode from "./nodes/StatusNotificationNode";
 import UnlockOutcomeNode from "./nodes/UnlockOutcomeNode";
 import ConfigSetNode from "./nodes/ConfigSetNode";
 import DataTransferNode from "./nodes/DataTransferNode";
+import OcppCallNode from "./nodes/OcppCallNode";
 import ConnectionTriggerNode from "./nodes/ConnectionTriggerNode";
 
 import {
@@ -214,6 +215,7 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.UNLOCK_OUTCOME]: UnlockOutcomeNode,
   [ScenarioNodeType.CONFIG_SET]: ConfigSetNode,
   [ScenarioNodeType.DATA_TRANSFER]: DataTransferNode,
+  [ScenarioNodeType.OCPP_CALL]: OcppCallNode,
   [ScenarioNodeType.CONNECTION_TRIGGER]: ConnectionTriggerNode,
   [ScenarioNodeType.START]: StartScenarioNode,
   [ScenarioNodeType.END]: EndScenarioNode,
@@ -242,6 +244,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   [ScenarioNodeType.UNLOCK_OUTCOME]: "#06b6d4",
   [ScenarioNodeType.CONFIG_SET]: "#6b7280",
   [ScenarioNodeType.DATA_TRANSFER]: "#a8a29e",
+  [ScenarioNodeType.OCPP_CALL]: "#78716c",
   [ScenarioNodeType.CERT_QUIRKS]: "#f59e0b",
 };
 
@@ -2280,6 +2283,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 label="DataTransfer"
                 icon="📦"
               />
+              <NodePaletteItem
+                type={ScenarioNodeType.OCPP_CALL}
+                label="OCPP Call"
+                icon="🧪"
+              />
             </div>
           </div>
 
@@ -2599,6 +2607,17 @@ function createNodeByType(
         data: {
           label: "DataTransfer",
           vendorId: "com.example",
+        },
+      };
+    case ScenarioNodeType.OCPP_CALL:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "OCPP call",
+          action: "Heartbeat",
+          payload: {},
         },
       };
     case ScenarioNodeType.START:

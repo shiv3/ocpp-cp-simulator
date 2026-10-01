@@ -727,6 +727,7 @@ export const createScenarioExecutorCallbacks = (
     onConfigSet: (key, value) => {
       chargePoint.configuration.applyChange(key, value);
     },
+    onSendOcppCall: (request) => chargePoint.sendOcppCall(request),
     onSendDataTransfer: (vendorId, messageId, data) => {
       // The node is fire-and-forget by design: the transport logs the answer
       // (or the failure), and a scenario that needs to react to it would be

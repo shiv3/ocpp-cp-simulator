@@ -68,6 +68,10 @@ import {
 import { appVersion } from "../appVersion";
 import { OcppSecurityProfileConfigError } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "../../cp/domain/errors/ScenarioRunStateError";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../cp/domain/errors/OcppCallErrors";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
@@ -1611,6 +1615,15 @@ async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "send_ocpp_call": {
+      const { params } = call;
+      // #389: a CALLERROR is an answer too, so it comes back as the result.
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.sendOcppCall(id, params),
+        ),
+      );
+    }
     case "diagnostics_status_notification": {
       const { params } = call;
       await runFacadeOperation(() =>
@@ -2205,6 +2218,20 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   // fault. The message names only the scenario id.
   if (err instanceof ScenarioRunStateError) {
     return new RpcFailure("invalid_params", err.message);
+  }
+  // #389: an expert OCPP call refused before anything was written (SOAP
+  // station, action the station does not send, schema-invalid payload
+  // without skipValidation, boot gate) is a caller error; the message says
+  // which. No answer is a timeout, or a disconnect when the CALL never
+  // reached the wire or the socket closed first.
+  if (err instanceof OcppCallRejectedError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  if (err instanceof OcppCallNoAnswerError) {
+    return new RpcFailure(
+      err.reason === "timeout" ? "timeout" : "disconnected",
+      err.message,
+    );
   }
   return null;
 }

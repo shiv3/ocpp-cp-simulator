@@ -1,6 +1,27 @@
 {
   "name": "ocpp-cp-simulator",
-  "private": true,
+  "description": "OCPP 1.6 / 2.0.1 / 2.1 charge point simulator: CLI daemon with a Socket.IO control plane, JSON-Lines mode, MCP endpoint, scenario engine and a bundled web console (runs on Bun)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shiv3/ocpp-cp-simulator.git"
+  },
+  "homepage": "https://github.com/shiv3/ocpp-cp-simulator#readme",
+  "bugs": "https://github.com/shiv3/ocpp-cp-simulator/issues",
+  "keywords": [
+    "ocpp",
+    "ocpp-1.6",
+    "ocpp-2.0.1",
+    "ocpp-2.1",
+    "charge-point",
+    "ev-charging",
+    "csms",
+    "simulator",
+    "mcp"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "version": "0.0.0",
   "type": "module",
   "bin": {

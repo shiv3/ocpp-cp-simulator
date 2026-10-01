@@ -6,6 +6,9 @@ name: Release CLI
 #
 #   bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 #
+# or, from the npm registry, with `npm install -g ocpp-cp-simulator` — the
+# `publish-npm` job below publishes the very tarball the release carries.
+#
 # `cli-latest` is a rolling pre-release this workflow re-points at every CLI
 # release (see the "rolling cli-latest pointer" step). It exists because this
 # repository has two tag trains — `v*` (desktop) and `cli-v*` (CLI) — and
@@ -217,3 +220,64 @@ jobs:
             sleep 10
           done
           ./scripts/verify-cli-tarball.sh --expect-dist rolling.tgz
+
+  # Publishes the release's tarball to the npm registry as `ocpp-cp-simulator`,
+  # so `npm install -g ocpp-cp-simulator` / `npx ocpp-cp-simulator` resolve.
+  #
+  # - Gated on the repository variable NPM_PUBLISH=true, which is set once the
+  #   package exists on npm and has this workflow registered as a trusted
+  #   publisher (npmjs.com → package → Settings → Trusted publishing). Until
+  #   then the job is skipped and the GitHub release is unaffected; the first
+  #   version is published by hand from the release's tarball.
+  # - Authenticates with the job's OIDC token (`id-token: write`), no secret:
+  #   npm exchanges it for a short-lived publish token and attaches a
+  #   provenance attestation. Needs npm ≥ 11.5.1, hence the self-upgrade.
+  # - Publishes the asset the GitHub release carries, downloaded by tag, so the
+  #   bytes on npm are the bytes the release published — never a re-pack.
+  # - Idempotent: a re-run of a tag whose version is already on npm skips
+  #   instead of failing on the registry's 403.
+  # - A SemVer prerelease (`cli-v1.0.0-rc.1`) goes under the `next` dist-tag,
+  #   so `npm install ocpp-cp-simulator` never resolves to one — the same
+  #   carve-out `cli-latest` makes.
+  publish-npm:
+    needs: release
+    if: vars.NPM_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm (trusted publishing needs ≥ 11.5.1)
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Download the release's tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "ocpp-cp-simulator-${VERSION}.tgz"
+          ls -lh "ocpp-cp-simulator-${VERSION}.tgz"
+
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          if [ -n "$(npm view "ocpp-cp-simulator@${VERSION}" version 2>/dev/null)" ]; then
+            echo "::notice::ocpp-cp-simulator@${VERSION} is already on npm; nothing to publish"
+            exit 0
+          fi
+          DIST_TAG=latest
+          case "$VERSION" in *-*|*+*) DIST_TAG=next ;; esac
+          npm publish "ocpp-cp-simulator-${VERSION}.tgz" --access public --tag "$DIST_TAG"
+          npm view "ocpp-cp-simulator@${VERSION}" version

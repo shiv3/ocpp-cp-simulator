@@ -72,6 +72,19 @@ ocpp-cp-sim --daemon
 > git), and bun does not install devDependencies for global packages so it
 > cannot run `vite build` on install. Use the prebuilt tarball URL above.
 > Release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags.
+>
+> **npm registry.** The same workflow's `publish-npm` job publishes that
+> tarball to the npm registry as `ocpp-cp-simulator`, authenticated by
+> GitHub's OIDC token (npm trusted publishing, no stored secret) and gated on
+> the repository variable `NPM_PUBLISH=true` — the first version is published
+> by hand from the release asset, the trusted publisher is then registered on
+> npmjs.com, and the variable is set. Until that first publish has happened
+> this page does not advertise `npm install -g ocpp-cp-simulator`, for the
+> reason #321 gives: a documented install command must resolve. The package
+> needs Bun at run time whichever way it is installed — the bin is
+> `src/cli/main.ts` under a `bun` shebang, and the daemon uses `bun:sqlite`
+> and `Bun.serve`. A SemVer prerelease (`cli-v1.0.0-rc.1`) is published under
+> the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
 
 ### Why `cli-latest` and not `releases/latest`
 

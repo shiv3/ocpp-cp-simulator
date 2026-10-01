@@ -1335,3 +1335,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI](entities/cli.md#csms-call-events), `ChargePointEvents.ts`: a SOAP request without a
   WS-Addressing `MessageID` never reaches dispatch (the envelope parser
   requires it), so `messageId` is never omitted on the wire.
+
+## [2026-10-01] ingest | cli-latest install URL after cli-v0.4.0
+
+- [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest), [README](../README.md): the quick-start install commands point at the rolling `cli-latest` tarball now that `cli-v0.4.0` created it; the rollout-status paragraph records the date. Pinned installs use a release's own asset.

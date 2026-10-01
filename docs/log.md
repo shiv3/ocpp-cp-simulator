@@ -1266,10 +1266,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-10-01] ingest | run history review: discarded runs, loading state (#388 review)
 
-- `concepts/control-plane.md`: a run discarded mid-flight (scenario deleted
+- [Control plane](concepts/control-plane.md#scenario-run-history): a run discarded mid-flight (scenario deleted
   or replaced, charge point edited) leaves no report — the "every finished
   run" sentence now says so.
-- `analyses/fleet-load-and-observability-roadmap.md`: `SCHEMA_VERSION` is 14.
+- [Fleet load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): `SCHEMA_VERSION` is 14.
 - Code: `useScenarioRunHistory` reports `isLoading` from the render a query
   change lands in, so the Run History page's offset clamp never reads the
   previous query's `total`.

@@ -45,7 +45,7 @@ bun link ocpp-cp-simulator   # in any other project
 
 > Every install command above is fetched by CI, so a URL printed here resolves. Do **not** use GitHub's `releases/latest/download/…` — this repo has two tag trains (`v*` desktop, `cli-v*` CLI) and "latest" resolves across both, landing on a desktop release that carries no `.tgz`.
 >
-> `releases/download/cli-latest/ocpp-cp-simulator.tgz` is a rolling pre-release the `Release CLI` workflow moves onto every CLI release, so the commands above always install the newest CLI. To pin a version, use that release's own asset instead, e.g. `releases/download/cli-v0.4.0/ocpp-cp-simulator-0.4.0.tgz`. See [docs/entities/cli.md](docs/entities/cli.md#why-cli-latest-and-not-releaseslatest).
+> `releases/download/cli-latest/ocpp-cp-simulator.tgz` is a rolling pre-release the `Release CLI` workflow moves onto every stable CLI release (a SemVer prerelease such as `cli-v1.0.0-rc.1` is skipped), so the commands above always install the newest stable CLI. To pin a version, use that release's own asset instead, e.g. `releases/download/cli-v0.4.0/ocpp-cp-simulator-0.4.0.tgz`. See [docs/entities/cli.md](docs/entities/cli.md#why-cli-latest-and-not-releaseslatest).
 >
 > The release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags. A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
 

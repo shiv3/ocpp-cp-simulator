@@ -1236,6 +1236,62 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Mechanism: `ParkedWait` carries the attempt's start time and `getContext()` reads the node and start time from it. `scenarioWaitExtensionSecondsSchema` is exported from `src/protocol/methods.ts` and used by both the method table and JSON-Lines mode.
 - Tests: the parallel-wait regression in `ScenarioExecutor.waitControls.test.ts` checks the whole waiting context before and after the latest wait settles; `jsonMode.scenarioWait.test.ts` forwards the three controls and bounds `seconds` (3600 accepted, 3601 refused before the service); `nonEmptyParams.test.ts` covers the three methods.
 
+## [2026-09-30] ingest | expert OCPP calls: send any station CALL with an edited payload (#389)
+
+- [Expert OCPP calls](concepts/expert-ocpp-calls.md): new canonical page. Any station-initiated CALL of the station's OCPP-J version, with the payload as given, through the normal transport (correlation, `Sent:` / `Received:` logs and traces, 1.6's serial queue and boot gate). The per-version action lists, pinned by a test against the vendored request schemas and the inbound registries. A schema-invalid payload is refused before anything is written unless the call sets `skipValidation`, which bypasses the check for that call only. The answer — CALLRESULT or CALLERROR, with the frame as sent — changes the station's state only with `applyResponse`. SOAP stations are refused. Refusals, no answer (25 s) and a dropped CALL, with their control-plane codes. Malformed OCPP-J frames (the issue's level C) are out of scope.
+- [Control plane](concepts/control-plane.md#cp-command-methods): `send_ocpp_call` row; `disconnected` is now also answered by the daemon, for a dropped expert call. **Lint fix:** the `data_transfer` row said an unanswered DataTransfer rejects after 30 s; the code waits 25 s (`DATA_TRANSFER_RESPONSE_TIMEOUT_MS`).
+- [MCP endpoint](entities/mcp-endpoint.md): curated `send_ocpp_call` tool (21 curated tools); the error-handling paragraph names the one tool that can answer `disconnected`.
+- [Scenario format](concepts/scenario-format.md#ocppcall-notes): **v1.3** — the `ocppCall` node (a CALLERROR is logged and the flow goes on; a refused call or no answer fails the run); changelog entry; `SCENARIO_SCHEMA_VERSION` and the schema title follow. [CLI → export-k6](entities/cli.md#export-k6): `ocppCall` is honoured.
+- [Web console](entities/web-console.md): the CP page's **Expert** tab.
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#soap-limitations-elsewhere-in-the-simulator), [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): SOAP boundary; both modes.
+- [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md), [GitHub issues](sources/github-issues.md): new page, tool and node-type counts, #389 row.
+- Mechanism: `ChargePoint.sendOcppCall` checks the action against the version's catalog (`src/cp/infrastructure/transport/codec/ocppCallCatalog.ts`), then each handler checks the payload with its codec and tracks the call in `ExpertCalls`, which every CALLRESULT / CALLERROR goes through first. Without `applyResponse` the handler stops there — before the 1.6 result handlers and StartTransaction / Authorize recovery, and before 2.x's shape-based BootNotification detection. The id outlives the caller's timer, so a late answer is kept away too; on 1.6 a call still queued when that timer fires is withdrawn from the serial queue, and an expert StartTransaction / StopTransaction carries the payload's connector (or the one running its `transactionId`) for `applyResponse`. A payload that is not a JSON object is refused whatever `skipValidation` says. The DataTransfer answer waiters of both handlers moved onto the shared `CallWaiters`. Default payloads come from the request schema (`defaultPayload.ts`: required fields, first enum value, now for `date-time`, minimums).
+- Tests: `ocppCallCatalog.test.ts`, `defaultPayload.test.ts`, `CallWaiters.test.ts`, `ExpertCalls.test.ts`, `ocppCall.bun.test.ts` (1.6 and 2.0.1 against a mock CSMS: station and connector actions with edited payloads, CALLERROR as a result, invalid payload refused with nothing written, `skipValidation` for one call only, unsupported action, SOAP, `applyResponse` on a BootNotification, drop on close; on 1.6 also the connector `applyResponse` acts on, a CALLERROR releasing the serial slot without recovery, the boot gate, and no replay after a close; 2.1), `OCPPMessageHandler.expertCall.test.ts` (fake timers: an expired queued call is never sent, a late answer is applied only with `applyResponse`), the control-plane tables (`methods`, `nonEmptyParams`, `rpcParsedParams`, MCP parity, both adapters), `jsonMode.ocppCall.test.ts`, the executor / runtime / editor tests for the node, the k6 interpreter, and `ExpertCallPanel.dom.test.tsx` plus the CP page's Expert tab. [`all-cases.json`](examples/scenarios/all-cases.json) gains an `ocppCall` Heartbeat, so `e2e/comprehensive.gocpp.e2e.ts` sends one against the Go CSMS on 1.6, 2.0.1 and 2.1.
+
+## [2026-09-30] ingest | expert OCPP calls: review follow-ups (#391)
+
+- [Scenario format](concepts/scenario-format.md#ocppcall-notes): stopping a run while an `ocppCall` waits for its answer ends the run at once, and the call's later answer or failure is ignored — it used to keep `stop` pending up to 25 s and could report a run error after `execution.stopped`. A payload that is not a JSON object is kept as the typed text and flagged by the editor instead of being saved as `{}`. `export-k6` carries on after an `ocppCall` CALLERROR, as the simulator does.
+- Mechanism: `ScenarioExecutor.executeOcppCall` races the call against the executor's abort promise and detaches a late rejection. The ocppCall form saves a non-object payload through `ocppCallPayload` (text kept) rather than `payloadValue` (`{}`), and `JsonTextareaField` shows `null` as `null`. The k6 runtime rejects a CALLERROR with a typed `CallErrorAnswer`, which the `ocppCall` node treats as an answer; timeouts and connection failures still end the walk.
+- Tests: `ScenarioExecutor.nodes.test.ts` (stop while pending, then reject), `nodeFormRegistry.test.ts` and `OcppCallForm.dom.test.tsx` (payload kept and flagged), `interpreter.test.ts` (k6: CALLERROR carries on, a failure does not).
+
+## [2026-09-30] ingest | persisted scenario run history (#388)
+
+- [Control plane](concepts/control-plane.md#scenario-run-history): new "Scenario run history" section and a `scenario.runs.list` row under daemon methods — finished runs across charge points, newest first, exact-match filters on `cpId` / `connectorId` / `scenarioId` / `verdict` / `executionState`, `limit` (default 50, max 200) / `offset`, `{ runs, total }` with summaries only. The `scenario_report` row notes it reads the same history: any recorded run of the charge point, and with `--state-db` across a restart. **Behaviour change:** the history used to be 20 runs per charge point in memory; it is now 100 per charge point, persisted with `--state-db`, dropped by `cp.delete` / `state.reset`, and kept when a scenario is deleted. Reports gain `stopped`.
+- [CLI](entities/cli.md#events): `scenario_run_recorded` event, emitted after the write.
+- [State persistence](concepts/state-persistence.md#tables): `scenario_runs` table (schema v14), in the `.tables` listing and the `cp.delete` cascade list.
+- [Web console](entities/web-console.md): the run console's Run history comes from the daemon and opens a run's report (verdicts, assertions, interventions, transcript, JSON download); new Run History page at `/v3/scenarios/runs` with URL-backed filters and paging.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): the history is daemon-only; Local mode keeps the page-view history.
+- [GitHub issues](sources/github-issues.md): #388 row.
+- Mechanism: `ScenarioRunRepository` (`src/cp/domain/persistence/`) with an in-memory and a SQLite implementation; `CPRegistry` owns one instance and hands it to every `CLIChargePointService`, which records into it from `finalizeScenarioRun` instead of its own capped map. A standalone REPL / JSON-mode service defaults to its own store.
+- Tests: `ScenarioRunRepository.bun.test.ts` (contract run on both implementations: ordering, filters, paging, per-CP retention, reopen), the v14 migration case in `BunSqliteDatabase.bun.test.ts`, `service.scenarioRunHistory.bun.test.ts`, `scenarioRunsList.bun.test.ts` (RPC contract, restart on the same DB), `mapServerEvent.runRecorded.test.ts`, the remote adapter table, `runHistoryRows.test.ts`, `useScenarioRunHistory.dom.test.tsx`, `ScenarioRunPage.history.dom.test.tsx` and `ScenarioRunsPage.dom.test.tsx`.
+
+## [2026-09-30] ingest | scenario run history review follow-ups (#388)
+
+- [Control plane](concepts/control-plane.md#scenario-run-history): `scenario.runs.list` takes a `runId` filter that finds one run wherever it sits in the history; an empty `runId` is `invalid_params`.
+- [Web console](entities/web-console.md): the Run History page keeps the page (`offset`) in the URL alongside the filters and the selected run, and looks a linked run up by `runId` when it is no longer on that page, so a copied URL reopens the same report. The run lists re-list when a charge point is deleted or the simulator reset (registry `removed` / `reset`), not only when a run is recorded; a deleted charge point's runs used to stay on screen until a manual Refresh.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): the Local-mode gap is stated as a deferred part of #388, tracked in #394.
+- Tests: the `runId` filter in `ScenarioRunRepository.bun.test.ts` and `scenarioRunsList.bun.test.ts`; `useScenarioRunHistory.dom.test.tsx` re-lists on a deleted charge point and on a reset, and not on an update; `ScenarioRunsPage.dom.test.tsx` reopens a copied URL for a run beyond the first page and reads the page from the URL.
+
+## [2026-09-30] ingest | run history identity is charge point + runId (#388 review)
+
+- [Web console](entities/web-console.md): the Run History page identifies a run by its charge point and `runId` — row keys, the selected row and the URL (`run` + `runCp`) — because a runId is unique per charge point only (`scenario.runs.list { runId }` can return one run per charge point). A copied link resolves the run on the charge point it names, on or off the current page; a link without `runCp` that matches runs on several charge points opens none and says so.
+- Tests: `runHistoryRows.test.ts` (rows of two charge points sharing a runId get distinct keys) and `ScenarioRunsPage.dom.test.tsx` (two charge points sharing a runId: no duplicate React key, clicking one opens that charge point's report, a copied link opens the named charge point's run on and off the page, an ambiguous legacy link opens none).
+
+## [2026-09-30] ingest | legacy run links check uniqueness across pages (#388 review)
+
+- [Web console](entities/web-console.md): a Run History link without `runCp` is always checked against the whole history (`scenario.runs.list { runId, limit: 2 }`), not only when the run is off the current page; a match on this page no longer hides a second one on another page, so such a link opens its run only when the id is unique, as documented.
+- Tests: `ScenarioRunsPage.dom.test.tsx` — one duplicate on the current page and the other off it: no report opens and the page says the id is ambiguous.
+
+## [2026-10-01] ingest | run history review: discarded runs, loading state (#388 review)
+
+- [Control plane](concepts/control-plane.md#scenario-run-history): a run discarded mid-flight (scenario deleted
+  or replaced, charge point edited) leaves no report — the "every finished
+  run" sentence now says so.
+- [Fleet load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): `SCHEMA_VERSION` is 14.
+- Code: `useScenarioRunHistory` reports `isLoading` from the render a query
+  change lands in, so the Run History page's offset clamp never reads the
+  previous query's `total`.
+
 ## [2026-09-30] ingest | `boot_notification` control-plane event (#395)
 
 - [CLI](entities/cli.md#events): `boot_notification` event (`status` `Accepted` / `Pending` / `Rejected`, `interval`, `currentTime`), emitted once per processed `BootNotification.conf`, after `connected` and before the status changes the answer causes. The `connected` row now says it is transport-only.

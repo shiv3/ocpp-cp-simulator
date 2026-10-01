@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 20 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 21 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -12,6 +12,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/network-simulation.md
   - ../analyses/driving-from-an-ai-agent.md
+  - ../concepts/expert-ocpp-calls.md
 updated: 2026-09-30
 ---
 
@@ -36,7 +37,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 20 curated tools wrapping the daemon's
+The endpoint exposes 21 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                    | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -53,6 +54,7 @@ The endpoint exposes 20 curated tools wrapping the daemon's
 | `start_transaction`     | `start_transaction`       | `cpId`, `connector`, `tagId?` — omitted, draws from the CP's [idTag pool](../concepts/control-plane.md#idtag-pool) (#299); `triggerReason?`, `chargingState?` — OCPP 2.x Started-event values (#335, [parameters](../concepts/control-plane.md#transaction-event-parameters)) |
 | `stop_transaction`      | `stop_transaction`        | `cpId`, `connector`, `reason?`, `triggerReason?` — 1.6 reason / 2.0.1 stoppedReason and the 2.x Ended-event trigger (#335)                                                                                                                                                    |
 | `authorize`             | `authorize`               | `cpId`, `tagId?` — same idTag pool fallback as `start_transaction` (#299)                                                                                                                                                                                                     |
+| `send_ocpp_call`        | `send_ocpp_call`          | `cpId`, `action`, `payload`, `skipValidation?`, `applyResponse?` — [Expert OCPP calls](../concepts/expert-ocpp-calls.md) (#389)                                                                                                                                               |
 | `set_connector_status`  | `update_connector_status` | `cpId`, `connector`, `status` (a connector status, as `update_connector_status` enforces), `errorCode?`, `info?`, `vendorErrorCode?`, `vendorId?`, `timestamp?`, `suppressChargingStateTransactionEvent?`                                                                     |
 | `set_meter_value`       | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                                                                                                                                                                  |
 | `send_meter_value`      | `send_meter_value`        | `cpId`, `connector`, `context?` — `ReadingContext` the readings carry (#335)                                                                                                                                                                                                  |
@@ -99,9 +101,11 @@ Tool-level failures return an MCP tool result with `isError: true` and text in t
 `not_found`, `invalid_params`, `connect_failed`, `timeout`, `internal`,
 `unauthorized` — six of the seven codes the
 [Control plane](../concepts/control-plane.md#rpc) defines, with the same
-meanings. `disconnected` is the exception: the Socket.IO client synthesises
+meanings. `disconnected` is mostly absent: the Socket.IO client synthesises
 it when the socket drops before an ack arrives, and an HTTP request/response
-has no such state to report.
+has no such state to report. The one exception is `send_ocpp_call`, which
+answers `disconnected` when its CALL was dropped before the CSMS could answer
+([Expert OCPP calls](../concepts/expert-ocpp-calls.md#errors), #389).
 
 Transport-level errors (malformed JSON-RPC, invalid auth, rate limit) are handled by the MCP
 protocol layer. Every call is subject to a 30-second deadline; timeout failures surface as

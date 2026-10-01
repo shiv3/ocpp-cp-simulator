@@ -47,8 +47,21 @@ overridden.
   and clears the local DB in Local mode.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
+- [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the
+  console's Expert tab calls the in-tab charge point in Local mode and
+  `send_ocpp_call` on the daemon in Remote mode, which is also the method the
+  MCP tool and JSON-Lines mode use.
 - The scenario wait controls (extend / retry / continue, #240) work in both
   modes and refuse an idle scenario the same way. The run report that records
   them (`interventions`) and the `scenario_wait_changed` event that refreshes
   other consoles exist only on the daemon — Local mode has no run reports and
   no scenario events.
+- The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
+  run console's recorded history and the `/v3/scenarios/runs` page need Remote
+  mode. In Local mode the run console lists only the runs started or attached
+  while the page is open, and forgets them when it closes. This is a deferred
+  part of #388, not a design choice: the browser runtime builds no run
+  reports (the transcript capture, assertion evaluation and verdict live in
+  the daemon's service), so it has nothing to record. Moving that report
+  builder to the shared application layer and recording local runs in the
+  sql.js `scenario_runs` table is tracked in #394.

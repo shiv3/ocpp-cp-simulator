@@ -12,6 +12,7 @@ related:
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
+  - ../concepts/expert-ocpp-calls.md
 updated: 2026-09-30
 ---
 
@@ -51,7 +52,7 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   a linear step editor and a separate run console (`/v3/scenarios`; each row's
   `…` menu — Duplicate, Export JSON, Delete — opens in a portal and flips
   upward near the bottom of the window, so it is never clipped by the table,
-  #365), a global
+  #365), a cross-CP **Run history** (`/v3/scenarios/runs`, #388), a global
   **Message log** (`/v3/logs`), and **Settings** (`/v3/settings`, where
   global [network simulation](../concepts/network-simulation.md) and the
   **Reset all simulator data** button live).
@@ -77,6 +78,40 @@ waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#
 shows at once, and a control the runtime refuses is shown inline instead of
 being dropped. In Remote mode every open console re-reads the run on
 `scenario_wait_changed`, not only the one that acted.
+
+A charge point's **Expert** tab sends an
+[expert OCPP call](../concepts/expert-ocpp-calls.md) (#389): pick any
+station-initiated action of the CP's OCPP-J version, edit the JSON payload —
+pre-filled with the smallest schema-valid one, **Reset to default** restores
+it — and **Send**. The schema check runs as you type; a schema-invalid payload
+is sent only with **Skip schema validation** ticked, and text that is not a
+JSON object never is. **Apply the answer to the station's state** is off by
+default. The tab shows the frame as sent and the CALLRESULT or CALLERROR, or
+why the call was refused; a SOAP CP gets a notice instead of the form. It
+works in both modes.
+
+The run console's **Run history** lists the daemon's recorded runs of that
+scenario on that connector — the latest 20, newest first, with each run's
+result and verdict — plus the run the page is tracking until the daemon records
+it, so the history survives navigating away and back or a daemon restart with
+`--state-db`. Selecting a recorded run opens its report: verdicts, timing,
+errors, assertion results, wait interventions and the run's OCPP transcript,
+downloadable as JSON. **View all runs** opens the **Run History** page
+(`/v3/scenarios/runs`), which lists every recorded run across charge points
+with filters on charge point, connector, scenario id, verdict and execution
+state, pages of 50, and the selected run's report beside the list. Filters, the
+page and the selected run are kept in the URL (`?cp=&connector=&scenario=
+&verdict=&state=&offset=&run=&runCp=`), so a copied URL reopens the same view;
+a linked run that is no longer on that page (newer runs pushed it down) is
+looked up by `runId` and its report still opens. A run is identified by its
+charge point and its `runId` (`runCp` + `run`), since a runId is unique per
+charge point only; a link without `runCp` opens its run only when that id
+names a single one. Both re-list when the daemon
+records a run, and when a charge point is deleted or the simulator reset
+([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
+In Local mode the run console keeps a history of this page view only, and the
+Run History page says it needs the daemon — local run reports are tracked in
+#394.
 
 The two consoles link to each other with a design switcher (the classic
 navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic

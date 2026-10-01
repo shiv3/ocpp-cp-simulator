@@ -687,6 +687,7 @@ detail — the table above is where those differences live.
 | `inboundPolicy`      | No       |
 | `certQuirks`         | No       |
 | `connectionTrigger`  | No       |
+| `ocppCall`           | Yes      |
 
 A scenario containing a node type marked "No" is refused by `export-k6` with
 the offending type named, rather than exported and silently skipped.
@@ -729,6 +730,7 @@ Events are emitted in all modes:
 | `scenario_error`        | `connectorId`, `scenarioId`, `error`      | Scenario execution failed                                                                                                                                                                                                                      |
 | `scenario_node_execute` | `connectorId`, `scenarioId`, `nodeId`     | Scenario node executed                                                                                                                                                                                                                         |
 | `scenario_wait_changed` | `connectorId`, `scenarioId`, `kind`       | An operator extended, retried or continued the wait the scenario is parked on (`kind`: `extend` / `retry` / `continue`; also carries `nodeId` and `runId`) (#240)                                                                              |
+| `scenario_run_recorded` | `connectorId`, `scenarioId`, `runId`      | A finished run's report was added to the daemon's [run history](../concepts/control-plane.md#scenario-run-history), so a client listing runs can re-list (#388)                                                                                |
 
 ## CLI Options
 

@@ -240,6 +240,7 @@ describe("SessionAnalysisPanel", () => {
       "Session Analysis",
       "Configuration",
       "Diagnostics",
+      "Expert",
     ]);
 
     await openAnalysisTab(container);

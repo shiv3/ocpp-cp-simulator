@@ -303,6 +303,47 @@ describe("runScenario", () => {
     expect(sent?.payload).toEqual({});
   });
 
+  it("sends an ocppCall node's action and payload as authored (#389)", async () => {
+    const host = new FakeHost();
+    const payload = { connectorId: 1, errorCode: "NoError", status: "Faulted" };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "ocppCall",
+          data: { action: "StatusNotification", payload, skipValidation: true },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    expect(host.sent).toContainEqual(
+      expect.objectContaining({ action: "StatusNotification", payload }),
+    );
+  });
+
+  it("an ocppCall answered with a CALLERROR carries on, like the simulator (#389)", async () => {
+    const host = new FakeHost();
+    host.callErrors.set("Heartbeat", "NotImplemented");
+    const result = await runScenario(host, wire16, ocppCallThenDataTransfer());
+    expect(result.completed).toBe(true);
+    expect(host.sent.map((c) => c.action)).toContain("DataTransfer");
+  });
+
+  it("an ocppCall that gets no answer still fails the run (#389)", async () => {
+    const host = new FakeHost();
+    host.failures.set("Heartbeat", new Error("Heartbeat timed out"));
+    const result = await runScenario(host, wire16, ocppCallThenDataTransfer());
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(/timed out/);
+    expect(host.sent.map((c) => c.action)).not.toContain("DataTransfer");
+  });
+
   it("csmsCallTrigger with a payload condition skips non-matching calls (#240)", async () => {
     const host = new FakeHost();
     const events: Array<{ action: string; payload: Record<string, unknown> }> =
@@ -789,3 +830,23 @@ describe("k6 baselines a curve at session start, not at its earliest point (#301
     expect(first).toBe(9000);
   });
 });
+
+function ocppCallThenDataTransfer(): ScenarioJson {
+  return scenario(
+    [
+      { id: "a", type: "start" },
+      {
+        id: "b",
+        type: "ocppCall",
+        data: { action: "Heartbeat", payload: {} },
+      },
+      { id: "c", type: "dataTransfer", data: { vendorId: "after" } },
+      { id: "d", type: "end" },
+    ],
+    [
+      ["a", "b"],
+      ["b", "c"],
+      ["c", "d"],
+    ],
+  );
+}

@@ -21,7 +21,13 @@ import {
   type ResponderState,
 } from "./autoResponder";
 import type { ScenarioHost } from "./interpreter";
-import type { CpIdentity, TranscriptEntry, Wire, WireCall } from "./types";
+import {
+  CallErrorAnswer,
+  type CpIdentity,
+  type TranscriptEntry,
+  type Wire,
+  type WireCall,
+} from "./types";
 import {
   ocppBootTime,
   ocppCallDuration,
@@ -256,8 +262,10 @@ export class OcppChargePoint implements ScenarioHost {
         p.entry.errorCode = frame.errorCode;
         ocppErrors.add(1, { action: p.action, kind: "callerror" });
         p.reject(
-          new Error(
-            `${p.action} CALLERROR ${frame.errorCode}: ${frame.errorDescription}`,
+          new CallErrorAnswer(
+            p.action,
+            frame.errorCode,
+            frame.errorDescription,
           ),
         );
       }

@@ -69,6 +69,18 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     return Promise.resolve({ status: "Accepted" });
   }
 
+  sendOcppCall(
+    ...args: Parameters<IChargePointMessageHandler["sendOcppCall"]>
+  ): ReturnType<IChargePointMessageHandler["sendOcppCall"]> {
+    this.record("sendOcppCall", args);
+    return Promise.resolve({
+      kind: "callResult",
+      messageId: "m",
+      sentFrame: "[]",
+      payload: {},
+    });
+  }
+
   sendSecurityEventNotification(
     ...args: Parameters<
       IChargePointMessageHandler["sendSecurityEventNotification"]
@@ -226,6 +238,10 @@ describe("Outbox", () => {
       "Message",
       '{"ok":true}',
     ]);
+
+    const expert = { action: "Heartbeat", payload: {}, skipValidation: true };
+    void outbox.sendOcppCall(expert);
+    expectCall(handler, "sendOcppCall", [expert]);
 
     outbox.sendSecurityEventNotification("StartupOfTheDevice", "boot accepted");
     expectCall(handler, "sendSecurityEventNotification", [

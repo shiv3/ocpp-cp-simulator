@@ -4,6 +4,10 @@ import type {
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
 import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../../cp/domain/types/OcppCall";
+import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
@@ -21,6 +25,10 @@ import {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { ScenarioRunResult } from "../../cp/application/verification/ScenarioAssertions";
+import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "../../cp/application/verification/ScenarioRunSummary";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -262,6 +270,13 @@ export class RegistryChargePointService implements ChargePointService {
     data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this.requireService(id).sendDataTransfer(vendorId, messageId, data);
+  }
+
+  async sendOcppCall(
+    id: string,
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    return this.requireService(id).sendOcppCall(request);
   }
 
   async startTransaction(
@@ -811,6 +826,10 @@ export class RegistryChargePointService implements ChargePointService {
     );
   }
 
+  async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
+    return this.registry.scenarioRuns.list(query);
+  }
+
   async getScenario(
     id: string,
     connectorId: number,
@@ -1117,6 +1136,13 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
         scenarioId: evt.data.scenarioId,
         runId: evt.data.runId,
         nodeId: evt.data.nodeId,
+      };
+    case "scenario_run_recorded":
+      return {
+        type: "scenario-run-recorded",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
       };
     case "scenario_wait_changed":
       return {

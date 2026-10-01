@@ -66,6 +66,17 @@
       }
     },
     {
+      "id": "expert-heartbeat",
+      "type": "ocppCall",
+      "position": { "x": 600, "y": 360 },
+      "data": {
+        "label": "Expert Heartbeat.req",
+        "description": "ocppCall node (#389): any station-initiated CALL with an authored payload, sent through the normal transport; the run waits for the answer. Heartbeat {} is valid on all versions.",
+        "action": "Heartbeat",
+        "payload": {}
+      }
+    },
+    {
       "id": "status-notif-available",
       "type": "statusNotification",
       "position": { "x": 400, "y": 450 },
@@ -281,7 +292,12 @@
     { "id": "e2", "source": "boot-delay", "target": "config-set" },
     { "id": "e3", "source": "config-set", "target": "config-set-interval" },
     { "id": "e4", "source": "config-set-interval", "target": "heartbeat" },
-    { "id": "e5", "source": "heartbeat", "target": "status-notif-available" },
+    { "id": "e5", "source": "heartbeat", "target": "expert-heartbeat" },
+    {
+      "id": "e5b",
+      "source": "expert-heartbeat",
+      "target": "status-notif-available"
+    },
     { "id": "e6", "source": "status-notif-available", "target": "reserve-now" },
     { "id": "e7", "source": "reserve-now", "target": "await-reserved" },
     { "id": "e8", "source": "await-reserved", "target": "cancel-reservation" },

@@ -1,6 +1,7 @@
 import React from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
+  History,
   PlugZap,
   Play,
   ScrollText,
@@ -41,7 +42,15 @@ const NAV_ITEMS: NavItem[] = [
     label: "Scenarios",
     to: consolePath("/scenarios"),
     icon: Play,
-    isActive: (pathname) => pathname.startsWith(consolePath("/scenarios")),
+    isActive: (pathname) =>
+      pathname.startsWith(consolePath("/scenarios")) &&
+      !pathname.startsWith(consolePath("/scenarios/runs")),
+  },
+  {
+    label: "Run History",
+    to: consolePath("/scenarios/runs"),
+    icon: History,
+    isActive: (pathname) => pathname.startsWith(consolePath("/scenarios/runs")),
   },
   {
     label: "Message Log",
@@ -90,6 +99,7 @@ const AppShell: React.FC = () => {
                 <Link
                   key={label}
                   to={to}
+                  aria-current={active ? "page" : undefined}
                   className={cn(
                     "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800",
                     active &&

@@ -115,7 +115,7 @@ describe("ScenarioLibraryPage", () => {
 
     const links = Array.from(container.querySelectorAll("a"));
     const runLink = links.find((a) =>
-      (a.getAttribute("href") ?? "").includes("/scenarios/run"),
+      (a.getAttribute("href") ?? "").includes("/scenarios/run?"),
     );
     expect(runLink, "expected a Run link in the table row").toBeTruthy();
     expect(runLink!.getAttribute("href")).toContain("cp=CP-1");

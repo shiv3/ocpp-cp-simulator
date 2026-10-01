@@ -17,6 +17,8 @@ import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { perChargePointTables } from "../../cp/domain/persistence/schema";
+import type { ScenarioRunRepository } from "../../cp/domain/persistence/ScenarioRunRepository";
+import { createScenarioRunRepository } from "../../cp/domain/persistence/createScenarioRunRepository";
 
 export type RegistryMembershipChange = "added" | "removed";
 
@@ -85,6 +87,9 @@ export class CPRegistry {
    *  listener subscribes once instead of tracking memberships. */
   private readonly runSettledSinks = new Set<SessionSettledSink>();
   private networkSimManager: NetworkSimManager | null = null;
+  /** #388: one run history for the whole daemon, so `scenario.runs.list` can
+   *  span charge points without `--state-db` too. */
+  readonly scenarioRuns: ScenarioRunRepository;
 
   constructor(
     private readonly bus: EventBus,
@@ -103,7 +108,9 @@ export class CPRegistry {
         connectorId: number,
       ): Promise<AutoTrafficConfig | null>;
     },
-  ) {}
+  ) {
+    this.scenarioRuns = createScenarioRunRepository(database);
+  }
 
   /** True when a SOAP charge point may be created without a callback URL. */
   canDeriveSoapCallbackUrl(): boolean {
@@ -555,6 +562,7 @@ export class CPRegistry {
     const svc = new CLIChargePointService(
       this.withDerivedSoapCallback(init),
       this.database,
+      this.scenarioRuns,
     );
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
     const unsubSettled = svc.onSessionSettled((info) =>
@@ -812,6 +820,8 @@ export class CPRegistry {
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.
     this.persistRemove(cpId);
+    // The in-memory run history has no table for persistRemove to cascade to.
+    this.scenarioRuns.deleteForChargePoint(cpId);
     this.notifyInitChange();
     return true;
   }

@@ -28,6 +28,9 @@ import type {
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
+import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
+import { type OcppCallOutcome, type OcppCallRequest } from "../types/OcppCall";
+import { OcppCallRejectedError } from "../errors/OcppCallErrors";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
 import type {
@@ -1087,6 +1090,41 @@ export class ChargePoint {
     data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this._outbox.sendDataTransfer(vendorId, messageId, data);
+  }
+
+  /**
+   * Expert OCPP call (#389): any station-initiated CALL of this station's
+   * OCPP-J version, with the payload as given. See
+   * {@link IChargePointMessageHandler.sendOcppCall}.
+   */
+  async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+    const catalog = getOcppCallCatalog(this._ocppVersion);
+    if (!catalog) {
+      throw new OcppCallRejectedError(
+        "unsupported_transport",
+        `Expert OCPP calls need an OCPP-J station; ${this._ocppVersion} is SOAP`,
+      );
+    }
+    // Checked here, not by the schema, so skipValidation cannot waive it:
+    // the scenario editor can store unparsed JSON text as the payload.
+    const { payload } = request;
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      throw new OcppCallRejectedError(
+        "invalid_payload",
+        "The payload of an OCPP call must be a JSON object",
+      );
+    }
+    if (!catalog.isSupported(request.action)) {
+      throw new OcppCallRejectedError(
+        "unsupported_action",
+        `${request.action} is not a station-initiated call on ${this._ocppVersion}; expected one of ${catalog.actions.join(", ")}`,
+      );
+    }
+    return this._outbox.sendOcppCall(request);
   }
 
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */

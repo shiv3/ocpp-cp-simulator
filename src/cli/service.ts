@@ -8,6 +8,10 @@ import type {
   DataTransferData,
   DataTransferResult,
 } from "../cp/domain/types/DataTransfer";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+} from "../cp/domain/types/OcppCall";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type { BootNotificationResult } from "../cp/domain/charge-point/ChargePointEvents";
 import type { Database } from "../cp/domain/persistence/Database";
@@ -69,6 +73,8 @@ import type {
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
+import type { ScenarioRunRepository } from "../cp/domain/persistence/ScenarioRunRepository";
+import { createScenarioRunRepository } from "../cp/domain/persistence/createScenarioRunRepository";
 import {
   NoopConnectorRuntimeRepository,
   type ConnectorRuntimeRepository,
@@ -189,6 +195,16 @@ export type CLIEvent =
         readonly connectorId: number;
         readonly scenarioId: string;
         readonly nodeId: string;
+        readonly runId: string;
+      };
+    }
+  | {
+      // #388: a finished run's report is in the run history, so a client
+      // listing runs (scenario.runs.list) can refresh.
+      readonly event: "scenario_run_recorded";
+      readonly data: {
+        readonly connectorId: number;
+        readonly scenarioId: string;
         readonly runId: string;
       };
     }
@@ -469,14 +485,10 @@ export class CLIChargePointService {
     string,
     ScenarioWaitIntervention[]
   > = new Map();
-  // #179 Phase 2b: bounded history of per-run verdicts + assertion results,
-  // keyed by runId. Capped so a long-lived daemon doesn't accumulate
-  // results forever; recordRunResult evicts the oldest entry past the cap.
-  private readonly _runResults: Map<string, ScenarioRunResult> = new Map();
-  private static readonly MAX_RUN_RESULTS = 20;
-  // Latest runId recorded per scenarioId, so getScenarioRunResult can
-  // resolve "the latest run" without scanning _runResults.
-  private readonly _latestRunIdByScenario: Map<string, string> = new Map();
+  // #388: finished-run reports. The daemon hands every charge point one
+  // shared store (see CPRegistry), bounded per charge point and persisted with
+  // --state-db; scenario_report reads it, scenario.runs.list pages through it.
+  private readonly _runs: ScenarioRunRepository;
   /**
    * Terminal execution context of the last finished run, per scenarioId.
    *
@@ -484,11 +496,11 @@ export class CLIChargePointService {
    * finally() deletes from — so status went null the instant a run ended. A
    * client polling for `state === "completed"` never succeeded, and could not
    * distinguish "unknown scenarioId" (still null) from "already finished",
-   * even though the run was sitting in `_runResults` the whole time.
+   * even though the run was sitting in the run history the whole time.
    *
    * Entries live until the scenario is removed or its run discarded, and are
    * overwritten by the next run. Bounded by the number of loaded scenarios, so
-   * unlike `_runResults` this needs no eviction cap.
+   * unlike the run history this needs no eviction cap.
    */
   private readonly _lastRunStatusByScenario: Map<
     string,
@@ -602,8 +614,13 @@ export class CLIChargePointService {
     init: ChargePointInitOptions,
     /** Shared daemon DB. `null` means run in-memory (no `--state-db`). */
     private readonly database: Database | null = null,
+    /** #388: the daemon-wide run history. Defaults to a store of this
+     *  service's own — on `database` when there is one — for the standalone
+     *  REPL / JSON-mode runtime. */
+    runs?: ScenarioRunRepository,
   ) {
     this._init = init;
+    this._runs = runs ?? createScenarioRunRepository(database);
     this._scenarioRepo = new SqliteScenarioRepository(database);
     this._runtimeRepo = database
       ? new SqliteConnectorRuntimeRepository(database)
@@ -1083,6 +1100,11 @@ export class CLIChargePointService {
     data?: DataTransferData,
   ): Promise<DataTransferResult> {
     return this._chargePoint.sendDataTransfer(vendorId, messageId, data);
+  }
+
+  /** Expert OCPP call (#389); see `ChargePoint.sendOcppCall`. */
+  sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
+    return this._chargePoint.sendOcppCall(request);
   }
 
   updateConnectorStatus(
@@ -2250,18 +2272,19 @@ export class CLIChargePointService {
    * #179 Phase 2b: the verdict + assertion results for a scenario run, or
    * null if no run has finished yet (or the given runId doesn't match a
    * stored result for this scenario). Omitting runId returns the latest
-   * recorded run for the scenario. Only the last {@link MAX_RUN_RESULTS}
-   * runs across the whole service are retained. Phase 3 surfaces this over
-   * RPC as `scenario_report`; this accessor is the only new public surface
-   * added here.
+   * recorded run for the scenario. Retention is the run history's (#388:
+   * `MAX_RUNS_PER_CP` per charge point, persisted with `--state-db`). Phase 3
+   * surfaces this over RPC as `scenario_report`.
    */
   getScenarioRunResult(
     scenarioId: string,
     runId?: string,
   ): ScenarioRunResult | null {
-    const targetRunId = runId ?? this._latestRunIdByScenario.get(scenarioId);
-    if (!targetRunId) return null;
-    const result = this._runResults.get(targetRunId);
+    const cpId = this._chargePoint.id;
+    const result =
+      runId === undefined
+        ? this._runs.latest(cpId, scenarioId)
+        : this._runs.get(cpId, runId);
     if (!result || result.scenarioId !== scenarioId) return null;
     return result;
   }
@@ -2303,6 +2326,7 @@ export class CLIChargePointService {
     blocked: boolean,
     errors: string[],
     timeout: { nodeId: string; expectation?: unknown } | null,
+    stopped = false,
   ): void {
     const transcript = this._transcriptByScenario.get(scenarioId);
     if (!transcript) return;
@@ -2368,6 +2392,7 @@ export class CLIChargePointService {
         new Date(endedAt).getTime() - new Date(startedAt).getTime(),
       ),
       executionState,
+      stopped,
       verdict: verdictSummary.verdict,
       conformanceVerdict: verdictSummary.conformanceVerdict,
       compatibilityVerdict: verdictSummary.compatibilityVerdict,
@@ -2382,18 +2407,31 @@ export class CLIChargePointService {
     });
   }
 
-  /** Stores a run result, evicting the oldest entry once
-   *  {@link MAX_RUN_RESULTS} is exceeded (Map iteration order is insertion
-   *  order, so the first key is the oldest). */
+  /** Stores a run result in the run history (which applies retention), then
+   *  announces it with `scenario_run_recorded` — after the write, so a client
+   *  refreshing on the event reads the run. A failed write never fails the
+   *  run — it already ended, only its report is lost — and is logged on the
+   *  charge point, so it shows in the console and `logs.get` rather than only
+   *  on the daemon's stderr. */
   private recordRunResult(result: ScenarioRunResult): void {
-    this._runResults.set(result.runId, result);
-    this._latestRunIdByScenario.set(result.scenarioId, result.runId);
-    if (this._runResults.size > CLIChargePointService.MAX_RUN_RESULTS) {
-      const oldestKey = this._runResults.keys().next().value;
-      if (oldestKey !== undefined) {
-        this._runResults.delete(oldestKey);
-      }
+    try {
+      this._runs.record(result);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this._chargePoint.logger.error(
+        `Scenario run ${result.runId} finished (${result.verdict}) but its report was not recorded: ${reason}`,
+        LogType.SCENARIO,
+      );
+      return;
     }
+    this.emit({
+      event: "scenario_run_recorded",
+      data: {
+        connectorId: result.connectorId,
+        scenarioId: result.scenarioId,
+        runId: result.runId,
+      },
+    });
   }
 
   stopScenario(connectorId: number, scenarioId: string): void {
@@ -2551,6 +2589,7 @@ export class CLIChargePointService {
       wasWaiting,
       [],
       timeout,
+      true,
     );
   }
 

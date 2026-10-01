@@ -409,6 +409,32 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [[]],
       },
       {
+        name: "listScenarioRuns",
+        invoke: (service) =>
+          service.listScenarioRuns({
+            cpId: "cp-1",
+            connectorId: 1,
+            scenarioId: "s1",
+            verdict: "FAIL",
+            limit: 10,
+            offset: 20,
+          }),
+        expected: [
+          {
+            method: "scenario.runs.list",
+            params: {
+              cpId: "cp-1",
+              connectorId: 1,
+              scenarioId: "s1",
+              verdict: "FAIL",
+              limit: 10,
+              offset: 20,
+            },
+          },
+        ],
+        results: [{ runs: [], total: 0 }],
+      },
+      {
         name: "loadConfig",
         invoke: (service) => service.loadConfig(),
         expected: [{ method: "config.get", params: {} }],
@@ -526,6 +552,30 @@ describe("RemoteChargePointService socket.io rpc", () => {
           },
         ],
         results: [undefined],
+      },
+      {
+        name: "sendOcppCall",
+        invoke: (service) =>
+          service.sendOcppCall("cp-1", {
+            action: "Heartbeat",
+            payload: {},
+            skipValidation: true,
+          }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "send_ocpp_call",
+            params: { action: "Heartbeat", payload: {}, skipValidation: true },
+          },
+        ],
+        results: [
+          {
+            kind: "callResult",
+            messageId: "m1",
+            sentFrame: '[2,"m1","Heartbeat",{}]',
+            payload: {},
+          },
+        ],
       },
       {
         name: "startTransaction",

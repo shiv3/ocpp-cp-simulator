@@ -1,4 +1,5 @@
 import { Logger, LogType } from "../../shared/Logger";
+import { encodeCallFrame } from "./callFrame";
 import { redactSensitiveText } from "../../shared/redaction";
 import { openOcppWebSocket, probeUpgradeRefusal } from "./wsUrlWithBasic";
 import type { SupervisionUrlPool } from "./SupervisionUrlPool";
@@ -413,13 +414,10 @@ export class OCPPWebSocket {
       return false;
     }
 
-    const message = JSON.stringify([
-      OCPPMessageType.CALL,
-      messageId,
-      action,
-      payload,
-    ]);
-    return this._controller.sendUpstream(message, onSettled);
+    return this._controller.sendUpstream(
+      encodeCallFrame(messageId, action, payload),
+      onSettled,
+    );
   }
 
   public sendResult(

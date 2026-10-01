@@ -196,9 +196,7 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
     OCPPAction.DataTransfer,
     new DataTransferResultHandler(),
   );
-  // `.conf` is empty by spec: acknowledging it is the whole exchange, and
-  // the "No handler for action result" warning stays for actions that do
-  // lack one (#407).
+  // Notifications whose `.conf` is empty by spec (#407).
   for (const action of [
     OCPPAction.FirmwareStatusNotification,
     OCPPAction.DiagnosticsStatusNotification,

@@ -19,7 +19,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -749,7 +749,7 @@ the OCPP answer are unchanged.
   would also release a scenario `csmsCallTrigger` waiting on that action
   (#257).
 - **Correlation.** `messageId` is the CALL's UniqueId (the WS-Addressing
-  `MessageID` on SOAP, omitted when the request has none). Repeated calls of
+  `MessageID` on SOAP, which the envelope parser requires). Repeated calls of
   the same action are told apart by it. `action` is the name on the wire: a
   2.x station reports `RequestStartTransaction`, not its 1.6 alias.
 - **Order.** `csms_call_received` is emitted as the CALL enters dispatch,

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Log
@@ -1255,3 +1255,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI](entities/cli.md#csms-call-events): the **Scope** bullet names what a SOAP station actually refuses before dispatch — an operation its dialect does not define (e.g. a 1.6-only `TriggerMessage` sent to a 1.5 station), another charge point's identity, a response — instead of "not implemented": with the charge point and logger production always supplies, every CS→CP operation of the dialect dispatches. The **Outcome** bullet qualifies `InternalError` as the 1.6J handler-failure answer; 2.x reports `NoResponse` (#399).
 - [Control plane](concepts/control-plane.md#event-push-and-rooms), [GitHub issues](sources/github-issues.md): "every OCPP-J CSMS CALL and every dispatchable SOAP one" instead of "every inbound CSMS CALL".
 - Tests: the SOAP no-event case in `OCPPSoapServer.notifyIncomingCall.test.ts` now sends a 1.6-only `TriggerMessage` to a 1.5 station with a logger (refused at parse: `Unsupported SOAP body wrapper`), replacing a case made non-dispatchable only by omitting the logger. It goes red if a Fault is ever reported as a completion without an announcement.
+
+## [2026-10-01] lint | CSMS call events: envelope lead-in, `messageId` always set (#396 review)
+
+- `concepts/control-plane.md`: the #396 paragraph had landed between "CP
+  event envelope" and the JSON it introduces; moved above the lead-in.
+- `entities/cli.md`, `ChargePointEvents.ts`: a SOAP request without a
+  WS-Addressing `MessageID` never reaches dispatch (the envelope parser
+  requires it), so `messageId` is never omitted on the wire.

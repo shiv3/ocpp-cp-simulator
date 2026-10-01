@@ -73,8 +73,9 @@ export interface ChargePointEvents {
    *  layer, before (and regardless of) handler execution or a response
    *  override. Lets scenario csmsCallTrigger nodes park on arbitrary
    *  incoming actions without per-action wiring (issue #110). `messageId`
-   *  is the CALL's UniqueId (#396); a SOAP request without a WS-Addressing
-   *  MessageID has none. */
+   *  is the CALL's UniqueId (#396) — the WS-Addressing MessageID on SOAP,
+   *  which the envelope parser requires. Every transport sets it; it is
+   *  optional only for callers outside the transports (tests). */
   incomingCallReceived: {
     action: string;
     payload: unknown;

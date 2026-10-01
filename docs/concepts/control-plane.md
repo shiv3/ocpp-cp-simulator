@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # Socket.IO control plane
@@ -542,10 +542,10 @@ socket.on("event", (envelope) => {
 });
 ```
 
-CP event envelope (the `evt` payloads are the CLI [event list](../entities/cli.md#events)):
-
 Every OCPP-J CSMS CALL, and every dispatchable SOAP one, is pushed as a
 correlated `csms_call_received` / `csms_call_completed` pair — see [CLI → CSMS call events](../entities/cli.md#csms-call-events) (#396).
+
+CP event envelope (the `evt` payloads are the CLI [event list](../entities/cli.md#events)):
 
 ```json
 {

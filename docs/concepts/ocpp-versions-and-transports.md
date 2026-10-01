@@ -8,6 +8,7 @@ sources:
   - README.md (SOAP section)
   - src/cli/soapCallbackUrl.ts
   - src/cli/soapTunnel.ts
+  - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -19,7 +20,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 
 # OCPP versions and transports
@@ -66,6 +67,33 @@ so no negative (refuse / ignore a CSMS call) or wait-for-call scenario was
 expressible on 2.0.1 at all; it now consults them at the same point the 1.6
 handler does, before payload validation and handler lookup, so policies are
 sticky across reconnects the same way and an override answers once.
+
+## WebSocket ping (`WebSocketPingInterval`)
+
+An OCPP-J charge point sends a WebSocket ping frame every
+`WebSocketPingInterval` seconds (#406) — the 1.6 key, or
+`OCPPCommCtrlr.WebSocketPingInterval` through `SetVariables` on 2.0.1 / 2.1.
+It keeps an idle connection alive through a proxy that drops silent
+WebSockets, at the cost of a control frame instead of a Heartbeat round trip.
+
+- **`0` (the default) sends no ping**, as before; the CSMS may still ping and
+  the station answers with a pong.
+- A change takes effect at once on the open socket and is re-armed on every
+  reconnect; a value persisted with `--state-db` applies from the first open.
+- A negative value (§9.1.34), or one above `2147483` s — the longest delay a
+  timer holds before Node and Bun turn it into 1 ms — is answered `Rejected`;
+  such a value persisted by an older version is ignored at load, so the key
+  falls back to `0`.
+- Ping frames are WebSocket control frames, not OCPP messages: they bypass
+  [network simulation](network-simulation.md) and are not logged one by one
+  (one `WebSocket ping every Ns` or `WebSocket ping off` line when the value
+  changes).
+- **A charge point that cannot send a ping frame does not have the key.** A
+  SOAP station has no socket, and the browser's `WebSocket` API has no
+  `ping()`, so in Local mode and on every SOAP version `ChangeConfiguration`
+  answers `NotSupported`, `GetConfiguration` lists the key as unknown, and
+  2.x `SetVariables` answers `Rejected`. The CLI and daemon (Bun's client, or
+  `ws` under Node) always send them.
 
 ## SOAP versions (1.2, 1.5, 1.6S)
 
@@ -250,6 +278,8 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 ### SOAP limitations elsewhere in the simulator
 
 - [Network simulation](network-simulation.md) applies to WebSocket CPs only.
+- `WebSocketPingInterval` is not a key a SOAP CP has: `ChangeConfiguration`
+  answers `NotSupported` ([WebSocket ping](#websocket-ping-websocketpinginterval)).
 - [Expert OCPP calls](expert-ocpp-calls.md) (#389) need an OCPP-J CP: a SOAP
   CP refuses them, because each envelope is built per operation.
 - `--trace-output` does not capture SOAP frames yet; the

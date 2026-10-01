@@ -1354,3 +1354,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Log format](concepts/log-format.md#no-handler-for-action-result): what `No handler for action result` means, the five empty-confirmation notifications that had no result handler now acknowledged at DEBUG (`StatusNotification` and `MeterValues` are empty too and already had one), `SignCertificate` still warning.
 - [GitHub issues](sources/github-issues.md): #407 row.
 - Mechanism: `buildV16CallHandlerRegistry` registers one `EmptyConfirmationResultHandler` per action; `handleCallResult` is unchanged.
+
+## [2026-10-01] ingest | `WebSocketPingInterval` sends WebSocket ping frames (#406)
+
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-ping-websocketpinginterval): new section — `0` default sends no ping, changes re-arm at once and on every reconnect, negative values and values above `2147483` s `Rejected`, pings bypass network simulation, and SOAP / browser charge points do not have the key (`NotSupported`). SOAP limitations list links to it.
+- [GitHub issues](sources/github-issues.md): #406.
+- Mechanism: `ChargePoint` forwards the key to `OCPPWebSocket.setPingInterval`; `defaultConfiguration` only declares the key when the transport `supportsPing`. Integer configuration keys gain optional `min` / `max` bounds (`SecurityProfile` 0–3 moved there), checked on `ChangeConfiguration` and on loading persisted overrides — an out-of-range persisted value is now skipped like an unparsable one.

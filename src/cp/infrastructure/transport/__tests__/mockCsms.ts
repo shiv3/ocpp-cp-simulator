@@ -11,6 +11,8 @@ export interface MockCsmsConnection {
   frames: Array<{ raw: string; receivedAt: number }>;
   openedAt: number;
   closedAt: number | null;
+  /** WebSocket ping frames the charge point sent on this connection (#406). */
+  pings: number;
 }
 
 interface FrameWaiter {
@@ -75,6 +77,7 @@ export function startMockCsms(): MockCsms {
           frames: [],
           openedAt: Date.now(),
           closedAt: null,
+          pings: 0,
         };
         connectionsList.push(currentConnection);
         openCountValue++;
@@ -95,6 +98,9 @@ export function startMockCsms(): MockCsms {
             w.resolve(frame); // resolve() removes the waiter and clears its timer
           }
         }
+      },
+      ping() {
+        if (currentConnection) currentConnection.pings++;
       },
       close() {
         // Mark current connection as closed

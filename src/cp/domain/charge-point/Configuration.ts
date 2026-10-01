@@ -1,5 +1,6 @@
 import { ChargePoint } from "./ChargePoint";
 import { OcppFeatureProfile } from "../types/OcppTypes";
+import { MAX_TIMER_MS } from "../../shared/timers";
 
 export const ConfigurationKeys = {
   Core: {
@@ -285,6 +286,9 @@ export const ConfigurationKeys = {
       required: false,
       readonly: false,
       type: "integer",
+      min: 0,
+      // #406: the longest interval a timer can hold.
+      max: Math.floor(MAX_TIMER_MS / 1000),
     } as IntegerConfigurationKey,
   },
   Reservation: {
@@ -363,6 +367,8 @@ export const ConfigurationKeys = {
       required: false,
       readonly: false,
       type: "integer",
+      min: 0,
+      max: 3,
     } as IntegerConfigurationKey,
     AuthorizationKey: {
       name: "AuthorizationKey",
@@ -435,6 +441,9 @@ export type ConfigurationKey<T = ConfigurationKeyType> = {
   writeonly?: boolean;
   required: boolean;
   type: T;
+  /** Inclusive bounds of an integer key; out of range → `Rejected`. */
+  min?: number;
+  max?: number;
 };
 export type IntegerConfigurationKey = ConfigurationKey<"integer">;
 export type StringConfigurationKey = ConfigurationKey<"string">;
@@ -533,7 +542,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     intVal(ConfigurationKeys.Core.TransactionMessageAttempts, 3),
     intVal(ConfigurationKeys.Core.TransactionMessageRetryInterval, 60),
     boolVal(ConfigurationKeys.Core.UnlockConnectorOnEVSideDisconnect, true),
-    intVal(ConfigurationKeys.Core.WebSocketPingInterval, 0),
+    // #406: only a transport that can send a ping frame claims the key, so
+    // SOAP and the browser build answer ChangeConfiguration with NotSupported.
+    ...(cp.supportsWebSocketPing
+      ? [intVal(ConfigurationKeys.Core.WebSocketPingInterval, 0)]
+      : []),
 
     // ── LocalAuthListManagement profile ────────────────────────────────
     boolVal(

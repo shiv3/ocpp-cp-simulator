@@ -1,7 +1,12 @@
 import { Logger, LogType } from "../../shared/Logger";
 import { encodeCallFrame } from "./callFrame";
 import { redactSensitiveText } from "../../shared/redaction";
-import { openOcppWebSocket, probeUpgradeRefusal } from "./wsUrlWithBasic";
+import {
+  isBrowserRuntime,
+  openOcppWebSocket,
+  probeUpgradeRefusal,
+  type OcppSocket,
+} from "./wsUrlWithBasic";
 import type { SupervisionUrlPool } from "./SupervisionUrlPool";
 import type {
   OcppSecurityProfile,
@@ -105,13 +110,15 @@ class GenerationTokenImpl implements GenerationToken {
 }
 
 export class OCPPWebSocket {
-  private _ws: WebSocket | null = null;
+  private _ws: OcppSocket | null = null;
   private _url: string;
   private _basicAuth: { username: string; password: string } | null = null;
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
-  private _pingInterval: number | null = null;
+  private _pingInterval: ReturnType<typeof setInterval> | null = null;
+  /** #406: `WebSocketPingInterval` in seconds; 0 sends no client ping. */
+  private _pingIntervalSeconds: number = 0;
   private _reconnectAttempts: number = 0;
   private _baseReconnectDelay: number = 1000; // 1 second base delay
   private _maxReconnectDelay: number = 30000; // 30 seconds max delay
@@ -321,10 +328,7 @@ export class OCPPWebSocket {
       this._ws.close();
       this._ws = null;
     }
-    if (this._pingInterval) {
-      clearInterval(this._pingInterval);
-      this._pingInterval = null;
-    }
+    this.stopPingInterval();
   }
 
   /**
@@ -348,10 +352,7 @@ export class OCPPWebSocket {
       this._ws.close();
       this._ws = null;
     }
-    if (this._pingInterval) {
-      clearInterval(this._pingInterval);
-      this._pingInterval = null;
-    }
+    this.stopPingInterval();
   }
 
   /**
@@ -382,10 +383,7 @@ export class OCPPWebSocket {
       this._ws.close();
       this._ws = null;
     }
-    if (this._pingInterval) {
-      clearInterval(this._pingInterval);
-      this._pingInterval = null;
-    }
+    this.stopPingInterval();
   }
 
   /**
@@ -580,10 +578,7 @@ export class OCPPWebSocket {
       this._ws.close();
       this._ws = null;
     }
-    if (this._pingInterval) {
-      clearInterval(this._pingInterval);
-      this._pingInterval = null;
-    }
+    this.stopPingInterval();
   }
 
   /**
@@ -664,6 +659,26 @@ export class OCPPWebSocket {
     }
   }
 
+  /** Whether this runtime's socket can send a ping frame (#406): Bun's
+   *  client and `ws` can, the browser `WebSocket` API cannot. */
+  get supportsPing(): boolean {
+    return !isBrowserRuntime();
+  }
+
+  /**
+   * #406: apply `WebSocketPingInterval`. Takes effect at once on an open
+   * socket and on every later open; 0 stops the client-side ping.
+   */
+  public setPingInterval(seconds: number): void {
+    if (seconds === this._pingIntervalSeconds) return;
+    this._pingIntervalSeconds = seconds;
+    this._logger.info(
+      seconds > 0 ? `WebSocket ping every ${seconds}s` : "WebSocket ping off",
+      LogType.WEBSOCKET,
+    );
+    this.startPingInterval();
+  }
+
   public setMessageHandler(handler: MessageHandler): void {
     this._messageHandler = handler;
   }
@@ -683,7 +698,7 @@ export class OCPPWebSocket {
     // Call controller.onSocketOpen() to arm periodic timers
     this._controller.onSocketOpen();
 
-    // this.startPingInterval();
+    this.startPingInterval();
   }
 
   /**
@@ -842,13 +857,26 @@ export class OCPPWebSocket {
     }
   }
 
-  // private startPingInterval(): void {
-  //   this._pingInterval = setInterval(() => {
-  //     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-  //       this._ws.ping();
-  //     }
-  //   }, 30000); // Send a ping every 30 seconds
-  // }
+  /**
+   * #406: ping frames are WebSocket control frames, not OCPP messages, so
+   * they bypass the network-sim pipelines and are not logged one by one.
+   */
+  private startPingInterval(): void {
+    this.stopPingInterval();
+    const seconds = this._pingIntervalSeconds;
+    if (seconds <= 0 || !this.isConnected()) return;
+    this._pingInterval = setInterval(() => {
+      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+      try {
+        this._ws.ping();
+      } catch (error) {
+        this._logger.warn(
+          `WebSocket ping failed: ${String(error)}`,
+          LogType.WEBSOCKET,
+        );
+      }
+    }, seconds * 1000);
+  }
 
   private stopPingInterval(): void {
     if (this._pingInterval) {

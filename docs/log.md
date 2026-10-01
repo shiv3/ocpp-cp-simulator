@@ -1247,7 +1247,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-10-01] lint | boot_notification: a re-boot on the open socket (#395 review)
 
-- `concepts/control-plane.md`: dropped "a `disconnected` always comes between
+- [Control plane](concepts/control-plane.md): dropped "a `disconnected` always comes between
   two real boots" — a retry after `Rejected` and a CSMS `TriggerMessage` for
   `BootNotification` re-send the request on the same socket, so a second
   `boot_notification` without a `disconnected` is a real boot.

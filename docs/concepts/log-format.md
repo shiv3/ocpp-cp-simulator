@@ -11,7 +11,7 @@ related:
   - state-persistence.md
   - trace-format.md
   - ../entities/analyze.md
-updated: 2026-09-04
+updated: 2026-10-01
 ---
 
 # Log format
@@ -76,6 +76,22 @@ protocol event:
 Under Node the `ws` client reports the status itself and no probe is made.
 Browser local mode has neither: the DOM `WebSocket` hides the handshake, which
 is why this is a daemon-side line only.
+
+## "No handler for action result"
+
+On OCPP 1.6J, `[WARN] [OCPP] No handler for action result: <action>` means the
+CSMS answered a CALL the station sent and nothing on the station consumes that
+answer. Five CP-initiated notifications whose confirmation is empty by spec
+had no result handler before #407 and logged it on every normal
+acknowledgement: `FirmwareStatusNotification`, `DiagnosticsStatusNotification`
+(1.6 core), `SecurityEventNotification`, `LogStatusNotification`,
+`SignedFirmwareStatusNotification` (Security Whitepaper). They now log
+`<action> acknowledged` at DEBUG, so a reconnect-heavy station does not
+inflate the WARN rate. They are not the only empty 1.6 confirmations:
+`StatusNotification.conf` and `MeterValues.conf` are empty too, and already
+had their own result handlers, which log at DEBUG. `SignCertificate`, whose
+confirmation carries a `status`, still logs the warning. OCPP 2.x and the SOAP
+transports never log this line.
 
 ## Related RPC methods
 

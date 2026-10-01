@@ -1,8 +1,13 @@
 import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   DataTransferResponseV16,
+  DiagnosticsStatusNotificationResponseV16,
+  FirmwareStatusNotificationResponseV16,
   HeartbeatResponseV16,
+  LogStatusNotificationResponseV16,
   MeterValuesResponseV16,
+  SecurityEventNotificationResponseV16,
+  SignedFirmwareStatusNotificationResponseV16,
   StatusNotificationResponseV16,
 } from "../../../../../ocpp";
 import { LogType } from "../../../../shared/Logger";
@@ -52,5 +57,28 @@ export class DataTransferResultHandler implements CallResultHandler<DataTransfer
       `Data transfer sent successfully: ${JSON.stringify(payload)}`,
       LogType.OCPP,
     );
+  }
+}
+
+type EmptyConfirmationResponseV16 =
+  | DiagnosticsStatusNotificationResponseV16
+  | FirmwareStatusNotificationResponseV16
+  | SignedFirmwareStatusNotificationResponseV16
+  | SecurityEventNotificationResponseV16
+  | LogStatusNotificationResponseV16;
+
+/**
+ * For CP-initiated notifications whose `.conf` is empty by spec: the CSMS
+ * acknowledging it is the whole exchange, so there is nothing to handle
+ * and nothing to warn about (#407).
+ */
+export class EmptyConfirmationResultHandler implements CallResultHandler<EmptyConfirmationResponseV16> {
+  constructor(private readonly action: string) {}
+
+  handle(
+    _payload: EmptyConfirmationResponseV16,
+    context: HandlerContext,
+  ): void {
+    context.logger.debug(`${this.action} acknowledged`, LogType.OCPP);
   }
 }

@@ -1349,6 +1349,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): `cli-v*` releases are published with `make_latest: false`, and release-drafter uses `tag-prefix: "v"`. Cutting `cli-v0.4.1` after `v0.8.0` had taken the "Latest" badge and produced a desktop draft named `v0.4.1`.
 
+## [2026-10-01] ingest | empty 1.6J notification confirmations no longer WARN (#407)
+
+- [Log format](concepts/log-format.md#no-handler-for-action-result): what `No handler for action result` means, the five empty-confirmation notifications that had no result handler now acknowledged at DEBUG (`StatusNotification` and `MeterValues` are empty too and already had one), `SignCertificate` still warning.
+- [GitHub issues](sources/github-issues.md): #407 row.
+- Mechanism: `buildV16CallHandlerRegistry` registers one `EmptyConfirmationResultHandler` per action; `handleCallResult` is unchanged.
+
 ## [2026-10-01] ingest | `WebSocketPingInterval` sends WebSocket ping frames (#406)
 
 - [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-ping-websocketpinginterval): new section — `0` default sends no ping, changes re-arm at once and on every reconnect, negative values and values above `2147483` s `Rejected`, pings bypass network simulation, and SOAP / browser charge points do not have the key (`NotSupported`). SOAP limitations list links to it.

@@ -56,7 +56,7 @@ installed:
 
 ```bash
 # Prebuilt release tarball (recommended) — ships the web-console dist/
-bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-v0.3.1/ocpp-cp-simulator-0.3.1.tgz
+bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # From a local checkout (dev)
 bun link
@@ -96,15 +96,12 @@ to bump a version number, and it is kept a pre-release precisely so it can
 never itself become the repository's "Latest" release, which the desktop train
 owns.
 
-**Rollout status.** That release does not exist yet — the workflow creates it
-on the next `cli-v*` push — so this page and [`README.md`](../../README.md)
-advertise the pinned `cli-v0.3.1` URL, which resolves today. Documenting a URL
-before it exists would reproduce the very defect #321 is about: a quick-start
-command that 404s. The CLI release that first creates the pointer is the one
-that swaps the pinned URLs for it. A maintainer with release rights can close
-the gap sooner by cutting a `cli-v*` release; nothing in the repository can do
-it, and no tag or release was created by the change that introduced the
-pointer.
+**Rollout status.** The pointer exists since `cli-v0.4.0` (2026-10-01), the
+first CLI release cut after it was introduced, and this page and
+[`README.md`](../../README.md) advertise it. A pinned version is still
+installable from its own release asset
+(`releases/download/cli-vX.Y.Z/ocpp-cp-simulator-X.Y.Z.tgz`); the quick-start
+commands no longer go stale when a CLI release is cut.
 
 **The contract.** `cli-latest` always serves the highest published
 `cli-vX.Y.Z` release, and never a lower one, whatever order the pointer jobs

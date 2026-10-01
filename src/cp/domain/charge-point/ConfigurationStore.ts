@@ -213,6 +213,11 @@ export class ConfigurationStore {
     return this.getInteger("ConnectionTimeOut") ?? 60;
   }
 
+  /** Canonical key `WebSocketPingInterval` (seconds); default `0` = no ping. */
+  webSocketPingInterval(): number {
+    return this.getInteger("WebSocketPingInterval") ?? 0;
+  }
+
   /** Canonical key `CertificateStoreMaxLength`; default `10`. */
   certificateStoreMaxLength(): number {
     return this.getInteger("CertificateStoreMaxLength") ?? 10;
@@ -269,7 +274,12 @@ export class ConfigurationStore {
         } catch {
           continue;
         }
-        if (!isValueAssignable(entry.key, value)) continue;
+        if (
+          !isValueAssignable(entry.key, value) ||
+          !isConfigurationValueValid(entry.key, value)
+        ) {
+          continue;
+        }
         this.values.set(name, {
           key: entry.key,
           value,
@@ -361,10 +371,11 @@ function isConfigurationValueValid(
   key: ConfigurationKey,
   value: ConfigurationValueType,
 ): boolean {
-  if (key.name === "SecurityProfile") {
-    return typeof value === "number" && value >= 0 && value <= 3;
-  }
-  return true;
+  if (typeof value !== "number") return true;
+  return (
+    (key.min === undefined || value >= key.min) &&
+    (key.max === undefined || value <= key.max)
+  );
 }
 
 export function isWriteOnlyConfigurationKey(

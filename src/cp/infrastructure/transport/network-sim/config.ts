@@ -1,6 +1,7 @@
 import { deriveSeed32 } from "./SeededRng";
+import { MAX_TIMER_MS } from "../../../shared/timers";
 
-export const MAX_TIMER_MS = 2_147_483_647;
+export { MAX_TIMER_MS };
 
 export const NETWORK_SIM_LIMITS = {
   maxRulesPerLayer: 32,

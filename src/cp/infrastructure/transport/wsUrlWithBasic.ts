@@ -47,6 +47,13 @@ export function isBrowserRuntime(): boolean {
   );
 }
 
+/**
+ * The socket {@link openOcppWebSocket} returns. `ping()` sends a WebSocket
+ * ping frame (#406) — on Bun's native client and the `ws` package; the
+ * browser `WebSocket` API has no way to send one, so there it does nothing.
+ */
+export type OcppSocket = WebSocket & { ping(): void };
+
 export function buildOcppWebSocketUrl(params: {
   baseUrl: string;
   chargePointId: string;
@@ -169,6 +176,7 @@ interface NodeWsLike {
     listener: (request: unknown, response: NodeIncomingMessageLike) => void,
   ): void;
   send(data: string): void;
+  ping(): void;
   close(code?: number, reason?: string): void;
   terminate(): void;
   readonly readyState: number;
@@ -557,6 +565,11 @@ class BufferedErrorWebSocket {
     this.socket.send(data);
   }
 
+  /** Bun's client `WebSocket` sends a ping frame; the DOM one has no `ping`. */
+  ping(): void {
+    (this.socket as WebSocket & { ping?: () => void }).ping?.();
+  }
+
   close(code?: number, reason?: string): void {
     this.socket.close(code, reason);
   }
@@ -641,6 +654,10 @@ class DeferredNodeWebSocket {
 
   send(data: string): void {
     this.socket?.send(data);
+  }
+
+  ping(): void {
+    this.socket?.ping();
   }
 
   close(code?: number, reason?: string): void {
@@ -820,7 +837,7 @@ export function openOcppWebSocket(params: {
   onmessage?: ((event: MessageEvent) => void) | null;
   onerror?: ((event: Event) => void) | null;
   onclose?: ((event: CloseEvent) => void) | null;
-}): WebSocket {
+}): OcppSocket {
   const connectOptions = buildOcppWebSocketConnectOptions(params);
   params.onConnectOptions?.(connectOptions);
   const hasHeaders = Object.keys(connectOptions.headers).length > 0;
@@ -837,7 +854,7 @@ export function openOcppWebSocket(params: {
       connectOptions.headers,
       connectOptions.tls,
       handlers,
-    ) as unknown as WebSocket;
+    ) as unknown as OcppSocket;
   }
   if (!isBrowserRuntime() && (hasHeaders || connectOptions.tls)) {
     return new BufferedErrorWebSocket(
@@ -847,10 +864,10 @@ export function openOcppWebSocket(params: {
         ...(connectOptions.tls ? { tls: connectOptions.tls } : {}),
       }),
       handlers,
-    ) as unknown as WebSocket;
+    ) as unknown as OcppSocket;
   }
   return new BufferedErrorWebSocket(
     new WebSocket(connectOptions.url, [...connectOptions.protocols]),
     handlers,
-  ) as unknown as WebSocket;
+  ) as unknown as OcppSocket;
 }

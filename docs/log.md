@@ -1348,3 +1348,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-01] ingest | the two release trains keep out of each other's way
 
 - [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): `cli-v*` releases are published with `make_latest: false`, and release-drafter uses `tag-prefix: "v"`. Cutting `cli-v0.4.1` after `v0.8.0` had taken the "Latest" badge and produced a desktop draft named `v0.4.1`.
+
+## [2026-10-01] ingest | `WebSocketPingInterval` sends WebSocket ping frames (#406)
+
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-ping-websocketpinginterval): new section — `0` default sends no ping, changes re-arm at once and on every reconnect, negative values and values above `2147483` s `Rejected`, pings bypass network simulation, and SOAP / browser charge points do not have the key (`NotSupported`). SOAP limitations list links to it.
+- [GitHub issues](sources/github-issues.md): #406.
+- Mechanism: `ChargePoint` forwards the key to `OCPPWebSocket.setPingInterval`; `defaultConfiguration` only declares the key when the transport `supportsPing`. Integer configuration keys gain optional `min` / `max` bounds (`SecurityProfile` 0–3 moved there), checked on `ChangeConfiguration` and on loading persisted overrides — an out-of-range persisted value is now skipped like an unparsable one.

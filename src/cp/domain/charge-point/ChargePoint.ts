@@ -452,6 +452,10 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    // A value persisted with --state-db is in force from the first open.
+    this._webSocket?.setPingInterval(
+      this._configuration.webSocketPingInterval(),
+    );
 
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
     // We don't actually transition status here (no WebSocket yet); the
@@ -534,9 +538,14 @@ export class ChargePoint {
             LogType.CONFIGURATION,
           );
           break;
-        // Other keys (ClockAlignedDataInterval / WebSocketPingInterval etc.)
-        // are wired in subsequent phases as the dependent subsystems are
-        // extended.
+        case "WebSocketPingInterval":
+          // #406: re-arms the ping timer at once on an open socket.
+          if (typeof value === "number") {
+            this._webSocket?.setPingInterval(value);
+          }
+          break;
+        // Other keys (ClockAlignedDataInterval etc.) are wired in subsequent
+        // phases as the dependent subsystems are extended.
         default:
           break;
       }
@@ -563,6 +572,12 @@ export class ChargePoint {
 
   get id(): string {
     return this._id;
+  }
+
+  /** #406: whether the transport can send WebSocket ping frames. False for
+   *  SOAP (no socket) and the browser build (no `ping()` in the DOM API). */
+  get supportsWebSocketPing(): boolean {
+    return this._webSocket?.supportsPing ?? false;
   }
 
   /** Standard OCPP Configuration Keys store. */

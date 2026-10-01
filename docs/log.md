@@ -1339,3 +1339,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-01] ingest | cli-latest install URL after cli-v0.4.0
 
 - [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest), [README](../README.md): the quick-start install commands point at the rolling `cli-latest` tarball now that `cli-v0.4.0` created it; the rollout-status paragraph records the date. Pinned installs use a release's own asset.
+
+## [2026-10-01] ingest | npm package `ocpp-cp-simulator`
+
+- [CLI](entities/cli.md#installing-as-the-ocpp-cp-sim-command): how the package reaches the npm registry and why the install command is not advertised until the first publish has happened (#321). Bun stays the run time.
+- Mechanism: `package.json` drops `private` and gains the registry metadata (description, license, repository, keywords, `publishConfig.access`); `cli-release.yml` gains a `publish-npm` job that downloads the tag's own release asset and publishes it with npm trusted publishing (OIDC, provenance), skipped unless the repository variable `NPM_PUBLISH` is `true`, idempotent on re-runs, and `next`-tagged for SemVer prereleases.

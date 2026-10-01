@@ -196,7 +196,8 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
     OCPPAction.DataTransfer,
     new DataTransferResultHandler(),
   );
-  // Notifications whose `.conf` is empty by spec (#407).
+  // The other CP-initiated actions whose `.conf` is empty by spec;
+  // StatusNotification and MeterValues have their own handlers (#407).
   for (const action of [
     OCPPAction.FirmwareStatusNotification,
     OCPPAction.DiagnosticsStatusNotification,

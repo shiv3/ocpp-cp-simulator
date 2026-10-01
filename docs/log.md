@@ -1351,6 +1351,6 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-10-01] ingest | empty 1.6J notification confirmations no longer WARN (#407)
 
-- [Log format](concepts/log-format.md#no-handler-for-action-result): what `No handler for action result` means, the five empty-confirmation notifications now acknowledged at DEBUG, `SignCertificate` still warning.
+- [Log format](concepts/log-format.md#no-handler-for-action-result): what `No handler for action result` means, the five empty-confirmation notifications that had no result handler now acknowledged at DEBUG (`StatusNotification` and `MeterValues` are empty too and already had one), `SignCertificate` still warning.
 - [GitHub issues](sources/github-issues.md): #407 row.
 - Mechanism: `buildV16CallHandlerRegistry` registers one `EmptyConfirmationResultHandler` per action; `handleCallResult` is unchanged.

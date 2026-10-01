@@ -1348,3 +1348,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-01] ingest | the two release trains keep out of each other's way
 
 - [CLI](entities/cli.md#why-cli-latest-and-not-releaseslatest): `cli-v*` releases are published with `make_latest: false`, and release-drafter uses `tag-prefix: "v"`. Cutting `cli-v0.4.1` after `v0.8.0` had taken the "Latest" badge and produced a desktop draft named `v0.4.1`.
+
+## [2026-10-01] ingest | empty 1.6J notification confirmations no longer WARN (#407)
+
+- [Log format](concepts/log-format.md#no-handler-for-action-result): what `No handler for action result` means, the five empty-confirmation notifications now acknowledged at DEBUG, `SignCertificate` still warning.
+- [GitHub issues](sources/github-issues.md): #407 row.
+- Mechanism: `buildV16CallHandlerRegistry` registers one `EmptyConfirmationResultHandler` per action; `handleCallResult` is unchanged.

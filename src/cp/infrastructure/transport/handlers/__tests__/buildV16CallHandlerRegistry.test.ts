@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { buildV16CallHandlerRegistry, MessageHandlerRegistry } from "../index";
+import { describe, expect, it, vi } from "vitest";
+import {
+  buildV16CallHandlerRegistry,
+  type HandlerContext,
+  MessageHandlerRegistry,
+} from "../index";
 import { OCPPAction } from "../../../../domain/types/OcppTypes";
+import { LogType } from "../../../../shared/Logger";
 
 describe("buildV16CallHandlerRegistry", () => {
   it("returns a MessageHandlerRegistry instance", () => {
@@ -121,6 +126,30 @@ describe("buildV16CallHandlerRegistry", () => {
       ).toBeDefined();
     });
 
+    it.each([
+      OCPPAction.FirmwareStatusNotification,
+      OCPPAction.DiagnosticsStatusNotification,
+      OCPPAction.SecurityEventNotification,
+      OCPPAction.LogStatusNotification,
+      OCPPAction.SignedFirmwareStatusNotification,
+    ])("acknowledges %s's empty confirmation at DEBUG (#407)", (action) => {
+      const handler =
+        buildV16CallHandlerRegistry().getCallResultHandler(action);
+      expect(handler).toBeDefined();
+
+      const logger = { debug: vi.fn(), warn: vi.fn() };
+      handler!.handle({}, {
+        chargePoint: {},
+        logger,
+      } as unknown as HandlerContext);
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        `${action} acknowledged`,
+        LogType.OCPP,
+      );
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
     it("does NOT register Authorize CALLRESULT handler (per-request, needs the request's idTag — #181)", () => {
       const registry = buildV16CallHandlerRegistry();
       // Mirrors StartTransaction/StopTransaction/MeterValues below:
@@ -139,6 +168,10 @@ describe("buildV16CallHandlerRegistry", () => {
         registry.getCallResultHandler(OCPPAction.RemoteStartTransaction),
       ).toBeUndefined();
       expect(registry.getCallResultHandler(OCPPAction.Reset)).toBeUndefined();
+      // SignCertificate.conf carries a status: no blanket acknowledgement.
+      expect(
+        registry.getCallResultHandler(OCPPAction.SignCertificate),
+      ).toBeUndefined();
     });
   });
 

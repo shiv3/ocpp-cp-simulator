@@ -54,3 +54,18 @@ export class DataTransferResultHandler implements CallResultHandler<DataTransfer
     );
   }
 }
+
+/**
+ * For CP-initiated notifications whose `.conf` is empty by spec: the CSMS
+ * acknowledging it is the whole exchange, so there is nothing to handle
+ * and nothing to warn about (#407).
+ */
+export class EmptyConfirmationResultHandler implements CallResultHandler<
+  Record<string, never>
+> {
+  constructor(private readonly action: string) {}
+
+  handle(_payload: Record<string, never>, context: HandlerContext): void {
+    context.logger.debug(`${this.action} acknowledged`, LogType.OCPP);
+  }
+}

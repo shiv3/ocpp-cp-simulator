@@ -30,6 +30,7 @@ import {
   HeartbeatResultHandler,
   StatusNotificationResultHandler,
   DataTransferResultHandler,
+  EmptyConfirmationResultHandler,
 } from "./index";
 
 /**
@@ -195,6 +196,21 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
     OCPPAction.DataTransfer,
     new DataTransferResultHandler(),
   );
+  // `.conf` is empty by spec: acknowledging it is the whole exchange, and
+  // the "No handler for action result" warning stays for actions that do
+  // lack one (#407).
+  for (const action of [
+    OCPPAction.FirmwareStatusNotification,
+    OCPPAction.DiagnosticsStatusNotification,
+    OCPPAction.SecurityEventNotification,
+    OCPPAction.LogStatusNotification,
+    OCPPAction.SignedFirmwareStatusNotification,
+  ]) {
+    registry.registerCallResultHandler(
+      action,
+      new EmptyConfirmationResultHandler(action),
+    );
+  }
 
   return registry;
 }

@@ -12,7 +12,11 @@ import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
 import { Connector } from "../connector/Connector";
-import type { ChargePointEvents } from "./ChargePointEvents";
+import type {
+  BootNotificationResult,
+  ChargePointEvents,
+  RegistrationStatus,
+} from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
@@ -1345,13 +1349,62 @@ export class ChargePoint {
     }, retryAfterSeconds * 1000);
   }
 
-  onBootNotificationAccepted(
-    _currentTime: string | undefined,
-    intervalSeconds: number,
-  ): void {
-    const interval = intervalSeconds > 0 ? intervalSeconds : 0;
-    this._logger.info("Boot notification accepted", LogType.OCPP);
-    this.markBootAccepted();
+  /**
+   * The single entry point for a processed BootNotification.conf, whatever
+   * the OCPP version or transport. A status outside the three the spec
+   * defines is treated as Rejected. The boot gate takes the new status first,
+   * then `bootNotificationResult` is emitted, then the answer's own effects
+   * run — so the event precedes every status change it causes (#395).
+   */
+  onBootNotificationResult(result: BootNotificationResult): void {
+    const status: RegistrationStatus =
+      result.status === "Accepted" || result.status === "Pending"
+        ? result.status
+        : "Rejected";
+    const interval =
+      typeof result.interval === "number" && result.interval > 0
+        ? result.interval
+        : 0;
+    switch (status) {
+      case "Accepted":
+        this._logger.info("Boot notification accepted", LogType.OCPP);
+        this.markBootAccepted();
+        break;
+      case "Pending":
+        this._logger.warn(
+          `BootNotification Pending — only CSMS-initiated traffic allowed${
+            interval > 0 ? `, retry interval=${interval}s` : ""
+          }`,
+          LogType.OCPP,
+        );
+        // Spec: stay quiet but keep the WebSocket open. No retry timer here;
+        // CSMS can move us to Accepted/Rejected via subsequent flow.
+        this.markBootPending();
+        break;
+      case "Rejected": {
+        const wait = interval > 0 ? interval : 60;
+        this._logger.error(
+          `BootNotification Rejected — silent for ${wait}s before retry`,
+          LogType.OCPP,
+        );
+        this.markBootRejected(wait);
+        break;
+      }
+    }
+    // The CSMS's interval, not the 60s retry a Rejected with 0 falls back to.
+    this._events.emit("bootNotificationResult", {
+      status,
+      interval,
+      currentTime: result.currentTime,
+    });
+    if (status === "Accepted") {
+      this.applyBootAccepted(interval);
+    } else {
+      this.stopHeartbeat();
+    }
+  }
+
+  private applyBootAccepted(interval: number): void {
     // Send connector 0 (charge point level) status first
     this.updateConnectorStatus(0, OCPPStatus.Available);
     this.connectors.forEach((connector) => {
@@ -1382,30 +1435,6 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
     }
-  }
-
-  onBootNotificationPending(intervalSeconds: number): void {
-    const interval = intervalSeconds > 0 ? intervalSeconds : 0;
-    this._logger.warn(
-      `BootNotification Pending — only CSMS-initiated traffic allowed${
-        interval > 0 ? `, retry interval=${interval}s` : ""
-      }`,
-      LogType.OCPP,
-    );
-    this.markBootPending();
-    this.stopHeartbeat();
-    // Spec: stay quiet but keep the WebSocket open. No retry timer here;
-    // CSMS can move us to Accepted/Rejected via subsequent flow.
-  }
-
-  onBootNotificationRejected(intervalSeconds: number): void {
-    const wait = intervalSeconds > 0 ? intervalSeconds : 60;
-    this._logger.error(
-      `BootNotification Rejected — silent for ${wait}s before retry`,
-      LogType.OCPP,
-    );
-    this.markBootRejected(wait);
-    this.stopHeartbeat();
   }
 
   boot(): void {

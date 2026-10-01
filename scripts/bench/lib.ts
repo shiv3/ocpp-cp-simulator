@@ -2195,7 +2195,7 @@ export function createFailureHint(reason: string): string {
  * boot, for as long as the run lasts.
  *
  * Why this exists. `cp.start_heartbeat` sets `HeartbeatService._intervalSeconds`
- * and nothing pins it there: `ChargePoint.onBootNotificationAccepted` calls
+ * and nothing pins it there: `ChargePoint.onBootNotificationResult` calls
  * `startHeartbeat(BootNotification.conf.interval)` on every accepted boot, so
  * the CSMS's value replaces the flag's the moment a charge point reconnects.
  * Arming the heartbeat once per cohort was therefore only true until the first
@@ -2220,19 +2220,18 @@ export function createFailureHint(reason: string): string {
  *    rather than tracked here, so it is the same set cleanup deletes: under
  *    `--allow-existing` someone else's charge point must not have its heartbeat
  *    rewritten by this script.
- * 3. **One RPC per boot, not one per event.** `onBootNotificationAccepted`
- *    emits `statusChange` *twice* for one boot, and issuing per event doubled
- *    the control-plane traffic a reconnect wave costs — load the benchmark
- *    offers without reporting, arriving at the N it exists to characterise.
- *    Events are therefore gathered for {@link BOOT_COALESCE_MS} and flushed to
- *    one RPC per charge point. This is strictly a collapse of boots that are
- *    already covered, never a dropped one: see that constant. The counters
+ * 3. **At most one RPC per boot.** Every RPC is control-plane load the
+ *    benchmark offers without reporting, arriving at the N it exists to
+ *    characterise. Observed boots are gathered for {@link BOOT_COALESCE_MS}
+ *    and flushed to one RPC per charge point, with one timer for a whole
+ *    reconnect wave. This is strictly a collapse of boots that are already
+ *    covered, never a dropped one: see that constant. The counters
  *    {@link bootsObserved} and {@link rpcsIssued} report the residual, so the
  *    perturbation is stated rather than inferred.
  *
  * The ordering against the CSMS value needs no bookkeeping and cannot be
- * arranged the wrong way round: `onBootNotificationAccepted` sets the status
- * (emitting the event) and then calls `startHeartbeat(csmsInterval)` in the
+ * arranged the wrong way round: `onBootNotificationResult` emits the
+ * `boot_notification` event and calls `startHeartbeat(csmsInterval)` in the
  * same synchronous frame, and this reapplication is issued from a different
  * process, so it can only ever land afterwards.
  */
@@ -2240,25 +2239,21 @@ export function createFailureHint(reason: string): string {
  * How long observed accepted boots are gathered before one `start_heartbeat`
  * is issued per charge point.
  *
- * This exists because **one** accepted boot emits `statusChange` **twice**:
- * `onBootNotificationAccepted` calls `updateConnectorStatus(0, Available)`
- * (which emits) and then assigns `this.status = Available` (whose setter emits
- * again), both before `startHeartbeat(csmsInterval)` and both in the same
- * synchronous frame. Issuing an RPC per event meant one boot cost two RPCs —
- * a reconnect wave at the top of a sweep is then twice the control-plane
- * traffic it needs to be, arriving at the exact N the benchmark is trying to
- * characterise. That is the fixed defect's own shape with the sign flipped, so
- * it is collapsed rather than documented.
+ * `boot_notification` fires once per boot, so a single boot has nothing to
+ * collapse; the window keeps any repeated event for one charge point from
+ * becoming repeated RPCs, at the cost of one timer per reconnect wave.
  *
  * **Any window is correct, which is why one this coarse is safe.** Every
- * observed event has already run `startHeartbeat(csmsInterval)` on the daemon
- * before it was emitted, so an RPC issued strictly *after* the last event of a
- * window overwrites every CSMS interval that window saw. Collapsing therefore
+ * observed event is emitted in the same synchronous frame as the
+ * `startHeartbeat(csmsInterval)` it announces, so that call has run on the
+ * daemon before any RPC this process sends can be handled, and an RPC issued
+ * strictly *after* the last event of a window overwrites every CSMS interval
+ * that window saw. Collapsing therefore
  * cannot lose a boot; it can only merge boots that are already covered.
  *
  * The value is chosen to sit between two numbers that are four orders of
- * magnitude apart: the two emissions of one boot are microseconds apart, and
- * the fastest a charge point can boot *again* is a socket close plus
+ * magnitude apart: events emitted in one synchronous frame are microseconds
+ * apart, and the fastest a charge point can boot *again* is a socket close plus
  * `OCPPWebSocket`'s 1s first reconnect backoff plus a connect and a
  * BootNotification round trip. Anything from a microsecond to several hundred
  * milliseconds separates them equally well; 50ms is far enough above
@@ -2355,7 +2350,7 @@ export class HeartbeatOverride {
     this.pending.add(work);
   }
 
-  /** Accepted-boot events observed for this run's charge points — two per
+  /** Accepted-boot events observed for this run's charge points — one per
    *  accepted boot, before coalescing. Reported beside {@link rpcsIssued} so a
    *  result file states the perturbation this mechanism cost rather than
    *  leaving it to be inferred. */

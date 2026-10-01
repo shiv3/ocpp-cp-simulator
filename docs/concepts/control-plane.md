@@ -600,6 +600,25 @@ CP event envelope (the `evt` payloads are the CLI [event list](../entities/cli.m
 }
 ```
 
+Commissioning state for an orchestrator — `Connecting → Booting → Online` —
+reads two events and nothing else: `connected` means the WebSocket opened (the
+station is booting), and `boot_notification` carries the CSMS's answer to
+`BootNotification.req` once it has been processed (`status`: `Accepted`,
+`Pending` or `Rejected`, plus `interval` and `currentTime`). It is emitted once
+per `BootNotification.conf` — first boot, reconnect, retry after `Rejected` —
+after the `connected` of that socket and before the `connector_status` /
+`status_change` events the answer causes. One exception: a `connect` on a
+socket that is already open sends no new `BootNotification.req`, but still
+emits `connected` so a caller waiting on it unblocks. That `connected` is not a
+new boot, and no `boot_notification` follows it: an orchestrator must keep the
+state the last `boot_notification` gave, not fall back to Booting. The
+converse also holds: a second `boot_notification` on the same socket, with no
+`disconnected` / `connected` between, is a real boot — a retry after
+`Rejected` and a CSMS `TriggerMessage` for `BootNotification` both re-send
+`BootNotification.req` on the open socket. Do not infer registration from
+`status_change`: it fires twice per accepted boot and on changes that are not
+boots at all (#395).
+
 Registry event envelope:
 
 ```json

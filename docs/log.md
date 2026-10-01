@@ -1291,3 +1291,19 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Code: `useScenarioRunHistory` reports `isLoading` from the render a query
   change lands in, so the Run History page's offset clamp never reads the
   previous query's `total`.
+
+## [2026-09-30] ingest | `boot_notification` control-plane event (#395)
+
+- [CLI](entities/cli.md#events): `boot_notification` event (`status` `Accepted` / `Pending` / `Rejected`, `interval`, `currentTime`), emitted once per processed `BootNotification.conf`, after `connected` and before the status changes the answer causes. The `connected` row now says it is transport-only.
+- [Control plane](concepts/control-plane.md#event-push-and-rooms): how an orchestrator reads `Connecting → Booting → Online` from `connected` and `boot_notification`, and why `status_change` is not a registration signal. Exception recorded: a `connect` on an already-open socket re-emits `connected` with no new boot, so it must not reset the state to Booting.
+- [Source: bench README](sources/bench-readme.md), [Daemon](entities/daemon.md): the fleet benchmark's heartbeat override now hooks `boot_notification` `Accepted` instead of `status_change` → `Available`; one event and one RPC per accepted boot (smoke sweep `bootsObserved: 2, rpcsIssued: 2`, was `4` / `2`).
+- [GitHub issues](sources/github-issues.md): #395 row.
+- Mechanism: every transport (1.6J, 1.6S / 1.5 / 1.2 SOAP, 2.0.1 / 2.1) ends in the single `ChargePoint.onBootNotificationResult` (which replaces `onBootNotificationAccepted` / `Pending` / `Rejected`, so the transport handlers are pass-throughs); it emits the domain event `bootNotificationResult` after the boot gate took the new status; `CLIChargePointService` forwards it as `boot_notification`, and JSON Lines and Socket.IO pass it through unchanged. `interval` is the CSMS's (non-positive → `0`), not the 60 s retry a `Rejected` with interval `0` falls back to.
+- Tests: `service.bootNotificationEvent.bun.test.ts` (mock CSMS, the three answers, ordering, `Rejected` with interval `0`, re-`connect` on an open socket, OCPP 2.0.1), `bootNotificationEvent.bun.test.ts` (daemon Socket.IO envelope), `output.formatEvent.test.ts`, `fleetBench.smoke.bun.test.ts` expectations.
+
+## [2026-10-01] lint | boot_notification: a re-boot on the open socket (#395 review)
+
+- [Control plane](concepts/control-plane.md): dropped "a `disconnected` always comes between
+  two real boots" — a retry after `Rejected` and a CSMS `TriggerMessage` for
+  `BootNotification` re-send the request on the same socket, so a second
+  `boot_notification` without a `disconnected` is a real boot.

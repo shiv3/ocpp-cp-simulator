@@ -12,7 +12,7 @@ related:
   - ../entities/docker-image.md
   - state-persistence.md
   - control-plane.md
-updated: 2026-09-30
+updated: 2026-10-02
 ---
 
 # Local vs Remote mode (browser)
@@ -51,11 +51,20 @@ overridden.
   console's Expert tab calls the in-tab charge point in Local mode and
   `send_ocpp_call` on the daemon in Remote mode, which is also the method the
   MCP tool and JSON-Lines mode use.
+- Scenarios run in both modes without depending on which page is open. In
+  Local mode each charge point's scenario runtime (`LocalScenarioRuntime`,
+  owned by the browser's data layer) loads the connector's saved scenarios,
+  fires status triggers and the connect / status auto-start, and reports runs
+  as `scenario-started` / `-node-execute` / `-completed` / `-error` /
+  `-wait-changed` events — the same events the daemon pushes, without a
+  `runId`. Before #411 that runtime lived in the classic UI's connector card:
+  with only the redesigned console open, a Local-mode scenario could not run.
+  Auto-start follows the daemon's rules
+  ([Scenario format → start notes](scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)).
 - The scenario wait controls (extend / retry / continue, #240) work in both
   modes and refuse an idle scenario the same way. The run report that records
-  them (`interventions`) and the `scenario_wait_changed` event that refreshes
-  other consoles exist only on the daemon — Local mode has no run reports and
-  no scenario events.
+  them (`interventions`) exists only on the daemon — Local mode has no run
+  reports.
 - The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
   run console's recorded history and the `/v3/scenarios/runs` page need Remote
   mode. In Local mode the run console lists only the runs started or attached

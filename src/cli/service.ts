@@ -72,9 +72,11 @@ import type {
   ScenarioExecutionState,
   ScenarioMode,
   ScenarioWaitIntervention,
-  StartNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
-import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
+import {
+  isAutoStartKeyOf,
+  matchAutoStart,
+} from "../cp/application/scenario/autoStart";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "../cp/domain/persistence/ScenarioRunRepository";
@@ -2683,15 +2685,12 @@ export class CLIChargePointService {
     this._unsubscribes.push(
       this._chargePoint.events.on("statusChange", ({ status }) => {
         this.emit({ event: "status_change", data: { status } });
-        // Mirror the browser's "auto-start on connect" gate from
-        // src/components/Connector.tsx: when the CP reaches Available
-        // (post-BootNotification.Accepted) fire any loaded manual-trigger
-        // scenarios whose Start node opts into `triggerOn: "connect"`.
-        // Without this, Remote-mode operators have to hit the "Start"
-        // button by hand for every scenario — the Connector.tsx auto-start
-        // opts out in Remote mode on the assumption the server drives
-        // lifecycles, and historically this side only handled the
-        // statusChange-trigger case.
+        // "Auto-start on connect", the daemon side of the browser's
+        // LocalScenarioRuntime (same rules, matchAutoStart): when the CP
+        // reaches Available (post-BootNotification.Accepted) fire any loaded
+        // manual-trigger scenarios whose Start node opts into
+        // `triggerOn: "connect"`. In Remote mode the browser runs no
+        // scenarios, so this is the only place that does it.
         if ((status as OCPPStatus) === OCPPStatus.Available) {
           this.handleConnectAutoStart();
           // Connector statusChange events fired during BootNotification
@@ -3120,8 +3119,8 @@ export class CLIChargePointService {
       // Mirrors ScenarioManager.handleStatusChange used by the browser,
       // inlined here to avoid duplicating the (cp, executors) state the
       // service already owns. Also drives the manual-trigger +
-      // StartNode.triggerOn === "status" case (mirror of Connector.tsx),
-      // since the browser opts out of that path in Remote mode.
+      // StartNode.triggerOn === "status" case (as LocalScenarioRuntime does
+      // in the browser's Local mode).
       this._connectorUnsubscribes.push(
         connector.events.on("statusChange", ({ status, previousStatus }) => {
           this.handleStatusChangeAutoTrigger(
@@ -3138,8 +3137,8 @@ export class CLIChargePointService {
   }
 
   /**
-   * Mirror of the auto-start useEffect in src/components/Connector.tsx for
-   * `triggerOn: "connect"` (the default). Called when the CP reaches
+   * Auto-start for `triggerOn: "connect"` (the default), as
+   * LocalScenarioRuntime does in the browser's Local mode. Called when the CP reaches
    * Available; runs the first matching loaded scenario per connector.
    */
   private handleConnectAutoStart(): void {
@@ -3165,8 +3164,8 @@ export class CLIChargePointService {
    * matches `mode` (and `targetStatus` for the "status" case), and runs it
    * via runScenario(). Dedup uses Connector.lastAutoStartedScenarioKey so a
    * status oscillation (or a reconnect that re-fires Available) doesn't
-   * restart an already-fired scenario. Matches the browser-side gate
-   * exactly.
+   * restart an already-fired scenario. The browser runtime
+   * (LocalScenarioRuntime) applies the same rules through matchAutoStart.
    */
   private tryAutoStartForConnector(
     connectorId: number,
@@ -3181,7 +3180,9 @@ export class CLIChargePointService {
       if (entry.connectorId !== connectorId) continue;
       const def = entry.definition;
       if (def.enabled === false) {
-        connector.lastAutoStartedScenarioKey = null;
+        if (isAutoStartKeyOf(connector.lastAutoStartedScenarioKey, def.id)) {
+          connector.lastAutoStartedScenarioKey = null;
+        }
         continue;
       }
       // Defensive: a misshapen scenario (wrong JSON shape, half-parsed
@@ -3193,27 +3194,11 @@ export class CLIChargePointService {
         );
         continue;
       }
-      // Status-trigger scenarios go through handleStatusChangeAutoTrigger;
-      // the browser equally skips them here so they don't double-fire.
-      const hasStatusTriggerNode = def.nodes.some(
-        (n) => n.type === ScenarioNodeType.STATUS_TRIGGER,
-      );
-      if (hasStatusTriggerNode) continue;
-      // Browser checks `trigger?.type !== "manual"` — i.e. require an
-      // explicit "manual" or no trigger at all. `statusChange`-typed
-      // triggers are owned by handleStatusChangeAutoTrigger.
-      if (def.trigger && def.trigger.type !== "manual") continue;
-
-      const startNode = def.nodes.find(
-        (n) => n.type === ScenarioNodeType.START,
-      );
-      const startData = startNode?.data as StartNodeData | undefined;
-      const triggerOn = startData?.triggerOn ?? "connect";
-      if (triggerOn !== mode) continue;
-      if (mode === "status") {
-        const target = startData?.targetStatus;
-        if (!target || connectorStatus !== target) continue;
-      }
+      // The eligibility rules (manual trigger, no StatusTrigger node,
+      // Start node's triggerOn / targetStatus) are shared with the browser
+      // runtime (LocalScenarioRuntime) so both fire the same scenarios.
+      const match = matchAutoStart(def, mode, connectorStatus);
+      if (!match) continue;
 
       // Skip if anything is already running for this connector — matches
       // ScenarioManager.handleStatusChange's one-scenario-at-a-time rule.
@@ -3227,18 +3212,12 @@ export class CLIChargePointService {
       }
       if (active) return;
 
-      // Dedup key encodes the trigger config + a structural hash of the
-      // scenario. Matches Connector.tsx so re-emitting Available (e.g.
-      // after a CSMS reconnect) doesn't restart the scenario.
-      const structuralKey = JSON.stringify({
-        n: def.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
-        e: def.edges.map((e) => ({ id: e.id, s: e.source, t: e.target })),
-      });
-      const autoStartKey = `${def.id}:${structuralKey}:${triggerOn}:${startData?.targetStatus ?? ""}`;
-      if (connector.lastAutoStartedScenarioKey === autoStartKey) return;
+      // Dedup: re-emitting Available (e.g. after a CSMS reconnect) doesn't
+      // restart an unchanged scenario.
+      if (connector.lastAutoStartedScenarioKey === match.key) return;
 
       try {
-        connector.lastAutoStartedScenarioKey = autoStartKey;
+        connector.lastAutoStartedScenarioKey = match.key;
         this.runScenario(connectorId, scenarioId);
       } catch (err) {
         connector.lastAutoStartedScenarioKey = null;

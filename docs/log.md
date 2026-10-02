@@ -1451,3 +1451,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#scenario-editor-steps-and-graph): the editor's description field and collapsed **Scenario EV Settings**. The `/v2` list of classic-only features now holds only the connector Faulted error code (#434).
 - [GitHub issues](sources/github-issues.md): #424 row.
 - Mechanism: the classic graph editor's EV settings form moves into `ScenarioEvSettingsFields` (its controls gain `aria-label`s) and `compactScenarioEvSettings` drops the empty fields; the classic settings dialog and `ScenarioEditPage` both use them.
+
+## [2026-10-02] ingest | the error code of a connector's Faulted status in the web console (#434)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's **Faulted with** error code, sent with **Set status → Faulted**. The `/v2` list of classic-only features is now empty: the classic UI stays only until #426 retires it.
+- [GitHub issues](sources/github-issues.md): #434 row, no longer open.
+- Mechanism: `ConnectorCard` passes `{ errorCode }` to `sendStatusNotification` for Faulted only, from the classic side panel's list (`ALL_CHARGE_POINT_ERROR_CODES` without `NoError`).

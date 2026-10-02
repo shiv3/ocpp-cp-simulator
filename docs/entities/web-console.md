@@ -59,7 +59,7 @@ transition, from the same origin:
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): deleting a charge point or a connector, bulk
+  move to the console (#411): removing a connector, bulk
   actions on every charge point, setting the meter value or SoC and sending
   a MeterValues by hand, a per-connector auto meter-value curve, a
   StatusNotification for connector 0, downloading the logs, the
@@ -82,6 +82,20 @@ transition, from the same origin:
   over: they had not loaded since the v1 code moved under `src/v1` (the
   hash key became `config-v1`). To share a configuration, use the JSON
   export / import in **Settings**.
+
+### Charge point page
+
+The charge point page (`/cp/:id`) has a header with **Scenarios**, **Edit
+config**, **Connect** / **Disconnect** and **Delete**, the connector cards, the
+**Active scenarios** panel, and tabs (transactions, message log, session
+analysis, configuration, state diagram, expert calls).
+
+**Delete** (#415) asks for a confirmation, removes the charge point and goes
+back to the dashboard. In Remote mode it calls `cp.delete`, which also deletes
+the charge point's persisted rows ([Control plane](../concepts/control-plane.md));
+in Local mode it drops the charge point from the saved configuration. In Local
+mode it refuses while that configuration has not loaded, instead of saving one
+without any charge point. On a failure the page stays open and says why.
 
 ### Scenario editor: steps and graph
 

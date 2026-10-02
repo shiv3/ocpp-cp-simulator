@@ -247,26 +247,36 @@ describe("AppRoutes", () => {
     });
   });
 
-  describe("classic UI during the transition", () => {
-    it.each(["/v2", "/v2/settings"])(
-      "%s still renders the classic UI",
-      async (path) => {
-        const app = await renderApp(path);
+  describe("/v2 bookmarks (the classic UI, retired by #426) redirect to the console", () => {
+    it.each([
+      ["/v2", "/", ""],
+      ["/v2/", "/", ""],
+      ["/v2/settings", "/settings", ""],
+      ["/v2/settings", "/settings", "?tab=json"],
+    ])("%s → %s (query: %s)", async (from, to, search) => {
+      const app = await renderApp(`${from}${search}#frag`);
 
-        expect(app.location().pathname).toBe(path);
-        const link = app.container.querySelector('a[href="/"]');
-        expect(link?.textContent).toContain("Web console");
-      },
-    );
+      expect(app.location()).toEqual({
+        pathname: to,
+        search,
+        hash: "#frag",
+      });
+      expect(
+        app.container.querySelector('a[href="/"]')?.textContent ?? "",
+      ).not.toContain("Web console");
+    });
 
-    it("the console links to the classic UI under /v2, not the root", async () => {
-      const app = await renderApp("/");
+    it("lands on the console page, not the classic UI", async () => {
+      const app = await renderApp("/v2");
 
-      const classic = Array.from(app.container.querySelectorAll("a")).find(
-        (a) => a.textContent?.includes("Classic UI"),
-      );
-      expect(classic?.getAttribute("href")).toBe("/v2");
-      expect(app.container.textContent).not.toContain("classic design");
+      expect(heading(app.container)).toBe("Charge Points");
+    });
+
+    it("the console no longer links to a classic UI", async () => {
+      const app = await renderApp("/settings");
+
+      expect(app.container.querySelector('a[href^="/v2"]')).toBeNull();
+      expect(app.container.textContent).not.toMatch(/classic UI/i);
     });
   });
 

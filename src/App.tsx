@@ -7,43 +7,21 @@ import {
   Routes,
   useLocation,
 } from "react-router-dom";
-import Navbar from "./components/Navbar.tsx";
-import Footer from "./components/Footer.tsx";
-import Settings from "./components/Settings.tsx";
-import TopPage from "./components/TopPage.tsx";
 import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
 import ConsoleApp from "./console/ConsoleApp.tsx";
 
-// The classic UI, mounted under /v2. Exported (not just used locally) so dom
-// tests can mount the real V2 route nesting under their own MemoryRouter —
-// see src/console/v2-settings-nav.dom.test.tsx, which proves Settings.tsx's
-// relative navigate("..") resolves to `/v2` (not `/`) when nested here.
-export const V2App: React.FC = () => {
-  return (
-    <DarkModeProvider>
-      <div className="min-h-screen flex flex-col bg-gray-100 dark:bg-gray-900 transition-colors">
-        <Navbar />
-        <div className="p-4 flex-1">
-          <Routes>
-            <Route path="/" element={<TopPage />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </div>
-        <Footer />
-      </div>
-    </DarkModeProvider>
-  );
-};
-
 /**
- * Old `/v3/...` bookmarks (the console was served there before #411) land on
- * the same console route, keeping the query string and hash. A router
+ * Old bookmarks under a retired prefix land on the same console route,
+ * keeping the query string and hash: `/v3/...` (where the console was served
+ * before #411) and `/v2/...` (the classic UI, retired by #426). A router
  * `<Navigate>` (not `window.location`) so the GitHub Pages basename
  * (`VITE_BASE_URL`) is applied.
  */
-const LegacyConsoleRedirect: React.FC = () => {
+const LegacyPrefixRedirect: React.FC<{ prefix: "/v2" | "/v3" }> = ({
+  prefix,
+}) => {
   const { pathname, search, hash } = useLocation();
-  const rest = pathname.replace(/^\/v3(?=\/|$)/, "");
+  const rest = pathname.slice(prefix.length).replace(/^\/$/, "");
   return <Navigate to={{ pathname: rest || "/", search, hash }} replace />;
 };
 
@@ -60,11 +38,8 @@ export const AppRoutes: React.FC = () => (
         REST API) are server-side and never reach this router. */}
     <Route path="/v1/*" element={<Navigate to="/" replace />} />
 
-    <Route path="/v3/*" element={<LegacyConsoleRedirect />} />
-
-    {/* The classic UI stays reachable under /v2 while the features it still
-        has alone move to the web console (#411). */}
-    <Route path="/v2/*" element={<V2App />} />
+    <Route path="/v2/*" element={<LegacyPrefixRedirect prefix="/v2" />} />
+    <Route path="/v3/*" element={<LegacyPrefixRedirect prefix="/v3" />} />
 
     {/* The web console, at the root. */}
     <Route

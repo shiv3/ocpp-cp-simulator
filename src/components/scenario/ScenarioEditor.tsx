@@ -1558,9 +1558,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       ) : null}
 
       {/* Header — slim toolbar.
-          Connector status / meter / SoC etc. are rendered by the parent
-          (ConnectorSidePanel left column); we just show the scenario-level
-          state + action buttons. */}
+          Connector status / meter / SoC etc. are rendered by the page around
+          the editor; we just show the scenario-level state + action
+          buttons. */}
       <div className="panel px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 text-xs min-w-0 flex-1">

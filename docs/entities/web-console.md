@@ -59,7 +59,8 @@ transition, from the same origin:
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): a StatusNotification for connector 0, downloading the logs, the
+  move to the console (#411): the error code of a connector's Faulted
+  status (#434), downloading the logs, the
   charging-profile view, and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
@@ -102,9 +103,9 @@ points. Failed: CP-2 (not connected).` The TagIDs come from **Settings**.
 ### Charge point page
 
 The charge point page (`/cp/:id`) has a header with **Scenarios**, **Edit
-config**, **Connect** / **Disconnect** and **Delete**, the connector cards, the
-**Active scenarios** panel, and tabs (transactions, message log, session
-analysis, configuration, state diagram, expert calls).
+config**, **Connect** / **Disconnect** and **Delete**, a **Charge point** panel,
+the connector cards, the **Active scenarios** panel, and tabs (transactions,
+message log, session analysis, configuration, state diagram, expert calls).
 
 **Delete** (#415) asks for a confirmation, removes the charge point and goes
 back to the dashboard. In Remote mode it calls `cp.delete`, which also deletes
@@ -112,6 +113,14 @@ the charge point's persisted rows ([Control plane](../concepts/control-plane.md)
 in Local mode it drops the charge point from the saved configuration. In Local
 mode it refuses while that configuration has not loaded, instead of saving one
 without any charge point. On a failure the page stays open and says why.
+
+The **Charge point (connector 0)** panel (#420) has the charge-point-level
+calls of the classic charge point card, disabled while the charge point is
+disconnected: the Heartbeat interval and when the last one was sent, with
+**Send Heartbeat**; **Authorize** with a TagID from **Settings**; and **Send
+status**, a StatusNotification for connector 0 (`Available`, `Unavailable` or
+`Faulted`, the last with an error code, §7.6). A failed call shows its error in
+the panel.
 
 Each connector card shows the status, the transaction, the energy and the SoC,
 with **Start** / **Stop transaction**, **Set status**, **Meter & SoC** (#417)

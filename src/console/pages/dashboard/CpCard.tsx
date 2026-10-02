@@ -8,6 +8,8 @@ import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointSe
 import { useChargePointView } from "../../../data/hooks/useChargePointView";
 import { useDataContext } from "../../../data/providers/DataProvider";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
+import { formatRelativeTime } from "../../lib/formatRelativeTime";
+import { useNow } from "../../lib/useNow";
 import StatusPill from "../../components/StatusPill";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
 import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
@@ -24,19 +26,6 @@ export interface CpCardProps {
   ocppVersion?: string;
 }
 
-function formatRelativeTime(date: Date | null): string {
-  if (!date) return "never";
-  const diffSec = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
-  if (diffSec < 5) return "just now";
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHour = Math.round(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}h ago`;
-  const diffDay = Math.round(diffHour / 24);
-  return `${diffDay}d ago`;
-}
-
 const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
   const navigate = useNavigate();
   const { chargePointService } = useDataContext();
@@ -44,6 +33,8 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
     cp.id,
   );
   const [isPending, setIsPending] = useState(false);
+  // Re-render so "Heartbeat … ago" stays current between heartbeats.
+  useNow();
 
   // Same derivation as the classic UI's ChargePoint.tsx (`isConnected`):
   // after an auto-reconnect the transport can be up before BootNotification

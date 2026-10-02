@@ -1,19 +1,18 @@
 ---
 title: Web console (browser UI)
 type: entity
-summary: The React + TypeScript browser UI — classic console at `/`, redesigned console at `/v3`, legacy at `/v1` — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
+summary: The React + TypeScript browser UI — classic console at `/`, redesigned console at `/v3` — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
 sources:
   - src/ (React app)
   - index.html
   - vite.config.ts
 related:
   - desktop-app.md
-  - legacy-v1-ui.md
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
-updated: 2026-09-30
+updated: 2026-10-02
 ---
 
 # Web console (browser UI)
@@ -56,8 +55,16 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   **Message log** (`/v3/logs`), and **Settings** (`/v3/settings`, where
   global [network simulation](../concepts/network-simulation.md) and the
   **Reset all simulator data** button live).
-- **`/v1`** — the original single-page UI (maintenance only) — see
-  [Legacy v1 UI](legacy-v1-ui.md).
+- **`/v1`** — no longer a UI. The original single-page UI was removed in
+  #411; its last version is the `legacy-v1-final` tag. A browser route under
+  `/v1/...` redirects to `/`, so an old bookmark opens the console rather
+  than an empty page. Only the client-side router does this: when the
+  [daemon](daemon.md) serves the console, it answers `/v1/...` itself (the
+  health endpoint, `404` for the removed REST paths), and these paths never
+  reach the app. Its URL-hash preset links (`#config=…`) are not carried
+  over: they had not loaded since the v1 code moved under `src/v1` (the
+  hash key became `config-v1`). To share a configuration, use the JSON
+  export / import in **Settings**.
 
 In `/v3`, a charge point's **Active scenarios** panel lists the runs executing
 or parked on its connectors, and its **Open run** link opens the scenario's run

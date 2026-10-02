@@ -8,7 +8,6 @@ OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CS
 | --------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | **Browser**     | Classic console (default, at `/`) / Tauri desktop app   | [Web console](docs/entities/web-console.md) · [Desktop app](docs/entities/desktop-app.md) |
 | **New console** | Redesigned console (React + Tailwind), served at `/v3`  | [Web console → Layout](docs/entities/web-console.md#layout-route-prefixes)                |
-| **Legacy v1**   | Original single-page web UI, served at `/v1`            | [Legacy v1 UI](docs/entities/legacy-v1-ui.md)                                             |
 | **CLI**         | Headless mode for scripting, CI, and AI integration     | [CLI](docs/entities/cli.md)                                                               |
 | **Server**      | Long-running Socket.IO server, multi-CP per process     | [Daemon](docs/entities/daemon.md) · [Control plane](docs/concepts/control-plane.md)       |
 | **Docker**      | Pre-built image (daemon + web console) on GHCR          | [Docker image](docs/entities/docker-image.md)                                             |

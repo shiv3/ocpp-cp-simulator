@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
-import type { ChargePointService } from "../../data/interfaces/ChargePointService";
+import type { ChargePointService } from "../interfaces/ChargePointService";
 
 type SocMeterSyncService = Pick<
   ChargePointService,
@@ -39,6 +39,9 @@ export function socFromMeter(meterWh: number, evSettings: EVSettings): number {
   return clampSoc(computed);
 }
 
+const describeError = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
 export function useSocMeterSync({
   chargePointService,
   cpId,
@@ -46,12 +49,21 @@ export function useSocMeterSync({
   evSettings,
 }: UseSocMeterSyncArgs) {
   const [autoSyncSocMeter, setAutoSyncSocMeterState] = useState<boolean>(true);
+  // Whether `autoSyncSocMeter` is known: the saved preference has loaded, or
+  // the operator has toggled it. Until then nothing is pushed — pushing the
+  // initial `true` to a connector that is off would make it derive its SoC
+  // from the meter, overwriting a hand-set SoC (`Connector.socMeterSyncEnabled`).
+  const [isKnown, setIsKnown] = useState(false);
+  // Why the preference could not be read, saved or applied, for the
+  // operator: until it is known, `autoSyncSocMeter` is only a default.
+  const [error, setError] = useState<string | null>(null);
   const touchedRef = useRef(false);
   const loadSeqRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const loadSeq = ++loadSeqRef.current;
+    setIsKnown(touchedRef.current);
 
     void chargePointService
       .getSocMeterSync(cpId, connectorId)
@@ -60,9 +72,16 @@ export function useSocMeterSync({
           return;
         }
         setAutoSyncSocMeterState(value);
+        setIsKnown(true);
       })
       .catch((err) => {
         console.warn("Failed to load SoC/Meter sync preference", err);
+        if (cancelled || touchedRef.current || loadSeq !== loadSeqRef.current) {
+          return;
+        }
+        setError(
+          `Sync preference not read (${describeError(err)}): Set SoC leaves the meter alone until you turn sync on.`,
+        );
       });
 
     return () => {
@@ -71,19 +90,30 @@ export function useSocMeterSync({
   }, [chargePointService, cpId, connectorId]);
 
   useEffect(() => {
-    void chargePointService.setConnectorSocMeterSync(
-      cpId,
-      connectorId,
-      autoSyncSocMeter,
-    );
-  }, [chargePointService, cpId, connectorId, autoSyncSocMeter]);
+    if (!isKnown) return;
+    chargePointService
+      .setConnectorSocMeterSync(cpId, connectorId, autoSyncSocMeter)
+      .catch((err) => {
+        console.error("Failed to apply SoC/Meter sync to the connector", err);
+        setError(`Sync not applied to the connector: ${describeError(err)}`);
+      });
+  }, [chargePointService, cpId, connectorId, autoSyncSocMeter, isKnown]);
 
   const setAutoSyncSocMeter = useCallback(
     (next: boolean | ((prev: boolean) => boolean)) => {
       touchedRef.current = true;
+      setIsKnown(true);
+      setError(null);
       setAutoSyncSocMeterState((prev) => {
         const resolved = typeof next === "function" ? next(prev) : next;
-        void chargePointService.saveSocMeterSync(cpId, connectorId, resolved);
+        chargePointService
+          .saveSocMeterSync(cpId, connectorId, resolved)
+          .catch((err) => {
+            console.error("Failed to save SoC/Meter sync preference", err);
+            setError(
+              `Sync turned ${resolved ? "on" : "off"}, but not saved: ${describeError(err)}`,
+            );
+          });
         return resolved;
       });
     },
@@ -105,6 +135,8 @@ export function useSocMeterSync({
 
   return {
     autoSyncSocMeter,
+    isKnown,
+    error,
     setAutoSyncSocMeter,
     handleToggleAutoSync,
     meterFromSoc: toMeterFromSoc,

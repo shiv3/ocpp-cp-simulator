@@ -1400,3 +1400,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#dashboard): new _Dashboard_ section — the **All charge points** menu (two charge points or more) and its table of actions, with the one-line report. The `/v2` list of classic-only features no longer has bulk actions.
 - [GitHub issues](sources/github-issues.md): #416 row.
 - Mechanism: `BulkActionsMenu` runs the action on every charge point with `Promise.all`, each one caught, and reports done / failed / skipped. **Start** pairs TagIDs with charge points in order (as the classic UI did); **Stop** reads the transactions from a fresh `getChargePoint` instead of the dashboard's list, which can lag.
+
+## [2026-10-02] ingest | meter value and SoC by hand in the web console (#417)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector cards and their **Meter & SoC** dialog (set the meter value, set or clear the SoC, sync SoC and meter, send MeterValues). Sync counts as off until its preference is read; a preference that cannot be read, saved or applied is reported in the dialog. The `/v2` list of classic-only features no longer has it.
+- Lint: [Control plane](concepts/control-plane.md) and [State persistence](concepts/state-persistence.md) said the SoC↔meter sync flag was stored per connector; it is one simulator-wide `kv` value (`soc_meter_sync`), and `connector_settings` has no such column.
+- [GitHub issues](sources/github-issues.md): #417 row.
+- Mechanism: `ConnectorMeterDialog` reuses `useSocMeterSync`, moved from `src/components/hooks` to `src/data/hooks` since both UIs use it. Its body mounts only while the dialog is open, so the preference is pushed to the connector on open, as the classic side panel did on mount.

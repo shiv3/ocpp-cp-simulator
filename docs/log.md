@@ -1439,3 +1439,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#charge-point-page): the connector card's availability and **Charging profiles** list. The _Charge point page_ section is restructured into lists (connector card, **Meter & SoC**, **Auto meter values**, Message Log tab). The `/v2` list of classic-only features no longer has the charging-profile view.
 - [GitHub issues](sources/github-issues.md): #422 row.
 - Mechanism: `ChargingProfilesList` renders `useConnectorView`'s `chargingProfiles` (or the single `chargingProfile` when the list is empty), as the classic side panel did.
+
+## [2026-10-02] ingest | the web console's mode pill follows the daemon connection (#423)
+
+- [Web console](entities/web-console.md#layout-route-prefixes): the sidebar (navigation, mode pill, **Classic UI** link, version) and the pill's Remote-mode connection dot; it was always a pulsing green dot before.
+- [GitHub issues](sources/github-issues.md): #423 row.
+- Mechanism: `useRemoteHealth` (`src/data/hooks`) holds the classic navbar's logic (`RemoteChargePointService.getConnectionState` / `onConnectionChange`) and its labels; the navbar and `AppShell` both use it.

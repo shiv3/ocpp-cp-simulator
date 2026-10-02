@@ -1,84 +1,30 @@
 // components/Navbar.tsx
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { SquarePen } from "lucide-react";
 import ThemeToggle from "./ThemeToggle.tsx";
 import { useDataContext } from "../data/providers/DataProvider";
-import type { RemoteConnectionState } from "../data/remote/RemoteChargePointService";
-
-type RemoteHealth = "checking" | "ok" | "down";
-
-interface ConnectionAwareService {
-  getConnectionState(): RemoteConnectionState;
-  onConnectionChange(
-    handler: (state: RemoteConnectionState) => void,
-  ): () => void;
-}
-
-function isConnectionAwareService(
-  service: unknown,
-): service is ConnectionAwareService {
-  return (
-    typeof service === "object" &&
-    service !== null &&
-    "getConnectionState" in service &&
-    "onConnectionChange" in service &&
-    typeof (service as { getConnectionState?: unknown }).getConnectionState ===
-      "function" &&
-    typeof (service as { onConnectionChange?: unknown }).onConnectionChange ===
-      "function"
-  );
-}
-
-function healthFromConnectionState(state: RemoteConnectionState): RemoteHealth {
-  if (state === "connected") return "ok";
-  if (state === "connecting") return "checking";
-  return "down";
-}
+import {
+  REMOTE_HEALTH_TEXT,
+  useRemoteHealth,
+  type RemoteHealth,
+} from "../data/hooks/useRemoteHealth";
 
 const Navbar: React.FC = () => {
-  const { mode, serverUrl, chargePointService } = useDataContext();
+  const { mode, serverUrl } = useDataContext();
   const isRemote = mode === "remote";
-  const [health, setHealth] = useState<RemoteHealth>("checking");
-
-  useEffect(() => {
-    if (!isRemote || !isConnectionAwareService(chargePointService)) {
-      setHealth("checking");
-      return;
-    }
-    setHealth(
-      healthFromConnectionState(chargePointService.getConnectionState()),
-    );
-    return chargePointService.onConnectionChange((state) => {
-      setHealth(healthFromConnectionState(state));
-    });
-  }, [isRemote, serverUrl, chargePointService]);
+  const health = useRemoteHealth();
 
   const badgeLabel = isRemote
     ? `Remote · ${serverUrl.replace(/^https?:\/\//, "")}`
     : "Local";
-  const healthMeta: Record<
-    RemoteHealth,
-    { dot: string; aria: string; reason: string }
-  > = {
-    checking: {
-      dot: "bg-yellow-400 animate-pulse",
-      aria: "Remote connection: checking",
-      reason: "Checking…",
-    },
-    ok: {
-      dot: "bg-emerald-400",
-      aria: "Remote connection: connected",
-      reason: "Connected",
-    },
-    down: {
-      dot: "bg-red-500 animate-pulse",
-      aria: "Remote connection: disconnected",
-      reason: "Cannot reach the daemon",
-    },
+  const healthDot: Record<RemoteHealth, string> = {
+    checking: "bg-yellow-400 animate-pulse",
+    ok: "bg-emerald-400",
+    down: "bg-red-500 animate-pulse",
   };
   const badgeTitle = isRemote
-    ? `Remote · ${serverUrl} — ${healthMeta[health].reason} — click to change`
+    ? `Remote · ${serverUrl} — ${REMOTE_HEALTH_TEXT[health].reason} — click to change`
     : "Local — click to change";
   const badgeBg = isRemote
     ? health === "down"
@@ -104,9 +50,9 @@ const Navbar: React.FC = () => {
             >
               {isRemote ? (
                 <span
-                  aria-label={healthMeta[health].aria}
+                  aria-label={REMOTE_HEALTH_TEXT[health].aria}
                   role="status"
-                  className={`inline-block w-2 h-2 rounded-full ${healthMeta[health].dot}`}
+                  className={`inline-block w-2 h-2 rounded-full ${healthDot[health]}`}
                 />
               ) : null}
               <span>{badgeLabel}</span>

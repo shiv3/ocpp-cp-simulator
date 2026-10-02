@@ -1426,3 +1426,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** panel (heartbeat interval and last sent, **Send Heartbeat**, **Authorize** with a TagID, **Send status** for connector 0 with an error code when Faulted). The `/v2` list of classic-only features loses it and gains the error code of a connector's Faulted status (#434), which the audit had missed.
 - [GitHub issues](sources/github-issues.md): #420 and #434 rows.
 - Mechanism: `ChargePointControls` on `CpDetailPage`, fed by `useChargePointView`'s heartbeat; `formatRelativeTime` moves from `CpCard` to `src/console/lib` for both.
+
+## [2026-10-02] ingest | download a charge point's logs from the web console (#421)
+
+- [Web console](entities/web-console.md#charge-point-page): **Download** on the charge point's Message Log tab and on `/logs` (one charge point, or all of them in one file), and what **Clear screen + DB** deletes. The `/v2` list of classic-only features no longer has the download.
+- Fix: the console's **Clear screen + DB** ignored its scope and never deleted the persisted rows; it now calls `clearStoredLogs`, as the classic card did.
+- [GitHub issues](sources/github-issues.md): #421 row.
+- Mechanism: `downloadStoredLogs` (`src/lib`) builds the JSON Lines file from `listStoredLogs` for one or more charge points; both UIs use it.

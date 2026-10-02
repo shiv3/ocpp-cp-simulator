@@ -11,7 +11,7 @@ related:
   - ../entities/web-console.md
   - state-persistence.md
   - scenario-format.md
-updated: 2026-09-03
+updated: 2026-10-02
 ---
 
 # Network simulation
@@ -23,8 +23,8 @@ applies globally (all CPs) or per-charger with null-tombstone override
 semantics. The same seed always produces the same fault sequence
 (deterministic via a seeded PRNG).
 
-**Configuration** — via the browser UI (`/v3/settings` for global,
-`/v3/cp/:id` for per-charger), the daemon's [RPC methods](#rpc-methods), or the
+**Configuration** — via the browser UI (`/settings` for global,
+`/cp/:id` for per-charger), the daemon's [RPC methods](#rpc-methods), or the
 [MCP tools](../entities/mcp-endpoint.md#network-simulation-tools). There are
 **no `--network-sim-*` startup flags** in Phase 1 — configuration is applied at
 runtime or persisted to the state database.

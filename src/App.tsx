@@ -5,6 +5,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
 } from "react-router-dom";
 import Navbar from "./components/Navbar.tsx";
 import Footer from "./components/Footer.tsx";
@@ -13,9 +14,9 @@ import TopPage from "./components/TopPage.tsx";
 import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
 import ConsoleApp from "./console/ConsoleApp.tsx";
 
-// Exported (not just used locally) so dom tests can mount the real V2 route
-// nesting under their own MemoryRouter — see
-// src/console/v2-settings-nav.dom.test.tsx, which proves Settings.tsx's
+// The classic UI, mounted under /v2. Exported (not just used locally) so dom
+// tests can mount the real V2 route nesting under their own MemoryRouter —
+// see src/console/v2-settings-nav.dom.test.tsx, which proves Settings.tsx's
 // relative navigate("..") resolves to `/v2` (not `/`) when nested here.
 export const V2App: React.FC = () => {
   return (
@@ -35,6 +36,18 @@ export const V2App: React.FC = () => {
 };
 
 /**
+ * Old `/v3/...` bookmarks (the console was served there before #411) land on
+ * the same console route, keeping the query string and hash. A router
+ * `<Navigate>` (not `window.location`) so the GitHub Pages basename
+ * (`VITE_BASE_URL`) is applied.
+ */
+const LegacyConsoleRedirect: React.FC = () => {
+  const { pathname, search, hash } = useLocation();
+  const rest = pathname.replace(/^\/v3(?=\/|$)/, "");
+  return <Navigate to={{ pathname: rest || "/", search, hash }} replace />;
+};
+
+/**
  * Top-level route tree, exported without a `<Router>` so dom tests can mount
  * the real routing under their own `<MemoryRouter>` (see
  * src/AppRoutes.dom.test.tsx).
@@ -47,23 +60,21 @@ export const AppRoutes: React.FC = () => (
         REST API) are server-side and never reach this router. */}
     <Route path="/v1/*" element={<Navigate to="/" replace />} />
 
-    {/* V3 new console (redesign) - opt-in under /v3 */}
+    <Route path="/v3/*" element={<LegacyConsoleRedirect />} />
+
+    {/* The classic UI stays reachable under /v2 while the features it still
+        has alone move to the web console (#411). */}
+    <Route path="/v2/*" element={<V2App />} />
+
+    {/* The web console, at the root. */}
     <Route
-      path="/v3/*"
+      path="/*"
       element={
         <DarkModeProvider>
           <ConsoleApp />
         </DarkModeProvider>
       }
     />
-
-    {/* /v2 - backward-compatible alias for the classic UI (old bookmarks
-        and deep links keep working). */}
-    <Route path="/v2/*" element={<V2App />} />
-
-    {/* Classic UI is the default again, served at the root. Anything not
-        claimed by /v1, /v2, or /v3 lands here. */}
-    <Route path="/*" element={<V2App />} />
   </Routes>
 );
 

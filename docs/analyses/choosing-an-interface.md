@@ -14,7 +14,7 @@ related:
   - ../entities/mcp-endpoint.md
   - ../concepts/local-vs-remote-mode.md
   - fleet-load-and-observability-roadmap.md
-updated: 2026-09-04
+updated: 2026-10-02
 ---
 
 # Choosing an interface
@@ -40,7 +40,7 @@ updated: 2026-09-04
 | Security profiles 2/3 (TLS files)   | ❌                  | ✅                                        | ✅               |
 | Scenario editor (node graph)        | ✅                  | ✅                                        | files only       |
 | Multiple charge points per process  | ✅ (per tab)        | ✅                                        | ❌ (one CP)      |
-| Network simulation                  | ✅ (`/v3/settings`) | ✅ (+ RPC / MCP)                          | ❌               |
+| Network simulation                  | ✅ (`/settings`)    | ✅ (+ RPC / MCP)                          | ❌               |
 | Persistence                         | IndexedDB           | SQLite `--state-db`                       | ❌               |
 | External control (Socket.IO / MCP)  | ❌                  | ✅                                        | ❌               |
 | Trace output / analyze              | log download        | `--trace-output`, `analyze --from-daemon` | `--trace-output` |

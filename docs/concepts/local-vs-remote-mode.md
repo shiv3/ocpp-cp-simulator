@@ -41,7 +41,7 @@ overridden.
   security profiles 2/3 and TLS files are daemon-only
   ([OCPP versions & transports](ocpp-versions-and-transports.md),
   [Security profiles](security-profiles.md)); [network simulation](network-simulation.md)
-  works in both modes from `/v3/settings`, but its RPC / MCP methods exist
+  works in both modes from `/settings`, but its RPC / MCP methods exist
   only on the daemon.
 - The **Reset all simulator data** button calls `state.reset` in Remote mode
   and clears the local DB in Local mode.
@@ -58,7 +58,7 @@ overridden.
   as `scenario-started` / `-node-execute` / `-completed` / `-error` /
   `-wait-changed` events — the same events the daemon pushes, without a
   `runId`. Before #411 that runtime lived in the classic UI's connector card:
-  with only the redesigned console open, a Local-mode scenario could not run.
+  with only the web console open, a Local-mode scenario could not run.
   Auto-start follows the daemon's rules
   ([Scenario format → start notes](scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)).
 - The scenario wait controls (extend / retry / continue, #240) work in both
@@ -66,7 +66,7 @@ overridden.
   them (`interventions`) exists only on the daemon — Local mode has no run
   reports.
 - The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
-  run console's recorded history and the `/v3/scenarios/runs` page need Remote
+  run console's recorded history and the `/scenarios/runs` page need Remote
   mode. In Local mode the run console lists only the runs started or attached
   while the page is open, and forgets them when it closes. This is a deferred
   part of #388, not a design choice: the browser runtime builds no run

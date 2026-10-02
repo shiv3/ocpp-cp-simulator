@@ -565,7 +565,7 @@ describe("ScenarioRunsPage (#388)", () => {
       Array.from(container.querySelectorAll("aside a")).find(
         (a) => a.textContent?.trim() === label,
       );
-    expect(nav("Run History")?.getAttribute("href")).toBe("/v3/scenarios/runs");
+    expect(nav("Run History")?.getAttribute("href")).toBe("/scenarios/runs");
     expect(nav("Run History")?.getAttribute("aria-current")).toBe("page");
     expect(nav("Scenarios")?.getAttribute("aria-current")).toBeNull();
   });

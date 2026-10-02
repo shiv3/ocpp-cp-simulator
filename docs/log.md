@@ -1445,3 +1445,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#layout-route-prefixes): the sidebar (navigation, mode pill, **Classic UI** link, version) and the pill's Remote-mode connection dot; it was always a pulsing green dot before.
 - [GitHub issues](sources/github-issues.md): #423 row.
 - Mechanism: `useRemoteHealth` (`src/data/hooks`) holds the classic navbar's logic (`RemoteChargePointService.getConnectionState` / `onConnectionChange`) and its labels; the navbar and `AppShell` both use it.
+
+## [2026-10-02] ingest | a scenario's description and EV settings in the web console (#424)
+
+- [Web console](entities/web-console.md#scenario-editor-steps-and-graph): the editor's description field and collapsed **Scenario EV Settings**. The `/v2` list of classic-only features now holds only the connector Faulted error code (#434).
+- [GitHub issues](sources/github-issues.md): #424 row.
+- Mechanism: the classic graph editor's EV settings form moves into `ScenarioEvSettingsFields` (its controls gain `aria-label`s) and `compactScenarioEvSettings` drops the empty fields; the classic settings dialog and `ScenarioEditPage` both use them.

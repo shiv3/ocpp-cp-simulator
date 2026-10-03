@@ -1407,3 +1407,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Lint: [Control plane](concepts/control-plane.md) and [State persistence](concepts/state-persistence.md) said the SoC↔meter sync flag was stored per connector; it is one simulator-wide `kv` value (`soc_meter_sync`), and `connector_settings` has no such column.
 - [GitHub issues](sources/github-issues.md): #417 row.
 - Mechanism: `ConnectorMeterDialog` reuses `useSocMeterSync`, moved from `src/components/hooks` to `src/data/hooks` since both UIs use it. Its body mounts only while the dialog is open, so the preference is pushed to the connector on open, as the classic side panel did on mount.
+
+## [2026-10-02] ingest | per-connector auto meter values in the web console (#418)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's **Auto meter values** button and what its **Save** applies and stores; a saved configuration that cannot be read keeps the editor closed instead of opening it on the default. The `/v2` list of classic-only features no longer has it.
+- Correction to the #411 audit: the classic side panel never opened its curve editor (`MeterValueCurveModal` was mounted behind a flag nothing set), so this is new in practice rather than a port.
+- [GitHub issues](sources/github-issues.md): #418 row.
+- Mechanism: `AutoMeterButton` lazy-loads the shared `MeterValueCurveModal`; **Save** calls `setAutoMeterValueConfig` then `saveAutoMeterConfig`. The saved per-connector copy (`connector_settings.auto_meter`) is not restored into connectors at startup.

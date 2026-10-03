@@ -19,8 +19,7 @@ const GithubMark: React.FC<{ className?: string }> = ({ className }) => (
 
 /**
  * "ocpp-cp-simulator vX.Y.Z · GitHub" — the build identifier plus a discovery
- * link, shared by the classic UI's footer (issue #93) and the web console
- * sidebar (issue #364) so both show the same version from the same source.
+ * link (issue #93), shown in the web console sidebar (issue #364).
  * The version is omitted for an unstamped dev build (see appBuildLabel).
  *
  * `daemonVersion` is the connected daemon's own version (`server.info`),

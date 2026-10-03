@@ -1,7 +1,7 @@
 ---
 title: Web console (browser UI)
 type: entity
-summary: The React + TypeScript web console at `/` (the classic UI stays at `/v2` for a transition) — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
+summary: The React + TypeScript web console at `/` (the classic UI was retired in #426) — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
 sources:
   - src/ (React app)
   - index.html
@@ -42,8 +42,7 @@ The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mo
 
 ## Layout (route prefixes)
 
-The browser app serves one web console, plus the classic UI during a
-transition, from the same origin:
+The browser app serves one web console:
 
 - **`/`** — the web console: a fleet of **Charge Points**, per-charge-point
   detail (`/cp/:id`), a cross-CP **Scenario library** (`/scenarios`; each
@@ -58,12 +57,10 @@ transition, from the same origin:
   simulator data** button live). Every page takes its state from the URL, so
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
-- **`/v2`** — the classic UI, kept for a transition (#411) until #426 retires
-  it. The console now has the features the #411 audit found only there
-  (#415–#424), and the connector Faulted error code (#434). The
-  console's sidebar **Classic UI** link and the Settings page's **Open
-  classic UI** link go there; the classic navbar's **Web console** link comes
-  back.
+- **`/v2/...`** — where the classic UI was served from #411 until #426
+  retired it, once the console had the features found only there (#415–#424,
+  #434). A bookmark redirects to the same console route without the prefix,
+  as for `/v3` below: `/v2` → `/`, `/v2/settings` → `/settings`.
 - **`/v3/...`** — where the console was served before #411. A bookmark
   redirects to the same route without the prefix, keeping the query string
   and the hash (`/v3/scenarios/run?cp=…&id=…` → `/scenarios/run?cp=…&id=…`).
@@ -81,10 +78,10 @@ transition, from the same origin:
   export / import in **Settings**.
 
 The console's sidebar holds the navigation, the mode pill (**Local mode** or
-**Remote mode**), the **Classic UI** link and the version line. In Remote mode
+**Remote mode**) and the version line. In Remote mode
 the pill's dot follows the connection to the daemon (#423): amber while
 connecting, green once connected, red when the daemon cannot be reached, with
-the reason in its tooltip, as the classic navbar's badge does. Before #423 it
+the reason in its tooltip, as the classic navbar's badge did. Before #423 it
 was always green. Local mode has no daemon, so its dot carries no status.
 
 ### Dashboard
@@ -157,8 +154,8 @@ Each connector card shows:
 
 **Sync SoC and meter** derives one from the other with the EV's battery
 capacity and initial SoC; it needs a capacity above 0 kWh. The flag is one
-simulator-wide preference. As in the classic side panel, it is applied to the
-connector when the dialog opens and when it is toggled; a connector whose
+simulator-wide preference, applied to the connector when the dialog opens and
+when it is toggled, as the classic side panel did; a connector whose
 dialog was never opened keeps its own flag (on by default). Until the
 preference is read, sync counts as off: the box is unchecked and disabled, and
 **Set SoC** leaves the meter alone. If it cannot be read, the dialog says so
@@ -215,10 +212,9 @@ flag are edited in the header in both views, and under it the description and
 the collapsed **Scenario EV Settings** (#424): the EV the scenario applies to
 its connector when it starts, field by field (an empty field keeps the
 connector's value; the placeholders show the Default EV Settings from
-**Settings**). The form is the classic graph editor's, shared; a scenario
-whose fields are all empty saves no EV settings. Unlike the classic graph editor,
-the graph view does not rewrite the trigger from a **Status Trigger** node,
-so pick **On status change** in the header for a scenario that should start
+**Settings**); a scenario whose fields are all empty saves no EV settings.
+The graph view does not rewrite the trigger from a **Status Trigger** node, as
+the classic UI's graph editor did, so pick **On status change** in the header for a scenario that should start
 on a status. A graph view opened because the scenario branches stays open
 when an edit makes it linear again. Opening a scenario in the graph view is
 not an edit: an edge to a missing node is hidden there, and leaves the saved
@@ -279,10 +275,9 @@ In Local mode the run console keeps a history of this page view only, and the
 Run History page says it needs the daemon — local run reports are tracked in
 #394.
 
-Both UIs show the running build as `ocpp-cp-simulator vX.Y.Z · GitHub` —
-in the classic UI's footer (#93) and at the bottom of the console's sidebar
-(#364). The two render the same component from the same source
-(`src/lib/appBuildLabel.ts`): the package version stamped by the release
+The console shows the running build as `ocpp-cp-simulator vX.Y.Z · GitHub` at
+the bottom of its sidebar (#364), as the classic UI's footer did (#93). It
+comes from `src/lib/appBuildLabel.ts`: the package version stamped by the release
 tooling (`__APP_VERSION__`), falling back to the short commit SHA on the
 GitHub Pages deploy (`__APP_COMMIT__`, built from `main`); an unstamped dev
 build shows no version rather than `v0.0.0`. In Remote mode the line also
@@ -293,16 +288,14 @@ console pointed at a self-hosted daemon. An unstamped daemon reports
 `0.0.0-dev`. Local mode has no daemon and shows no daemon version; neither
 does a daemon that predates `server.info`.
 
-The console's dashboard and connector cards, and the classic connector card and
-expanded side panel, format a connector's live readings with
+The console's dashboard and connector cards format a connector's live readings
+with
 `src/lib/connectorFormat.ts`: the meter value, which is in Wh, as kWh with
 2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`). The
-console's connector card shows `—` when no SoC is reported; the classic side
-panel's collapsed rail rounds the SoC to a whole percent (#368).
+console's connector card shows `—` when no SoC is reported (#368).
 
-The console and the classic UI share the data layer, the scenario engine and
-the per-step forms; the console promotes scenarios, charge points and logs
-to first-class routes instead of nested panels.
+The console promotes scenarios, charge points and logs to first-class routes,
+where the classic UI nested them in panels.
 
 ## What the console can do
 

@@ -171,7 +171,7 @@ describe("Network Simulation DOM Tests (Composed/Cross-feature)", () => {
     });
   });
 
-  describe("all four NETWORK_SIM log surfaces render", () => {
+  describe("NETWORK_SIM log surfaces render", () => {
     it("LogsPage renders a NETWORK_SIM entry with type label and class", async () => {
       const cpA = snapshot("CP-A");
       const service = createFakeChargePointService({ snapshots: [cpA] });
@@ -238,39 +238,6 @@ describe("Network Simulation DOM Tests (Composed/Cross-feature)", () => {
       expect(container.textContent).not.toContain(
         "Rule fired\nDisconnect injected",
       );
-    });
-
-    it("the legacy Logger component renders a NETWORK_SIM entry", async () => {
-      // The legacy (classic-UI) viewer has its own LogType switch, updated
-      // alongside the enum — render it directly and assert it maps the type.
-      const { createRoot } = await import("react-dom/client");
-      const { default: LegacyLogger } = await import("../../components/Logger");
-      const React = await import("react");
-
-      const host = document.createElement("div");
-      document.body.appendChild(host);
-      const root = createRoot(host);
-      cleanup = () => unmount(root);
-
-      await act(async () => {
-        root.render(
-          React.createElement(LegacyLogger, {
-            logs: [
-              {
-                timestamp: new Date("2026-01-01T10:00:00.000Z"),
-                level: LogLevel.INFO,
-                type: LogType.NETWORK_SIM,
-                message: "Periodic disconnect scheduled",
-              },
-            ],
-            onClear: () => undefined,
-          }),
-        );
-      });
-      await flush();
-
-      expect(host.textContent).toContain("Periodic disconnect scheduled");
-      expect(host.innerHTML).toContain("log-network-sim");
     });
 
     it("index.css defines .log-network-sim selector", async () => {

@@ -1382,3 +1382,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `/v3/...` paths updated to the new routes: [Local vs Remote mode](concepts/local-vs-remote-mode.md), [Network simulation](concepts/network-simulation.md), [Expert OCPP calls](concepts/expert-ocpp-calls.md), [Choosing an interface](analyses/choosing-an-interface.md), [Docker image](entities/docker-image.md), [Index](index.md), [README](../README.md).
 - [GitHub issues](sources/github-issues.md): #411 row.
 - Mechanism: `AppRoutes` mounts `ConsoleApp` at `/*`, `V2App` at `/v2/*`, and `LegacyConsoleRedirect` (a router `<Navigate>`, so the Pages basename applies) at `/v3/*`; `src/console/routes.ts` (`consolePath`) is gone — console links are plain root paths. The daemon's SPA fallback already served `index.html` for these paths.
+
+## [2026-10-02] ingest | Steps / Graph views in the console's scenario editor (#411)
+
+- [Web console](entities/web-console.md#scenario-editor-steps-and-graph): new section — the **Steps | Graph** toggle (`view=` in the URL), branching and looping scenarios open in the graph view, both views edit one definition saved by the page's Save. The `/v2` list of classic-only features loses the graph editor and gains a scenario's description and EV settings, which the console does not edit yet.
+- [GitHub issues](sources/github-issues.md): #411 row.
+- Mechanism: `ScenarioEditPage` lazy-loads the classic `ScenarioEditor` with a new `embedded` prop: hydrated once, no autosave, no own Save / settings / import / export / run controls, the node panel's button reads **Apply**, and each graph edit is reported through `onGraphChange` — not the opening, nor its drop of orphan edges (edges to a missing node), so opening a scenario never leaves the page with unsaved changes. The step list's read-only mode is gone (a non-linear scenario never reaches it). The jsdom `ResizeObserver` mock now reports a `contentRect`, which xyflow's pane reads.

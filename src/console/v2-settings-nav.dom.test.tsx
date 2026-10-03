@@ -2,7 +2,7 @@
 //
 // Regression test for the `/v2/settings` → `/v2` leg of Settings.tsx's
 // relative `navigate("..")` "Back to Home" button. The `/settings` → `/`
-// leg (embedded in the new console) is already covered by
+// leg (embedded in the web console) is already covered by
 // src/console/ConsoleApp.dom.test.tsx. That test alone doesn't prove the
 // `/v2` case: `..` resolution in react-router v6 depends on route-context
 // depth, not URL segment count, so it has to be exercised through the same

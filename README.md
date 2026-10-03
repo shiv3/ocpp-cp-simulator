@@ -4,14 +4,13 @@
 
 OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CSMS development. Comes with a browser UI, a headless CLI, and a Socket.IO control API that any agent or script can drive. Also speaks OCPP 2.0.1 / 2.1 (WebSocket) and OCPP 1.2 / 1.5 / 1.6S (SOAP).
 
-| Interface       | Description                                             | Docs                                                                                      |
-| --------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Browser**     | Classic console (default, at `/`) / Tauri desktop app   | [Web console](docs/entities/web-console.md) · [Desktop app](docs/entities/desktop-app.md) |
-| **New console** | Redesigned console (React + Tailwind), served at `/v3`  | [Web console → Layout](docs/entities/web-console.md#layout-route-prefixes)                |
-| **CLI**         | Headless mode for scripting, CI, and AI integration     | [CLI](docs/entities/cli.md)                                                               |
-| **Server**      | Long-running Socket.IO server, multi-CP per process     | [Daemon](docs/entities/daemon.md) · [Control plane](docs/concepts/control-plane.md)       |
-| **Docker**      | Pre-built image (daemon + web console) on GHCR          | [Docker image](docs/entities/docker-image.md)                                             |
-| **MCP**         | `POST /mcp` tools for Claude Code and other MCP clients | [MCP endpoint](docs/entities/mcp-endpoint.md)                                             |
+| Interface   | Description                                             | Docs                                                                                      |
+| ----------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Browser** | Web console at `/` / Tauri desktop app                  | [Web console](docs/entities/web-console.md) · [Desktop app](docs/entities/desktop-app.md) |
+| **CLI**     | Headless mode for scripting, CI, and AI integration     | [CLI](docs/entities/cli.md)                                                               |
+| **Server**  | Long-running Socket.IO server, multi-CP per process     | [Daemon](docs/entities/daemon.md) · [Control plane](docs/concepts/control-plane.md)       |
+| **Docker**  | Pre-built image (daemon + web console) on GHCR          | [Docker image](docs/entities/docker-image.md)                                             |
+| **MCP**     | `POST /mcp` tools for Claude Code and other MCP clients | [MCP endpoint](docs/entities/mcp-endpoint.md)                                             |
 
 ![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
 

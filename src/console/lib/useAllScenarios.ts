@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
-import { consolePath } from "../routes";
 
 /**
  * One scenario definition plus the (cpId, connectorId) scope it was loaded
@@ -169,7 +168,7 @@ export function buildScenarioUrl(
   params.set("connector", connectorId != null ? String(connectorId) : "");
   params.set("id", scenarioId);
   if (options.runId) params.set("run", options.runId);
-  return consolePath(`/scenarios/${kind}?${params.toString()}`);
+  return `/scenarios/${kind}?${params.toString()}`;
 }
 
 /** The run history page (#388) filtered on one scenario's runs on a
@@ -183,5 +182,5 @@ export function buildRunHistoryUrl(
   params.set("cp", cpId);
   if (connectorId != null) params.set("connector", String(connectorId));
   params.set("scenario", scenarioId);
-  return consolePath(`/scenarios/runs?${params.toString()}`);
+  return `/scenarios/runs?${params.toString()}`;
 }

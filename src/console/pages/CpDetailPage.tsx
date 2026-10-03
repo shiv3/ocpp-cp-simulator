@@ -36,7 +36,6 @@ import PageHeader from "../components/PageHeader";
 import StatusPill from "../components/StatusPill";
 import NetworkSimBadge from "../components/network-sim/NetworkSimBadge";
 import ManualDisconnectButtons from "../components/network-sim/ManualDisconnectButtons";
-import { consolePath } from "../routes";
 import ActiveScenarioPanel from "./cp/ActiveScenarioPanel";
 import ConnectorCard from "./cp/ConnectorCard";
 import ConfigTab from "./cp/ConfigTab";
@@ -333,7 +332,7 @@ const CpDetailPage: React.FC = () => {
   return (
     <div className="p-6">
       <Link
-        to={consolePath("/")}
+        to={"/"}
         className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
       >
         ← Back to charge points
@@ -344,9 +343,7 @@ const CpDetailPage: React.FC = () => {
         actions={
           <>
             <Button asChild variant="outline" size="sm">
-              <Link
-                to={consolePath(`/scenarios?cp=${encodeURIComponent(cpId)}`)}
-              >
+              <Link to={`/scenarios?cp=${encodeURIComponent(cpId)}`}>
                 Scenarios
               </Link>
             </Button>

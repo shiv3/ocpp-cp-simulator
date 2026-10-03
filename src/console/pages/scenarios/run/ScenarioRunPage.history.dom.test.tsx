@@ -208,7 +208,7 @@ describe("ScenarioRunPage run history (#388)", () => {
       (a) => a.textContent?.trim() === "View all runs",
     );
     expect(link?.getAttribute("href")).toBe(
-      "/v3/scenarios/runs?cp=CP-1&connector=1&scenario=s1",
+      "/scenarios/runs?cp=CP-1&connector=1&scenario=s1",
     );
   });
 

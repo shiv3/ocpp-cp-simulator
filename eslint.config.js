@@ -85,12 +85,6 @@ export default tseslint.config(
         "error",
         { allowInterfaces: "always" },
       ],
-      // `cond && sideEffect()` / ternary short-circuits are used in the legacy
-      // src/v1 code; allow them as before.
-      "@typescript-eslint/no-unused-expressions": [
-        "error",
-        { allowShortCircuit: true, allowTernary: true },
-      ],
     },
   },
 

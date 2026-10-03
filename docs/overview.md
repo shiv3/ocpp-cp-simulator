@@ -2,7 +2,7 @@
 title: Overview
 type: overview
 summary: Master summary of the OCPP CP Simulator — what it is, how the pieces fit together, and where to read next.
-updated: 2026-09-03
+updated: 2026-10-02
 ---
 
 # OCPP CP Simulator — overview
@@ -34,8 +34,8 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
 - **Interfaces** — [Web console](entities/web-console.md) (Local mode in a tab
   or Remote mode against a daemon), [Desktop app](entities/desktop-app.md),
   [CLI](entities/cli.md), [Daemon](entities/daemon.md),
-  [MCP endpoint](entities/mcp-endpoint.md), [Docker image](entities/docker-image.md),
-  [Legacy v1 UI](entities/legacy-v1-ui.md). Pick one with
+  [MCP endpoint](entities/mcp-endpoint.md), [Docker image](entities/docker-image.md).
+  Pick one with
   [Choosing an interface](analyses/choosing-an-interface.md).
 - **Control plane** — every Socket.IO client of the daemon (web console in
   Remote mode, CLI client modes, external agents) speaks the same

@@ -1161,7 +1161,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-09-29] ingest | type-checking is a blocking CI step (#374)
 
 - [Testing strategy](analyses/testing-strategy.md#type-checking): new section. `bun run typecheck` (`tsc -b --noEmit`) covers every project the root `tsconfig.json` references, is a blocking CI step and runs in the `pre-push` hook. Test files are checked too, some by both the web app (DOM lib) and CLI (`bun-types`) projects; `tsc -b` wants every imported file in its project's `include`.
-- [Legacy v1 UI](entities/legacy-v1-ui.md): `src/v1` is mounted by `src/App.tsx` and stays type-checked; its dead `main.tsx` entry was removed.
+- Legacy v1 UI (`entities/legacy-v1-ui.md`, page removed with the v1 UI in #411): `src/v1` is mounted by `src/App.tsx` and stays type-checked; its dead `main.tsx` entry was removed.
 - [README](../README.md) Contributing: the local checks CI runs, typecheck included.
 - [GitHub issues](sources/github-issues.md): #374 row.
 - [Control plane](concepts/control-plane.md): auto traffic is refused in browser local mode (`browser_auto_traffic_unsupported`).
@@ -1360,3 +1360,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-ping-websocketpinginterval): new section — `0` default sends no ping, changes re-arm at once and on every reconnect, negative values and values above `2147483` s `Rejected`, pings bypass network simulation, and SOAP / browser charge points do not have the key (`NotSupported`). SOAP limitations list links to it.
 - [GitHub issues](sources/github-issues.md): #406.
 - Mechanism: `ChargePoint` forwards the key to `OCPPWebSocket.setPingInterval`; `defaultConfiguration` only declares the key when the transport `supportsPing`. Integer configuration keys gain optional `min` / `max` bounds (`SecurityProfile` 0–3 moved there), checked on `ChangeConfiguration` and on loading persisted overrides — an out-of-range persisted value is now skipped like an unparsable one.
+
+## [2026-10-02] ingest | legacy v1 UI removed (#411)
+
+- [Web console](entities/web-console.md#layout-route-prefixes): `/v1` is no longer a UI. Browser routes under `/v1/...` redirect to `/`; the daemon's own `/v1/...` paths (health endpoint, `404` for the removed REST API) are unchanged. Why the `#config=` URL-hash presets are not carried over (broken since the v1 split; Settings JSON export / import replaces them).
+- Removed: `entities/legacy-v1-ui.md` (and its links from [Overview](overview.md), [Index](index.md), [GitHub issues](sources/github-issues.md), [README](../README.md)).
+- [GitHub issues](sources/github-issues.md): #411 row.
+- Mechanism: `src/v1/**` deleted (last version at the `legacy-v1-final` tag); `App.tsx` exports `AppRoutes` and maps `/v1/*` to `<Navigate to="/">`; the v1-only `flowbite-react` / `jotai-location` dependencies and the short-circuit ESLint exception go with it.

@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-09-30
+updated: 2026-10-02
 ---
 
 # Index
@@ -18,9 +18,8 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [CLI (`ocpp-cp-sim`)](entities/cli.md)                        | Headless Bun binary — REPL, JSON Lines, daemon launcher, client modes, install / packaging, `export-k6`, full flag reference        |
 | [analyze subcommand](entities/analyze.md)                     | DebugKit failure-pattern reports from a trace file or a live daemon; per-CP / per-connector splitting; excluded records; disclaimer |
 | [Daemon (server mode)](entities/daemon.md)                    | Long-lived multi-CP process: starting, flags, HTTP surfaces, health endpoint, `--watch` file hot-reload, security posture, limits   |
-| [Web console](entities/web-console.md)                        | React browser UI at `/`, `/v3`, `/v1`; Local vs Remote; what it can do; dev commands                                                |
+| [Web console](entities/web-console.md)                        | React browser UI at `/` and `/v3`; Local vs Remote; what it can do; dev commands                                                    |
 | [Desktop app (Tauri)](entities/desktop-app.md)                | Tauri bundle running the daemon as a sidecar; installers per OS; state location; dev/build                                          |
-| [Legacy v1 UI](entities/legacy-v1-ui.md)                      | Original single-page UI at `/v1`; URL-hash presets; experimental multi-charger mode                                                 |
 | [Docker image](entities/docker-image.md)                      | `ghcr.io/shiv3/ocpp-cp-simulator`: tags, `/data` volume, compose variables, structured logs, custom health path                     |
 | [MCP endpoint](entities/mcp-endpoint.md)                      | `POST /mcp` tools-only MCP server: 21 curated + 3 network-sim tools, `list_methods` / `call_method`, limits                         |
 | [Built-in scenario templates](entities/scenario-templates.md) | Six general templates + 47 `cert16-*` certification templates + OCTT probe; where they are used; instance semantics                 |

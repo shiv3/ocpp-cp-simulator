@@ -286,7 +286,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     useState<ScenarioExecutionState>("idle");
   // executionMode is no longer surfaced — scenarios always run one-shot.
   // We keep a no-op setter so the existing call sites (which still pass a
-  // ScenarioExecutionMode through ScenarioExecutor / ScenarioControlPanel)
+  // ScenarioExecutionMode through ScenarioExecutor)
   // continue to compile without surgery.
   const setExecutionMode = (_mode: ScenarioExecutionMode): void => {
     /* no-op */

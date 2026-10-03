@@ -6,7 +6,6 @@ import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import type { EVSettings } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import { DefaultBootNotification } from "../../cp/domain/types/OcppTypes";
-import { UnsupportedFeatureError } from "../interfaces/UnsupportedFeatureError";
 import { LocalChargePointService } from "./LocalChargePointService";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
 
@@ -202,8 +201,8 @@ describe("LocalChargePointService A1.1d port methods", () => {
 
     const loaded: ScenarioDefinition[][] = [];
     const manager = {
-      loadScenarios: vi.fn((definitions: ScenarioDefinition[]) => {
-        loaded.push(definitions);
+      setScenario: vi.fn((definition: ScenarioDefinition) => {
+        loaded.push([definition]);
       }),
       executeScenario: vi.fn().mockResolvedValue(undefined),
       destroy: vi.fn(),
@@ -245,23 +244,12 @@ describe("LocalChargePointService A1.1d port methods", () => {
     expect(manager.continueWait).toHaveBeenCalledWith("s1");
   });
 
-  it("rejects a wait control when the browser executor is unavailable (#240)", async () => {
+  it("rejects a wait control on a scenario that is not running (#240)", async () => {
     const setup = await serviceWithChargePoint();
     service = setup.service;
 
     await expect(
       service.continueScenarioWait("CP-PORT", 1, "s1"),
-    ).rejects.toThrow("Scenario manager not available");
-  });
-
-  it("rejects runScenarioTemplate when the browser executor is unavailable", async () => {
-    const setup = await serviceWithChargePoint();
-    service = setup.service;
-
-    await expect(
-      service.runScenarioTemplate("CP-PORT", "essential-cp-behavior", {
-        connectorId: 1,
-      }),
-    ).rejects.toBeInstanceOf(UnsupportedFeatureError);
+    ).rejects.toThrow("Scenario s1 is not running");
   });
 });

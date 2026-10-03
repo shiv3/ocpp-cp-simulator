@@ -1494,8 +1494,8 @@ export class ChargePoint {
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
     // restart something already running. That arm must not survive the socket
     // dying: both auto-start engines (CLIChargePointService.
-    // tryAutoStartForConnector for the daemon, the useEffect in
-    // src/components/Connector.tsx for browser local mode) gate on the key, so
+    // tryAutoStartForConnector for the daemon, LocalScenarioRuntime for
+    // browser local mode) gate on the key, so
     // a stale arm means the scenario never re-fires after a reconnect. In the
     // daemon that silently kills a CLI-bootstrapped RemoteStart responder --
     // the CP reconnects and boots, but nothing answers RemoteStartTransaction

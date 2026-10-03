@@ -1388,3 +1388,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#scenario-editor-steps-and-graph): new section — the **Steps | Graph** toggle (`view=` in the URL), branching and looping scenarios open in the graph view, both views edit one definition saved by the page's Save. The `/v2` list of classic-only features loses the graph editor and gains a scenario's description and EV settings, which the console does not edit yet.
 - [GitHub issues](sources/github-issues.md): #411 row.
 - Mechanism: `ScenarioEditPage` lazy-loads the classic `ScenarioEditor` with a new `embedded` prop: hydrated once, no autosave, no own Save / settings / import / export / run controls, the node panel's button reads **Apply**, and each graph edit is reported through `onGraphChange` — not the opening, nor its drop of orphan edges (edges to a missing node), so opening a scenario never leaves the page with unsaved changes. The step list's read-only mode is gone (a non-linear scenario never reaches it). The jsdom `ResizeObserver` mock now reports a `contentRect`, which xyflow's pane reads.
+
+## [2026-10-02] ingest | delete a charge point from the web console (#415)
+
+- [Web console](entities/web-console.md#charge-point-page): new _Charge point page_ section — the header's **Delete** (confirmation, `cp.delete` in Remote mode, the saved configuration in Local mode, back to the dashboard). The `/v2` list of classic-only features no longer has it.
+- [GitHub issues](sources/github-issues.md): #415 row.
+- Mechanism: `useCpConfigActions.removeCp` resolves whether the charge point is gone, and in Local mode refuses a charge point that is not in the loaded configuration, so a removal before the configuration has loaded cannot save an empty one.

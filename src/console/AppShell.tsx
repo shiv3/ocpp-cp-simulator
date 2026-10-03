@@ -12,6 +12,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useDataContext } from "../data/providers/DataProvider";
 import { useServerInfo } from "../data/hooks/useServerInfo";
+import {
+  REMOTE_HEALTH_TEXT,
+  useRemoteHealth,
+  type RemoteHealth,
+} from "../data/hooks/useRemoteHealth";
 import ThemeToggle from "../components/ThemeToggle";
 import AppBuildInfo from "../components/AppBuildInfo";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
@@ -61,10 +66,17 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+const HEALTH_DOT: Record<RemoteHealth, string> = {
+  checking: "bg-amber-400 animate-pulse",
+  ok: "bg-emerald-500",
+  down: "bg-red-500 animate-pulse",
+};
+
 const AppShell: React.FC = () => {
   const location = useLocation();
   const { mode, serverUrl } = useDataContext();
   const serverInfo = useServerInfo();
+  const health = useRemoteHealth();
   const isRemote = mode === "remote";
 
   return (
@@ -110,8 +122,32 @@ const AppShell: React.FC = () => {
 
           <div className="space-y-2 border-t border-gray-200 p-3 dark:border-gray-800">
             <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span
+                data-testid="mode-indicator"
+                title={
+                  isRemote
+                    ? `${serverUrl} — ${REMOTE_HEALTH_TEXT[health].reason}`
+                    : "Local mode: the simulator runs in this browser"
+                }
+                className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+              >
+                {/* Remote: the daemon connection (#423). Local mode has no
+                    daemon, so its dot carries no status. */}
+                {isRemote ? (
+                  <span
+                    role="status"
+                    aria-label={REMOTE_HEALTH_TEXT[health].aria}
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      HEALTH_DOT[health],
+                    )}
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                  />
+                )}
                 {isRemote ? "Remote mode" : "Local mode"}
               </span>
               <ThemeToggle />

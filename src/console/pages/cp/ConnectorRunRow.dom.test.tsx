@@ -89,7 +89,9 @@ const scenarioDefinitionFixture: ScenarioDefinition = {
   updatedAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
 };
 
-describe("ActiveScenarioPanel", () => {
+const RUN_ROW = '[data-testid="connector-run-row"]';
+
+describe("ConnectorRunRow", () => {
   let cleanup: (() => Promise<void>) | null = null;
 
   beforeAll(() => {
@@ -152,19 +154,16 @@ describe("ActiveScenarioPanel", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    // Panel should exist and show the scenario name
-    expect(container.textContent).toContain("Active scenarios");
+    // The row sits under the selected connector and shows the scenario name
+    expect(container.querySelector(RUN_ROW)).toBeTruthy();
     expect(container.textContent).toContain("Cert probe");
 
     // Waiting badge should be visible
     expect(container.textContent).toContain("waiting");
 
-    // Connector info visible
-    expect(container.textContent).toContain("Connector #1");
-
-    // Current step info visible
+    // Current step: label and k/N
     expect(container.textContent).toContain("Wait for remote start");
-    expect(container.textContent).toContain("1/2 steps");
+    expect(container.textContent).toContain("1/2");
 
     // Waiting expectation details
     expect(container.textContent).toContain("Waiting for");
@@ -210,8 +209,9 @@ describe("ActiveScenarioPanel", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    // Panel should not be visible when there are no active scenarios
-    expect(container.textContent).not.toContain("Active scenarios");
+    // No row when there are no active scenarios
+    expect(container.querySelector(RUN_ROW)).toBeNull();
+    expect(container.textContent).not.toContain("Inactive scenario");
   });
 
   it("shows running state badge correctly", async () => {
@@ -491,10 +491,10 @@ describe("ActiveScenarioPanel", () => {
     const { container, root } = await renderConsole("/cp/CP-1", { service });
     cleanup = () => unmount(root);
     await flush();
-    expect(container.textContent).toContain("Active scenarios");
+    expect(container.querySelector(RUN_ROW)).toBeTruthy();
     const settledCalls = listScenarios.mock.calls.length;
 
-    // Force parent page re-renders via status events. CpDetailPage passes a
+    // Force parent page re-renders via status events. CpDetailContent passes a
     // freshly-mapped connectorIds array on every render; the hook must key
     // its fetch effect on the array's content, not its identity, or each
     // re-render refetches (the loop this test pins down).
@@ -528,6 +528,60 @@ describe("ActiveScenarioPanel", () => {
     });
     await flush();
     expect(listScenarios.mock.calls.length).toBe(settledCalls + 1);
+  });
+
+  it("shows only the runs of the selected connector, whichever connector the run is on", async () => {
+    const cp = snapshot({
+      id: "CP-1",
+      status: OCPPStatus.Available,
+      connectors: [connector({ id: 1 }), connector({ id: 2 })],
+    });
+    // The scenario of connector 2 only is running.
+    const listScenarios = vi.fn(async (_cpId: string, connectorId: number) =>
+      connectorId === 2
+        ? [{ scenarioId: "s2", name: "Second probe", active: true }]
+        : [],
+    );
+    const getScenarioStatus = vi.fn(
+      async (): Promise<ScenarioExecutionContext | null> => ({
+        scenarioId: "s2",
+        state: "running" as const,
+        mode: "oneshot" as const,
+        currentNodeId: "n1",
+        executedNodes: ["n1"],
+        loopCount: 0,
+        runId: "run-2",
+        currentNodeStartedAt: Date.now(),
+      }),
+    );
+    const service = createFakeChargePointService({
+      snapshots: [cp],
+      listScenarios,
+      getScenarioStatus,
+      getScenario: vi.fn(async () => scenarioDefinitionFixture),
+      getStateHistory: vi.fn(async () => []),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    // Connector 1 is selected by default: nothing runs there.
+    expect(container.querySelector(RUN_ROW)).toBeNull();
+    expect(container.textContent).not.toContain("Second probe");
+
+    const tab2 = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        '[role="tablist"][aria-label="Connectors"] [role="tab"]',
+      ),
+    ).find((t) => t.textContent?.trim() === "#2");
+    await act(async () => {
+      tab2!.click();
+    });
+    await flush();
+
+    expect(container.querySelector(RUN_ROW)).toBeTruthy();
+    expect(container.textContent).toContain("Second probe");
   });
 
   describe("wait controls (#240)", () => {

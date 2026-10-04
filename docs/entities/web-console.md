@@ -171,6 +171,7 @@ in the URL, so a reload or a shared link reopens it:
 | ------------------------- | ------------------------------------------------------------- |
 | `/?cp=<id>`               | The list with that charge point open in the panel.            |
 | `/?cp=<id>&connector=<n>` | The same, on connector `n` (a connector cell or row sets it). |
+| `/?cp=<id>&tab=<section>` | The same, with a **More** section in the lower half.          |
 | `/cp/<id>?connector=<n>`  | The full page, reached from **Open as full page**.            |
 
 - **Open, swap, toggle.** Opening from a closed list adds one history entry.
@@ -212,35 +213,70 @@ points. Failed: CP-2 (not connected).` The TagIDs come from **Settings**.
 
 ### Charge point page
 
-The charge point page (`/cp/:id`) has a header with **Scenarios**, **Edit
-config**, **Connect** / **Disconnect** and **Delete**, a **Charge point** panel,
-the connector cards, the **Active scenarios** panel, and tabs (transactions,
-message log, session analysis, configuration, state diagram, expert calls).
-The same content is what the list's [side panel](#dashboard) shows. The
-optional `?connector=<n>` parameter names the selected connector: it is kept
-across the full page and the panel, and the state diagram tab opens on it.
-Choosing another connector there updates the parameter (replacing the history
-entry).
+The charge point page (`/cp/:id`) is one column, top to bottom:
 
-**Delete** (#415) asks for a confirmation, removes the charge point and goes
-back to the dashboard. In Remote mode it calls `cp.delete`, which also deletes
+- **Header.** The charge point id, its status, a network-simulation badge when
+  it is on, and the OCPP version with the security profile (`OCPP-1.6J · SP2`);
+  the WebSocket URL under it. The actions, in order: **Config**, **Connect** /
+  **Disconnect**, and **More** (a `…` button), then **Open as full page** and
+  **Close** in the side panel.
+- **Config**, when on (`aria-expanded`, highlighted), opens an inline form in
+  a card under the header: the same fields and checks as the Add / Configure
+  dialog (both are `ChargePointConfigForm`), with the charge point id locked.
+  **Save** updates the charge point (`cp.update` in Remote mode, the saved
+  configuration in Local mode), re-reads it and closes the form; if the save
+  fails the form stays open. **Cancel** closes it. In Remote mode a SOAP charge
+  point's form shows the effective SOAP callback URL under the field, with a
+  **Copy** button and, when it was derived from the daemon's tunnel, a note that
+  it may change between daemon runs (#183).
+- **Charge point (connector 0)**, one compact row (below).
+- **Connector tabs**: a strip of `#1`, `#2`, … buttons (`role="tablist"`,
+  each tab `aria-selected`), each with a dot in the connector's status color.
+  The arrow keys, Home and End move the selection. Under the strip, the
+  selected connector's card and, when a scenario run is live on that
+  connector, its **run row** (below). A charge point without connectors shows
+  **No connectors** instead.
+- **The lower half**: the message log, or a section picked in **More**.
+
+The same content is what the list's [side panel](#dashboard) shows. Two URL
+parameters keep the view across the full page and the panel:
+
+| Parameter        | Meaning                                                                                                                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?connector=<n>` | The selected connector. Absent, or naming a connector the charge point does not have (for example a removed one), the first connector is selected. Choosing a tab replaces the history entry.             |
+| `?tab=<section>` | The lower half: `transactions`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes. |
+
+**More** lists, in this order: **Message log**, **Transactions**, **Session
+analysis**, **Diagnostics**, **Expert**, **Network simulation** (only when the
+charge point has network simulation, that is, its snapshot's `networkSim` is
+not `null`), **Scenarios** (a link to `/scenarios?cp=<id>`), and, after a
+separator, **Delete** (red). Picking a section sets `?tab=` (replacing the
+history entry) and swaps the lower half; the section's heading row has a
+**← Message log** link back. **Diagnostics** is the state transition diagram
+(Local mode only; its connector select starts on the selected connector).
+
+**Delete** (#415), the last item of **More**, asks for a confirmation, removes
+the charge point and goes back to the dashboard (from the side panel, it closes
+the panel). In Remote mode it calls `cp.delete`, which also deletes
 the charge point's persisted rows ([Control plane](../concepts/control-plane.md));
 in Local mode it drops the charge point from the saved configuration. In Local
 mode it refuses while that configuration has not loaded, instead of saving one
 without any charge point. On a failure the page stays open and says why.
 
-The **Charge point (connector 0)** panel (#420) has the charge-point-level
+The **Charge point (connector 0)** row (#420) has the charge-point-level
 calls of the classic charge point card, disabled while the charge point is
 disconnected: the Heartbeat interval and when the last one was sent, with
 **Send Heartbeat**; **Authorize** with a TagID from **Settings**; and **Send
 status**, a StatusNotification for connector 0 (`Available`, `Unavailable` or
 `Faulted`, the last with an error code, §7.6). A failed call shows its error in
-the panel.
+the row.
 
 Each connector card shows:
 
-- the status, the availability (`Operative` / `Inoperative`, set by
-  ChangeAvailability, #422), the transaction, the energy and the SoC;
+- the status, and the key figures as small uppercase labels over values:
+  **Meter** (kWh), **SoC**, **Transaction** (`#<id>` and its TagID, or `—`) and
+  **Availability** (`Operative` / `Inoperative`, set by ChangeAvailability,
+  #422);
 - a collapsed **Charging profiles (n)** list (#422): each profile's purpose,
   kind, stack level and schedule periods. The profile in effect is marked
   **Current**, and a profile whose every limit is 0 is marked **Paused**. The
@@ -285,8 +321,23 @@ once, and saves it for the connector. The saved copy is only read back by this
 editor: a restart does not restore it into the connector. The classic side
 panel had the same editor wired, but no button opened it.
 
-The **Message Log** tab (#421) shows the charge point's entries from the
-console's log buffer:
+The **run row** under a connector's card shows the scenario run executing or
+parked on that connector: its state, the scenario name, the current step and
+`k/N`, the elapsed time, **Stop**, and the **Open run** link; while the run is
+waiting, what it waits for with the wait controls (see
+[Scenario editor](#scenario-editor-steps-and-graph)). There is no row without a
+live run, and the runs are read once for the whole page and filtered by
+connector.
+
+The **lower half** (#421, #405) shows, by default, the charge point's **Message
+Log** from the console's log buffer: a heading row with the entry count and
+**Open in Message Log →**, a link to `/logs?cp=<id>` (the id URL-encoded); under
+it a compact list, one line per message: the time, `↑` (sent) or `↓`
+(received), the OCPP action and the payload, truncated (hover for the whole
+line). A response names the action of the call it answers. The newest line is at
+the bottom and the list follows it until the reader scrolls up; it draws the
+latest 500 lines (the Message Log page has the rest). It is at most 340 px tall
+in the side panel, and 70% of the window on the full page. The heading row has:
 
 - **Download** saves every persisted log row of the charge point as JSON
   Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
@@ -296,10 +347,16 @@ console's log buffer:
   Remote mode). Before #421 the console's **Clear screen + DB** left the
   persisted rows in place.
 
+The searchable, filterable log viewer (`LogViewer`) is the run console's;
+its toolbar wraps instead of clipping when it is narrow (#405).
+
 The global **Message log** page (`/logs`) has the same **Download**, for the
 charge point picked in its filter or for all of them in one file
 (`ocpp-logs-all-<timestamp>.jsonl`). It downloads the persisted rows, not the
-filtered lines on screen.
+filtered lines on screen. Its charge point filter is `?cp=<id>`: the page opens
+with that charge point preselected (the link from the charge point page), and
+picking one writes the parameter back (replacing the history entry); **All
+charge points** removes it.
 
 ### Scenario editor: steps and graph
 
@@ -333,8 +390,9 @@ not an edit: an edge to a missing node is hidden there, and leaves the saved
 definition only with the first save after a graph edit. Before #411 a branching
 scenario opened read-only, with a link to the classic UI's graph editor.
 
-In the console, a charge point's **Active scenarios** panel lists the runs executing
-or parked on its connectors, and its **Open run** link opens the scenario's run
+In the console, a connector's **run row** (under its card on the
+[charge point page](#charge-point-page)) shows the run executing or parked on
+it, and its **Open run** link opens the scenario's run
 console (`/scenarios/run?cp=…&connector=…&id=…&run=<runId>`). The run
 console **attaches** to a run that is already live in the runtime rather than
 showing a fresh idle state: it hydrates the state (`running` / `waiting` / …),
@@ -345,7 +403,7 @@ started elsewhere while the page is open (for example an auto-start trigger)
 is attached the same way. When `run=` names a run that has ended or been
 superseded, a banner says so (daemon only — local mode mints no runId) (#366).
 
-While a run is `waiting`, the panel and the run console both offer **+30 s**
+While a run is `waiting`, the run row and the run console both offer **+30 s**
 (only when the wait has a timeout), **Retry** and **Continue** beside the
 waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#controls-on-a-parked-wait),
 #240). The countdown follows the runtime's `waitDeadlineAt`, so an extension
@@ -353,14 +411,14 @@ shows at once, and a control the runtime refuses is shown inline instead of
 being dropped. In Remote mode every open console re-reads the run on
 `scenario_wait_changed`, not only the one that acted.
 
-A charge point's **Expert** tab sends an
+A charge point's **Expert** section (**More → Expert**) sends an
 [expert OCPP call](../concepts/expert-ocpp-calls.md) (#389): pick any
 station-initiated action of the CP's OCPP-J version, edit the JSON payload —
 pre-filled with the smallest schema-valid one, **Reset to default** restores
 it — and **Send**. The schema check runs as you type; a schema-invalid payload
 is sent only with **Skip schema validation** ticked, and text that is not a
 JSON object never is. **Apply the answer to the station's state** is off by
-default. The tab shows the frame as sent and the CALLRESULT or CALLERROR, or
+default. The section shows the frame as sent and the CALLRESULT or CALLERROR, or
 why the call was refused; a SOAP CP gets a notice instead of the form. It
 works in both modes.
 
@@ -417,7 +475,7 @@ where the classic UI nested them in panels.
   In Remote mode, when the daemon holds a SOAP public base (`--soap-tunnel
 ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
   create / edit form — the derived value is previewed — and the charge point's
-  Configuration tab shows the effective URL with a **Copy** button, the value
+  **Config** form shows the effective URL with a **Copy** button, the value
   to register in the CSMS (#183).
 - Author, import and export scenarios in the node-graph
   [scenario format](../concepts/scenario-format.md); load the built-in

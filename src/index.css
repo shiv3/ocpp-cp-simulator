@@ -149,21 +149,55 @@
     outline-offset: 2px;
   }
 
-  /* Let the browser draw native form controls (checkbox, radio, etc.) in
-     dark mode so their default "white box" doesn't blend into the dark
-     surface. Combined with accent-color this gives a visible unchecked
-     state plus a clearly-coloured checked state. */
+  /* Native form controls follow the theme: a dark scheme makes the browser
+     draw an unchecked checkbox as a dark box instead of a bright white one
+     (the Connected / Scenario filters, the Enabled checkbox). */
+  :root {
+    color-scheme: light;
+  }
+
   .dark {
     color-scheme: dark;
   }
 
+  /* The scheme is also set on the controls themselves: a control inherits it,
+     but a stylesheet that sets it on a wrapper must not bring the white box
+     back. accent-color is the console's primary blue for the checked state. */
   input[type="checkbox"],
   input[type="radio"] {
-    accent-color: hsl(var(--primary));
+    accent-color: var(--cx-primary);
+    color-scheme: light;
+  }
+
+  .dark input[type="checkbox"],
+  .dark input[type="radio"] {
+    color-scheme: dark;
+  }
+
+  /* 14px next to 13px text; the browser default (13px, 3px margin) floats. */
+  input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
   }
 }
 
 @layer components {
+  /* The filter bars' native selects (filterStyles.ts): the browser's own
+     chevron is missing or too faint on a restyled select in dark mode, so every
+     select draws the same one. The stroke is the --cx-muted of each theme
+     (a data URI cannot read a CSS variable). */
+  .cx-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2370707a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 10px 6px;
+  }
+
+  .dark .cx-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2385858f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+
   /* Card components */
   .card {
     @apply bg-white dark:bg-gray-800 shadow-md rounded-lg transition-colors;
@@ -295,15 +329,6 @@
 
   .log-level-error {
     @apply text-red-800 dark:text-red-200;
-  }
-
-  /* Form styles of the charge point dialog */
-  .logger-label {
-    @apply dark:text-gray-200;
-  }
-
-  .logger-input {
-    @apply dark:bg-gray-700 dark:text-white dark:border-gray-600;
   }
 }
 

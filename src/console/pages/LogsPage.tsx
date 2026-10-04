@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -86,11 +87,30 @@ const LogsPage: React.FC = () => {
   const { entries, paused, setPaused, clear } = useGlobalLogs();
   const { chargePointService } = useDataContext();
 
-  const [cpFilter, setCpFilter] = useState("all");
+  // The charge point filter lives in the URL (`?cp=`; absent = all), so the
+  // charge point page can link here with its own messages preselected and a
+  // reload keeps the choice. The other filters stay local.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const cpFilter = searchParams.get("cp") ?? "all";
+  const setCpFilter = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "all") next.delete("cp");
+    else next.set("cp", value);
+    setSearchParams(next, { replace: true });
+  };
   const [typeFilter, setTypeFilter] = useState("all");
   const [levelFilter, setLevelFilter] = useState("all");
   const [textFilter, setTextFilter] = useState("");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
+
+  // An id from the URL stays selectable before the list arrives (remote mode
+  // learns its charge points from registry events) and when none has it.
+  const cpFilterIds = useMemo(() => {
+    const ids = chargePoints.map((cp) => cp.id);
+    return cpFilter !== "all" && !ids.includes(cpFilter)
+      ? [...ids, cpFilter]
+      : ids;
+  }, [chargePoints, cpFilter]);
 
   const filtered = useMemo(() => {
     const query = textFilter.trim().toLowerCase();
@@ -166,9 +186,9 @@ const LogsPage: React.FC = () => {
           aria-label="Filter by charge point"
         >
           <option value="all">All charge points</option>
-          {chargePoints.map((cp) => (
-            <option key={cp.id} value={cp.id}>
-              {cp.id}
+          {cpFilterIds.map((id) => (
+            <option key={id} value={id}>
+              {id}
             </option>
           ))}
         </select>

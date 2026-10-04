@@ -7,6 +7,7 @@ import {
   createFakeChargePointService,
   renderConsole,
   type FakeChargePointService,
+  type ReportedLocation,
 } from "../test/harness";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import type {
@@ -147,6 +148,78 @@ describe("LogsPage", () => {
     });
     expect(container.textContent).toContain("1 shown · 2 total");
     expect(container.textContent).not.toContain("BootNotification accepted");
+  });
+
+  describe("?cp= (charge point filter in the URL)", () => {
+    async function mountWithLogs(path: string) {
+      const cpA = snapshot("CP-A");
+      const cpB = snapshot("CP-B");
+      const service = createFakeChargePointService({ snapshots: [cpA, cpB] });
+      const locations: ReportedLocation[] = [];
+
+      const { container, root } = await renderConsole(path, {
+        service,
+        onLocationChange: (next) => locations.push(next),
+      });
+      cleanup = () => unmount(root);
+      await flush();
+      await pushRegistrySnapshot(service, [cpA, cpB]);
+      await flush();
+      for (const [cpId, message] of [
+        ["CP-A", "message of A"],
+        ["CP-B", "message of B"],
+      ] as const) {
+        await pushEvent(service, cpId, {
+          type: "log",
+          entry: {
+            timestamp: new Date("2026-01-01T10:00:00.000Z"),
+            level: LogLevel.INFO,
+            type: LogType.OCPP,
+            message,
+          },
+        });
+      }
+      const cpSelect = container.querySelector(
+        'select[aria-label="Filter by charge point"]',
+      ) as HTMLSelectElement;
+      return { container, cpSelect, locations };
+    }
+
+    async function choose(select: HTMLSelectElement, value: string) {
+      await act(async () => {
+        select.value = value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    it("/logs?cp=CP-A preselects CP-A in the filter and lists only its messages", async () => {
+      const { container, cpSelect } = await mountWithLogs("/logs?cp=CP-A");
+
+      expect(cpSelect.value).toBe("CP-A");
+      expect(container.textContent).toContain("1 shown · 2 total");
+      expect(container.textContent).toContain("message of A");
+      expect(container.textContent).not.toContain("message of B");
+    });
+
+    it("writes the filter back to the URL (replace); All charge points removes the param", async () => {
+      const { container, cpSelect, locations } = await mountWithLogs("/logs");
+      expect(container.textContent).toContain("2 shown · 2 total");
+
+      await choose(cpSelect, "CP-B");
+      expect(locations.at(-1)?.search).toBe("?cp=CP-B");
+      expect(locations.at(-1)?.type).toBe("REPLACE");
+      expect(container.textContent).toContain("1 shown · 2 total");
+
+      await choose(cpSelect, "all");
+      expect(locations.at(-1)?.search).toBe("");
+      expect(container.textContent).toContain("2 shown · 2 total");
+    });
+
+    it("an id from the URL that no charge point has stays selectable", async () => {
+      const { cpSelect } = await mountWithLogs("/logs?cp=CP-gone");
+
+      expect(cpSelect.value).toBe("CP-gone");
+    });
   });
 
   it("Pause stops new events from appearing; Clear empties the list", async () => {

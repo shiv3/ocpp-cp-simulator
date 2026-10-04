@@ -6,6 +6,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
+  findMenuItem,
+  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -57,29 +59,15 @@ function snapshot(id: string): ChargePointSnapshot {
   return { id, status: OCPPStatus.Available, error: "", connectors: [] };
 }
 
-function tabTrigger(
-  container: HTMLElement,
-  label: string,
-): HTMLElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>('[role="tab"]'),
-  ).find((el) => el.textContent?.trim() === label);
-}
-
 async function openAnalysisTab(container: HTMLElement): Promise<void> {
-  const trigger = tabTrigger(container, "Session Analysis");
-  expect(trigger, "expected a Session Analysis tab").toBeTruthy();
-  // Radix's TabsTrigger switches on `onMouseDown`, not `onClick` -- plain
-  // `.click()` only dispatches a "click" event, so it never activates it
-  // (mirrors the dropdown-trigger workaround in CpDetailPage.dom.test.tsx).
+  // The section lives in the charge point page's More menu (`?tab=analysis`).
+  const more = container.querySelector<HTMLElement>('[aria-label="More"]');
+  expect(more, "expected the More button").toBeTruthy();
+  await openDropdownMenu(more!);
+  const item = findMenuItem("Session analysis");
+  expect(item, "expected a Session analysis item").toBeTruthy();
   await act(async () => {
-    trigger!.dispatchEvent(
-      new MouseEvent("mousedown", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-      }),
-    );
+    item!.click();
     await Promise.resolve();
   });
   // The panel is a lazy chunk (`import("./cp/SessionAnalysisPanel")`) that
@@ -222,7 +210,7 @@ describe("SessionAnalysisPanel", () => {
     }
   });
 
-  it("shows the Session Analysis tab (alongside the existing tabs) in idle state with the disclaimer and an Analyze button", async () => {
+  it("offers Session analysis in the More menu; it opens in idle state with the disclaimer and an Analyze button", async () => {
     const service = makeService({
       snapshots: [snapshot("CP-1")],
       listStoredLogs: vi.fn(async () => []),
@@ -231,17 +219,11 @@ describe("SessionAnalysisPanel", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    const labels = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).map((el) => el.textContent?.trim());
-    expect(labels).toEqual([
-      "Transactions",
-      "Message Log",
-      "Session Analysis",
-      "Configuration",
-      "Diagnostics",
-      "Expert",
-    ]);
+    // Not a tab any more: the message log is the lower half until picked.
+    expect(
+      container.querySelector('[data-testid="cp-message-log"]'),
+    ).toBeTruthy();
+    expect(container.textContent).not.toContain(ANALYZE_DISCLAIMER);
 
     await openAnalysisTab(container);
 

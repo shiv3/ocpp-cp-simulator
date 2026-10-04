@@ -375,6 +375,22 @@ describe("DashboardPage views and filters", () => {
     expect(container.querySelector('[data-cp-id="CP-A"]')).toBeNull();
   });
 
+  it("the Status and OCPP version selects share one class, the one that draws the chevron", async () => {
+    const { container } = await mount("/");
+    const status = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Status"]',
+    )!;
+    const version = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="OCPP version"]',
+    )!;
+
+    // jsdom paints nothing, so the class is the guard: `cx-select` (index.css)
+    // is what draws the chevron, and identical classes mean the same height
+    // and padding. The "Any version" select once showed no chevron.
+    expect(version.className).toBe(status.className);
+    expect(version.classList.contains("cx-select")).toBe(true);
+  });
+
   it("typing in the charge point combobox and pressing Enter sets ?q=", async () => {
     const { container } = await mount("/");
     const input = container.querySelector<HTMLInputElement>(

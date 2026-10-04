@@ -672,9 +672,10 @@ export function LogViewer({
        *  whole page) wider instead of scrolling inside its own container
        *  (#178 2.1). */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <div className="flex justify-between items-center p-3 border-b bg-muted/50">
-          <div className="flex items-center gap-3">
+        {/* Top Bar. Wraps instead of clipping when the viewer is narrow, as
+         *  in the charge point side panel (#405). */}
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 border-b bg-muted/50">
+          <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               Logs
             </h3>
@@ -682,7 +683,7 @@ export function LogViewer({
               {logs.length} total / {filteredLogs.length} filtered
             </Badge>
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
               <Checkbox
                 checked={autoScroll}
@@ -690,7 +691,7 @@ export function LogViewer({
               />
               Auto-scroll
             </label>
-            <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               {onDownload && (
                 <Button
                   size="sm"

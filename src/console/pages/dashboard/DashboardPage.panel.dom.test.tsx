@@ -164,7 +164,7 @@ describe("DashboardPage side panel", () => {
     const panel = panelOf(container);
     expect(panel, "expected the side panel").toBeTruthy();
     expect(panel!.querySelector("h2")?.textContent).toBe("CP-A");
-    expect(buttonByText(panel!, "Edit config")).toBeTruthy();
+    expect(buttonByText(panel!, "Config")).toBeTruthy();
     expect(location?.pathname).toBe("/");
     expect(location?.search).toBe("?cp=CP-A");
     expect(rowOf(container, "CP-A").getAttribute("data-selected")).toBe("true");
@@ -210,6 +210,18 @@ describe("DashboardPage side panel", () => {
     expect(panelOf(container)).toBeNull();
     expect(location?.search).toBe("");
     expect(locations.at(-1)?.type).toBe("REPLACE");
+  });
+
+  it("swapping to another charge point drops ?tab=, selecting a connector on the same one keeps it", async () => {
+    const { container } = await mount("/?cp=CP-A&tab=transactions");
+
+    // Same charge point, another connector: the section stays.
+    await click(container.querySelector('[data-connector-cell="CP-A#2"]')!);
+    expect(location?.search).toBe("?cp=CP-A&tab=transactions&connector=2");
+
+    // Another charge point opens on its message log.
+    await click(rowOf(container, "CP-B"));
+    expect(location?.search).toBe("?cp=CP-B");
   });
 
   it("the close button closes the panel", async () => {

@@ -95,13 +95,13 @@ const AutoMeterButton: React.FC<AutoMeterButtonProps> = ({
         type="button"
         variant="outline"
         size="sm"
-        className="w-full text-xs"
+        className="text-xs"
         onClick={() => void open()}
       >
         Auto meter values
       </Button>
       {error && (
-        <p role="alert" className="text-xs text-cx-rose">
+        <p role="alert" className="basis-full text-xs text-cx-rose">
           {error}
         </p>
       )}

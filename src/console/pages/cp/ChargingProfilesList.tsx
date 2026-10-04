@@ -24,14 +24,12 @@ const ChargingProfilesList: React.FC<ChargingProfilesListProps> = ({
   const shown = profiles.length > 0 ? profiles : current ? [current] : [];
 
   return (
-    <details
-      data-testid="charging-profiles"
-      className="rounded-md bg-cx-sub text-xs"
-    >
-      <summary className="cursor-pointer select-none px-2 py-1.5 font-medium text-cx-fg2">
+    <details data-testid="charging-profiles" className="text-xs">
+      {/* Styled as the card's other key-figure labels; the list opens below. */}
+      <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[0.06em] text-cx-faint hover:text-cx-fg2">
         Charging profiles ({shown.length})
       </summary>
-      <div className="space-y-2 px-2 pb-2">
+      <div className="mt-2 space-y-2">
         {shown.length === 0 ? (
           <p className="text-cx-muted">
             No charging profile: the connector charges at its unrestricted rate
@@ -48,7 +46,7 @@ const ChargingProfilesList: React.FC<ChargingProfilesListProps> = ({
               <div
                 key={profile.chargingProfileId}
                 data-profile-id={profile.chargingProfileId}
-                className="rounded border border-cx-border bg-cx-card p-2"
+                className="rounded-md border border-cx-border bg-cx-sub p-2"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-cx-fg">

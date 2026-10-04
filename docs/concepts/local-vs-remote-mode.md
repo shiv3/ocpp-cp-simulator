@@ -12,7 +12,7 @@ related:
   - ../entities/docker-image.md
   - state-persistence.md
   - control-plane.md
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 # Local vs Remote mode (browser)
@@ -48,7 +48,7 @@ overridden.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
 - [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the
-  console's Expert tab calls the in-tab charge point in Local mode and
+  console's Expert section calls the in-tab charge point in Local mode and
   `send_ocpp_call` on the daemon in Remote mode, which is also the method the
   MCP tool and JSON-Lines mode use.
 - Scenarios run in both modes without depending on which page is open. In

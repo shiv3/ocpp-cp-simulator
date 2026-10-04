@@ -12,11 +12,13 @@ import { useConnectorView } from "@/data/hooks/useConnectorView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { formatEnergyKwh, formatSoc } from "@/lib/connectorFormat";
+import { cn } from "@/lib/utils";
 import {
   ALL_CHARGE_POINT_ERROR_CODES,
   OCPPStatus,
 } from "@/cp/domain/types/OcppTypes";
 
+import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import StatusPill from "../../components/StatusPill";
 import AutoMeterButton from "./AutoMeterButton";
 import ChargingProfilesList from "./ChargingProfilesList";
@@ -45,6 +47,21 @@ const STATUS_OPTIONS: OCPPStatus[] = [
 // A fault has an error to report (§7.6), as in the classic side panel.
 const FAULT_ERROR_CODES = ALL_CHARGE_POINT_ERROR_CODES.filter(
   (code) => code !== "NoError",
+);
+
+/** One key figure of the card: a small uppercase label over a 16px value. */
+const KeyFigure: React.FC<{ label: string; children: React.ReactNode }> = ({
+  label,
+  children,
+}) => (
+  <div>
+    <dt className="text-[11px] uppercase tracking-[0.06em] text-cx-faint">
+      {label}
+    </dt>
+    <dd className="mt-0.5 text-base font-medium tabular-nums text-cx-fg">
+      {children}
+    </dd>
+  </div>
 );
 
 /**
@@ -154,26 +171,26 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
   return (
     <div
       data-connector-id={connectorId}
-      className="flex flex-col rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4"
+      className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-cx-fg">
-          Connector {connectorId}
-        </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-cx-fg">
+            Connector {connectorId}
+          </span>
           <StatusPill status={view.status} />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-cx-muted hover:text-cx-rose"
-            aria-label={`Remove connector ${connectorId}`}
-            title="Remove connector"
-            onClick={() => void handleRemove()}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-cx-muted hover:text-cx-rose"
+          aria-label={`Remove connector ${connectorId}`}
+          title="Remove connector"
+          onClick={() => void handleRemove()}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       </div>
       {removeError && (
         <p role="alert" className="mt-1 text-xs text-cx-rose">
@@ -181,66 +198,71 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         </p>
       )}
 
-      <div
-        className="mt-1 flex items-center gap-1.5 text-xs text-cx-muted"
-        title="Set by the CSMS with ChangeAvailability"
-      >
-        <span
-          aria-hidden
-          className={`h-1.5 w-1.5 rounded-full ${
-            view.availability === "Operative" ? "bg-cx-emerald" : "bg-cx-rose"
-          }`}
-        />
-        <span data-testid="availability">{view.availability}</span>
-      </div>
+      {/* The key figures, like the mock's `.kv`: a small label over a value. */}
+      <dl className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-x-4 gap-y-3">
+        <KeyFigure label="Meter">{formatEnergyKwh(view.meterValue)}</KeyFigure>
+        <KeyFigure label="SoC">
+          {view.soc != null ? formatSoc(view.soc) : "—"}
+        </KeyFigure>
+        <KeyFigure label="Transaction">
+          {view.transactionId != null ? (
+            <>
+              #{view.transactionId}
+              {view.transactionTagId && (
+                <span className="ml-1.5 text-xs font-normal text-cx-muted">
+                  {view.transactionTagId}
+                </span>
+              )}
+            </>
+          ) : (
+            "—"
+          )}
+        </KeyFigure>
+        <KeyFigure label="Availability">
+          <span
+            className="inline-flex items-center gap-1.5"
+            title="Set by the CSMS with ChangeAvailability"
+          >
+            <span
+              aria-hidden
+              className={`h-[7px] w-[7px] rounded-full ${
+                view.availability === "Operative"
+                  ? "bg-cx-emerald"
+                  : "bg-cx-rose"
+              }`}
+            />
+            <span data-testid="availability">{view.availability}</span>
+          </span>
+        </KeyFigure>
+      </dl>
 
-      {view.transactionId != null && (
-        <div className="mt-1 text-xs text-cx-muted">
-          Tx #{view.transactionId}
-          {view.transactionTagId ? ` · ${view.transactionTagId}` : ""}
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-md bg-cx-sub px-2 py-1.5">
-          <div className="text-cx-muted">Energy</div>
-          <div className="font-mono tabular-nums text-cx-fg">
-            {formatEnergyKwh(view.meterValue)}
-          </div>
-        </div>
-        <div className="rounded-md bg-cx-sub px-2 py-1.5">
-          <div className="text-cx-muted">SoC</div>
-          <div className="font-mono tabular-nums text-cx-fg">
-            {view.soc != null ? formatSoc(view.soc) : "—"}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-2">
+      <div className="mt-3">
         <ChargingProfilesList
           profiles={view.chargingProfiles}
           current={view.chargingProfile}
         />
       </div>
 
-      <div className="mt-3 space-y-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-cx-border pt-3">
         {isCharging ? (
-          <button
+          <Button
             type="button"
+            variant="warning"
+            size="sm"
             onClick={() => void handleStop()}
             disabled={isPending}
-            className="w-full rounded-[7px] border border-cx-border-strong px-3 py-1.5 text-[12.5px] font-medium text-cx-amber hover:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-50"
           >
             Stop transaction
-          </button>
+          </Button>
         ) : (
           <>
             <select
               value={effectiveTagId}
               onChange={(e) => setTagIdInput(e.target.value)}
               disabled={tagIds.length === 0}
-              className="w-full rounded-[7px] border border-cx-border bg-cx-card px-2.5 py-1.5 text-[13px] text-cx-fg hover:border-cx-border-strong disabled:opacity-60"
+              className={cn(FILTER_SELECT_CLASS, "disabled:opacity-60")}
               title="RFID tag to authorize the transaction with"
+              aria-label="TagID of the transaction"
             >
               {tagIds.length === 0 ? (
                 <option value="">No TagIDs configured</option>
@@ -252,24 +274,21 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
                 ))
               )}
             </select>
-            <button
+            <Button
               type="button"
+              variant="success"
+              size="sm"
               onClick={() => void handleStart()}
               disabled={isPending || !effectiveTagId}
-              className="w-full rounded-[7px] border border-cx-border-strong px-3 py-1.5 text-[12.5px] font-medium text-cx-emerald hover:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-50"
             >
               Start transaction
-            </button>
+            </Button>
           </>
         )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full justify-between text-xs"
-            >
+            <Button variant="outline" size="sm">
               Set status
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
@@ -293,7 +312,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             value={faultErrorCode}
             onChange={(e) => setFaultErrorCode(e.target.value)}
             title="errorCode sent with Set status → Faulted"
-            className="min-w-0 flex-1 rounded-md border border-cx-border-strong py-1 pl-2 pr-8 text-xs text-cx-fg"
+            className={cn(FILTER_SELECT_CLASS, "min-w-0")}
           >
             {FAULT_ERROR_CODES.map((code) => (
               <option key={code} value={code}>
@@ -307,7 +326,6 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
           type="button"
           variant="outline"
           size="sm"
-          className="w-full text-xs"
           onClick={() => setIsMeterOpen(true)}
         >
           Meter & SoC

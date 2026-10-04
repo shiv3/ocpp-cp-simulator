@@ -42,6 +42,8 @@ vi.mock("@ocpp-debugkit/toolkit/core", async () => {
 
 import {
   createFakeChargePointService,
+  findMenuItem,
+  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -84,26 +86,15 @@ function snapshot(id: string): ChargePointSnapshot {
   return { id, status: OCPPStatus.Available, error: "", connectors: [] };
 }
 
-function tabTrigger(
-  container: HTMLElement,
-  label: string,
-): HTMLElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>('[role="tab"]'),
-  ).find((el) => el.textContent?.trim() === label);
-}
-
 async function openAnalysisTab(container: HTMLElement): Promise<void> {
-  const trigger = tabTrigger(container, "Session Analysis");
-  expect(trigger, "expected a Session Analysis tab").toBeTruthy();
+  // The section lives in the charge point page's More menu (`?tab=analysis`).
+  const more = container.querySelector<HTMLElement>('[aria-label="More"]');
+  expect(more, "expected the More button").toBeTruthy();
+  await openDropdownMenu(more!);
+  const item = findMenuItem("Session analysis");
+  expect(item, "expected a Session analysis item").toBeTruthy();
   await act(async () => {
-    trigger!.dispatchEvent(
-      new MouseEvent("mousedown", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-      }),
-    );
+    item!.click();
     await Promise.resolve();
   });
   for (let i = 0; i < 100; i++) {

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   ALL_CHARGE_POINT_ERROR_CODES,
   OCPPStatus,
@@ -9,6 +10,7 @@ import type { HeartbeatView } from "@/data/hooks/useChargePointView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
 
+import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import { formatRelativeTime } from "../../lib/formatRelativeTime";
 import { useNow } from "../../lib/useNow";
 
@@ -19,8 +21,7 @@ const CP_STATUSES = [
   OCPPStatus.Faulted,
 ] as const;
 
-const SELECT_CLASS =
-  "rounded-md border border-cx-border-strong py-1 pl-2 pr-8 text-xs text-cx-fg disabled:opacity-60";
+const SELECT_CLASS = cn(FILTER_SELECT_CLASS, "text-xs disabled:opacity-60");
 
 export interface ChargePointControlsProps {
   cpId: string;
@@ -79,13 +80,14 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   return (
     <div
       data-testid="charge-point-controls"
-      className="mb-6 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4"
+      className="mb-4 rounded-[10px] border border-cx-border bg-cx-card px-4 py-2.5"
     >
-      <div className="mb-3 text-sm font-semibold text-cx-fg">
-        Charge point
-        <span className="ml-1 font-normal text-cx-muted">(connector 0)</span>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
+      {/* One compact row: the label, then the three calls. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+        <span className="text-sm font-semibold text-cx-fg">
+          Charge point
+          <span className="ml-1 font-normal text-cx-muted">(connector 0)</span>
+        </span>
         <div className="flex items-center gap-2">
           <span
             className="text-cx-fg2"

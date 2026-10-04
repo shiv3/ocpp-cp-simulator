@@ -99,20 +99,6 @@ async function click(el: HTMLElement): Promise<void> {
   await flush();
 }
 
-async function openMessageLogTab(): Promise<void> {
-  const tab = Array.from(
-    document.body.querySelectorAll<HTMLElement>('[role="tab"]'),
-  ).find((el) => el.textContent?.trim() === "Message Log");
-  if (!tab) throw new Error("no Message Log tab");
-  await act(async () => {
-    tab.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-    );
-    tab.click();
-  });
-  await flush();
-}
-
 describe("downloading a charge point's logs (#421)", () => {
   let unmount: (() => void) | null = null;
 
@@ -145,11 +131,10 @@ describe("downloading a charge point's logs (#421)", () => {
     vi.restoreAllMocks();
   });
 
-  it("the charge point's Message Log tab downloads its persisted logs as JSON Lines", async () => {
+  it("the charge point page's message log downloads its persisted logs as JSON Lines", async () => {
     const { service, root } = await render("/cp/CP-1");
     unmount = () => act(() => root.unmount());
 
-    await openMessageLogTab();
     await click(button("Download"));
 
     expect(service.listStoredLogs).toHaveBeenCalledWith("CP-1");
@@ -160,12 +145,11 @@ describe("downloading a charge point's logs (#421)", () => {
     );
   });
 
-  it("the Message Log tab's Clear screen + DB deletes the persisted logs too", async () => {
+  it("the charge point page's message log: Clear screen + DB deletes the persisted logs too", async () => {
     const clearStoredLogs = vi.fn(async () => {});
     const { root } = await render("/cp/CP-1", { clearStoredLogs });
     unmount = () => act(() => root.unmount());
 
-    await openMessageLogTab();
     await click(button("Clear screen"));
     expect(clearStoredLogs).not.toHaveBeenCalled();
 
@@ -212,7 +196,6 @@ describe("downloading a charge point's logs (#421)", () => {
     });
     unmount = () => act(() => root.unmount());
 
-    await openMessageLogTab();
     await click(button("Download"));
 
     expect(alert).toHaveBeenCalledWith(

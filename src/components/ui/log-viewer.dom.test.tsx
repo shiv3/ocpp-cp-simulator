@@ -320,3 +320,29 @@ describe("LogViewer direction/action filters (#178 2.4)", () => {
     expect(heartbeatRow.textContent).toContain("1");
   });
 });
+
+describe("LogViewer toolbar (#405)", () => {
+  // jsdom has no layout, so a clipped toolbar cannot be measured here. The
+  // wrapping classes are the regression guard: without `flex-wrap` the bar
+  // and its action buttons overflowed and clipped in a narrow side panel.
+  it("lets the title row and both action groups wrap instead of clipping", () => {
+    render(
+      <LogViewer
+        logs={[entry('Sent: [2, "1", "Heartbeat", {}]')]}
+        onClear={() => undefined}
+        onDownload={() => undefined}
+      />,
+    );
+
+    const bar = screen
+      .getByText("Logs", { selector: "h3" })
+      .closest("div.border-b");
+    expect(bar?.className).toContain("flex-wrap");
+
+    const actions = screen.getByText("Download").closest("div")!.parentElement!;
+    expect(actions.className).toContain("flex-wrap");
+    expect(screen.getByText("Download").parentElement?.className).toContain(
+      "flex-wrap",
+    );
+  });
+});

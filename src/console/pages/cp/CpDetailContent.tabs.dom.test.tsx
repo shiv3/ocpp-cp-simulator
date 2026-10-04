@@ -227,13 +227,20 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
 
   it("?connector=2 marks connector 2 on load and scrolls it into view; a missing connector falls back to the first", async () => {
     const scrolled: string[] = [];
-    Element.prototype.scrollIntoView = function (this: Element) {
+    const options: unknown[] = [];
+    Element.prototype.scrollIntoView = function (
+      this: Element,
+      arg?: boolean | ScrollIntoViewOptions,
+    ) {
       scrolled.push((this as HTMLElement).dataset.connectorId ?? "");
+      options.push(arg);
     };
     try {
       const { container } = await mount("/cp/CP-A?connector=2");
       expect(selectedCards(container)).toEqual(["2"]);
       expect(scrolled).toEqual(["2"]);
+      // Along the row as well as down the page.
+      expect(options).toEqual([{ block: "nearest", inline: "nearest" }]);
       expect(container.textContent).toContain("TAG-7");
 
       await cleanup!();

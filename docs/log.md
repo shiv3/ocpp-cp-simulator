@@ -1537,3 +1537,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** paragraph describes the new card: a header with the Heartbeat figure (interval, `next in Ns` / `last sent ...` / `not configured`, a bar between heartbeats), **Send Heartbeat** and a **Controls** toggle, and behind the toggle the Heartbeat, Authorize and Status and faults groups with per-group errors (a failed header Send Heartbeat also shows under the header while folded). The list entry no longer says "one compact row".
 - Code: `ChargePointControls.tsx` (rewritten), `Figure.tsx` and `controlPrimitives.tsx` (extracted from `ConnectorCard.tsx` / `ConnectorControls.tsx`, shared by both cards); tests in `ChargePointControls.dom.test.tsx`.
+
+## [2026-10-04] ingest | Connector cards in one scrolling row
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is now one row that scrolls horizontally instead of wrapping (`grid-auto-flow: column`, `grid-auto-columns: minmax(min(100%, max(420px, quarter)), 1fr)`, `overflow-x: auto`, scroll snapping): at most four cards are visible, each at least a quarter of the row and about 420 px, fewer connectors share the width, the row is a focusable `region` named Connectors, and the connector in `?connector=` is scrolled into view along the row (`inline: "nearest"`). The card's own container queries are unchanged.
+- Code: `CpDetailContent.tsx` (grid, scroll-into-view); tests `CpDetailContent.connectorGrid.dom.test.tsx` and `CpDetailContent.tabs.dom.test.tsx`.

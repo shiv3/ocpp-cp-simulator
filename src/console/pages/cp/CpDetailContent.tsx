@@ -358,7 +358,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       : (connectorList[0]?.id ?? null);
 
   // On the full page, the connector named in the URL is scrolled into view
-  // once, when its card first renders.
+  // once, when its card first renders: down the page and along the row.
   useEffect(() => {
     if (isPanel || scrolledToConnectorRef.current) return;
     if (selectedConnectorId == null) return;
@@ -367,7 +367,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
     );
     if (!card) return;
     scrolledToConnectorRef.current = true;
-    card.scrollIntoView?.({ block: "nearest" });
+    card.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [isPanel, selectedConnectorId, connectorList.length]);
 
   // The network simulation section is gated as the block always was: not for a
@@ -702,21 +702,32 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               )}
             </>
           ) : (
-            // The full page shows every connector at once: up to four across,
-            // the cards shrink to about 420 px. `max(420px, quarter)` caps the
-            // count at four (3rem = the three gutters), `min(100%, …)` keeps a
-            // phone at one column, and `auto-fit` lets fewer cards share the row.
+            // The full page shows every connector at once, in ONE row that
+            // scrolls horizontally instead of wrapping: `grid-auto-flow:
+            // column`, every column at least a quarter of the row
+            // (`(100% - 3rem) / 4`, 3rem = the three gutters) and at least
+            // 420 px, so at most four are visible; `min(100%, …)` keeps a phone
+            // at one card per view and the `1fr` max lets fewer than four share
+            // the width. More than four overflow into `overflow-x-auto`, and
+            // snapping lands a scroll on a card edge without forcing it. The
+            // row is a focusable region so the arrow keys scroll it, and
+            // `relative` makes it the containing block of the cards' absolutely
+            // positioned bits (the switches' `sr-only` inputs), so the scroll
+            // area clips them instead of widening the page.
             <div ref={connectorGridRef} className="@container">
               <div
                 data-testid="connector-grid"
-                className="grid items-start gap-4"
+                role="region"
+                aria-label="Connectors"
+                tabIndex={0}
+                className="relative grid snap-x snap-proximity items-start gap-4 overflow-x-auto overscroll-x-contain pb-2 [grid-auto-flow:column]"
                 style={{
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(min(100%, max(420px, calc((100% - 3rem) / 4))), 1fr))",
+                  gridAutoColumns:
+                    "minmax(min(100%, max(420px, calc((100% - 3rem) / 4))), 1fr)",
                 }}
               >
                 {connectorList.map((connector) => (
-                  <div key={connector.id}>
+                  <div key={connector.id} className="min-w-0 snap-start">
                     <ConnectorCard
                       cpId={cpId}
                       connectorId={connector.id}

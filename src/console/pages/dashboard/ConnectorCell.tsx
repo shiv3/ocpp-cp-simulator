@@ -8,10 +8,10 @@ import type { LiveRunState } from "../../lib/scenarioRunState";
 import type { CpListRow } from "./cpListFilters";
 
 const RUN_STATE_TEXT: Record<LiveRunState, string> = {
-  running: "text-blue-600 dark:text-blue-400",
-  paused: "text-gray-500 dark:text-gray-400",
-  stepping: "text-purple-600 dark:text-purple-400",
-  waiting: "text-amber-600 dark:text-amber-400",
+  running: "text-cx-blue",
+  paused: "text-cx-gray",
+  stepping: "text-cx-purple",
+  waiting: "text-cx-amber",
 };
 
 type RowConnector = CpListRow["connectors"][number];
@@ -54,18 +54,19 @@ const ConnectorCell: React.FC<ConnectorCellProps> = ({
     title={connectorTitle(connector)}
     onClick={onClick}
     className={cn(
-      "flex min-w-0 items-center gap-2 rounded-md border border-gray-200 px-2 py-1 text-left text-xs hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800",
+      "flex min-w-0 items-center gap-2 rounded-[7px] bg-cx-sub px-2.5 py-1.5 text-left hover:shadow-[0_0_0_1px_var(--cx-border-strong)]",
       selected &&
-        "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950/40",
+        "bg-cx-sel shadow-[0_0_0_1.5px_var(--cx-accent)] hover:shadow-[0_0_0_1.5px_var(--cx-accent)]",
     )}
   >
-    <span className="font-mono text-gray-400 dark:text-gray-500">
+    <span className="font-mono text-[11.5px] text-cx-faint">
       #{connector.id}
     </span>
-    <span className="flex min-w-0 items-center gap-1.5 text-gray-700 dark:text-gray-200">
+    <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-cx-fg2">
       <span
+        aria-hidden
         className={cn(
-          "h-2 w-2 shrink-0 rounded-full",
+          "h-[7px] w-[7px] shrink-0 rounded-full",
           statusDotClass(connector.status),
         )}
       />
@@ -81,12 +82,12 @@ const ConnectorCell: React.FC<ConnectorCellProps> = ({
       />
     )}
     {connector.transactionId !== null ? (
-      <span className="ml-auto shrink-0 font-mono text-gray-500 dark:text-gray-400">
+      <span className="ml-auto shrink-0 font-mono text-[11.5px] text-cx-muted">
         Tx {connector.transactionId}
       </span>
     ) : (
       connector.meterValue !== 0 && (
-        <span className="ml-auto shrink-0 text-gray-500 dark:text-gray-400">
+        <span className="ml-auto shrink-0 font-mono text-[11.5px] text-cx-muted">
           {formatEnergyKwh(connector.meterValue)}
         </span>
       )

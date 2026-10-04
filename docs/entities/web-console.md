@@ -22,6 +22,18 @@ React + TypeScript web application with Flowbite/Tailwind UI. The same bundle
 [daemon](daemon.md) with `--web-console` (and therefore the
 [Docker image](docker-image.md)), and the [desktop app](desktop-app.md).
 
+**Look.** The console uses neutral graphite surfaces with one blue accent,
+kept for the selection and the primary action. A status is a small colored dot
+plus plain text, never a filled pill (one color map for charge point statuses
+and scenario run states: green, blue, amber, red, gray, purple for stepping).
+Text is IBM Plex Sans, with IBM Plex Mono for ids, versions and numbers; the
+font files are bundled with the app (`@fontsource/ibm-plex-*`, imported in
+[`src/main.tsx`](../../src/main.tsx)), so the console looks the same offline,
+in the daemon image and in the desktop app. Light and dark themes both come
+from the palette variables in [`src/index.css`](../../src/index.css) (`--cx-*`,
+exposed to Tailwind as `bg-cx-card`, `text-cx-muted`, …), which also retune the
+shared shadcn variables, so dialogs, menus and the graph editor follow.
+
 ![Web console — connector panel, scenario editor, and real-time logs](../images/web-console-overview.png)
 
 ## Web Version
@@ -105,7 +117,7 @@ view is the default and leaves the parameter out.
 In the Hierarchy view a row's head holds, left to right: a **twist** button
 (`Collapse connectors of <id>` / `Expand …`, `aria-expanded`) that folds the
 connector grid away (kept on the page, not in the URL), a plug icon colored by
-status, the id, the OCPP version as a muted chip, the status pill, the
+status, the id, the OCPP version as small muted text, the status (dot and text), the
 **Scenario** badge (amber **Waiting: …** while a run is parked), the **Net
 sim** badge, one small dot per connector (tooltip `#<n> <Status>`), and at the
 right end an icon-only power button (`Connect <id>` / `Disconnect <id>`; its

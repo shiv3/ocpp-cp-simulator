@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import StatusPill from "../../components/StatusPill";
-import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
+import RunStatePill from "../../components/RunStatePill";
 import { usePanelParams } from "../../lib/usePanelParams";
 import type { CpListRow } from "./cpListFilters";
 import { cpStatus } from "./cpRowFormat";
@@ -46,10 +46,7 @@ const ConnectorTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
                 onClick={() =>
                   selected ? close() : open(row.cp.id, connector.id)
                 }
-                className={cn(
-                  "cursor-pointer",
-                  selected && "bg-blue-50 dark:bg-blue-950/30",
-                )}
+                className={cn("cursor-pointer", selected && "bg-cx-sel")}
               >
                 <TableCell className="font-mono text-sm">
                   {/* A button, so the panel opens from the keyboard too. */}
@@ -60,7 +57,7 @@ const ConnectorTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
                       if (selected) close();
                       else open(row.cp.id, connector.id);
                     }}
-                    className="font-semibold text-gray-900 hover:underline dark:text-gray-100"
+                    className="font-semibold text-cx-fg hover:underline"
                   >
                     {row.cp.id} #{connector.id}
                   </button>
@@ -76,22 +73,17 @@ const ConnectorTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
                   {connector.transactionId !== null ? (
                     `#${connector.transactionId}`
                   ) : (
-                    <span className="text-gray-400 dark:text-gray-500">—</span>
+                    <span className="text-cx-faint">—</span>
                   )}
                 </TableCell>
                 <TableCell>
                   {connector.hasRun && connector.runState ? (
-                    <span
+                    <RunStatePill
+                      state={connector.runState}
                       title={connector.runName}
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-xs font-semibold",
-                        LIVE_RUN_STATE_STYLES[connector.runState],
-                      )}
-                    >
-                      {connector.runState}
-                    </span>
+                    />
                   ) : (
-                    <span className="text-gray-400 dark:text-gray-500">—</span>
+                    <span className="text-cx-faint">—</span>
                   )}
                 </TableCell>
                 <TableCell>

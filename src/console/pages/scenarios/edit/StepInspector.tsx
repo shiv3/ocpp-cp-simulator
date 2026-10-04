@@ -75,11 +75,9 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-        {entry.title}
-      </h2>
+      <h2 className="text-base font-semibold text-cx-fg">{entry.title}</h2>
 
-      <div className="space-y-3 border-b border-gray-100 pb-4 dark:border-gray-800">
+      <div className="space-y-3 border-b border-cx-border pb-4">
         <TextField
           label="Label"
           value={(formValue.label as string | undefined) ?? ""}

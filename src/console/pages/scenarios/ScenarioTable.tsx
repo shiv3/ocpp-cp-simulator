@@ -70,11 +70,9 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
           return (
             <TableRow key={rowKey} data-scenario-id={scenario.id}>
               <TableCell>
-                <div className="font-medium text-gray-900 dark:text-gray-100">
-                  {scenario.name}
-                </div>
+                <div className="font-medium text-cx-fg">{scenario.name}</div>
                 {scenario.description && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                  <div className="text-xs text-cx-muted">
                     {scenario.description}
                   </div>
                 )}
@@ -82,14 +80,14 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
               <TableCell>
                 <TargetChip cpId={cpId} connectorId={connectorId} />
               </TableCell>
-              <TableCell className="text-xs text-gray-600 dark:text-gray-300">
+              <TableCell className="text-xs text-cx-fg2">
                 {triggerLabel(scenario)}
               </TableCell>
-              <TableCell className="text-xs text-gray-600 dark:text-gray-300">
+              <TableCell className="text-xs text-cx-fg2">
                 {linear.isLinear ? (
                   `${linear.steps.length} steps`
                 ) : (
-                  <span className="inline-flex items-center rounded-md bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                  <span className="inline-flex items-center rounded-md bg-cx-sel px-1.5 py-0.5 text-xs font-medium text-cx-accent">
                     graph
                   </span>
                 )}
@@ -100,14 +98,14 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
                   aria-label={`Enabled: ${scenario.name}`}
                   checked={enabled}
                   onChange={(e) => onToggleEnabled(item, e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 dark:border-gray-600"
+                  className="h-4 w-4 rounded border-cx-border-strong"
                 />
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex items-center justify-end gap-2">
                   <Link
                     to={buildScenarioUrl("run", cpId, connectorId, scenario.id)}
-                    className="rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                    className="rounded-md border border-cx-border px-2 py-1 text-xs font-medium text-cx-fg2 hover:bg-cx-sub"
                   >
                     Run
                   </Link>
@@ -118,7 +116,7 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
                       connectorId,
                       scenario.id,
                     )}
-                    className="rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                    className="rounded-md border border-cx-border px-2 py-1 text-xs font-medium text-cx-fg2 hover:bg-cx-sub"
                   >
                     Edit
                   </Link>
@@ -127,7 +125,7 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
                       <button
                         type="button"
                         aria-label={`More actions for ${scenario.name}`}
-                        className="rounded-md border border-gray-200 p-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                        className="rounded-md border border-cx-border p-1 text-cx-fg2 hover:bg-cx-sub"
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
@@ -150,7 +148,7 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() => onDelete(item)}
-                        className="text-xs text-rose-600 focus:bg-rose-50 focus:text-rose-600 dark:text-rose-400 dark:focus:bg-rose-950 dark:focus:text-rose-400"
+                        className="text-xs text-cx-rose focus:bg-cx-rose/10 focus:text-cx-rose"
                       >
                         Delete
                       </DropdownMenuItem>

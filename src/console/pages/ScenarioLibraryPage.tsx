@@ -248,7 +248,7 @@ const ScenarioLibraryPage: React.FC = () => {
         <select
           value={cpFilter}
           onChange={(e) => updateCpFilter(e.target.value)}
-          className="rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
         >
           <option value="">All charge points</option>
           {chargePoints.map((cp) => (
@@ -257,12 +257,12 @@ const ScenarioLibraryPage: React.FC = () => {
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
           <input
             type="checkbox"
             checked={enabledOnly}
             onChange={(e) => setEnabledOnly(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 dark:border-gray-600"
+            className="h-4 w-4 rounded border-cx-border-strong"
           />
           Enabled only
         </label>

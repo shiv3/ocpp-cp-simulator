@@ -108,13 +108,13 @@ const MeterDialogBody: React.FC<BodyProps> = ({
 
   return (
     <div className="space-y-4 text-sm">
-      <div className="text-xs text-gray-600 dark:text-gray-300">
+      <div className="text-xs text-cx-fg2">
         Now: {formatEnergyKwh(meterValue)} ·{" "}
         {soc != null ? formatSoc(soc) : "SoC not reported"}
       </div>
 
       <section className="space-y-2">
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-200">
+        <label className="block text-xs font-medium text-cx-fg2">
           Meter (energy register, Wh)
           <Input
             type="number"
@@ -147,7 +147,7 @@ const MeterDialogBody: React.FC<BodyProps> = ({
       </section>
 
       <section className="space-y-2">
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-200">
+        <label className="block text-xs font-medium text-cx-fg2">
           State of charge (%)
           <Input
             type="number"
@@ -182,7 +182,7 @@ const MeterDialogBody: React.FC<BodyProps> = ({
           </Button>
         </div>
         <label
-          className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"
+          className="flex items-center gap-2 text-xs text-cx-fg2"
           title={
             canSync
               ? "Derive the SoC from the meter (and back) with the EV's battery capacity"
@@ -197,20 +197,20 @@ const MeterDialogBody: React.FC<BodyProps> = ({
             onChange={(e) => setAutoSyncSocMeter(e.target.checked)}
           />
           Sync SoC and meter
-          <span className="text-gray-500 dark:text-gray-400">
+          <span className="text-cx-muted">
             ({evSettings.batteryCapacityKwh} kWh, from {evSettings.initialSoc}{" "}
             %)
           </span>
         </label>
         {syncError && (
-          <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+          <p role="alert" className="text-xs text-cx-rose">
             {syncError}
           </p>
         )}
       </section>
 
-      <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
+      <div className="flex items-center justify-between gap-2 border-t border-cx-border pt-3">
+        <span className="text-xs text-cx-muted">
           Sends the current reading.
         </span>
         <Button
@@ -227,7 +227,7 @@ const MeterDialogBody: React.FC<BodyProps> = ({
       </div>
 
       {error && (
-        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="text-xs text-cx-rose">
           {error}
         </p>
       )}

@@ -19,6 +19,7 @@ import type {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
+import SegmentedControl from "../components/SegmentedControl";
 import {
   deriveLinearSteps,
   insertStep,
@@ -204,11 +205,7 @@ const ScenarioEditPage: React.FC = () => {
   };
 
   if (isLoading) {
-    return (
-      <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
-        Loading…
-      </div>
-    );
+    return <div className="p-6 text-sm text-cx-muted">Loading…</div>;
   }
 
   if (notFound || !scenario || !linear) {
@@ -216,7 +213,7 @@ const ScenarioEditPage: React.FC = () => {
       <div className="p-6">
         <Link
           to={"/scenarios"}
-          className="mb-4 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+          className="mb-4 inline-block text-sm text-cx-accent hover:underline"
         >
           ← Back to scenarios
         </Link>
@@ -253,10 +250,10 @@ const ScenarioEditPage: React.FC = () => {
           onChange={(e) =>
             handleMetaChange({ description: e.target.value || undefined })
           }
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100"
+          className="w-full rounded-md border border-cx-border-strong bg-cx-card px-3 py-1.5 text-sm text-cx-fg"
         />
         <ScenarioEvSettingsFields
-          className="bg-white dark:bg-gray-950"
+          className="bg-cx-card"
           value={scenario.evSettings ?? {}}
           onChange={(next) =>
             handleMetaChange({ evSettings: compactScenarioEvSettings(next) })
@@ -269,54 +266,35 @@ const ScenarioEditPage: React.FC = () => {
       {saveError && (
         <div
           role="alert"
-          className="mb-4 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200"
+          className="mb-4 rounded-md border border-cx-rose/40 bg-cx-rose/10 px-3 py-2 text-sm text-cx-rose"
         >
           {saveError}
         </div>
       )}
 
-      <div
-        role="group"
-        aria-label="Editor view"
-        className="mb-4 inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm dark:border-gray-800 dark:bg-gray-950"
-      >
-        {(
-          [
-            ["steps", "Steps"],
-            ["graph", "Graph"],
-          ] as const
-        ).map(([value, label]) => {
-          const disabled = value === "steps" && !linear.isLinear;
-          return (
-            <button
-              key={value}
-              type="button"
-              data-view={value}
-              aria-pressed={view === value}
-              disabled={disabled}
-              title={
-                disabled
-                  ? "This scenario has branches or loops: the step list can only show a single chain"
-                  : undefined
-              }
-              onClick={() => setView(value)}
-              className={`rounded-md px-3 py-1 font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-                view === value
-                  ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                  : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      <SegmentedControl
+        label="Editor view"
+        className="mb-4"
+        value={view}
+        onChange={setView}
+        options={[
+          {
+            value: "steps",
+            label: "Steps",
+            disabled: !linear.isLinear,
+            title: linear.isLinear
+              ? undefined
+              : "This scenario has branches or loops: the step list can only show a single chain",
+          },
+          { value: "graph", label: "Graph" },
+        ]}
+      />
 
       {view === "graph" ? (
-        <div className="h-[70vh] min-h-[480px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+        <div className="h-[70vh] min-h-[480px] overflow-hidden rounded-xl border border-cx-border">
           <Suspense
             fallback={
-              <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
+              <div className="p-4 text-sm text-cx-muted">
                 Loading graph editor…
               </div>
             }
@@ -343,7 +321,7 @@ const ScenarioEditPage: React.FC = () => {
               onInsert={handleInsert}
             />
           </div>
-          <div className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+          <div className="min-w-0 flex-1 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
             {linear.isLinear && selectedNode ? (
               <StepInspector
                 node={selectedNode}

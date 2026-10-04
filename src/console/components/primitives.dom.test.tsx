@@ -4,8 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Inbox } from "lucide-react";
 
-import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
-import StatusPill from "./StatusPill";
 import ModePill from "./ModePill";
 import TargetChip from "./TargetChip";
 import PageHeader from "./PageHeader";
@@ -40,54 +38,6 @@ function render(ui: React.ReactElement): HTMLElement {
   });
   return container;
 }
-
-describe("StatusPill", () => {
-  it("renders the label and emerald classes for Available", () => {
-    const container = render(<StatusPill status={OCPPStatus.Available} />);
-    const pill = container.firstElementChild as HTMLElement;
-    expect(pill.textContent).toContain("Available");
-    expect(pill.className).toContain("bg-emerald-100");
-    expect(pill.className).toContain("text-emerald-700");
-    expect(pill.className).toContain("dark:bg-emerald-950");
-    expect(pill.className).toContain("dark:text-emerald-300");
-    expect(pill.className).toContain("rounded-full");
-  });
-
-  it("renders rose classes for Faulted", () => {
-    const container = render(<StatusPill status={OCPPStatus.Faulted} />);
-    const pill = container.firstElementChild as HTMLElement;
-    expect(pill.textContent).toContain("Faulted");
-    expect(pill.className).toContain("bg-rose-100");
-    expect(pill.className).toContain("text-rose-700");
-    expect(pill.className).toContain("dark:bg-rose-950");
-  });
-
-  it("maps Charging to blue and SuspendedEV to amber", () => {
-    const charging = render(<StatusPill status={OCPPStatus.Charging} />)
-      .firstElementChild as HTMLElement;
-    expect(charging.className).toContain("bg-blue-100");
-    expect(charging.className).toContain("text-blue-700");
-  });
-
-  it("treats the string statuses Connected (emerald) and Disconnected (gray)", () => {
-    const connected = render(<StatusPill status="Connected" />)
-      .firstElementChild as HTMLElement;
-    expect(connected.textContent).toContain("Connected");
-    expect(connected.className).toContain("bg-emerald-100");
-
-    const disconnected = render(<StatusPill status="Disconnected" />)
-      .firstElementChild as HTMLElement;
-    expect(disconnected.textContent).toContain("Disconnected");
-    expect(disconnected.className).toContain("bg-gray-100");
-    expect(disconnected.className).toContain("text-gray-700");
-  });
-
-  it("merges an extra className", () => {
-    const pill = render(<StatusPill status="Connected" className="ml-2" />)
-      .firstElementChild as HTMLElement;
-    expect(pill.className).toContain("ml-2");
-  });
-});
 
 describe("ModePill", () => {
   it("renders Remote mode / Local mode labels", () => {

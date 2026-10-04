@@ -404,11 +404,11 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   )}`;
 
   return (
-    <div className={isPanel ? "p-4" : "p-6"}>
+    <div className={isPanel ? undefined : "p-6"}>
       {!isPanel && (
         <Link
           to={backToListHref}
-          className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+          className="mb-2 inline-block text-sm text-cx-accent hover:underline"
         >
           ← Back to charge points
         </Link>
@@ -447,7 +447,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               size="sm"
               disabled={isDeletePending}
               onClick={() => void handleDelete()}
-              className="text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-300 dark:hover:bg-rose-950"
+              className="text-cx-rose hover:bg-cx-rose/10 hover:text-cx-rose"
             >
               <Trash2 className="h-3.5 w-3.5" />
               Delete
@@ -488,7 +488,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
         <StatusPill status={isConnected ? view.status : "Disconnected"} />
         <NetworkSimBadge summary={snapshot?.networkSim} />
         {resolvedOcppVersion && (
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <span className="font-mono text-[11.5px] text-cx-faint">
             {resolvedOcppVersion}
             {resolvedSecurityProfile != null
               ? ` · SP${resolvedSecurityProfile}`
@@ -498,7 +498,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       </PageHeader>
 
       {resolvedWsUrl && (
-        <div className="-mt-2 mb-4 font-mono text-xs text-gray-500 dark:text-gray-400">
+        <div className="-mt-2 mb-4 font-mono text-xs text-cx-muted">
           {resolvedWsUrl}
         </div>
       )}
@@ -548,7 +548,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
         <TabsContent value="analysis">
           <Suspense
             fallback={
-              <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
+              <div className="p-6 text-sm text-cx-muted">
                 Loading session analysis…
               </div>
             }
@@ -572,7 +572,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             <select
               value={diagnosticsConnectorId ?? ""}
               onChange={(e) => onSelectConnector(Number(e.target.value))}
-              className="mb-3 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              className="mb-3 rounded-md border border-cx-border-strong px-2 py-1 text-xs text-cx-fg"
             >
               {connectorList.map((connector) => (
                 <option key={connector.id} value={connector.id}>
@@ -585,7 +585,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             <div className="h-[520px]">
               <Suspense
                 fallback={
-                  <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
+                  <div className="p-6 text-sm text-cx-muted">
                     Loading state diagram…
                   </div>
                 }
@@ -614,12 +614,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
 
       {snapshot?.networkSim !== null &&
         networkSimGlobalConfig !== undefined && (
-          <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+          <div className="mt-6 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6">
+            <h2 className="mb-4 text-lg font-semibold text-cx-fg">
               Network Simulation
             </h2>
             {networkSimLoadError && (
-              <div className="mb-4 rounded-md border border-red-500 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500 dark:bg-red-950 dark:text-red-400">
+              <div className="mb-4 rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
                 {networkSimLoadError}
               </div>
             )}
@@ -657,8 +657,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 />
                 {snapshot?.networkSim?.manualRuleIds &&
                   snapshot.networkSim.manualRuleIds.length > 0 && (
-                    <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
-                      <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-gray-100">
+                    <div className="mt-6 border-t border-cx-border pt-6">
+                      <h3 className="mb-4 text-base font-semibold text-cx-fg">
                         Manual Rules
                       </h3>
                       <ManualDisconnectButtons

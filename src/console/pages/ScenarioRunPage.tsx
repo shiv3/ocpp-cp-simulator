@@ -3,18 +3,18 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { LogViewer } from "@/components/ui/log-viewer";
-import { cn } from "@/lib/utils";
 import { useChargePointView } from "../../data/hooks/useChargePointView";
 import { useDataContext } from "../../data/providers/DataProvider";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import RunStatePill from "../components/RunStatePill";
 import TargetChip from "../components/TargetChip";
 import WaitControls from "../components/WaitControls";
 import WaitingExpectation from "../components/WaitingExpectation";
-import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
+import { isLiveRunState } from "../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
-import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
+import { useScenarioRun } from "../lib/useScenarioRun";
 import { useScenarioRunHistory } from "../lib/useScenarioRunHistory";
 import { mergeRunHistory, runRowKey } from "../lib/runHistoryRows";
 import { buildRunHistoryUrl } from "../lib/useAllScenarios";
@@ -25,14 +25,6 @@ import RunTimeline from "./scenarios/run/RunTimeline";
 const LOG_TAIL_LIMIT = 200;
 /** How many recorded runs the panel lists; the run history page has the rest. */
 const RECORDED_RUNS_LIMIT = 20;
-
-const RUN_STATE_STYLES: Record<ScenarioRunState, string> = {
-  ...LIVE_RUN_STATE_STYLES,
-  idle: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  completed:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-  error: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
-};
 
 /**
  * Scenario Run console (Task 8): a dedicated view that runs a scenario and
@@ -183,11 +175,7 @@ const ScenarioRunPage: React.FC = () => {
       : "";
 
   if (isLoading) {
-    return (
-      <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
-        Loading…
-      </div>
-    );
+    return <div className="p-6 text-sm text-cx-muted">Loading…</div>;
   }
 
   if (notFound || !scenario) {
@@ -195,7 +183,7 @@ const ScenarioRunPage: React.FC = () => {
       <div className="p-6">
         <Link
           to={"/scenarios"}
-          className="mb-4 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+          className="mb-4 inline-block text-sm text-cx-accent hover:underline"
         >
           ← Back to scenarios
         </Link>
@@ -213,7 +201,7 @@ const ScenarioRunPage: React.FC = () => {
     <div className="p-6">
       <Link
         to={"/scenarios"}
-        className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+        className="mb-2 inline-block text-sm text-cx-accent hover:underline"
       >
         ← Back to scenarios
       </Link>
@@ -248,18 +236,15 @@ const ScenarioRunPage: React.FC = () => {
         }
       >
         <TargetChip cpId={cpId} connectorId={connectorId} />
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-            RUN_STATE_STYLES[state],
-          )}
+        <RunStatePill
+          state={state}
+          label={state.charAt(0).toUpperCase() + state.slice(1)}
         >
-          {state.charAt(0).toUpperCase() + state.slice(1)}
           {stepLabel}
-        </span>
+        </RunStatePill>
         {runId && (
           <span
-            className="font-mono text-xs text-gray-500 dark:text-gray-400"
+            className="font-mono text-xs text-cx-muted"
             title="Runtime run id"
           >
             {runId}
@@ -268,14 +253,14 @@ const ScenarioRunPage: React.FC = () => {
       </PageHeader>
 
       {requestedRunGone && (
-        <div className="mb-4 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200">
+        <div className="mb-4 rounded-md border border-cx-accent/40 bg-cx-accent/10 px-3 py-2 text-sm text-cx-accent">
           Run {requestedRunId} is no longer active
           {isRunning && runId ? ` — showing the current run ${runId}.` : "."}
         </div>
       )}
 
       {state === "waiting" && expectation && (
-        <div className="mb-4 flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <div className="mb-4 flex flex-col gap-2 rounded-md border border-cx-amber/40 bg-cx-amber/10 px-3 py-2 text-sm text-cx-amber">
           <WaitingExpectation
             expectation={expectation}
             currentNodeStartedAt={currentNodeStartedAt}
@@ -291,7 +276,7 @@ const ScenarioRunPage: React.FC = () => {
       {cpScopeScenario && (
         <div
           id="cp-scope-scenario-note"
-          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          className="mb-4 rounded-md border border-cx-amber/40 bg-cx-amber/10 px-3 py-2 text-sm text-cx-amber"
         >
           This is a charge-point-scope scenario — it runs automatically per
           connector when its trigger fires, not via a manual Start here. Start
@@ -300,16 +285,14 @@ const ScenarioRunPage: React.FC = () => {
       )}
 
       {error && (
-        <div className="mb-4 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">
+        <div className="mb-4 rounded-md border border-cx-rose/40 bg-cx-rose/10 px-3 py-2 text-sm text-cx-rose">
           {error}
         </div>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-          <h2 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
-            Timeline
-          </h2>
+        <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
+          <h2 className="mb-3 text-sm font-semibold text-cx-fg2">Timeline</h2>
           <RunTimeline
             scenario={scenario}
             currentNodeId={currentNodeId}
@@ -319,25 +302,23 @@ const ScenarioRunPage: React.FC = () => {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="h-[360px] rounded-xl border border-gray-200 dark:border-gray-800">
+          <div className="h-[360px] rounded-xl border border-cx-border">
             <LogViewer logs={tailLogs} onClear={view.clearLogs} />
           </div>
-          <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+          <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Run history
-              </h2>
+              <h2 className="text-sm font-semibold text-cx-fg2">Run history</h2>
               {recorded.supported && (
                 <Link
                   to={buildRunHistoryUrl(cpId, connectorId, scenarioId)}
-                  className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                  className="text-xs text-cx-accent hover:underline"
                 >
                   View all runs
                 </Link>
               )}
             </div>
             {recorded.error && (
-              <p className="mb-2 text-xs text-rose-700 dark:text-rose-300">
+              <p className="mb-2 text-xs text-cx-rose">
                 Could not load the recorded runs: {recorded.error}
               </p>
             )}
@@ -360,7 +341,7 @@ const ScenarioRunPage: React.FC = () => {
               }
             />
             {selectedRunId && connectorId != null && (
-              <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-800">
+              <div className="mt-4 border-t border-cx-border pt-4">
                 <RunReportView
                   cpId={cpId}
                   connectorId={connectorId}

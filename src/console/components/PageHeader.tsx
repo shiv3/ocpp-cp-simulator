@@ -18,11 +18,17 @@ const PageHeader: React.FC<PageHeaderProps> = ({
 }) => (
   <div className="mb-4 flex flex-wrap items-center gap-3">
     <div className="flex items-baseline gap-3">
-      <Title className="text-lg font-semibold">{title}</Title>
+      <Title
+        className={
+          Title === "h1"
+            ? "text-xl font-semibold tracking-[-0.015em]"
+            : "text-[17px] font-semibold tracking-[-0.015em]"
+        }
+      >
+        {title}
+      </Title>
       {count != null && (
-        <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-          {count}
-        </span>
+        <span className="text-[13px] font-normal text-cx-muted">{count}</span>
       )}
     </div>
     {children}

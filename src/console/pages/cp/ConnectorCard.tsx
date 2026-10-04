@@ -154,10 +154,10 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
   return (
     <div
       data-connector-id={connectorId}
-      className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      className="flex flex-col rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        <span className="text-sm font-semibold text-cx-fg">
           Connector {connectorId}
         </span>
         <div className="flex items-center gap-1">
@@ -166,7 +166,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             type="button"
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-gray-500 hover:text-rose-700 dark:text-gray-400 dark:hover:text-rose-300"
+            className="h-7 w-7 text-cx-muted hover:text-cx-rose"
             aria-label={`Remove connector ${connectorId}`}
             title="Remove connector"
             onClick={() => void handleRemove()}
@@ -176,41 +176,41 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         </div>
       </div>
       {removeError && (
-        <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-1 text-xs text-cx-rose">
           {removeError}
         </p>
       )}
 
       <div
-        className="mt-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+        className="mt-1 flex items-center gap-1.5 text-xs text-cx-muted"
         title="Set by the CSMS with ChangeAvailability"
       >
         <span
           aria-hidden
           className={`h-1.5 w-1.5 rounded-full ${
-            view.availability === "Operative" ? "bg-emerald-500" : "bg-rose-500"
+            view.availability === "Operative" ? "bg-cx-emerald" : "bg-cx-rose"
           }`}
         />
         <span data-testid="availability">{view.availability}</span>
       </div>
 
       {view.transactionId != null && (
-        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        <div className="mt-1 text-xs text-cx-muted">
           Tx #{view.transactionId}
           {view.transactionTagId ? ` · ${view.transactionTagId}` : ""}
         </div>
       )}
 
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-md bg-gray-50 px-2 py-1.5 dark:bg-gray-800">
-          <div className="text-gray-500 dark:text-gray-400">Energy</div>
-          <div className="font-mono tabular-nums text-gray-900 dark:text-gray-100">
+        <div className="rounded-md bg-cx-sub px-2 py-1.5">
+          <div className="text-cx-muted">Energy</div>
+          <div className="font-mono tabular-nums text-cx-fg">
             {formatEnergyKwh(view.meterValue)}
           </div>
         </div>
-        <div className="rounded-md bg-gray-50 px-2 py-1.5 dark:bg-gray-800">
-          <div className="text-gray-500 dark:text-gray-400">SoC</div>
-          <div className="font-mono tabular-nums text-gray-900 dark:text-gray-100">
+        <div className="rounded-md bg-cx-sub px-2 py-1.5">
+          <div className="text-cx-muted">SoC</div>
+          <div className="font-mono tabular-nums text-cx-fg">
             {view.soc != null ? formatSoc(view.soc) : "—"}
           </div>
         </div>
@@ -229,7 +229,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             type="button"
             onClick={() => void handleStop()}
             disabled={isPending}
-            className="w-full rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-[7px] border border-cx-border-strong px-3 py-1.5 text-[12.5px] font-medium text-cx-amber hover:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-50"
           >
             Stop transaction
           </button>
@@ -239,7 +239,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
               value={effectiveTagId}
               onChange={(e) => setTagIdInput(e.target.value)}
               disabled={tagIds.length === 0}
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              className="w-full rounded-[7px] border border-cx-border bg-cx-card px-2.5 py-1.5 text-[13px] text-cx-fg hover:border-cx-border-strong disabled:opacity-60"
               title="RFID tag to authorize the transaction with"
             >
               {tagIds.length === 0 ? (
@@ -256,7 +256,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
               type="button"
               onClick={() => void handleStart()}
               disabled={isPending || !effectiveTagId}
-              className="w-full rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full rounded-[7px] border border-cx-border-strong px-3 py-1.5 text-[12.5px] font-medium text-cx-emerald hover:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-50"
             >
               Start transaction
             </button>
@@ -286,14 +286,14 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-xs text-cx-fg2">
           <span className="shrink-0">Faulted with</span>
           <select
             aria-label="Fault error code"
             value={faultErrorCode}
             onChange={(e) => setFaultErrorCode(e.target.value)}
             title="errorCode sent with Set status → Faulted"
-            className="min-w-0 flex-1 rounded-md border border-gray-300 py-1 pl-2 pr-8 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            className="min-w-0 flex-1 rounded-md border border-cx-border-strong py-1 pl-2 pr-8 text-xs text-cx-fg"
           >
             {FAULT_ERROR_CODES.map((code) => (
               <option key={code} value={code}>

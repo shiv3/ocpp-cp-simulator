@@ -2,11 +2,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import WaitControls from "../../components/WaitControls";
 import WaitingExpectation from "../../components/WaitingExpectation";
 import { formatElapsed } from "../../lib/scenarioExpectation";
-import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
+import RunStatePill from "../../components/RunStatePill";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import { controlScenarioWait } from "../../lib/waitControl";
 import { buildScenarioUrl } from "../../lib/useAllScenarios";
@@ -59,8 +58,8 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
   }
 
   return (
-    <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-      <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+    <div className="mb-6 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
+      <h3 className="mb-3 text-sm font-semibold text-cx-fg">
         Active scenarios
       </h3>
 
@@ -73,23 +72,14 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
           return (
             <div
               key={`${run.connectorId}:${run.scenarioId}`}
-              className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800"
+              className="flex flex-col gap-2 rounded-md border border-cx-border bg-cx-sub p-3"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-xs font-semibold",
-                      LIVE_RUN_STATE_STYLES[run.state],
-                    )}
-                  >
-                    {run.state}
-                  </span>
+                  <RunStatePill state={run.state} />
                   <div className="flex flex-col gap-0.5">
-                    <span className="font-medium text-gray-900 dark:text-gray-100">
-                      {run.name}
-                    </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="font-medium text-cx-fg">{run.name}</span>
+                    <span className="text-xs text-cx-muted">
                       Connector #{run.connectorId}
                     </span>
                   </div>
@@ -106,7 +96,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
                 </Button>
               </div>
 
-              <div className="flex items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300">
+              <div className="flex items-center justify-between gap-2 text-xs text-cx-fg2">
                 <span>
                   {run.currentNodeLabel || run.currentNodeId || "—"} (
                   {run.executedCount}/{run.nodeCount ?? "?"} steps)
@@ -121,7 +111,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
                     currentNodeStartedAt={run.currentNodeStartedAt}
                     waitDeadlineAt={run.waitDeadlineAt}
                     now={now}
-                    className="text-xs text-gray-600 dark:text-gray-300"
+                    className="text-xs text-cx-fg2"
                   />
                   <WaitControls
                     canExtend={run.waitDeadlineAt != null}
@@ -149,7 +139,7 @@ const ActiveScenarioPanel: React.FC<ActiveScenarioPanelProps> = ({
                   run.scenarioId,
                   { runId: run.runId },
                 )}
-                className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                className="text-xs text-cx-accent hover:underline"
               >
                 Open run
               </Link>

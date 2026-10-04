@@ -17,7 +17,7 @@ export interface CpListFilterBarProps {
 }
 
 const CHECKBOX_LABEL_CLASS =
-  "inline-flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-200";
+  "inline-flex items-center gap-1.5 text-sm text-cx-fg2";
 
 /** The filter row above the list: two comboboxes, two selects, two checkboxes
  *  and the match counter. The values live in the URL (see `useCpListParams`). */
@@ -135,7 +135,7 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
       </label>
       <span
         data-testid="cp-list-count"
-        className="ml-auto text-xs text-gray-500 dark:text-gray-400"
+        className="ml-auto text-xs text-cx-muted"
       >
         {shown.cps} CPs · {shown.connectors} connectors
       </span>

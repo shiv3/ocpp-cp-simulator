@@ -68,17 +68,13 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
   );
 
   if (steps.length === 0) {
-    return (
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        This scenario has no steps.
-      </p>
-    );
+    return <p className="text-sm text-cx-muted">This scenario has no steps.</p>;
   }
 
   return (
     <div className="space-y-2">
       {!isLinear && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <div className="rounded-md border border-cx-amber/40 bg-cx-amber/10 px-3 py-2 text-xs text-cx-amber">
           branching scenario — order approximate
         </div>
       )}
@@ -97,31 +93,25 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
               key={step.id}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg border px-2.5 py-2 text-sm",
-                status === "pending" &&
-                  "border-gray-200 opacity-60 dark:border-gray-800",
-                status !== "pending" &&
-                  !isFailedNode &&
-                  "border-gray-200 dark:border-gray-800",
+                status === "pending" && "border-cx-border opacity-60",
+                status !== "pending" && !isFailedNode && "border-cx-border",
                 status === "current" &&
                   !isFailedNode &&
-                  "border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/40",
-                isFailedNode &&
-                  "border-rose-400 bg-rose-50 dark:border-rose-700 dark:bg-rose-950/40",
+                  "border-cx-accent bg-cx-sel",
+                isFailedNode && "border-cx-rose bg-cx-rose/10",
               )}
             >
               <span
                 className={cn(
                   "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-                  status === "pending" &&
-                    "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+                  status === "pending" && "bg-cx-sub text-cx-muted",
                   status === "done" &&
                     !isFailedNode &&
-                    "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+                    "bg-cx-emerald/10 text-cx-emerald",
                   status === "current" &&
                     !isFailedNode &&
-                    "animate-pulse bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-                  isFailedNode &&
-                    "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
+                    "animate-pulse bg-cx-sel text-cx-accent",
+                  isFailedNode && "bg-cx-rose/10 text-cx-rose",
                 )}
                 aria-label={
                   isFailedNode ? "failed" : status === "done" ? "done" : status
@@ -136,10 +126,10 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
                 )}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-gray-900 dark:text-gray-100">
+                <div className="truncate font-medium text-cx-fg">
                   {nodeTitle(step)}
                 </div>
-                <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+                <div className="truncate text-xs text-cx-muted">
                   {stepSummary(step)}
                 </div>
               </div>

@@ -53,8 +53,8 @@ const CpPowerButton: React.FC<CpPowerButtonProps> = ({
       className={cn(
         "inline-flex h-7 w-7 items-center justify-center rounded-md border",
         connected
-          ? "border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950"
-          : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950",
+          ? "border-cx-rose/40 text-cx-rose hover:bg-cx-rose/10"
+          : "border-cx-emerald/40 text-cx-emerald hover:bg-cx-emerald/10",
         isPending && "opacity-50",
       )}
     >

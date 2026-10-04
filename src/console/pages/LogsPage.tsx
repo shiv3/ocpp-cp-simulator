@@ -217,9 +217,9 @@ const LogsPage: React.FC = () => {
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="max-h-[600px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-800">
+          <div className="max-h-[600px] overflow-y-auto rounded-lg border border-cx-border">
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+              <thead className="sticky top-0 bg-cx-sub text-xs uppercase tracking-wide text-cx-muted">
                 <tr>
                   <th className="px-2 py-2 font-medium">Time</th>
                   <th className="px-2 py-2 font-medium">CP</th>
@@ -227,7 +227,7 @@ const LogsPage: React.FC = () => {
                   <th className="px-2 py-2 font-medium">Message</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              <tbody className="divide-y divide-cx-border">
                 {filtered.map((item) => (
                   <tr
                     key={item.seq}
@@ -245,16 +245,16 @@ const LogsPage: React.FC = () => {
                       }
                     }}
                     className={cn(
-                      "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
+                      "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-cx-accent focus-visible:ring-inset",
                       selected?.seq === item.seq
-                        ? "bg-blue-50 dark:bg-blue-950"
-                        : "hover:bg-gray-50 dark:hover:bg-gray-900",
+                        ? "bg-cx-sel"
+                        : "hover:bg-cx-sub",
                     )}
                   >
-                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs text-gray-500 dark:text-gray-400">
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs text-cx-muted">
                       {formatLogTime(item.entry.timestamp)}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-200">
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs text-cx-fg2">
                       {item.cpId}
                     </td>
                     <td className="whitespace-nowrap px-2 py-1.5">
@@ -267,7 +267,7 @@ const LogsPage: React.FC = () => {
                         {item.entry.type}
                       </span>
                     </td>
-                    <td className="max-w-[280px] truncate px-2 py-1.5 text-xs text-gray-700 dark:text-gray-300">
+                    <td className="max-w-[280px] truncate px-2 py-1.5 text-xs text-cx-fg2">
                       {item.entry.message}
                     </td>
                   </tr>
@@ -276,11 +276,11 @@ const LogsPage: React.FC = () => {
             </table>
           </div>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+          <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
             {selected ? (
               <>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  <span className="font-mono text-sm font-semibold text-cx-fg">
                     {selected.cpId}
                   </span>
                   <span
@@ -300,15 +300,15 @@ const LogsPage: React.FC = () => {
                     {LogLevel[selected.entry.level]}
                   </span>
                 </div>
-                <div className="mb-3 font-mono text-xs text-gray-500 dark:text-gray-400">
+                <div className="mb-3 font-mono text-xs text-cx-muted">
                   {selected.entry.timestamp.toISOString()}
                 </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-800 dark:text-gray-200">
+                <pre className="whitespace-pre-wrap break-words font-mono text-xs text-cx-fg">
                   {prettyPrintMessage(selected.entry.message)}
                 </pre>
               </>
             ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-cx-muted">
                 Select a message to see details.
               </p>
             )}

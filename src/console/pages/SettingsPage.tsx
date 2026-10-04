@@ -48,14 +48,14 @@ const SettingsPage: React.FC = () => {
       <Settings />
 
       {!isLoadingNetSim && loadError && (
-        <div className="rounded-md border border-red-500 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500 dark:bg-red-950 dark:text-red-400">
+        <div className="rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
           {loadError}
         </div>
       )}
 
       {!isLoadingNetSim && !loadError && (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6">
+          <h2 className="mb-4 text-lg font-semibold text-cx-fg">
             Network Simulation
           </h2>
           <NetworkSimEditor

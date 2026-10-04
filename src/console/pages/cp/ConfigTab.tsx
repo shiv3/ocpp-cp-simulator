@@ -61,11 +61,7 @@ const SoapCallbackUrlRow: React.FC<{
               : "Copy"}
         </Button>
       </div>
-      {note && (
-        <span className="font-sans text-xs text-gray-500 dark:text-gray-400">
-          {note}
-        </span>
-      )}
+      {note && <span className="font-sans text-xs text-cx-muted">{note}</span>}
     </div>
   );
 };
@@ -116,16 +112,14 @@ const ConfigTab: React.FC<ConfigTabProps> = ({
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+    <div className="rounded-lg border border-cx-border p-4">
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {rows.map(([label, value]) => (
           <div key={label}>
-            <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            <dt className="text-xs font-medium uppercase tracking-wide text-cx-muted">
               {label}
             </dt>
-            <dd className="break-all font-mono text-sm text-gray-900 dark:text-gray-100">
-              {value}
-            </dd>
+            <dd className="break-all font-mono text-sm text-cx-fg">{value}</dd>
           </div>
         ))}
       </dl>

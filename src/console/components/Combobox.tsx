@@ -124,7 +124,7 @@ const Combobox: React.FC<ComboboxProps> = ({
             setOpen(true);
           }
         }}
-        className="absolute inset-y-0 right-0 flex w-7 items-center justify-center text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+        className="absolute inset-y-0 right-0 flex w-7 items-center justify-center text-cx-faint hover:text-cx-fg2"
       >
         <ChevronDown className="h-4 w-4" />
       </button>
@@ -133,11 +133,11 @@ const Combobox: React.FC<ComboboxProps> = ({
           role="listbox"
           id={listId}
           aria-label={ariaLabel}
-          className="absolute left-0 top-full z-20 mt-1 max-h-72 min-w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 text-sm shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-20 mt-1 max-h-72 min-w-full overflow-auto rounded-[9px] border border-cx-border-strong bg-cx-card p-1 text-[13px] shadow-[0_10px_28px_rgba(0,0,0,0.22)]"
         >
           {value !== "" && (
             <OptionButton onSelect={() => pick("")}>
-              <span className="text-gray-500 dark:text-gray-400">Clear</span>
+              <span className="text-cx-muted">Clear</span>
             </OptionButton>
           )}
           {visible.map((option) => (
@@ -151,20 +151,18 @@ const Combobox: React.FC<ComboboxProps> = ({
                   className={cn("h-2 w-2 shrink-0 rounded-full", option.dot)}
                 />
               )}
-              <span className="whitespace-nowrap text-gray-700 dark:text-gray-200">
+              <span className="whitespace-nowrap text-cx-fg2">
                 {option.value}
               </span>
               {option.hint && (
-                <span className="ml-auto pl-3 font-mono text-xs text-gray-400 dark:text-gray-500">
+                <span className="ml-auto pl-3 font-mono text-[11px] text-cx-faint">
                   {option.hint}
                 </span>
               )}
             </OptionButton>
           ))}
           {visible.length === 0 && (
-            <div className="px-3 py-1.5 text-gray-400 dark:text-gray-500">
-              No match
-            </div>
+            <div className="px-2 py-1.5 text-cx-faint">No match</div>
           )}
         </div>
       )}
@@ -183,8 +181,8 @@ const OptionButton: React.FC<{
     aria-selected={selected ?? false}
     onClick={onSelect}
     className={cn(
-      "flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800",
-      selected && "bg-gray-50 dark:bg-gray-800",
+      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-cx-sub",
+      selected && "bg-cx-sub",
     )}
   >
     {children}

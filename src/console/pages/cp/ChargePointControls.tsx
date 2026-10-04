@@ -20,7 +20,7 @@ const CP_STATUSES = [
 ] as const;
 
 const SELECT_CLASS =
-  "rounded-md border border-gray-300 py-1 pl-2 pr-8 text-xs text-gray-900 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100";
+  "rounded-md border border-cx-border-strong py-1 pl-2 pr-8 text-xs text-cx-fg disabled:opacity-60";
 
 export interface ChargePointControlsProps {
   cpId: string;
@@ -79,18 +79,16 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   return (
     <div
       data-testid="charge-point-controls"
-      className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      className="mb-6 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4"
     >
-      <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+      <div className="mb-3 text-sm font-semibold text-cx-fg">
         Charge point
-        <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
-          (connector 0)
-        </span>
+        <span className="ml-1 font-normal text-cx-muted">(connector 0)</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
         <div className="flex items-center gap-2">
           <span
-            className="text-gray-600 dark:text-gray-300"
+            className="text-cx-fg2"
             title="Set by BootNotification.conf and ChangeConfiguration HeartbeatInterval (§4.6)"
           >
             {heartbeat.intervalSeconds > 0
@@ -185,7 +183,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
         </div>
       </div>
       {error && (
-        <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-xs text-cx-rose">
           {error}
         </p>
       )}

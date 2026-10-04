@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, PlugZap, SearchX } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import ChargePointConfigModal, {
   defaultChargePointConfig,
@@ -104,14 +105,10 @@ const DashboardPage: React.FC = () => {
   ).length;
 
   const addButton = (
-    <button
-      type="button"
-      onClick={() => setIsAddOpen(true)}
-      className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-    >
-      <Plus className="h-4 w-4" />
+    <Button type="button" onClick={() => setIsAddOpen(true)}>
+      <Plus />
       Add Charge Point
-    </button>
+    </Button>
   );
 
   return (
@@ -139,7 +136,7 @@ const DashboardPage: React.FC = () => {
           <p
             role="status"
             data-testid="bulk-result"
-            className="-mt-2 mb-4 text-xs text-gray-600 dark:text-gray-300"
+            className="-mt-2 mb-4 text-xs text-cx-fg2"
           >
             {bulkReport}
           </p>
@@ -174,7 +171,7 @@ const DashboardPage: React.FC = () => {
             ) : (
               <div
                 ref={listRef}
-                className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
+                className="overflow-hidden rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none"
               >
                 {view === "hierarchy" &&
                   shownRows.map((row) => (

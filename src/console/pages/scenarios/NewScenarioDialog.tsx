@@ -107,7 +107,7 @@ const NewScenarioDialog: React.FC<NewScenarioDialogProps> = ({
                 setCpId(e.target.value);
                 setConnectorValue("");
               }}
-              className="w-full rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              className="w-full rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
             >
               <option value="" disabled>
                 Select a charge point
@@ -126,7 +126,7 @@ const NewScenarioDialog: React.FC<NewScenarioDialogProps> = ({
               id="new-scenario-connector"
               value={connectorValue}
               onChange={(e) => setConnectorValue(e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              className="w-full rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
             >
               <option value="">Charge point (all connectors)</option>
               {connectors.map((connector) => (

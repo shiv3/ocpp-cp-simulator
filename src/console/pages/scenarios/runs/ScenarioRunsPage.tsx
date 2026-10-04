@@ -237,13 +237,13 @@ const ScenarioRunsPage: React.FC = () => {
       </div>
 
       {error && (
-        <p className="mb-4 text-sm text-rose-700 dark:text-rose-300">
+        <p className="mb-4 text-sm text-cx-rose">
           Could not load the run history: {error}
         </p>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+        <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
           <RunHistory
             rows={rows}
             emptyText="No runs match these filters."
@@ -259,7 +259,7 @@ const ScenarioRunsPage: React.FC = () => {
               )
             }
           />
-          <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <div className="mt-3 flex items-center justify-between gap-2 text-xs text-cx-muted">
             <span>
               {first}–{last} of {page.total}
             </span>
@@ -286,7 +286,7 @@ const ScenarioRunsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+        <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
           {selected ? (
             <RunReportView
               cpId={selected.cpId}
@@ -295,7 +295,7 @@ const ScenarioRunsPage: React.FC = () => {
               runId={selected.runId}
             />
           ) : (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-cx-muted">
               {selectedRunId
                 ? isLoading || lookup.isLoading
                   ? "Loading…"

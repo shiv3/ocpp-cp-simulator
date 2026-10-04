@@ -48,7 +48,7 @@ const InsertSlot: React.FC<{ onPick: (type: ScenarioNodeType) => void }> = ({
         type="button"
         aria-label="Insert step here"
         onClick={() => setOpen(true)}
-        className="flex h-4 w-full items-center justify-center rounded text-gray-300 opacity-0 hover:bg-blue-50 hover:text-blue-500 focus-visible:opacity-100 group-hover/insert:opacity-100 dark:hover:bg-blue-950"
+        className="flex h-4 w-full items-center justify-center rounded text-cx-faint opacity-0 hover:bg-cx-sel hover:text-cx-accent focus-visible:opacity-100 group-hover/insert:opacity-100"
       >
         <Plus className="h-3 w-3" />
       </button>
@@ -87,8 +87,8 @@ const StepList: React.FC<StepListProps> = ({
               className={cn(
                 "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-sm",
                 selected
-                  ? "border-blue-400 bg-blue-50 ring-1 ring-blue-400 dark:border-blue-700 dark:bg-blue-950/40"
-                  : "border-gray-200 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900",
+                  ? "border-cx-accent bg-cx-sel ring-1 ring-cx-accent"
+                  : "border-cx-border hover:bg-cx-sub",
               )}
             >
               <button
@@ -98,14 +98,12 @@ const StepList: React.FC<StepListProps> = ({
                 onClick={() => onSelect(step.id)}
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
               >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cx-sub text-xs font-semibold text-cx-fg2">
                   {index + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-gray-900 dark:text-gray-100">
-                    {title}
-                  </div>
-                  <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+                  <div className="truncate font-medium text-cx-fg">{title}</div>
+                  <div className="truncate text-xs text-cx-muted">
                     {stepSummary(step)}
                   </div>
                 </div>
@@ -116,7 +114,7 @@ const StepList: React.FC<StepListProps> = ({
                   aria-label={`Move step ${index + 1} up`}
                   disabled={index === 0}
                   onClick={() => onMove(index, index - 1)}
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-gray-800"
+                  className="rounded p-1 text-cx-faint hover:bg-cx-sub disabled:opacity-30"
                 >
                   <ChevronUp className="h-3.5 w-3.5" />
                 </button>
@@ -125,7 +123,7 @@ const StepList: React.FC<StepListProps> = ({
                   aria-label={`Move step ${index + 1} down`}
                   disabled={index === steps.length - 1}
                   onClick={() => onMove(index, index + 1)}
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-gray-800"
+                  className="rounded p-1 text-cx-faint hover:bg-cx-sub disabled:opacity-30"
                 >
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
@@ -133,7 +131,7 @@ const StepList: React.FC<StepListProps> = ({
                   type="button"
                   aria-label={`Delete step ${index + 1}`}
                   onClick={() => onDelete(step.id)}
-                  className="rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950"
+                  className="rounded p-1 text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -157,7 +155,7 @@ const StepList: React.FC<StepListProps> = ({
           <button
             type="button"
             onClick={() => setShowAddAtEnd(true)}
-            className="w-full rounded-lg border border-dashed border-gray-300 py-2 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-600 dark:hover:text-gray-200"
+            className="w-full rounded-lg border border-dashed border-cx-border-strong py-2 text-sm font-medium text-cx-muted hover:border-cx-border-strong hover:text-cx-fg"
           >
             + Add step
           </button>

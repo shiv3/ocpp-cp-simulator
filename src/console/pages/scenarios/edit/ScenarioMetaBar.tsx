@@ -78,10 +78,10 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
   };
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-4 dark:border-gray-800">
+    <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-cx-border pb-4">
       <Link
         to={"/scenarios"}
-        className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+        className="text-sm text-cx-accent hover:underline"
       >
         ← Back
       </Link>
@@ -90,7 +90,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
         aria-label="Scenario name"
         value={scenario.name}
         onChange={(e) => onChange({ name: e.target.value })}
-        className="min-w-0 flex-1 border-0 bg-transparent text-lg font-semibold text-gray-900 focus:outline-none focus:ring-0 dark:text-gray-100"
+        className="min-w-0 flex-1 border-0 bg-transparent text-lg font-semibold text-cx-fg focus:outline-none focus:ring-0"
       />
 
       <TargetChip cpId={cpId} connectorId={connectorId} />
@@ -99,7 +99,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
         aria-label="Trigger"
         value={triggerType}
         onChange={(e) => handleTriggerTypeChange(e.target.value)}
-        className="rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
       >
         <option value="manual">Manual</option>
         <option value="statusChange">On status change</option>
@@ -110,7 +110,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
           aria-label="Trigger to-status"
           value={toStatus}
           onChange={(e) => handleToStatusChange(e.target.value)}
-          className="rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
         >
           {Object.values(OCPPStatus).map((status) => (
             <option key={status} value={status}>
@@ -120,12 +120,12 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
         </select>
       )}
 
-      <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+      <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
         <input
           type="checkbox"
           checked={enabled}
           onChange={(e) => onChange({ enabled: e.target.checked })}
-          className="h-4 w-4 rounded border-gray-300 dark:border-gray-600"
+          className="h-4 w-4 rounded border-cx-border-strong"
         />
         Enabled
       </label>
@@ -136,7 +136,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
             role="status"
             aria-label="Unsaved changes"
             title="Unsaved changes"
-            className="h-2 w-2 rounded-full bg-amber-500"
+            className="h-2 w-2 rounded-full bg-cx-amber"
           />
         )}
         <Button

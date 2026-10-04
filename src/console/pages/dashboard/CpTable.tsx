@@ -58,22 +58,19 @@ const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
                 if ((event.target as Element).closest("button, a")) return;
                 toggleOpen();
               }}
-              className={cn(
-                "cursor-pointer",
-                selected && "bg-blue-50 dark:bg-blue-950/30",
-              )}
+              className={cn("cursor-pointer", selected && "bg-cx-sel")}
             >
               <TableCell>
                 {/* A button, so the panel opens from the keyboard too. */}
                 <button
                   type="button"
                   onClick={toggleOpen}
-                  className="font-mono text-sm font-semibold text-gray-900 hover:underline dark:text-gray-100"
+                  className="font-mono text-sm font-semibold text-cx-fg hover:underline"
                 >
                   {cp.id}
                 </button>
               </TableCell>
-              <TableCell className="font-mono text-xs text-gray-500 dark:text-gray-400">
+              <TableCell className="font-mono text-[11.5px] text-cx-faint">
                 {row.ocppVersion ?? "—"}
               </TableCell>
               <TableCell>
@@ -89,10 +86,10 @@ const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
                     waitingExpectation={firstWaitingExpectation(row)}
                   />
                 ) : (
-                  <span className="text-gray-400 dark:text-gray-500">—</span>
+                  <span className="text-cx-faint">—</span>
                 )}
               </TableCell>
-              <TableCell className="text-xs text-gray-500 dark:text-gray-400">
+              <TableCell className="text-xs text-cx-muted">
                 {formatRelativeTime(lastHeartbeat(row))}
               </TableCell>
               <TableCell>

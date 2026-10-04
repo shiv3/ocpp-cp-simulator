@@ -114,7 +114,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
     <aside
       aria-label={label}
       style={{ "--console-panel-width": widthCss } as React.CSSProperties}
-      className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-gray-100 shadow-2xl min-[1100px]:w-[var(--console-panel-width)] dark:border-gray-800 dark:bg-gray-900"
+      className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-cx-border bg-cx-bg shadow-[-16px_0_40px_rgba(20,20,30,0.12)] min-[1100px]:w-[var(--console-panel-width)] dark:shadow-[-16px_0_40px_rgba(0,0,0,0.45)]"
     >
       <div
         role="separator"
@@ -143,10 +143,10 @@ const SidePanel: React.FC<SidePanelProps> = ({
         // edge to drag.
         className={cn(
           "absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize touch-none min-[1100px]:block",
-          "hover:bg-blue-500/40 focus-visible:bg-blue-500/60 focus-visible:outline-none",
+          "hover:bg-cx-accent/40 focus-visible:bg-cx-accent focus-visible:outline-none",
         )}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
     </aside>
   );
 };

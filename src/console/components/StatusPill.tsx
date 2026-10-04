@@ -2,8 +2,8 @@ import React from "react";
 
 import { cn } from "@/lib/utils";
 import {
-  STATUS_PILL_CLASSES,
   statusColor,
+  statusDotClass,
   type StatusPillStatus,
 } from "./statusColor";
 
@@ -14,20 +14,21 @@ export interface StatusPillProps {
   className?: string;
 }
 
-const StatusPill: React.FC<StatusPillProps> = ({ status, className }) => {
-  const color = statusColor(status);
-  return (
+/** A status as a small colored dot plus plain text, with no fill. */
+const StatusPill: React.FC<StatusPillProps> = ({ status, className }) => (
+  <span
+    className={cn(
+      "inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-medium",
+      statusColor(status) === "gray" ? "text-cx-muted" : "text-cx-fg2",
+      className,
+    )}
+  >
     <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-        STATUS_PILL_CLASSES[color],
-        className,
-      )}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {status}
-    </span>
-  );
-};
+      aria-hidden
+      className={cn("h-[7px] w-[7px] rounded-full", statusDotClass(status))}
+    />
+    {status}
+  </span>
+);
 
 export default StatusPill;

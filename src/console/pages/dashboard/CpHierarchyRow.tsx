@@ -49,14 +49,14 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
   };
 
   return (
-    <div className="border-t border-gray-200 first:border-t-0 dark:border-gray-800">
+    <div className="border-t border-cx-border first:border-t-0">
       <div
         data-cp-id={cp.id}
         data-selected={selected ? "true" : undefined}
         onClick={handleHeadClick}
         className={cn(
-          "flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/50",
-          selected && "bg-blue-50 dark:bg-blue-950/30",
+          "flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 hover:bg-cx-sub",
+          selected && "bg-cx-sel",
         )}
       >
         <button
@@ -64,7 +64,7 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
           onClick={onToggleCollapse}
           aria-expanded={!collapsed}
           aria-label={`${collapsed ? "Expand" : "Collapse"} connectors of ${cp.id}`}
-          className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+          className="rounded p-0.5 text-cx-faint hover:bg-cx-sub hover:text-cx-fg2"
         >
           <ChevronRight
             className={cn(
@@ -78,12 +78,12 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
         <button
           type="button"
           onClick={toggleOpen}
-          className="font-mono text-sm font-semibold text-gray-900 hover:underline dark:text-gray-100"
+          className="font-mono text-sm font-semibold text-cx-fg hover:underline"
         >
           {cp.id}
         </button>
         {row.ocppVersion && (
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <span className="font-mono text-[11.5px] text-cx-faint">
             {row.ocppVersion}
           </span>
         )}
@@ -99,7 +99,7 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
               key={connector.id}
               title={`#${connector.id} ${connector.status}`}
               className={cn(
-                "h-2 w-2 rounded-full",
+                "h-[7px] w-[7px] rounded-full",
                 statusDotClass(connector.status),
               )}
             />
@@ -116,7 +116,7 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
 
       {!collapsed &&
         (row.connectors.length === 0 ? (
-          <div className="pb-2 pl-9 pr-3 text-xs text-gray-400 dark:text-gray-500">
+          <div className="pb-2 pl-9 pr-3 text-xs text-cx-faint">
             No connectors
           </div>
         ) : (

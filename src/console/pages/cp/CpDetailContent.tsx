@@ -706,7 +706,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             // scrolls horizontally instead of wrapping: `grid-auto-flow:
             // column`, every column at least a quarter of the row
             // (`(100% - 3rem) / 4`, 3rem = the three gutters) and at least
-            // 420 px, so at most four are visible; `min(100%, …)` keeps a phone
+            // 400 px, so at most four are visible; `min(100%, …)` keeps a phone
             // at one card per view and the `1fr` max lets fewer than four share
             // the width. More than four overflow into `overflow-x-auto`, and
             // snapping lands a scroll on a card edge without forcing it. The
@@ -723,7 +723,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 className="relative grid snap-x snap-proximity items-start gap-4 overflow-x-auto overscroll-x-contain pb-2 [grid-auto-flow:column]"
                 style={{
                   gridAutoColumns:
-                    "minmax(min(100%, max(420px, calc((100% - 3rem) / 4))), 1fr)",
+                    "minmax(min(100%, max(400px, calc((100% - 3rem) / 4))), 1fr)",
                 }}
               >
                 {connectorList.map((connector) => (

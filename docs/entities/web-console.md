@@ -244,7 +244,7 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   classic UI: one [connector card](#connector-card) per connector, each followed
   by its own [scenario card](#scenario-card), in **one row that scrolls
   horizontally** (the cards never wrap to a second row): **at most four cards
-  are visible**, each at least a quarter of the row and at least about 420 px
+  are visible**, each at least a quarter of the row and at least about 400 px
   wide, and the rest are reached by scrolling the row (scroll snapping lands on
   a card edge without forcing it; the row is a focusable `region` labelled
   _Connectors_, so the arrow keys scroll it). Fewer connectors share the width
@@ -252,7 +252,7 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   a phone shows one card per view). The connector named in `?connector=` is
   scrolled into view along the row as well as down the page. Pure CSS, no
   measuring (`grid-auto-flow: column` with
-  `grid-auto-columns: minmax(min(100%, max(420px, quarter)), 1fr)` and
+  `grid-auto-columns: minmax(min(100%, max(400px, quarter)), 1fr)` and
   `overflow-x: auto`). The card lays itself out by **its own width** (a container query, not the viewport):
   the battery sits beside the figures from about 400 px, the stepper goes
   compact under about 520 px (tighter padding and lines, the TagID select or

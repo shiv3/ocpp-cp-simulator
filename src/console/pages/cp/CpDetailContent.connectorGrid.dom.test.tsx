@@ -83,7 +83,7 @@ describe("CpDetailContent: the connector grid on the full page", () => {
     // jsdom does not lay out: assert the rule, not the geometry.
     const columns = grid!.style.gridAutoColumns;
     expect(columns).toContain("/ 4");
-    expect(columns).toContain("420px");
+    expect(columns).toContain("400px");
     expect(grid!.style.gridTemplateColumns).toBe("");
     expect(grid!.className).toContain("overflow-x-auto");
     expect(grid!.className).toContain("[grid-auto-flow:column]");

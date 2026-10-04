@@ -42,8 +42,6 @@ vi.mock("@ocpp-debugkit/toolkit/core", async () => {
 
 import {
   createFakeChargePointService,
-  findMenuItem,
-  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -87,12 +85,14 @@ function snapshot(id: string): ChargePointSnapshot {
 }
 
 async function openAnalysisTab(container: HTMLElement): Promise<void> {
-  // The section lives in the charge point page's More menu (`?tab=analysis`).
-  const more = container.querySelector<HTMLElement>('[aria-label="More"]');
-  expect(more, "expected the More button").toBeTruthy();
-  await openDropdownMenu(more!);
-  const item = findMenuItem("Session analysis");
-  expect(item, "expected a Session analysis item").toBeTruthy();
+  // The section is a tab of the charge point page's lower half
+  // (`?tab=analysis`).
+  const item = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[role="tablist"][aria-label="Charge point sections"] [role="tab"]',
+    ),
+  ).find((tab) => tab.textContent?.trim() === "Session analysis");
+  expect(item, "expected a Session analysis tab").toBeTruthy();
   await act(async () => {
     item!.click();
     await Promise.resolve();

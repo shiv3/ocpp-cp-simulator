@@ -306,15 +306,18 @@ describe("DashboardPage side panel", () => {
     };
     let panel = panelOf(result.container);
     expect(panel!.querySelector("h2")?.textContent).toBe("CP-A");
-    expect(panel!.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    // The connector tabs (the lower half has its own tab strip).
+    const connectorTabs = (root: Element) =>
+      root.querySelectorAll(
+        '[role="tablist"][aria-label="Connectors"] [role="tab"]',
+      );
+    expect(connectorTabs(panel!)).toHaveLength(0);
 
     snapshots.set("CP-A", cpA);
     await pushRegistry(service, [cpA, cpB]);
     await flush();
     panel = panelOf(result.container);
-    expect(panel!.querySelectorAll('[role="tab"]')).toHaveLength(
-      cpA.connectors.length,
-    );
+    expect(connectorTabs(panel!)).toHaveLength(cpA.connectors.length);
   });
 
   it("the expand control opens the full page on the same connector", async () => {

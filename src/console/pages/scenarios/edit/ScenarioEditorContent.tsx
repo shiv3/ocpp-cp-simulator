@@ -627,93 +627,96 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           </div>
         </>
       ) : (
-        <div
-          className={cn(
-            "flex flex-col gap-4",
-            !isPanel && "lg:flex-row lg:items-start",
-          )}
-        >
-          <div className="min-w-0 flex-1">
-            {view === "graph" ? (
-              <StepsGraphView
-                layout={layout}
-                editable
-                selectedStepId={selectedStepId}
-                onSelectStep={setSelectedStepId}
-                onInsertStep={handleInsertStep}
-                onMoveStep={handleMove}
-                onDeleteStep={handleDeleteRequest}
-                onAddBranch={handleAddBranch}
-              />
-            ) : (
-              <StepsView
-                layout={layout}
-                editable
-                selectedStepId={selectedStepId}
-                onSelectStep={setSelectedStepId}
-                onInsertStep={handleInsertStep}
-                onMoveStep={handleMove}
-                onDeleteStep={handleDeleteRequest}
-                onAddBranch={handleAddBranch}
-              />
-            )}
-          </div>
+        // A container query, not the window width: the editor sits on a page
+        // or in a side panel the user can drag wide, and only its own width
+        // says whether the inspector fits beside the steps (the mock's
+        // `.editor > .insp`) or goes under them.
+        <div data-testid="editor-body" className="@container">
           <div
-            className={cn(
-              "min-w-0 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
-              !isPanel && "lg:sticky lg:top-4 lg:w-[400px] lg:shrink-0",
-            )}
+            data-testid="editor-grid"
+            className="grid grid-cols-1 items-start gap-4 @[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]"
           >
-            {selectedNode && selectedPlace && selectedNumber !== null ? (
-              <>
-                <div className="mb-3 flex items-center gap-2 border-b border-cx-border pb-3">
-                  <span
-                    className="min-w-0 flex-1 text-xs text-cx-muted"
-                    title={nodeTitle(selectedNode)}
-                  >
-                    Step <span className="font-mono">{selectedNumber}</span>
-                    {selectedPlace.lane !== "main" &&
-                      ` · ${layout.fork?.branches[selectedPlace.lane]?.name ?? ""}`}
-                  </span>
-                  <InspectorAction
-                    label={`Move step ${selectedNumber} up`}
-                    disabled={selectedPlace.index === 0}
-                    onClick={() => handleMove(selectedNode.id, -1)}
-                  >
-                    <ChevronUp className="h-3.5 w-3.5" />
-                  </InspectorAction>
-                  <InspectorAction
-                    label={`Move step ${selectedNumber} down`}
-                    disabled={selectedPlace.index === selectedPlace.length - 1}
-                    onClick={() => handleMove(selectedNode.id, 1)}
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </InspectorAction>
-                  <InspectorAction
-                    label={`Delete step ${selectedNumber}`}
-                    danger
-                    onClick={() => handleDelete(selectedNode.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </InspectorAction>
-                </div>
-                <StepInspector
-                  node={selectedNode}
-                  onChange={(data) =>
-                    handleStepDataChange(selectedNode.id, data)
-                  }
+            {/* min-w-0: the graph scrolls sideways inside its own column. */}
+            <div className="min-w-0">
+              {view === "graph" ? (
+                <StepsGraphView
+                  layout={layout}
+                  editable
+                  selectedStepId={selectedStepId}
+                  onSelectStep={setSelectedStepId}
+                  onInsertStep={handleInsertStep}
+                  onMoveStep={handleMove}
+                  onDeleteStep={handleDeleteRequest}
+                  onAddBranch={handleAddBranch}
                 />
-              </>
-            ) : (
-              <EmptyState
-                title="Select a step"
-                hint={
-                  isPanel
-                    ? "Pick a step above to edit its configuration."
-                    : "Pick a step on the left to edit its configuration."
-                }
-              />
-            )}
+              ) : (
+                <StepsView
+                  layout={layout}
+                  editable
+                  selectedStepId={selectedStepId}
+                  onSelectStep={setSelectedStepId}
+                  onInsertStep={handleInsertStep}
+                  onMoveStep={handleMove}
+                  onDeleteStep={handleDeleteRequest}
+                  onAddBranch={handleAddBranch}
+                />
+              )}
+            </div>
+            <div
+              className={cn(
+                "min-w-0 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
+                "@[860px]:sticky @[860px]:top-4",
+              )}
+            >
+              {selectedNode && selectedPlace && selectedNumber !== null ? (
+                <>
+                  <div className="mb-3 flex items-center gap-2 border-b border-cx-border pb-3">
+                    <span
+                      className="min-w-0 flex-1 text-xs text-cx-muted"
+                      title={nodeTitle(selectedNode)}
+                    >
+                      Step <span className="font-mono">{selectedNumber}</span>
+                      {selectedPlace.lane !== "main" &&
+                        ` · ${layout.fork?.branches[selectedPlace.lane]?.name ?? ""}`}
+                    </span>
+                    <InspectorAction
+                      label={`Move step ${selectedNumber} up`}
+                      disabled={selectedPlace.index === 0}
+                      onClick={() => handleMove(selectedNode.id, -1)}
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </InspectorAction>
+                    <InspectorAction
+                      label={`Move step ${selectedNumber} down`}
+                      disabled={
+                        selectedPlace.index === selectedPlace.length - 1
+                      }
+                      onClick={() => handleMove(selectedNode.id, 1)}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </InspectorAction>
+                    <InspectorAction
+                      label={`Delete step ${selectedNumber}`}
+                      danger
+                      onClick={() => handleDelete(selectedNode.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </InspectorAction>
+                  </div>
+                  <StepInspector
+                    node={selectedNode}
+                    onChange={(data) =>
+                      handleStepDataChange(selectedNode.id, data)
+                    }
+                  />
+                </>
+              ) : (
+                <EmptyState
+                  title="Select a step"
+                  hint="Pick a step to edit its configuration."
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

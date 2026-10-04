@@ -5,8 +5,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
-  findMenuItem,
-  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -51,36 +49,19 @@ async function flush(times = 3): Promise<void> {
   }
 }
 
-/** Picks a section of the lower half from the header's More menu. */
+/** Picks a section of the lower half from its tab strip. */
 async function openMoreSection(
   container: HTMLElement,
   label: string,
 ): Promise<void> {
-  const more = container.querySelector<HTMLElement>('[aria-label="More"]');
-  expect(more, "expected the More button").toBeTruthy();
-  await openDropdownMenu(more!);
-  const item = findMenuItem(label);
-  expect(item, `expected a "${label}" item in the More menu`).toBeTruthy();
+  const item = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[role="tablist"][aria-label="Charge point sections"] [role="tab"]',
+    ),
+  ).find((tab) => tab.textContent?.trim() === label);
+  expect(item, `expected a "${label}" section tab`).toBeTruthy();
   await act(async () => {
     item!.click();
-    await Promise.resolve();
-  });
-  await flush();
-}
-
-/** Selects a connector tab (`#2`). */
-async function selectConnectorTab(
-  container: HTMLElement,
-  label: string,
-): Promise<void> {
-  const tab = Array.from(
-    container.querySelectorAll<HTMLElement>(
-      '[role="tablist"][aria-label="Connectors"] [role="tab"]',
-    ),
-  ).find((el) => el.textContent?.trim() === label);
-  expect(tab, `expected a ${label} tab`).toBeTruthy();
-  await act(async () => {
-    tab!.click();
     await Promise.resolve();
   });
   await flush();
@@ -178,12 +159,12 @@ describe("CpDetailPage", () => {
     }
   });
 
-  it("shows the CP header, a disabled Start transaction with no tags, and the fixture's transaction history from the More menu", async () => {
+  it("shows the CP header, a disabled Start charging with no tags, and the fixture's transaction history in its tab", async () => {
     const cp = snapshot({
       id: "CP-1",
       status: OCPPStatus.Available,
       connectors: [
-        connector({ id: 1, status: OCPPStatus.Available }),
+        connector({ id: 1, status: OCPPStatus.Preparing }),
         connector({
           id: 2,
           status: OCPPStatus.Charging,
@@ -208,30 +189,28 @@ describe("CpDetailPage", () => {
     const heading = container.querySelector("h1");
     expect(heading?.textContent).toContain("CP-1");
 
-    // Connector 1 card: no transaction, no global tag ids configured (fresh
-    // jsdom localStorage) — the tag select is empty and Start transaction is
+    // Connector 1 card: plugged in, no global tag ids configured (fresh
+    // jsdom localStorage) — the tag select is empty and Start charging is
     // disabled by the tag-flow, not by the button being unconditionally off.
     const connector1Card = container.querySelector('[data-connector-id="1"]');
     expect(connector1Card, "expected a card for connector 1").toBeTruthy();
-    const startButton = Array.from(
-      connector1Card!.querySelectorAll("button"),
-    ).find((b) => b.textContent?.trim() === "Start transaction");
-    expect(startButton, "expected a Start transaction button").toBeTruthy();
+    const startButton = connector1Card!.querySelector<HTMLButtonElement>(
+      '[data-step="start"]',
+    );
+    expect(startButton?.dataset.state).toBe("next");
     expect(startButton!.disabled).toBe(true);
 
-    // Connector 2's tab: its card already has an active transaction — Stop
-    // transaction instead, with the Transaction figure visible.
-    await selectConnectorTab(container, "#2");
+    // Connector 2's card, beside it on the full page: an active transaction,
+    // so Stop charging is next, with the transaction and its tag.
     const connector2Card = container.querySelector('[data-connector-id="2"]');
     expect(connector2Card, "expected a card for connector 2").toBeTruthy();
-    expect(connector2Card!.textContent).toContain("Transaction#7");
-    expect(connector2Card!.textContent).toContain("TAG-7");
-    const stopButton = Array.from(
-      connector2Card!.querySelectorAll("button"),
-    ).find((b) => b.textContent?.trim() === "Stop transaction");
-    expect(stopButton, "expected a Stop transaction button").toBeTruthy();
+    expect(connector2Card!.textContent).toContain("Tx #7 · TAG-7");
+    const stopButton = connector2Card!.querySelector<HTMLButtonElement>(
+      '[data-step="stop"][data-state="next"]',
+    );
+    expect(stopButton, "expected a Stop charging step").toBeTruthy();
 
-    // Pick Transactions in the More menu and see the fixture row rendered
+    // Pick the Transactions tab and see the fixture row rendered
     // from useStateHistory's fetched history.
     await openMoreSection(container, "Transactions");
 
@@ -240,7 +219,7 @@ describe("CpDetailPage", () => {
     });
     expect(container.textContent).toContain("Available → Preparing");
 
-    // A real service call: toggling Stop transaction on connector 2 wires
+    // A real service call: Stop charging on connector 2 wires
     // through to chargePointService.stopTransaction.
     await act(async () => {
       stopButton!.click();
@@ -276,13 +255,16 @@ describe("CpDetailPage", () => {
     const connector1Card = container.querySelector('[data-connector-id="1"]');
     expect(connector1Card, "expected a card for connector 1").toBeTruthy();
     expect(connector1Card!.textContent).toContain("Meter16.21 kWh");
-    expect(connector1Card!.textContent).toContain("SoC20.5%");
+    expect(
+      connector1Card!.querySelector('[data-testid="soc-hero"]')?.textContent,
+    ).toBe("20.5%");
 
-    await selectConnectorTab(container, "#2");
     const connector2Card = container.querySelector('[data-connector-id="2"]');
     expect(connector2Card, "expected a card for connector 2").toBeTruthy();
     expect(connector2Card!.textContent).toContain("Meter0.00 kWh");
-    expect(connector2Card!.textContent).toContain("SoC—");
+    expect(
+      connector2Card!.querySelector('[data-testid="soc-hero"]')?.textContent,
+    ).toBe("—");
   });
 
   it("ConnectorCard: a rejecting stopTransaction is caught, isPending resets, and the failure is logged (not an unhandled rejection)", async () => {
@@ -314,10 +296,10 @@ describe("CpDetailPage", () => {
 
     const card = container.querySelector('[data-connector-id="1"]');
     expect(card, "expected a card for connector 1").toBeTruthy();
-    const stopButton = Array.from(card!.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Stop transaction",
+    const stopButton = card!.querySelector<HTMLButtonElement>(
+      '[data-step="stop"][data-state="next"]',
     );
-    expect(stopButton, "expected a Stop transaction button").toBeTruthy();
+    expect(stopButton, "expected a Stop charging step").toBeTruthy();
 
     await act(async () => {
       stopButton!.click();
@@ -327,8 +309,11 @@ describe("CpDetailPage", () => {
 
     expect(stopTransaction).toHaveBeenCalledWith("CP-1", 1);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Failed to stop transaction on CP-1/1"),
+      expect.stringContaining("Stop charging failed on CP-1/1"),
       expect.any(Error),
+    );
+    expect(card!.querySelector('[role="alert"]')?.textContent).toBe(
+      "Stop charging failed: stop boom",
     );
     // isPending reset in `finally` — the button isn't stuck disabled after
     // the rejection settles.
@@ -337,7 +322,7 @@ describe("CpDetailPage", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("ConnectorCard: the status dropdown ignores a second status click while the first call is still pending", async () => {
+  it("ConnectorCard: Send status ignores a second click while the first call is still pending", async () => {
     const cp = snapshot({
       id: "CP-1",
       connectors: [connector({ id: 1 })],
@@ -361,21 +346,21 @@ describe("CpDetailPage", () => {
 
     const card = container.querySelector('[data-connector-id="1"]');
     expect(card, "expected a card for connector 1").toBeTruthy();
-    const trigger = Array.from(card!.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Set status"),
-    );
-    expect(trigger, "expected a Set status trigger").toBeTruthy();
-
-    const openDropdown = () => openDropdownMenu(trigger!);
-
-    await openDropdown();
-    const firstItem = findMenuItem(OCPPStatus.Charging);
-    expect(firstItem, "expected a Charging status item").toBeTruthy();
+    const status = card!.querySelector<HTMLSelectElement>(
+      'select[aria-label="Status"]',
+    )!;
     await act(async () => {
-      firstItem!.click();
+      status.value = OCPPStatus.Charging;
+      status.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const send = Array.from(card!.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Send status",
+    )!;
+
+    await act(async () => {
+      send.click();
       await Promise.resolve();
     });
-
     expect(sendStatusNotification).toHaveBeenCalledTimes(1);
     expect(sendStatusNotification).toHaveBeenCalledWith(
       "CP-1",
@@ -383,36 +368,26 @@ describe("CpDetailPage", () => {
       OCPPStatus.Charging,
     );
 
-    // Re-open while the first call is still pending and try a second,
-    // different status — the pending guard must drop this click.
-    await openDropdown();
-    const secondItem = findMenuItem(OCPPStatus.Faulted);
-    expect(secondItem, "expected a Faulted status item").toBeTruthy();
+    // While the first call is pending the group waits: a second click is
+    // dropped.
+    expect(send.disabled).toBe(true);
     await act(async () => {
-      secondItem!.click();
+      send.click();
       await Promise.resolve();
     });
-
     expect(sendStatusNotification).toHaveBeenCalledTimes(1);
 
-    // The second click's item was disabled (isPending), so Radix's own
-    // onSelect-driven close never ran — the menu is still open. Resolving
-    // the in-flight call resets isPending (re-enabling the still-open
-    // menu's items), so a subsequent status change goes through normally
-    // without needing to reopen the dropdown.
     await act(async () => {
       resolveStatus?.();
       await Promise.resolve();
     });
     await flush();
 
-    const thirdItem = findMenuItem(OCPPStatus.Faulted);
-    expect(thirdItem, "expected a Faulted status item").toBeTruthy();
+    expect(send.disabled).toBe(false);
     await act(async () => {
-      thirdItem!.click();
+      send.click();
       await Promise.resolve();
     });
-
     expect(sendStatusNotification).toHaveBeenCalledTimes(2);
   });
 

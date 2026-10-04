@@ -166,47 +166,84 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(item, `expected a "${label}" item in the More menu`).toBeTruthy();
     await click(item!);
   }
+  const sectionTabs = (root: ParentNode) =>
+    Array.from(
+      root.querySelectorAll<HTMLElement>(
+        '[role="tablist"][aria-label="Charge point sections"] [role="tab"]',
+      ),
+    );
+  async function pickSection(label: string, root: ParentNode = document.body) {
+    const tab = sectionTabs(root).find((t) => t.textContent?.trim() === label);
+    expect(tab, `expected a "${label}" section tab`).toBeTruthy();
+    await click(tab!);
+  }
+  const selectedCards = (container: HTMLElement) =>
+    Array.from(
+      container.querySelectorAll<HTMLElement>(
+        '[data-connector-id][data-selected="true"]',
+      ),
+    ).map((el) => el.dataset.connectorId);
 
-  it("renders one tab per connector and only the first connector's card", async () => {
+  it("the full page shows every connector's card, no tabs, the first one marked", async () => {
     const { container } = await mount("/cp/CP-A");
 
-    expect(tabs(container).map((t) => t.textContent?.trim())).toEqual([
-      "#1",
-      "#2",
-    ]);
-    expect(tabByLabel(container, "#1")!.getAttribute("aria-selected")).toBe(
-      "true",
-    );
-    expect(tabByLabel(container, "#2")!.getAttribute("aria-selected")).toBe(
-      "false",
-    );
-    expect(cardIds(container)).toEqual(["1"]);
+    expect(tabs(container)).toEqual([]);
+    expect(
+      container.querySelector('[role="tablist"][aria-label="Connectors"]'),
+    ).toBeNull();
+    expect(cardIds(container)).toEqual(["1", "2"]);
+    expect(selectedCards(container)).toEqual(["1"]);
+    // Each card has its own scenario card under it.
+    expect(
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          '[data-testid="scenario-card"]',
+        ),
+      ).map((el) => el.dataset.connectorIdRef),
+    ).toEqual(["1", "2"]);
   });
 
-  it("clicking #2 shows connector 2's card and writes ?connector=2 (replace)", async () => {
+  it("clicking a card's header selects it and writes ?connector=2 (replace); its controls do not", async () => {
     const { container } = await mount("/cp/CP-A");
+    const header = container.querySelector<HTMLElement>(
+      '[data-connector-id="2"] [data-card-header]',
+    )!;
 
-    await click(tabByLabel(container, "#2")!);
-
-    expect(cardIds(container)).toEqual(["2"]);
-    expect(tabByLabel(container, "#2")!.getAttribute("aria-selected")).toBe(
-      "true",
+    // A control in the header acts, it does not select.
+    await click(
+      Array.from(header.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Controls"),
+      )!,
     );
+    expect(selectedCards(container)).toEqual(["1"]);
+
+    await click(header);
+
+    expect(selectedCards(container)).toEqual(["2"]);
     expect(location?.pathname).toBe("/cp/CP-A");
     expect(location?.search).toBe("?connector=2");
     expect(location?.type).toBe("REPLACE");
   });
 
-  it("?connector=2 selects connector 2 on load; a missing connector falls back to the first", async () => {
-    const { container } = await mount("/cp/CP-A?connector=2");
-    expect(cardIds(container)).toEqual(["2"]);
-    expect(container.textContent).toContain("TAG-7");
+  it("?connector=2 marks connector 2 on load and scrolls it into view; a missing connector falls back to the first", async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push((this as HTMLElement).dataset.connectorId ?? "");
+    };
+    try {
+      const { container } = await mount("/cp/CP-A?connector=2");
+      expect(selectedCards(container)).toEqual(["2"]);
+      expect(scrolled).toEqual(["2"]);
+      expect(container.textContent).toContain("TAG-7");
 
-    await cleanup!();
-    cleanup = null;
+      await cleanup!();
+      cleanup = null;
 
-    const second = await mount("/cp/CP-A?connector=9");
-    expect(cardIds(second.container)).toEqual(["1"]);
+      const second = await mount("/cp/CP-A?connector=9");
+      expect(selectedCards(second.container)).toEqual(["1"]);
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it("a charge point without connectors shows the empty state, not a tablist", async () => {
@@ -335,6 +372,57 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(link?.getAttribute("href")).toBe("/logs?cp=CP-A");
   });
 
+  it("the Message log tab is the Message Log page's viewer on this charge point's lines: sidebar, toolbar, search, table", async () => {
+    const clearStoredLogs = vi.fn(async () => {});
+    const { container, service } = await mount("/cp/CP-A", {
+      clearStoredLogs,
+    });
+    await act(async () => {
+      for (const handler of service.__handlers.subscribeRegistry) {
+        handler({ type: "snapshot", cps: [cpA] });
+      }
+      await Promise.resolve();
+    });
+    await flush();
+    for (const message of ["first line", "second line"]) {
+      await pushEvent(service as FakeChargePointService, "CP-A", {
+        type: "log",
+        entry: {
+          timestamp: new Date("2026-01-01T10:00:00.000Z"),
+          level: LogLevel.INFO,
+          type: LogType.OCPP,
+          message,
+        },
+      });
+    }
+    await flush();
+
+    const log = container.querySelector<HTMLElement>(
+      '[data-testid="cp-message-log"]',
+    )!;
+    const toolbar = log.querySelector('[data-testid="log-toolbar"]');
+    expect(toolbar?.textContent).toContain("2 total / 2 filtered");
+    expect(
+      log.querySelector('input[placeholder="Search in messages..."]'),
+    ).toBeTruthy();
+    expect(log.querySelector("table")).toBeTruthy();
+    // Oldest first, and no Charge point column: the lines are all this one's.
+    const text = log.textContent ?? "";
+    expect(text.indexOf("first line")).toBeLessThan(
+      text.indexOf("second line"),
+    );
+    expect(
+      Array.from(log.querySelectorAll("th")).map((th) => th.textContent),
+    ).not.toContain("Charge point");
+
+    await click(buttonByText(log, "Clear screen")!);
+    expect(log.textContent).not.toContain("first line");
+    expect(clearStoredLogs).not.toHaveBeenCalled();
+
+    await click(buttonByText(log, "Clear screen + DB")!);
+    expect(clearStoredLogs).toHaveBeenCalledWith("CP-A");
+  });
+
   it("encodes the charge point id in the Message Log link", async () => {
     const weird = snapshot({
       id: "CP?x#1",
@@ -348,7 +436,7 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(link?.getAttribute("href")).toBe("/logs?cp=CP%3Fx%231");
   });
 
-  it("More lists the sections, Scenarios and Delete (last)", async () => {
+  it("More lists only Scenarios and Delete (last)", async () => {
     await mount("/cp/CP-A");
     const more = document.body.querySelector<HTMLElement>(
       '[aria-label="More"]',
@@ -358,28 +446,36 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     const items = Array.from(
       document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
     ).map((el) => el.textContent?.trim());
-    expect(items).toEqual([
+    expect(items).toEqual(["Scenarios", "Delete"]);
+    expect(findMenuItem("Scenarios")?.getAttribute("href")).toBe(
+      "/scenarios?tab=library&cp=CP-A",
+    );
+  });
+
+  it("the lower half is an underline tab strip of the sections, Message log first", async () => {
+    await mount("/cp/CP-A");
+    expect(
+      sectionTabs(document.body).map((t) => t.textContent?.trim()),
+    ).toEqual([
       "Message log",
       "Transactions",
       "Session analysis",
       "Diagnostics",
       "Expert",
       "Network simulation",
-      "Scenarios",
-      "Delete",
     ]);
-    expect(findMenuItem("Scenarios")?.getAttribute("href")).toBe(
-      "/scenarios?tab=library&cp=CP-A",
-    );
+    expect(
+      sectionTabs(document.body).map((t) => t.getAttribute("aria-selected")),
+    ).toEqual(["true", "false", "false", "false", "false", "false"]);
   });
 
-  it("More → Transactions sets ?tab=transactions and swaps the lower half; ← Message log returns", async () => {
+  it("the Transactions tab sets ?tab=transactions and swaps the lower half; the Message log tab returns", async () => {
     const { container, service } = await mount("/cp/CP-A");
     expect(
       container.querySelector('[data-testid="cp-message-log"]'),
     ).toBeTruthy();
 
-    await pickFromMore("Transactions");
+    await pickSection("Transactions");
 
     expect(location?.search).toBe("?tab=transactions");
     expect(location?.type).toBe("REPLACE");
@@ -391,11 +487,7 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
       container.querySelector('[data-testid="cp-message-log"]'),
     ).toBeNull();
 
-    const back = Array.from(container.querySelectorAll("a")).find((a) =>
-      a.textContent?.includes("Message log"),
-    );
-    expect(back, "expected a ← Message log link").toBeTruthy();
-    await click(back!);
+    await pickSection("Message log");
 
     expect(location?.search).toBe("");
     expect(
@@ -411,6 +503,11 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
       }),
     ]);
     expect(container.querySelector('select[aria-label="Action"]')).toBeTruthy();
+    expect(
+      sectionTabs(container)
+        .find((t) => t.getAttribute("aria-selected") === "true")
+        ?.textContent?.trim(),
+    ).toBe("Expert");
 
     await cleanup!();
     cleanup = null;
@@ -429,7 +526,7 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(select?.value).toBe("2");
   });
 
-  it("without network simulation the More menu has no such item and ?tab=network shows the log", async () => {
+  it("without network simulation there is no such tab and ?tab=network shows the log", async () => {
     const noSim = snapshot({
       id: "CP-A",
       connectors: [connector({ id: 1 })],
@@ -440,11 +537,9 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
       container.querySelector('[data-testid="cp-message-log"]'),
     ).toBeTruthy();
 
-    const more = document.body.querySelector<HTMLElement>(
-      '[aria-label="More"]',
-    )!;
-    await openDropdownMenu(more);
-    expect(findMenuItem("Network simulation")).toBeUndefined();
+    expect(
+      sectionTabs(container).map((t) => t.textContent?.trim()),
+    ).not.toContain("Network simulation");
   });
 
   it("More → Delete confirms, removes the charge point and goes back to the list", async () => {
@@ -482,10 +577,30 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
       );
     });
 
-    it("More → Session analysis writes ?tab=analysis beside ?cp=", async () => {
+    it("shows the tabs and only the selected connector's card; #2 swaps it", async () => {
+      const { container } = await mount("/?cp=CP-A");
+      const panel = container.querySelector<HTMLElement>(
+        'aside[aria-label="Charge point"]',
+      )!;
+      expect(tabs(panel).map((t) => t.textContent?.trim())).toEqual([
+        "#1",
+        "#2",
+      ]);
+      expect(cardIds(panel)).toEqual(["1"]);
+
+      await click(tabByLabel(panel, "#2")!);
+
+      expect(cardIds(panel)).toEqual(["2"]);
+      expect(tabByLabel(panel, "#2")!.getAttribute("aria-selected")).toBe(
+        "true",
+      );
+      expect(location?.type).toBe("REPLACE");
+    });
+
+    it("the Session analysis tab writes ?tab=analysis beside ?cp=", async () => {
       await mount("/?cp=CP-A");
 
-      await pickFromMore("Session analysis");
+      await pickSection("Session analysis");
 
       expect(new URLSearchParams(location!.search).get("cp")).toBe("CP-A");
       expect(new URLSearchParams(location!.search).get("tab")).toBe("analysis");

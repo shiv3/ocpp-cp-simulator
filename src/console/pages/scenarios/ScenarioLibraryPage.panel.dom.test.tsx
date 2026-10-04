@@ -411,4 +411,20 @@ describe("Scenarios page — side panel", () => {
     expect(openParam(location)).toBeNull();
     expect(editParam(location)).toBeNull();
   });
+  it("the panel editor uses the same container grid, so a wide panel gets the inspector on the right", async () => {
+    await renderPage(`${DEF_PATH}&edit=1`);
+    const panel = document.querySelector(PANEL)!;
+    const body = panel.querySelector('[data-testid="editor-body"]')!;
+    expect(body.classList.contains("@container")).toBe(true);
+    const grid = body.querySelector('[data-testid="editor-grid"]')!;
+    expect(grid.classList.contains("grid-cols-1")).toBe(true);
+    expect(
+      grid.classList.contains(
+        "@[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]",
+      ),
+    ).toBe(true);
+    const [, inspector] = Array.from(grid.children);
+    expect(inspector.textContent).toContain("Select a step");
+    expect(inspector.classList.contains("@[860px]:sticky")).toBe(true);
+  });
 });

@@ -73,7 +73,7 @@ function button(root: ParentNode, text: string) {
   );
 }
 
-describe("ConnectorRunRow — scenario selection", () => {
+describe("ScenarioCard: the scenario on a connector", () => {
   let cleanup: (() => Promise<void>) | null = null;
 
   beforeAll(() => {
@@ -117,6 +117,54 @@ describe("ConnectorRunRow — scenario selection", () => {
     return { ...rendered, service, store, a, b };
   }
 
+  it("without a live run, says so under a clear title, with Run as the primary action", async () => {
+    const { container } = await renderCp();
+    const card = container.querySelector<HTMLElement>(
+      '[data-testid="scenario-card"]',
+    )!;
+    expect(card.querySelector("h3")?.textContent).toBe("No scenario running");
+    expect(card.textContent).toContain(
+      "Pick one from the Library to run on this connector.",
+    );
+    const run = button(card, "▶ Run")!;
+    // The primary button style, not an outline.
+    expect(run.className).toContain("bg-cx-primary");
+  });
+
+  it("with a live run, its name heads the card with Open run and Stop", async () => {
+    const { container } = await renderCp(undefined, {
+      listScenarios: vi.fn(async (_cp: string, connectorId: number) =>
+        connectorId === 1
+          ? [{ scenarioId: "lib-a@CP-1#1", name: "Charge flow", active: true }]
+          : [],
+      ),
+      getScenarioStatus: vi.fn(async () => ({
+        scenarioId: "lib-a@CP-1#1",
+        state: "running" as const,
+        mode: "oneshot" as const,
+        currentNodeId: null,
+        executedNodes: [],
+        loopCount: 0,
+        runId: "run-1",
+        currentNodeStartedAt: Date.now(),
+      })),
+    });
+    const card = container.querySelector<HTMLElement>(
+      '[data-testid="scenario-card"]',
+    )!;
+    expect(card.querySelector("h3")?.textContent).toContain("Charge flow");
+    expect(card.textContent).toContain("running");
+    expect(card.textContent).not.toContain("No scenario running");
+    expect(button(card, "Stop")).toBeTruthy();
+    expect(
+      Array.from(card.querySelectorAll("a")).some(
+        (a) => a.textContent?.trim() === "Open run",
+      ),
+    ).toBe(true);
+    // No picker while the run is live.
+    expect(card.querySelector(SELECT)).toBeNull();
+  });
+
   it("lists the library scenarios with None first and selects the connector's one", async () => {
     const { container } = await renderCp();
     const select = container.querySelector<HTMLSelectElement>(SELECT)!;
@@ -149,9 +197,8 @@ describe("ConnectorRunRow — scenario selection", () => {
       ],
     );
     expect(
-      container.querySelector(
-        '[data-testid="connector-scenario-select"] [role="status"]',
-      )?.textContent,
+      container.querySelector('[data-testid="scenario-card"] [role="status"]')
+        ?.textContent,
     ).toContain("Scenario set");
 
     await change(select, "");
@@ -192,13 +239,11 @@ describe("ConnectorRunRow — scenario selection", () => {
     );
     expect(runScenario).toHaveBeenCalledTimes(2);
     expect(
-      container.querySelector(
-        '[data-testid="connector-scenario-select"] [role="alert"]',
-      ),
+      container.querySelector('[data-testid="scenario-card"] [role="alert"]'),
     ).toBeNull();
   });
 
-  it("Apply to all connectors assigns the scenario to every connector, confirming a replacement", async () => {
+  it("Use on all connectors assigns the scenario to every connector, confirming a replacement", async () => {
     const { container, service, b } = await renderCp((store) => {
       store.set("CP-1", 2, [copyOf(lib("lib-b", "Fault flow"), 2)]);
     });
@@ -206,7 +251,7 @@ describe("ConnectorRunRow — scenario selection", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     await act(async () =>
-      button(container, "Apply to all connectors")!.click(),
+      button(container, "Use on all 2 connectors")!.click(),
     );
     await flush(10);
 
@@ -228,10 +273,10 @@ describe("ConnectorRunRow — scenario selection", () => {
     }
   });
 
-  it("the gear opens the scenario in the Library editor", async () => {
+  it("Edit in Library opens the scenario in the Library editor", async () => {
     const { container } = await renderCp();
-    const gear = container.querySelector<HTMLAnchorElement>(
-      'a[aria-label="Edit scenario"]',
+    const gear = Array.from(container.querySelectorAll("a")).find(
+      (a) => a.textContent?.trim() === "Edit in Library",
     );
     expect(gear?.getAttribute("href")).toBe(
       "/scenarios?tab=library&edit=lib-a",

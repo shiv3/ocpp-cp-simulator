@@ -181,7 +181,7 @@ in the URL, so a reload or a shared link reopens it:
 | ------------------------- | ------------------------------------------------------------- |
 | `/?cp=<id>`               | The list with that charge point open in the panel.            |
 | `/?cp=<id>&connector=<n>` | The same, on connector `n` (a connector cell or row sets it). |
-| `/?cp=<id>&tab=<section>` | The same, with a **More** section in the lower half.          |
+| `/?cp=<id>&tab=<section>` | The same, with that tab of the lower half.                    |
 | `/cp/<id>?connector=<n>`  | The full page, reached from **Open as full page**.            |
 
 - **Open, swap, toggle.** Opening from a closed list adds one history entry.
@@ -240,39 +240,45 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   **Copy** button and, when it was derived from the daemon's tunnel, a note that
   it may change between daemon runs (#183).
 - **Charge point (connector 0)**, one compact row (below).
-- **Connector tabs**: a strip of `#1`, `#2`, … buttons (`role="tablist"`,
-  each tab `aria-selected`), each with a dot in the connector's status color.
-  The arrow keys, Home and End move the selection. Under the strip, the
-  selected connector's card and, under it, its **run row** when a scenario run
-  is live on that connector, else its **scenario row** (both below). A charge
+- **The connectors.** The full page shows **every connector at once**, like the
+  classic UI: one [connector card](#connector-card) per connector, each followed
+  by its own [scenario card](#scenario-card), in a grid of one column under
+  about 1100 px of content width and two above (a container query; never three,
+  the cards are wide). The side panel shows **one connector at a time**: a strip
+  of `#1`, `#2`, … buttons (`role="tablist"`, each tab `aria-selected`, a dot in
+  the connector's status color; the arrow keys, Home and End move the
+  selection) over the selected connector's card and scenario card. A charge
   point without connectors shows **No connectors** instead.
-- **The lower half**: the message log, or a section picked in **More**.
+- **The lower half**: an underline tab strip (`role="tablist"`, _Charge point
+  sections_): **Message log** (the default), **Transactions**, **Session
+  analysis**, **Diagnostics**, **Expert** and **Network simulation** (only when
+  the charge point has network simulation, that is, its snapshot's
+  `networkSim` is not `null`). The arrow keys, Home and End move along it.
 
 The same content is what the list's [side panel](#dashboard) shows. Two URL
 parameters keep the view across the full page and the panel:
 
-| Parameter        | Meaning                                                                                                                                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `?connector=<n>` | The selected connector. Absent, or naming a connector the charge point does not have (for example a removed one), the first connector is selected. Choosing a tab replaces the history entry.             |
-| `?tab=<section>` | The lower half: `transactions`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes. |
+| Parameter        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?connector=<n>` | The selected connector. Absent, or naming a connector the charge point does not have (for example a removed one), the first connector is selected. In the panel it is the tab shown; on the full page it marks that card (an accent ring, `data-selected`) and scrolls it into view on load. It is also what the run panel (`?run=`) and the Diagnostics select use. Selecting one replaces the history entry. |
+| `?tab=<section>` | The lower half's tab: `transactions`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes.                                                                                                                                                                                                |
 
-**More** lists, in this order: **Message log**, **Transactions**, **Session
-analysis**, **Diagnostics**, **Expert**, **Network simulation** (only when the
-charge point has network simulation, that is, its snapshot's `networkSim` is
-not `null`), **Scenarios** (a link to `/scenarios?tab=library&cp=<id>`, the
-Library filtered to this charge point), and, after a
-separator, **Delete** (red). Picking a section sets `?tab=` (replacing the
-history entry) and swaps the lower half; the section's heading row has a
-**← Message log** link back. **Diagnostics** is the state transition diagram
-(Local mode only; its connector select starts on the selected connector).
+On the full page a click on a card's header (the title, status and
+availability, not its **Config** / **Controls** buttons) selects that
+connector. Picking a lower-half tab sets `?tab=` (replacing the history entry)
+and swaps the content. **Diagnostics** is the state transition diagram (Local
+mode only; its connector select starts on the selected connector).
 
-**Delete** (#415), the last item of **More**, asks for a confirmation, removes
-the charge point and goes back to the dashboard (from the side panel, it closes
-the panel). In Remote mode it calls `cp.delete`, which also deletes
-the charge point's persisted rows ([Control plane](../concepts/control-plane.md));
-in Local mode it drops the charge point from the saved configuration. In Local
-mode it refuses while that configuration has not loaded, instead of saving one
-without any charge point. On a failure the page stays open and says why.
+**More** holds **Scenarios** (a link to `/scenarios?tab=library&cp=<id>`, the
+Library filtered to this charge point) and, after a separator, **Delete**
+(red); the sections moved to the tab strip. **Delete** (#415) asks for a
+confirmation, removes the charge point and goes back to the dashboard (from the
+side panel, it closes the panel). In Remote mode it calls `cp.delete`, which
+also deletes the charge point's persisted rows
+([Control plane](../concepts/control-plane.md)); in Local mode it drops the
+charge point from the saved configuration. In Local mode it refuses while that
+configuration has not loaded, instead of saving one without any charge point.
+On a failure the page stays open and says why.
 
 The **Charge point (connector 0)** row (#420) has the charge-point-level
 calls of the classic charge point card, disabled while the charge point is
@@ -282,103 +288,183 @@ status**, a StatusNotification for connector 0 (`Available`, `Unavailable` or
 `Faulted`, the last with an error code, §7.6). A failed call shows its error in
 the row.
 
-Each connector card shows:
+#### Connector card
 
-- the status, and the key figures as small uppercase labels over values:
-  **Meter** (kWh), **SoC**, **Transaction** (`#<id>` and its TagID, or `—`) and
-  **Availability** (`Operative` / `Inoperative`, set by ChangeAvailability,
-  #422);
-- a collapsed **Charging profiles (n)** list (#422): each profile's purpose,
-  kind, stack level and schedule periods. The profile in effect is marked
-  **Current**, and a profile whose every limit is 0 is marked **Paused**. The
-  list follows SetChargingProfile / ClearChargingProfile live;
-- **Start** / **Stop transaction** and **Set status**. **Faulted** is sent
-  with the error code picked under the menu (#434): `InternalError` by
-  default, any code but `NoError`, as in the classic side panel. Before #434
-  the console sent none, so the charge point reported the connector's current
-  error code (`NoError` unless something set one);
-- **Meter & SoC** (#417), a dialog described below;
-- **Auto meter values** (#418), described below;
-- a trash button (#419) that removes the connector after a confirmation, as
-  the classic card did. The removal is not saved: the connector comes back
-  when the charge point is created again (a reload in Local mode, a daemon
-  restart).
+A connector card is the connector as a charging session
+([`ConnectorCard.tsx`](../../src/console/pages/cp/ConnectorCard.tsx)), top to
+bottom:
 
-**Meter & SoC** opens a dialog that:
+- **Header**: `Connector <n>`, its status, its availability (`Operative` /
+  `Inoperative`, set by ChangeAvailability, #422), then **⚙ Config** (the
+  [Config dialog](#config-dialog)) and **Controls ▾** (`aria-expanded`,
+  `aria-controls`), which unfolds the [simulator controls](#simulator-controls)
+  inside the card.
+- **Session stepper** (`role="group"`, _Charging session_): **Plug in → Start
+  charging → Stop charging → Unplug**, no numbers. Done steps carry a ✓
+  (green), the next step is the primary button (▶), later steps are faint.
+  Where the session stands comes from the connector: `Available` (or anything
+  else without a transaction) → **Plug in**; `Preparing`, or a charging status
+  without a transaction → **Start charging**, with a TagID select beside it
+  (the TagIDs from **Settings**; with none it reads _No TagIDs configured_ and
+  Start is disabled); a transaction → **Stop charging**, with `Tx #<id> · <tag>`
+  at the right; `Finishing` → **Unplug**. `Faulted` marks the step it was at
+  (**Charging (faulted)** with a transaction) with nothing to press;
+  `Unavailable` disables every step and says _Unavailable: send Available in
+  Controls to plug in_. Start calls `startTransaction(cp, n, tag)`, Stop
+  `stopTransaction`. **Plug in** and **Unplug** send a StatusNotification
+  `Preparing` / `Available` (`sendStatusNotification`): the simulator's
+  `connectorPlug` scenario node runs a no-op callback, and the exported k6
+  runtime sends exactly these, so the card does what the node means on the
+  wire. While a step's call runs the stepper waits; a failure shows under it.
+- **EV and battery**: an SVG battery whose fill follows the SoC (accent with a
+  bolt while `Charging`, green once the SoC reaches the target, red when
+  `Faulted`, the foreground grey otherwise), a dashed line at the EV's target SoC, and the
+  SoC as the hero figure (`—` without one). Under it: _Target 80 % · about
+  3 h 27 min at 7.4 kW · Tesla Model 3_; the time to target is (target − SoC) /
+  100 × capacity ÷ power, left out without power or SoC, and _Target reached_
+  once the SoC is there. The vehicle is the EV settings' model name, else the
+  preset whose battery and power match, else _Custom EV_. The battery is also a
+  range input (`aria-label="State of charge (drag)"`): the figure follows the
+  drag and `setConnectorSoc` is called on release (with SoC ↔ meter sync on,
+  the meter is moved to match, as the former Meter & SoC dialog did).
+- **Figures** (a `dl`): **Energy added** (the register minus its value at
+  transaction start, `of <capacity> kWh`, a 3 px bar), **Power** (the slope of
+  the last two meter readings, kW, `max <EV max>`, a bar), **Session** (time
+  since the transaction started, `Tx #<id>`) and **Meter** (the register in
+  kWh). The readings are kept per connector by `useConnectorPower` from the
+  `connector-meter` events and the snapshot, for the current transaction only:
+  a new transaction id starts them over. Snapshots carry no `meterStart`, so a
+  transaction the console meets half-way counts its energy from the first
+  reading it sees.
+- **Power this session**: the readings' power as a line over a 14 % area, the
+  EV's max power as the top grid line, the configured auto meter curve as a
+  dotted ghost on the same time axis, a dot at the latest reading, `start` and
+  `now` ticks; _no transaction_ without readings. Under it the auto meter row:
+  a switch (**Auto meter values**, `setAutoMeterValueConfig` with `enabled`
+  toggled, from the live configuration, else the saved one, else the default),
+  `every <n> s · <energy> kWh over <m> min, peak <p> kW[, stop at target SoC]`
+  and **Edit curve…**, which opens the Config dialog on **Auto meter**.
+- **Footer**: `Tag <tag>` while a transaction runs, and the collapsed
+  **Charging profiles (n)** list (#422): each profile's purpose, kind, stack
+  level and schedule periods, the one in effect marked **Current**, one whose
+  every limit is 0 marked **Paused**; it follows SetChargingProfile /
+  ClearChargingProfile live.
 
-- sets the meter value (**Set**, **Set and send**);
-- sets the SoC (**Set SoC**), or clears it (**Clear SoC**: the next
-  MeterValues carries no SoC sample);
-- sends a MeterValues with the current reading.
+#### Config dialog
 
-**Sync SoC and meter** derives one from the other with the EV's battery
-capacity and initial SoC; it needs a capacity above 0 kWh. The flag is one
-simulator-wide preference, applied to the connector when the dialog opens and
-when it is toggled, as the classic side panel did; a connector whose
-dialog was never opened keeps its own flag (on by default). Until the
-preference is read, sync counts as off: the box is unchecked and disabled, and
-**Set SoC** leaves the meter alone. If it cannot be read, the dialog says so
-and sync stays off until the operator turns it on. A failed call, and a sync
-choice the connector did not take or that was not saved, show their error in
-the dialog.
+**⚙ Config** opens _Connector n · Config_
+([`ConnectorConfigDialog.tsx`](../../src/console/pages/cp/ConnectorConfigDialog.tsx)),
+a dialog with a vertical tab rail (`role="tablist"`, `aria-orientation="vertical"`;
+it lies across the top on a narrow screen). It reads the connector's settings
+when it opens; **Save** applies only what changed and closes, **Cancel** drops
+it. A failed or refused value keeps the dialog open with the reason.
 
-**Auto meter values** opens the auto MeterValue editor for that connector: on
-/ off, send interval and energy curve. It starts on the connector's live
-configuration, else the one saved for it, else the default; when the saved
-one cannot be read, the editor does not open (it would start on the default)
-and the card says why. **Save** applies
-the configuration to the connector, where a running transaction picks it up at
-once, and saves it for the connector. The saved copy is only read back by this
-editor: a restart does not restore it into the connector. The classic side
-panel had the same editor wired, but no button opened it.
+- **EV**: **Vehicle** (the presets of `EV_PRESETS` with their battery and
+  power, and **Custom**; a preset fills Battery and Max power), **Battery**
+  (kWh), **Max power** (kW), **Initial SoC** and **Target SoC** (%), checked on
+  Save (battery and power above 0, SoCs within 0–100), then `setEVSettings`.
+  **Sync SoC and meter through the battery capacity** is the simulator-wide
+  preference that derives one from the other with the battery capacity and the
+  initial SoC; it needs a capacity above 0 kWh. It is read when the dialog
+  opens (`getSocMeterSync`) and applied to the connector then, as the former
+  Meter & SoC dialog did; a toggle is staged until **Save**, which saves it
+  (`saveSocMeterSync`) and applies it (`setConnectorSocMeterSync`). Until the
+  preference is read the switch is disabled; if it cannot be read, the dialog
+  says so.
+- **Auto meter** (#418): **Enabled**, `every [n] s`, **Stop at target SoC**,
+  the presets **Constant 7.4 kW**, **Ramp and hold** and **Taper (DC-like)**
+  (under the EV's max power), and the **curve editor**: power (kW) over the
+  session (minutes) as an SVG, points dragged with the pointer (kept between
+  their neighbours, at whole minutes and 0.1 kW, and under the EV's max power,
+  drawn as a dashed red line), a points table (minute, kW, ✕; at least two
+  points) with **+ Add point**, and a summary (duration, energy over the curve
+  and its share of the battery, peak, the number of MeterValues at the
+  interval). It starts on the connector's live configuration, else the one
+  saved for it, else the default; when the saved one cannot be read, the tab
+  says so and offers no editor (it would start on the default). **Save**
+  applies the configuration (`setAutoMeterValueConfig`; a running transaction
+  picks it up at once) and stores it (`saveAutoMeterConfig`), reported apart.
+  The saved copy is only read back by this dialog: a restart does not restore
+  it into the connector.
 
-The **run row** under a connector's card shows the scenario run executing or
-parked on that connector: its state, the scenario name, the current step and
-`k/N`, the elapsed time, **Stop**, and the **Open run** link (straight to the
-[run page](#scenario-runs-panel-and-page)); while the run is waiting, what it
-waits for with the wait controls (see
-[Scenario editor](#scenario-editor-steps-and-graph)). The scenario name is a
-link (`›`) to `/cp/<id>?connector=<n>&run=<scenarioId>`: the full charge point
-page with the [run panel](#scenario-runs-panel-and-page) open beside it. From
-the list's side panel the same link switches to the full page. There is no row
-without a live run, and the runs are read once for the whole page and filtered
-by connector. The [Scenarios page](#scenarios-page) lists the runs of every
-charge point.
+The connector's `AutoMeterValueConfig.curvePoints` is **cumulative energy**
+(kWh over seconds) that the simulator evaluates as one Bézier over all its
+control points, not power samples, so the editor converts at the boundary
+([`powerCurve.ts`](../../src/console/pages/cp/powerCurve.ts)): a constant power
+is written as the exact two-point line; any other shape as its energy integral
+sampled once a minute (at most 240 points, uniform times), which the Bézier
+follows within a few percent, smoothed over a couple of minutes around a
+corner. Reading, 12 or more uniform samples are read as samples; any other
+curve is evaluated as the simulator evaluates it and turned back into the
+fewest power points that draw it. An untouched curve is saved as it was. The
+scenario editor's meter node keeps its own Bézier editor
+(`MeterValueCurveModal`).
 
-Without a live run, the connector's **scenario row** takes its place: which
-[Library](#scenario-library) scenario the connector uses, picked there.
+#### Simulator controls
 
-- **Scenario** — a select (`aria-label="Scenario for connector <n>"`) of the
-  Library scenarios, **None** first; it shows the one the connector's copy
-  came from (its `libraryId`). Changing it assigns at once: the connector's
-  persisted definition set becomes exactly one copy of that scenario (or empty
-  with **None**), and **Scenario set** shows for 2 s. A connector holding a
-  definition that is not a Library copy (loaded by hand, or written after the
-  migration) shows it as a disabled `<name> (not in the Library)` entry.
-- **▶ Run** (disabled with **None**) starts the connector's copy
-  (`runScenario`). The copy is already persisted and the runtime already has
-  it (the daemon reloads the connector's runtime on the assignment; Local mode's
-  runtime follows the store); should the runtime still answer "not found",
-  the copy is loaded into it and run again.
-- The gear (**Edit scenario**) opens the scenario in the Library editor
-  (`/scenarios?tab=library&edit=<libraryId>`); for a definition that is not a
-  copy, the per-connector editor. (The run panel beside the page edits in
-  place, see [Editing in the side panel](#editing-in-the-side-panel).)
-- **Apply to all connectors** (on a charge point with more than one) assigns
-  the same Library scenario to every connector of the charge point, after a
-  confirmation naming the connectors whose different scenario it replaces.
+**Controls ▾** unfolds, inside the card, _Simulator controls — what a real
+charger would not do by itself_, three groups that each report their own
+failure (`role="alert"`) and wait for their own call:
 
-A failed call is shown under the row (`role="alert"`).
+- **Readings**: SoC `[n] %` **Set** / **Clear** (`setConnectorSoc`; Clear
+  means the next MeterValues carries no SoC; with sync on, Set also moves the
+  meter), Meter `[kWh]` **Set** (`setMeterValue`, in Wh), **Send MeterValues
+  now** (`sendMeterValue`). Until edited, the fields follow the live readings.
+- **Status and faults**: a status and **Send status** (`sendStatusNotification`),
+  an error code and **Send Faulted**: Faulted with that code (#434), any code but
+  `NoError`, `InternalError` by default (before #434 the console sent none, so
+  the charge point reported the connector's current error code). The
+  availability line says the CSMS sets it with ChangeAvailability.
+- **Connector**: **Plug in** / **Unplug** (the stepper's calls) and **Remove
+  connector** (#419), which asks first. The removal is not saved: the
+  connector comes back when the charge point is created again (a reload in
+  Local mode, a daemon restart).
 
-The **lower half** (#421, #405) shows, by default, the charge point's **Message
-Log** from the console's log buffer: a heading row with the entry count and
-**Open in Message Log →**, a link to `/logs?cp=<id>` (the id URL-encoded); under
-it a compact list, one line per message: the time, `↑` (sent) or `↓`
-(received), the OCPP action and the payload, truncated (hover for the whole
-line). A response names the action of the call it answers. The newest line is at
-the bottom and the list follows it until the reader scrolls up; it draws the
-latest 500 lines (the Message Log page has the rest). It is at most 340 px tall
-in the side panel, and 70% of the window on the full page. The heading row has:
+#### Scenario card
+
+Under each connector card, its **scenario card**
+([`ScenarioCard.tsx`](../../src/console/pages/cp/ScenarioCard.tsx)) shows the
+scenario run executing or parked on that connector, else its
+[Library](#scenario-library) scenario:
+
+- **A run is live**: its name as the title, a link (`›`) to
+  `/cp/<id>?connector=<n>&run=<scenarioId>` (the full charge point page with the
+  [run panel](#scenario-runs-panel-and-page) beside it; from the list's side
+  panel it switches to the full page), its state, `step k of N · <current
+step> · <elapsed>`, **Open run** (straight to the
+  [run page](#scenario-runs-panel-and-page)) and **Stop**; a 3 px progress bar
+  under it; while the run waits, what it waits for with the wait controls (see
+  [Scenario editor](#scenario-editor-steps-and-graph)). The runs are read once
+  for the whole page and filtered by connector. The
+  [Scenarios page](#scenarios-page) lists the runs of every charge point.
+- **No run**: **No scenario running** — _Pick one from the Library to run on
+  this connector._ — then a select (`aria-label="Scenario for connector <n>"`)
+  of the Library scenarios, **None** first, showing the one the connector's
+  copy came from (its `libraryId`). Changing it assigns at once: the
+  connector's persisted definition set becomes exactly one copy of that
+  scenario (or empty with **None**), and **Scenario set** shows for 2 s. A
+  connector holding a definition that is not a Library copy shows it as a
+  disabled `<name> (not in the Library)` entry. **▶ Run** (primary; disabled
+  with **None**) starts the connector's copy (`runScenario`); should the
+  runtime answer "not found", the copy is loaded into it and run again. **Edit
+  in Library** opens the scenario in the Library editor
+  (`/scenarios?tab=library&edit=<libraryId>`; for a definition that is not a
+  copy, the per-connector editor). **Use on all N connectors** (on a charge
+  point with more than one) assigns the same Library scenario to every
+  connector, after a confirmation naming the connectors whose different
+  scenario it replaces. A failed call is shown under the card.
+
+#### Message log tab
+
+The lower half's **Message log** tab (#421) is the
+[Message Log page](#message-log-page)'s viewer (`LogViewer`) on this charge
+point's lines, oldest first: the filter sidebar (Level, Type, Connector,
+Direction, Action; no Charge point group, the lines are all this one's), the
+toolbar (`<n> total / <m> filtered`, Auto-scroll, Download, Clear screen,
+Clear screen + DB; it wraps, #405), the search box and the table. A heading row
+above it has **Open in Message Log →**, a link to `/logs?cp=<id>` (the id
+URL-encoded). It fills what is left of the side panel (at least 360 px) and is
+480 px tall on the full page.
 
 - **Download** saves every persisted log row of the charge point as JSON
   Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
@@ -388,12 +474,9 @@ in the side panel, and 70% of the window on the full page. The heading row has:
   Remote mode). Before #421 the console's **Clear screen + DB** left the
   persisted rows in place.
 
-The compact list replaced the searchable log viewer (`LogViewer`) the charge
-point and run pages used to embed, which was too wide for a side panel; its
-toolbar, whose wrap was #405, is back on the [Message Log
-page](#message-log-page), where the viewer has the whole window. The run page
-shows no message log, so a run's traffic is read here or on the Message Log
-page.
+The viewer replaced the compact one-line-per-message list the charge point
+page used since the redesign. The run page shows no message log, so a run's
+traffic is read here or on the Message Log page.
 
 ### Message Log page
 
@@ -448,7 +531,7 @@ any other value) the page opens on **Active runs**. Switching tabs replaces the
 history entry and keeps the other parameters.
 
 **Active runs** lists the live scenario runs (`running`, `waiting`, `paused`
-or `stepping`) of every charge point, read per charge point like the run row
+or `stepping`) of every charge point, read per charge point like the scenario card
 and re-read when a scenario event arrives on that charge point. It has:
 
 - **State tiles**: **All** and one tile per state (running, waiting, paused,
@@ -639,8 +722,8 @@ scenario or a copy of one (`libraryId`). All use the same content
 
 - **Steps** — the step boxes of the run views' Steps view: the chain, then at
   most one fork with its branches side by side. A click selects a step: its
-  form opens in the inspector (on the right, sticky, on a wide page; under the
-  steps in the panel), whose header moves the step up or down **within its
+  form opens in the inspector (beside the steps, sticky, when the editor is
+  wider than about 860 px; under them when it is narrower), whose header moves the step up or down **within its
   lane** (the chain or its branch — a move never crosses lanes) and deletes
   it. Hovering the gap between two boxes of a lane shows a small `+`
   (**Insert step between n and n+1**) that opens the step picker there (as the
@@ -693,8 +776,11 @@ the collapsed **Scenario EV Settings** (#424): the EV the scenario applies to
 its connector when it starts, field by field (an empty field keeps the
 connector's value; the placeholders show the Default EV Settings from
 **Settings**); a scenario whose fields are all empty saves no EV settings.
-The inspector lays its fields out in two columns when it is wide enough (in
-the panel, under the steps) and in one beside the steps on the page.
+Whether the inspector (and its empty **Select a step** box) sits beside the
+steps or graph or under them follows the editor's own width, not the
+window's (a container query: two columns above about 860 px), on the page and
+in a side panel alike. The inspector lays its fields out in two columns when
+it is wide enough itself (under the steps) and in one beside them.
 The full graph editor does not rewrite the trigger from a **Status Trigger** node, as
 the classic UI's graph editor did, so pick **On status change** in the header for a scenario that should start
 on a status. Opening a scenario in the full graph editor is
@@ -714,8 +800,9 @@ connectors** for a Library scenario with users), **Cancel**, the expand button
 (**Open in the Library editor**, or **Open in the editor** for a definition
 that is not a Library copy: the editor page on the same scenario) and close;
 the trigger and **Enabled** sit under it, then **Used by**, the description
-and EV settings, the **Steps | Graph** switch, the steps or the graph, and the
-inspector under them. **Cancel** returns to the read view; with unsaved
+and EV settings, the **Steps | Graph** switch, and the steps or the graph
+with the inspector under them — or beside them, sticky, once the panel is
+dragged wider than about 860 px of editor. **Cancel** returns to the read view; with unsaved
 changes it first asks in the panel (**Discard unsaved changes?** —
 **Keep editing** / **Discard**), not in a browser dialog. **Esc** in edit mode is the same
 Cancel, on both the Scenarios page and the charge point page's run panel: it
@@ -730,7 +817,7 @@ connector using it (with the same confirmation when a copy is running), a
 definition that is not a copy is saved in its own scope. Leaving the edit
 mode re-reads the run panel's definition.
 
-In the console, a connector's **run row** (under its card on the
+In the console, a connector's [scenario card](#scenario-card) (under its card on the
 [charge point page](#charge-point-page)) shows the run executing or parked on
 it, and its **Open run** link opens the scenario's
 [run page](#scenario-runs-panel-and-page)
@@ -744,7 +831,7 @@ started elsewhere while the page is open (for example an auto-start trigger)
 is attached the same way. When the run page's `run=` names a run that has ended or been
 superseded, a banner says so (daemon only — local mode mints no runId) (#366).
 
-While a run is `waiting`, the run row, the run panel and the run page offer **+30 s**
+While a run is `waiting`, the scenario card, the run panel and the run page offer **+30 s**
 (only when the wait has a timeout), **Retry** and **Continue** beside the
 waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#controls-on-a-parked-wait),
 #240). The countdown follows the runtime's `waitDeadlineAt`, so an extension
@@ -752,7 +839,7 @@ shows at once, and a control the runtime refuses is shown inline instead of
 being dropped. In Remote mode every open console re-reads the run on
 `scenario_wait_changed`, not only the one that acted.
 
-A charge point's **Expert** section (**More → Expert**) sends an
+A charge point's **Expert** tab (the lower half's **Expert**) sends an
 [expert OCPP call](../concepts/expert-ocpp-calls.md) (#389): pick any
 station-initiated action of the CP's OCPP-J version, edit the JSON payload —
 pre-filled with the smallest schema-valid one, **Reset to default** restores

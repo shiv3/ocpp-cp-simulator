@@ -49,7 +49,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
     return (
       <EmptyState
         title="Select a step"
-        hint="Pick a step from the list on the left to edit its configuration."
+        hint="Pick a step to edit its configuration."
       />
     );
   }

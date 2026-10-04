@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -16,6 +17,7 @@ import {
 import { Maximize2, MoreHorizontal, Settings, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { LogViewer } from "@/components/ui/log-viewer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,10 +57,9 @@ import StatusPill from "../../components/StatusPill";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
 import ManualDisconnectButtons from "../../components/network-sim/ManualDisconnectButtons";
 import ChargePointControls from "./ChargePointControls";
-import CompactLogList from "./CompactLogList";
 import ConnectorCard from "./ConnectorCard";
-import ConnectorRunRow from "./ConnectorRunRow";
 import ConnectorTabs from "./ConnectorTabs";
+import ScenarioCard from "./ScenarioCard";
 import TransactionsTab from "./TransactionsTab";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
 import { NetworkSimEditor } from "../../components/network-sim/NetworkSimEditor";
@@ -72,11 +73,9 @@ const SessionAnalysisPanel = lazy(() => import("./SessionAnalysisPanel"));
 type Section =
   "log" | "transactions" | "analysis" | "diagnostics" | "expert" | "network";
 
-/** The sections the More menu offers after the message log, in menu order. */
-const MORE_SECTIONS: ReadonlyArray<{
-  value: Exclude<Section, "log">;
-  label: string;
-}> = [
+/** The lower half's tabs, in order; `log` is the default. */
+const SECTIONS: ReadonlyArray<{ value: Section; label: string }> = [
+  { value: "log", label: "Message log" },
   { value: "transactions", label: "Transactions" },
   { value: "analysis", label: "Session analysis" },
   { value: "diagnostics", label: "Diagnostics" },
@@ -85,7 +84,7 @@ const MORE_SECTIONS: ReadonlyArray<{
 ];
 
 function isSection(value: string | null): value is Exclude<Section, "log"> {
-  return MORE_SECTIONS.some((section) => section.value === value);
+  return value !== "log" && SECTIONS.some((section) => section.value === value);
 }
 
 /**
@@ -192,23 +191,6 @@ export interface CpDetailContentProps {
   onSelectConnector: (id: number) => void;
 }
 
-/** Heading row of a lower-half section, with the way back to the message log. */
-const SectionHeader: React.FC<{ title: string; backSearch: string }> = ({
-  title,
-  backSearch,
-}) => (
-  <div className="mb-3 flex items-center justify-between gap-2">
-    <h3 className="text-sm font-semibold text-cx-fg">{title}</h3>
-    <Link
-      replace
-      to={{ search: backSearch }}
-      className="text-xs text-cx-accent hover:underline"
-    >
-      ← Message log
-    </Link>
-  </div>
-);
-
 const CpDetailContent: React.FC<CpDetailContentProps> = ({
   cpId,
   variant,
@@ -226,6 +208,9 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   const navigate = useNavigate();
   const configCardId = useId();
   const connectorPanelId = useId();
+  const sectionsId = useId();
+  const connectorGridRef = useRef<HTMLDivElement>(null);
+  const scrolledToConnectorRef = useRef(false);
 
   const view = useChargePointView(cpId || null);
   const { entries: globalLogEntries } = useGlobalLogs();
@@ -372,6 +357,19 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       ? selectedConnectorId
       : (connectorList[0]?.id ?? null);
 
+  // On the full page, the connector named in the URL is scrolled into view
+  // once, when its card first renders.
+  useEffect(() => {
+    if (isPanel || scrolledToConnectorRef.current) return;
+    if (selectedConnectorId == null) return;
+    const card = connectorGridRef.current?.querySelector(
+      `[data-connector-id="${selectedConnectorId}"]`,
+    );
+    if (!card) return;
+    scrolledToConnectorRef.current = true;
+    card.scrollIntoView?.({ block: "nearest" });
+  }, [isPanel, selectedConnectorId, connectorList.length]);
+
   // The network simulation section is gated as the block always was: not for a
   // charge point the service reports without one (`networkSim: null`).
   const hasNetworkSim = snapshot?.networkSim !== null;
@@ -388,12 +386,30 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
     else params.set("tab", next);
     setSearchParams(params, { replace: true });
   };
-  const backToLogSearch = (() => {
-    const params = new URLSearchParams(searchParams);
-    params.delete("tab");
-    const query = params.toString();
-    return query ? `?${query}` : "";
-  })();
+  const visibleSections = SECTIONS.filter(
+    (item) => item.value !== "network" || hasNetworkSim,
+  );
+  const sectionTabRefs = useRef(new Map<Section, HTMLButtonElement>());
+  // Arrow keys, Home and End move along the tab strip, as in a native tablist.
+  const onSectionKey = (event: React.KeyboardEvent) => {
+    const index = visibleSections.findIndex((item) => item.value === section);
+    const last = visibleSections.length - 1;
+    const next =
+      event.key === "ArrowRight"
+        ? (index + 1) % visibleSections.length
+        : event.key === "ArrowLeft"
+          ? (index - 1 + visibleSections.length) % visibleSections.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    const target = visibleSections[next].value;
+    setSection(target);
+    sectionTabRefs.current.get(target)?.focus();
+  };
 
   // Same proxy for "socket up" that the Charge Points list uses: after an
   // auto-reconnect the transport can be up before BootNotification is
@@ -492,12 +508,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
     { cp: cpId, ...Object.fromEntries(carriedParams) },
   )}`;
 
-  const runsOnActiveConnector = activeRuns.filter(
-    (run) => run.connectorId === activeConnectorId,
-  );
+  const connectorIds = connectorList.map((c) => c.id);
+  const runsOn = (connectorId: number) =>
+    activeRuns.filter((run) => run.connectorId === connectorId);
 
   return (
-    <div className={isPanel ? undefined : "p-6"}>
+    <div className={isPanel ? "flex min-h-full flex-col" : "p-6"}>
       {!isPanel && (
         <Link
           to={backToListHref}
@@ -550,23 +566,6 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className={cn(section === "log" && "font-semibold")}
-                  onSelect={() => setSection("log")}
-                >
-                  Message log
-                </DropdownMenuItem>
-                {MORE_SECTIONS.filter(
-                  (item) => item.value !== "network" || hasNetworkSim,
-                ).map((item) => (
-                  <DropdownMenuItem
-                    key={item.value}
-                    className={cn(section === item.value && "font-semibold")}
-                    onSelect={() => setSection(item.value)}
-                  >
-                    {item.label}
-                  </DropdownMenuItem>
-                ))}
                 <DropdownMenuItem asChild>
                   <Link
                     to={`/scenarios?tab=library&cp=${encodeURIComponent(cpId)}`}
@@ -665,81 +664,131 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
         />
       ) : (
         <>
-          <ConnectorTabs
-            connectors={connectorList.map((c) => ({
-              id: c.id,
-              status: c.status,
-            }))}
-            selectedId={activeConnectorId}
-            onSelect={onSelectConnector}
-            panelId={connectorPanelId}
-          />
-          {activeConnectorId != null && (
-            <div
-              role="tabpanel"
-              id={connectorPanelId}
-              aria-label={`Connector ${activeConnectorId}`}
-              className="mt-3"
-            >
-              <ConnectorCard
-                key={activeConnectorId}
-                cpId={cpId}
-                connectorId={activeConnectorId}
+          {isPanel ? (
+            <>
+              <ConnectorTabs
+                connectors={connectorList.map((c) => ({
+                  id: c.id,
+                  status: c.status,
+                }))}
+                selectedId={activeConnectorId}
+                onSelect={onSelectConnector}
+                panelId={connectorPanelId}
               />
-              <ConnectorRunRow
-                cpId={cpId}
-                connectorId={activeConnectorId}
-                connectorIds={connectorList.map((c) => c.id)}
-                runs={runsOnActiveConnector}
-                refresh={refreshRuns}
-                scheduleRefresh={scheduleRunsRefresh}
-                // From the list's panel the link goes to the full page, whose
-                // Back returns to the list; on the full page it only adds
-                // `?run=`, so the page keeps the Back it already had.
-                runLinkState={isPanel ? { from: "/" } : location.state}
-              />
+              {activeConnectorId != null && (
+                <div
+                  role="tabpanel"
+                  id={connectorPanelId}
+                  aria-label={`Connector ${activeConnectorId}`}
+                  className="mt-3"
+                >
+                  <ConnectorCard
+                    key={activeConnectorId}
+                    cpId={cpId}
+                    connectorId={activeConnectorId}
+                  />
+                  <ScenarioCard
+                    cpId={cpId}
+                    connectorId={activeConnectorId}
+                    connectorIds={connectorIds}
+                    runs={runsOn(activeConnectorId)}
+                    refresh={refreshRuns}
+                    scheduleRefresh={scheduleRunsRefresh}
+                    // From the list's panel the link goes to the full page,
+                    // whose Back returns to the list.
+                    runLinkState={{ from: "/" }}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            // The full page shows every connector at once; the cards are wide
+            // (stepper, battery), so two columns at most.
+            <div ref={connectorGridRef} className="@container">
+              <div className="grid grid-cols-1 items-start gap-4 @min-[1100px]:grid-cols-2">
+                {connectorList.map((connector) => (
+                  <div key={connector.id}>
+                    <ConnectorCard
+                      cpId={cpId}
+                      connectorId={connector.id}
+                      selected={connector.id === activeConnectorId}
+                      onSelect={() => onSelectConnector(connector.id)}
+                    />
+                    <ScenarioCard
+                      cpId={cpId}
+                      connectorId={connector.id}
+                      connectorIds={connectorIds}
+                      runs={runsOn(connector.id)}
+                      refresh={refreshRuns}
+                      scheduleRefresh={scheduleRunsRefresh}
+                      // On the full page the link only adds `?run=`, so the
+                      // page keeps the Back it already had.
+                      runLinkState={location.state}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </>
       )}
 
-      <div className="mt-6">
-        {section === "log" && (
-          <section data-testid="cp-message-log">
-            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h3 className="text-sm font-semibold text-cx-fg">Message Log</h3>
-              <span className="text-xs text-cx-muted">
-                {tabLogs.length} {tabLogs.length === 1 ? "entry" : "entries"}
-              </span>
-              <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDownloadLogs}
-                  title="Download every persisted log row for this CP as a JSON Lines file."
-                >
-                  Download
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleClearTabLogs("screen")}
-                  title="Hide the currently-displayed log lines. Persisted history stays."
-                >
-                  Clear screen
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-cx-rose hover:text-cx-rose"
-                  onClick={() => handleClearTabLogs("all")}
-                  title="Hide the displayed lines AND delete persisted log rows for this CP."
-                >
-                  Clear screen + DB
-                </Button>
+      <div className={cn("mt-6 flex flex-col", isPanel && "min-h-0 flex-1")}>
+        <div
+          role="tablist"
+          aria-label="Charge point sections"
+          onKeyDown={onSectionKey}
+          className="flex gap-5 overflow-x-auto border-b border-cx-border"
+        >
+          {visibleSections.map((item) => {
+            const active = section === item.value;
+            return (
+              <button
+                key={item.value}
+                ref={(el) => {
+                  if (el) sectionTabRefs.current.set(item.value, el);
+                  else sectionTabRefs.current.delete(item.value);
+                }}
+                type="button"
+                role="tab"
+                id={`${sectionsId}-${item.value}`}
+                aria-selected={active}
+                aria-controls={`${sectionsId}-panel`}
+                tabIndex={active ? 0 : -1}
+                onClick={() => setSection(item.value)}
+                className={cn(
+                  "-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2 text-[13.5px] font-medium",
+                  active
+                    ? "border-cx-accent text-cx-fg"
+                    : "border-transparent text-cx-muted hover:text-cx-fg",
+                )}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div
+          role="tabpanel"
+          id={`${sectionsId}-panel`}
+          aria-labelledby={`${sectionsId}-${section}`}
+          className={cn("pt-3", isPanel && "flex min-h-0 flex-1 flex-col")}
+        >
+          {section === "log" && (
+            // The Message Log page's viewer, on this charge point's lines: it
+            // fills what is left of the side panel, and a fixed height on the
+            // page (the cards above it are tall).
+            <section
+              data-testid="cp-message-log"
+              className={cn(
+                "flex flex-col",
+                isPanel ? "min-h-[360px] flex-1" : "h-[480px]",
+              )}
+            >
+              {/* The viewer's toolbar counts the lines; this row leads to
+                  the Message Log page, filtered to this charge point. */}
+              <div className="mb-2 flex items-center justify-end">
                 <Link
                   to={`/logs?cp=${encodeURIComponent(cpId)}`}
                   className="text-xs text-cx-accent hover:underline"
@@ -747,167 +796,162 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                   Open in Message Log →
                 </Link>
               </div>
-            </div>
-            <CompactLogList
-              logs={tabLogs}
-              className={isPanel ? "max-h-[340px]" : "max-h-[70vh]"}
-            />
-          </section>
-        )}
+              <LogViewer
+                logs={tabLogs}
+                onClear={handleClearTabLogs}
+                onDownload={handleDownloadLogs}
+                className="min-h-0 flex-1"
+              />
+            </section>
+          )}
 
-        {section === "transactions" && (
-          <section>
-            <SectionHeader title="Transactions" backSearch={backToLogSearch} />
-            <TransactionsTab cpId={cpId} />
-          </section>
-        )}
+          {section === "transactions" && (
+            <section>
+              <TransactionsTab cpId={cpId} />
+            </section>
+          )}
 
-        {section === "analysis" && (
-          <section>
-            <SectionHeader
-              title="Session analysis"
-              backSearch={backToLogSearch}
-            />
-            <Suspense
-              fallback={
-                <div className="p-6 text-sm text-cx-muted">
-                  Loading session analysis…
+          {section === "analysis" && (
+            <section>
+              <Suspense
+                fallback={
+                  <div className="p-6 text-sm text-cx-muted">
+                    Loading session analysis…
+                  </div>
+                }
+              >
+                <SessionAnalysisPanel
+                  cpId={cpId}
+                  ocppVersion={resolvedOcppVersion}
+                />
+              </Suspense>
+            </section>
+          )}
+
+          {section === "diagnostics" && (
+            <section>
+              {connectorList.length > 1 && (
+                <select
+                  data-testid="diagnostics-connector"
+                  aria-label="Connector"
+                  value={activeConnectorId ?? ""}
+                  onChange={(e) => onSelectConnector(Number(e.target.value))}
+                  className={cn(FILTER_SELECT_CLASS, "mb-3")}
+                >
+                  {connectorList.map((connector) => (
+                    <option key={connector.id} value={connector.id}>
+                      Connector {connector.id}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {diagnosticsConnector && localCp ? (
+                <div className="h-[520px]">
+                  <Suspense
+                    fallback={
+                      <div className="p-6 text-sm text-cx-muted">
+                        Loading state diagram…
+                      </div>
+                    }
+                  >
+                    <StateTransitionViewer
+                      connector={diagnosticsConnector}
+                      chargePoint={localCp}
+                    />
+                  </Suspense>
                 </div>
-              }
-            >
-              <SessionAnalysisPanel
+              ) : (
+                <EmptyState
+                  title="State diagram unavailable"
+                  hint="The state transition diagram is available in local mode only."
+                />
+              )}
+            </section>
+          )}
+
+          {section === "expert" && (
+            <section>
+              <ExpertCallPanel
                 cpId={cpId}
                 ocppVersion={resolvedOcppVersion}
+                connected={isConnected}
               />
-            </Suspense>
-          </section>
-        )}
+            </section>
+          )}
 
-        {section === "diagnostics" && (
-          <section>
-            <SectionHeader title="Diagnostics" backSearch={backToLogSearch} />
-            {connectorList.length > 1 && (
-              <select
-                data-testid="diagnostics-connector"
-                aria-label="Connector"
-                value={activeConnectorId ?? ""}
-                onChange={(e) => onSelectConnector(Number(e.target.value))}
-                className={cn(FILTER_SELECT_CLASS, "mb-3")}
-              >
-                {connectorList.map((connector) => (
-                  <option key={connector.id} value={connector.id}>
-                    Connector {connector.id}
-                  </option>
-                ))}
-              </select>
-            )}
-            {diagnosticsConnector && localCp ? (
-              <div className="h-[520px]">
-                <Suspense
-                  fallback={
-                    <div className="p-6 text-sm text-cx-muted">
-                      Loading state diagram…
-                    </div>
-                  }
-                >
-                  <StateTransitionViewer
-                    connector={diagnosticsConnector}
-                    chargePoint={localCp}
-                  />
-                </Suspense>
+          {section === "network" && (
+            <section>
+              <div className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none">
+                {networkSimLoadError && (
+                  <div className="mb-4 rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
+                    {networkSimLoadError}
+                  </div>
+                )}
+                {networkSimGlobalConfig === undefined &&
+                  !networkSimLoadError && (
+                    <p className="text-sm text-cx-muted">
+                      Loading network simulation…
+                    </p>
+                  )}
+                {networkSimGlobalConfig != null && (
+                  <>
+                    <NetworkSimEditor
+                      mode="cp"
+                      value={networkSimCpConfig ?? null}
+                      inheritedRules={inheritedNetworkSimRules}
+                      inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
+                      onSave={async (config) => {
+                        try {
+                          await chargePointService.saveNetworkSimCp(
+                            cpId,
+                            config,
+                          );
+                          await refreshNetworkSim();
+                        } catch (err) {
+                          console.error(
+                            `Failed to save network sim config for ${cpId}`,
+                            err,
+                          );
+                          throw err;
+                        }
+                      }}
+                      onDeleteOverride={async () => {
+                        try {
+                          await chargePointService.saveNetworkSimCp(cpId, null);
+                          await refreshNetworkSim();
+                        } catch (err) {
+                          console.error(
+                            `Failed to delete network sim override for ${cpId}`,
+                            err,
+                          );
+                          throw err;
+                        }
+                      }}
+                    />
+                    {snapshot?.networkSim?.manualRuleIds &&
+                      snapshot.networkSim.manualRuleIds.length > 0 && (
+                        <div className="mt-6 border-t border-cx-border pt-6">
+                          <h3 className="mb-4 text-base font-semibold text-cx-fg">
+                            Manual Rules
+                          </h3>
+                          <ManualDisconnectButtons
+                            manualRuleIds={snapshot.networkSim.manualRuleIds}
+                            isConnected={isConnected}
+                            onTriggerDisconnect={async (ruleId) =>
+                              chargePointService.triggerNetworkSimDisconnect(
+                                cpId,
+                                ruleId,
+                              )
+                            }
+                          />
+                        </div>
+                      )}
+                  </>
+                )}
               </div>
-            ) : (
-              <EmptyState
-                title="State diagram unavailable"
-                hint="The state transition diagram is available in local mode only."
-              />
-            )}
-          </section>
-        )}
-
-        {section === "expert" && (
-          <section>
-            <SectionHeader title="Expert" backSearch={backToLogSearch} />
-            <ExpertCallPanel
-              cpId={cpId}
-              ocppVersion={resolvedOcppVersion}
-              connected={isConnected}
-            />
-          </section>
-        )}
-
-        {section === "network" && (
-          <section>
-            <SectionHeader
-              title="Network simulation"
-              backSearch={backToLogSearch}
-            />
-            <div className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none">
-              {networkSimLoadError && (
-                <div className="mb-4 rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
-                  {networkSimLoadError}
-                </div>
-              )}
-              {networkSimGlobalConfig === undefined && !networkSimLoadError && (
-                <p className="text-sm text-cx-muted">
-                  Loading network simulation…
-                </p>
-              )}
-              {networkSimGlobalConfig != null && (
-                <>
-                  <NetworkSimEditor
-                    mode="cp"
-                    value={networkSimCpConfig ?? null}
-                    inheritedRules={inheritedNetworkSimRules}
-                    inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
-                    onSave={async (config) => {
-                      try {
-                        await chargePointService.saveNetworkSimCp(cpId, config);
-                        await refreshNetworkSim();
-                      } catch (err) {
-                        console.error(
-                          `Failed to save network sim config for ${cpId}`,
-                          err,
-                        );
-                        throw err;
-                      }
-                    }}
-                    onDeleteOverride={async () => {
-                      try {
-                        await chargePointService.saveNetworkSimCp(cpId, null);
-                        await refreshNetworkSim();
-                      } catch (err) {
-                        console.error(
-                          `Failed to delete network sim override for ${cpId}`,
-                          err,
-                        );
-                        throw err;
-                      }
-                    }}
-                  />
-                  {snapshot?.networkSim?.manualRuleIds &&
-                    snapshot.networkSim.manualRuleIds.length > 0 && (
-                      <div className="mt-6 border-t border-cx-border pt-6">
-                        <h3 className="mb-4 text-base font-semibold text-cx-fg">
-                          Manual Rules
-                        </h3>
-                        <ManualDisconnectButtons
-                          manualRuleIds={snapshot.networkSim.manualRuleIds}
-                          isConnected={isConnected}
-                          onTriggerDisconnect={async (ruleId) =>
-                            chargePointService.triggerNetworkSimDisconnect(
-                              cpId,
-                              ruleId,
-                            )
-                          }
-                        />
-                      </div>
-                    )}
-                </>
-              )}
-            </div>
-          </section>
-        )}
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

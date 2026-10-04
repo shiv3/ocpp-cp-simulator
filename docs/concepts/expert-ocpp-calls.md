@@ -29,7 +29,7 @@ high-level simulator action (#389).
 
 Three surfaces use the same API, `ChargePoint.sendOcppCall`:
 
-- the **Expert** section of a charge point (**More → Expert**) in the
+- the **Expert** tab of a charge point's lower half in the
   [web console](../entities/web-console.md);
 - the `send_ocpp_call` [control-plane](control-plane.md#cp-command-methods)
   method, also a curated [MCP tool](../entities/mcp-endpoint.md) and a

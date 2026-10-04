@@ -171,12 +171,12 @@ describe("Charge point page — scenario run panel", () => {
     expect(back?.getAttribute("href")).toBe("/cp/CP-A?connector=1&run=s1");
   });
 
-  it("the connector run row's scenario name links to the run panel", async () => {
+  it("the scenario card's run name links to the run panel", async () => {
     const { container } = await renderPage("/cp/CP-A?connector=1");
     expect(document.querySelector(PANEL)).toBeNull();
     const link = Array.from(
       container.querySelectorAll<HTMLAnchorElement>(
-        '[data-testid="connector-run-row"] a',
+        '[data-testid="scenario-run"] a',
       ),
     ).find((a) => a.textContent?.includes("Fork demo"))!;
     expect(link.getAttribute("href")).toBe("/cp/CP-A?connector=1&run=s1");
@@ -202,7 +202,7 @@ describe("Charge point page — scenario run panel", () => {
     const { container } = await renderPage("/?cp=CP-A&connector=1");
     const link = Array.from(
       container.ownerDocument.querySelectorAll<HTMLAnchorElement>(
-        '[data-testid="connector-run-row"] a',
+        '[data-testid="scenario-run"] a',
       ),
     ).find((a) => a.textContent?.includes("Fork demo"))!;
     expect(link).toBeTruthy();

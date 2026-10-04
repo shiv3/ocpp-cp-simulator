@@ -109,13 +109,14 @@ describe("ConnectorCard: remove a connector (#419)", () => {
       connectorId: 2,
     });
     expect(card(2)).toBeNull();
-    // The selection falls back to the first connector, and its tab is gone.
+    // The other connector stays, and becomes the selected one.
     expect(card(1)).not.toBeNull();
     expect(
-      Array.from(document.body.querySelectorAll('[role="tab"]')).map((t) =>
-        t.textContent?.trim(),
-      ),
-    ).toEqual(["#1"]);
+      document.body
+        .querySelector('[data-connector-id="1"]')
+        ?.closest("[data-selected]")
+        ?.getAttribute("data-selected"),
+    ).toBe("true");
   });
 
   it("keeps the connector when the confirmation is cancelled", async () => {

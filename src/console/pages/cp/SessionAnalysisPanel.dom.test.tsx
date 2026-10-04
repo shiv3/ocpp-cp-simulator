@@ -6,8 +6,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
-  findMenuItem,
-  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -60,12 +58,14 @@ function snapshot(id: string): ChargePointSnapshot {
 }
 
 async function openAnalysisTab(container: HTMLElement): Promise<void> {
-  // The section lives in the charge point page's More menu (`?tab=analysis`).
-  const more = container.querySelector<HTMLElement>('[aria-label="More"]');
-  expect(more, "expected the More button").toBeTruthy();
-  await openDropdownMenu(more!);
-  const item = findMenuItem("Session analysis");
-  expect(item, "expected a Session analysis item").toBeTruthy();
+  // The section is a tab of the charge point page's lower half
+  // (`?tab=analysis`).
+  const item = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[role="tablist"][aria-label="Charge point sections"] [role="tab"]',
+    ),
+  ).find((tab) => tab.textContent?.trim() === "Session analysis");
+  expect(item, "expected a Session analysis tab").toBeTruthy();
   await act(async () => {
     item!.click();
     await Promise.resolve();
@@ -210,7 +210,7 @@ describe("SessionAnalysisPanel", () => {
     }
   });
 
-  it("offers Session analysis in the More menu; it opens in idle state with the disclaimer and an Analyze button", async () => {
+  it("offers Session analysis as a tab; it opens in idle state with the disclaimer and an Analyze button", async () => {
     const service = makeService({
       snapshots: [snapshot("CP-1")],
       listStoredLogs: vi.fn(async () => []),

@@ -859,4 +859,33 @@ describe("ScenarioEditPage", () => {
       container.querySelector('[aria-label="Unsaved changes"]'),
     ).toBeTruthy();
   });
+  it("puts the inspector beside the steps when the editor is wide enough (a container query)", async () => {
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [linearFixture()]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    // jsdom has no layout: the classes are the guard.
+    const body = container.querySelector('[data-testid="editor-body"]')!;
+    expect(body.classList.contains("@container")).toBe(true);
+    const grid = body.querySelector('[data-testid="editor-grid"]')!;
+    expect(grid.classList.contains("grid")).toBe(true);
+    expect(grid.classList.contains("grid-cols-1")).toBe(true);
+    expect(
+      grid.classList.contains(
+        "@[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]",
+      ),
+    ).toBe(true);
+    // Steps column, then the inspector (the empty "Select a step" box too).
+    const [steps, inspector] = Array.from(grid.children);
+    expect(steps.classList.contains("min-w-0")).toBe(true);
+    expect(steps.querySelector("[data-step-id]")).toBeTruthy();
+    expect(inspector.textContent).toContain("Select a step");
+    expect(inspector.classList.contains("@[860px]:sticky")).toBe(true);
+  });
 });

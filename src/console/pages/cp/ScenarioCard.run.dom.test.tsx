@@ -89,9 +89,9 @@ const scenarioDefinitionFixture: ScenarioDefinition = {
   updatedAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
 };
 
-const RUN_ROW = '[data-testid="connector-run-row"]';
+const RUN_ROW = '[data-testid="scenario-run"]';
 
-describe("ConnectorRunRow", () => {
+describe("ScenarioCard: the live run on a connector", () => {
   let cleanup: (() => Promise<void>) | null = null;
 
   beforeAll(() => {
@@ -161,9 +161,16 @@ describe("ConnectorRunRow", () => {
     // Waiting badge should be visible
     expect(container.textContent).toContain("waiting");
 
-    // Current step: label and k/N
-    expect(container.textContent).toContain("Wait for remote start");
-    expect(container.textContent).toContain("1/2");
+    // Current step: k of N and its label
+    expect(container.textContent).toContain(
+      "step 1 of 2 · Wait for remote start",
+    );
+    // A 3px progress bar under the heading row.
+    expect(
+      container
+        .querySelector('[data-testid="scenario-progress"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("1");
 
     // Waiting expectation details
     expect(container.textContent).toContain("Waiting for");
@@ -530,7 +537,7 @@ describe("ConnectorRunRow", () => {
     expect(listScenarios.mock.calls.length).toBe(settledCalls + 1);
   });
 
-  it("shows only the runs of the selected connector, whichever connector the run is on", async () => {
+  it("shows each connector's runs under that connector's card on the page, the selected one's in the panel", async () => {
     const cp = snapshot({
       id: "CP-1",
       status: OCPPStatus.Available,
@@ -562,16 +569,29 @@ describe("ConnectorRunRow", () => {
       getStateHistory: vi.fn(async () => []),
     });
 
-    const { container, root } = await renderConsole("/cp/CP-1", { service });
-    cleanup = () => unmount(root);
+    // The full page: every connector with its own scenario card.
+    const page = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(page.root);
     await flush();
+    const scenarioCard = (id: number) =>
+      page.container.querySelector<HTMLElement>(
+        `[data-testid="scenario-card"][data-connector-id-ref="${id}"]`,
+      );
+    expect(scenarioCard(1)?.querySelector(RUN_ROW)).toBeNull();
+    expect(scenarioCard(1)?.textContent).toContain("No scenario running");
+    expect(scenarioCard(2)?.querySelector(RUN_ROW)).toBeTruthy();
+    expect(scenarioCard(2)?.textContent).toContain("Second probe");
+    await cleanup();
 
-    // Connector 1 is selected by default: nothing runs there.
-    expect(container.querySelector(RUN_ROW)).toBeNull();
-    expect(container.textContent).not.toContain("Second probe");
+    // The side panel: one connector at a time.
+    const panel = await renderConsole("/?cp=CP-1", { service });
+    cleanup = () => unmount(panel.root);
+    await flush();
+    expect(panel.container.querySelector(RUN_ROW)).toBeNull();
+    expect(panel.container.textContent).not.toContain("Second probe");
 
     const tab2 = Array.from(
-      container.querySelectorAll<HTMLElement>(
+      panel.container.querySelectorAll<HTMLElement>(
         '[role="tablist"][aria-label="Connectors"] [role="tab"]',
       ),
     ).find((t) => t.textContent?.trim() === "#2");
@@ -580,8 +600,8 @@ describe("ConnectorRunRow", () => {
     });
     await flush();
 
-    expect(container.querySelector(RUN_ROW)).toBeTruthy();
-    expect(container.textContent).toContain("Second probe");
+    expect(panel.container.querySelector(RUN_ROW)).toBeTruthy();
+    expect(panel.container.textContent).toContain("Second probe");
   });
 
   describe("wait controls (#240)", () => {

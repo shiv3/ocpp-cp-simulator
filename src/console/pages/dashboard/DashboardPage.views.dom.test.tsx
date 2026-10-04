@@ -420,26 +420,93 @@ describe("DashboardPage views and filters", () => {
     expect(counter(container)).toBe("1 CPs · 1 connectors");
   });
 
-  it("the Connector / Tx combobox offers #n and Tx options and filters on them", async () => {
+  /** Focuses a combobox, types into it and returns what its list offers. */
+  const optionsOf = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>('[role="option"]')).map(
+      (o) => o.textContent,
+    );
+
+  it("the Connector combobox offers #n options and filters on the number", async () => {
     const { container } = await mount("/");
     const input = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Connector number or transaction id"]',
+      'input[aria-label="Connector"]',
     )!;
-    expect(input.getAttribute("placeholder")).toBe("Connector / Tx");
+    expect(input.getAttribute("placeholder")).toBe("Connector");
+    expect(
+      container.querySelector(
+        'input[aria-label="Connector number or transaction id"]',
+      ),
+    ).toBeNull();
 
     await act(async () => {
       input.focus();
     });
-    const options = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="option"]'),
-    ).map((o) => o.textContent);
-    expect(options).toEqual(["#1connector", "#2connector", "Tx 42CP-A #2"]);
+    expect(optionsOf(container)).toEqual(["#1", "#2"]);
 
-    await setValue(input, "Tx 42", "input");
-    expect(location?.search).toBe("?conn=Tx+42");
+    // A typed "#2" is stored as the number only.
+    await setValue(input, "#2", "input");
+    expect(location?.search).toBe("?conn=2");
     expect(cells(container).map((c) => c.dataset.connectorCell)).toEqual([
       "CP-A#2",
     ]);
+
+    await setValue(input, "1", "input");
+    expect(location?.search).toBe("?conn=1");
+    expect(cells(container).map((c) => c.dataset.connectorCell)).toEqual([
+      "CP-A#1",
+      "CP-B#1",
+      "CP-C#1",
+    ]);
+  });
+
+  it("the Transaction combobox offers the active transaction ids and filters on them", async () => {
+    const { container } = await mount("/");
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Transaction"]',
+    )!;
+    expect(input.getAttribute("placeholder")).toBe("Transaction");
+
+    await act(async () => {
+      input.focus();
+    });
+    expect(optionsOf(container)).toEqual(["#42CP-A #2"]);
+
+    await setValue(input, "4", "input");
+    expect(location?.search).toBe("?tx=4");
+    expect(cells(container).map((c) => c.dataset.connectorCell)).toEqual([
+      "CP-A#2",
+    ]);
+
+    // Picking the suggestion writes the id text, without the "#".
+    await act(async () => {
+      input.focus();
+    });
+    await click(
+      Array.from(container.querySelectorAll('[role="option"]')).find((o) =>
+        o.textContent?.startsWith("#42"),
+      )!,
+    );
+    expect(location?.search).toBe("?tx=42");
+    expect(input.value).toBe("42");
+    expect(counter(container)).toBe("1 CPs · 1 connectors");
+  });
+
+  it("?conn= and ?tx= do not touch the panel's ?connector=, and both filters combine", async () => {
+    const { container } = await mount("/?cp=CP-A&connector=1&conn=2&tx=42");
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Connector"]',
+      )!.value,
+    ).toBe("2");
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Transaction"]',
+      )!.value,
+    ).toBe("42");
+    expect(cells(container).map((c) => c.dataset.connectorCell)).toEqual([
+      "CP-A#2",
+    ]);
+    expect(location?.search).toBe("?cp=CP-A&connector=1&conn=2&tx=42");
   });
 
   it("a connector with an active scenario run shows it, and the Scenario checkbox keeps only those", async () => {
@@ -576,20 +643,40 @@ describe("DashboardPage views and filters", () => {
     expect(cells(container)).toHaveLength(4);
   });
 
-  it("the power button connects or disconnects without opening the panel", async () => {
-    const { container, service } = await mount("/");
+  it("a head holds no button but the twist and the id, and tells the heartbeat instead of a power button", async () => {
+    const { container } = await mount("/");
+    for (const id of ["CP-A", "CP-B", "CP-C"]) {
+      const head = headOf(container, id);
+      expect(
+        Array.from(head.querySelectorAll("button")).map(
+          (b) => b.getAttribute("aria-label") ?? b.textContent?.trim(),
+        ),
+      ).toEqual([`Collapse connectors of ${id}`, id]);
+    }
+    expect(container.querySelector('[aria-label^="Connect "]')).toBeNull();
+    expect(container.querySelector('[aria-label^="Disconnect "]')).toBeNull();
 
-    await click(container.querySelector('[aria-label="Disconnect CP-A"]')!);
-    expect(service.disconnect).toHaveBeenCalledWith("CP-A");
+    // Connected charge points tell their last Heartbeat; the disconnected one
+    // stays quiet.
+    expect(headOf(container, "CP-A").textContent).toContain("heartbeat never");
+    expect(headOf(container, "CP-C").textContent).not.toContain("heartbeat");
+  });
 
-    await click(container.querySelector('[aria-label="Connect CP-C"]')!);
-    expect(service.connect).toHaveBeenCalledWith("CP-C");
-    expect(location?.search).toBe("");
-    expect(
-      container
-        .querySelector('[aria-label="Disconnect CP-A"]')!
-        .getAttribute("title"),
-    ).toContain("heartbeat never");
+  it("the Charge points table has no actions column and no power button", async () => {
+    const { container } = await mount("/?view=cp");
+    const headers = Array.from(container.querySelectorAll("th")).map((th) =>
+      th.textContent?.trim(),
+    );
+    expect(headers).toEqual([
+      "Charge point",
+      "OCPP",
+      "Status",
+      "In use",
+      "Scenario",
+      "Heartbeat",
+    ]);
+    expect(container.querySelector('[aria-label^="Connect "]')).toBeNull();
+    expect(container.querySelector('[aria-label^="Disconnect "]')).toBeNull();
   });
 
   it("keeps today's empty state when there are no charge points at all", async () => {

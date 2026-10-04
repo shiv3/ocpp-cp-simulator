@@ -31,8 +31,11 @@ export interface CpListRow {
 export interface CpListFilters {
   /** Substring of the charge point id (case-insensitive). */
   q: string;
-  /** `#3`, `3`, `Tx 42`, `tx42` or `42`: see `matchesConnectorQuery`. */
+  /** A connector number, `3` or `#3` (`?conn=`: `?connector=` is the side
+   *  panel's own key on this page). */
   conn: string;
+  /** A transaction id, or part of one: `42` or `#42` (`?tx=`). */
+  tx: string;
   /** A connector status, or "" for any. */
   status: OCPPStatus | "";
   /** An OCPP version, or "" for any. */
@@ -62,6 +65,7 @@ export function parseCpListFilters(params: URLSearchParams): CpListFilters {
     // survive the round trip through the URL. The filter trims.
     q: params.get("q") ?? "",
     conn: params.get("conn") ?? "",
+    tx: params.get("tx") ?? "",
     status: Object.values(OCPPStatus).find((value) => value === status) ?? "",
     version: params.get("version") ?? "",
     connected: params.get("connected") === "1",
@@ -69,32 +73,19 @@ export function parseCpListFilters(params: URLSearchParams): CpListFilters {
   };
 }
 
-/** `#3`, `3`, `Tx 42`, `tx42`, `42`: an optional `#` / `Tx` prefix and digits.
- *  Returns the digits, "" when only a prefix was typed (no constraint yet, so
- *  the list does not blank while the operator is still typing) and null when
- *  the text is not in that form (matches nothing). */
-function parseConnectorQuery(conn: string): string | null {
-  const match = /^(?:#|tx)?\s*(\d*)$/i.exec(conn.trim());
+/** `#3` or `3`: an optional `#` and digits. Returns the digits, "" when
+ *  nothing but the prefix was typed (no constraint yet, so the list does not
+ *  blank while the operator is still typing) and null when the text is not in
+ *  that form (matches nothing). */
+function parseDigits(text: string): string | null {
+  const match = /^#?\s*(\d*)$/.exec(text.trim());
   return match ? match[1] : null;
-}
-
-/** The number equals the connector's, or the transaction id contains it, so
- *  one box finds both "connector 2" and "transaction 42". */
-function matchesConnectorQuery(
-  connector: ConnectorSnapshot,
-  digits: string,
-): boolean {
-  if (digits === "") return true;
-  if (connector.id === Number(digits)) return true;
-  return (
-    connector.transactionId !== null &&
-    String(connector.transactionId).includes(digits)
-  );
 }
 
 /**
  * Applies the filters to the list. Charge-point-level filters (q, version,
- * connected) drop whole rows. Connector-level filters (conn, status, scenario)
+ * connected) drop whole rows. Connector-level filters (conn, tx, status,
+ * scenario)
  * narrow each row's connectors to the matching ones and drop the rows left
  * with none, so a status filter hides the charge points without a connector in
  * that status and the Hierarchy view hides the other connector cells. Rows are
@@ -106,9 +97,10 @@ export function filterChargePoints(
   filters: CpListFilters,
 ): CpListRow[] {
   const q = filters.q.trim().toLowerCase();
-  const digits = parseConnectorQuery(filters.conn);
+  const conn = parseDigits(filters.conn);
+  const tx = parseDigits(filters.tx);
   const connectorLevel =
-    digits !== "" || filters.status !== "" || filters.scenario;
+    conn !== "" || tx !== "" || filters.status !== "" || filters.scenario;
 
   const result: CpListRow[] = [];
   for (const row of rows) {
@@ -121,9 +113,13 @@ export function filterChargePoints(
     }
     const connectors = row.connectors.filter(
       (c) =>
-        // null: text that is no connector / transaction reference.
-        digits !== null &&
-        matchesConnectorQuery(c, digits) &&
+        // null: text that is no connector number / transaction id.
+        conn !== null &&
+        tx !== null &&
+        (conn === "" || c.id === Number(conn)) &&
+        // The id is a number, so "contains" is a match on its digits.
+        (tx === "" ||
+          (c.transactionId !== null && String(c.transactionId).includes(tx))) &&
         (filters.status === "" || c.status === filters.status) &&
         (!filters.scenario || c.hasRun),
     );

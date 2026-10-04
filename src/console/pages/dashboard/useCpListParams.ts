@@ -21,7 +21,8 @@ export interface CpListParams {
  * The list's view and filters live in the URL (`?view=cp&status=Charging`),
  * so a reload or a shared link shows the same list. Changes replace the
  * history entry: Back should leave the page, not undo each keystroke. The
- * panel's own params (`cp`, `connector`) are kept untouched, and the panel
+ * panel's own params (`cp`, `connector`) are kept untouched (the filter
+ * uses `conn`, not `connector`, so the two never clash), and the panel
  * keeps these (see `usePanelParams`).
  */
 export function useCpListParams(): CpListParams {
@@ -51,6 +52,7 @@ export function useCpListParams(): CpListParams {
       const changes: Record<string, string | null> = {};
       if (patch.q !== undefined) changes.q = patch.q;
       if (patch.conn !== undefined) changes.conn = patch.conn;
+      if (patch.tx !== undefined) changes.tx = patch.tx;
       if (patch.status !== undefined) changes.status = patch.status;
       if (patch.version !== undefined) changes.version = patch.version;
       if (patch.connected !== undefined)

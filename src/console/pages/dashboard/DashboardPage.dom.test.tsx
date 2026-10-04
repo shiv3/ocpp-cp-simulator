@@ -87,7 +87,7 @@ describe("DashboardPage", () => {
     }
   });
 
-  it("renders registered/connected CPs with connector cells (energy in kWh), an active Tx, and wires Disconnect to the service", async () => {
+  it("renders registered/connected CPs with connector cells (energy in kWh), an active Tx, and has no Connect / Disconnect button in the row", async () => {
     const cpA = snapshot({
       id: "CP-A",
       status: OCPPStatus.Available,
@@ -134,20 +134,9 @@ describe("DashboardPage", () => {
     const cellA = container.querySelector('[data-connector-cell="CP-A#1"]');
     expect(cellA, "expected a connector cell for CP-A #1").toBeTruthy();
     expect(cellA!.textContent).toContain("16.21 kWh");
-    const disconnectButton = rowA!.querySelector<HTMLButtonElement>(
-      '[aria-label="Disconnect CP-A"]',
-    );
-    expect(
-      disconnectButton,
-      "expected a Disconnect button on CP-A's row",
-    ).toBeTruthy();
-
-    await act(async () => {
-      disconnectButton!.click();
-      await Promise.resolve();
-    });
-
-    expect(service.disconnect).toHaveBeenCalledWith("CP-A");
+    // Connecting lives in the side panel and the bulk menu, not in the row.
+    expect(rowA!.querySelector('[aria-label="Disconnect CP-A"]')).toBeNull();
+    expect(service.disconnect).not.toHaveBeenCalled();
   });
 
   it("shows an empty state with an add action when there are no charge points", async () => {

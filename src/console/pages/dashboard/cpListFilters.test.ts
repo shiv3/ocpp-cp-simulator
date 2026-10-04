@@ -78,6 +78,7 @@ describe("parseCpListFilters", () => {
     expect(NONE).toEqual({
       q: "",
       conn: "",
+      tx: "",
       status: "",
       version: "",
       connected: false,
@@ -85,12 +86,13 @@ describe("parseCpListFilters", () => {
     });
     const parsed = parseCpListFilters(
       new URLSearchParams(
-        "q=alp&conn=%232&status=Charging&version=2.0.1&connected=1&scenario=1",
+        "q=alp&conn=2&tx=42&status=Charging&version=2.0.1&connected=1&scenario=1",
       ),
     );
     expect(parsed).toEqual({
       q: "alp",
-      conn: "#2",
+      conn: "2",
+      tx: "42",
       status: OCPPStatus.Charging,
       version: "2.0.1",
       connected: true,
@@ -135,31 +137,47 @@ describe("filterChargePoints", () => {
     expect(apply({ q: "zzz" })).toEqual([]);
   });
 
-  it("conn '#2' and '2' match the connector with that number (and, as the digits, a transaction id containing them)", () => {
-    for (const conn of ["#2", "2"]) {
+  it("conn '#2' and '2' match the connector with that number, not a transaction id", () => {
+    for (const conn of ["#2", "2", " # 2 "]) {
       const result = apply({ conn });
-      // CP-GAMMA's connector 3 matches through its transaction 4207.
-      expect(ids(result)).toEqual(["CP-ALPHA", "CP-GAMMA"]);
+      expect(ids(result)).toEqual(["CP-ALPHA"]);
       expect(result[0].connectors.map((c) => c.id)).toEqual([2]);
-      expect(result[1].connectors.map((c) => c.id)).toEqual([3]);
     }
     expect(ids(apply({ conn: "#1" }))).toEqual(["CP-ALPHA", "cp-beta"]);
+    expect(ids(apply({ conn: "3" }))).toEqual(["CP-GAMMA"]);
     expect(apply({ conn: "#5" })).toEqual([]);
   });
 
-  it("conn 'Tx 42', 'tx42' and '42' match a transaction id containing the digits", () => {
-    for (const conn of ["Tx 42", "tx42", "42"]) {
-      const result = apply({ conn });
+  it("conn that is only a prefix does not filter; anything else matches nothing", () => {
+    expect(apply({ conn: "#" })).toEqual(rows);
+    expect(apply({ conn: "abc" })).toEqual([]);
+    // The old combined form is gone: no compatibility shim.
+    expect(apply({ conn: "Tx 42" })).toEqual([]);
+  });
+
+  it("tx matches a transaction id containing the digits, not a connector number", () => {
+    for (const tx of ["42", "#42", "# 42"]) {
+      const result = apply({ tx });
       expect(ids(result)).toEqual(["CP-ALPHA", "CP-GAMMA"]);
       expect(result[0].connectors.map((c) => c.id)).toEqual([2]);
       expect(result[1].connectors.map((c) => c.id)).toEqual([3]);
     }
+    expect(ids(apply({ tx: "4207" }))).toEqual(["CP-GAMMA"]);
+    // Connector 1 and 2 exist, but no transaction id contains 1.
+    expect(apply({ tx: "1" })).toEqual([]);
   });
 
-  it("conn that is only a prefix does not filter; garbage matches nothing", () => {
-    expect(apply({ conn: "#" })).toEqual(rows);
-    expect(apply({ conn: "Tx" })).toEqual(rows);
-    expect(apply({ conn: "abc" })).toEqual([]);
+  it("tx that is only a prefix does not filter; anything else matches nothing", () => {
+    expect(apply({ tx: "#" })).toEqual(rows);
+    expect(apply({ tx: "x" })).toEqual([]);
+  });
+
+  it("conn and tx combine with AND on the same connector", () => {
+    const result = apply({ conn: "2", tx: "42" });
+    expect(ids(result)).toEqual(["CP-ALPHA"]);
+    expect(result[0].connectors.map((c) => c.id)).toEqual([2]);
+    expect(ids(apply({ conn: "3", tx: "4207" }))).toEqual(["CP-GAMMA"]);
+    expect(apply({ conn: "1", tx: "42" })).toEqual([]);
   });
 
   it("status matches the connector status and narrows the connectors", () => {

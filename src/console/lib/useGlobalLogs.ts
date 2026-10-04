@@ -5,8 +5,9 @@ import type { UseGlobalLogsResult } from "./globalLogsContext";
 
 export type { GlobalLogEntry, UseGlobalLogsResult } from "./globalLogsContext";
 
-/** HH:mm:ss in local time — LogsPage's row list renders timestamps with it
- *  (it was shared with the Dashboard's "Recent activity" box, since removed).
+/** HH:mm:ss in local time — the charge point page's compact log renders
+ *  timestamps with it (it was shared with the Dashboard's "Recent activity"
+ *  box, since removed).
  *  Deliberately hand-rolled instead of `toLocaleTimeString` so output
  *  doesn't depend on the runtime's ICU/locale data (dom tests included). */
 export function formatLogTime(date: Date): string {

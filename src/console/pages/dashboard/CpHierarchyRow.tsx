@@ -6,6 +6,7 @@ import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
 import StatusPill from "../../components/StatusPill";
 import { statusDotClass, statusTextClass } from "../../components/statusColor";
+import { formatRelativeTime } from "../../lib/formatRelativeTime";
 import { usePanelParams } from "../../lib/usePanelParams";
 import ConnectorCell from "./ConnectorCell";
 import type { CpListRow } from "./cpListFilters";
@@ -15,7 +16,6 @@ import {
   hasActiveRun,
   lastHeartbeat,
 } from "./cpRowFormat";
-import CpPowerButton from "./CpPowerButton";
 
 export interface CpHierarchyRowProps {
   row: CpListRow;
@@ -26,7 +26,7 @@ export interface CpHierarchyRowProps {
 
 /**
  * One charge point of the Hierarchy view: a head (twist, status icon, id,
- * version, pills, a dot per connector, power button) over a grid of connector
+ * version, pills, a dot per connector, the last Heartbeat) over a grid of connector
  * cells. The head opens the side panel; so do the cells, on their connector.
  */
 const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
@@ -105,13 +105,13 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
             />
           ))}
         </span>
-        <div className="ml-auto">
-          <CpPowerButton
-            cpId={cp.id}
-            connected={row.connected}
-            lastHeartbeat={lastHeartbeat(row)}
-          />
-        </div>
+        {/* Connecting is in the side panel and the bulk menu; the row only
+            tells the Heartbeat, which the old power button's tooltip carried. */}
+        {row.connected && (
+          <span className="ml-auto font-mono text-[11.5px] text-cx-muted">
+            heartbeat {formatRelativeTime(lastHeartbeat(row))}
+          </span>
+        )}
       </div>
 
       {!collapsed &&

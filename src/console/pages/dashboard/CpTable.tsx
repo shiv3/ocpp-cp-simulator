@@ -21,7 +21,6 @@ import {
   inUseCount,
   lastHeartbeat,
 } from "./cpRowFormat";
-import CpPowerButton from "./CpPowerButton";
 
 /** The Charge points view: one table row per charge point. */
 const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
@@ -37,9 +36,6 @@ const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
           <TableHead className="text-right">In use</TableHead>
           <TableHead>Scenario</TableHead>
           <TableHead>Heartbeat</TableHead>
-          <TableHead className="w-10">
-            <span className="sr-only">Actions</span>
-          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -91,13 +87,6 @@ const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
               </TableCell>
               <TableCell className="text-xs text-cx-muted">
                 {formatRelativeTime(lastHeartbeat(row))}
-              </TableCell>
-              <TableCell>
-                <CpPowerButton
-                  cpId={cp.id}
-                  connected={row.connected}
-                  lastHeartbeat={lastHeartbeat(row)}
-                />
               </TableCell>
             </TableRow>
           );

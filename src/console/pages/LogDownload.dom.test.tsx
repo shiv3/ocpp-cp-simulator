@@ -14,6 +14,7 @@ import {
   createFakeChargePointService,
   flush,
   renderConsole,
+  type FakeChargePointService,
 } from "../test/harness";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type {
@@ -157,9 +158,28 @@ describe("downloading a charge point's logs (#421)", () => {
     expect(clearStoredLogs).toHaveBeenCalledWith("CP-1");
   });
 
-  it("/logs downloads every charge point's logs, or the filtered one's", async () => {
+  /** Pushes a log line so the Charge point group lists the charge point. */
+  async function logLine(service: FakeChargePointService, cpId: string) {
+    await act(async () => {
+      for (const handler of service.__handlers.subscribe.get(cpId) ?? []) {
+        handler({
+          type: "log",
+          entry: {
+            timestamp: new Date("2026-10-02T10:00:00.000Z"),
+            level: 1,
+            type: "OCPP",
+            message: `line of ${cpId}`,
+          },
+        });
+      }
+    });
+  }
+
+  it("/logs downloads every charge point's logs, or the selected ones'", async () => {
     const { service, root } = await render("/logs");
     unmount = () => act(() => root.unmount());
+    await logLine(service, "CP-1");
+    await logLine(service, "CP-2");
 
     await click(button("Download"));
     let file = await lastDownload();
@@ -171,19 +191,39 @@ describe("downloading a charge point's logs (#421)", () => {
         .map((l) => JSON.parse(l)),
     ).toEqual([...ROWS["CP-1"], ...ROWS["CP-2"]]);
 
-    const filter = document.body.querySelector<HTMLSelectElement>(
-      'select[aria-label="Filter by charge point"]',
-    )!;
-    await act(async () => {
-      filter.value = "CP-2";
-      filter.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const checkbox = (id: string) =>
+      document.body.querySelector<HTMLInputElement>(
+        `[data-filter-group="Charge point"] label[data-filter-option="${id}"] input`,
+      )!;
+    await click(checkbox("CP-2"));
     vi.mocked(service.listStoredLogs!).mockClear();
     await click(button("Download"));
     file = await lastDownload();
     expect(service.listStoredLogs).toHaveBeenCalledTimes(1);
     expect(service.listStoredLogs).toHaveBeenCalledWith("CP-2");
     expect(file.name).toMatch(/^ocpp-logs-CP-2-.+\.jsonl$/);
+
+    // Two selected: both, in one file.
+    await click(checkbox("CP-1"));
+    vi.mocked(service.listStoredLogs!).mockClear();
+    await click(button("Download"));
+    file = await lastDownload();
+    expect(
+      vi.mocked(service.listStoredLogs!).mock.calls.map((c) => c[0]),
+    ).toEqual(["CP-2", "CP-1"]);
+    expect(file.name).toMatch(/^ocpp-logs-selected-.+\.jsonl$/);
+  });
+
+  it("/logs?cp= downloads that charge point's logs without touching the others", async () => {
+    const { service, root } = await render("/logs?cp=CP-1");
+    unmount = () => act(() => root.unmount());
+
+    await click(button("Download"));
+    const file = await lastDownload();
+
+    expect(service.listStoredLogs).toHaveBeenCalledTimes(1);
+    expect(service.listStoredLogs).toHaveBeenCalledWith("CP-1");
+    expect(file.name).toMatch(/^ocpp-logs-CP-1-.+\.jsonl$/);
   });
 
   it("says why the logs could not be downloaded", async () => {

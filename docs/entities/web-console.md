@@ -106,18 +106,18 @@ was always green. Local mode has no daemon, so its dot carries no status.
 The dashboard (`/`, titled **Charge Points**) lists every charge point in one
 of three **views**, under a row of **filters**. It replaces the card grid and
 the **Recent activity** box of earlier versions; the traffic is on the
-[Message Log](#layout-route-prefixes) page.
+[Message Log](#message-log-page) page.
 
 **Views.** A segmented control in the header (`role="group"`, label `View`;
 the header reads: view switch, **All charge points** menu, **Add Charge
 Point**) picks the layout. The choice is `?view=` in the URL; the Hierarchy
 view is the default and leaves the parameter out.
 
-| View (`?view=`)               | Shows                                                                                                                                                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hierarchy** (`hierarchy`)   | One row per charge point in one bordered card, with its connectors as a grid of small cells under it.                                                                                                                                  |
-| **Charge points** (`cp`)      | A table, one row per charge point: id, OCPP version, status, **In use** (`busy / total` connectors, busy = Charging, Preparing, SuspendedEV, SuspendedEVSE or Finishing), scenario badge or `—`, last Heartbeat, and the power button. |
-| **Connectors** (`connectors`) | A flat table, one row per connector: `<cp id> #<n>`, status, meter (kWh), transaction (`#<id>` or `—`), scenario run state or `—`, and the charge point's status.                                                                      |
+| View (`?view=`)               | Shows                                                                                                                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Hierarchy** (`hierarchy`)   | One row per charge point in one bordered card, with its connectors as a grid of small cells under it.                                                                                                                    |
+| **Charge points** (`cp`)      | A table, one row per charge point: id, OCPP version, status, **In use** (`busy / total` connectors, busy = Charging, Preparing, SuspendedEV, SuspendedEVSE or Finishing), scenario badge or `—`, and the last Heartbeat. |
+| **Connectors** (`connectors`) | A flat table, one row per connector: `<cp id> #<n>`, status, meter (kWh), transaction (`#<id>` or `—`), scenario run state or `—`, and the charge point's status.                                                        |
 
 In the Hierarchy view a row's head holds, left to right: a **twist** button
 (`Collapse connectors of <id>` / `Expand …`, `aria-expanded`) that folds the
@@ -125,8 +125,10 @@ connector grid away (kept on the page, not in the URL), a plug icon colored by
 status, the id, the OCPP version as small muted text, the status (dot and text), the
 **Scenario** badge (amber **Waiting: …** while a run is parked), the **Net
 sim** badge, one small dot per connector (tooltip `#<n> <Status>`), and at the
-right end an icon-only power button (`Connect <id>` / `Disconnect <id>`; its
-tooltip carries the last Heartbeat, `heartbeat 3m ago`). Status colors, for
+right end, only while the charge point is connected, the last Heartbeat as
+muted mono text (`heartbeat 3m ago`, `heartbeat never` before the first). The
+list has no **Connect** / **Disconnect** button, in either view: connecting is
+in the side panel's header and the **All charge points** menu. Status colors, for
 the pill, the dots and the icon: Available and Connected green; Charging blue;
 Preparing, Finishing, Reserved, SuspendedEV and SuspendedEVSE amber; Faulted
 and Unavailable red; Disconnected gray
@@ -143,20 +145,23 @@ open in the panel) and opens the panel on that connector.
 
 **Filters.** The row above the list narrows it; every field is a URL
 parameter, kept when the panel opens and changed with a replace (Back leaves
-the page, not the last keystroke). The comboboxes filter as you type; **Enter**
+the page, not the last keystroke). The connector filter is `?conn=`, not
+`?connector=`: that one is the side panel's selected connector (see below) and
+the two are independent. The comboboxes filter as you type; **Enter**
 takes the first suggestion, **Esc** closes the suggestions (and does not close
 the side panel), and **Clear** empties the field.
 
-| Field (label)               | URL            | Matches                                                                                                                                                                                                                                                                                                                    |
-| --------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Charge point** combobox   | `?q=`          | A substring of the charge point id, case-insensitive. Suggestions: every id, with a status dot and the OCPP version.                                                                                                                                                                                                       |
-| **Connector / Tx** combobox | `?conn=`       | `#3`, `3`, `Tx 42`, `tx42` or `42`: a connector whose number equals the digits, or whose transaction id contains them. Text that is not of that form matches nothing; `#` or `Tx` alone does not filter yet. Suggestions: every connector number as `#n`, then every running transaction as `Tx <id>` with `<cp id> #<n>`. |
-| **Status** select           | `?status=`     | The connector's OCPP status (the nine values, in enum order). An unknown value in the URL is ignored.                                                                                                                                                                                                                      |
-| **OCPP version** select     | `?version=`    | The charge point's version (`config.ocppVersion` in Remote mode; in Local mode the shared config's), among the versions present in the list.                                                                                                                                                                               |
-| **Connected** checkbox      | `?connected=1` | Charge points that are connected: transport up, or a status other than Unavailable.                                                                                                                                                                                                                                        |
-| **Scenario** checkbox       | `?scenario=1`  | Connectors with an active scenario run.                                                                                                                                                                                                                                                                                    |
+| Field (label)             | URL            | Matches                                                                                                                                                                                                                                                        |
+| ------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Charge point** combobox | `?q=`          | A substring of the charge point id, case-insensitive. Suggestions: every id, with a status dot and the OCPP version.                                                                                                                                           |
+| **Connector** combobox    | `?conn=`       | A connector number, `3` or `#3` (the URL holds `3`): connectors whose number equals it. Text that is not a number matches nothing; `#` alone does not filter yet. Suggestions: every connector number once, as `#n`.                                           |
+| **Transaction** combobox  | `?tx=`         | A transaction id or part of one, `42` or `#42` (the URL holds `42`): connectors whose transaction id contains it, so `42` also finds `4207`. Text that is not a number matches nothing. Suggestions: every running transaction as `#<id>` with `<cp id> #<n>`. |
+| **Status** select         | `?status=`     | The connector's OCPP status (the nine values, in enum order). An unknown value in the URL is ignored.                                                                                                                                                          |
+| **OCPP version** select   | `?version=`    | The charge point's version (`config.ocppVersion` in Remote mode; in Local mode the shared config's), among the versions present in the list.                                                                                                                   |
+| **Connected** checkbox    | `?connected=1` | Charge points that are connected: transport up, or a status other than Unavailable.                                                                                                                                                                            |
+| **Scenario** checkbox     | `?scenario=1`  | Connectors with an active scenario run.                                                                                                                                                                                                                        |
 
-The **connector-level** filters (Connector / Tx, Status, Scenario) hide the
+The **connector-level** filters (Connector, Transaction, Status, Scenario) hide the
 charge points that have no matching connector and, in the Hierarchy view, the
 connectors that do not match; the others (Charge point, OCPP version,
 Connected) hide whole charge points. Filters combine with AND. At the right
@@ -382,19 +387,56 @@ in the side panel, and 70% of the window on the full page. The heading row has:
   Remote mode). Before #421 the console's **Clear screen + DB** left the
   persisted rows in place.
 
-The compact list replaced the searchable log viewer (`LogViewer`) the
-charge point and run pages used to embed; its toolbar, whose wrap was #405, no
-longer exists, and the component was deleted once no page used it. The run page
-shows no message log, so a run's traffic is read here or on the Message log
+The compact list replaced the searchable log viewer (`LogViewer`) the charge
+point and run pages used to embed, which was too wide for a side panel; its
+toolbar, whose wrap was #405, is back on the [Message Log
+page](#message-log-page), where the viewer has the whole window. The run page
+shows no message log, so a run's traffic is read here or on the Message Log
 page.
 
-The global **Message log** page (`/logs`) has the same **Download**, for the
-charge point picked in its filter or for all of them in one file
-(`ocpp-logs-all-<timestamp>.jsonl`). It downloads the persisted rows, not the
-filtered lines on screen. Its charge point filter is `?cp=<id>`: the page opens
-with that charge point preselected (the link from the charge point page), and
-picking one writes the parameter back (replacing the history entry); **All
-charge points** removes it.
+### Message Log page
+
+The global **Message Log** (`/logs`) is the old log screen's shape, restyled
+with the console's tokens: the `LogViewer`
+([`log-viewer.tsx`](../../src/components/ui/log-viewer.tsx)) fills the window
+under a header that keeps **Pause** / **Resume** (it stops the console's log
+buffer from taking new lines, so it belongs to the page, not to the view).
+The viewer has three parts:
+
+- **Filter sidebar.** Groups with a checkbox and a count per value, a
+  _Filter values_ box in each, folded by their uppercase heading: **Charge
+  point** (shown once a line has arrived), **Level** (a status dot per level),
+  **Type**, **Connector** (the ids a message names, `(none)` for the rest),
+  **Direction** (Sent / Received, parsed from the OCPP frame) and **Action**
+  (the OCPP action; a response takes the action of the call it answers). Ticking
+  several values of one group matches any of them; groups combine with AND, and
+  the counts are over all lines, not the filtered ones.
+- **Toolbar** (wraps in a narrow window, #405): `<n> total / <m> filtered`,
+  **Auto-scroll** (keeps the table at the newest line), **Download**,
+  **Clear screen** and **Clear screen + DB**; under it a **search** box over the
+  message text.
+- **Table**: Timestamp (UTC, `HH:mm:ss.SSS`, mono), Charge point (with the
+  group), Level, Type, Direction, Action (mono) and Message, one line each. A
+  level, type and direction is a colored dot and its text, not a filled badge.
+  A long message scrolls sideways instead of wrapping; the chevron at the start
+  of the row expands it to the whole message with the first JSON object
+  pretty-printed.
+
+The newest line is at the bottom. The charge point group is `?cp=<id>`,
+repeated for several (`?cp=CP-A&cp=CP-B`): the page opens with them ticked (the
+**Open in Message Log →** link of the charge point page sets one, and an id no
+line has yet stays listed), ticking writes the parameter back by replacing the
+history entry, and unticking the last one removes it. **Download**,
+**Clear screen** and **Clear screen + DB** act on the ticked charge points, on
+all of them when none is ticked:
+
+- **Download** saves the persisted rows, not the filtered lines on screen, as
+  one JSON Lines file: `ocpp-logs-<cp>-<timestamp>.jsonl` for one charge point,
+  `ocpp-logs-selected-…` for several, `ocpp-logs-all-…` for none ticked;
+- **Clear screen** drops those charge points' lines from the console's buffer
+  and leaves the persisted rows;
+- **Clear screen + DB** also deletes their persisted rows (`logs.clear`, once
+  per charge point); a failure is shown in an alert.
 
 ### Scenarios page
 

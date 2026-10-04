@@ -263,17 +263,6 @@ describe("DashboardPage side panel", () => {
     expect(location?.search).toBe("");
   });
 
-  it("Connect / Disconnect on a row calls the service and does not open the panel", async () => {
-    const down = snapshot({ id: "CP-A", status: OCPPStatus.Unavailable });
-    const { container, service } = await mount("/", [down]);
-
-    await click(container.querySelector('[aria-label="Connect CP-A"]')!);
-
-    expect(service.connect).toHaveBeenCalledWith("CP-A");
-    expect(panelOf(container)).toBeNull();
-    expect(location?.search).toBe("");
-  });
-
   it("?cp= in the URL shows the panel on load, scrolling the row into view", async () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;

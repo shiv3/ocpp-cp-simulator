@@ -16,7 +16,9 @@ export interface UseGlobalLogsResult {
   entries: GlobalLogEntry[];
   paused: boolean;
   setPaused: (paused: boolean) => void;
-  clear: () => void;
+  /** Empties the buffer, or only the entries of `cpIds` when the list is not
+   *  empty (the Message Log page clears the charge points it has selected). */
+  clear: (cpIds?: readonly string[]) => void;
 }
 
 /** Populated by `<GlobalLogsProvider>` (see `./GlobalLogsProvider.tsx`) —

@@ -19,7 +19,12 @@ export interface CpListFilterBarProps {
 const CHECKBOX_LABEL_CLASS =
   "inline-flex items-center gap-1.5 text-sm text-cx-fg2";
 
-/** The filter row above the list: two comboboxes, two selects, two checkboxes
+/** `#3` -> `3`: the URL holds the number / id only, whether the operator typed
+ *  the `#` or picked a suggestion (which carry it). A lone `#` stays, so the
+ *  box can still be typed into. */
+const withoutHash = (text: string) => text.replace(/^#(?=\d)/, "");
+
+/** The filter row above the list: three comboboxes, two selects, two checkboxes
  *  and the match counter. The values live in the URL (see `useCpListParams`). */
 const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
   filters,
@@ -37,29 +42,31 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
     [rows],
   );
 
-  // Every connector number once, then every running transaction with where
-  // it runs.
+  // Every connector number once.
   const connOptions = useMemo<ComboboxOption[]>(() => {
     const numbers = new Set<number>();
-    const transactions: ComboboxOption[] = [];
-    for (const row of rows) {
-      for (const connector of row.connectors) {
-        numbers.add(connector.id);
-        if (connector.transactionId !== null) {
-          transactions.push({
-            value: `Tx ${connector.transactionId}`,
-            hint: `${row.cp.id} #${connector.id}`,
-          });
-        }
-      }
-    }
-    return [
-      ...[...numbers]
-        .sort((a, b) => a - b)
-        .map((n) => ({ value: `#${n}`, hint: "connector" })),
-      ...transactions,
-    ];
+    for (const row of rows)
+      for (const connector of row.connectors) numbers.add(connector.id);
+    return [...numbers].sort((a, b) => a - b).map((n) => ({ value: `#${n}` }));
   }, [rows]);
+
+  // Every running transaction with where it runs.
+  const txOptions = useMemo<ComboboxOption[]>(
+    () =>
+      rows.flatMap((row) =>
+        row.connectors.flatMap((connector) =>
+          connector.transactionId === null
+            ? []
+            : [
+                {
+                  value: `#${connector.transactionId}`,
+                  hint: `${row.cp.id} #${connector.id}`,
+                },
+              ],
+        ),
+      ),
+    [rows],
+  );
 
   const versions = useMemo(() => {
     const found = new Set<string>();
@@ -82,12 +89,21 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
       />
       <Combobox
         id="cp-filter-conn"
-        aria-label="Connector number or transaction id"
-        placeholder="Connector / Tx"
+        aria-label="Connector"
+        placeholder="Connector"
         value={filters.conn}
-        onChange={(conn) => onChange({ conn })}
+        onChange={(conn) => onChange({ conn: withoutHash(conn) })}
         options={connOptions}
-        className="w-40"
+        className="w-32"
+      />
+      <Combobox
+        id="cp-filter-tx"
+        aria-label="Transaction"
+        placeholder="Transaction"
+        value={filters.tx}
+        onChange={(tx) => onChange({ tx: withoutHash(tx) })}
+        options={txOptions}
+        className="w-36"
       />
       <select
         aria-label="Status"

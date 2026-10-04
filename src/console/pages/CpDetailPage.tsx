@@ -1,6 +1,8 @@
 import React, { useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import { useChargePoints } from "../../data/hooks/useChargePoints";
+import { useConfig } from "../../data/hooks/useConfig";
 import SidePanel from "../components/SidePanel";
 import CpDetailContent from "./cp/CpDetailContent";
 import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
@@ -19,6 +21,13 @@ const CpDetailPage: React.FC = () => {
   const selectedConnectorId =
     raw !== null && /^\d+$/.test(raw) ? Number(raw) : null;
   const runScenarioId = searchParams.get("run") || null;
+  // The body reads its snapshot once on mount. On a reload in Local mode the
+  // page mounts before the charge point is created, so remount the body when
+  // the list first names the charge point (tests render without a registry
+  // and keep the immediate content).
+  const { config, isLoading } = useConfig();
+  const { chargePoints } = useChargePoints(config, { isLoading });
+  const known = chargePoints.some((cp) => cp.id === cpId);
 
   const onSelectConnector = useCallback(
     (id: number) => {
@@ -41,6 +50,7 @@ const CpDetailPage: React.FC = () => {
   return (
     <>
       <CpDetailContent
+        key={known ? "listed" : "pending"}
         cpId={cpId}
         variant="page"
         selectedConnectorId={selectedConnectorId}

@@ -434,6 +434,26 @@ describe("ScenarioRunPage", () => {
     expect(container.querySelectorAll("[data-step-id]")).toHaveLength(0);
   });
 
+  it("Edit scenario of a Library copy opens the Library editor", async () => {
+    const fixture = { ...linearFixture(), libraryId: "lib-a" };
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    const edit = Array.from(container.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Edit scenario"),
+    );
+    expect(edit?.getAttribute("href")).toBe(
+      "/scenarios?tab=library&edit=lib-a",
+    );
+  });
+
   it("falls back to the flat timeline for a scenario it cannot lay out", async () => {
     let def = linearFixture();
     const [a, b] = def.nodes.filter(

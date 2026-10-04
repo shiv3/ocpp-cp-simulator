@@ -197,3 +197,18 @@ export function retargetScenarioToConnector(
     updatedAt: now,
   };
 }
+
+/**
+ * Load an already-persisted definition into a connector's runtime, for the
+ * rare case where the runtime does not have it yet (a connector-assigned
+ * Library copy whose `runScenario` answered "not found"). Persistence is not
+ * touched: the copy is already stored, this only makes it runnable.
+ */
+export async function loadPersistedScenarioIntoRuntime(
+  chargePointService: Pick<ChargePointService, "loadScenario">,
+  cpId: string,
+  connectorId: number,
+  scenario: ScenarioDefinition,
+): Promise<void> {
+  await chargePointService.loadScenario(cpId, connectorId, scenario);
+}

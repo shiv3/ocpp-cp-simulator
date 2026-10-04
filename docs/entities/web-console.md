@@ -12,6 +12,7 @@ related:
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
+  - ../concepts/scenario-format.md
 updated: 2026-10-04
 ---
 
@@ -61,7 +62,9 @@ The browser app serves one web console:
   [Scenarios page](#scenarios-page): the live **Active runs** and the
   **Library**, whose row `…` menu — Duplicate, Export JSON, Delete — opens in a
   portal and flips upward near the bottom of the window, so it is never clipped
-  by the table, #365) with an editor (`/scenarios/edit`, see
+  by the table, #365; a Library scenario is edited inline at
+  `/scenarios?tab=library&edit=<id>`) with a per-connector editor
+  (`/scenarios/edit`, see
   [Scenario editor](#scenario-editor-steps-and-graph)) and a read-only run
   page (`/scenarios/run`, see
   [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
@@ -235,9 +238,9 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
 - **Connector tabs**: a strip of `#1`, `#2`, … buttons (`role="tablist"`,
   each tab `aria-selected`), each with a dot in the connector's status color.
   The arrow keys, Home and End move the selection. Under the strip, the
-  selected connector's card and, when a scenario run is live on that
-  connector, its **run row** (below). A charge point without connectors shows
-  **No connectors** instead.
+  selected connector's card and, under it, its **run row** when a scenario run
+  is live on that connector, else its **scenario row** (both below). A charge
+  point without connectors shows **No connectors** instead.
 - **The lower half**: the message log, or a section picked in **More**.
 
 The same content is what the list's [side panel](#dashboard) shows. Two URL
@@ -337,6 +340,30 @@ without a live run, and the runs are read once for the whole page and filtered
 by connector. The [Scenarios page](#scenarios-page) lists the runs of every
 charge point.
 
+Without a live run, the connector's **scenario row** takes its place: which
+[Library](#scenario-library) scenario the connector uses, picked there.
+
+- **Scenario** — a select (`aria-label="Scenario for connector <n>"`) of the
+  Library scenarios, **None** first; it shows the one the connector's copy
+  came from (its `libraryId`). Changing it assigns at once: the connector's
+  persisted definition set becomes exactly one copy of that scenario (or empty
+  with **None**), and **Scenario set** shows for 2 s. A connector holding a
+  definition that is not a Library copy (loaded by hand, or written after the
+  migration) shows it as a disabled `<name> (not in the Library)` entry.
+- **▶ Run** (disabled with **None**) starts the connector's copy
+  (`runScenario`). The copy is already persisted and the runtime already has
+  it (the daemon reloads the connector's runtime on the assignment; Local mode's
+  runtime follows the store); should the runtime still answer "not found",
+  the copy is loaded into it and run again.
+- The gear (**Edit scenario**) opens the scenario in the Library editor
+  (`/scenarios?tab=library&edit=<libraryId>`); for a definition that is not a
+  copy, the per-connector editor.
+- **Apply to all connectors** (on a charge point with more than one) assigns
+  the same Library scenario to every connector of the charge point, after a
+  confirmation naming the connectors whose different scenario it replaces.
+
+A failed call is shown under the row (`role="alert"`).
+
 The **lower half** (#421, #405) shows, by default, the charge point's **Message
 Log** from the console's log buffer: a heading row with the entry count and
 **Open in Message Log →**, a link to `/logs?cp=<id>` (the id URL-encoded); under
@@ -355,9 +382,11 @@ in the side panel, and 70% of the window on the full page. The heading row has:
   Remote mode). Before #421 the console's **Clear screen + DB** left the
   persisted rows in place.
 
-The run page used to embed the searchable log viewer (`LogViewer`, whose toolbar
-wrap was #405); it no longer shows a message log, so a run's traffic is read
-here or on the Message log page.
+The compact list replaced the searchable log viewer (`LogViewer`) the
+charge point and run pages used to embed; its toolbar, whose wrap was #405, no
+longer exists, and the component was deleted once no page used it. The run page
+shows no message log, so a run's traffic is read here or on the Message log
+page.
 
 The global **Message log** page (`/logs`) has the same **Download**, for the
 charge point picked in its filter or for all of them in one file
@@ -370,8 +399,8 @@ charge points** removes it.
 ### Scenarios page
 
 The Scenarios page (`/scenarios`) has the header **Scenarios** with the
-library's `<n> total`, the **Import JSON** and **+ New scenario** actions, and
-two tabs under it. `?tab=library` opens the **Library**; without it (or with
+Library's `<n> total` (Library scenarios, not the connectors' copies), the
+**Import JSON** and **+ New scenario** actions, and two tabs under it. `?tab=library` opens the **Library**; without it (or with
 any other value) the page opens on **Active runs**. Switching tabs replaces the
 history entry and keeps the other parameters.
 
@@ -400,10 +429,8 @@ The tab says **No scenario is running.** when no charge point has a live run,
 and **No active run matches the current filters.** when the filters leave
 none.
 
-**Library** is the scenario table: the template gallery, the **Charge point**
-select (`?cp=`, an exact id; the charge point page's **Scenarios** menu item
-opens it with this set) and the **Enabled only** checkbox, then one row per
-scenario across charge points.
+**Library** is where scenarios are kept and edited — see
+[Scenario Library](#scenario-library) below.
 
 Clicking a row of either tab opens the scenario in a **side panel** beside the
 list (the same panel shell as the [Charge Points list](#dashboard): resize,
@@ -411,22 +438,92 @@ list (the same panel shell as the [Charge Points list](#dashboard): resize,
 closes it). The panel is in `?open=`, so a reload or a shared link reopens it;
 each part is URI-encoded:
 
-| `?open=`                            | Panel                                                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `run:<cp>/<connector>/<scenarioId>` | An active run's row: the [run panel](#scenario-runs-panel-and-page).                                  |
-| `def:<cp>/<connector>/<scenarioId>` | A Library row: the definition panel. `cp` in place of the connector is a charge-point-scope scenario. |
+| `?open=`                            | Panel                                                                                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run:<cp>/<connector>/<scenarioId>` | An active run's row: the [run panel](#scenario-runs-panel-and-page).                                                                                                                                    |
+| `def:<cp>/<connector>/<scenarioId>` | A Library row: the definition panel, `def:__library__/cp/<id>`. An older link naming a charge point's own scope (`cp` in place of the connector is its charge-point scope) still opens that definition. |
 
 Opening from a closed page adds one history entry; clicking another row swaps
 the panel and replaces it; clicking the open row again closes the panel.
 Closing replaces the entry and keeps the tab and the filters. A row's own
-controls (**Skip**, **Next**, **Stop**, **Run**, **Edit**, the enabled box, the
+controls (**Skip**, **Next**, **Stop**, **Edit**, the enabled box, the
 `…` menu) keep their job and do not open the panel. The open row is highlighted
 (`data-selected="true"`).
 
-The **definition panel** shows the scenario's name, its step count (and branch
-count), **Edit scenario**, **Used by** — the connectors with a live run of it,
-as chips linking to `/cp/<id>?connector=<n>`, or "no connector running it" —
-and its steps in the Steps view without any run state.
+The **definition panel** shows the scenario's name, `Library`, its step count
+(and branch count), **Edit scenario** (the Library editor), **Used by** — the
+connectors assigned a copy of it, as chips linking to
+`/cp/<id>?connector=<n>`, a running one marked with its run state's dot, or "no
+connector uses it" — and its steps in the Steps view without any run state.
+
+#### Scenario Library
+
+Scenarios are edited in one place, the Library; each connector picks which
+Library scenario it uses on the [charge point page](#charge-point-page).
+
+**Storage.** There is no new table or schema change. A Library scenario is an
+ordinary scenario definition stored through the per-scope definition API
+(`scenario.definitions.*` in Remote mode) under the reserved charge point id
+`__library__` with no connector; it keeps `targetType: "connector"` and no
+`targetId`. No charge point is ever instantiated for that id, `state.reset`
+wipes it with everything else, and `cp.delete` never touches it
+([State persistence](../concepts/state-persistence.md)). A connector **uses**
+a Library scenario when its own scope holds a copy of it: the scenario
+retargeted to the connector, with `libraryId` naming the Library scenario
+([scenario format](../concepts/scenario-format.md), v1.4) and the id
+`<libraryId>@<cpId>#<connector>`, so assigning the same scenario again replaces
+the copy rather than adding one. That copy is what the runtime, auto-start and
+`listScenarios` read. The data model is kept behind the helpers of
+[`src/console/lib/scenarioLibrary.ts`](../../src/console/lib/scenarioLibrary.ts).
+
+**The tab.** The template gallery, the **Charge point** filter (`?cp=`, an
+exact id: the scenarios some connector of that charge point uses; the charge
+point page's **Scenarios** menu item opens it with this set) and **Enabled
+only**, then one row per Library scenario:
+
+| Column   | Shows                                                                                                                |
+| -------- | -------------------------------------------------------------------------------------------------------------------- |
+| Scenario | The name, the description under it (muted).                                                                          |
+| Steps    | The step count of the Steps view's layout; a scenario that view cannot draw shows its node count and a `graph` chip. |
+| Used by  | `<n> connectors` (the connectors holding a copy; the tooltip names them), or —.                                      |
+| Running  | One state pill per live run of a copy, or —.                                                                         |
+| Enabled  | A checkbox; a change saves the Library scenario and re-pushes it to its users.                                       |
+| Edit     | **Edit** (the inline editor) and the `…` menu: **Duplicate**, **Export JSON**, **Delete**.                           |
+
+**+ New scenario** asks for a name only and **Use template** and **Import JSON**
+ask nothing: each creates a Library scenario (a template instance or an
+imported file loses its connector target; an imported id already in the
+Library gets a fresh one) and opens it in the editor. **Delete** confirms,
+naming the connectors that use the scenario; it removes the copy from each of
+them (their other definitions stay), then the Library scenario.
+
+**The editor.** `?edit=<id>` opens the [editor](#scenario-editor-steps-and-graph)
+in place of the table, with the header `← Library`, the name, the trigger, the
+enabled flag and **Save**, and under it **Used by** chips (a running one
+marked). Saving writes the Library scenario, then re-pushes the copy to every
+connector using it, in parallel (each connector's copy keeps its id; its other
+definitions stay), so **Save** reads **Save and apply to <n> connectors** when
+there are any. Re-pushing replaces the connector's definition set, which the
+daemon answers by reloading the connector's runtime and discarding a run in
+flight: when a copy is running, a confirmation says **A run of this scenario
+is active on <n> connectors and will be stopped. Save?** first.
+
+**Migration.** State written before the Library existed has definitions only
+on the connectors. When the Library tab opens with an empty Library while
+charge points hold definitions, each distinct definition (keyed by
+`templateId`, else by name) is copied into the Library once, and every
+connector definition is re-saved with `libraryId` set to its Library entry
+(keeping its id). It runs once per page load and logs a summary line
+(`[scenario library] migrated …`); a non-empty Library makes it a no-op. A
+Library emptied later (every scenario deleted) is filled again the same way on
+the next load from what connectors still hold.
+
+**Charge points arriving late.** The Library is read and watched on its own,
+independently of the charge point list; the connectors' copies (Used by,
+Running) are re-read when the charge point list changes and whenever a scope's
+definitions change, so in Local mode, where the registry fills in after the
+page mounts, a hard reload of `/scenarios?tab=library` still shows the
+Library and its users.
 
 ### Scenario runs: panel and page
 
@@ -438,13 +535,14 @@ and replaces the history entry) and the read-only **run page**
 show the scenario name, `<charge point> #<connector>`, the run state,
 `k / N · <elapsed>` and a progress bar, **Start** or **Stop**, the wait
 controls while the run is parked, and **Edit scenario**, which opens the
-scenario in the [editor](#scenario-editor-steps-and-graph). The panel's expand
+scenario in the [editor](#scenario-editor-steps-and-graph) — the Library editor
+for a copy of a [Library scenario](#scenario-library). The panel's expand
 button goes to the run page (with `run=<runId>`); the page's **← Back**
 returns to where it was opened from (the panel, still open), else to
 `/scenarios`. **Start** is disabled for a charge-point-scope scenario (it
 runs per connector when its trigger fires). A run of a charge-point-scope
 scenario on a connector is found in the charge point's scope, and **Edit
-scenario** opens it there.
+scenario** opens it there (or in the Library, for a copy).
 
 The run page has no message log (the charge point page and the Message log
 page hold the traffic); its **Run history** stays under the steps, full width.
@@ -473,23 +571,43 @@ marked "order approximate". The layout is a pure function,
 
 ### Scenario editor: steps and graph
 
-The editor (`/scenarios/edit?cp=…&connector=…&id=…`) shows one scenario in two
-views, switched by the **Steps | Graph** toggle and kept in the URL
-(`&view=steps|graph`):
+The editor shows one scenario in two views, switched by the **Steps | Graph**
+toggle and kept in the URL (`&view=steps|graph`). It opens inline on the
+Library tab for a [Library scenario](#scenario-library)
+(`/scenarios?tab=library&edit=<id>`, header `← Library`, **Save and apply to
+<n> connectors**, **Used by** chips), and as the per-connector editor
+(`/scenarios/edit?cp=…&connector=…&id=…`, header `← Back`, the target chip and
+**▶ Run**) for a definition of a charge point's own scope that is not a
+Library copy. **Edit scenario** everywhere opens the Library editor when the
+scenario is a Library scenario or a copy of one (`libraryId`). Both use the
+same content
+([`ScenarioEditorContent`](../../src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
 
-- **Steps** — an ordered list of steps with a form for the selected one. It
-  can only show a single START → … → END chain, so it is the default for such
-  a scenario.
+- **Steps** — the step boxes of the run views' Steps view: the chain, then at
+  most one fork with its branches side by side. A click selects a step: its
+  form opens in the inspector on the right (sticky on a wide window), whose
+  header moves the step up or down **within its lane** (the chain or its
+  branch — a move never crosses lanes) and deletes it. **+ Add step** under
+  the chain and under each branch appends a step there (inserting at the end of
+  the chain of a forked scenario makes the new step the fork node);
+  **+ Add parallel branch** adds a branch holding one Delay step — to a chain,
+  it creates the fork at the chain's last step (its first branch is the
+  chain's own, empty, continuation to END). Deleting a branch's last step drops
+  the branch, and a single remaining branch folds into the chain. The edits
+  rebuild the graph's edges and positions
+  ([`scenarioSteps.ts`](../../src/console/lib/scenarioSteps.ts),
+  `insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
+  Steps is the default for any scenario this view can draw.
 - **Graph** — the node graph editor (ReactFlow): nodes, edges, the node
   palette, auto-arrange, undo / redo, and a node panel (double-click a node,
-  then **Apply**). A scenario with branches (a node with more than one
-  outgoing edge — the executor runs them in parallel) or a loop always opens
-  here, with **Steps** disabled; a linear one can be turned into a branching
-  one here.
+  then **Apply**). A scenario the Steps view cannot draw (a join, a loop, a
+  second fork, a node no path reaches) always opens here, with **Steps**
+  disabled.
 
 Both views edit the same definition: unsaved changes survive a switch, and
-nothing is written until the page's **Save**, which saves this scenario only
-(the connector's other scenarios are kept). The name, trigger and enabled
+nothing is written until **Save**. The per-connector editor's Save saves this
+scenario only (the connector's other scenarios are kept); the Library editor's
+re-pushes it to its users. The name, trigger and enabled
 flag are edited in the header in both views, and under it the description and
 the collapsed **Scenario EV Settings** (#424): the EV the scenario applies to
 its connector when it starts, field by field (an empty field keeps the
@@ -497,11 +615,12 @@ connector's value; the placeholders show the Default EV Settings from
 **Settings**); a scenario whose fields are all empty saves no EV settings.
 The graph view does not rewrite the trigger from a **Status Trigger** node, as
 the classic UI's graph editor did, so pick **On status change** in the header for a scenario that should start
-on a status. A graph view opened because the scenario branches stays open
-when an edit makes it linear again. Opening a scenario in the graph view is
+on a status. A graph view opened because the scenario could not be drawn stays
+open when an edit makes it drawable again. Opening a scenario in the graph view is
 not an edit: an edge to a missing node is hidden there, and leaves the saved
 definition only with the first save after a graph edit. Before #411 a branching
-scenario opened read-only, with a link to the classic UI's graph editor.
+scenario opened read-only, with a link to the classic UI's graph editor; before
+the Library, the Steps view showed only a single chain.
 
 In the console, a connector's **run row** (under its card on the
 [charge point page](#charge-point-page)) shows the run executing or parked on

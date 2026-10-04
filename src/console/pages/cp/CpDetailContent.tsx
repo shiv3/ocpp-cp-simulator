@@ -688,6 +688,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               />
               <ConnectorRunRow
                 cpId={cpId}
+                connectorId={activeConnectorId}
+                connectorIds={connectorList.map((c) => c.id)}
                 runs={runsOnActiveConnector}
                 refresh={refreshRuns}
                 scheduleRefresh={scheduleRunsRefresh}

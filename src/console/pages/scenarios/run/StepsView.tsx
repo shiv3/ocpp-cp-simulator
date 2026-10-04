@@ -1,13 +1,17 @@
-import React from "react";
+import React, { useState } from "react";
 import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
-import type { ScenarioNode } from "../../../../cp/application/scenario/ScenarioTypes";
+import type {
+  ScenarioNode,
+  ScenarioNodeType,
+} from "../../../../cp/application/scenario/ScenarioTypes";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
-import { stepSummary } from "../../../lib/scenarioSteps";
+import { stepSummary, type StepLane } from "../../../lib/scenarioSteps";
 import { layoutSteps, stepIndexOf } from "../../../lib/stepLayout";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
+import AddStepPicker from "../edit/AddStepPicker";
 import StepTile from "./StepTile";
 import {
   CURRENT_RING,
@@ -29,6 +33,8 @@ interface StepBoxProps {
   state?: ScenarioRunState;
   selected: boolean;
   onSelect?: (nodeId: string) => void;
+  /** The editor names each box for its selection button. */
+  editable?: boolean;
 }
 
 const StepBox: React.FC<StepBoxProps> = ({
@@ -39,6 +45,7 @@ const StepBox: React.FC<StepBoxProps> = ({
   state,
   selected,
   onSelect,
+  editable,
 }) => {
   const live = state !== undefined && isLiveRunState(state) ? state : null;
   const body = (
@@ -84,6 +91,9 @@ const StepBox: React.FC<StepBoxProps> = ({
         <button
           type="button"
           aria-pressed={selected}
+          aria-label={
+            editable ? `Select step ${index}: ${nodeTitle(step)}` : undefined
+          }
           onClick={() => onSelect(step.id)}
           className={className}
         >
@@ -96,6 +106,37 @@ const StepBox: React.FC<StepBoxProps> = ({
   );
 };
 
+/** "+ Add step" under a lane; opens the step picker in place. */
+const AddStepSlot: React.FC<{
+  label?: string;
+  onPick: (type: ScenarioNodeType) => void;
+}> = ({ label, onPick }) => {
+  const [open, setOpen] = useState(false);
+  if (open) {
+    return (
+      <div className="mt-1.5">
+        <AddStepPicker
+          onPick={(type) => {
+            onPick(type);
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={() => setOpen(true)}
+      className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
+    >
+      + Add step
+    </button>
+  );
+};
+
 /**
  * The run's steps as boxes stacked top to bottom: the chain, then — when the
  * scenario forks — one column per branch, side by side, each under a lane tag
@@ -103,11 +144,25 @@ const StepBox: React.FC<StepBoxProps> = ({
  * shows `RunTimeline` for the rest.
  */
 const StepsView: React.FC<StepRunViewProps> = (props) => {
-  const { layout, currentNodeId, state, selectedStepId, onSelectStep } = props;
+  const {
+    layout,
+    currentNodeId,
+    state,
+    selectedStepId,
+    onSelectStep,
+    editable = false,
+    onAddStep,
+    onAddBranch,
+  } = props;
 
-  if (layoutSteps(layout).length === 0) {
+  if (!editable && layoutSteps(layout).length === 0) {
     return <p className="text-sm text-cx-muted">This scenario has no steps.</p>;
   }
+
+  const addSlot = (lane: StepLane, label?: string) =>
+    editable && onAddStep ? (
+      <AddStepSlot label={label} onPick={(type) => onAddStep(lane, type)} />
+    ) : null;
 
   const renderBox = (step: ScenarioNode) => (
     <StepBox
@@ -119,6 +174,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
       state={state}
       selected={selectedStepId === step.id}
       onSelect={onSelectStep}
+      editable={editable}
     />
   );
 
@@ -127,6 +183,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
       {layout.main.length > 0 && (
         <ol className="space-y-1.5">{layout.main.map(renderBox)}</ol>
       )}
+      {addSlot("main")}
       {layout.fork && (
         <div
           data-testid="step-branches"
@@ -166,10 +223,20 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
                   </span>
                 </div>
                 <ol className="space-y-1.5">{branch.steps.map(renderBox)}</ol>
+                {addSlot(index, `Add step to ${branch.name}`)}
               </div>
             );
           })}
         </div>
+      )}
+      {editable && onAddBranch && (
+        <button
+          type="button"
+          onClick={onAddBranch}
+          className="mt-3 text-[13px] font-medium text-cx-accent hover:underline"
+        >
+          + Add parallel branch
+        </button>
       )}
     </div>
   );

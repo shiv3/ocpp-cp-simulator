@@ -14,6 +14,7 @@ import { formatElapsed } from "../../../lib/scenarioExpectation";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../../../lib/scenarioSteps";
 import { deriveStepLayout, layoutSteps } from "../../../lib/stepLayout";
+import { editScenarioUrl } from "../../../lib/scenarioLibrary";
 import { buildScenarioUrl } from "../../../lib/useAllScenarios";
 import {
   useScenarioRun,
@@ -354,7 +355,12 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
         )}
         <Button asChild variant="outline" size="sm">
           <Link
-            to={buildScenarioUrl("edit", cpId, scopeConnectorId, scenarioId)}
+            // A copy of a Library scenario is edited in the Library.
+            to={editScenarioUrl(
+              cpId,
+              scopeConnectorId,
+              scenario ?? { id: scenarioId },
+            )}
           >
             <Settings className="h-3.5 w-3.5" />
             Edit scenario

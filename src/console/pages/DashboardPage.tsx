@@ -208,9 +208,13 @@ const DashboardPage: React.FC = () => {
         label="Charge point"
       >
         {panelCpId !== null && (
-          // Keyed so a swap starts from a clean state (tab, dialogs, snapshot).
+          // Keyed so a swap starts from a clean state (tab, dialogs, snapshot),
+          // and remounted when the list first names the charge point: on a
+          // reload in Local mode the panel mounts before the charge point is
+          // created, and the content's one-time snapshot read would find
+          // nothing.
           <CpDetailContent
-            key={panelCpId}
+            key={`${panelCpId}\n${chargePoints.some((cp) => cp.id === panelCpId) ? "listed" : "pending"}`}
             cpId={panelCpId}
             variant="panel"
             selectedConnectorId={panel.connectorId}

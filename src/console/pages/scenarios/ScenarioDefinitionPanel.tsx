@@ -8,9 +8,15 @@ import type { ScenarioDefinition } from "../../../cp/application/scenario/Scenar
 import EmptyState from "../../components/EmptyState";
 import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../../lib/scenarioSteps";
+import {
+  editScenarioUrl,
+  isLibraryScope,
+  runsOfLibraryScenario,
+  usedBy as usedByOf,
+} from "../../lib/scenarioLibrary";
 import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
-import { buildScenarioUrl } from "../../lib/useAllScenarios";
 import type { ChargePointRun } from "../../lib/useAllActiveScenarioRuns";
+import type { ScenarioLibraryItem } from "../../lib/useAllScenarios";
 import RunTimeline from "./run/RunTimeline";
 import StepsView from "./run/StepsView";
 
@@ -24,7 +30,18 @@ export interface ScenarioDefinitionPanelProps {
   isLoading: boolean;
   /** Every live run (the Scenarios page's `useAllActiveScenarioRuns`). */
   runs: ChargePointRun[];
+  /** Every per-charge-point definition (`useScenarioLibrary().items`): a
+   *  Library entry's users are the scopes holding a copy of it. */
+  items?: ScenarioLibraryItem[];
   onClose: () => void;
+}
+
+interface UsedByChip {
+  key: string;
+  cpId: string;
+  connectorId: number | null;
+  /** The live run there, if any. */
+  run: ChargePointRun | undefined;
 }
 
 const plural = (n: number, one: string, many: string) =>
@@ -32,8 +49,10 @@ const plural = (n: number, one: string, many: string) =>
 
 /**
  * A Library entry in the Scenarios page's side panel: what the scenario does
- * (its steps, no run state), where it runs right now (**Used by**: the
- * connectors with a live run of it), and **Edit scenario**.
+ * (its steps, no run state), **Used by** (the connectors assigned a copy of
+ * it, a running one marked with its run state), and **Edit scenario** (the
+ * Library editor). A definition of a charge point's own scope (an older
+ * link) lists the connectors with a live run of it instead.
  */
 const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   cpId,
@@ -42,6 +61,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   scenario,
   isLoading,
   runs,
+  items = [],
   onClose,
 }) => {
   const layout = useMemo(
@@ -79,13 +99,36 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
     );
   }
 
-  // A charge-point-scope scenario runs on any connector of its charge point.
-  const usedBy = runs.filter(
-    (run) =>
-      run.cpId === cpId &&
-      run.scenarioId === scenario.id &&
-      (connectorId === null || run.connectorId === connectorId),
-  );
+  let usedBy: UsedByChip[];
+  if (isLibraryScope(cpId)) {
+    const live = runsOfLibraryScenario(runs, items, scenario.id);
+    usedBy = usedByOf(items, scenario.id).map((user) => ({
+      key: `${user.cpId}:${user.connectorId ?? "cp"}`,
+      cpId: user.cpId,
+      connectorId: user.connectorId,
+      run: live.find(
+        (run) =>
+          run.cpId === user.cpId &&
+          run.scenarioId === user.scenario.id &&
+          (user.connectorId === null || run.connectorId === user.connectorId),
+      ),
+    }));
+  } else {
+    // A charge-point-scope scenario runs on any connector of its charge point.
+    usedBy = runs
+      .filter(
+        (run) =>
+          run.cpId === cpId &&
+          run.scenarioId === scenario.id &&
+          (connectorId === null || run.connectorId === connectorId),
+      )
+      .map((run) => ({
+        key: `${run.cpId}:${run.connectorId}`,
+        cpId: run.cpId,
+        connectorId: run.connectorId,
+        run,
+      }));
+  }
   const branchCount = layout.fork?.branches.length ?? 0;
   const meta = layout.supported
     ? [
@@ -102,8 +145,14 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
             {scenario.name}
           </h2>
           <div className="mt-0.5 font-mono text-xs text-cx-muted">
-            {cpId}
-            {connectorId != null ? ` #${connectorId}` : " · charge point"}
+            {isLibraryScope(cpId) ? (
+              <span className="font-sans">Library</span>
+            ) : (
+              <>
+                {cpId}
+                {connectorId != null ? ` #${connectorId}` : " · charge point"}
+              </>
+            )}
             <span className="font-sans"> · {meta}</span>
           </div>
         </div>
@@ -116,7 +165,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
 
       <div className="mt-3">
         <Button asChild variant="outline" size="sm">
-          <Link to={buildScenarioUrl("edit", cpId, connectorId, scenario.id)}>
+          <Link to={editScenarioUrl(cpId, connectorId, scenario)}>
             <Settings className="h-3.5 w-3.5" />
             Edit scenario
           </Link>
@@ -128,24 +177,38 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
           Used by
         </h3>
         {usedBy.length === 0 ? (
-          <p className="text-sm text-cx-muted">no connector running it</p>
+          <p className="text-sm text-cx-muted">
+            {isLibraryScope(cpId)
+              ? "no connector uses it"
+              : "no connector running it"}
+          </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {usedBy.map((run) => (
+            {usedBy.map((chip) => (
               <Link
-                key={`${run.cpId}:${run.connectorId}`}
-                to={`/cp/${encodeURIComponent(run.cpId)}?connector=${run.connectorId}`}
-                title={run.state}
+                key={chip.key}
+                to={
+                  chip.connectorId === null
+                    ? `/cp/${encodeURIComponent(chip.cpId)}`
+                    : `/cp/${encodeURIComponent(chip.cpId)}?connector=${chip.connectorId}`
+                }
+                title={chip.run?.state}
+                data-running={chip.run ? "true" : undefined}
                 className="inline-flex items-center gap-1.5 rounded-md border border-cx-border bg-cx-card px-2 py-0.5 font-mono text-xs text-cx-fg2 hover:border-cx-border-strong hover:text-cx-fg"
               >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "h-[7px] w-[7px] rounded-full",
-                    LIVE_RUN_STATE_STYLES[run.state],
-                  )}
-                />
-                {run.cpId} #{run.connectorId}
+                {chip.run && (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "h-[7px] w-[7px] rounded-full",
+                      LIVE_RUN_STATE_STYLES[chip.run.state],
+                    )}
+                  />
+                )}
+                {chip.cpId}
+                {chip.connectorId === null
+                  ? " · charge point"
+                  : ` #${chip.connectorId}`}
               </Link>
             ))}
           </div>

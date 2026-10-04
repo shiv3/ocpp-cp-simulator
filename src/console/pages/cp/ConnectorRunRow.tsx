@@ -12,9 +12,14 @@ import { formatElapsed } from "../../lib/scenarioExpectation";
 import { buildScenarioUrl } from "../../lib/useAllScenarios";
 import type { ActiveScenarioRun } from "../../lib/useActiveScenarioRuns";
 import { controlScenarioWait } from "../../lib/waitControl";
+import ConnectorScenarioSelect from "./ConnectorScenarioSelect";
 
 export interface ConnectorRunRowProps {
   cpId: string;
+  /** The selected connector, and every connector of the charge point: with
+   *  no live run the row is the connector's scenario picker. */
+  connectorId: number;
+  connectorIds: number[];
   /** The live runs on the selected connector (usually one). */
   runs: ActiveScenarioRun[];
   /** Re-query the runs now / soon (from `useActiveScenarioRuns`). */
@@ -31,11 +36,15 @@ export interface ConnectorRunRowProps {
  * for with its wait controls (#240), plus the link to the run console (#366).
  * The scenario name opens the run in a side panel beside the full charge
  * point page (`/cp/<id>?connector=<n>&run=<scenarioId>`).
- * Renders nothing when no run is live on the connector. The runs come from the
- * page's single `useActiveScenarioRuns`, filtered by connector.
+ * With no run live on the connector, the row is the connector's scenario
+ * picker instead (`ConnectorScenarioSelect`: the Library scenario it uses,
+ * **▶ Run**, **Apply to all connectors**). The runs come from the page's
+ * single `useActiveScenarioRuns`, filtered by connector.
  */
 const ConnectorRunRow: React.FC<ConnectorRunRowProps> = ({
   cpId,
+  connectorId: selectedConnectorId,
+  connectorIds,
   runs,
   refresh,
   scheduleRefresh,
@@ -66,7 +75,18 @@ const ConnectorRunRow: React.FC<ConnectorRunRowProps> = ({
     [cpId, chargePointService, refresh],
   );
 
-  if (runs.length === 0) return null;
+  if (runs.length === 0) {
+    return (
+      <ConnectorScenarioSelect
+        // Keyed: a connector switch starts from that connector's selection.
+        key={selectedConnectorId}
+        cpId={cpId}
+        connectorId={selectedConnectorId}
+        connectorIds={connectorIds}
+        onRunStarted={scheduleRefresh}
+      />
+    );
+  }
 
   return (
     <div className="mt-2 space-y-2">

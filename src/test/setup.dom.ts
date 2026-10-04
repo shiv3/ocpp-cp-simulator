@@ -145,11 +145,4 @@ if (typeof window !== "undefined") {
   ensureWorkingStorage("sessionStorage");
   ensureMatchMedia();
   mockReactFlow();
-
-  // jsdom doesn't implement Element.scrollTo (used by LogViewer's
-  // auto-scroll-to-bottom effect, #178). No-op is fine for tests — nothing
-  // asserts on actual scroll position.
-  if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
-    Element.prototype.scrollTo = function scrollTo() {};
-  }
 }

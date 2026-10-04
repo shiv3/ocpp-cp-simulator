@@ -479,7 +479,7 @@ export interface ScenarioTrigger {
  * See `schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.3";
+export const SCENARIO_SCHEMA_VERSION = "1.4";
 
 /**
  * Scenario definition
@@ -501,6 +501,14 @@ export interface ScenarioDefinition {
    * themselves without parsing.
    */
   templateId?: string;
+  /**
+   * The web console's Library scenario this per-connector copy came from
+   * (schema v1.4). Set when a connector is assigned a library scenario, so
+   * the Library can tell which connectors use it and re-push an edit to
+   * them. Absent on library entries themselves and on scenarios loaded by
+   * hand (CLI, MCP, a JSON import onto a connector).
+   */
+  libraryId?: string;
   name: string;
   description?: string;
   targetType: "chargePoint" | "connector";

@@ -11,7 +11,10 @@ import {
   NODE_FORM_REGISTRY,
   isScenarioNodeType,
 } from "../../../../components/scenario/forms/nodeFormRegistry";
-import type { ScenarioNode } from "../../../../cp/application/scenario/ScenarioTypes";
+import type {
+  ScenarioNode,
+  ScenarioNodeType,
+} from "../../../../cp/application/scenario/ScenarioTypes";
 import type { LiveRunState } from "../../../lib/scenarioRunState";
 import {
   stepPhase,
@@ -19,7 +22,7 @@ import {
   type StepPhase,
 } from "../../../lib/stepLayout";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
-import { STEP_CATEGORIES } from "../../../lib/scenarioSteps";
+import { STEP_CATEGORIES, type StepLane } from "../../../lib/scenarioSteps";
 
 /** The registry title of a step's type ("Status Change"), as the editor's
  *  step list and the run timeline show it. */
@@ -104,9 +107,14 @@ export interface StepRunViewProps {
   state?: ScenarioRunState;
   selectedStepId?: string | null;
   onSelectStep?: (nodeId: string) => void;
-  /** The run views never edit; the field keeps the props the editor's steps
-   *  view will share. */
-  editable?: false;
+  /** The editor's Steps view: each box gets an accessible "Select step"
+   *  name, and "+ Add step" sits under the chain and under each branch, with
+   *  "+ Add parallel branch" at the bottom. The run views leave it off. */
+  editable?: boolean;
+  /** editable: a step type picked under a lane (appended to that lane). */
+  onAddStep?: (lane: StepLane, type: ScenarioNodeType) => void;
+  /** editable: "+ Add parallel branch". */
+  onAddBranch?: () => void;
 }
 
 export type BoxPhase = StepPhase | "plain";

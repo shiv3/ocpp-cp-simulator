@@ -291,6 +291,43 @@ describe("DashboardPage side panel", () => {
     }
   });
 
+  it("re-reads the charge point once the list names it (a reload in Local mode)", async () => {
+    const service = createFakeChargePointService({
+      snapshots: [cpA, cpB],
+      getStateHistory: vi.fn(async () => []),
+      listScenarios: vi.fn(async () => []),
+      getNetworkSimGlobal: vi.fn(async () => null),
+      getNetworkSimCp: vi.fn(async () => ({
+        config: null,
+        resolved: {} as never,
+      })),
+    });
+    // The snapshot is empty until the registry answers, as when the local
+    // service has not created the charge point yet.
+    const snapshots = new Map<string, ChargePointSnapshot>();
+    service.getChargePoint = vi.fn(
+      async (id: string) => snapshots.get(id) ?? null,
+    );
+    const result = await renderConsole("/?cp=CP-A&connector=2", { service });
+    cleanup = async () => {
+      await act(async () => {
+        result.root.unmount();
+      });
+      document.body.innerHTML = "";
+    };
+    let panel = panelOf(result.container);
+    expect(panel!.querySelector("h2")?.textContent).toBe("CP-A");
+    expect(panel!.querySelectorAll('[role="tab"]')).toHaveLength(0);
+
+    snapshots.set("CP-A", cpA);
+    await pushRegistry(service, [cpA, cpB]);
+    await flush();
+    panel = panelOf(result.container);
+    expect(panel!.querySelectorAll('[role="tab"]')).toHaveLength(
+      cpA.connectors.length,
+    );
+  });
+
   it("the expand control opens the full page on the same connector", async () => {
     const { container } = await mount("/?cp=CP-A&connector=2");
 

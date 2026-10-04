@@ -9,6 +9,7 @@ import {
   type ReportedLocation,
 } from "../../test/harness";
 import { forkScenario } from "../../test/scenarioFixtures";
+import { LIBRARY_SCOPE } from "../../lib/scenarioLibrary";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 import type { ScenarioExecutionContext } from "../../../cp/application/scenario/ScenarioTypes";
@@ -41,7 +42,7 @@ function snapshot(id: string): ChargePointSnapshot {
 }
 
 const RUN_ROW = '[data-run-key="CP-A:1:s1"]';
-const LIBRARY_ROW = '[data-scenario-id="s1"]';
+const LIBRARY_ROW = '[data-scenario-id="lib-fork"]';
 const PANEL = 'aside[aria-label="Scenario"]';
 
 function openParam(location: ReportedLocation | null): string | null {
@@ -91,8 +92,13 @@ describe("Scenarios page — side panel", () => {
       ]),
       getScenarioStatus: vi.fn(async () => status),
       getScenario: vi.fn(async () => forkScenario()),
-      listScenarioDefinitions: vi.fn(async (_cp: string, connector) =>
-        connector === 1 ? [forkScenario()] : [],
+      // The Library holds the scenario; connector 1 holds its copy, `s1`.
+      listScenarioDefinitions: vi.fn(async (cp: string, connector) =>
+        cp === LIBRARY_SCOPE
+          ? [forkScenario({ id: "lib-fork" })]
+          : connector === 1
+            ? [forkScenario({ libraryId: "lib-fork" })]
+            : [],
       ),
       stopScenario: vi.fn(async () => undefined),
     });
@@ -162,20 +168,23 @@ describe("Scenarios page — side panel", () => {
 
     await click(row.querySelector("td")!);
 
-    expect(openParam(location)).toBe("def:CP-A/1/s1");
+    expect(openParam(location)).toBe(`def:${LIBRARY_SCOPE}/cp/lib-fork`);
     const panel = document.querySelector(PANEL)!;
     expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
+    expect(panel.textContent).toContain("Library");
     expect(panel.textContent).toContain("5 steps · 2 branches");
     expect(panel.textContent).toContain("Used by");
+    // The assigned connector, marked with its live run.
     const chip = Array.from(panel.querySelectorAll("a")).find(
       (a) => a.textContent?.trim() === "CP-A #1",
     );
     expect(chip?.getAttribute("href")).toBe("/cp/CP-A?connector=1");
+    expect(chip?.getAttribute("data-running")).toBe("true");
     const edit = Array.from(panel.querySelectorAll("a")).find((a) =>
       a.textContent?.includes("Edit scenario"),
     );
     expect(edit?.getAttribute("href")).toBe(
-      "/scenarios/edit?cp=CP-A&connector=1&id=s1",
+      "/scenarios?tab=library&edit=lib-fork",
     );
     // Plain steps, no run phase.
     expect(

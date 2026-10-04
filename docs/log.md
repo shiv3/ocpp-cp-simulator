@@ -1542,3 +1542,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is now one row that scrolls horizontally instead of wrapping (`grid-auto-flow: column`, `grid-auto-columns: minmax(min(100%, max(400px, quarter)), 1fr)`, `overflow-x: auto`, scroll snapping): at most four cards are visible, each at least a quarter of the row and about 400 px (lowered from 420 so four cards fit a 2000 px window with classic scrollbars), fewer connectors share the width, the row is a focusable `region` named Connectors, and the connector in `?connector=` is scrolled into view along the row (`inline: "nearest"`). The card's own container queries are unchanged.
 - Code: `CpDetailContent.tsx` (grid, scroll-into-view); tests `CpDetailContent.connectorGrid.dom.test.tsx` and `CpDetailContent.tabs.dom.test.tsx`.
+
+## [2026-10-04] ingest | Connector cards back to two columns
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is a two-column grid again (one column under about 1100 px of content width, two above; maintainer decision after trying four across and one scrolling row). The card keeps its own container queries, the scroll-into-view of `?connector=` stays.

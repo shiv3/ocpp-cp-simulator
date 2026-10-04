@@ -55,7 +55,7 @@ describe("CpDetailContent: the connector grid on the full page", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps every connector in one row that scrolls horizontally, four visible at most", async () => {
+  it("lays the connectors out two per row from 1100 px, one below", async () => {
     const service = createFakeChargePointService({
       snapshots: [cpSeven],
       getStateHistory: vi.fn(async () => []),
@@ -80,18 +80,12 @@ describe("CpDetailContent: the connector grid on the full page", () => {
     );
     expect(grid, "expected the connector grid").toBeTruthy();
     expect(grid!.querySelectorAll("[data-connector-id]")).toHaveLength(7);
-    // jsdom does not lay out: assert the rule, not the geometry.
-    const columns = grid!.style.gridAutoColumns;
-    expect(columns).toContain("/ 4");
-    expect(columns).toContain("400px");
-    expect(grid!.style.gridTemplateColumns).toBe("");
-    expect(grid!.className).toContain("overflow-x-auto");
-    expect(grid!.className).toContain("[grid-auto-flow:column]");
-    // The containing block of the cards' absolute bits, so they cannot widen the page.
-    expect(grid!.className.split(" ")).toContain("relative");
-    // The row scrolls, so it is a focusable region the arrow keys can scroll.
-    expect(grid!.getAttribute("role")).toBe("region");
-    expect(grid!.getAttribute("aria-label")).toBe("Connectors");
-    expect(grid!.tabIndex).toBe(0);
+    // jsdom does not lay out: assert the rule, not the geometry. Two columns
+    // from 1100 px of content width, one below; no horizontal scrolling.
+    expect(grid!.className).toContain("@min-[1100px]:grid-cols-2");
+    expect(grid!.className).toContain("grid-cols-1");
+    expect(grid!.className).not.toContain("overflow-x-auto");
+    expect(grid!.style.gridAutoColumns).toBe("");
+    expect(grid!.getAttribute("role")).toBeNull();
   });
 });

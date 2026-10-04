@@ -62,8 +62,9 @@ The browser app serves one web console:
   **Library**, whose row `…` menu — Duplicate, Export JSON, Delete — opens in a
   portal and flips upward near the bottom of the window, so it is never clipped
   by the table, #365) with an editor (`/scenarios/edit`, see
-  [Scenario editor](#scenario-editor-steps-and-graph)) and a separate run
-  console (`/scenarios/run`), a cross-CP **Run history**
+  [Scenario editor](#scenario-editor-steps-and-graph)) and a read-only run
+  page (`/scenarios/run`, see
+  [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
   (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
   **Settings** (`/settings`, where global
   [network simulation](../concepts/network-simulation.md) and the **Reset all
@@ -325,12 +326,16 @@ panel had the same editor wired, but no button opened it.
 
 The **run row** under a connector's card shows the scenario run executing or
 parked on that connector: its state, the scenario name, the current step and
-`k/N`, the elapsed time, **Stop**, and the **Open run** link; while the run is
-waiting, what it waits for with the wait controls (see
-[Scenario editor](#scenario-editor-steps-and-graph)). There is no row without a
-live run, and the runs are read once for the whole page and filtered by
-connector. The [Scenarios page](#scenarios-page) lists the runs of every charge
-point.
+`k/N`, the elapsed time, **Stop**, and the **Open run** link (straight to the
+[run page](#scenario-runs-panel-and-page)); while the run is waiting, what it
+waits for with the wait controls (see
+[Scenario editor](#scenario-editor-steps-and-graph)). The scenario name is a
+link (`›`) to `/cp/<id>?connector=<n>&run=<scenarioId>`: the full charge point
+page with the [run panel](#scenario-runs-panel-and-page) open beside it. From
+the list's side panel the same link switches to the full page. There is no row
+without a live run, and the runs are read once for the whole page and filtered
+by connector. The [Scenarios page](#scenarios-page) lists the runs of every
+charge point.
 
 The **lower half** (#421, #405) shows, by default, the charge point's **Message
 Log** from the console's log buffer: a heading row with the entry count and
@@ -350,8 +355,9 @@ in the side panel, and 70% of the window on the full page. The heading row has:
   Remote mode). Before #421 the console's **Clear screen + DB** left the
   persisted rows in place.
 
-The searchable, filterable log viewer (`LogViewer`) is the run console's;
-its toolbar wraps instead of clipping when it is narrow (#405).
+The run page used to embed the searchable log viewer (`LogViewer`, whose toolbar
+wrap was #405); it no longer shows a message log, so a run's traffic is read
+here or on the Message log page.
 
 The global **Message log** page (`/logs`) has the same **Download**, for the
 charge point picked in its filter or for all of them in one file
@@ -392,13 +398,78 @@ and re-read when a scenario event arrives on that charge point. It has:
 
 The tab says **No scenario is running.** when no charge point has a live run,
 and **No active run matches the current filters.** when the filters leave
-none. A row does not open the run yet; the run console is reached from the
-charge point's [run row](#charge-point-page).
+none.
 
 **Library** is the scenario table: the template gallery, the **Charge point**
 select (`?cp=`, an exact id; the charge point page's **Scenarios** menu item
 opens it with this set) and the **Enabled only** checkbox, then one row per
 scenario across charge points.
+
+Clicking a row of either tab opens the scenario in a **side panel** beside the
+list (the same panel shell as the [Charge Points list](#dashboard): resize,
+**Esc**, a click on the page's background, or the **Close side panel** button
+closes it). The panel is in `?open=`, so a reload or a shared link reopens it;
+each part is URI-encoded:
+
+| `?open=`                            | Panel                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `run:<cp>/<connector>/<scenarioId>` | An active run's row: the [run panel](#scenario-runs-panel-and-page).                                  |
+| `def:<cp>/<connector>/<scenarioId>` | A Library row: the definition panel. `cp` in place of the connector is a charge-point-scope scenario. |
+
+Opening from a closed page adds one history entry; clicking another row swaps
+the panel and replaces it; clicking the open row again closes the panel.
+Closing replaces the entry and keeps the tab and the filters. A row's own
+controls (**Skip**, **Next**, **Stop**, **Run**, **Edit**, the enabled box, the
+`…` menu) keep their job and do not open the panel. The open row is highlighted
+(`data-selected="true"`).
+
+The **definition panel** shows the scenario's name, its step count (and branch
+count), **Edit scenario**, **Used by** — the connectors with a live run of it,
+as chips linking to `/cp/<id>?connector=<n>`, or "no connector running it" —
+and its steps in the Steps view without any run state.
+
+### Scenario runs: panel and page
+
+A scenario run shows in two places with the same content: the **run panel**
+(beside the Scenarios page's Active runs, or beside the full charge point page
+at `/cp/<id>?connector=<n>&run=<scenarioId>`, whose **Close** removes `run`
+and replaces the history entry) and the read-only **run page**
+(`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=graph]`). Both
+show the scenario name, `<charge point> #<connector>`, the run state,
+`k / N · <elapsed>` and a progress bar, **Start** or **Stop**, the wait
+controls while the run is parked, and **Edit scenario**, which opens the
+scenario in the [editor](#scenario-editor-steps-and-graph). The panel's expand
+button goes to the run page (with `run=<runId>`); the page's **← Back**
+returns to where it was opened from (the panel, still open), else to
+`/scenarios`. **Start** is disabled for a charge-point-scope scenario (it
+runs per connector when its trigger fires). A run of a charge-point-scope
+scenario on a connector is found in the charge point's scope, and **Edit
+scenario** opens it there.
+
+The run page has no message log (the charge point page and the Message log
+page hold the traffic); its **Run history** stays under the steps, full width.
+It also has a **Steps | Graph** switch, kept in `?view=` (replacing the
+history entry; Steps is the default). The panel always shows Steps.
+
+- **Steps** — one box per step, top to bottom, numbered: the step type's tile,
+  its title and summary, the state pill on the current step and a check on a
+  done one; steps not reached yet are dimmed. When the scenario forks, the
+  steps after the fork node stand in side-by-side columns, one per branch,
+  each under a lane tag (`A`, `B`, … in the lane colour, the branch name —
+  the first step's label, unless it is the type's default, else
+  `Branch A`, … — and `done/total`). The executor starts every branch at
+  once after the fork node.
+- **Graph** — the same order drawn as connected cards: the chain in one lane,
+  each branch curving into a lane of its own below the fork node; a travelled
+  path takes its lane's colour. It is drawn by the console itself, not the
+  editor's graph library.
+
+Both views draw a chain, then at most one fork whose branches each run to
+their end (END, a step with no next step, or an edge to a missing node). A
+scenario with a join (two branches reaching one step), a loop, a second fork,
+or a step no path reaches is shown as a flat list in definition order instead,
+marked "order approximate". The layout is a pure function,
+[`deriveStepLayout`](../../src/console/lib/stepLayout.ts).
 
 ### Scenario editor: steps and graph
 
@@ -434,18 +505,19 @@ scenario opened read-only, with a link to the classic UI's graph editor.
 
 In the console, a connector's **run row** (under its card on the
 [charge point page](#charge-point-page)) shows the run executing or parked on
-it, and its **Open run** link opens the scenario's run
-console (`/scenarios/run?cp=…&connector=…&id=…&run=<runId>`). The run
-console **attaches** to a run that is already live in the runtime rather than
+it, and its **Open run** link opens the scenario's
+[run page](#scenario-runs-panel-and-page)
+(`/scenarios/run?cp=…&connector=…&id=…&run=<runId>`). The run panel and the
+run page **attach** to a run that is already live in the runtime rather than
 showing a fresh idle state: it hydrates the state (`running` / `waiting` / …),
 current and already-executed nodes, the waiting expectation with its timeout
-countdown, and the runId from `scenario_status`, and its **Stop** acts on that
-run. Opening or reloading the page never starts a run; a run of the scenario
+countdown, and the runId from `scenario_status`, and **Stop** acts on that
+run. Opening or reloading them never starts a run; a run of the scenario
 started elsewhere while the page is open (for example an auto-start trigger)
-is attached the same way. When `run=` names a run that has ended or been
+is attached the same way. When the run page's `run=` names a run that has ended or been
 superseded, a banner says so (daemon only — local mode mints no runId) (#366).
 
-While a run is `waiting`, the run row and the run console both offer **+30 s**
+While a run is `waiting`, the run row, the run panel and the run page offer **+30 s**
 (only when the wait has a timeout), **Retry** and **Continue** beside the
 waiting expectation ([Controls on a parked wait](../concepts/scenario-format.md#controls-on-a-parked-wait),
 #240). The countdown follows the runtime's `waitDeadlineAt`, so an extension
@@ -464,7 +536,7 @@ default. The section shows the frame as sent and the CALLRESULT or CALLERROR, or
 why the call was refused; a SOAP CP gets a notice instead of the form. It
 works in both modes.
 
-The run console's **Run history** lists the daemon's recorded runs of that
+The run page's **Run history** lists the daemon's recorded runs of that
 scenario on that connector — the latest 20, newest first, with each run's
 result and verdict — plus the run the page is tracking until the daemon records
 it, so the history survives navigating away and back or a daemon restart with
@@ -483,7 +555,7 @@ charge point only; a link without `runCp` opens its run only when that id
 names a single one. Both re-list when the daemon
 records a run, and when a charge point is deleted or the simulator reset
 ([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
-In Local mode the run console keeps a history of this page view only, and the
+In Local mode the run page keeps a history of this page view only, and the
 Run History page says it needs the daemon — local run reports are tracked in
 #394.
 

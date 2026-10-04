@@ -23,6 +23,10 @@ export interface ActiveRunsTabProps {
   chargePoints: ChargePointSnapshot[];
   /** `ocppVersion` for a snapshot without `config` (Local mode). */
   ocppVersionFallback?: string;
+  /** The run open in the page's side panel (highlighted). */
+  isSelected?: (run: ChargePointRun) => boolean;
+  /** A click on a row (not on its controls) opens or closes its panel. */
+  onSelect?: (run: ChargePointRun) => void;
 }
 
 // The tiles' order (the mock's), not the runtime's `LIVE_RUN_STATES` order.
@@ -53,6 +57,8 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
   refresh,
   chargePoints,
   ocppVersionFallback,
+  isSelected,
+  onSelect,
 }) => {
   const { chargePointService } = useDataContext();
   const [params, setParams] = useSearchParams();
@@ -236,13 +242,22 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
               run.nodeCount && run.nodeCount > 0
                 ? Math.min(100, (run.executedCount / run.nodeCount) * 100)
                 : null;
+            const selected = isSelected?.(run) ?? false;
             return (
-              // A plain div: the run panel that opens from a row comes later.
               <div
                 key={key}
                 data-run-key={key}
+                data-selected={selected ? "true" : undefined}
+                onClick={(event) => {
+                  // The row's controls keep their own job.
+                  const target = event.target as Element;
+                  if (target.closest("button, a, input, label")) return;
+                  onSelect?.(run);
+                }}
                 className={cn(
-                  "px-4 py-3 hover:bg-cx-sub",
+                  "px-4 py-3",
+                  onSelect && "cursor-pointer",
+                  selected ? "bg-cx-sel" : "hover:bg-cx-sub",
                   index > 0 && "border-t border-cx-border",
                 )}
               >

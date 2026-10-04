@@ -22,6 +22,7 @@ import {
   type ScenarioLibraryItem,
 } from "../../lib/useAllScenarios";
 import TargetChip from "../../components/TargetChip";
+import { cn } from "@/lib/utils";
 
 export interface ScenarioTableProps {
   items: ScenarioLibraryItem[];
@@ -29,6 +30,10 @@ export interface ScenarioTableProps {
   onDuplicate: (item: ScenarioLibraryItem) => void;
   onExport: (item: ScenarioLibraryItem) => void;
   onDelete: (item: ScenarioLibraryItem) => void;
+  /** The entry open in the page's side panel (highlighted). */
+  isSelected?: (item: ScenarioLibraryItem) => boolean;
+  /** A click on a row (not on its controls) opens or closes its panel. */
+  onSelect?: (item: ScenarioLibraryItem) => void;
 }
 
 function triggerLabel(scenario: ScenarioLibraryItem["scenario"]): string {
@@ -47,6 +52,8 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
   onDuplicate,
   onExport,
   onDelete,
+  isSelected,
+  onSelect,
 }) => {
   return (
     <Table>
@@ -66,9 +73,26 @@ const ScenarioTable: React.FC<ScenarioTableProps> = ({
           const linear = deriveLinearSteps(scenario);
           const enabled = scenario.enabled !== false;
           const rowKey = `${cpId}:${connectorId ?? "cp"}:${scenario.id}`;
+          const selected = isSelected?.(item) ?? false;
 
           return (
-            <TableRow key={rowKey} data-scenario-id={scenario.id}>
+            <TableRow
+              key={rowKey}
+              data-scenario-id={scenario.id}
+              data-selected={selected ? "true" : undefined}
+              onClick={(event) => {
+                const target = event.target as Element;
+                // The row's controls keep their own job; the `…` menu is
+                // portalled, so its clicks bubble here through React only.
+                if (!event.currentTarget.contains(target)) return;
+                if (target.closest("button, a, input, label")) return;
+                onSelect?.(item);
+              }}
+              className={cn(
+                onSelect && "cursor-pointer",
+                selected && "bg-cx-sel hover:bg-cx-sel",
+              )}
+            >
               <TableCell>
                 <div className="font-medium text-cx-fg">{scenario.name}</div>
                 {scenario.description && (

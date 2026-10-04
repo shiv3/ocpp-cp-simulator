@@ -2,17 +2,11 @@ import React, { useMemo } from "react";
 import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import {
-  NODE_FORM_REGISTRY,
-  isScenarioNodeType,
-} from "../../../../components/scenario/forms/nodeFormRegistry";
 import { deriveDisplayedSteps, stepSummary } from "../../../lib/scenarioSteps";
-import type {
-  ScenarioDefinition,
-  ScenarioNode,
-} from "../../../../cp/application/scenario/ScenarioTypes";
-import { isLiveRunState } from "../../../lib/scenarioRunState";
+import type { ScenarioDefinition } from "../../../../cp/application/scenario/ScenarioTypes";
+import { stepPhase } from "../../../lib/stepLayout";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
+import { nodeTitle } from "./stepVisuals";
 
 export interface RunTimelineProps {
   scenario: ScenarioDefinition;
@@ -21,40 +15,13 @@ export interface RunTimelineProps {
   state: ScenarioRunState;
 }
 
-type StepStatus = "done" | "current" | "pending";
-
 /**
- * There's no `scenario-node-complete`/`scenario-node-progress` event (only
- * `scenario-node-execute`), so a step only ever reads "done" once a LATER
- * node-execute event supersedes it as `currentNodeId`, or the run leaves the
- * live states (`isLiveRunState`) entirely (completed/error/stopped) — at which point
- * whatever was still "current" settles into "done" too. No fractional
- * progress bar is possible without a progress event.
- */
-function stepStatus(
-  nodeId: string,
-  currentNodeId: string | null,
-  executedNodeIds: readonly string[],
-  state: ScenarioRunState,
-): StepStatus {
-  if (!executedNodeIds.includes(nodeId)) return "pending";
-  if (nodeId === currentNodeId && isLiveRunState(state)) return "current";
-  return "done";
-}
-
-function nodeTitle(node: ScenarioNode): string {
-  const entry = isScenarioNodeType(node.type)
-    ? NODE_FORM_REGISTRY[node.type]
-    : undefined;
-  return entry?.title ?? node.type ?? "Step";
-}
-
-/**
- * Read-only run view of a scenario's steps (Task 8's counterpart to the
- * editor's `StepList`). Linear scenarios use `deriveLinearSteps`'s ordered
- * walk; branching scenarios fall back to a flat list of every non-START/END
- * node in definition order, flagged with a banner since that order is only
- * approximate (the real execution order depends on which edge fires).
+ * Flat read-only list of a scenario's steps: the run views' fallback for a
+ * shape `deriveStepLayout` cannot draw (a join, a loop, a second fork). It
+ * lists every non-START/END node in definition order, flagged with a banner
+ * since that order is only approximate (the real execution order depends on
+ * which edge fires). A step reads "done" once a later node-execute
+ * supersedes it or the run ends — there is no node-complete event.
  */
 const RunTimeline: React.FC<RunTimelineProps> = ({
   scenario,
@@ -80,12 +47,14 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
       )}
       <ol className="space-y-1.5">
         {steps.map((step, index) => {
-          const status = stepStatus(
+          // One phase rule for every run view (see `stepPhase`).
+          const phase = stepPhase(
             step.id,
             currentNodeId,
             executedNodeIds,
             state,
           );
+          const status = phase === "todo" ? "pending" : phase;
           const isFailedNode = state === "error" && step.id === currentNodeId;
 
           return (

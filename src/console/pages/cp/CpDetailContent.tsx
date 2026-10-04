@@ -691,6 +691,10 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 runs={runsOnActiveConnector}
                 refresh={refreshRuns}
                 scheduleRefresh={scheduleRunsRefresh}
+                // From the list's panel the link goes to the full page, whose
+                // Back returns to the list; on the full page it only adds
+                // `?run=`, so the page keeps the Back it already had.
+                runLinkState={isPanel ? { from: "/" } : location.state}
               />
             </div>
           )}

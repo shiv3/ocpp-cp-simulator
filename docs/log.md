@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-01
+updated: 2026-10-04
 ---
 
 # Log
@@ -1490,3 +1490,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#scenarios-page): the Scenarios page has two tabs, **Active runs** (the default) and **Library** (`?tab=library`, today's table and gallery). Active runs lists every charge point's live runs with state tiles that act as the filter (`?state=`), **Scenario** and **Charge point** comboboxes (`?q=`, `?cp=`), a `<k> / <n>` counter, and per-row **Skip** (waiting), **Next** (stepping) and **Stop**; there is no Pause / Resume because the service has no such method. The charge point page's **Scenarios** menu item now links to `/scenarios?tab=library&cp=<id>`.
 - Mechanism: `fetchActiveRuns` (`src/console/lib/activeRuns.ts`) holds the fetch logic that `useActiveScenarioRuns` had; `useAllActiveScenarioRuns` reads and subscribes per charge point (re-reads only the charge point whose event arrived; resubscribes when the set of ids changes); `ActiveRunsTab` (`src/console/pages/scenarios`) is the tab.
+
+## [2026-10-04] ingest | scenario run panel, read-only run page, Steps and Graph views
+
+- [Web console](entities/web-console.md#scenario-runs-panel-and-page): a new **Scenario runs: panel and page** section. A row of the Scenarios page's Active runs or Library opens a side panel (`?open=run:<cp>/<connector>/<id>` or `def:<cp>/<connector|cp>/<id>`, push / replace / close like the Charge Points list's panel; Esc and the page background close it); a Library entry's panel shows its steps, **Used by** and **Edit scenario**. A connector run row's scenario name opens the run panel beside the full charge point page (`/cp/<id>?connector=<n>&run=<scenarioId>`); from the list's panel it switches to the full page. The run page (`/scenarios/run`) is read-only, has no message log, keeps **Run history**, and switches **Steps | Graph** in `?view=`; the panel's expand opens it and its **← Back** returns to the panel. Steps shows a fork's branches as side-by-side columns with a lane tag and `done/total`; Graph draws the same order as connected cards. A join, a loop, a second fork or an unreachable step falls back to the flat "order approximate" list. The `LogViewer` sentence of the charge point section now says the run page no longer embeds it.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md): "run console" → "run page".
+- Mechanism: `deriveStepLayout` / `stepIndexOf` / `stepPhase` (`src/console/lib/stepLayout.ts`, pure, unit-tested) give the chain and the one fork; `StepsView` and `StepsGraphView` (`src/console/pages/scenarios/run/`, SVG + absolutely placed cards, no ReactFlow) draw it; `ScenarioRunContent` (definition load with the charge-point-scope fallback, `useScenarioRun`, header, controls) backs both the panel and `ScenarioRunPage`; `RunHistoryCard` is the page's history; `ScenarioDefinitionPanel` is the Library panel; `useScenarioPanelParams` holds `?open=`. `RunTimeline` stays as the fallback and shares `stepPhase`.

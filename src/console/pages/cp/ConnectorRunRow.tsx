@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useDataContext } from "@/data/providers/DataProvider";
@@ -19,12 +20,17 @@ export interface ConnectorRunRowProps {
   /** Re-query the runs now / soon (from `useActiveScenarioRuns`). */
   refresh: () => Promise<void>;
   scheduleRefresh: () => void;
+  /** Router state for the scenario-name link to the run panel: what the
+   *  charge point page's Back link needs (`{ from }`). */
+  runLinkState?: unknown;
 }
 
 /**
  * The scenario run executing on the selected connector, under its card: state,
  * name, `step k/N`, elapsed, Stop and, when the run is parked, what it waits
  * for with its wait controls (#240), plus the link to the run console (#366).
+ * The scenario name opens the run in a side panel beside the full charge
+ * point page (`/cp/<id>?connector=<n>&run=<scenarioId>`).
  * Renders nothing when no run is live on the connector. The runs come from the
  * page's single `useActiveScenarioRuns`, filtered by connector.
  */
@@ -33,6 +39,7 @@ const ConnectorRunRow: React.FC<ConnectorRunRowProps> = ({
   runs,
   refresh,
   scheduleRefresh,
+  runLinkState,
 }) => {
   const { chargePointService } = useDataContext();
   const [now, setNow] = useState<number>(Date.now());
@@ -74,7 +81,17 @@ const ConnectorRunRow: React.FC<ConnectorRunRowProps> = ({
           >
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <RunStatePill state={run.state} />
-              <span className="font-medium text-cx-fg">{run.name}</span>
+              <Link
+                to={`/cp/${encodeURIComponent(cpId)}?connector=${
+                  run.connectorId
+                }&run=${encodeURIComponent(run.scenarioId)}`}
+                state={runLinkState}
+                title="Show the run beside the charge point"
+                className="inline-flex items-center gap-0.5 font-medium text-cx-fg hover:text-cx-accent hover:underline"
+              >
+                {run.name}
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
               <span className="text-xs text-cx-muted">
                 {run.currentNodeLabel || run.currentNodeId || "—"}{" "}
                 <span className="font-mono">

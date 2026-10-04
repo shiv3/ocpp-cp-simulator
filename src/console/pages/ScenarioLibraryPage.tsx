@@ -19,12 +19,23 @@ import { cn } from "@/lib/utils";
 import { useDataContext } from "@/data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
-import { useAllActiveScenarioRuns } from "../lib/useAllActiveScenarioRuns";
+import SidePanel from "../components/SidePanel";
+import {
+  useAllActiveScenarioRuns,
+  type ChargePointRun,
+} from "../lib/useAllActiveScenarioRuns";
+import {
+  formatScenarioPanel,
+  useScenarioPanelParams,
+  type ScenarioPanelTarget,
+} from "../lib/useScenarioPanelParams";
 import ActiveRunsTab from "./scenarios/ActiveRunsTab";
 import NewScenarioDialog from "./scenarios/NewScenarioDialog";
 import type { NewScenarioTarget } from "./scenarios/NewScenarioDialog";
+import ScenarioDefinitionPanel from "./scenarios/ScenarioDefinitionPanel";
 import ScenarioTable from "./scenarios/ScenarioTable";
 import TemplateGallery from "./scenarios/TemplateGallery";
+import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
 
 type ScenariosTab = "active" | "library";
 
@@ -47,6 +58,20 @@ function reportActionError(message: string, err: unknown): void {
     window.alert(message);
   }
 }
+
+const runTarget = (run: ChargePointRun): ScenarioPanelTarget => ({
+  kind: "run",
+  cpId: run.cpId,
+  connectorId: run.connectorId,
+  scenarioId: run.scenarioId,
+});
+
+const defTarget = (item: ScenarioLibraryItem): ScenarioPanelTarget => ({
+  kind: "def",
+  cpId: item.cpId,
+  connectorId: item.connectorId,
+  scenarioId: item.scenario.id,
+});
 
 function duplicateScenario(scenario: ScenarioDefinition): ScenarioDefinition {
   const now = new Date().toISOString();
@@ -75,6 +100,11 @@ const ScenarioLibraryPage: React.FC = () => {
     null,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const panel = useScenarioPanelParams();
+  const { target: panelTarget, close: closePanel } = panel;
+  // A click on the open row closes its panel, as on the Charge Points list.
+  const togglePanel = (target: ScenarioPanelTarget) =>
+    panel.isOpen(target) ? closePanel() : panel.open(target);
 
   const cpFilter = searchParams.get("cp") ?? "";
   // Absent (or any other value) is Active runs, the page's default.
@@ -199,6 +229,32 @@ const ScenarioLibraryPage: React.FC = () => {
     );
   };
 
+  // A click on the page itself (not a row, not a control) closes the panel.
+  // Portalled content (dialogs, menus) bubbles through React but is not in
+  // the DOM subtree, so the `contains` check leaves it out.
+  const handleBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (panelTarget === null) return;
+    const target = event.target as Element;
+    if (!event.currentTarget.contains(target)) return;
+    if (
+      target.closest(
+        "[data-run-key], [data-scenario-id], [role='listbox'], button, a, input, select, label",
+      )
+    )
+      return;
+    closePanel();
+  };
+
+  const panelItem =
+    panelTarget?.kind === "def"
+      ? items.find(
+          (item) =>
+            item.cpId === panelTarget.cpId &&
+            item.connectorId === panelTarget.connectorId &&
+            item.scenario.id === panelTarget.scenarioId,
+        )
+      : undefined;
+
   const newScenarioButton = (
     <Button
       type="button"
@@ -236,147 +292,191 @@ const ScenarioLibraryPage: React.FC = () => {
   })();
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title="Scenarios"
-        count={`${items.length} total`}
-        actions={
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={(e) => void handleFileInputChange(e)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Import JSON
-            </Button>
-            {newScenarioButton}
-          </>
-        }
-      />
-
+    <>
       <div
-        role="tablist"
-        aria-label="Scenarios"
-        className="mb-4 flex gap-5 border-b border-cx-border"
+        data-scenarios-page=""
+        className="min-h-full p-6"
+        onClick={handleBackgroundClick}
       >
-        {TABS.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.value}
-            onClick={() => selectTab(item.value)}
-            className={cn(
-              "-mb-px border-b-2 px-0.5 pb-2 text-[13.5px] font-medium",
-              tab === item.value
-                ? "border-cx-accent text-cx-fg"
-                : "border-transparent text-cx-muted hover:text-cx-fg",
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "active" ? (
-        <ActiveRunsTab
-          runs={activeRuns.runs}
-          // The charge point list loads after the config; until it has, "no
-          // runs" would be a guess.
-          isLoading={configLoading || activeRuns.isLoading}
-          refresh={activeRuns.refresh}
-          chargePoints={chargePoints}
-          ocppVersionFallback={
-            mode === "local" ? config?.ocppVersion : undefined
+        <PageHeader
+          title="Scenarios"
+          count={`${items.length} total`}
+          actions={
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) => void handleFileInputChange(e)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Import JSON
+              </Button>
+              {newScenarioButton}
+            </>
           }
         />
-      ) : (
-        <>
-          <TemplateGallery
-            onUseTemplate={(template) =>
-              setPendingAction({ kind: "template", template })
-            }
-          />
 
-          <div className="mb-4 flex flex-wrap items-center gap-3">
-            <select
-              value={cpFilter}
-              onChange={(e) => updateCpFilter(e.target.value)}
-              className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
+        <div
+          role="tablist"
+          aria-label="Scenarios"
+          className="mb-4 flex gap-5 border-b border-cx-border"
+        >
+          {TABS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.value}
+              onClick={() => selectTab(item.value)}
+              className={cn(
+                "-mb-px border-b-2 px-0.5 pb-2 text-[13.5px] font-medium",
+                tab === item.value
+                  ? "border-cx-accent text-cx-fg"
+                  : "border-transparent text-cx-muted hover:text-cx-fg",
+              )}
             >
-              <option value="">All charge points</option>
-              {chargePoints.map((cp) => (
-                <option key={cp.id} value={cp.id}>
-                  {cp.id}
-                </option>
-              ))}
-            </select>
-            <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
-              <input
-                type="checkbox"
-                checked={enabledOnly}
-                onChange={(e) => setEnabledOnly(e.target.checked)}
-                className="h-4 w-4 rounded border-cx-border-strong"
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "active" ? (
+          <ActiveRunsTab
+            runs={activeRuns.runs}
+            // The charge point list loads after the config; until it has, "no
+            // runs" would be a guess.
+            isLoading={configLoading || activeRuns.isLoading}
+            refresh={activeRuns.refresh}
+            chargePoints={chargePoints}
+            ocppVersionFallback={
+              mode === "local" ? config?.ocppVersion : undefined
+            }
+            isSelected={(run) => panel.isOpen(runTarget(run))}
+            onSelect={(run) => togglePanel(runTarget(run))}
+          />
+        ) : (
+          <>
+            <TemplateGallery
+              onUseTemplate={(template) =>
+                setPendingAction({ kind: "template", template })
+              }
+            />
+
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <select
+                value={cpFilter}
+                onChange={(e) => updateCpFilter(e.target.value)}
+                className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
+              >
+                <option value="">All charge points</option>
+                {chargePoints.map((cp) => (
+                  <option key={cp.id} value={cp.id}>
+                    {cp.id}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
+                <input
+                  type="checkbox"
+                  checked={enabledOnly}
+                  onChange={(e) => setEnabledOnly(e.target.checked)}
+                  className="h-4 w-4 rounded border-cx-border-strong"
+                />
+                Enabled only
+              </label>
+            </div>
+
+            {error ? (
+              <EmptyState
+                icon={ListTree}
+                title="Couldn't load scenarios"
+                hint={`Couldn't load scenarios: ${error}`}
+                action={
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void refresh()}
+                  >
+                    Retry
+                  </Button>
+                }
               />
-              Enabled only
-            </label>
-          </div>
+            ) : !isLoading && filteredItems.length === 0 ? (
+              <EmptyState
+                icon={ListTree}
+                title="No scenarios"
+                hint={
+                  items.length === 0
+                    ? "Create a scenario or use a template to get started."
+                    : "No scenarios match the current filters."
+                }
+                action={items.length === 0 ? newScenarioButton : undefined}
+              />
+            ) : (
+              <ScenarioTable
+                items={filteredItems}
+                onToggleEnabled={handleToggleEnabled}
+                onDuplicate={handleDuplicate}
+                onExport={handleExport}
+                onDelete={handleDelete}
+                isSelected={(item) => panel.isOpen(defTarget(item))}
+                onSelect={(item) => togglePanel(defTarget(item))}
+              />
+            )}
+          </>
+        )}
 
-          {error ? (
-            <EmptyState
-              icon={ListTree}
-              title="Couldn't load scenarios"
-              hint={`Couldn't load scenarios: ${error}`}
-              action={
-                <Button type="button" size="sm" onClick={() => void refresh()}>
-                  Retry
-                </Button>
-              }
-            />
-          ) : !isLoading && filteredItems.length === 0 ? (
-            <EmptyState
-              icon={ListTree}
-              title="No scenarios"
-              hint={
-                items.length === 0
-                  ? "Create a scenario or use a template to get started."
-                  : "No scenarios match the current filters."
-              }
-              action={items.length === 0 ? newScenarioButton : undefined}
-            />
-          ) : (
-            <ScenarioTable
-              items={filteredItems}
-              onToggleEnabled={handleToggleEnabled}
-              onDuplicate={handleDuplicate}
-              onExport={handleExport}
-              onDelete={handleDelete}
-            />
-          )}
-        </>
-      )}
+        {dialogProps && (
+          <NewScenarioDialog
+            isOpen
+            title={dialogProps.title}
+            description={dialogProps.description}
+            chargePoints={chargePoints}
+            requireName={dialogProps.requireName}
+            confirmLabel={dialogProps.confirmLabel}
+            onClose={() => setPendingAction(null)}
+            onConfirm={(target) => void handleDialogConfirm(target)}
+          />
+        )}
+      </div>
 
-      {dialogProps && (
-        <NewScenarioDialog
-          isOpen
-          title={dialogProps.title}
-          description={dialogProps.description}
-          chargePoints={chargePoints}
-          requireName={dialogProps.requireName}
-          confirmLabel={dialogProps.confirmLabel}
-          onClose={() => setPendingAction(null)}
-          onConfirm={(target) => void handleDialogConfirm(target)}
-        />
-      )}
-    </div>
+      <SidePanel
+        open={panelTarget !== null}
+        onClose={closePanel}
+        label="Scenario"
+      >
+        {panelTarget?.kind === "run" && (
+          // Keyed so a swap starts from a clean run state.
+          <ScenarioRunContent
+            key={formatScenarioPanel(panelTarget)}
+            cpId={panelTarget.cpId}
+            connectorId={panelTarget.connectorId}
+            scenarioId={panelTarget.scenarioId}
+            variant="panel"
+            onClose={closePanel}
+          />
+        )}
+        {panelTarget?.kind === "def" && (
+          <ScenarioDefinitionPanel
+            key={formatScenarioPanel(panelTarget)}
+            cpId={panelTarget.cpId}
+            connectorId={panelTarget.connectorId}
+            scenarioId={panelTarget.scenarioId}
+            scenario={panelItem?.scenario ?? null}
+            isLoading={isLoading}
+            runs={activeRuns.runs}
+            onClose={closePanel}
+          />
+        )}
+      </SidePanel>
+    </>
   );
 };
 

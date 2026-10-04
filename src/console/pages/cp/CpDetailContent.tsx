@@ -568,7 +568,9 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuItem asChild>
-                  <Link to={`/scenarios?cp=${encodeURIComponent(cpId)}`}>
+                  <Link
+                    to={`/scenarios?tab=library&cp=${encodeURIComponent(cpId)}`}
+                  >
                     Scenarios
                   </Link>
                 </DropdownMenuItem>

@@ -84,7 +84,7 @@ async function renderLibraryWith(
     ),
     ...overrides,
   });
-  const rendered = await renderConsole("/scenarios", { service });
+  const rendered = await renderConsole("/scenarios?tab=library", { service });
   await flush();
   return rendered;
 }
@@ -198,7 +198,9 @@ describe("ScenarioLibraryPage", () => {
 
     const service = createFakeChargePointService({ listChargePoints });
 
-    const { container, root } = await renderConsole("/scenarios", { service });
+    const { container, root } = await renderConsole("/scenarios?tab=library", {
+      service,
+    });
     cleanup = () => unmount(root);
 
     await act(async () => {
@@ -239,7 +241,9 @@ describe("ScenarioLibraryPage", () => {
       saveScenarioDefinition,
     });
 
-    const { container, root } = await renderConsole("/scenarios", { service });
+    const { container, root } = await renderConsole("/scenarios?tab=library", {
+      service,
+    });
     cleanup = () => unmount(root);
 
     // Populate useChargePoints (remote mode subscribes to registry events)

@@ -15,12 +15,23 @@ import {
   importScenarioFromJSON,
 } from "../../utils/scenarioFile";
 import type { ScenarioTemplate } from "../../utils/scenarioTemplates";
+import { cn } from "@/lib/utils";
+import { useDataContext } from "@/data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import { useAllActiveScenarioRuns } from "../lib/useAllActiveScenarioRuns";
+import ActiveRunsTab from "./scenarios/ActiveRunsTab";
 import NewScenarioDialog from "./scenarios/NewScenarioDialog";
 import type { NewScenarioTarget } from "./scenarios/NewScenarioDialog";
 import ScenarioTable from "./scenarios/ScenarioTable";
 import TemplateGallery from "./scenarios/TemplateGallery";
+
+type ScenariosTab = "active" | "library";
+
+const TABS: ReadonlyArray<{ value: ScenariosTab; label: string }> = [
+  { value: "active", label: "Active runs" },
+  { value: "library", label: "Library" },
+];
 
 type PendingAction =
   | { kind: "new" }
@@ -51,10 +62,12 @@ function duplicateScenario(scenario: ScenarioDefinition): ScenarioDefinition {
 const ScenarioLibraryPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { mode } = useDataContext();
   const { config, isLoading: configLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, {
     isLoading: configLoading,
   });
+  const activeRuns = useAllActiveScenarioRuns(chargePoints);
   const { items, isLoading, error, save, remove, refresh } = useAllScenarios();
 
   const [enabledOnly, setEnabledOnly] = useState(false);
@@ -64,6 +77,9 @@ const ScenarioLibraryPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cpFilter = searchParams.get("cp") ?? "";
+  // Absent (or any other value) is Active runs, the page's default.
+  const tab: ScenariosTab =
+    searchParams.get("tab") === "library" ? "library" : "active";
 
   const filteredItems = useMemo(
     () =>
@@ -83,6 +99,14 @@ const ScenarioLibraryPage: React.FC = () => {
       next.delete("cp");
     }
     setSearchParams(next);
+  };
+
+  const selectTab = (next: ScenariosTab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "library") params.set("tab", "library");
+    else params.delete("tab");
+    // Replace: Back should leave the page, not step between its tabs.
+    setSearchParams(params, { replace: true });
   };
 
   const handleFileInputChange = async (
@@ -238,66 +262,106 @@ const ScenarioLibraryPage: React.FC = () => {
         }
       />
 
-      <TemplateGallery
-        onUseTemplate={(template) =>
-          setPendingAction({ kind: "template", template })
-        }
-      />
-
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <select
-          value={cpFilter}
-          onChange={(e) => updateCpFilter(e.target.value)}
-          className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
-        >
-          <option value="">All charge points</option>
-          {chargePoints.map((cp) => (
-            <option key={cp.id} value={cp.id}>
-              {cp.id}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
-          <input
-            type="checkbox"
-            checked={enabledOnly}
-            onChange={(e) => setEnabledOnly(e.target.checked)}
-            className="h-4 w-4 rounded border-cx-border-strong"
-          />
-          Enabled only
-        </label>
+      <div
+        role="tablist"
+        aria-label="Scenarios"
+        className="mb-4 flex gap-5 border-b border-cx-border"
+      >
+        {TABS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.value}
+            onClick={() => selectTab(item.value)}
+            className={cn(
+              "-mb-px border-b-2 px-0.5 pb-2 text-[13.5px] font-medium",
+              tab === item.value
+                ? "border-cx-accent text-cx-fg"
+                : "border-transparent text-cx-muted hover:text-cx-fg",
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
-      {error ? (
-        <EmptyState
-          icon={ListTree}
-          title="Couldn't load scenarios"
-          hint={`Couldn't load scenarios: ${error}`}
-          action={
-            <Button type="button" size="sm" onClick={() => void refresh()}>
-              Retry
-            </Button>
+      {tab === "active" ? (
+        <ActiveRunsTab
+          runs={activeRuns.runs}
+          // The charge point list loads after the config; until it has, "no
+          // runs" would be a guess.
+          isLoading={configLoading || activeRuns.isLoading}
+          refresh={activeRuns.refresh}
+          chargePoints={chargePoints}
+          ocppVersionFallback={
+            mode === "local" ? config?.ocppVersion : undefined
           }
-        />
-      ) : !isLoading && filteredItems.length === 0 ? (
-        <EmptyState
-          icon={ListTree}
-          title="No scenarios"
-          hint={
-            items.length === 0
-              ? "Create a scenario or use a template to get started."
-              : "No scenarios match the current filters."
-          }
-          action={items.length === 0 ? newScenarioButton : undefined}
         />
       ) : (
-        <ScenarioTable
-          items={filteredItems}
-          onToggleEnabled={handleToggleEnabled}
-          onDuplicate={handleDuplicate}
-          onExport={handleExport}
-          onDelete={handleDelete}
-        />
+        <>
+          <TemplateGallery
+            onUseTemplate={(template) =>
+              setPendingAction({ kind: "template", template })
+            }
+          />
+
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <select
+              value={cpFilter}
+              onChange={(e) => updateCpFilter(e.target.value)}
+              className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
+            >
+              <option value="">All charge points</option>
+              {chargePoints.map((cp) => (
+                <option key={cp.id} value={cp.id}>
+                  {cp.id}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
+              <input
+                type="checkbox"
+                checked={enabledOnly}
+                onChange={(e) => setEnabledOnly(e.target.checked)}
+                className="h-4 w-4 rounded border-cx-border-strong"
+              />
+              Enabled only
+            </label>
+          </div>
+
+          {error ? (
+            <EmptyState
+              icon={ListTree}
+              title="Couldn't load scenarios"
+              hint={`Couldn't load scenarios: ${error}`}
+              action={
+                <Button type="button" size="sm" onClick={() => void refresh()}>
+                  Retry
+                </Button>
+              }
+            />
+          ) : !isLoading && filteredItems.length === 0 ? (
+            <EmptyState
+              icon={ListTree}
+              title="No scenarios"
+              hint={
+                items.length === 0
+                  ? "Create a scenario or use a template to get started."
+                  : "No scenarios match the current filters."
+              }
+              action={items.length === 0 ? newScenarioButton : undefined}
+            />
+          ) : (
+            <ScenarioTable
+              items={filteredItems}
+              onToggleEnabled={handleToggleEnabled}
+              onDuplicate={handleDuplicate}
+              onExport={handleExport}
+              onDelete={handleDelete}
+            />
+          )}
+        </>
       )}
 
       {dialogProps && (

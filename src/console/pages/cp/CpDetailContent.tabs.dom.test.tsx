@@ -369,7 +369,7 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
       "Delete",
     ]);
     expect(findMenuItem("Scenarios")?.getAttribute("href")).toBe(
-      "/scenarios?cp=CP-A",
+      "/scenarios?tab=library&cp=CP-A",
     );
   });
 

@@ -57,10 +57,11 @@ The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mo
 The browser app serves one web console:
 
 - **`/`** — the web console: a fleet of **Charge Points**, per-charge-point
-  detail (`/cp/:id`), a cross-CP **Scenario library** (`/scenarios`; each
-  row's `…` menu — Duplicate, Export JSON, Delete — opens in a portal and
-  flips upward near the bottom of the window, so it is never clipped by the
-  table, #365) with an editor (`/scenarios/edit`, see
+  detail (`/cp/:id`), a cross-CP **Scenarios** page (`/scenarios`, see
+  [Scenarios page](#scenarios-page): the live **Active runs** and the
+  **Library**, whose row `…` menu — Duplicate, Export JSON, Delete — opens in a
+  portal and flips upward near the bottom of the window, so it is never clipped
+  by the table, #365) with an editor (`/scenarios/edit`, see
   [Scenario editor](#scenario-editor-steps-and-graph)) and a separate run
   console (`/scenarios/run`), a cross-CP **Run history**
   (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
@@ -249,7 +250,8 @@ parameters keep the view across the full page and the panel:
 **More** lists, in this order: **Message log**, **Transactions**, **Session
 analysis**, **Diagnostics**, **Expert**, **Network simulation** (only when the
 charge point has network simulation, that is, its snapshot's `networkSim` is
-not `null`), **Scenarios** (a link to `/scenarios?cp=<id>`), and, after a
+not `null`), **Scenarios** (a link to `/scenarios?tab=library&cp=<id>`, the
+Library filtered to this charge point), and, after a
 separator, **Delete** (red). Picking a section sets `?tab=` (replacing the
 history entry) and swaps the lower half; the section's heading row has a
 **← Message log** link back. **Diagnostics** is the state transition diagram
@@ -327,7 +329,8 @@ parked on that connector: its state, the scenario name, the current step and
 waiting, what it waits for with the wait controls (see
 [Scenario editor](#scenario-editor-steps-and-graph)). There is no row without a
 live run, and the runs are read once for the whole page and filtered by
-connector.
+connector. The [Scenarios page](#scenarios-page) lists the runs of every charge
+point.
 
 The **lower half** (#421, #405) shows, by default, the charge point's **Message
 Log** from the console's log buffer: a heading row with the entry count and
@@ -357,6 +360,45 @@ filtered lines on screen. Its charge point filter is `?cp=<id>`: the page opens
 with that charge point preselected (the link from the charge point page), and
 picking one writes the parameter back (replacing the history entry); **All
 charge points** removes it.
+
+### Scenarios page
+
+The Scenarios page (`/scenarios`) has the header **Scenarios** with the
+library's `<n> total`, the **Import JSON** and **+ New scenario** actions, and
+two tabs under it. `?tab=library` opens the **Library**; without it (or with
+any other value) the page opens on **Active runs**. Switching tabs replaces the
+history entry and keeps the other parameters.
+
+**Active runs** lists the live scenario runs (`running`, `waiting`, `paused`
+or `stepping`) of every charge point, read per charge point like the run row
+and re-read when a scenario event arrives on that charge point. It has:
+
+- **State tiles**: **All** and one tile per state (running, waiting, paused,
+  stepping) with its count. The tiles are the state filter: the pressed one
+  sets `?state=<state>`, **All** clears it. The counts always cover every run,
+  not the filtered list.
+- Two comboboxes: **Scenario** (`?q=`, a substring of the scenario name; the
+  options are the names of the live runs) and **Charge point** (`?cp=`, a
+  substring of the id; the options are every charge point, with its status dot
+  and OCPP version), and a `<shown> / <total>` counter. The filters replace the
+  history entry, so a reload or a shared link shows the same list.
+- One row per run: the state, the scenario name over `<charge point> #<connector>`,
+  the current step with `k/N · <elapsed>` and a thin progress bar (left out
+  while the scenario's node count is unknown), and the controls: **Skip** on a
+  `waiting` run (continue past the parked wait, #240), **Next** on a `stepping`
+  run (one step), and **Stop** on every run. A failed control is logged and
+  shown under its row. There is no **Pause** or **Resume**: the service has no
+  method for either, so a `paused` run only offers **Stop**.
+
+The tab says **No scenario is running.** when no charge point has a live run,
+and **No active run matches the current filters.** when the filters leave
+none. A row does not open the run yet; the run console is reached from the
+charge point's [run row](#charge-point-page).
+
+**Library** is the scenario table: the template gallery, the **Charge point**
+select (`?cp=`, an exact id; the charge point page's **Scenarios** menu item
+opens it with this set) and the **Enabled only** checkbox, then one row per
+scenario across charge points.
 
 ### Scenario editor: steps and graph
 

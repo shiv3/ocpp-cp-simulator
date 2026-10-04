@@ -96,7 +96,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
     <div
       role="group"
       aria-label="Charging session"
-      className="mt-3.5 flex flex-wrap items-center gap-y-1 rounded-[9px] bg-cx-sub px-2.5 py-2"
+      className="mt-3.5 flex flex-wrap items-center gap-y-1 rounded-[9px] bg-cx-sub px-2.5 py-2 @max-[520px]:px-1"
     >
       {STEPS.map((step, index) => {
         const state = stateOf(index);
@@ -110,7 +110,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
             {index > 0 && (
               <span
                 aria-hidden
-                className="h-[1.5px] w-[18px] flex-none bg-cx-border-strong"
+                className="h-[1.5px] w-[18px] flex-none bg-cx-border-strong @max-[520px]:w-1.5"
               />
             )}
             <button
@@ -120,7 +120,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
               disabled={state !== "next" || pending || blocked}
               onClick={actions[step.id]}
               className={cn(
-                "inline-flex items-center gap-[7px] rounded-[7px] px-[9px] py-[5px] text-[12.5px] font-medium",
+                "inline-flex items-center gap-[7px] whitespace-nowrap rounded-[7px] px-[9px] py-[5px] text-[12.5px] font-medium @max-[520px]:gap-1.5 @max-[520px]:px-1.5 @max-[520px]:text-xs",
                 state === "todo" && "text-cx-faint",
                 state === "done" && "text-cx-muted",
                 state === "current" && "text-cx-fg",
@@ -131,7 +131,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
               <i
                 aria-hidden
                 className={cn(
-                  "inline-grid h-3.5 w-3.5 place-items-center rounded-full border-[1.5px] border-cx-border-strong bg-cx-card text-[9px] not-italic leading-none text-cx-faint",
+                  "inline-grid h-3.5 w-3.5 place-items-center @max-[520px]:h-3 @max-[520px]:w-3 rounded-full border-[1.5px] border-cx-border-strong bg-cx-card text-[9px] not-italic leading-none text-cx-faint",
                   state === "done" &&
                     "border-cx-emerald bg-cx-emerald text-white",
                   state === "current" &&
@@ -148,7 +148,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
       })}
 
       {!unavailable && !faulted && position === 1 && (
-        <label className="ml-auto inline-flex items-center gap-1.5 pl-2 text-xs text-cx-muted">
+        <label className="ml-auto inline-flex items-center gap-1.5 pl-2 text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
           with tag
           <select
             value={tagId}
@@ -174,13 +174,13 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
         </label>
       )}
       {!unavailable && transactionId != null && position === 2 && (
-        <span className="ml-auto pl-2 font-mono text-xs text-cx-muted">
+        <span className="ml-auto pl-2 font-mono text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
           Tx #{transactionId}
           {transactionTagId ? ` · ${transactionTagId}` : ""}
         </span>
       )}
       {unavailable && (
-        <span className="ml-auto pl-2 text-xs text-cx-muted">
+        <span className="ml-auto pl-2 text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
           Unavailable: send Available in Controls to plug in
         </span>
       )}

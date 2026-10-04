@@ -195,4 +195,17 @@ describe("SessionFlow: the charging session as a stepper", () => {
     const { container } = await renderFlow({ pending: true });
     expect(steps(container).every((s) => s.disabled)).toBe(true);
   });
+
+  it("compacts the stepper by the card's width, not the viewport's", async () => {
+    const { container } = await renderFlow();
+    for (const step of steps(container)) {
+      expect(step.className).toContain("@max-[520px]:px-1.5");
+      expect(step.className).toContain("@max-[520px]:gap-1.5");
+    }
+    const lines = container.querySelectorAll('span[aria-hidden][class*="w-"]');
+    expect(lines.length).toBe(3);
+    for (const line of lines) {
+      expect(line.className).toContain("@max-[520px]:w-1.5");
+    }
+  });
 });

@@ -62,7 +62,9 @@ const Figure: React.FC<{
     <dd className="text-base font-medium tracking-[-0.01em] tabular-nums text-cx-fg">
       {value}
       {note && (
-        <small className="ml-1 text-xs font-normal text-cx-muted">{note}</small>
+        <small className="ml-1 whitespace-nowrap text-xs font-normal text-cx-muted @max-[560px]:ml-0 @max-[560px]:block">
+          {note}
+        </small>
       )}
       {bar && (
         <div className="mt-1.5 h-[3px] overflow-hidden rounded-sm bg-cx-sub">
@@ -182,7 +184,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
       data-selected={selected === undefined ? undefined : String(selected)}
       aria-label={`Connector ${connectorId}`}
       className={cn(
-        "rounded-[10px] border border-cx-border bg-cx-card px-[18px] py-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
+        "@container rounded-[10px] border border-cx-border bg-cx-card px-[18px] py-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
         selected && "border-cx-accent ring-1 ring-cx-accent",
       )}
     >
@@ -268,7 +270,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
         </p>
       )}
 
-      <div className="mt-3.5 grid grid-cols-1 items-start gap-x-6 gap-y-4 sm:grid-cols-[minmax(240px,1.1fr)_minmax(220px,1fr)]">
+      <div className="mt-3.5 grid grid-cols-1 items-start gap-y-4 @min-[400px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] @min-[400px]:gap-x-4 @min-[560px]:grid-cols-[minmax(240px,1.1fr)_minmax(220px,1fr)] @min-[560px]:gap-x-6">
         <EvBattery
           soc={view.soc}
           targetSoc={ev.targetSoc}

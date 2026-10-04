@@ -205,7 +205,7 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
               placeholder="not reported"
               value={socShown}
               onChange={(e) => setSocText(e.target.value)}
-              className={INPUT}
+              className={cn(INPUT, "min-w-[7.5rem]")}
             />
             <Hint>%</Hint>
             <Button

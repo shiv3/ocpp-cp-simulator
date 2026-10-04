@@ -702,10 +702,19 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               )}
             </>
           ) : (
-            // The full page shows every connector at once; the cards are wide
-            // (stepper, battery), so two columns at most.
+            // The full page shows every connector at once: up to four across,
+            // the cards shrink to about 420 px. `max(420px, quarter)` caps the
+            // count at four (3rem = the three gutters), `min(100%, …)` keeps a
+            // phone at one column, and `auto-fit` lets fewer cards share the row.
             <div ref={connectorGridRef} className="@container">
-              <div className="grid grid-cols-1 items-start gap-4 @min-[1100px]:grid-cols-2">
+              <div
+                data-testid="connector-grid"
+                className="grid items-start gap-4"
+                style={{
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(min(100%, max(420px, calc((100% - 3rem) / 4))), 1fr))",
+                }}
+              >
                 {connectorList.map((connector) => (
                   <div key={connector.id}>
                     <ConnectorCard

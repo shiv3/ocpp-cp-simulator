@@ -242,9 +242,17 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
 - **Charge point (connector 0)**, one compact row (below).
 - **The connectors.** The full page shows **every connector at once**, like the
   classic UI: one [connector card](#connector-card) per connector, each followed
-  by its own [scenario card](#scenario-card), in a grid of one column under
-  about 1100 px of content width and two above (a container query; never three,
-  the cards are wide). The side panel shows **one connector at a time**: a strip
+  by its own [scenario card](#scenario-card), in a grid with **up to four cards
+  per row**: the cards are at least about 420 px wide, as many as fit share the
+  row (never more than four), and fewer connectors share the width (two
+  connectors on a wide window are two half-width cards, one is full width; a
+  phone gets one column). Pure CSS, no measuring
+  (`repeat(auto-fit, minmax(min(100%, max(420px, quarter)), 1fr))`). The card
+  lays itself out by **its own width** (a container query, not the viewport):
+  the battery sits beside the figures from about 400 px, the stepper goes
+  compact under about 520 px (tighter padding and lines, the TagID select or
+  `Tx #…` note on its own line), which also governs the card in the side
+  panel. The side panel shows **one connector at a time**: a strip
   of `#1`, `#2`, … buttons (`role="tablist"`, each tab `aria-selected`, a dot in
   the connector's status color; the arrow keys, Home and End move the
   selection) over the selected connector's card and scenario card. A charge

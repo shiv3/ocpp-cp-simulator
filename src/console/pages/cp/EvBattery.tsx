@@ -127,7 +127,7 @@ const EvBattery: React.FC<EvBatteryProps> = ({
       <svg
         viewBox="0 0 136 60"
         aria-hidden
-        className="h-[70px] w-[150px] flex-none rounded-lg peer-focus-visible:outline-2 peer-focus-visible:outline-offset-[3px] peer-focus-visible:outline-cx-accent"
+        className="h-auto w-[150px] max-w-full flex-none rounded-lg peer-focus-visible:outline-2 peer-focus-visible:outline-offset-[3px] peer-focus-visible:outline-cx-accent"
       >
         <rect
           className="fill-cx-sub"
@@ -188,7 +188,7 @@ const EvBattery: React.FC<EvBatteryProps> = ({
       <div className="min-w-0">
         <div
           data-testid="soc-hero"
-          className="text-[36px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-cx-fg"
+          className="whitespace-nowrap text-[36px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-cx-fg"
         >
           {shown == null ? (
             "—"
@@ -201,7 +201,9 @@ const EvBattery: React.FC<EvBatteryProps> = ({
             </>
           )}
         </div>
-        <div className="mt-1.5 text-[12.5px] text-cx-muted">{detail}</div>
+        <div className="mt-1.5 break-words text-[12.5px] text-cx-muted">
+          {detail}
+        </div>
       </div>
     </div>
   );

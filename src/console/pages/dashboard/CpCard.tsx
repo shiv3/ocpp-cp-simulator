@@ -1,6 +1,4 @@
 import React, { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-
 import { formatEnergyKwh } from "@/lib/connectorFormat";
 import { cn } from "@/lib/utils";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
@@ -10,6 +8,7 @@ import { useDataContext } from "../../../data/providers/DataProvider";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import { formatRelativeTime } from "../../lib/formatRelativeTime";
 import { useNow } from "../../lib/useNow";
+import { usePanelParams } from "../../lib/usePanelParams";
 import StatusPill from "../../components/StatusPill";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
 import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
@@ -27,7 +26,7 @@ export interface CpCardProps {
 }
 
 const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
-  const navigate = useNavigate();
+  const { open, close, isOpen } = usePanelParams();
   const { chargePointService } = useDataContext();
   const { status, connected, connectors, heartbeat } = useChargePointView(
     cp.id,
@@ -79,18 +78,36 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
     }
   };
 
+  const selected = isOpen(cp.id);
+  const toggleOpen = () => (selected ? close() : open(cp.id));
+
+  // The whole card opens the panel, except where the click already means
+  // something else (a button, link or form control inside it handles itself).
+  const handleCardClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    if (target.closest("button, a, input, select, label")) return;
+    toggleOpen();
+  };
+
   return (
     <div
       data-cp-id={cp.id}
-      className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      data-selected={selected ? "true" : undefined}
+      onClick={handleCardClick}
+      className={cn(
+        "flex cursor-pointer flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900",
+        selected && "ring-2 ring-blue-500 dark:ring-blue-400",
+      )}
     >
       <div className="flex items-start justify-between gap-2">
-        <Link
-          to={`/cp/${encodeURIComponent(cp.id)}`}
+        {/* A button, so the panel opens from the keyboard too. */}
+        <button
+          type="button"
+          onClick={toggleOpen}
           className="font-mono text-sm font-semibold text-gray-900 hover:underline dark:text-gray-100"
         >
           {cp.id}
-        </Link>
+        </button>
         <div className="flex items-center gap-2">
           <StatusPill status={isConnected ? status : "Disconnected"} />
           <NetworkSimBadge summary={cp.networkSim} />
@@ -114,9 +131,11 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
           </div>
         ) : (
           connectorList.map((connector) => (
-            <div
+            <button
+              type="button"
               key={connector.id}
-              className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
+              onClick={() => open(cp.id, connector.id)}
+              className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded px-1 text-left text-xs text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               <span className="w-5 shrink-0 text-gray-400 dark:text-gray-500">
                 #{connector.id}
@@ -128,7 +147,7 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
                   Tx #{connector.transactionId}
                 </span>
               )}
-            </div>
+            </button>
           ))
         )}
       </div>
@@ -138,13 +157,6 @@ const CpCard: React.FC<CpCardProps> = ({ cp, ocppVersion }) => {
           Heartbeat {formatRelativeTime(heartbeat.lastSentAt)}
         </span>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => navigate(`/cp/${encodeURIComponent(cp.id)}`)}
-            className="rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            Open
-          </button>
           <button
             type="button"
             onClick={() => void handleToggleConnect()}

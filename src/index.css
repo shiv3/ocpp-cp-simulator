@@ -249,3 +249,15 @@
 .text-secondary {
   @apply text-gray-700 dark:text-gray-300;
 }
+
+/*
+  Web console side panel (src/console/components/SidePanel.tsx): from 1100 px
+  the page keeps working beside the fixed panel; below that the panel covers
+  it. SidePanel sets the attribute and the width variable on the root while
+  it is open.
+*/
+@media (min-width: 1100px) {
+  :root[data-side-panel] [data-console-main] {
+    margin-right: var(--console-panel-width);
+  }
+}

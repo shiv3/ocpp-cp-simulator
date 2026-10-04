@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, PlugZap } from "lucide-react";
 
@@ -12,9 +12,12 @@ import { useServerInfo } from "../../data/hooks/useServerInfo";
 import { useDataContext } from "../../data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import SidePanel from "../components/SidePanel";
 import { formatLogTime, useGlobalLogs } from "../lib/useGlobalLogs";
+import { usePanelParams } from "../lib/usePanelParams";
 import BulkActionsMenu from "./dashboard/BulkActionsMenu";
 import CpCard from "./dashboard/CpCard";
+import CpDetailContent from "./cp/CpDetailContent";
 import { useCpConfigActions } from "./dashboard/useCpConfigActions";
 
 const RECENT_ACTIVITY_LIMIT = 5;
@@ -29,6 +32,35 @@ const DashboardPage: React.FC = () => {
   const [bulkReport, setBulkReport] = useState<string | null>(null);
   const { entries: logEntries } = useGlobalLogs();
   const recentActivity = logEntries.slice(0, RECENT_ACTIVITY_LIMIT);
+
+  const panel = usePanelParams();
+  const { cpId: panelCpId, open: openPanel, close: closePanel } = panel;
+  const gridRef = useRef<HTMLDivElement>(null);
+  // `?cp=` on arrival (a reload, or Back from the full page): bring that card
+  // into view once, when the list has it. Later clicks are on visible cards.
+  const initialCpId = useRef(panelCpId);
+  const scrolledToInitial = useRef(false);
+  useEffect(() => {
+    if (!initialCpId.current || scrolledToInitial.current) return;
+    const card = Array.from(gridRef.current?.children ?? []).find(
+      (el) => (el as HTMLElement).dataset.cpId === initialCpId.current,
+    );
+    if (!card) return;
+    scrolledToInitial.current = true;
+    // jsdom has no scrollIntoView.
+    card.scrollIntoView?.({ block: "nearest" });
+  }, [chargePoints]);
+
+  // A click on the page itself (not a card, not a control) closes the panel.
+  // Portalled content (the Add dialog) bubbles through React but is not in
+  // the DOM subtree, so it is excluded by the `contains` check.
+  const handleBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (panelCpId === null) return;
+    const target = event.target as Element;
+    if (!event.currentTarget.contains(target)) return;
+    if (target.closest("[data-cp-id], button, a, input, select, label")) return;
+    closePanel();
+  };
 
   const connectedCount = chargePoints.filter(
     (cp) => cp.status !== OCPPStatus.Unavailable,
@@ -46,102 +78,124 @@ const DashboardPage: React.FC = () => {
   );
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title="Charge Points"
-        count={`${chargePoints.length} registered · ${connectedCount} connected`}
-        actions={
-          <>
-            {/* Bulk actions only make sense with several charge points. */}
-            {chargePoints.length >= 2 && (
-              <BulkActionsMenu
-                cpIds={chargePoints.map((cp) => cp.id)}
-                onReport={setBulkReport}
-              />
-            )}
-            {addButton}
-          </>
-        }
-      />
-
-      {bulkReport && (
-        <p
-          role="status"
-          data-testid="bulk-result"
-          className="-mt-2 mb-4 text-xs text-gray-600 dark:text-gray-300"
-        >
-          {bulkReport}
-        </p>
-      )}
-
-      {chargePoints.length === 0 ? (
-        <EmptyState
-          icon={PlugZap}
-          title="No charge points"
-          hint="Add a charge point to start simulating OCPP traffic."
-          action={addButton}
+    <>
+      <div className="min-h-full p-6" onClick={handleBackgroundClick}>
+        <PageHeader
+          title="Charge Points"
+          count={`${chargePoints.length} registered · ${connectedCount} connected`}
+          actions={
+            <>
+              {/* Bulk actions only make sense with several charge points. */}
+              {chargePoints.length >= 2 && (
+                <BulkActionsMenu
+                  cpIds={chargePoints.map((cp) => cp.id)}
+                  onReport={setBulkReport}
+                />
+              )}
+              {addButton}
+            </>
+          }
         />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {chargePoints.map((cp) => (
-            <CpCard
-              key={cp.id}
-              cp={cp}
-              // Local-mode snapshots don't carry `config` (the browser owns
-              // config, not the service) — fall back to the shared local
-              // config's ocppVersion so the chip still shows in local mode.
-              ocppVersion={mode === "local" ? config?.ocppVersion : undefined}
-            />
-          ))}
-        </div>
-      )}
 
-      <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-            Recent activity
-          </h2>
-          <Link
-            to={"/logs"}
-            className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+        {bulkReport && (
+          <p
+            role="status"
+            data-testid="bulk-result"
+            className="-mt-2 mb-4 text-xs text-gray-600 dark:text-gray-300"
           >
-            Open Message Log →
-          </Link>
-        </div>
-        {recentActivity.length === 0 ? (
-          <p className="text-xs text-gray-400 dark:text-gray-500">
-            No activity yet.
+            {bulkReport}
           </p>
-        ) : (
-          <ul className="space-y-1.5">
-            {recentActivity.map((item) => (
-              <li
-                key={item.seq}
-                className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
-              >
-                <span className="font-mono text-gray-400 dark:text-gray-500">
-                  {formatLogTime(item.entry.timestamp)}
-                </span>
-                <span className="font-mono font-medium text-gray-700 dark:text-gray-200">
-                  {item.cpId}
-                </span>
-                <span className="truncate">{item.entry.message}</span>
-              </li>
-            ))}
-          </ul>
         )}
+
+        {chargePoints.length === 0 ? (
+          <EmptyState
+            icon={PlugZap}
+            title="No charge points"
+            hint="Add a charge point to start simulating OCPP traffic."
+            action={addButton}
+          />
+        ) : (
+          <div
+            ref={gridRef}
+            className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+          >
+            {chargePoints.map((cp) => (
+              <CpCard
+                key={cp.id}
+                cp={cp}
+                // Local-mode snapshots don't carry `config` (the browser owns
+                // config, not the service) — fall back to the shared local
+                // config's ocppVersion so the chip still shows in local mode.
+                ocppVersion={mode === "local" ? config?.ocppVersion : undefined}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Recent activity
+            </h2>
+            <Link
+              to={"/logs"}
+              className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Open Message Log →
+            </Link>
+          </div>
+          {recentActivity.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              No activity yet.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {recentActivity.map((item) => (
+                <li
+                  key={item.seq}
+                  className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
+                >
+                  <span className="font-mono text-gray-400 dark:text-gray-500">
+                    {formatLogTime(item.entry.timestamp)}
+                  </span>
+                  <span className="font-mono font-medium text-gray-700 dark:text-gray-200">
+                    {item.cpId}
+                  </span>
+                  <span className="truncate">{item.entry.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <ChargePointConfigModal
+          isOpen={isAddOpen}
+          onClose={() => setIsAddOpen(false)}
+          onSave={(cpConfig) => void addCp(cpConfig)}
+          mode={mode}
+          initialConfig={defaultChargePointConfig}
+          isNewChargePoint
+          soapPublicBase={serverInfo?.soap ?? null}
+        />
       </div>
 
-      <ChargePointConfigModal
-        isOpen={isAddOpen}
-        onClose={() => setIsAddOpen(false)}
-        onSave={(cpConfig) => void addCp(cpConfig)}
-        mode={mode}
-        initialConfig={defaultChargePointConfig}
-        isNewChargePoint
-        soapPublicBase={serverInfo?.soap ?? null}
-      />
-    </div>
+      <SidePanel
+        open={panelCpId !== null}
+        onClose={closePanel}
+        label="Charge point"
+      >
+        {panelCpId !== null && (
+          // Keyed so a swap starts from a clean state (tab, dialogs, snapshot).
+          <CpDetailContent
+            key={panelCpId}
+            cpId={panelCpId}
+            variant="panel"
+            selectedConnectorId={panel.connectorId}
+            onSelectConnector={(id) => openPanel(panelCpId, id)}
+          />
+        )}
+      </SidePanel>
+    </>
   );
 };
 

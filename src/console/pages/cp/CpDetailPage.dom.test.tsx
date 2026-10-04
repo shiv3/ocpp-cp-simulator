@@ -519,15 +519,26 @@ describe("CpDetailPage", () => {
     });
     await flush();
 
-    // Navigate to CP-1's detail page by clicking the link to it in the
-    // dashboard. Find the link by looking for CP-1 text and finding an <a> tag.
-    const cpLink = Array.from(container.querySelectorAll("a")).find((a) =>
-      a.textContent?.trim().startsWith("CP-1"),
+    // Navigate to CP-1's detail page: open its card in the side panel, then
+    // expand the panel to the full page.
+    const cpButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "CP-1",
     );
-    expect(cpLink, "expected a link to CP-1 in the dashboard").toBeTruthy();
+    expect(cpButton, "expected CP-1's card in the dashboard").toBeTruthy();
 
     await act(async () => {
-      cpLink!.click();
+      cpButton!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    const expandLink = container.querySelector<HTMLElement>(
+      '[aria-label="Open as full page"]',
+    );
+    expect(expandLink, "expected the panel's expand link").toBeTruthy();
+
+    await act(async () => {
+      expandLink!.click();
       await Promise.resolve();
     });
     await flush();

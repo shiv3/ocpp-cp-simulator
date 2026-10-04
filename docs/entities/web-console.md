@@ -12,7 +12,7 @@ related:
   - ../concepts/local-vs-remote-mode.md
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 # Web console (browser UI)
@@ -87,7 +87,42 @@ was always green. Local mode has no daemon, so its dot carries no status.
 ### Dashboard
 
 The dashboard (`/`) shows a card per charge point (status, connectors, last
-Heartbeat, **Open**, **Connect** / **Disconnect**) and the recent activity.
+Heartbeat, **Connect** / **Disconnect**) and the recent activity.
+
+Clicking a charge point — its card, its id or one of its connector rows —
+opens it in a **side panel** beside the list, without leaving the page. The
+panel holds the [charge point page](#charge-point-page)'s content, with
+**Open as full page** and **Close** buttons added to its header. The state is
+in the URL, so a reload or a shared link reopens it:
+
+| URL                       | Meaning                                               |
+| ------------------------- | ----------------------------------------------------- |
+| `/?cp=<id>`               | The list with that charge point open in the panel.    |
+| `/?cp=<id>&connector=<n>` | The same, on connector `n` (a connector row sets it). |
+| `/cp/<id>?connector=<n>`  | The full page, reached from **Open as full page**.    |
+
+- **Open, swap, toggle.** Opening from a closed list adds one history entry.
+  Clicking another charge point (or connector) while the panel is open swaps
+  its content and replaces the entry; clicking the open charge point's card
+  again closes the panel. A button, link or form control inside a card keeps
+  its own job: **Connect** / **Disconnect** does not open the panel. The card
+  of the open charge point is highlighted (`data-selected="true"`).
+- **Close.** The **Close side panel** button, **Esc** (unless a dialog inside
+  the panel handles it first), or a click on the list's background. Closing
+  replaces the history entry and removes `cp` and `connector`; other search
+  parameters stay.
+- **Resize.** The panel's left edge is a handle (`role="separator"`): drag it,
+  or focus it and press **←** (wider) / **→** (narrower) for 32 px a step. The
+  width stays between 360 px and the window width minus 320 px, and is kept in
+  the browser (`localStorage`, key `ocpp-cp.console.panel-width`); the default
+  is `min(680px, 48vw)`. From 1100 px of window width the list stays usable
+  beside the panel; below that the panel covers the page and the handle is
+  hidden.
+- **Open as full page** goes to `/cp/<id>?connector=<n>`. Leaving the full
+  page with **← Back to charge points** returns to `/?cp=<id>&connector=<n>`:
+  the list with that charge point still open in the panel, and its card
+  scrolled into view.
+
 With two charge points or more, its **All charge points** menu (#416) runs an
 action on every charge point at once, as the classic UI's Multi-CP dialog did:
 
@@ -109,6 +144,11 @@ The charge point page (`/cp/:id`) has a header with **Scenarios**, **Edit
 config**, **Connect** / **Disconnect** and **Delete**, a **Charge point** panel,
 the connector cards, the **Active scenarios** panel, and tabs (transactions,
 message log, session analysis, configuration, state diagram, expert calls).
+The same content is what the list's [side panel](#dashboard) shows. The
+optional `?connector=<n>` parameter names the selected connector: it is kept
+across the full page and the panel, and the state diagram tab opens on it.
+Choosing another connector there updates the parameter (replacing the history
+entry).
 
 **Delete** (#415) asks for a confirmation, removes the charge point and goes
 back to the dashboard. In Remote mode it calls `cp.delete`, which also deletes

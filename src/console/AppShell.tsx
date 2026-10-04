@@ -165,7 +165,12 @@ const AppShell: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-900">
+        {/* data-console-main: src/index.css gives it a right margin while a
+            side panel is open, so the page is not hidden under the panel. */}
+        <main
+          data-console-main
+          className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-900"
+        >
           <Outlet />
         </main>
       </div>

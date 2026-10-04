@@ -1464,3 +1464,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Docker image](entities/docker-image.md), [index](index.md): no classic footer, no `/v2`.
 - [GitHub issues](sources/github-issues.md): #426 row.
 - Mechanism: `AppRoutes` maps both retired prefixes through one `LegacyPrefixRedirect`. Removed: `V2App`, `TopPage`, `Navbar`, `Footer`, `ChargePoint`, `Connector`, `ConnectorSidePanel`, `Logger`, `connectorAutoMeterConfig`, `useScenarios` (only the side panel used it) and their tests, plus the `index.css` rules only they used (`status-*`, `panel-border`, the logger panel). Shared modules stay (Settings, the charge point dialog, the curve editor, the graph editor, the state-transition viewer, `src/data`, `src/cp`, `src/lib`).
+
+## [2026-10-04] ingest | side panel for a charge point on the Charge Points list
+
+- [Web console](entities/web-console.md#dashboard): clicking a charge point opens it in a side panel beside the list (`/?cp=<id>&connector=<n>`); swap, toggle and close rules (button, Esc, list background); the resize handle (drag, arrow keys, width kept in the browser); **Open as full page** (`/cp/<id>?connector=<n>`) and the Back link that returns to the list with the panel open and the card in view. The card's **Open** button and the id link are gone. The [charge point page](entities/web-console.md#charge-point-page) section gains `?connector=`.
+- Mechanism: `SidePanel` (`src/console/components`) is the generic shell (width, Esc, margin via the root's `data-side-panel` and `index.css`); `usePanelParams` (`src/console/lib`) holds the URL state with the push / replace rules; `CpDetailContent` (`src/console/pages/cp`) is the old `CpDetailPage` body, shared by the full page and the panel.

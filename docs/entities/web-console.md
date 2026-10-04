@@ -239,7 +239,7 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   point's form shows the effective SOAP callback URL under the field, with a
   **Copy** button and, when it was derived from the daemon's tunnel, a note that
   it may change between daemon runs (#183).
-- **Charge point (connector 0)**, one compact row (below).
+- **Charge point (connector 0)**, a card above the connectors (below).
 - **The connectors.** The full page shows **every connector at once**, like the
   classic UI: one [connector card](#connector-card) per connector, each followed
   by its own [scenario card](#scenario-card), in a grid with **up to four cards
@@ -288,13 +288,27 @@ charge point from the saved configuration. In Local mode it refuses while that
 configuration has not loaded, instead of saving one without any charge point.
 On a failure the page stays open and says why.
 
-The **Charge point (connector 0)** row (#420) has the charge-point-level
-calls of the classic charge point card, disabled while the charge point is
-disconnected: the Heartbeat interval and when the last one was sent, with
-**Send Heartbeat**; **Authorize** with a TagID from **Settings**; and **Send
-status**, a StatusNotification for connector 0 (`Available`, `Unavailable` or
-`Faulted`, the last with an error code, §7.6). A failed call shows its error in
-the row.
+The **Charge point (connector 0)** card
+([`ChargePointControls.tsx`](../../src/console/pages/cp/ChargePointControls.tsx),
+#420) has the charge-point-level calls of the classic charge point card in the
+connector card's shape. Its header reads `Charge point` / `connector 0` and
+carries a **Heartbeat** figure (the interval, `30 s`, or `—` when none is
+configured; a note, `next in 4s` while connected, `last sent 26s ago` or `not
+sent yet` otherwise, `not configured` without an interval; and a bar that fills
+from the last Heartbeat to the next, accent while connected, grey otherwise,
+refreshed every second), **Send Heartbeat** (one click for the most common
+call) and a **Controls ▾** toggle. The **Controls** block, folded by default
+and laid out like the connector's [Simulator controls](#simulator-controls),
+has three groups: **Heartbeat** (the interval, when the last one was sent, and
+**Send Heartbeat**), **Authorize** (a TagID from **Settings**, with a hint
+when there is none) and **Status and faults** (a StatusNotification for
+connector 0: `Available`, `Unavailable` or `Faulted`, the last with an error
+code, §7.6). Every call is disabled while the charge point is disconnected.
+Each group shows its own failure; a failed **Send Heartbeat** from the header
+also shows under the header while the block is folded, so it is never
+invisible. `Figure`, `Group`, `Row` and `Hint` are shared with the connector
+card ([`Figure.tsx`](../../src/console/pages/cp/Figure.tsx),
+[`controlPrimitives.tsx`](../../src/console/pages/cp/controlPrimitives.tsx)).
 
 #### Connector card
 

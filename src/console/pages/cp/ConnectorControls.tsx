@@ -20,6 +20,7 @@ import {
   setSocWithSync,
   unplug,
 } from "./connectorActions";
+import { Group, Hint, Row } from "./controlPrimitives";
 
 export interface ConnectorControlsProps {
   /** For the card's Controls toggle (`aria-controls`). */
@@ -58,39 +59,6 @@ type GroupId = "readings" | "status" | "connector";
 
 const INPUT = cn(FILTER_INPUT_CLASS, "h-8 min-w-0 flex-1 py-1 font-mono");
 const SELECT = cn(FILTER_SELECT_CLASS, "min-w-0 flex-1");
-
-const Group: React.FC<{
-  title: string;
-  error: string | null;
-  children: React.ReactNode;
-}> = ({ title, error, children }) => (
-  <div
-    role="group"
-    aria-label={title}
-    className="flex flex-col gap-2 rounded-[9px] border border-cx-border p-3"
-  >
-    <h4 className="text-[12.5px] font-semibold text-cx-fg2">{title}</h4>
-    {children}
-    {error && (
-      <p role="alert" className="text-xs text-cx-rose">
-        {error}
-      </p>
-    )}
-  </div>
-);
-
-const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="flex flex-wrap items-center gap-1.5">{children}</div>
-);
-
-const Hint: React.FC<{ children: React.ReactNode; className?: string }> = ({
-  children,
-  className,
-}) => (
-  <span className={cn("text-[11.5px] text-cx-muted", className)}>
-    {children}
-  </span>
-);
 
 /**
  * The simulator controls of a connector card, folded away by default: the

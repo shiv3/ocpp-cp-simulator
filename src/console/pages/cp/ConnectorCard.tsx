@@ -21,6 +21,7 @@ import {
 } from "./connectorActions";
 import { batteryTone, evDisplayName } from "./connectorCardModel";
 import EvBattery from "./EvBattery";
+import Figure from "./Figure";
 import PowerSparkline from "./PowerSparkline";
 import { curvePointsToPower, describePowerCurve } from "./powerCurve";
 import SessionFlow from "./SessionFlow";
@@ -46,37 +47,6 @@ function formatSession(ms: number): string {
 }
 
 const formatKw = (kw: number) => String(Number(kw.toFixed(1)));
-
-/** One figure of the card: a small uppercase label over a 16px value, the
- *  mock's `.kv`, with an optional 3px bar. */
-const Figure: React.FC<{
-  label: string;
-  value: React.ReactNode;
-  note?: React.ReactNode;
-  bar?: { pct: number; className: string };
-}> = ({ label, value, note, bar }) => (
-  <div>
-    <dt className="mb-[3px] text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-      {label}
-    </dt>
-    <dd className="text-base font-medium tracking-[-0.01em] tabular-nums text-cx-fg">
-      {value}
-      {note && (
-        <small className="ml-1 whitespace-nowrap text-xs font-normal text-cx-muted @max-[560px]:ml-0 @max-[560px]:block">
-          {note}
-        </small>
-      )}
-      {bar && (
-        <div className="mt-1.5 h-[3px] overflow-hidden rounded-sm bg-cx-sub">
-          <div
-            className={cn("h-full rounded-sm", bar.className)}
-            style={{ width: `${Math.min(100, Math.max(0, bar.pct))}%` }}
-          />
-        </div>
-      )}
-    </dd>
-  </div>
-);
 
 const BAR_CLASS = {
   charging: "bg-cx-accent",

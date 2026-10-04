@@ -137,6 +137,14 @@ const ScenarioLibraryPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panel = useScenarioPanelParams();
   const { target: panelTarget, close: closePanel } = panel;
+  // Esc on an editing panel is the editor's Cancel (asks when dirty), not a
+  // close that would drop the unsaved edits.
+  const cancelEditRef = useRef<(() => void) | null>(null);
+  const handlePanelEscape = () => {
+    if (!panel.editing) closePanel();
+    else if (cancelEditRef.current) cancelEditRef.current();
+    else panel.setEditing(false);
+  };
   // A click on the open row closes its panel, as on the Charge Points list.
   const togglePanel = (target: ScenarioPanelTarget) =>
     panel.isOpen(target) ? closePanel() : panel.open(target);
@@ -486,7 +494,7 @@ const ScenarioLibraryPage: React.FC = () => {
 
       <SidePanel
         open={panelTarget !== null}
-        onClose={closePanel}
+        onClose={handlePanelEscape}
         label="Scenario"
       >
         {panelTarget?.kind === "run" && (
@@ -500,6 +508,7 @@ const ScenarioLibraryPage: React.FC = () => {
             onClose={closePanel}
             editing={panel.editing}
             onEditingChange={panel.setEditing}
+            cancelEditRef={cancelEditRef}
           />
         )}
         {panelTarget?.kind === "def" && (
@@ -516,6 +525,7 @@ const ScenarioLibraryPage: React.FC = () => {
             editing={panel.editing}
             onEditingChange={panel.setEditing}
             saveLibrary={saveScenario}
+            cancelEditRef={cancelEditRef}
           />
         )}
       </SidePanel>

@@ -144,6 +144,8 @@ export interface ScenarioRunContentProps {
    *  `onEditingChange`, **Edit scenario** links to the editor page. */
   editing?: boolean;
   onEditingChange?: (editing: boolean) => void;
+  /** panel: filled with the editor's Cancel while editing (the host's Esc). */
+  cancelEditRef?: React.RefObject<(() => void) | null>;
 }
 
 /**
@@ -169,6 +171,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
   footer,
   editing: editingProp = false,
   onEditingChange,
+  cancelEditRef,
 }) => {
   const isPanel = variant === "panel";
   const editing = isPanel && editingProp && onEditingChange !== undefined;
@@ -299,6 +302,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
       connectorId: target.connectorId,
       scenarioId: target.scenarioId,
       onCancel: () => onEditingChange?.(false),
+      cancelRef: cancelEditRef,
       expand: {
         to: editScenarioUrl(cpId, scopeConnectorId, scenario),
         label: target.library

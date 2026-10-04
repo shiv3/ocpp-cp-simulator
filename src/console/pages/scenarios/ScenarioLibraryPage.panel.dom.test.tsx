@@ -331,4 +331,84 @@ describe("Scenarios page — side panel", () => {
     expect(editParam(location)).toBeNull();
     expect(panel.querySelector('[role="alertdialog"]')).toBeNull();
   });
+  async function pressEscape() {
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await flush(10);
+  }
+
+  it("Esc in a clean editing panel returns to the read view, keeping the panel open", async () => {
+    await renderPage(`${DEF_PATH}&edit=1`);
+    await pressEscape();
+    expect(editParam(location)).toBeNull();
+    expect(openParam(location)).toBe(`def:${LIBRARY_SCOPE}/cp/lib-fork`);
+    const panel = document.querySelector(PANEL)!;
+    expect(panel).toBeTruthy();
+    expect(panel.querySelector('input[aria-label="Scenario name"]')).toBeNull();
+    expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
+  });
+
+  it("Esc with unsaved changes asks in the panel, like Cancel", async () => {
+    await renderPage(`${DEF_PATH}&edit=1`);
+    const panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    await act(async () => setInputValue(name, "Unsaved"));
+
+    await pressEscape();
+    const question = panel.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toContain("Discard unsaved changes?");
+    expect(document.querySelector(PANEL)).toBeTruthy();
+    expect(editParam(location)).toBe("1");
+
+    await click(buttonIn(question!, "Keep editing")!);
+    expect(name.value).toBe("Unsaved");
+    expect(editParam(location)).toBe("1");
+
+    await pressEscape();
+    await click(
+      buttonIn(panel.querySelector('[role="alertdialog"]')!, "Discard")!,
+    );
+    expect(editParam(location)).toBeNull();
+    expect(openParam(location)).toBe(`def:${LIBRARY_SCOPE}/cp/lib-fork`);
+    expect(
+      document.querySelector(PANEL)?.querySelector("h2")?.textContent,
+    ).toBe("Fork demo");
+  });
+  it("the close button of a dirty editing panel asks first; Discard closes the panel", async () => {
+    await renderPage(`${DEF_PATH}&edit=1`);
+    const panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    await act(async () => setInputValue(name, "Unsaved"));
+    const closeButton = () =>
+      panel.querySelector<HTMLButtonElement>(
+        'button[aria-label="Close side panel"]',
+      );
+
+    await click(closeButton()!);
+    const question = panel.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toContain("Discard unsaved changes?");
+    expect(document.querySelector(PANEL)).toBeTruthy();
+    await click(buttonIn(question!, "Keep editing")!);
+    expect(name.value).toBe("Unsaved");
+    expect(openParam(location)).toBe(`def:${LIBRARY_SCOPE}/cp/lib-fork`);
+
+    await click(closeButton()!);
+    await click(
+      buttonIn(panel.querySelector('[role="alertdialog"]')!, "Discard")!,
+    );
+    expect(document.querySelector(PANEL)).toBeNull();
+    expect(openParam(location)).toBeNull();
+    expect(editParam(location)).toBeNull();
+  });
 });

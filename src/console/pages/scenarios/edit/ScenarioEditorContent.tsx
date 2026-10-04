@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -106,6 +107,9 @@ export interface ScenarioEditorContentProps {
   expand?: { to: string; label: string };
   /** panel: the close button. */
   onClose?: () => void;
+  /** panel: filled with this editor's Cancel (asks first when there are
+   *  unsaved changes), for the host to route the side panel's Esc to. */
+  cancelRef?: React.RefObject<(() => void) | null>;
 }
 
 /**
@@ -137,6 +141,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   onCancel,
   expand,
   onClose,
+  cancelRef,
 }) => {
   const isPanel = variant === "panel";
   const [searchParams, setSearchParams] = useSearchParams();
@@ -153,7 +158,11 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   /** A step the keyboard asked to delete, waiting for the in-page answer. */
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState(false);
+  /** Leaving with unsaved changes waits for the in-page answer: back to the
+   *  read view (Cancel, Esc) or out of the panel (close). */
+  const [confirmLeave, setConfirmLeave] = useState<"cancel" | "close" | null>(
+    null,
+  );
   /** Set once the ReactFlow editor opened: it stays for this visit. */
   const [fullGraph, setFullGraph] = useState(false);
 
@@ -340,9 +349,25 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   };
 
   const handleCancel = () => {
-    if (dirty) setConfirmCancel(true);
+    if (dirty) setConfirmLeave("cancel");
     else onCancel?.();
   };
+
+  const handleClose = () => {
+    if (dirty) setConfirmLeave("close");
+    else onClose?.();
+  };
+  // The host's Esc is Cancel too: hand it the latest handler.
+  const handleCancelRef = useRef(handleCancel);
+  handleCancelRef.current = handleCancel;
+  useEffect(() => {
+    if (!cancelRef) return undefined;
+    const request = () => handleCancelRef.current();
+    cancelRef.current = request;
+    return () => {
+      if (cancelRef.current === request) cancelRef.current = null;
+    };
+  }, [cancelRef]);
 
   const panelActions = isPanel ? (
     <>
@@ -377,7 +402,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           className="px-2"
           aria-label="Close side panel"
           title="Close (Esc)"
-          onClick={onClose}
+          onClick={handleClose}
         >
           <X className="h-3.5 w-3.5" />
         </Button>
@@ -450,17 +475,19 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         }
       />
 
-      {confirmCancel && (
+      {confirmLeave && (
         <InlineConfirm
           className="mb-4"
           message="Discard unsaved changes?"
           cancelLabel="Keep editing"
           confirmLabel="Discard"
           danger
-          onCancel={() => setConfirmCancel(false)}
+          onCancel={() => setConfirmLeave(null)}
           onConfirm={() => {
-            setConfirmCancel(false);
-            onCancel?.();
+            const leave = confirmLeave;
+            setConfirmLeave(null);
+            if (leave === "close") onClose?.();
+            else onCancel?.();
           }}
         />
       )}

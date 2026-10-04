@@ -717,7 +717,14 @@ the trigger and **Enabled** sit under it, then **Used by**, the description
 and EV settings, the **Steps | Graph** switch, the steps or the graph, and the
 inspector under them. **Cancel** returns to the read view; with unsaved
 changes it first asks in the panel (**Discard unsaved changes?** —
-**Keep editing** / **Discard**), not in a browser dialog. Save behaves as on
+**Keep editing** / **Discard**), not in a browser dialog. **Esc** in edit mode is the same
+Cancel, on both the Scenarios page and the charge point page's run panel: it
+returns to the read view at once when nothing changed, otherwise it shows
+the same question and the panel stays open until it is answered (Esc no
+longer closes an editing panel and drops its edits). The header's close
+button asks the same way: a clean editor closes the panel at once; with
+unsaved changes **Discard** closes it and **Keep editing** keeps it open
+with the edits. Save behaves as on
 the page: a Library scenario is saved to the Library and re-pushed to every
 connector using it (with the same confirmation when a copy is running), a
 definition that is not a copy is saved in its own scope. Leaving the edit

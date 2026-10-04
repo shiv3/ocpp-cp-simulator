@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChargePoints } from "../../data/hooks/useChargePoints";
@@ -65,6 +65,15 @@ const CpDetailPage: React.FC = () => {
     [searchParams, setSearchParams],
   );
 
+  // Esc on the editing run panel is the editor's Cancel (asks when dirty),
+  // not a close that would drop the unsaved edits.
+  const cancelEditRef = useRef<(() => void) | null>(null);
+  const handlePanelEscape = () => {
+    if (!editing) closeRun();
+    else if (cancelEditRef.current) cancelEditRef.current();
+    else setEditing(false);
+  };
+
   return (
     <>
       <CpDetailContent
@@ -76,7 +85,7 @@ const CpDetailPage: React.FC = () => {
       />
       <SidePanel
         open={runScenarioId !== null}
-        onClose={closeRun}
+        onClose={handlePanelEscape}
         label="Scenario run"
       >
         {runScenarioId !== null && (
@@ -90,6 +99,7 @@ const CpDetailPage: React.FC = () => {
             onClose={closeRun}
             editing={editing}
             onEditingChange={setEditing}
+            cancelEditRef={cancelEditRef}
           />
         )}
       </SidePanel>

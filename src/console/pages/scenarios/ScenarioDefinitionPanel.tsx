@@ -43,6 +43,8 @@ export interface ScenarioDefinitionPanelProps {
   /** Saves a Library scenario and re-pushes it to its users (the page's
    *  `useScenarioLibrary().save`). */
   saveLibrary?: (scenario: ScenarioDefinition) => Promise<void>;
+  /** Filled with the editor's Cancel while editing (the host's Esc). */
+  cancelEditRef?: React.RefObject<(() => void) | null>;
 }
 
 interface UsedByChip {
@@ -76,6 +78,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   editing = false,
   onEditingChange,
   saveLibrary,
+  cancelEditRef,
 }) => {
   const layout = useMemo(
     () => (scenario ? deriveStepLayout(scenario) : null),
@@ -130,6 +133,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
             : undefined
         }
         onCancel={() => onEditingChange(false)}
+        cancelRef={cancelEditRef}
         expand={{
           to: editScenarioUrl(cpId, connectorId, scenario),
           label: target.library

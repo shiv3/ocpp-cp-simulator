@@ -263,4 +263,84 @@ describe("Charge point page — scenario run panel", () => {
     );
     expect(buttonIn(document, "Edit scenario")).toBeUndefined();
   });
+  async function pressEscape() {
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await flush(10);
+  }
+
+  const search = () => new URLSearchParams(location?.search ?? "");
+
+  it("Esc in a clean editing run panel returns to the run, keeping the panel open", async () => {
+    await renderPage("/cp/CP-A?connector=1&run=s1&edit=1");
+    await pressEscape();
+    expect(search().get("edit")).toBeNull();
+    expect(search().get("run")).toBe("s1");
+    const panel = document.querySelector(PANEL)!;
+    expect(panel.querySelector('input[aria-label="Scenario name"]')).toBeNull();
+    expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
+  });
+
+  it("Esc with unsaved changes in the run panel asks first, like Cancel", async () => {
+    await renderPage("/cp/CP-A?connector=1&run=s1&edit=1");
+    const panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    await act(async () => setInputValue(name, "Unsaved"));
+
+    await pressEscape();
+    const question = panel.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toContain("Discard unsaved changes?");
+    expect(search().get("edit")).toBe("1");
+    expect(search().get("run")).toBe("s1");
+
+    await clickEl(buttonIn(question!, "Keep editing"));
+    expect(name.value).toBe("Unsaved");
+    expect(search().get("edit")).toBe("1");
+
+    await pressEscape();
+    await clickEl(
+      buttonIn(panel.querySelector('[role="alertdialog"]')!, "Discard"),
+    );
+    expect(search().get("edit")).toBeNull();
+    expect(search().get("run")).toBe("s1");
+    expect(
+      document.querySelector(PANEL)?.querySelector("h2")?.textContent,
+    ).toBe("Fork demo");
+  });
+  it("the close button of a dirty editing run panel asks first; Discard closes the panel", async () => {
+    await renderPage("/cp/CP-A?connector=1&run=s1&edit=1");
+    const panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    await act(async () => setInputValue(name, "Unsaved"));
+    const closeButton = () =>
+      panel.querySelector<HTMLButtonElement>(
+        'button[aria-label="Close side panel"]',
+      );
+
+    await clickEl(closeButton());
+    const question = panel.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toContain("Discard unsaved changes?");
+    expect(search().get("run")).toBe("s1");
+    await clickEl(buttonIn(question!, "Keep editing"));
+    expect(name.value).toBe("Unsaved");
+    expect(search().get("edit")).toBe("1");
+
+    await clickEl(closeButton());
+    await clickEl(
+      buttonIn(panel.querySelector('[role="alertdialog"]')!, "Discard"),
+    );
+    expect(document.querySelector(PANEL)).toBeNull();
+    expect(location?.search).toBe("?connector=1");
+  });
 });

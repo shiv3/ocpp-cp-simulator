@@ -87,7 +87,7 @@ describe("DashboardPage", () => {
     }
   });
 
-  it("renders registered/connected CPs with connector rows (energy in kWh), an active Tx, and wires Disconnect to the service", async () => {
+  it("renders registered/connected CPs with connector cells (energy in kWh), an active Tx, and wires Disconnect to the service", async () => {
     const cpA = snapshot({
       id: "CP-A",
       status: OCPPStatus.Available,
@@ -126,18 +126,20 @@ describe("DashboardPage", () => {
     expect(container.textContent).toContain("CP-A");
     expect(container.textContent).toContain("CP-B");
     expect(container.textContent).toContain("2 registered");
-    expect(container.textContent).toContain("Tx #42");
+    expect(container.textContent).toContain("Tx 42");
 
-    const cardA = container.querySelector('[data-cp-id="CP-A"]');
-    expect(cardA, "expected a card for CP-A").toBeTruthy();
+    const rowA = container.querySelector('[data-cp-id="CP-A"]');
+    expect(rowA, "expected a row for CP-A").toBeTruthy();
     // The meter value is in Wh (#368).
-    expect(cardA!.textContent).toContain("16.21 kWh");
-    const disconnectButton = Array.from(cardA!.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Disconnect",
+    const cellA = container.querySelector('[data-connector-cell="CP-A#1"]');
+    expect(cellA, "expected a connector cell for CP-A #1").toBeTruthy();
+    expect(cellA!.textContent).toContain("16.21 kWh");
+    const disconnectButton = rowA!.querySelector<HTMLButtonElement>(
+      '[aria-label="Disconnect CP-A"]',
     );
     expect(
       disconnectButton,
-      "expected a Disconnect button on CP-A's card",
+      "expected a Disconnect button on CP-A's row",
     ).toBeTruthy();
 
     await act(async () => {
@@ -167,7 +169,7 @@ describe("DashboardPage", () => {
     expect(addButtons.length).toBeGreaterThan(0);
   });
 
-  it("shows a Recent activity strip that fills in as global log events arrive (Task 9)", async () => {
+  it("has no Recent activity box any more (the Message Log page has the traffic)", async () => {
     const cpA = snapshot({ id: "CP-A" });
     const service = createFakeChargePointService({ snapshots: [cpA] });
     const { container, root } = await renderConsole("/", { service });
@@ -183,16 +185,6 @@ describe("DashboardPage", () => {
       await Promise.resolve();
     });
 
-    // Before any log event, the strip is present but empty.
-    expect(container.textContent).toContain("Recent activity");
-    expect(container.textContent).toContain("No activity yet.");
-
-    const openLogLink = Array.from(container.querySelectorAll("a")).find((a) =>
-      a.textContent?.includes("Open Message Log"),
-    );
-    expect(openLogLink, "expected an Open Message Log link").toBeTruthy();
-    expect(openLogLink!.getAttribute("href")).toBe("/logs");
-
     await pushEvent(service, "CP-A", {
       type: "log",
       entry: {
@@ -203,9 +195,9 @@ describe("DashboardPage", () => {
       },
     });
 
-    expect(container.textContent).not.toContain("No activity yet.");
-    expect(container.textContent).toContain("CP-A");
-    expect(container.textContent).toContain("BootNotification accepted");
+    expect(container.textContent).not.toContain("Recent activity");
+    expect(container.textContent).not.toContain("BootNotification accepted");
+    expect(container.textContent).not.toContain("Open Message Log");
   });
 
   it("encodes a special-character cpId in the panel's URL and the full-page link, and the full page opens (bug fix)", async () => {
@@ -232,17 +224,17 @@ describe("DashboardPage", () => {
       await Promise.resolve();
     });
 
-    const card = container.querySelector(`[data-cp-id="${specialId}"]`);
-    expect(card, "expected a card for CP/Special").toBeTruthy();
+    const row = container.querySelector(`[data-cp-id="${specialId}"]`);
+    expect(row, "expected a row for CP/Special").toBeTruthy();
     // The id opens the side panel; it no longer links to the full page.
-    expect(card!.querySelector("a")).toBeNull();
+    expect(row!.querySelector("a")).toBeNull();
     expect(
-      Array.from(card!.querySelectorAll("button")).some(
+      Array.from(row!.querySelectorAll("button")).some(
         (b) => b.textContent?.trim() === "Open",
       ),
     ).toBe(false);
 
-    const idButton = Array.from(card!.querySelectorAll("button")).find(
+    const idButton = Array.from(row!.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === specialId,
     );
     expect(idButton, "expected the cpId button").toBeTruthy();

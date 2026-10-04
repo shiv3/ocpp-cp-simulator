@@ -311,7 +311,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       ? selectedConnectorId
       : (connectorList[0]?.id ?? null);
 
-  // Same proxy for "socket up" that CpCard uses: after an
+  // Same proxy for "socket up" that the Charge Points list uses: after an
   // auto-reconnect the transport can be up before BootNotification is
   // re-Accepted, so fall back to a non-Unavailable status.
   const isConnected = view.connected || view.status !== OCPPStatus.Unavailable;

@@ -290,8 +290,9 @@ describe("useGlobalLogs", () => {
 
     await pushLog(service, "CP-A", "collected on dashboard");
 
-    // Sanity check: the entry actually landed while on the Dashboard.
-    expect(container.textContent).toContain("collected on dashboard");
+    // The Dashboard shows no log lines (its Recent activity box is gone), so
+    // the entry is only visible once the Message Log page opens below.
+    expect(container.textContent).not.toContain("collected on dashboard");
 
     const logsLink = Array.from(container.querySelectorAll("a")).find(
       (a) => a.textContent?.trim() === "Message Log",

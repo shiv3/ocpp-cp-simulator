@@ -86,26 +86,86 @@ was always green. Local mode has no daemon, so its dot carries no status.
 
 ### Dashboard
 
-The dashboard (`/`) shows a card per charge point (status, connectors, last
-Heartbeat, **Connect** / **Disconnect**) and the recent activity.
+The dashboard (`/`, titled **Charge Points**) lists every charge point in one
+of three **views**, under a row of **filters**. It replaces the card grid and
+the **Recent activity** box of earlier versions; the traffic is on the
+[Message Log](#layout-route-prefixes) page.
 
-Clicking a charge point — its card, its id or one of its connector rows —
+**Views.** A segmented control in the header (`role="group"`, label `View`;
+the header reads: view switch, **All charge points** menu, **Add Charge
+Point**) picks the layout. The choice is `?view=` in the URL; the Hierarchy
+view is the default and leaves the parameter out.
+
+| View (`?view=`)               | Shows                                                                                                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hierarchy** (`hierarchy`)   | One row per charge point in one bordered card, with its connectors as a grid of small cells under it.                                                                                                                                  |
+| **Charge points** (`cp`)      | A table, one row per charge point: id, OCPP version, status, **In use** (`busy / total` connectors, busy = Charging, Preparing, SuspendedEV, SuspendedEVSE or Finishing), scenario badge or `—`, last Heartbeat, and the power button. |
+| **Connectors** (`connectors`) | A flat table, one row per connector: `<cp id> #<n>`, status, meter (kWh), transaction (`#<id>` or `—`), scenario run state or `—`, and the charge point's status.                                                                      |
+
+In the Hierarchy view a row's head holds, left to right: a **twist** button
+(`Collapse connectors of <id>` / `Expand …`, `aria-expanded`) that folds the
+connector grid away (kept on the page, not in the URL), a plug icon colored by
+status, the id, the OCPP version as a muted chip, the status pill, the
+**Scenario** badge (amber **Waiting: …** while a run is parked), the **Net
+sim** badge, one small dot per connector (tooltip `#<n> <Status>`), and at the
+right end an icon-only power button (`Connect <id>` / `Disconnect <id>`; its
+tooltip carries the last Heartbeat, `heartbeat 3m ago`). Status colors, for
+the pill, the dots and the icon: Available and Connected green; Charging blue;
+Preparing, Finishing, Reserved, SuspendedEV and SuspendedEVSE amber; Faulted
+and Unavailable red; Disconnected gray
+([`statusColor.ts`](../../src/console/components/statusColor.ts)).
+
+A **connector cell** shows little text: `#<n>`, the status with a colored dot,
+a small play icon in the run state's color while a scenario runs on it, and at
+the right either `Tx <id>` or, with no transaction and a non-zero meter, the
+energy in kWh (nothing otherwise). The rest is in the tooltip, joined with
+`·`: status, energy, `Tx #<id>`, and `<run state>: <scenario name>`. The
+snapshot carries no fault code, so a Faulted connector's tooltip shows the
+status only. The cell is a button (`aria-pressed` while it is the connector
+open in the panel) and opens the panel on that connector.
+
+**Filters.** The row above the list narrows it; every field is a URL
+parameter, kept when the panel opens and changed with a replace (Back leaves
+the page, not the last keystroke). The comboboxes filter as you type; **Enter**
+takes the first suggestion, **Esc** closes the suggestions (and does not close
+the side panel), and **Clear** empties the field.
+
+| Field (label)               | URL            | Matches                                                                                                                                                                                                                                                                                                                    |
+| --------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Charge point** combobox   | `?q=`          | A substring of the charge point id, case-insensitive. Suggestions: every id, with a status dot and the OCPP version.                                                                                                                                                                                                       |
+| **Connector / Tx** combobox | `?conn=`       | `#3`, `3`, `Tx 42`, `tx42` or `42`: a connector whose number equals the digits, or whose transaction id contains them. Text that is not of that form matches nothing; `#` or `Tx` alone does not filter yet. Suggestions: every connector number as `#n`, then every running transaction as `Tx <id>` with `<cp id> #<n>`. |
+| **Status** select           | `?status=`     | The connector's OCPP status (the nine values, in enum order). An unknown value in the URL is ignored.                                                                                                                                                                                                                      |
+| **OCPP version** select     | `?version=`    | The charge point's version (`config.ocppVersion` in Remote mode; in Local mode the shared config's), among the versions present in the list.                                                                                                                                                                               |
+| **Connected** checkbox      | `?connected=1` | Charge points that are connected: transport up, or a status other than Unavailable.                                                                                                                                                                                                                                        |
+| **Scenario** checkbox       | `?scenario=1`  | Connectors with an active scenario run.                                                                                                                                                                                                                                                                                    |
+
+The **connector-level** filters (Connector / Tx, Status, Scenario) hide the
+charge points that have no matching connector and, in the Hierarchy view, the
+connectors that do not match; the others (Charge point, OCPP version,
+Connected) hide whole charge points. Filters combine with AND. At the right
+end the counter reads `<n> CPs · <m> connectors` for what is shown. When
+nothing matches, the list says **No charge points match the current
+filters.**; with no charge point at all it keeps **No charge points** and the
+add action. The filter logic is a pure module,
+[`cpListFilters.ts`](../../src/console/pages/dashboard/cpListFilters.ts).
+
+Clicking a charge point — its row, its id, a table row or a connector cell —
 opens it in a **side panel** beside the list, without leaving the page. The
 panel holds the [charge point page](#charge-point-page)'s content, with
 **Open as full page** and **Close** buttons added to its header. The state is
 in the URL, so a reload or a shared link reopens it:
 
-| URL                       | Meaning                                               |
-| ------------------------- | ----------------------------------------------------- |
-| `/?cp=<id>`               | The list with that charge point open in the panel.    |
-| `/?cp=<id>&connector=<n>` | The same, on connector `n` (a connector row sets it). |
-| `/cp/<id>?connector=<n>`  | The full page, reached from **Open as full page**.    |
+| URL                       | Meaning                                                       |
+| ------------------------- | ------------------------------------------------------------- |
+| `/?cp=<id>`               | The list with that charge point open in the panel.            |
+| `/?cp=<id>&connector=<n>` | The same, on connector `n` (a connector cell or row sets it). |
+| `/cp/<id>?connector=<n>`  | The full page, reached from **Open as full page**.            |
 
 - **Open, swap, toggle.** Opening from a closed list adds one history entry.
   Clicking another charge point (or connector) while the panel is open swaps
-  its content and replaces the entry; clicking the open charge point's card
-  again closes the panel. A button, link or form control inside a card keeps
-  its own job: **Connect** / **Disconnect** does not open the panel. The card
+  its content and replaces the entry; clicking the open charge point's row
+  again closes the panel. A button, link or form control inside a row keeps
+  its own job: **Connect** / **Disconnect** does not open the panel. The row
   of the open charge point is highlighted (`data-selected="true"`).
 - **Close.** The **Close side panel** button, **Esc** (unless a dialog inside
   the panel handles it first), or a click on the list's background. Closing
@@ -120,10 +180,10 @@ in the URL, so a reload or a shared link reopens it:
   hidden.
 - **Open as full page** goes to `/cp/<id>?connector=<n>`. Leaving the full
   page with **← Back to charge points** returns to `/?cp=<id>&connector=<n>`:
-  the list with that charge point still open in the panel, and its card
+  the list with that charge point still open in the panel, and its row
   scrolled into view.
 
-With two charge points or more, its **All charge points** menu (#416) runs an
+With two charge points or more, the header's **All charge points** menu (#416) runs an
 action on every charge point at once, as the classic UI's Multi-CP dialog did:
 
 | Action                       | What each charge point does                                                                                                                                 |
@@ -328,7 +388,7 @@ console pointed at a self-hosted daemon. An unstamped daemon reports
 `0.0.0-dev`. Local mode has no daemon and shows no daemon version; neither
 does a daemon that predates `server.info`.
 
-The console's dashboard and connector cards format a connector's live readings
+The console's dashboard (the connector cells and the Connectors view) and the connector cards format a connector's live readings
 with
 `src/lib/connectorFormat.ts`: the meter value, which is in Wh, as kWh with
 2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`). The

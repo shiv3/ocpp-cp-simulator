@@ -1,0 +1,113 @@
+import React from "react";
+
+import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
+import StatusPill from "../../components/StatusPill";
+import { formatRelativeTime } from "../../lib/formatRelativeTime";
+import { usePanelParams } from "../../lib/usePanelParams";
+import type { CpListRow } from "./cpListFilters";
+import {
+  cpStatus,
+  firstWaitingExpectation,
+  hasActiveRun,
+  inUseCount,
+  lastHeartbeat,
+} from "./cpRowFormat";
+import CpPowerButton from "./CpPowerButton";
+
+/** The Charge points view: one table row per charge point. */
+const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
+  const { open, close, isOpen } = usePanelParams();
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead>Charge point</TableHead>
+          <TableHead>OCPP</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead className="text-right">In use</TableHead>
+          <TableHead>Scenario</TableHead>
+          <TableHead>Heartbeat</TableHead>
+          <TableHead className="w-10">
+            <span className="sr-only">Actions</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => {
+          const { cp } = row;
+          const selected = isOpen(cp.id);
+          const toggleOpen = () => (selected ? close() : open(cp.id));
+          const { busy, total } = inUseCount(row);
+          return (
+            <TableRow
+              key={cp.id}
+              data-cp-id={cp.id}
+              data-selected={selected ? "true" : undefined}
+              onClick={(event) => {
+                // A button inside the row handles its own click.
+                if ((event.target as Element).closest("button, a")) return;
+                toggleOpen();
+              }}
+              className={cn(
+                "cursor-pointer",
+                selected && "bg-blue-50 dark:bg-blue-950/30",
+              )}
+            >
+              <TableCell>
+                {/* A button, so the panel opens from the keyboard too. */}
+                <button
+                  type="button"
+                  onClick={toggleOpen}
+                  className="font-mono text-sm font-semibold text-gray-900 hover:underline dark:text-gray-100"
+                >
+                  {cp.id}
+                </button>
+              </TableCell>
+              <TableCell className="font-mono text-xs text-gray-500 dark:text-gray-400">
+                {row.ocppVersion ?? "—"}
+              </TableCell>
+              <TableCell>
+                <StatusPill status={cpStatus(row)} />
+              </TableCell>
+              <TableCell className="text-right font-mono text-xs">
+                {busy} / {total}
+              </TableCell>
+              <TableCell>
+                {hasActiveRun(row) ? (
+                  <ActiveScenarioBadge
+                    isActive
+                    waitingExpectation={firstWaitingExpectation(row)}
+                  />
+                ) : (
+                  <span className="text-gray-400 dark:text-gray-500">—</span>
+                )}
+              </TableCell>
+              <TableCell className="text-xs text-gray-500 dark:text-gray-400">
+                {formatRelativeTime(lastHeartbeat(row))}
+              </TableCell>
+              <TableCell>
+                <CpPowerButton
+                  cpId={cp.id}
+                  connected={row.connected}
+                  lastHeartbeat={lastHeartbeat(row)}
+                />
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+};
+
+export default CpTable;

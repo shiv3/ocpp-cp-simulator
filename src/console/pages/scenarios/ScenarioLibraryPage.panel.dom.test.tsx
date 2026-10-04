@@ -49,6 +49,23 @@ function openParam(location: ReportedLocation | null): string | null {
   return new URLSearchParams(location?.search ?? "").get("open");
 }
 
+function editParam(location: ReportedLocation | null): string | null {
+  return new URLSearchParams(location?.search ?? "").get("edit");
+}
+
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+const DEF_PATH = `/scenarios?tab=library&open=${encodeURIComponent(
+  `def:${LIBRARY_SCOPE}/cp/lib-fork`,
+)}`;
+
 function buttonIn(root: Element, label: string): HTMLButtonElement | undefined {
   return Array.from(root.querySelectorAll("button")).find(
     (b) => b.textContent?.trim() === label,
@@ -180,12 +197,8 @@ describe("Scenarios page — side panel", () => {
     );
     expect(chip?.getAttribute("href")).toBe("/cp/CP-A?connector=1");
     expect(chip?.getAttribute("data-running")).toBe("true");
-    const edit = Array.from(panel.querySelectorAll("a")).find((a) =>
-      a.textContent?.includes("Edit scenario"),
-    );
-    expect(edit?.getAttribute("href")).toBe(
-      "/scenarios?tab=library&edit=lib-fork",
-    );
+    // Edit scenario edits in the panel (see below), not a link away.
+    expect(buttonIn(panel, "Edit scenario")).toBeTruthy();
     // Plain steps, no run phase.
     expect(
       panel.querySelector('[data-step-id="plug"]')?.getAttribute("data-phase"),
@@ -222,5 +235,100 @@ describe("Scenarios page — side panel", () => {
 
     await click(container.querySelector("[data-scenarios-page]")!);
     expect(openParam(location)).toBeNull();
+  });
+  it("Edit scenario turns the definition panel into the editor (&edit=1), and Save writes the Library", async () => {
+    const { container, service } = await renderPage(DEF_PATH);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    let panel = document.querySelector(PANEL)!;
+    await click(buttonIn(panel, "Edit scenario")!);
+
+    expect(editParam(location)).toBe("1");
+    expect(openParam(location)).toBe(`def:${LIBRARY_SCOPE}/cp/lib-fork`);
+    // The page keeps the Library table: the editor is in the panel.
+    expect(container.querySelector(LIBRARY_ROW)).toBeTruthy();
+    panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    expect(name.value).toBe("Fork demo");
+    expect(panel.querySelector('select[aria-label="Trigger"]')).toBeTruthy();
+    expect(
+      panel.querySelector('[role="group"][aria-label="Editor view"]'),
+    ).toBeTruthy();
+    expect(panel.querySelector('[data-testid="library-used-by"]')).toBeTruthy();
+    expect(panel.querySelectorAll("[data-step-id]")).toHaveLength(5);
+    // The expand button opens the Library editor page on the same scenario.
+    expect(
+      panel
+        .querySelector('a[aria-label="Open in the Library editor"]')
+        ?.getAttribute("href"),
+    ).toBe("/scenarios?tab=library&edit=lib-fork");
+
+    // The inspector goes under the steps in the narrow panel.
+    await click(panel.querySelector('button[aria-label^="Select step 1"]')!);
+    expect(panel.querySelector('[data-testid="step-inspector"]')).toBeTruthy();
+
+    await act(async () => setInputValue(name, "Renamed fork"));
+    await click(buttonIn(panel, "Save and apply to 1 connector")!);
+
+    expect(confirm).toHaveBeenCalled();
+    expect(service.saveScenarioDefinition).toHaveBeenCalledWith(
+      LIBRARY_SCOPE,
+      null,
+      expect.objectContaining({ id: "lib-fork", name: "Renamed fork" }),
+    );
+    // The copy on CP-A #1 is re-pushed, as from the page's Save.
+    expect(service.replaceConnectorScenarioDefinitions).toHaveBeenCalledWith(
+      "CP-A",
+      1,
+      [expect.objectContaining({ id: "s1", libraryId: "lib-fork" })],
+    );
+  });
+
+  it("a reload with &edit=1 reopens the panel's editor", async () => {
+    await renderPage(`${DEF_PATH}&edit=1`);
+    const panel = document.querySelector(PANEL)!;
+    expect(
+      panel.querySelector<HTMLInputElement>('input[aria-label="Scenario name"]')
+        ?.value,
+    ).toBe("Fork demo");
+  });
+
+  it("Cancel with unsaved changes asks in the panel and keeps editing until confirmed", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    await renderPage(`${DEF_PATH}&edit=1`);
+    let panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    await act(async () => setInputValue(name, "Unsaved"));
+
+    await click(buttonIn(panel, "Cancel")!);
+    const question = panel.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toContain("Discard unsaved changes?");
+    expect(editParam(location)).toBe("1");
+    expect(confirm).not.toHaveBeenCalled();
+
+    await click(buttonIn(question!, "Keep editing")!);
+    expect(panel.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(name.value).toBe("Unsaved");
+    expect(editParam(location)).toBe("1");
+
+    await click(buttonIn(panel, "Cancel")!);
+    await click(
+      buttonIn(panel.querySelector('[role="alertdialog"]')!, "Discard")!,
+    );
+    expect(editParam(location)).toBeNull();
+    panel = document.querySelector(PANEL)!;
+    expect(panel.querySelector('input[aria-label="Scenario name"]')).toBeNull();
+    expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
+  });
+
+  it("Cancel without changes returns to the read view at once", async () => {
+    await renderPage(`${DEF_PATH}&edit=1`);
+    const panel = document.querySelector(PANEL)!;
+    await click(buttonIn(panel, "Cancel")!);
+    expect(editParam(location)).toBeNull();
+    expect(panel.querySelector('[role="alertdialog"]')).toBeNull();
   });
 });

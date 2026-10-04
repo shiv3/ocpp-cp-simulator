@@ -52,25 +52,54 @@ export function parseScenarioPanel(
 
 export interface ScenarioPanelParams {
   target: ScenarioPanelTarget | null;
+  /** The panel shows the editor (`&edit=1`) instead of the read view. */
+  editing: boolean;
   open(target: ScenarioPanelTarget): void;
   close(): void;
   isOpen(target: ScenarioPanelTarget): boolean;
+  /** Switches the open panel between its read view and the editor. */
+  setEditing(editing: boolean): void;
+}
+
+/** The panel's edit mode in the URL (`edit=1`, with the editor's `view`),
+ *  so a reload keeps it. Shared by every page with a scenario panel. */
+export function withPanelEditing(
+  params: URLSearchParams,
+  editing: boolean,
+): URLSearchParams {
+  const next = new URLSearchParams(params);
+  if (editing) {
+    next.set("edit", "1");
+  } else {
+    next.delete("edit");
+    next.delete("view");
+  }
+  return next;
+}
+
+/** True when `edit=1` asks for the panel's editor. */
+export function isPanelEditing(params: URLSearchParams): boolean {
+  return params.get("edit") === "1";
 }
 
 /**
  * The Scenarios page's side panel lives in `?open=` (see
  * `formatScenarioPanel`), with `usePanelParams`'s history rules: opening from
  * a closed page pushes one entry (Back closes it), swapping and closing
- * replace it. The page's other parameters (tab, filters) are kept.
+ * replace it. `&edit=1` puts the panel in its edit mode (opening, swapping
+ * and closing leave it). The page's other parameters (tab, filters) are kept.
+ * With `?open=`, `edit` is the panel's flag; without it, the Library tab's
+ * inline editor (`edit=<id>`).
  */
 export function useScenarioPanelParams(): ScenarioPanelParams {
   const [params, setParams] = useSearchParams();
   const raw = params.get("open");
   const target = useMemo(() => parseScenarioPanel(raw), [raw]);
+  const editing = target !== null && isPanelEditing(params);
 
   const open = useCallback(
     (next: ScenarioPanelTarget) => {
-      const updated = new URLSearchParams(params);
+      const updated = withPanelEditing(params, false);
       updated.set("open", formatScenarioPanel(next));
       setParams(updated, { replace: target !== null });
     },
@@ -78,7 +107,7 @@ export function useScenarioPanelParams(): ScenarioPanelParams {
   );
 
   const close = useCallback(() => {
-    const updated = new URLSearchParams(params);
+    const updated = withPanelEditing(params, false);
     updated.delete("open");
     setParams(updated, { replace: true });
   }, [params, setParams]);
@@ -90,5 +119,14 @@ export function useScenarioPanelParams(): ScenarioPanelParams {
     [target],
   );
 
-  return { target, open, close, isOpen };
+  const setEditing = useCallback(
+    (next: boolean) => {
+      if (target === null) return;
+      // Replace: Back leaves the panel rather than stepping out of the editor.
+      setParams(withPanelEditing(params, next), { replace: true });
+    },
+    [params, setParams, target],
+  );
+
+  return { target, editing, open, close, isOpen, setEditing };
 }

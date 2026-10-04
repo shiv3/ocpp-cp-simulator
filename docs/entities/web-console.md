@@ -362,7 +362,8 @@ Without a live run, the connector's **scenario row** takes its place: which
   the copy is loaded into it and run again.
 - The gear (**Edit scenario**) opens the scenario in the Library editor
   (`/scenarios?tab=library&edit=<libraryId>`); for a definition that is not a
-  copy, the per-connector editor.
+  copy, the per-connector editor. (The run panel beside the page edits in
+  place, see [Editing in the side panel](#editing-in-the-side-panel).)
 - **Apply to all connectors** (on a charge point with more than one) assigns
   the same Library scenario to every connector of the charge point, after a
   confirmation naming the connectors whose different scenario it replaces.
@@ -485,15 +486,23 @@ each part is URI-encoded:
 | `run:<cp>/<connector>/<scenarioId>` | An active run's row: the [run panel](#scenario-runs-panel-and-page).                                                                                                                                    |
 | `def:<cp>/<connector>/<scenarioId>` | A Library row: the definition panel, `def:__library__/cp/<id>`. An older link naming a charge point's own scope (`cp` in place of the connector is its charge-point scope) still opens that definition. |
 
+`&edit=1` beside `?open=` shows the panel's **edit mode** (see
+[Editing in the side panel](#editing-in-the-side-panel)), so a reload keeps it;
+with `?open=` the `edit` parameter is always this flag, never the Library
+tab's inline editor (`edit=<id>`, which has no panel).
+
 Opening from a closed page adds one history entry; clicking another row swaps
 the panel and replaces it; clicking the open row again closes the panel.
-Closing replaces the entry and keeps the tab and the filters. A row's own
+Closing replaces the entry and keeps the tab and the filters; opening,
+swapping and closing leave the edit mode. A click on the page background does
+not close a panel in edit mode (its unsaved changes would be lost). A row's own
 controls (**Skip**, **Next**, **Stop**, **Edit**, the enabled box, the
 `…` menu) keep their job and do not open the panel. The open row is highlighted
 (`data-selected="true"`).
 
 The **definition panel** shows the scenario's name, `Library`, its step count
-(and branch count), **Edit scenario** (the Library editor), **Used by** — the
+(and branch count), **Edit scenario** (the panel's
+[edit mode](#editing-in-the-side-panel)), **Used by** — the
 connectors assigned a copy of it, as chips linking to
 `/cp/<id>?connector=<n>`, a running one marked with its run state's dot, or "no
 connector uses it" — and its steps in the Steps view without any run state.
@@ -576,10 +585,13 @@ and replaces the history entry) and the read-only **run page**
 (`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=graph]`). Both
 show the scenario name, `<charge point> #<connector>`, the run state,
 `k / N · <elapsed>` and a progress bar, **Start** or **Stop**, the wait
-controls while the run is parked, and **Edit scenario**, which opens the
-scenario in the [editor](#scenario-editor-steps-and-graph) — the Library editor
-for a copy of a [Library scenario](#scenario-library). The panel's expand
-button goes to the run page (with `run=<runId>`); the page's **← Back**
+controls while the run is parked, and **Edit scenario**: in the panel it
+switches the panel to its [edit mode](#editing-in-the-side-panel)
+(`&edit=1`, on the charge point page `/cp/<id>?connector=<n>&run=<id>&edit=1`);
+on the run page it links to the [editor](#scenario-editor-steps-and-graph).
+Either way a copy of a [Library scenario](#scenario-library) edits the Library
+entry (its `libraryId`), and a definition that is not a copy edits itself. The
+panel's expand button goes to the run page (with `run=<runId>`); the page's **← Back**
 returns to where it was opened from (the panel, still open), else to
 `/scenarios`. **Start** is disabled for a charge-point-scope scenario (it
 runs per connector when its trigger fires). A run of a charge-point-scope
@@ -617,34 +629,60 @@ The editor shows one scenario in two views, switched by the **Steps | Graph**
 toggle and kept in the URL (`&view=steps|graph`). It opens inline on the
 Library tab for a [Library scenario](#scenario-library)
 (`/scenarios?tab=library&edit=<id>`, header `← Library`, **Save and apply to
-<n> connectors**, **Used by** chips), and as the per-connector editor
+<n> connectors**, **Used by** chips), as the per-connector editor
 (`/scenarios/edit?cp=…&connector=…&id=…`, header `← Back`, the target chip and
 **▶ Run**) for a definition of a charge point's own scope that is not a
-Library copy. **Edit scenario** everywhere opens the Library editor when the
-scenario is a Library scenario or a copy of one (`libraryId`). Both use the
-same content
+Library copy, and in a [side panel](#editing-in-the-side-panel). **Edit
+scenario** everywhere edits the Library entry when the scenario is a Library
+scenario or a copy of one (`libraryId`). All use the same content
 ([`ScenarioEditorContent`](../../src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
 
 - **Steps** — the step boxes of the run views' Steps view: the chain, then at
   most one fork with its branches side by side. A click selects a step: its
-  form opens in the inspector on the right (sticky on a wide window), whose
-  header moves the step up or down **within its lane** (the chain or its
-  branch — a move never crosses lanes) and deletes it. **+ Add step** under
-  the chain and under each branch appends a step there (inserting at the end of
-  the chain of a forked scenario makes the new step the fork node);
-  **+ Add parallel branch** adds a branch holding one Delay step — to a chain,
-  it creates the fork at the chain's last step (its first branch is the
-  chain's own, empty, continuation to END). Deleting a branch's last step drops
-  the branch, and a single remaining branch folds into the chain. The edits
-  rebuild the graph's edges and positions
-  ([`scenarioSteps.ts`](../../src/console/lib/scenarioSteps.ts),
-  `insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
-  Steps is the default for any scenario this view can draw.
-- **Graph** — the node graph editor (ReactFlow): nodes, edges, the node
-  palette, auto-arrange, undo / redo, and a node panel (double-click a node,
-  then **Apply**). A scenario the Steps view cannot draw (a join, a loop, a
-  second fork, a node no path reaches) always opens here, with **Steps**
-  disabled.
+  form opens in the inspector (on the right, sticky, on a wide page; under the
+  steps in the panel), whose header moves the step up or down **within its
+  lane** (the chain or its branch — a move never crosses lanes) and deletes
+  it. Hovering the gap between two boxes of a lane shows a small `+`
+  (**Insert step between n and n+1**) that opens the step picker there (as the
+  old step list did); **+ Add step** under the chain and under each branch
+  appends a step (inserting at the end of the chain of a forked scenario makes
+  the new step the fork node). Each box has a grab handle (**Drag to
+  reorder**) on its left: dragging it up or down shows a drop line where the
+  box will land, a release moves it there (only within its lane), and
+  **Escape** cancels; a focused box takes **Alt+↑ / Alt+↓** to move one place
+  and **Delete** to remove it (asked first, in the page). **+ Add parallel
+  branch** adds a branch holding one Delay step — to a chain, it creates the
+  fork at the chain's last step (its first branch is the chain's own, empty,
+  continuation to END). Deleting a branch's last step drops the branch, and a
+  single remaining branch folds into the chain. Steps is the default for any
+  scenario this view can draw.
+- **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
+  connected cards, the chain in lane 0 and each branch curving into a lane of
+  its own. A click selects a card for the inspector (the selected card gets a
+  small ✕ that removes it); a `+` disc on the path after the last card of the
+  chain and of each branch (**Add step after step n**; on an empty branch
+  **Add step to <branch>**) and a `+` shown on
+  hover between two cards of a lane (**Insert step between n and n+1**) open
+  the step picker at that place; **+ branch** beside the fork node (beside
+  the chain's last card when there is no fork yet) adds a parallel branch.
+  A card drags up or down within its lane like a Steps box (the card follows
+  the pointer over a drop line; a press that moves less than 6 px is a click,
+  so it still selects; **Escape** cancels), and a focused card takes
+  **Alt+↑ / Alt+↓** and **Delete** the same way. A scenario the layout cannot
+  draw (a join, a loop, a second fork, a node no path reaches) opens the full
+  node graph editor (ReactFlow: nodes, edges, the node palette,
+  auto-arrange, undo / redo, a node panel — double-click a node, then
+  **Apply**) under the line "This scenario has joins or loops; the full graph
+  editor is used", with **Steps** disabled. Once open, that editor stays for
+  the visit even when an edit makes the scenario drawable again (picking
+  **Steps** leaves it).
+
+The two views share the drag
+([`useLaneDrag`](../../src/console/lib/useLaneDrag.ts), pointer events, no
+drag-and-drop library) and the insert picker, so they behave the same. The
+edits rebuild the graph's edges and positions
+([`scenarioSteps.ts`](../../src/console/lib/scenarioSteps.ts),
+`insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
 
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until **Save**. The per-connector editor's Save saves this
@@ -655,14 +693,35 @@ the collapsed **Scenario EV Settings** (#424): the EV the scenario applies to
 its connector when it starts, field by field (an empty field keeps the
 connector's value; the placeholders show the Default EV Settings from
 **Settings**); a scenario whose fields are all empty saves no EV settings.
-The graph view does not rewrite the trigger from a **Status Trigger** node, as
+The inspector lays its fields out in two columns when it is wide enough (in
+the panel, under the steps) and in one beside the steps on the page.
+The full graph editor does not rewrite the trigger from a **Status Trigger** node, as
 the classic UI's graph editor did, so pick **On status change** in the header for a scenario that should start
-on a status. A graph view opened because the scenario could not be drawn stays
-open when an edit makes it drawable again. Opening a scenario in the graph view is
+on a status. Opening a scenario in the full graph editor is
 not an edit: an edge to a missing node is hidden there, and leaves the saved
 definition only with the first save after a graph edit. Before #411 a branching
 scenario opened read-only, with a link to the classic UI's graph editor; before
-the Library, the Steps view showed only a single chain.
+the Library, the Steps view showed only a single chain; before this round the
+Graph view was always the ReactFlow editor.
+
+#### Editing in the side panel
+
+**Edit scenario** in the Scenarios page's definition panel and in a run panel
+(the Scenarios page's Active runs, or beside the charge point page) turns the
+panel body into the editor (`&edit=1`, kept on reload) instead of leaving the
+page. The panel's header holds the name, **Save** (**Save and apply to <n>
+connectors** for a Library scenario with users), **Cancel**, the expand button
+(**Open in the Library editor**, or **Open in the editor** for a definition
+that is not a Library copy: the editor page on the same scenario) and close;
+the trigger and **Enabled** sit under it, then **Used by**, the description
+and EV settings, the **Steps | Graph** switch, the steps or the graph, and the
+inspector under them. **Cancel** returns to the read view; with unsaved
+changes it first asks in the panel (**Discard unsaved changes?** —
+**Keep editing** / **Discard**), not in a browser dialog. Save behaves as on
+the page: a Library scenario is saved to the Library and re-pushed to every
+connector using it (with the same confirmation when a copy is running), a
+definition that is not a copy is saved in its own scope. Leaving the edit
+mode re-reads the run panel's definition.
 
 In the console, a connector's **run row** (under its card on the
 [charge point page](#charge-point-page)) shows the run executing or parked on

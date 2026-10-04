@@ -7,8 +7,9 @@ import React, {
   useState,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Maximize2, Trash2, X } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { saveEditorScenario } from "../../../../components/scenario/scenarioPersistence";
 import { serializeScenarioGraph } from "../../../../components/scenario/scenarioSerialize";
@@ -21,6 +22,7 @@ import type {
 } from "../../../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../../../data/providers/DataProvider";
 import EmptyState from "../../../components/EmptyState";
+import InlineConfirm from "../../../components/InlineConfirm";
 import SegmentedControl from "../../../components/SegmentedControl";
 import {
   addParallelBranch,
@@ -36,13 +38,14 @@ import {
   layoutSteps,
   stepIndexOf,
 } from "../../../lib/stepLayout";
+import StepsGraphView from "../run/StepsGraphView";
 import StepsView from "../run/StepsView";
 import { nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
 import StepInspector from "./StepInspector";
 
-// The ReactFlow graph editor is heavy; load it only when the Graph view
-// opens.
+// The ReactFlow graph editor is heavy, and only the fallback for a shape
+// the card graph cannot draw: load it only then.
 const ScenarioEditor = lazy(
   () => import("../../../../components/scenario/ScenarioEditor"),
 );
@@ -92,20 +95,36 @@ export interface ScenarioEditorContentProps {
   backLabel?: string;
   /** Set for a Library scenario: Used by, and Save applies to the users. */
   library?: LibraryEditorBinding;
+  /** `panel`: the side panel's layout — the header holds the name, trigger,
+   *  Enabled, Save, Cancel, the expand link and close; the inspector goes
+   *  under the steps. `page` (default): the editor page. */
+  variant?: "page" | "panel";
+  /** panel: back to the read view (asked first when there are unsaved
+   *  changes). */
+  onCancel?: () => void;
+  /** panel: the expand button, to the editor page on the same scenario. */
+  expand?: { to: string; label: string };
+  /** panel: the close button. */
+  onClose?: () => void;
 }
 
 /**
  * Scenario editor with two views of the same definition:
  * - **Steps**: the step boxes of `StepsView` (a chain, then at most one fork
- *   of branches) with "+ Add step" under the chain and each branch and
- *   "+ Add parallel branch"; a click selects a step for the inspector on the
- *   right, whose header moves it within its lane or deletes it;
- * - **Graph**: the ReactFlow graph editor (`ScenarioEditor`, embedded), for
- *   any scenario — the only view for a shape `deriveStepLayout` cannot draw
- *   (a join, a loop, a second fork).
+ *   of branches) with "+ Add step" under the chain and each branch, a `+`
+ *   between two boxes, drag to reorder within a lane and "+ Add parallel
+ *   branch"; a click selects a step for the inspector, whose header moves it
+ *   within its lane or deletes it;
+ * - **Graph**: the same layout as connected cards (`StepsGraphView`, as on
+ *   the run page) with `+` discs, "+ branch" and drag. A shape
+ *   `deriveStepLayout` cannot draw (a join, a loop, a second fork) opens the
+ *   ReactFlow `ScenarioEditor` instead — the only view for it, and kept for
+ *   the rest of the visit once opened, so an edit that makes the scenario
+ *   drawable does not swap editors mid-edit.
  * The content owns the definition, the dirty state and Save in both views;
  * the view is kept in the URL (`view=steps|graph`). Used by the
- * per-connector editor page and, inline, by the Library tab.
+ * per-connector editor page, inline by the Library tab, and in the
+ * Scenarios page's and the charge point page's side panels (`variant`).
  */
 const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   cpId,
@@ -114,7 +133,12 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   onBack,
   backLabel,
   library,
+  variant = "page",
+  onCancel,
+  expand,
+  onClose,
 }) => {
+  const isPanel = variant === "panel";
   const [searchParams, setSearchParams] = useSearchParams();
   const { mode, chargePointService, defaultEvSettings } = useDataContext();
   const requestedView: EditorView =
@@ -127,6 +151,11 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** A step the keyboard asked to delete, waiting for the in-page answer. */
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  /** Set once the ReactFlow editor opened: it stays for this visit. */
+  const [fullGraph, setFullGraph] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +199,9 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   // it drawable again does not eject the user from the graph mid-edit.
   const forcedGraph = layout !== null && !layout.supported;
   const view: EditorView = forcedGraph ? "graph" : requestedView;
+  // Same for the editor: ReactFlow, once open, stays until Steps is picked.
+  if (forcedGraph && !fullGraph) setFullGraph(true);
+  const showFullGraph = forcedGraph || fullGraph;
 
   const dirty = useMemo(() => {
     if (!scenario || !original) return false;
@@ -184,6 +216,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   );
   const selectedPlace =
     layout && selectedNode ? findStepLane(layout, selectedNode.id) : null;
+  const pendingNode =
+    (layout && layoutSteps(layout).find((s) => s.id === pendingDelete)) ?? null;
   const selectedNumber =
     layout && selectedNode ? stepIndexOf(layout, selectedNode.id) : null;
 
@@ -191,26 +225,30 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     setScenario((prev) => (prev ? { ...prev, ...patch } : prev));
   };
 
-  const handleAddStep = (lane: StepLane, type: ScenarioNodeType) => {
-    if (!scenario || !layout) return;
-    const steps =
-      lane === "main" ? layout.main : layout.fork?.branches[lane]?.steps;
-    if (!steps) return;
-    const next = insertLaneStep(scenario, layout, lane, steps.length, type);
+  /** Selects the step a change added (the one id `next` has that the
+   *  scenario had not). */
+  const applyAndSelectNew = (next: ScenarioDefinition) => {
+    if (!scenario) return;
     const before = new Set(scenario.nodes.map((n) => n.id));
     setScenario(next);
     setSelectedStepId(next.nodes.find((n) => !before.has(n.id))?.id ?? null);
+  };
+
+  const handleInsertStep = (
+    lane: StepLane,
+    index: number,
+    type: ScenarioNodeType,
+  ) => {
+    if (!scenario || !layout) return;
+    applyAndSelectNew(insertLaneStep(scenario, layout, lane, index, type));
   };
 
   const handleAddBranch = () => {
     if (!scenario || !layout) return;
-    const next = addParallelBranch(scenario, layout);
-    const before = new Set(scenario.nodes.map((n) => n.id));
-    setScenario(next);
-    setSelectedStepId(next.nodes.find((n) => !before.has(n.id))?.id ?? null);
+    applyAndSelectNew(addParallelBranch(scenario, layout));
   };
 
-  const handleMove = (nodeId: string, delta: -1 | 1) => {
+  const handleMove = (nodeId: string, delta: number) => {
     if (!scenario || !layout) return;
     setScenario(moveLaneStep(scenario, layout, nodeId, delta));
   };
@@ -219,6 +257,17 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     if (!scenario || !layout) return;
     setScenario(removeLaneStep(scenario, layout, nodeId));
     setSelectedStepId((sel) => (sel === nodeId ? null : sel));
+    setPendingDelete(null);
+  };
+
+  /** The keyboard's Delete asks first (one key away from losing a step);
+   *  the ✕ and the inspector's bin are deliberate clicks. */
+  const handleDeleteRequest = (
+    nodeId: string,
+    { confirm }: { confirm: boolean },
+  ) => {
+    if (confirm) setPendingDelete(nodeId);
+    else handleDelete(nodeId);
   };
 
   const handleStepDataChange = (nodeId: string, data: ScenarioNodeData) => {
@@ -234,6 +283,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   );
 
   const setView = (view: EditorView) => {
+    if (view === "steps") setFullGraph(false);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -289,6 +339,52 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     }
   };
 
+  const handleCancel = () => {
+    if (dirty) setConfirmCancel(true);
+    else onCancel?.();
+  };
+
+  const panelActions = isPanel ? (
+    <>
+      {onCancel && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleCancel}
+        >
+          Cancel
+        </Button>
+      )}
+      {expand && (
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="px-2"
+          title={expand.label}
+        >
+          <Link to={expand.to} aria-label={expand.label}>
+            <Maximize2 className="h-3.5 w-3.5" />
+          </Link>
+        </Button>
+      )}
+      {onClose && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="px-2"
+          aria-label="Close side panel"
+          title="Close (Esc)"
+          onClick={onClose}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </>
+  ) : null;
+
   const backControl = onBack ? (
     <button
       type="button"
@@ -313,7 +409,11 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   if (notFound || !scenario || !layout) {
     return (
       <div>
-        {backControl}
+        {isPanel ? (
+          <div className="mb-2 flex justify-end gap-2">{panelActions}</div>
+        ) : (
+          backControl
+        )}
         <EmptyState
           title="Scenario not found"
           hint={
@@ -340,13 +440,30 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         onSave={() => void handleSave()}
         onBack={onBack}
         backLabel={backLabel}
-        showTarget={!library}
+        showTarget={!library && !isPanel}
+        variant={variant}
+        actions={panelActions}
         saveLabel={
           library && users.length > 0
             ? `Save and apply to ${plural(users.length, "connector", "connectors")}`
             : "Save"
         }
       />
+
+      {confirmCancel && (
+        <InlineConfirm
+          className="mb-4"
+          message="Discard unsaved changes?"
+          cancelLabel="Keep editing"
+          confirmLabel="Discard"
+          danger
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={() => {
+            setConfirmCancel(false);
+            onCancel?.();
+          }}
+        />
+      )}
 
       {library && (
         <div
@@ -437,38 +554,89 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         ]}
       />
 
-      {view === "graph" ? (
-        <div className="h-[70vh] min-h-[480px] overflow-hidden rounded-xl border border-cx-border">
-          <Suspense
-            fallback={
-              <div className="p-4 text-sm text-cx-muted">
-                Loading graph editor…
-              </div>
-            }
+      {pendingDelete && (
+        <InlineConfirm
+          className="mb-3"
+          message={`Delete step ${stepIndexOf(layout, pendingDelete) ?? ""}: ${
+            pendingNode ? nodeTitle(pendingNode) : ""
+          }?`}
+          cancelLabel="Keep"
+          confirmLabel="Delete"
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => handleDelete(pendingDelete)}
+        />
+      )}
+
+      {view === "graph" && showFullGraph ? (
+        <>
+          {!layout.supported && (
+            <p className="mb-2 text-xs text-cx-muted">
+              This scenario has joins or loops; the full graph editor is used.
+            </p>
+          )}
+          <div
+            className={cn(
+              "overflow-hidden rounded-xl border border-cx-border",
+              isPanel ? "h-[60vh] min-h-[420px]" : "h-[70vh] min-h-[480px]",
+            )}
           >
-            <ScenarioEditor
-              key={scenario.id}
-              cpId={cpId}
-              connectorId={connectorId}
-              scenario={scenario}
-              onClose={noop}
-              embedded={{ onGraphChange: handleGraphChange }}
-            />
-          </Suspense>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-          <div className="min-w-0 flex-1">
-            <StepsView
-              layout={layout}
-              editable
-              selectedStepId={selectedStepId}
-              onSelectStep={setSelectedStepId}
-              onAddStep={handleAddStep}
-              onAddBranch={handleAddBranch}
-            />
+            <Suspense
+              fallback={
+                <div className="p-4 text-sm text-cx-muted">
+                  Loading graph editor…
+                </div>
+              }
+            >
+              <ScenarioEditor
+                key={scenario.id}
+                cpId={cpId}
+                connectorId={connectorId}
+                scenario={scenario}
+                onClose={noop}
+                embedded={{ onGraphChange: handleGraphChange }}
+              />
+            </Suspense>
           </div>
-          <div className="min-w-0 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] lg:sticky lg:top-4 lg:w-[400px] lg:shrink-0 dark:shadow-none">
+        </>
+      ) : (
+        <div
+          className={cn(
+            "flex flex-col gap-4",
+            !isPanel && "lg:flex-row lg:items-start",
+          )}
+        >
+          <div className="min-w-0 flex-1">
+            {view === "graph" ? (
+              <StepsGraphView
+                layout={layout}
+                editable
+                selectedStepId={selectedStepId}
+                onSelectStep={setSelectedStepId}
+                onInsertStep={handleInsertStep}
+                onMoveStep={handleMove}
+                onDeleteStep={handleDeleteRequest}
+                onAddBranch={handleAddBranch}
+              />
+            ) : (
+              <StepsView
+                layout={layout}
+                editable
+                selectedStepId={selectedStepId}
+                onSelectStep={setSelectedStepId}
+                onInsertStep={handleInsertStep}
+                onMoveStep={handleMove}
+                onDeleteStep={handleDeleteRequest}
+                onAddBranch={handleAddBranch}
+              />
+            )}
+          </div>
+          <div
+            className={cn(
+              "min-w-0 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
+              !isPanel && "lg:sticky lg:top-4 lg:w-[400px] lg:shrink-0",
+            )}
+          >
             {selectedNode && selectedPlace && selectedNumber !== null ? (
               <>
                 <div className="mb-3 flex items-center gap-2 border-b border-cx-border pb-3">
@@ -512,7 +680,11 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
             ) : (
               <EmptyState
                 title="Select a step"
-                hint="Pick a step on the left to edit its configuration."
+                hint={
+                  isPanel
+                    ? "Pick a step above to edit its configuration."
+                    : "Pick a step on the left to edit its configuration."
+                }
               />
             )}
           </div>

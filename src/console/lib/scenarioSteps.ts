@@ -356,19 +356,20 @@ export function insertLaneStep(
   return rebuildLaneScenario(def, shape);
 }
 
-/** Moves a step one place up (`-1`) or down (`1`) within its own lane; at the
- *  lane's edge it is a no-op — a move never crosses lanes. */
+/** Moves a step `delta` places within its own lane (`-1` up, `1` down, more
+ *  for a drag); a target past the lane's edge is a no-op — a move never
+ *  crosses lanes. */
 export function moveLaneStep(
   def: ScenarioDefinition,
   layout: StepLayout,
   nodeId: string,
-  delta: -1 | 1,
+  delta: number,
 ): ScenarioDefinition {
   if (!layout.supported) return def;
   const found = findStepLane(layout, nodeId);
   if (!found) return def;
   const target = found.index + delta;
-  if (target < 0 || target >= found.length) return def;
+  if (delta === 0 || target < 0 || target >= found.length) return def;
   const shape = laneShape(layout);
   const steps = laneSteps(shape, found.lane)!;
   const [moved] = steps.splice(found.index, 1);

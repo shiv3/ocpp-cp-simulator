@@ -7,6 +7,7 @@ import { createEmptyScenario } from "../lib/scenarioSteps";
 import {
   LIBRARY_SCOPE,
   isLibraryScope,
+  libraryEditorUsers,
   runsOfLibraryScenario,
   toLibraryScenario,
 } from "../lib/scenarioLibrary";
@@ -117,7 +118,12 @@ const ScenarioLibraryPage: React.FC = () => {
   // Absent (or any other value) is Active runs, the page's default.
   const tab: ScenariosTab =
     searchParams.get("tab") === "library" ? "library" : "active";
-  const editId = tab === "library" ? searchParams.get("edit") : null;
+  // With a side panel open, `edit` is the panel's edit mode (`edit=1`), not
+  // the inline editor's scenario id.
+  const editId =
+    tab === "library" && !searchParams.get("open")
+      ? searchParams.get("edit")
+      : null;
 
   const scenarioLibrary = useScenarioLibrary(chargePoints, {
     migrate: tab === "library",
@@ -283,7 +289,9 @@ const ScenarioLibraryPage: React.FC = () => {
   // Portalled content (dialogs, menus) bubbles through React but is not in
   // the DOM subtree, so the `contains` check leaves it out.
   const handleBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (panelTarget === null) return;
+    // An editing panel keeps its unsaved changes: it closes by its own
+    // buttons (or Esc), not by a stray click beside it.
+    if (panelTarget === null || panel.editing) return;
     const target = event.target as Element;
     if (!event.currentTarget.contains(target)) return;
     if (
@@ -310,16 +318,7 @@ const ScenarioLibraryPage: React.FC = () => {
       : undefined;
 
   const editUsers = editId
-    ? usedBy(editId).map((user) => ({
-        cpId: user.cpId,
-        connectorId: user.connectorId,
-        running: activeRuns.runs.some(
-          (run) =>
-            run.cpId === user.cpId &&
-            run.scenarioId === user.scenario.id &&
-            (user.connectorId === null || run.connectorId === user.connectorId),
-        ),
-      }))
+    ? libraryEditorUsers(items, activeRuns.runs, editId)
     : [];
 
   const newScenarioButton = (
@@ -499,6 +498,8 @@ const ScenarioLibraryPage: React.FC = () => {
             scenarioId={panelTarget.scenarioId}
             variant="panel"
             onClose={closePanel}
+            editing={panel.editing}
+            onEditingChange={panel.setEditing}
           />
         )}
         {panelTarget?.kind === "def" && (
@@ -512,6 +513,9 @@ const ScenarioLibraryPage: React.FC = () => {
             runs={activeRuns.runs}
             items={items}
             onClose={closePanel}
+            editing={panel.editing}
+            onEditingChange={panel.setEditing}
+            saveLibrary={saveScenario}
           />
         )}
       </SidePanel>

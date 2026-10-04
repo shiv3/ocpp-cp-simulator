@@ -9,9 +9,11 @@ import {
   deleteLibraryScenario,
   editScenarioUrl,
   libraryCopyId,
+  libraryEditorUsers,
   migrateToLibrary,
   runsOfLibraryScenario,
   saveLibraryScenario,
+  scenarioEditTarget,
   toLibraryScenario,
   usedBy,
 } from "./scenarioLibrary";
@@ -126,6 +128,44 @@ describe("usedBy and runsOfLibraryScenario", () => {
 
     expect(runsOfLibraryScenario(runs, items, "a")).toEqual([runs[0]]);
     expect(runsOfLibraryScenario(runs, items, "b")).toEqual([runs[1]]);
+  });
+
+  it("marks each user the editor shows as running or not", () => {
+    const runs = [
+      { cpId: "CP-2", connectorId: 1, scenarioId: "a@CP-2#1" },
+    ] as ChargePointRun[];
+    expect(libraryEditorUsers(items, runs, "a")).toEqual([
+      { cpId: "CP-1", connectorId: 1, running: false },
+      { cpId: "CP-2", connectorId: 1, running: true },
+    ]);
+  });
+});
+
+describe("scenarioEditTarget", () => {
+  it("edits a Library entry, or the entry behind a copy, in the Library", () => {
+    expect(scenarioEditTarget(LIBRARY_SCOPE, null, { id: "a" })).toEqual({
+      cpId: LIBRARY_SCOPE,
+      connectorId: null,
+      scenarioId: "a",
+      library: true,
+    });
+    expect(
+      scenarioEditTarget("CP-1", 1, { id: "a@CP-1#1", libraryId: "a" }),
+    ).toEqual({
+      cpId: LIBRARY_SCOPE,
+      connectorId: null,
+      scenarioId: "a",
+      library: true,
+    });
+  });
+
+  it("edits anything else in its own scope", () => {
+    expect(scenarioEditTarget("CP-1", null, { id: "s1" })).toEqual({
+      cpId: "CP-1",
+      connectorId: null,
+      scenarioId: "s1",
+      library: false,
+    });
   });
 });
 

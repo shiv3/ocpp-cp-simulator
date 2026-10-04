@@ -163,6 +163,32 @@ export function runsOfLibraryScenario(
   );
 }
 
+/** A user of a library scenario as the editor shows it: a connector (or a
+ *  charge point scope) and whether a run of its copy is live there. */
+export interface LibraryUserState {
+  cpId: string;
+  connectorId: number | null;
+  running: boolean;
+}
+
+/** The users of `libraryId`, each marked when its copy is running. */
+export function libraryEditorUsers(
+  items: readonly ScenarioLibraryItem[],
+  runs: readonly ChargePointRun[],
+  libraryId: string,
+): LibraryUserState[] {
+  return usedBy(items, libraryId).map((user) => ({
+    cpId: user.cpId,
+    connectorId: user.connectorId,
+    running: runs.some(
+      (run) =>
+        run.cpId === user.cpId &&
+        run.scenarioId === user.scenario.id &&
+        (user.connectorId === null || run.connectorId === user.connectorId),
+    ),
+  }));
+}
+
 /**
  * Re-pushes an edited library scenario to one user, keeping the copy's own id
  * (a migrated copy has its original one) and any sibling definitions of the
@@ -308,17 +334,52 @@ export function libraryEditorUrl(libraryId: string): string {
   return `/scenarios?${params.toString()}`;
 }
 
+/** The definition an edit of `scenario` (in the scope `cpId` /
+ *  `connectorId`) applies to: the Library entry for a library entry or a copy
+ *  of one (edits are made once, in the Library), else the scenario itself. */
+export interface ScenarioEditTarget {
+  cpId: string;
+  connectorId: number | null;
+  scenarioId: string;
+  /** True when the target is a Library entry (`cpId` is the Library). */
+  library: boolean;
+}
+
+export function scenarioEditTarget(
+  cpId: string,
+  connectorId: number | null,
+  scenario: Pick<ScenarioDefinition, "id" | "libraryId">,
+): ScenarioEditTarget {
+  if (isLibraryScope(cpId)) {
+    return {
+      cpId: LIBRARY_SCOPE,
+      connectorId: null,
+      scenarioId: scenario.id,
+      library: true,
+    };
+  }
+  if (scenario.libraryId) {
+    return {
+      cpId: LIBRARY_SCOPE,
+      connectorId: null,
+      scenarioId: scenario.libraryId,
+      library: true,
+    };
+  }
+  return { cpId, connectorId, scenarioId: scenario.id, library: false };
+}
+
 /**
- * Where **Edit scenario** goes: the Library editor for a library entry or a
- * copy of one (edits are made once, in the Library), else the per-connector
- * editor.
+ * Where **Edit scenario** goes on a page: the Library editor for a library
+ * entry or a copy of one, else the per-connector editor (see
+ * {@link scenarioEditTarget}).
  */
 export function editScenarioUrl(
   cpId: string,
   connectorId: number | null,
   scenario: Pick<ScenarioDefinition, "id" | "libraryId">,
 ): string {
-  if (isLibraryScope(cpId)) return libraryEditorUrl(scenario.id);
-  if (scenario.libraryId) return libraryEditorUrl(scenario.libraryId);
+  const target = scenarioEditTarget(cpId, connectorId, scenario);
+  if (target.library) return libraryEditorUrl(target.scenarioId);
   return buildScenarioUrl("edit", cpId, connectorId, scenario.id);
 }

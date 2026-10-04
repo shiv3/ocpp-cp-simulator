@@ -287,6 +287,20 @@ describe("Scenario Library", () => {
     );
   });
 
+  it("the editor's Graph view is the card graph for a scenario it can draw", async () => {
+    const { container } = await renderLibrary(
+      "/scenarios?tab=library&edit=lib-a&view=graph",
+    );
+    expect(container.querySelectorAll("[data-node-id]")).toHaveLength(2);
+    expect(container.querySelector(".react-flow__node")).toBeNull();
+    expect(
+      container.querySelector('button[aria-label="Add step after step 2"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('button[aria-label="Add a parallel branch"]'),
+    ).toBeTruthy();
+  });
+
   it("+ New scenario asks only for a name and creates a library scenario", async () => {
     const { container, service } = await renderLibrary();
 

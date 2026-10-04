@@ -9,6 +9,7 @@ import {
   type ReportedLocation,
 } from "../../test/harness";
 import { forkScenario } from "../../test/scenarioFixtures";
+import { LIBRARY_SCOPE } from "../../lib/scenarioLibrary";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 import type { ScenarioExecutionContext } from "../../../cp/application/scenario/ScenarioTypes";
@@ -58,7 +59,7 @@ describe("Charge point page — scenario run panel", () => {
     }
   });
 
-  async function renderPage(path: string) {
+  async function renderPage(path: string, { libraryCopy = false } = {}) {
     const status: ScenarioExecutionContext = {
       scenarioId: "s1",
       state: "running",
@@ -76,8 +77,20 @@ describe("Charge point page — scenario run panel", () => {
       ]),
       getScenarioStatus: vi.fn(async () => status),
       getScenario: vi.fn(async () => forkScenario()),
-      listScenarioDefinitions: vi.fn(async (_cp: string, connector) =>
-        connector === 1 ? [forkScenario()] : [],
+      // With `libraryCopy`, connector 1 holds a copy of the Library's
+      // `lib-fork`.
+      listScenarioDefinitions: vi.fn(async (cpId: string, connector) =>
+        cpId === LIBRARY_SCOPE
+          ? libraryCopy
+            ? [forkScenario({ id: "lib-fork" })]
+            : []
+          : connector === 1
+            ? [
+                forkScenario(
+                  libraryCopy ? { libraryId: "lib-fork" } : undefined,
+                ),
+              ]
+            : [],
       ),
       getStateHistory: vi.fn(async () => []),
     });
@@ -92,7 +105,41 @@ describe("Charge point page — scenario run panel", () => {
       document.body.innerHTML = "";
     };
     await flush(10);
-    return rendered;
+    return { ...rendered, service };
+  }
+
+  function setInputValue(input: HTMLInputElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  const buttonIn = (root: ParentNode, text: string) =>
+    Array.from(root.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === text,
+    );
+
+  async function clickEl(el: Element | undefined | null) {
+    expect(el, "expected the element to click").toBeTruthy();
+    await act(async () => (el as HTMLElement).click());
+    await flush(10);
+  }
+
+  async function renameAndSave(saveLabel: RegExp) {
+    const panel = document.querySelector(PANEL)!;
+    const name = panel.querySelector<HTMLInputElement>(
+      'input[aria-label="Scenario name"]',
+    )!;
+    expect(name.value).toBe("Fork demo");
+    await act(async () => setInputValue(name, "Renamed"));
+    await clickEl(
+      Array.from(panel.querySelectorAll("button")).find((b) =>
+        saveLabel.test(b.textContent?.trim() ?? ""),
+      ),
+    );
   }
 
   it("?run= opens the run panel beside the page; expand goes to the run page", async () => {
@@ -164,5 +211,56 @@ describe("Charge point page — scenario run panel", () => {
     expect(location?.pathname).toBe("/cp/CP-A");
     expect(location?.search).toBe("?connector=1&run=s1");
     expect(document.querySelector(PANEL)).toBeTruthy();
+  });
+  it("Edit scenario in the run panel edits the Library entry of a copy (&edit=1)", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { service } = await renderPage("/cp/CP-A?connector=1&run=s1", {
+      libraryCopy: true,
+    });
+    await clickEl(buttonIn(document.querySelector(PANEL)!, "Edit scenario"));
+    expect(new URLSearchParams(location?.search).get("edit")).toBe("1");
+    expect(new URLSearchParams(location?.search).get("run")).toBe("s1");
+    expect(
+      document
+        .querySelector(`${PANEL} a[aria-label="Open in the Library editor"]`)
+        ?.getAttribute("href"),
+    ).toBe("/scenarios?tab=library&edit=lib-fork");
+
+    await renameAndSave(/^Save/);
+
+    expect(service.saveScenarioDefinition).toHaveBeenCalledWith(
+      LIBRARY_SCOPE,
+      null,
+      expect.objectContaining({ id: "lib-fork", name: "Renamed" }),
+    );
+    vi.restoreAllMocks();
+  });
+
+  it("a scenario that is not a Library copy is edited in its own scope", async () => {
+    const { service } = await renderPage("/cp/CP-A?connector=1&run=s1&edit=1");
+    await renameAndSave(/^Save$/);
+    expect(service.saveScenarioDefinition).toHaveBeenCalledWith(
+      "CP-A",
+      1,
+      expect.objectContaining({ id: "s1", name: "Renamed" }),
+    );
+    // Closing the panel drops the edit mode with it.
+    await clickEl(
+      document.querySelector(`${PANEL} button[aria-label="Close side panel"]`),
+    );
+    expect(location?.search).toBe("?connector=1");
+  });
+
+  it("the run page keeps Edit scenario as a link to the Library editor", async () => {
+    await renderPage("/scenarios/run?cp=CP-A&connector=1&id=s1", {
+      libraryCopy: true,
+    });
+    const edit = Array.from(document.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Edit scenario"),
+    );
+    expect(edit?.getAttribute("href")).toBe(
+      "/scenarios?tab=library&edit=lib-fork",
+    );
+    expect(buttonIn(document, "Edit scenario")).toBeUndefined();
   });
 });

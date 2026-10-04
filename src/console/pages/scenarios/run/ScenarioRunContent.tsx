@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Maximize2, Settings, X } from "lucide-react";
 
@@ -14,12 +14,19 @@ import { formatElapsed } from "../../../lib/scenarioExpectation";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../../../lib/scenarioSteps";
 import { deriveStepLayout, layoutSteps } from "../../../lib/stepLayout";
-import { editScenarioUrl } from "../../../lib/scenarioLibrary";
+import {
+  editScenarioUrl,
+  scenarioEditTarget,
+} from "../../../lib/scenarioLibrary";
+import { useLibraryEditorBinding } from "../../../lib/useLibraryEditorBinding";
 import { buildScenarioUrl } from "../../../lib/useAllScenarios";
 import {
   useScenarioRun,
   type UseScenarioRunResult,
 } from "../../../lib/useScenarioRun";
+import ScenarioEditorContent, {
+  type ScenarioEditorContentProps,
+} from "../edit/ScenarioEditorContent";
 import RunTimeline from "./RunTimeline";
 import StepsGraphView from "./StepsGraphView";
 import StepsView from "./StepsView";
@@ -41,12 +48,14 @@ interface LoadedDefinition {
 /**
  * Loads the definition the run executes. A run on a connector may come from
  * the charge point's own scope (a charge-point-scope scenario runs per
- * connector), so that scope is the fallback.
+ * connector), so that scope is the fallback. A new `version` re-reads it
+ * (after an edit) and keeps showing the old one meanwhile.
  */
 function useRunDefinition(
   cpId: string,
   connectorId: number | null,
   scenarioId: string,
+  version = 0,
 ): LoadedDefinition {
   const { chargePointService } = useDataContext();
   const [loaded, setLoaded] = useState<LoadedDefinition>({
@@ -54,14 +63,19 @@ function useRunDefinition(
     scopeConnectorId: connectorId,
     isLoading: true,
   });
+  const loadedKey = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoaded({
-      scenario: null,
-      scopeConnectorId: connectorId,
-      isLoading: true,
-    });
+    const key = `${cpId}\n${connectorId}\n${scenarioId}`;
+    if (loadedKey.current !== key) {
+      loadedKey.current = key;
+      setLoaded({
+        scenario: null,
+        scopeConnectorId: connectorId,
+        isLoading: true,
+      });
+    }
     const scopes = connectorId == null ? [null] : [connectorId, null];
 
     void (async () => {
@@ -98,10 +112,19 @@ function useRunDefinition(
     return () => {
       cancelled = true;
     };
-  }, [chargePointService, cpId, connectorId, scenarioId]);
+  }, [chargePointService, cpId, connectorId, scenarioId, version]);
 
   return loaded;
 }
+
+/** The panel editor on a Library entry: its users and the re-pushing Save
+ *  come from the Library, read here. */
+const LibraryPanelEditor: React.FC<
+  Omit<ScenarioEditorContentProps, "library">
+> = (props) => {
+  const library = useLibraryEditorBinding(props.scenarioId);
+  return <ScenarioEditorContent {...props} library={library} />;
+};
 
 export interface ScenarioRunContentProps {
   cpId: string;
@@ -117,11 +140,16 @@ export interface ScenarioRunContentProps {
   onClose?: () => void;
   /** page: what goes under the steps, given the run (the run history). */
   footer?: (run: UseScenarioRunResult) => React.ReactNode;
+  /** panel: the editor in place of the run (`&edit=1`). Without
+   *  `onEditingChange`, **Edit scenario** links to the editor page. */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }
 
 /**
  * One scenario run: name and target, state, progress, Start / Stop, the wait
- * controls while parked, **Edit scenario**, then the steps (`StepsView`, or
+ * controls while parked, **Edit scenario** (in the panel: the editor in place
+ * of the run, `editing`), then the steps (`StepsView`, or
  * the Graph drawing on the page; `RunTimeline`'s flat list for a shape the
  * layout cannot draw). The run comes from `useScenarioRun`, which attaches
  * to a run already live in the runtime (#366) — opening this never starts
@@ -139,14 +167,26 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
   runId: requestedRunId,
   onClose,
   footer,
+  editing: editingProp = false,
+  onEditingChange,
 }) => {
   const isPanel = variant === "panel";
+  const editing = isPanel && editingProp && onEditingChange !== undefined;
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Leaving the editor re-reads the definition, which a Save may have
+  // changed (a Library copy is re-pushed).
+  const [definitionVersion, setDefinitionVersion] = useState(0);
+  const wasEditing = useRef(editing);
+  useEffect(() => {
+    if (wasEditing.current && !editing) setDefinitionVersion((v) => v + 1);
+    wasEditing.current = editing;
+  }, [editing]);
   const { scenario, scopeConnectorId, isLoading } = useRunDefinition(
     cpId,
     connectorId,
     scenarioId,
+    definitionVersion,
   );
   const run = useScenarioRun(cpId || null, connectorId, scenario);
   const {
@@ -248,6 +288,29 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
           }.`}
         />
       </div>
+    );
+  }
+
+  if (editing) {
+    const target = scenarioEditTarget(cpId, scopeConnectorId, scenario);
+    const editorProps: Omit<ScenarioEditorContentProps, "library"> = {
+      variant: "panel",
+      cpId: target.cpId,
+      connectorId: target.connectorId,
+      scenarioId: target.scenarioId,
+      onCancel: () => onEditingChange?.(false),
+      expand: {
+        to: editScenarioUrl(cpId, scopeConnectorId, scenario),
+        label: target.library
+          ? "Open in the Library editor"
+          : "Open in the editor",
+      },
+      onClose,
+    };
+    return target.library ? (
+      <LibraryPanelEditor key={target.scenarioId} {...editorProps} />
+    ) : (
+      <ScenarioEditorContent key={target.scenarioId} {...editorProps} />
     );
   }
 
@@ -353,19 +416,29 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             Start
           </Button>
         )}
-        <Button asChild variant="outline" size="sm">
-          <Link
-            // A copy of a Library scenario is edited in the Library.
-            to={editScenarioUrl(
-              cpId,
-              scopeConnectorId,
-              scenario ?? { id: scenarioId },
-            )}
+        {isPanel && onEditingChange ? (
+          // In the panel itself; a copy of a Library scenario edits the
+          // Library entry there too.
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onEditingChange(true)}
           >
             <Settings className="h-3.5 w-3.5" />
             Edit scenario
-          </Link>
-        </Button>
+          </Button>
+        ) : (
+          <Button asChild variant="outline" size="sm">
+            <Link
+              // A copy of a Library scenario is edited in the Library.
+              to={editScenarioUrl(cpId, scopeConnectorId, scenario)}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Edit scenario
+            </Link>
+          </Button>
+        )}
         {!isPanel && layout.supported && (
           <SegmentedControl
             label="View"

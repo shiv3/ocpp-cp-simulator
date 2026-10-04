@@ -11,12 +11,15 @@ import { deriveDisplayedSteps } from "../../lib/scenarioSteps";
 import {
   editScenarioUrl,
   isLibraryScope,
+  libraryEditorUsers,
   runsOfLibraryScenario,
+  scenarioEditTarget,
   usedBy as usedByOf,
 } from "../../lib/scenarioLibrary";
 import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
 import type { ChargePointRun } from "../../lib/useAllActiveScenarioRuns";
 import type { ScenarioLibraryItem } from "../../lib/useAllScenarios";
+import ScenarioEditorContent from "./edit/ScenarioEditorContent";
 import RunTimeline from "./run/RunTimeline";
 import StepsView from "./run/StepsView";
 
@@ -34,6 +37,12 @@ export interface ScenarioDefinitionPanelProps {
    *  Library entry's users are the scopes holding a copy of it. */
   items?: ScenarioLibraryItem[];
   onClose: () => void;
+  /** The panel shows the editor (`&edit=1`) in place of the read view. */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
+  /** Saves a Library scenario and re-pushes it to its users (the page's
+   *  `useScenarioLibrary().save`). */
+  saveLibrary?: (scenario: ScenarioDefinition) => Promise<void>;
 }
 
 interface UsedByChip {
@@ -50,9 +59,10 @@ const plural = (n: number, one: string, many: string) =>
 /**
  * A Library entry in the Scenarios page's side panel: what the scenario does
  * (its steps, no run state), **Used by** (the connectors assigned a copy of
- * it, a running one marked with its run state), and **Edit scenario** (the
- * Library editor). A definition of a charge point's own scope (an older
- * link) lists the connectors with a live run of it instead.
+ * it, a running one marked with its run state), and **Edit scenario**, which
+ * turns the panel into the editor (`editing`; Save re-pushes to the users as
+ * the Library editor's does). A definition of a charge point's own scope (an
+ * older link) lists the connectors with a live run of it instead.
  */
 const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   cpId,
@@ -63,6 +73,9 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   runs,
   items = [],
   onClose,
+  editing = false,
+  onEditingChange,
+  saveLibrary,
 }) => {
   const layout = useMemo(
     () => (scenario ? deriveStepLayout(scenario) : null),
@@ -96,6 +109,35 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
           />
         )}
       </div>
+    );
+  }
+
+  if (editing && onEditingChange) {
+    const target = scenarioEditTarget(cpId, connectorId, scenario);
+    return (
+      <ScenarioEditorContent
+        key={`${target.cpId}\n${target.scenarioId}`}
+        variant="panel"
+        cpId={target.cpId}
+        connectorId={target.connectorId}
+        scenarioId={target.scenarioId}
+        library={
+          target.library && saveLibrary
+            ? {
+                users: libraryEditorUsers(items, runs, target.scenarioId),
+                save: saveLibrary,
+              }
+            : undefined
+        }
+        onCancel={() => onEditingChange(false)}
+        expand={{
+          to: editScenarioUrl(cpId, connectorId, scenario),
+          label: target.library
+            ? "Open in the Library editor"
+            : "Open in the editor",
+        }}
+        onClose={onClose}
+      />
     );
   }
 
@@ -164,12 +206,24 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
       )}
 
       <div className="mt-3">
-        <Button asChild variant="outline" size="sm">
-          <Link to={editScenarioUrl(cpId, connectorId, scenario)}>
+        {onEditingChange ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onEditingChange(true)}
+          >
             <Settings className="h-3.5 w-3.5" />
             Edit scenario
-          </Link>
-        </Button>
+          </Button>
+        ) : (
+          <Button asChild variant="outline" size="sm">
+            <Link to={editScenarioUrl(cpId, connectorId, scenario)}>
+              <Settings className="h-3.5 w-3.5" />
+              Edit scenario
+            </Link>
+          </Button>
+        )}
       </div>
 
       <div className="mt-4">

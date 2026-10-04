@@ -107,13 +107,25 @@ export interface StepRunViewProps {
   state?: ScenarioRunState;
   selectedStepId?: string | null;
   onSelectStep?: (nodeId: string) => void;
-  /** The editor's Steps view: each box gets an accessible "Select step"
-   *  name, and "+ Add step" sits under the chain and under each branch, with
-   *  "+ Add parallel branch" at the bottom. The run views leave it off. */
+  /** The editor's views: each step gets an accessible "Select step" name,
+   *  `+` controls to add or insert a step, a way to add a parallel branch,
+   *  drag to reorder within a lane, and Alt+ArrowUp/Down / Delete on a
+   *  focused step. The run views leave it off. */
   editable?: boolean;
-  /** editable: a step type picked under a lane (appended to that lane). */
-  onAddStep?: (lane: StepLane, type: ScenarioNodeType) => void;
-  /** editable: "+ Add parallel branch". */
+  /** editable: a step type picked for `index` of `lane` (the lane's length
+   *  appends). */
+  onInsertStep?: (
+    lane: StepLane,
+    index: number,
+    type: ScenarioNodeType,
+  ) => void;
+  /** editable: move a step `delta` places within its lane (a drag, or
+   *  Alt+ArrowUp/Down). */
+  onMoveStep?: (nodeId: string, delta: number) => void;
+  /** editable: remove a step; `confirm` when it came from the keyboard, so
+   *  the editor asks first. */
+  onDeleteStep?: (nodeId: string, options: { confirm: boolean }) => void;
+  /** editable: add a parallel branch. */
   onAddBranch?: () => void;
 }
 

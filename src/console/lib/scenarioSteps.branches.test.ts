@@ -85,6 +85,26 @@ describe("branch-aware step editing", () => {
     expect(lanes(last).branches).toEqual([["charge", "meter"], ["wait"]]);
   });
 
+  it("moves a step several places at once (a drag) within its lane", () => {
+    let def = forkScenario();
+    def = insertLaneStep(
+      def,
+      deriveStepLayout(def),
+      0,
+      2,
+      ScenarioNodeType.DELAY,
+    );
+    const added = deriveStepLayout(def).fork!.branches[0].steps[2].id;
+    const moved = moveLaneStep(def, deriveStepLayout(def), added, -2);
+    expect(lanes(moved).branches).toEqual([
+      [added, "charge", "meter"],
+      ["wait"],
+    ]);
+    // Past the lane's edge: a no-op, never a clamp into another lane.
+    const past = moveLaneStep(def, deriveStepLayout(def), "charge", 3);
+    expect(lanes(past)).toEqual(lanes(def));
+  });
+
   it("removes a step from a branch; emptying a branch drops it and a lone branch folds into the chain", () => {
     const def = forkScenario();
     const removed = removeLaneStep(def, deriveStepLayout(def), "charge");

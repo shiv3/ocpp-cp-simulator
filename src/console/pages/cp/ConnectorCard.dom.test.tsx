@@ -150,6 +150,23 @@ describe("ConnectorCard: the connector as a charging session", () => {
     expect(controls.hidden).toBe(false);
   });
 
+  it("puts the battery beside the figures from 340 px of card, the drawing above the SoC under 560 px", async () => {
+    const { root } = await renderCard({});
+    unmount = () => act(() => root.unmount());
+
+    // jsdom does not lay out: assert the container-query rules.
+    const hero = card().querySelector('[data-testid="soc-hero"]')!;
+    const batteryRoot = hero.parentElement!.parentElement!;
+    const grid = batteryRoot.parentElement!;
+    expect(grid.className).toContain(
+      "@min-[340px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]",
+    );
+    expect(grid.className).toContain("@min-[340px]:gap-x-4");
+    expect(grid.className).toContain("@min-[560px]:grid-cols-");
+    expect(batteryRoot.className).toContain("@max-[560px]:flex-col");
+    expect(batteryRoot.className).toContain("@max-[560px]:items-start");
+  });
+
   it("Plug in on the stepper reports Preparing", async () => {
     const { root, service } = await renderCard({});
     unmount = () => act(() => root.unmount());

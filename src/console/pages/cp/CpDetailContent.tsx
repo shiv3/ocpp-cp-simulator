@@ -689,16 +689,33 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 )}
               </>
             ) : (
-              // The full page shows every connector at once, two cards per row
-              // from about 1100 px of content width (a container query) and one
-              // below. The card lays itself out by its own width.
+              // The full page shows every connector at once, in ONE row that
+              // scrolls horizontally instead of wrapping: `grid-auto-flow:
+              // column`, every column at least a quarter of the row
+              // (`(100% - 3rem) / 4`, 3rem = the three gutters) and at least
+              // 400 px, so at most four are visible; `min(100%, …)` keeps a phone
+              // at one card per view and the `1fr` max lets fewer than four share
+              // the width. More than four overflow into `overflow-x-auto`, and
+              // snapping lands a scroll on a card edge without forcing it. The
+              // row is a focusable region so the arrow keys scroll it, and
+              // `relative` makes it the containing block of the cards' absolutely
+              // positioned bits (the switches' `sr-only` inputs), so the scroll
+              // area clips them instead of widening the page. The card lays
+              // itself out by its own width.
               <div ref={connectorGridRef} className="@container">
                 <div
                   data-testid="connector-grid"
-                  className="grid grid-cols-1 items-start gap-4 @min-[1100px]:grid-cols-2"
+                  role="region"
+                  aria-label="Connectors"
+                  tabIndex={0}
+                  className="relative grid snap-x snap-proximity items-start gap-4 overflow-x-auto overscroll-x-contain pb-2 [grid-auto-flow:column]"
+                  style={{
+                    gridAutoColumns:
+                      "minmax(min(100%, max(400px, calc((100% - 3rem) / 4))), 1fr)",
+                  }}
                 >
                   {connectorList.map((connector) => (
-                    <div key={connector.id} className="min-w-0">
+                    <div key={connector.id} className="min-w-0 snap-start">
                       <ConnectorCard
                         cpId={cpId}
                         connectorId={connector.id}

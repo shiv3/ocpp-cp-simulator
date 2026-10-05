@@ -108,7 +108,7 @@ const EvBattery: React.FC<EvBatteryProps> = ({
   }
 
   return (
-    <div className="relative flex items-center gap-4">
+    <div className="relative flex items-center gap-4 @max-[560px]:flex-col @max-[560px]:items-start @max-[560px]:gap-2">
       <input
         type="range"
         min={0}

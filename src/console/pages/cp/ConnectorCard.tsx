@@ -245,7 +245,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
         </p>
       )}
 
-      <div className="mt-3.5 grid grid-cols-1 items-start gap-y-4 @min-[400px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] @min-[400px]:gap-x-4 @min-[560px]:grid-cols-[minmax(240px,1.1fr)_minmax(220px,1fr)] @min-[560px]:gap-x-6">
+      <div className="mt-3.5 grid grid-cols-1 items-start gap-y-4 @min-[340px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] @min-[340px]:gap-x-4 @min-[560px]:grid-cols-[minmax(240px,1.1fr)_minmax(220px,1fr)] @min-[560px]:gap-x-6">
         <EvBattery
           soc={view.soc}
           targetSoc={ev.targetSoc}

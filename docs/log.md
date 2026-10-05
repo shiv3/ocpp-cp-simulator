@@ -1560,3 +1560,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-05] ingest | Click anywhere in a connector card to select it
 
 - [Web console](entities/web-console.md#charge-point-page): on the full page a click anywhere inside a connector card's frame selects it (writes `?connector=`), not only its header; the card's own controls still act without selecting.
+
+## [2026-10-05] ingest | Connector row restored, two columns inside the card
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is one row that scrolls horizontally again (`grid-auto-flow: column`, `grid-auto-columns: minmax(min(100%, max(400px, quarter)), 1fr)`, `overflow-x: auto`, scroll snapping, a focusable `region` named Connectors, `inline: "nearest"` scroll-into-view; maintainer feedback after the two-column grid, which had been meant as two columns _inside the card_). The card's battery-beside-figures tier now starts at about 340 px of card width (was 400 px, so a 400 px card in the row got one column), and under about 560 px the battery drawing sits above the SoC figure and its text.
+- Code: `CpDetailContent.tsx` (grid), `ConnectorCard.tsx` (`@min-[340px]:` tier), `EvBattery.tsx` (`@max-[560px]:flex-col`); tests `CpDetailContent.connectorGrid.dom.test.tsx`, `ConnectorCard.dom.test.tsx`.

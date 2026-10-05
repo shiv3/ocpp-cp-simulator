@@ -371,9 +371,12 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
 
     const log = container.querySelector('[data-testid="cp-message-log"]');
     expect(log, "expected the message log section").toBeTruthy();
-    expect(log!.textContent).toContain("Message Log");
     expect(log!.textContent).toContain("BootNotification accepted");
-    const link = Array.from(log!.querySelectorAll("a")).find((a) =>
+    // The link sits in the bottom panel's header bar, beside the tab strip.
+    const panel = container.querySelector<HTMLElement>(
+      '[data-testid="bottom-panel"]',
+    )!;
+    const link = Array.from(panel.querySelectorAll("a")).find((a) =>
       a.textContent?.includes("Open in Message Log"),
     );
     expect(link?.getAttribute("href")).toBe("/logs?cp=CP-A");
@@ -474,6 +477,66 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(
       sectionTabs(document.body).map((t) => t.getAttribute("aria-selected")),
     ).toEqual(["true", "false", "false", "false", "false", "false"]);
+  });
+
+  it("the page root has a scroll area with the bottom panel after it", async () => {
+    const { container } = await mount("/cp/CP-A");
+    const scroll = container.querySelector<HTMLElement>(
+      '[data-testid="cp-scroll-area"]',
+    )!;
+    const panel = container.querySelector<HTMLElement>(
+      '[data-testid="bottom-panel"]',
+    )!;
+    expect(scroll).toBeTruthy();
+    expect(panel).toBeTruthy();
+    expect(scroll.parentElement).toBe(panel.parentElement);
+    expect(scroll.nextElementSibling).toBe(panel);
+    expect(scroll.className).toContain("overflow-y-auto");
+    // The tab strip lives in the panel, not in the scroll area.
+    expect(
+      scroll.querySelector(
+        '[role="tablist"][aria-label="Charge point sections"]',
+      ),
+    ).toBeNull();
+    expect(
+      panel.querySelector(
+        '[role="tablist"][aria-label="Charge point sections"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("the Open in Message Log link sits in the bottom panel's header bar on the log tab only", async () => {
+    const { container } = await mount("/cp/CP-A");
+    const panel = container.querySelector<HTMLElement>(
+      '[data-testid="bottom-panel"]',
+    )!;
+    const bar =
+      panel.querySelector<HTMLElement>('[role="tablist"]')!.parentElement!;
+    const linkIn = (root: ParentNode) =>
+      Array.from(root.querySelectorAll("a")).find((a) =>
+        a.textContent?.includes("Open in Message Log"),
+      );
+    expect(linkIn(bar)).toBeTruthy();
+
+    await pickSection("Transactions");
+    expect(linkIn(container)).toBeUndefined();
+
+    await pickSection("Message log");
+    expect(linkIn(bar)).toBeTruthy();
+  });
+
+  it("the side panel also gets the bottom panel under its scrolling upper part", async () => {
+    const { container } = await mount("/?cp=CP-A");
+    const aside = container.querySelector<HTMLElement>(
+      'aside[aria-label="Charge point"]',
+    )!;
+    const panel = aside.querySelector<HTMLElement>(
+      '[data-testid="bottom-panel"]',
+    )!;
+    expect(panel).toBeTruthy();
+    expect(panel.previousElementSibling?.className).toContain(
+      "overflow-y-auto",
+    );
   });
 
   it("the Transactions tab sets ?tab=transactions and swaps the lower half; the Message log tab returns", async () => {

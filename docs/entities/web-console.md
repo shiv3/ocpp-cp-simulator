@@ -13,7 +13,7 @@ related:
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/scenario-format.md
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 # Web console (browser UI)
@@ -181,7 +181,7 @@ in the URL, so a reload or a shared link reopens it:
 | ------------------------- | ------------------------------------------------------------- |
 | `/?cp=<id>`               | The list with that charge point open in the panel.            |
 | `/?cp=<id>&connector=<n>` | The same, on connector `n` (a connector cell or row sets it). |
-| `/?cp=<id>&tab=<section>` | The same, with that tab of the lower half.                    |
+| `/?cp=<id>&tab=<section>` | The same, with that tab of the bottom panel.                  |
 | `/cp/<id>?connector=<n>`  | The full page, reached from **Open as full page**.            |
 
 - **Open, swap, toggle.** Opening from a closed list adds one history entry.
@@ -255,11 +255,30 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   the connector's status color; the arrow keys, Home and End move the
   selection) over the selected connector's card and scenario card. A charge
   point without connectors shows **No connectors** instead.
-- **The lower half**: an underline tab strip (`role="tablist"`, _Charge point
-  sections_): **Message log** (the default), **Transactions**, **Session
-  analysis**, **Diagnostics**, **Expert** and **Network simulation** (only when
-  the charge point has network simulation, that is, its snapshot's
-  `networkSim` is not `null`). The arrow keys, Home and End move along it.
+- **The bottom panel** (the charge point's lower half): docked to the bottom
+  of the page (and of the side panel), always visible, like an editor's
+  Panel. The content above it (header, charge point box, connector cards)
+  scrolls in its own area (`data-testid="cp-scroll-area"`); the page itself
+  does not scroll, and the panel stays put. Its **header bar** holds an
+  underline tab strip (`role="tablist"`, _Charge point sections_): **Message
+  log** (the default), **Transactions**, **Session analysis**,
+  **Diagnostics**, **Expert** and **Network simulation** (only when the
+  charge point has network simulation, that is, its snapshot's `networkSim`
+  is not `null`); the arrow keys, Home and End move along it, and the strip
+  scrolls sideways when it does not fit. At the right end of the bar sit the
+  tab's actions (on the Message log tab, **Open in Message Log →**) and a
+  **chevron** (**Collapse panel** / **Expand panel**, `aria-expanded`) that
+  folds the panel to its header bar; so does a double-click on the bar's empty
+  area. Clicking a tab while the panel is folded selects it and unfolds the
+  panel; clicking the active tab does nothing. The panel's **top edge drags**
+  (a `separator` named _Resize panel_; ↑ / ↓ move it by 32 px when focused)
+  between 120 px and the room that leaves 160 px for the content above; the
+  default is 320 px. Height and folded state are kept in `localStorage` per
+  variant (`ocpp-cp.console.cp-panel.page.*` on the full page,
+  `ocpp-cp.console.cp-panel.side.*` in the side panel; `.height` and
+  `.collapsed`). The tab's content scrolls inside the panel's body, which
+  stays mounted while folded. Esc never touches the panel (in the side panel
+  it closes the side panel, as before).
 
 The same content is what the list's [side panel](#dashboard) shows. Two URL
 parameters keep the view across the full page and the panel:
@@ -267,11 +286,11 @@ parameters keep the view across the full page and the panel:
 | Parameter        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `?connector=<n>` | The selected connector. Absent, or naming a connector the charge point does not have (for example a removed one), the first connector is selected. In the panel it is the tab shown; on the full page it marks that card (an accent ring, `data-selected`) and scrolls it into view on load. It is also what the run panel (`?run=`) and the Diagnostics select use. Selecting one replaces the history entry. |
-| `?tab=<section>` | The lower half's tab: `transactions`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes.                                                                                                                                                                                                |
+| `?tab=<section>` | The bottom panel's tab: `transactions`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes.                                                                                                                                                                                              |
 
 On the full page a click on a card's header (the title, status and
 availability, not its **Config** / **Controls** buttons) selects that
-connector. Picking a lower-half tab sets `?tab=` (replacing the history entry)
+connector. Picking a bottom-panel tab sets `?tab=` (replacing the history entry)
 and swaps the content. **Diagnostics** is the state transition diagram (Local
 mode only; its connector select starts on the selected connector).
 
@@ -476,15 +495,15 @@ step> · <elapsed>`, **Open run** (straight to the
 
 #### Message log tab
 
-The lower half's **Message log** tab (#421) is the
+The bottom panel's **Message log** tab (#421) is the
 [Message Log page](#message-log-page)'s viewer (`LogViewer`) on this charge
 point's lines, oldest first: the filter sidebar (Level, Type, Connector,
 Direction, Action; no Charge point group, the lines are all this one's), the
 toolbar (`<n> total / <m> filtered`, Auto-scroll, Download, Clear screen,
-Clear screen + DB; it wraps, #405), the search box and the table. A heading row
-above it has **Open in Message Log →**, a link to `/logs?cp=<id>` (the id
-URL-encoded). It fills what is left of the side panel (at least 360 px) and is
-480 px tall on the full page.
+Clear screen + DB; it wraps, #405), the search box and the table. The panel's
+header bar has **Open in Message Log →**, a link to `/logs?cp=<id>` (the id
+URL-encoded), while this tab is open. The viewer fills the panel's body, so
+its height follows the panel's.
 
 - **Download** saves every persisted log row of the charge point as JSON
   Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
@@ -859,7 +878,7 @@ shows at once, and a control the runtime refuses is shown inline instead of
 being dropped. In Remote mode every open console re-reads the run on
 `scenario_wait_changed`, not only the one that acted.
 
-A charge point's **Expert** tab (the lower half's **Expert**) sends an
+A charge point's **Expert** tab (in the bottom panel) sends an
 [expert OCPP call](../concepts/expert-ocpp-calls.md) (#389): pick any
 station-initiated action of the CP's OCPP-J version, edit the JSON payload —
 pre-filled with the smallest schema-valid one, **Reset to default** restores

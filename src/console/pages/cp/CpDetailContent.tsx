@@ -49,6 +49,7 @@ import type {
 import type { ChargePoint } from "@/cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
+import BottomPanel from "../../components/BottomPanel";
 import EmptyState from "../../components/EmptyState";
 import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import ExpertCallPanel from "./ExpertCallPanel";
@@ -208,7 +209,6 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   const navigate = useNavigate();
   const configCardId = useId();
   const connectorPanelId = useId();
-  const sectionsId = useId();
   const connectorGridRef = useRef<HTMLDivElement>(null);
   const scrolledToConnectorRef = useRef(false);
 
@@ -389,28 +389,6 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   const visibleSections = SECTIONS.filter(
     (item) => item.value !== "network" || hasNetworkSim,
   );
-  const sectionTabRefs = useRef(new Map<Section, HTMLButtonElement>());
-  // Arrow keys, Home and End move along the tab strip, as in a native tablist.
-  const onSectionKey = (event: React.KeyboardEvent) => {
-    const index = visibleSections.findIndex((item) => item.value === section);
-    const last = visibleSections.length - 1;
-    const next =
-      event.key === "ArrowRight"
-        ? (index + 1) % visibleSections.length
-        : event.key === "ArrowLeft"
-          ? (index - 1 + visibleSections.length) % visibleSections.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? last
-              : null;
-    if (next === null) return;
-    event.preventDefault();
-    const target = visibleSections[next].value;
-    setSection(target);
-    sectionTabRefs.current.get(target)?.focus();
-  };
-
   // Same proxy for "socket up" that the Charge Points list uses: after an
   // auto-reconnect the transport can be up before BootNotification is
   // re-Accepted, so fall back to a non-Unavailable status.
@@ -513,450 +491,423 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
     activeRuns.filter((run) => run.connectorId === connectorId);
 
   return (
-    <div className={isPanel ? "flex min-h-full flex-col" : "p-6"}>
-      {!isPanel && (
-        <Link
-          to={backToListHref}
-          className="mb-2 inline-block text-sm text-cx-accent hover:underline"
-        >
-          ← Back to charge points
-        </Link>
-      )}
-
-      <PageHeader
-        title={<span className="font-mono">{cpId}</span>}
-        titleAs={isPanel ? "h2" : "h1"}
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-expanded={isConfigOpen}
-              aria-controls={isConfigOpen ? configCardId : undefined}
-              onClick={() => setIsConfigOpen((open) => !open)}
-              className={cn(
-                isConfigOpen &&
-                  "border-cx-accent bg-cx-sel text-cx-accent hover:bg-cx-sel hover:text-cx-accent",
-              )}
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Config
-            </Button>
-            <Button
-              type="button"
-              variant={isConnected ? "destructive" : "success"}
-              size="sm"
-              disabled={isConnectPending}
-              onClick={() => void handleToggleConnect()}
-            >
-              {isConnected ? "Disconnect" : "Connect"}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  aria-label="More"
-                  title="More"
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link
-                    to={`/scenarios?tab=library&cp=${encodeURIComponent(cpId)}`}
-                  >
-                    Scenarios
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  disabled={isDeletePending}
-                  className="text-cx-rose focus:text-cx-rose"
-                  onSelect={() => void handleDelete()}
-                >
-                  <Trash2 className="mr-2 h-3.5 w-3.5" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {isPanel && (
-              <>
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  title="Open as full page"
-                >
-                  <Link
-                    to={fullPageHref}
-                    state={{ from: "/" }}
-                    aria-label="Open as full page"
-                  >
-                    <Maximize2 className="h-3.5 w-3.5" />
-                  </Link>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  aria-label="Close side panel"
-                  title="Close (Esc)"
-                  onClick={closePanel}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              </>
-            )}
-          </>
-        }
-      >
-        <StatusPill status={isConnected ? view.status : "Disconnected"} />
-        <NetworkSimBadge summary={snapshot?.networkSim} />
-        {resolvedOcppVersion && (
-          <span className="font-mono text-[11.5px] text-cx-faint">
-            {resolvedOcppVersion}
-            {resolvedSecurityProfile != null
-              ? ` · SP${resolvedSecurityProfile}`
-              : ""}
-          </span>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Everything above the bottom panel scrolls on its own; the panel
+          stays docked at the bottom of the page / side panel. */}
+      <div
+        data-testid="cp-scroll-area"
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto",
+          isPanel ? "px-6 py-5" : "p-6",
         )}
-      </PageHeader>
+      >
+        {!isPanel && (
+          <Link
+            to={backToListHref}
+            className="mb-2 inline-block text-sm text-cx-accent hover:underline"
+          >
+            ← Back to charge points
+          </Link>
+        )}
 
-      {resolvedWsUrl && (
-        <div className="-mt-2 mb-4 font-mono text-xs text-cx-muted">
-          {resolvedWsUrl}
-        </div>
-      )}
-
-      {isConfigOpen && (
-        <div
-          id={configCardId}
-          className="mb-4 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none"
-        >
-          <ChargePointConfigForm
-            initialConfig={editInitialConfig}
-            isNewChargePoint={false}
-            mode={mode}
-            soapPublicBase={serverInfo?.soap ?? null}
-            onSave={(cpConfig) => void handleSaveConfig(cpConfig)}
-            onCancel={() => setIsConfigOpen(false)}
-          />
-        </div>
-      )}
-
-      <ChargePointControls
-        cpId={cpId}
-        connected={isConnected}
-        heartbeat={view.heartbeat}
-      />
-
-      {connectorList.length === 0 ? (
-        <EmptyState
-          title="No connectors"
-          hint="This charge point has no connectors yet."
-        />
-      ) : (
-        <>
-          {isPanel ? (
+        <PageHeader
+          title={<span className="font-mono">{cpId}</span>}
+          titleAs={isPanel ? "h2" : "h1"}
+          actions={
             <>
-              <ConnectorTabs
-                connectors={connectorList.map((c) => ({
-                  id: c.id,
-                  status: c.status,
-                }))}
-                selectedId={activeConnectorId}
-                onSelect={onSelectConnector}
-                panelId={connectorPanelId}
-              />
-              {activeConnectorId != null && (
-                <div
-                  role="tabpanel"
-                  id={connectorPanelId}
-                  aria-label={`Connector ${activeConnectorId}`}
-                  className="mt-3"
-                >
-                  <ConnectorCard
-                    key={activeConnectorId}
-                    cpId={cpId}
-                    connectorId={activeConnectorId}
-                  />
-                  <ScenarioCard
-                    cpId={cpId}
-                    connectorId={activeConnectorId}
-                    connectorIds={connectorIds}
-                    runs={runsOn(activeConnectorId)}
-                    refresh={refreshRuns}
-                    scheduleRefresh={scheduleRunsRefresh}
-                    // From the list's panel the link goes to the full page,
-                    // whose Back returns to the list.
-                    runLinkState={{ from: "/" }}
-                  />
-                </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-expanded={isConfigOpen}
+                aria-controls={isConfigOpen ? configCardId : undefined}
+                onClick={() => setIsConfigOpen((open) => !open)}
+                className={cn(
+                  isConfigOpen &&
+                    "border-cx-accent bg-cx-sel text-cx-accent hover:bg-cx-sel hover:text-cx-accent",
+                )}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Config
+              </Button>
+              <Button
+                type="button"
+                variant={isConnected ? "destructive" : "success"}
+                size="sm"
+                disabled={isConnectPending}
+                onClick={() => void handleToggleConnect()}
+              >
+                {isConnected ? "Disconnect" : "Connect"}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="px-2"
+                    aria-label="More"
+                    title="More"
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem asChild>
+                    <Link
+                      to={`/scenarios?tab=library&cp=${encodeURIComponent(cpId)}`}
+                    >
+                      Scenarios
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={isDeletePending}
+                    className="text-cx-rose focus:text-cx-rose"
+                    onSelect={() => void handleDelete()}
+                  >
+                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {isPanel && (
+                <>
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="px-2"
+                    title="Open as full page"
+                  >
+                    <Link
+                      to={fullPageHref}
+                      state={{ from: "/" }}
+                      aria-label="Open as full page"
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="px-2"
+                    aria-label="Close side panel"
+                    title="Close (Esc)"
+                    onClick={closePanel}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </>
               )}
             </>
-          ) : (
-            // The full page shows every connector at once, two cards per row
-            // from about 1100 px of content width (a container query) and one
-            // below. The card lays itself out by its own width.
-            <div ref={connectorGridRef} className="@container">
-              <div
-                data-testid="connector-grid"
-                className="grid grid-cols-1 items-start gap-4 @min-[1100px]:grid-cols-2"
-              >
-                {connectorList.map((connector) => (
-                  <div key={connector.id} className="min-w-0">
+          }
+        >
+          <StatusPill status={isConnected ? view.status : "Disconnected"} />
+          <NetworkSimBadge summary={snapshot?.networkSim} />
+          {resolvedOcppVersion && (
+            <span className="font-mono text-[11.5px] text-cx-faint">
+              {resolvedOcppVersion}
+              {resolvedSecurityProfile != null
+                ? ` · SP${resolvedSecurityProfile}`
+                : ""}
+            </span>
+          )}
+        </PageHeader>
+
+        {resolvedWsUrl && (
+          <div className="-mt-2 mb-4 font-mono text-xs text-cx-muted">
+            {resolvedWsUrl}
+          </div>
+        )}
+
+        {isConfigOpen && (
+          <div
+            id={configCardId}
+            className="mb-4 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none"
+          >
+            <ChargePointConfigForm
+              initialConfig={editInitialConfig}
+              isNewChargePoint={false}
+              mode={mode}
+              soapPublicBase={serverInfo?.soap ?? null}
+              onSave={(cpConfig) => void handleSaveConfig(cpConfig)}
+              onCancel={() => setIsConfigOpen(false)}
+            />
+          </div>
+        )}
+
+        <ChargePointControls
+          cpId={cpId}
+          connected={isConnected}
+          heartbeat={view.heartbeat}
+        />
+
+        {connectorList.length === 0 ? (
+          <EmptyState
+            title="No connectors"
+            hint="This charge point has no connectors yet."
+          />
+        ) : (
+          <>
+            {isPanel ? (
+              <>
+                <ConnectorTabs
+                  connectors={connectorList.map((c) => ({
+                    id: c.id,
+                    status: c.status,
+                  }))}
+                  selectedId={activeConnectorId}
+                  onSelect={onSelectConnector}
+                  panelId={connectorPanelId}
+                />
+                {activeConnectorId != null && (
+                  <div
+                    role="tabpanel"
+                    id={connectorPanelId}
+                    aria-label={`Connector ${activeConnectorId}`}
+                    className="mt-3"
+                  >
                     <ConnectorCard
+                      key={activeConnectorId}
                       cpId={cpId}
-                      connectorId={connector.id}
-                      selected={connector.id === activeConnectorId}
-                      onSelect={() => onSelectConnector(connector.id)}
+                      connectorId={activeConnectorId}
                     />
                     <ScenarioCard
                       cpId={cpId}
-                      connectorId={connector.id}
+                      connectorId={activeConnectorId}
                       connectorIds={connectorIds}
-                      runs={runsOn(connector.id)}
+                      runs={runsOn(activeConnectorId)}
                       refresh={refreshRuns}
                       scheduleRefresh={scheduleRunsRefresh}
-                      // On the full page the link only adds `?run=`, so the
-                      // page keeps the Back it already had.
-                      runLinkState={location.state}
+                      // From the list's panel the link goes to the full page,
+                      // whose Back returns to the list.
+                      runLinkState={{ from: "/" }}
                     />
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      <div className={cn("mt-6 flex flex-col", isPanel && "min-h-0 flex-1")}>
-        <div
-          role="tablist"
-          aria-label="Charge point sections"
-          onKeyDown={onSectionKey}
-          className="flex gap-5 overflow-x-auto border-b border-cx-border"
-        >
-          {visibleSections.map((item) => {
-            const active = section === item.value;
-            return (
-              <button
-                key={item.value}
-                ref={(el) => {
-                  if (el) sectionTabRefs.current.set(item.value, el);
-                  else sectionTabRefs.current.delete(item.value);
-                }}
-                type="button"
-                role="tab"
-                id={`${sectionsId}-${item.value}`}
-                aria-selected={active}
-                aria-controls={`${sectionsId}-panel`}
-                tabIndex={active ? 0 : -1}
-                onClick={() => setSection(item.value)}
-                className={cn(
-                  "-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2 text-[13.5px] font-medium",
-                  active
-                    ? "border-cx-accent text-cx-fg"
-                    : "border-transparent text-cx-muted hover:text-cx-fg",
                 )}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div
-          role="tabpanel"
-          id={`${sectionsId}-panel`}
-          aria-labelledby={`${sectionsId}-${section}`}
-          className={cn("pt-3", isPanel && "flex min-h-0 flex-1 flex-col")}
-        >
-          {section === "log" && (
-            // The Message Log page's viewer, on this charge point's lines: it
-            // fills what is left of the side panel, and a fixed height on the
-            // page (the cards above it are tall).
-            <section
-              data-testid="cp-message-log"
-              className={cn(
-                "flex flex-col",
-                isPanel ? "min-h-[360px] flex-1" : "h-[480px]",
-              )}
-            >
-              {/* The viewer's toolbar counts the lines; this row leads to
-                  the Message Log page, filtered to this charge point. */}
-              <div className="mb-2 flex items-center justify-end">
-                <Link
-                  to={`/logs?cp=${encodeURIComponent(cpId)}`}
-                  className="text-xs text-cx-accent hover:underline"
-                >
-                  Open in Message Log →
-                </Link>
-              </div>
-              <LogViewer
-                logs={tabLogs}
-                onClear={handleClearTabLogs}
-                onDownload={handleDownloadLogs}
-                className="min-h-0 flex-1"
-              />
-            </section>
-          )}
-
-          {section === "transactions" && (
-            <section>
-              <TransactionsTab cpId={cpId} />
-            </section>
-          )}
-
-          {section === "analysis" && (
-            <section>
-              <Suspense
-                fallback={
-                  <div className="p-6 text-sm text-cx-muted">
-                    Loading session analysis…
-                  </div>
-                }
-              >
-                <SessionAnalysisPanel
-                  cpId={cpId}
-                  ocppVersion={resolvedOcppVersion}
-                />
-              </Suspense>
-            </section>
-          )}
-
-          {section === "diagnostics" && (
-            <section>
-              {connectorList.length > 1 && (
-                <select
-                  data-testid="diagnostics-connector"
-                  aria-label="Connector"
-                  value={activeConnectorId ?? ""}
-                  onChange={(e) => onSelectConnector(Number(e.target.value))}
-                  className={cn(FILTER_SELECT_CLASS, "mb-3")}
+              </>
+            ) : (
+              // The full page shows every connector at once, two cards per row
+              // from about 1100 px of content width (a container query) and one
+              // below. The card lays itself out by its own width.
+              <div ref={connectorGridRef} className="@container">
+                <div
+                  data-testid="connector-grid"
+                  className="grid grid-cols-1 items-start gap-4 @min-[1100px]:grid-cols-2"
                 >
                   {connectorList.map((connector) => (
-                    <option key={connector.id} value={connector.id}>
-                      Connector {connector.id}
-                    </option>
+                    <div key={connector.id} className="min-w-0">
+                      <ConnectorCard
+                        cpId={cpId}
+                        connectorId={connector.id}
+                        selected={connector.id === activeConnectorId}
+                        onSelect={() => onSelectConnector(connector.id)}
+                      />
+                      <ScenarioCard
+                        cpId={cpId}
+                        connectorId={connector.id}
+                        connectorIds={connectorIds}
+                        runs={runsOn(connector.id)}
+                        refresh={refreshRuns}
+                        scheduleRefresh={scheduleRunsRefresh}
+                        // On the full page the link only adds `?run=`, so the
+                        // page keeps the Back it already had.
+                        runLinkState={location.state}
+                      />
+                    </div>
                   ))}
-                </select>
-              )}
-              {diagnosticsConnector && localCp ? (
-                <div className="h-[520px]">
-                  <Suspense
-                    fallback={
-                      <div className="p-6 text-sm text-cx-muted">
-                        Loading state diagram…
-                      </div>
-                    }
-                  >
-                    <StateTransitionViewer
-                      connector={diagnosticsConnector}
-                      chargePoint={localCp}
-                    />
-                  </Suspense>
                 </div>
-              ) : (
-                <EmptyState
-                  title="State diagram unavailable"
-                  hint="The state transition diagram is available in local mode only."
-                />
-              )}
-            </section>
-          )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
-          {section === "expert" && (
-            <section>
-              <ExpertCallPanel
+      <BottomPanel
+        label="Charge point panel"
+        tabsLabel="Charge point sections"
+        tabs={visibleSections}
+        active={section}
+        onSelect={setSection}
+        storageKey={
+          isPanel
+            ? "ocpp-cp.console.cp-panel.side"
+            : "ocpp-cp.console.cp-panel.page"
+        }
+        toolbar={
+          section === "log" ? (
+            // The viewer's toolbar counts the lines; this link leads to the
+            // Message Log page, filtered to this charge point.
+            <Link
+              to={`/logs?cp=${encodeURIComponent(cpId)}`}
+              className="truncate whitespace-nowrap text-xs text-cx-accent hover:underline"
+            >
+              Open in Message Log →
+            </Link>
+          ) : undefined
+        }
+      >
+        {section === "log" && (
+          // The Message Log page's viewer, on this charge point's lines: it
+          // fills the panel's body.
+          <section
+            data-testid="cp-message-log"
+            className="flex h-full min-h-0 flex-col"
+          >
+            <LogViewer
+              logs={tabLogs}
+              onClear={handleClearTabLogs}
+              onDownload={handleDownloadLogs}
+              className="min-h-0 flex-1"
+            />
+          </section>
+        )}
+
+        {section === "transactions" && (
+          <section>
+            <TransactionsTab cpId={cpId} />
+          </section>
+        )}
+
+        {section === "analysis" && (
+          <section>
+            <Suspense
+              fallback={
+                <div className="p-6 text-sm text-cx-muted">
+                  Loading session analysis…
+                </div>
+              }
+            >
+              <SessionAnalysisPanel
                 cpId={cpId}
                 ocppVersion={resolvedOcppVersion}
-                connected={isConnected}
               />
-            </section>
-          )}
+            </Suspense>
+          </section>
+        )}
 
-          {section === "network" && (
-            <section>
-              <div className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none">
-                {networkSimLoadError && (
-                  <div className="mb-4 rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
-                    {networkSimLoadError}
-                  </div>
-                )}
-                {networkSimGlobalConfig === undefined &&
-                  !networkSimLoadError && (
-                    <p className="text-sm text-cx-muted">
-                      Loading network simulation…
-                    </p>
-                  )}
-                {networkSimGlobalConfig != null && (
-                  <>
-                    <NetworkSimEditor
-                      mode="cp"
-                      value={networkSimCpConfig ?? null}
-                      inheritedRules={inheritedNetworkSimRules}
-                      inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
-                      onSave={async (config) => {
-                        try {
-                          await chargePointService.saveNetworkSimCp(
-                            cpId,
-                            config,
-                          );
-                          await refreshNetworkSim();
-                        } catch (err) {
-                          console.error(
-                            `Failed to save network sim config for ${cpId}`,
-                            err,
-                          );
-                          throw err;
-                        }
-                      }}
-                      onDeleteOverride={async () => {
-                        try {
-                          await chargePointService.saveNetworkSimCp(cpId, null);
-                          await refreshNetworkSim();
-                        } catch (err) {
-                          console.error(
-                            `Failed to delete network sim override for ${cpId}`,
-                            err,
-                          );
-                          throw err;
-                        }
-                      }}
-                    />
-                    {snapshot?.networkSim?.manualRuleIds &&
-                      snapshot.networkSim.manualRuleIds.length > 0 && (
-                        <div className="mt-6 border-t border-cx-border pt-6">
-                          <h3 className="mb-4 text-base font-semibold text-cx-fg">
-                            Manual Rules
-                          </h3>
-                          <ManualDisconnectButtons
-                            manualRuleIds={snapshot.networkSim.manualRuleIds}
-                            isConnected={isConnected}
-                            onTriggerDisconnect={async (ruleId) =>
-                              chargePointService.triggerNetworkSimDisconnect(
-                                cpId,
-                                ruleId,
-                              )
-                            }
-                          />
-                        </div>
-                      )}
-                  </>
-                )}
+        {section === "diagnostics" && (
+          <section>
+            {connectorList.length > 1 && (
+              <select
+                data-testid="diagnostics-connector"
+                aria-label="Connector"
+                value={activeConnectorId ?? ""}
+                onChange={(e) => onSelectConnector(Number(e.target.value))}
+                className={cn(FILTER_SELECT_CLASS, "mb-3")}
+              >
+                {connectorList.map((connector) => (
+                  <option key={connector.id} value={connector.id}>
+                    Connector {connector.id}
+                  </option>
+                ))}
+              </select>
+            )}
+            {diagnosticsConnector && localCp ? (
+              <div className="h-[520px]">
+                <Suspense
+                  fallback={
+                    <div className="p-6 text-sm text-cx-muted">
+                      Loading state diagram…
+                    </div>
+                  }
+                >
+                  <StateTransitionViewer
+                    connector={diagnosticsConnector}
+                    chargePoint={localCp}
+                  />
+                </Suspense>
               </div>
-            </section>
-          )}
-        </div>
-      </div>
+            ) : (
+              <EmptyState
+                title="State diagram unavailable"
+                hint="The state transition diagram is available in local mode only."
+              />
+            )}
+          </section>
+        )}
+
+        {section === "expert" && (
+          <section>
+            <ExpertCallPanel
+              cpId={cpId}
+              ocppVersion={resolvedOcppVersion}
+              connected={isConnected}
+            />
+          </section>
+        )}
+
+        {section === "network" && (
+          <section>
+            <div className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none">
+              {networkSimLoadError && (
+                <div className="mb-4 rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
+                  {networkSimLoadError}
+                </div>
+              )}
+              {networkSimGlobalConfig === undefined && !networkSimLoadError && (
+                <p className="text-sm text-cx-muted">
+                  Loading network simulation…
+                </p>
+              )}
+              {networkSimGlobalConfig != null && (
+                <>
+                  <NetworkSimEditor
+                    mode="cp"
+                    value={networkSimCpConfig ?? null}
+                    inheritedRules={inheritedNetworkSimRules}
+                    inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
+                    onSave={async (config) => {
+                      try {
+                        await chargePointService.saveNetworkSimCp(cpId, config);
+                        await refreshNetworkSim();
+                      } catch (err) {
+                        console.error(
+                          `Failed to save network sim config for ${cpId}`,
+                          err,
+                        );
+                        throw err;
+                      }
+                    }}
+                    onDeleteOverride={async () => {
+                      try {
+                        await chargePointService.saveNetworkSimCp(cpId, null);
+                        await refreshNetworkSim();
+                      } catch (err) {
+                        console.error(
+                          `Failed to delete network sim override for ${cpId}`,
+                          err,
+                        );
+                        throw err;
+                      }
+                    }}
+                  />
+                  {snapshot?.networkSim?.manualRuleIds &&
+                    snapshot.networkSim.manualRuleIds.length > 0 && (
+                      <div className="mt-6 border-t border-cx-border pt-6">
+                        <h3 className="mb-4 text-base font-semibold text-cx-fg">
+                          Manual Rules
+                        </h3>
+                        <ManualDisconnectButtons
+                          manualRuleIds={snapshot.networkSim.manualRuleIds}
+                          isConnected={isConnected}
+                          onTriggerDisconnect={async (ruleId) =>
+                            chargePointService.triggerNetworkSimDisconnect(
+                              cpId,
+                              ruleId,
+                            )
+                          }
+                        />
+                      </div>
+                    )}
+                </>
+              )}
+            </div>
+          </section>
+        )}
+      </BottomPanel>
     </div>
   );
 };

@@ -44,6 +44,12 @@ export interface SidePanelProps {
   onClose(): void;
   /** Accessible name of the panel (`aria-label`). */
   label: string;
+  /**
+   * Default `true`: the panel pads and scrolls its children. `false` hands
+   * both to the child (which then fills the panel's height, e.g. to dock a
+   * bottom panel under a scrolling upper part).
+   */
+  padded?: boolean;
   children: React.ReactNode;
 }
 
@@ -58,6 +64,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
   open,
   onClose,
   label,
+  padded = true,
   children,
 }) => {
   // null = nothing stored and not resized yet: the CSS default applies.
@@ -146,7 +153,15 @@ const SidePanel: React.FC<SidePanelProps> = ({
           "hover:bg-cx-accent/40 focus-visible:bg-cx-accent focus-visible:outline-none",
         )}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+      <div
+        className={
+          padded
+            ? "min-h-0 flex-1 overflow-y-auto px-6 py-5"
+            : "flex min-h-0 flex-1 flex-col"
+        }
+      >
+        {children}
+      </div>
     </aside>
   );
 };

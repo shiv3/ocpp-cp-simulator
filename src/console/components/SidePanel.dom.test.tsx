@@ -39,11 +39,20 @@ describe("SidePanel", () => {
     document.body.innerHTML = "";
   });
 
-  async function render(open: boolean, onClose: () => void = () => {}) {
+  async function render(
+    open: boolean,
+    onClose: () => void = () => {},
+    padded?: boolean,
+  ) {
     root ??= createRoot(container);
     await act(async () => {
       root!.render(
-        <SidePanel open={open} onClose={onClose} label="Details">
+        <SidePanel
+          open={open}
+          onClose={onClose}
+          label="Details"
+          padded={padded}
+        >
           <p>body</p>
         </SidePanel>,
       );
@@ -78,6 +87,19 @@ describe("SidePanel", () => {
     expect(document.documentElement.hasAttribute("data-side-panel")).toBe(
       false,
     );
+  });
+
+  it("padded={false} leaves padding and scrolling to the child", async () => {
+    await render(true);
+    const padded = container.querySelector("aside p")!.parentElement!;
+    expect(padded.className).toContain("overflow-y-auto");
+    expect(padded.className).toContain("px-6");
+
+    await render(true, () => {}, false);
+    const bare = container.querySelector("aside p")!.parentElement!;
+    expect(bare.className).not.toContain("overflow-y-auto");
+    expect(bare.className).not.toContain("px-6");
+    expect(bare.className).toContain("flex-1");
   });
 
   it("exposes the resize handle as a vertical separator with a 360 px minimum", async () => {

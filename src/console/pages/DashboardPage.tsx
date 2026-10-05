@@ -206,6 +206,8 @@ const DashboardPage: React.FC = () => {
         open={panelCpId !== null}
         onClose={closePanel}
         label="Charge point"
+        // The content owns scrolling: its bottom panel stays docked.
+        padded={false}
       >
         {panelCpId !== null && (
           // Keyed so a swap starts from a clean state (tab, dialogs, snapshot),

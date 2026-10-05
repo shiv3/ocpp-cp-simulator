@@ -1570,3 +1570,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#message-log-tab): the charge point's Message log tab filters to the selected connector (page card click, panel `#N` tab); a chip **Connector N** with a **×** (`Show every connector`) in the bottom panel's header bar clears it, widening in the Filters sidebar holds until the selection changes. Lines that name no connector are hidden while a connector is selected (tick `(none)` to see them).
 - Code: `log-viewer.tsx` (new controlled props `selectedConnectorIds` / `onConnectorFilterChange`, exported `ConnectorFilterValue`), `CpDetailContent.tsx`; tests `log-viewer.dom.test.tsx`, `CpDetailContent.tabs.dom.test.tsx`, `DashboardPage.panel.dom.test.tsx`.
+
+## [2026-10-05] ingest | Network simulation tab says when no global layer exists
+
+- [Web console](entities/web-console.md#charge-point-page): with no global network simulation layer saved, the charge point's Network simulation tab shows **Network simulation is not set up** with a link to `/settings#network-simulation` instead of an empty box (it rendered neither the loading text nor the editor for a `null` global layer). The per-CP layer stays an override of the global one ([network simulation](concepts/network-simulation.md)). The Settings page's Network Simulation section got the anchor id `network-simulation` and scrolls into view on that hash.
+- Code: `CpDetailContent.tsx`, `SettingsPage.tsx`; tests `CpDetailContent.tabs.dom.test.tsx`, `SettingsPage.dom.test.tsx`.

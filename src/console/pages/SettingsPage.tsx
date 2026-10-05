@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import Settings from "../../components/Settings";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { NetworkSimEditor } from "../components/network-sim/NetworkSimEditor";
@@ -6,6 +7,7 @@ import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/ne
 
 const SettingsPage: React.FC = () => {
   const { chargePointService } = useDataContext();
+  const { hash } = useLocation();
   const [networkSimConfig, setNetworkSimConfig] =
     useState<NetworkSimLayerConfig | null>(null);
   const [isLoadingNetSim, setIsLoadingNetSim] = useState(true);
@@ -38,6 +40,14 @@ const SettingsPage: React.FC = () => {
     };
   }, [chargePointService]);
 
+  // `/settings#network-simulation` (the charge point's Network simulation tab
+  // links here) scrolls the section into view once it has rendered.
+  const networkSimShown = !isLoadingNetSim && !loadError;
+  useEffect(() => {
+    if (hash !== "#network-simulation" || !networkSimShown) return;
+    document.getElementById("network-simulation")?.scrollIntoView?.();
+  }, [hash, networkSimShown]);
+
   const handleSaveNetworkSim = async (config: NetworkSimLayerConfig | null) => {
     await chargePointService.saveNetworkSimGlobal(config);
     setNetworkSimConfig(config);
@@ -54,7 +64,10 @@ const SettingsPage: React.FC = () => {
       )}
 
       {!isLoadingNetSim && !loadError && (
-        <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6">
+        <div
+          id="network-simulation"
+          className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6"
+        >
           <h2 className="mb-4 text-lg font-semibold text-cx-fg">
             Network Simulation
           </h2>

@@ -907,6 +907,22 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                   Loading network simulation…
                 </p>
               )}
+              {networkSimGlobalConfig === null && !networkSimLoadError && (
+                // No global layer saved: this charge point's settings are an
+                // override of it, so there is nothing to edit yet.
+                <EmptyState
+                  title="Network simulation is not set up"
+                  hint="Create the global layer first; this charge point's settings are an override of it."
+                  action={
+                    <Link
+                      to="/settings#network-simulation"
+                      className="text-sm text-cx-accent hover:underline"
+                    >
+                      Open Settings → Network simulation
+                    </Link>
+                  }
+                />
+              )}
               {networkSimGlobalConfig != null && (
                 <>
                   <NetworkSimEditor

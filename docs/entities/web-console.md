@@ -286,7 +286,15 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   `ocpp-cp.console.cp-panel.side.*` in the side panel; `.height` and
   `.collapsed`). The tab's content scrolls inside the panel's body, which
   stays mounted while folded. Esc never touches the panel (in the side panel
-  it closes the side panel, as before).
+  it closes the side panel, as before). The **Network simulation** tab edits
+  this charge point's layer, an override of the global one, so while no global
+  layer is saved (`getNetworkSimGlobal()` is `null`) it shows **Network
+  simulation is not set up** (_Create the global layer first; this charge
+  point's settings are an override of it._) with a link **Open Settings →
+  Network simulation** to `/settings#network-simulation` (the Settings page
+  scrolls that section into view); once a global layer exists it shows the
+  editor. A load error is shown instead of either. See
+  [network simulation](../concepts/network-simulation.md).
 
 The same content is what the list's [side panel](#dashboard) shows. Two URL
 parameters keep the view across the full page and the panel:

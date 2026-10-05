@@ -759,6 +759,36 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     ).not.toContain("Network simulation");
   });
 
+  it("?tab=network without a global layer says so and links to Settings, not an empty box", async () => {
+    // mount()'s default: getNetworkSimGlobal resolves null.
+    const { container } = await mount("/cp/CP-A?tab=network");
+    const text = container.textContent ?? "";
+    expect(text).toContain("Network simulation is not set up");
+    expect(text).toContain(
+      "Create the global layer first; this charge point's settings are an override of it.",
+    );
+    expect(text).not.toContain("Loading network simulation");
+    const link = Array.from(container.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Open Settings"),
+    );
+    expect(link?.textContent).toContain("Network simulation");
+    expect(link?.getAttribute("href")).toBe("/settings#network-simulation");
+  });
+
+  it("?tab=network with a global layer shows the editor, not the not-set-up state", async () => {
+    const { container } = await mount("/cp/CP-A?tab=network", {
+      getNetworkSimGlobal: vi.fn(async () => ({ enabled: false, rules: {} })),
+    });
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("Network simulation is not set up");
+    expect(text).toContain("Inherit (off)");
+    expect(
+      Array.from(container.querySelectorAll("a")).some((a) =>
+        a.textContent?.includes("Open Settings"),
+      ),
+    ).toBe(false);
+  });
+
   it("More → Delete confirms, removes the charge point and goes back to the list", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const removeChargePoint = vi.fn(async () => {});

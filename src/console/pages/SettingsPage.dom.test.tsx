@@ -60,4 +60,18 @@ describe("SettingsPage", () => {
     // But the page itself should still be visible (not just blank)
     expect(container.textContent).toContain("RFID Tag IDs");
   });
+
+  it("marks the Network Simulation section #network-simulation, the target of the charge point tab's link", async () => {
+    const service = createFakeChargePointService({
+      getNetworkSimGlobal: vi.fn(async () => null),
+    });
+    const { container, root } = await renderConsole("/settings", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const section = container.querySelector("#network-simulation");
+    expect(section?.querySelector("h2")?.textContent).toBe(
+      "Network Simulation",
+    );
+  });
 });

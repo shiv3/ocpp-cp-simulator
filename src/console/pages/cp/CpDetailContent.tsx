@@ -17,7 +17,10 @@ import {
 import { Maximize2, MoreHorizontal, Settings, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { LogViewer } from "@/components/ui/log-viewer";
+import {
+  LogViewer,
+  type ConnectorFilterValue,
+} from "@/components/ui/log-viewer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -230,6 +233,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   // Watermark to track which global log entries have been cleared from this
   // tab's view. Only entries with seq > logsClearedBeforeSeq are shown.
   const [logsClearedBeforeSeq, setLogsClearedBeforeSeq] = useState(-1);
+  // The Message log tab's Connector filter. It follows the selected connector
+  // (the effect below) and the operator may widen it in the Filters sidebar;
+  // that choice holds until the selection changes again.
+  const [logConnectorFilter, setLogConnectorFilter] = useState<
+    ConnectorFilterValue[]
+  >([]);
 
   /** Global rules minus tombstones, as the per-CP editor's inherited baseline. */
   const inheritedNetworkSimRules = useMemo(() => {
@@ -356,6 +365,16 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
     connectorList.some((c) => c.id === selectedConnectorId)
       ? selectedConnectorId
       : (connectorList[0]?.id ?? null);
+
+  useEffect(() => {
+    setLogConnectorFilter(activeConnectorId == null ? [] : [activeConnectorId]);
+  }, [activeConnectorId]);
+
+  // The chip shows while the filter is exactly the selected connector.
+  const logFilteredToActiveConnector =
+    activeConnectorId != null &&
+    logConnectorFilter.length === 1 &&
+    logConnectorFilter[0] === activeConnectorId;
 
   // On the full page, the connector named in the URL is scrolled into view
   // once, when its card first renders: down the page and along the row.
@@ -757,12 +776,28 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           section === "log" ? (
             // The viewer's toolbar counts the lines; this link leads to the
             // Message Log page, filtered to this charge point.
-            <Link
-              to={`/logs?cp=${encodeURIComponent(cpId)}`}
-              className="truncate whitespace-nowrap text-xs text-cx-accent hover:underline"
-            >
-              Open in Message Log →
-            </Link>
+            <>
+              {logFilteredToActiveConnector && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-cx-border bg-cx-sub px-2 text-[11.5px] leading-5 text-cx-fg2">
+                  Connector {activeConnectorId}
+                  <button
+                    type="button"
+                    aria-label="Show every connector"
+                    title="Show every connector"
+                    onClick={() => setLogConnectorFilter([])}
+                    className="inline-flex items-center rounded-full text-cx-muted hover:text-cx-fg"
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                </span>
+              )}
+              <Link
+                to={`/logs?cp=${encodeURIComponent(cpId)}`}
+                className="truncate whitespace-nowrap text-xs text-cx-accent hover:underline"
+              >
+                Open in Message Log →
+              </Link>
+            </>
           ) : undefined
         }
       >
@@ -778,6 +813,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               onClear={handleClearTabLogs}
               onDownload={handleDownloadLogs}
               defaultFiltersOpen={!isPanel}
+              selectedConnectorIds={logConnectorFilter}
+              onConnectorFilterChange={setLogConnectorFilter}
               className="min-h-0 flex-1"
             />
           </section>

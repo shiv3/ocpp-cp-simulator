@@ -387,7 +387,8 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
         timestamp: new Date("2026-01-01T10:00:00.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "BootNotification accepted",
+        // Names connector 1, the selected one: the tab filters to it.
+        message: "BootNotification accepted on connector 1",
       },
     });
     await flush();
@@ -417,7 +418,11 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
       await Promise.resolve();
     });
     await flush();
-    for (const message of ["first line", "second line"]) {
+    // Both name connector 1, the selected one: the tab filters to it.
+    for (const message of [
+      "first line, connector 1",
+      "second line, connector 1",
+    ]) {
       await pushEvent(service as FakeChargePointService, "CP-A", {
         type: "log",
         entry: {
@@ -454,6 +459,95 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
 
     await click(buttonByText(log, "Clear screen + DB")!);
     expect(clearStoredLogs).toHaveBeenCalledWith("CP-A");
+  });
+
+  /** Log lines that name connector 1, connector 2 and no connector. */
+  async function seedConnectorLogs(
+    service: FakeChargePointService,
+    cpId = "CP-A",
+  ) {
+    await act(async () => {
+      for (const handler of service.__handlers.subscribeRegistry) {
+        handler({ type: "snapshot", cps: [cpA] });
+      }
+      await Promise.resolve();
+    });
+    await flush();
+    for (const message of [
+      "line for connector 1",
+      "line for connector 2",
+      "line for the charge point",
+    ]) {
+      await pushEvent(service, cpId, {
+        type: "log",
+        entry: {
+          timestamp: new Date("2026-01-01T10:00:00.000Z"),
+          level: LogLevel.INFO,
+          type: LogType.OCPP,
+          message,
+        },
+      });
+    }
+    await flush();
+  }
+  const logRows = (root: ParentNode) =>
+    Array.from(
+      root.querySelectorAll('[data-testid="cp-message-log"] tbody tr'),
+    ).map((tr) => tr.textContent ?? "");
+  const showEveryConnector = (root: ParentNode) =>
+    root.querySelector<HTMLElement>('[aria-label="Show every connector"]');
+  /** The chip is the button's wrapper in the bottom panel's header bar. */
+  const connectorChip = (root: ParentNode) =>
+    showEveryConnector(root)?.parentElement ?? undefined;
+
+  it("the Message log follows the selected connector: a chip names it, its x shows every connector", async () => {
+    const { container, service } = await mount("/cp/CP-A");
+    await seedConnectorLogs(service as FakeChargePointService);
+
+    // Connector 1 is the active one: only its lines.
+    let rows = logRows(container);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("line for connector 1");
+    expect(connectorChip(container)?.textContent).toContain("Connector 1");
+
+    await click(
+      container.querySelector<HTMLElement>(
+        '[data-connector-id="2"] [data-card-header]',
+      )!,
+    );
+    rows = logRows(container);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("line for connector 2");
+    expect(connectorChip(container)?.textContent).toContain("Connector 2");
+
+    await click(showEveryConnector(container)!);
+    expect(logRows(container)).toHaveLength(3);
+    expect(connectorChip(container)).toBeUndefined();
+    expect(showEveryConnector(container)).toBeNull();
+
+    // Selecting a connector narrows it again.
+    await click(
+      container.querySelector<HTMLElement>(
+        '[data-connector-id="1"] [data-card-header]',
+      )!,
+    );
+    rows = logRows(container);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("line for connector 1");
+    expect(connectorChip(container)?.textContent).toContain("Connector 1");
+  });
+
+  it("widening the filter in the sidebar hides the chip and holds until the selection changes", async () => {
+    const { container, service } = await mount("/cp/CP-A");
+    await seedConnectorLogs(service as FakeChargePointService);
+
+    const option = (label: string) =>
+      container.querySelector<HTMLInputElement>(
+        `[data-filter-group="Connector"] label[data-filter-option="${label}"] input`,
+      )!;
+    await click(option("Connector 2"));
+    expect(logRows(container)).toHaveLength(2);
+    expect(connectorChip(container)).toBeUndefined();
   });
 
   it("encodes the charge point id in the Message Log link", async () => {

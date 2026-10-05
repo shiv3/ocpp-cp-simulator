@@ -527,7 +527,8 @@ describe("CpDetailPage", () => {
         timestamp: new Date("2026-01-01T10:00:00.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "BootNotification accepted",
+        // Names connector 1, the selected one: the log tab filters to it.
+        message: "BootNotification accepted on connector 1",
       },
     });
     await flush();
@@ -596,7 +597,7 @@ describe("CpDetailPage", () => {
         timestamp: new Date("2026-01-01T10:00:00.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "initial entry",
+        message: "initial entry on connector 1",
       },
     });
     await flush();
@@ -626,7 +627,7 @@ describe("CpDetailPage", () => {
         timestamp: new Date("2026-01-01T10:00:01.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "new entry after clear",
+        message: "new entry after clear on connector 1",
       },
     });
     await flush();

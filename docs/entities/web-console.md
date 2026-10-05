@@ -516,6 +516,21 @@ header bar has **Open in Message Log →**, a link to `/logs?cp=<id>` (the id
 URL-encoded), while this tab is open. The viewer fills the panel's body, so
 its height follows the panel's.
 
+The **Connector filter follows the selected connector**: selecting connector 2
+(a card click on the page, the `#2` tab in the side panel) leaves only the
+lines that reference connector 2, and selecting another connector narrows it to
+that one. (Lines that name no connector, such as the charge point's own
+traffic, are hidden while a connector is selected.) While the filter is exactly
+the selected connector, a chip **Connector _N_** with a **×** button
+(`aria-label="Show every connector"`) sits in the header bar beside **Open in
+Message Log →**; the **×** clears the filter. To widen it instead, tick other
+values in the sidebar's Connector group (add `(none)` for the charge point's
+own traffic): the chip then disappears, and the choice holds until the
+selection changes again. With the sidebar closed, the **Filters** badge counts
+the Connector group. The `LogViewer` takes this as the controlled props
+`selectedConnectorIds` / `onConnectorFilterChange`, like the charge point
+filter.
+
 - **Download** saves every persisted log row of the charge point as JSON
   Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
   [log format](../concepts/log-format.md));

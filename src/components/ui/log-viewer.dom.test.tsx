@@ -577,6 +577,37 @@ describe("LogViewer charge point group", () => {
     expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
   });
 
+  it("is controlled by selectedConnectorIds / onConnectorFilterChange", () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <LogViewer
+        logs={[
+          entry('Sent: [2,"1","StatusNotification",{"connectorId":2}]'),
+          entry("Handling connector 3 reset"),
+          entry("no connector here"),
+        ]}
+        selectedConnectorIds={[2]}
+        onConnectorFilterChange={onChange}
+      />,
+    );
+    const rows = () => container.querySelectorAll("tbody tr");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].textContent).toContain("StatusNotification");
+    expect(
+      findFilterOptionRow(
+        "Connector",
+        "Connector 2",
+      ).querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked,
+    ).toBe(true);
+
+    clickFilterOption("Connector", "Connector 3");
+    expect(onChange).toHaveBeenLastCalledWith([2, 3]);
+    clickFilterOption("Connector", "Connector 2");
+    expect(onChange).toHaveBeenLastCalledWith([]);
+    // Controlled: nothing changed until the owner passes the new value.
+    expect(rows()).toHaveLength(1);
+  });
+
   it("is controlled by selectedCpIds / onCpFilterChange, and lists a selected id that has no entries", () => {
     const onChange = vi.fn();
     const { container } = render(

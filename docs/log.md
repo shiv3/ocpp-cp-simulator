@@ -1565,3 +1565,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is one row that scrolls horizontally again (`grid-auto-flow: column`, `grid-auto-columns: minmax(min(100%, max(400px, quarter)), 1fr)`, `overflow-x: auto`, scroll snapping, a focusable `region` named Connectors, `inline: "nearest"` scroll-into-view; maintainer feedback after the two-column grid, which had been meant as two columns _inside the card_). The card's battery-beside-figures tier now starts at about 340 px of card width (was 400 px, so a 400 px card in the row got one column), and under about 560 px the battery drawing sits above the SoC figure and its text.
 - Code: `CpDetailContent.tsx` (grid), `ConnectorCard.tsx` (`@min-[340px]:` tier), `EvBattery.tsx` (`@max-[560px]:flex-col`); tests `CpDetailContent.connectorGrid.dom.test.tsx`, `ConnectorCard.dom.test.tsx`.
+
+## [2026-10-05] ingest | Message log tab follows the selected connector
+
+- [Web console](entities/web-console.md#message-log-tab): the charge point's Message log tab filters to the selected connector (page card click, panel `#N` tab); a chip **Connector N** with a **×** (`Show every connector`) in the bottom panel's header bar clears it, widening in the Filters sidebar holds until the selection changes. Lines that name no connector are hidden while a connector is selected (tick `(none)` to see them).
+- Code: `log-viewer.tsx` (new controlled props `selectedConnectorIds` / `onConnectorFilterChange`, exported `ConnectorFilterValue`), `CpDetailContent.tsx`; tests `log-viewer.dom.test.tsx`, `CpDetailContent.tabs.dom.test.tsx`, `DashboardPage.panel.dom.test.tsx`.

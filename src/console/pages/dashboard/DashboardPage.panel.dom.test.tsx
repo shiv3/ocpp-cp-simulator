@@ -14,11 +14,13 @@ import {
 import {
   createFakeChargePointService,
   flush,
+  pushEvent,
   renderConsole,
   type FakeChargePointService,
   type ReportedLocation,
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
+import { LogLevel, LogType } from "../../../cp/shared/Logger";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 
 function connector(
@@ -192,6 +194,55 @@ describe("DashboardPage side panel", () => {
 
     expect(panelOf(container)).toBeTruthy();
     expect(location?.search).toBe("?cp=CP-A&connector=2");
+  });
+
+  it("the panel's Message log follows the selected connector tab: a chip names it, its x shows both", async () => {
+    const { container, service } = await mount("/?cp=CP-A");
+    for (const message of ["line for connector 1", "line for connector 2"]) {
+      await pushEvent(service, "CP-A", {
+        type: "log",
+        entry: {
+          timestamp: new Date("2026-01-01T10:00:00.000Z"),
+          level: LogLevel.INFO,
+          type: LogType.OCPP,
+          message,
+        },
+      });
+    }
+    await flush();
+    const panel = panelOf(container)!;
+    const rows = () =>
+      Array.from(
+        panel.querySelectorAll('[data-testid="cp-message-log"] tbody tr'),
+      ).map((tr) => tr.textContent ?? "");
+    const tab = (label: string) =>
+      Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          '[role="tablist"][aria-label="Connectors"] [role="tab"]',
+        ),
+      ).find((t) => t.textContent?.trim() === label)!;
+    const showEvery = () =>
+      panel.querySelector<HTMLElement>('[aria-label="Show every connector"]');
+    // The chip is the button's wrapper in the bottom panel's header bar.
+    const chip = () => showEvery()?.parentElement ?? undefined;
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain("line for connector 1");
+    expect(chip()?.textContent).toContain("Connector 1");
+
+    await click(tab("#2"));
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain("line for connector 2");
+    expect(chip()?.textContent).toContain("Connector 2");
+
+    await click(showEvery()!);
+    expect(rows()).toHaveLength(2);
+    expect(chip()).toBeUndefined();
+
+    await click(tab("#1"));
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain("line for connector 1");
+    expect(chip()?.textContent).toContain("Connector 1");
   });
 
   it("clicking another row swaps the panel (replace), clicking it again closes it (replace)", async () => {

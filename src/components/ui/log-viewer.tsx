@@ -29,6 +29,11 @@ export interface LogViewerProps {
    *  URL. Without it the viewer keeps the selection itself. */
   selectedCpIds?: string[];
   onCpFilterChange?: (ids: string[]) => void;
+  /** The checked Connector values (`null` is "(none)"); owning them lets the
+   *  charge point page follow its selected connector. Without it the viewer
+   *  keeps the selection itself. */
+  selectedConnectorIds?: ConnectorFilterValue[];
+  onConnectorFilterChange?: (ids: ConnectorFilterValue[]) => void;
   /** Caps the table's height; without it the table fills the viewer, which
    *  the caller sizes (`className="h-full"` in a flex column). */
   maxHeight?: string;
@@ -44,7 +49,7 @@ export interface LogViewerProps {
  * don't reference any connector. `null` represents the real "no connector"
  * case so we can keep the filter list as `(number | null)[]`.
  */
-type ConnectorFilterValue = number | null;
+export type ConnectorFilterValue = number | null;
 
 /**
  * "(none)" pseudo-value for the Direction/Action filters, used for log
@@ -239,6 +244,8 @@ export function LogViewer({
   onDownload,
   selectedCpIds,
   onCpFilterChange,
+  selectedConnectorIds,
+  onConnectorFilterChange,
   maxHeight,
   defaultFiltersOpen = true,
   className,
@@ -248,7 +255,7 @@ export function LogViewer({
   const [filter, setFilter] = useState("");
   const [logLevelFilter, setLogLevelFilter] = useState<LogLevel[]>([]);
   const [logTypeFilter, setLogTypeFilter] = useState<LogType[]>([]);
-  const [logConnectorFilter, setLogConnectorFilter] = useState<
+  const [ownConnectorFilter, setOwnConnectorFilter] = useState<
     ConnectorFilterValue[]
   >([]);
   const [logDirectionFilter, setLogDirectionFilter] = useState<
@@ -266,6 +273,13 @@ export function LogViewer({
   const setCpFilter = (next: string[]) => {
     if (selectedCpIds === undefined) setOwnCpFilter(next);
     onCpFilterChange?.(next);
+  };
+
+  // Connector selection: likewise.
+  const logConnectorFilter = selectedConnectorIds ?? ownConnectorFilter;
+  const setLogConnectorFilter = (next: ConnectorFilterValue[]) => {
+    if (selectedConnectorIds === undefined) setOwnConnectorFilter(next);
+    onConnectorFilterChange?.(next);
   };
 
   // A stable id per entry object: the React key and the "expanded" marker,

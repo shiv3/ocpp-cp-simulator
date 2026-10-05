@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, SlidersHorizontal } from "lucide-react";
 
 import { LogEntry, LogLevel, LogType } from "@/cp/shared/Logger";
 import {
@@ -32,6 +32,10 @@ export interface LogViewerProps {
   /** Caps the table's height; without it the table fills the viewer, which
    *  the caller sizes (`className="h-full"` in a flex column). */
   maxHeight?: string;
+  /** Whether the filter sidebar starts open (default `true`). The toolbar's
+   *  Filters button shows or hides it afterwards; the viewer owns the state.
+   *  A narrow host such as the charge point's side panel starts it closed. */
+  defaultFiltersOpen?: boolean;
   className?: string;
 }
 
@@ -236,8 +240,11 @@ export function LogViewer({
   selectedCpIds,
   onCpFilterChange,
   maxHeight,
+  defaultFiltersOpen = true,
   className,
 }: LogViewerProps) {
+  const filtersId = useId();
+  const [filtersOpen, setFiltersOpen] = useState(defaultFiltersOpen);
   const [filter, setFilter] = useState("");
   const [logLevelFilter, setLogLevelFilter] = useState<LogLevel[]>([]);
   const [logTypeFilter, setLogTypeFilter] = useState<LogType[]>([]);
@@ -480,6 +487,17 @@ export function LogViewer({
 
   const columnCount = hasCp ? 8 : 7;
 
+  // Filter groups with a selection: a closed sidebar hides them, so the
+  // Filters button counts them.
+  const activeFilterGroups = [
+    cpFilter,
+    logLevelFilter,
+    logTypeFilter,
+    logConnectorFilter,
+    logDirectionFilter,
+    logActionFilter,
+  ].filter((selection) => selection.length > 0).length;
+
   return (
     <div
       className={cn(
@@ -488,7 +506,11 @@ export function LogViewer({
       )}
     >
       {/* Left sidebar: filters */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-cx-border bg-cx-side">
+      <div
+        id={filtersId}
+        hidden={!filtersOpen}
+        className="flex w-64 shrink-0 flex-col border-r border-cx-border bg-cx-side"
+      >
         <div className="border-b border-cx-border px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-cx-muted">
           Filters
         </div>
@@ -532,6 +554,25 @@ export function LogViewer({
           className="flex flex-wrap items-center justify-between gap-2 border-b border-cx-border bg-cx-sub px-3 py-2"
         >
           <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed={filtersOpen}
+              aria-controls={filtersId}
+              aria-label="Filters"
+              title="Show or hide the filters"
+              onClick={() => setFiltersOpen((open) => !open)}
+              className={cn(filtersOpen && "bg-cx-sub text-cx-fg")}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filters
+              {!filtersOpen && activeFilterGroups > 0 && (
+                <span className="rounded-full bg-cx-accent px-1.5 text-[10.5px] leading-4 text-white">
+                  {activeFilterGroups}
+                </span>
+              )}
+            </Button>
             <h3 className="text-[13px] font-semibold text-cx-fg">Logs</h3>
             <span className="font-mono text-[11.5px] text-cx-muted">
               {logs.length} total / {filteredLogs.length} filtered

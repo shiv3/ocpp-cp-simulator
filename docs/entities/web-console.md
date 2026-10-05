@@ -499,8 +499,11 @@ The bottom panel's **Message log** tab (#421) is the
 [Message Log page](#message-log-page)'s viewer (`LogViewer`) on this charge
 point's lines, oldest first: the filter sidebar (Level, Type, Connector,
 Direction, Action; no Charge point group, the lines are all this one's), the
-toolbar (`<n> total / <m> filtered`, Auto-scroll, Download, Clear screen,
-Clear screen + DB; it wraps, #405), the search box and the table. The panel's
+toolbar (**Filters**, `<n> total / <m> filtered`, Auto-scroll, Download, Clear
+screen, Clear screen + DB; it wraps, #405), the search box and the table. In
+the **side panel** the filter sidebar starts **closed**, so the table gets the
+whole width; on the full page it starts open. The **Filters** button opens and
+closes it either way. The panel's
 header bar has **Open in Message Log →**, a link to `/logs?cp=<id>` (the id
 URL-encoded), while this tab is open. The viewer fills the panel's body, so
 its height follows the panel's.
@@ -534,7 +537,12 @@ The viewer has three parts:
   (the OCPP action; a response takes the action of the call it answers). Ticking
   several values of one group matches any of them; groups combine with AND, and
   the counts are over all lines, not the filtered ones.
-- **Toolbar** (wraps in a narrow window, #405): `<n> total / <m> filtered`,
+- **Toolbar** (wraps in a narrow window, #405): a **Filters** button (first;
+  `aria-pressed`, it shows or hides the sidebar, which stays mounted so the
+  ticked values survive; while the sidebar is closed and some groups have a
+  selection, a small count badge on the button shows how many groups, so a
+  hidden filter is never invisible; the page starts with the sidebar open,
+  `defaultFiltersOpen={false}` starts it closed), `<n> total / <m> filtered`,
   **Auto-scroll** (keeps the table at the newest line), **Download**,
   **Clear screen** and **Clear screen + DB**; under it a **search** box over the
   message text.

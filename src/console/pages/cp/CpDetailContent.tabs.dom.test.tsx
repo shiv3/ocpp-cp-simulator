@@ -525,6 +525,36 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(linkIn(bar)).toBeTruthy();
   });
 
+  it("the log viewer's filter sidebar starts closed in the side panel and open on the page", async () => {
+    const sidebarOf = (root: HTMLElement) => {
+      const log = root.querySelector<HTMLElement>(
+        '[data-testid="cp-message-log"]',
+      )!;
+      return log.querySelector<HTMLElement>("[data-filter-group]")!
+        .parentElement!.parentElement!;
+    };
+    const filtersButton = (root: HTMLElement) =>
+      root.querySelector<HTMLElement>(
+        '[data-testid="cp-message-log"] button[aria-label="Filters"]',
+      )!;
+
+    const panel = await mount("/?cp=CP-A");
+    expect(sidebarOf(panel.container).hasAttribute("hidden")).toBe(true);
+    expect(filtersButton(panel.container).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    await click(filtersButton(panel.container));
+    expect(sidebarOf(panel.container).hasAttribute("hidden")).toBe(false);
+    await cleanup!();
+    cleanup = null;
+
+    const page = await mount("/cp/CP-A");
+    expect(sidebarOf(page.container).hasAttribute("hidden")).toBe(false);
+    expect(filtersButton(page.container).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
   it("the side panel also gets the bottom panel under its scrolling upper part", async () => {
     const { container } = await mount("/?cp=CP-A");
     const aside = container.querySelector<HTMLElement>(

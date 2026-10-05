@@ -600,3 +600,70 @@ describe("LogViewer charge point group", () => {
     expect(bodyText()).not.toContain("from a1");
   });
 });
+
+describe("LogViewer filter sidebar toggle", () => {
+  const logs = () => [
+    entry(`Sent: ${JSON.stringify([2, "1", "BootNotification", {}])}`),
+    entry("unrelated general log line — no direction/action"),
+  ];
+  const sidebar = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>("[data-filter-group]")!.parentElement!
+      .parentElement!;
+  const filtersButton = () =>
+    screen.getByRole("button", { name: "Filters" }) as HTMLButtonElement;
+
+  it("is open by default and the Filters button hides and shows it", () => {
+    const { container } = render(<LogViewer logs={logs()} />);
+    expect(sidebar(container).hasAttribute("hidden")).toBe(false);
+    expect(filtersButton().getAttribute("aria-pressed")).toBe("true");
+    expect(filtersButton().getAttribute("aria-controls")).toBe(
+      sidebar(container).id,
+    );
+    // The button leads the toolbar's left group, before the Logs heading.
+    const left = screen.getByTestId("log-toolbar").firstElementChild!;
+    expect(left.firstElementChild).toBe(filtersButton());
+
+    fireEvent.click(filtersButton());
+    expect(sidebar(container).hasAttribute("hidden")).toBe(true);
+    expect(filtersButton().getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(filtersButton());
+    expect(sidebar(container).hasAttribute("hidden")).toBe(false);
+    expect(filtersButton().getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("defaultFiltersOpen={false} starts it closed; a hidden active filter shows as a count badge", () => {
+    const { container } = render(
+      <LogViewer logs={logs()} defaultFiltersOpen={false} />,
+    );
+    expect(sidebar(container).hasAttribute("hidden")).toBe(true);
+    expect(filtersButton().getAttribute("aria-pressed")).toBe("false");
+    expect(filtersButton().textContent).toBe("Filters");
+
+    fireEvent.click(filtersButton());
+    clickFilterOption("Direction", "Sent");
+    // Open: no badge, the sidebar shows the selection itself.
+    expect(filtersButton().textContent).toBe("Filters");
+
+    fireEvent.click(filtersButton());
+    expect(sidebar(container).hasAttribute("hidden")).toBe(true);
+    expect(filtersButton().textContent).toBe("Filters1");
+    // The filter still applies, and it survives reopening (kept mounted).
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
+    fireEvent.click(filtersButton());
+    expect(
+      findFilterOptionRow("Direction", "Sent").querySelector<HTMLInputElement>(
+        'input[type="checkbox"]',
+      )!.checked,
+    ).toBe(true);
+  });
+
+  it("the badge counts the groups with a selection, not the values", () => {
+    render(<LogViewer logs={logs()} />);
+    clickFilterOption("Direction", "Sent");
+    clickFilterOption("Level", "INFO");
+    clickFilterOption("Level", "DEBUG");
+    fireEvent.click(filtersButton());
+    expect(filtersButton().textContent).toBe("Filters2");
+  });
+});

@@ -760,6 +760,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               logs={tabLogs}
               onClear={handleClearTabLogs}
               onDownload={handleDownloadLogs}
+              defaultFiltersOpen={!isPanel}
               className="min-h-0 flex-1"
             />
           </section>

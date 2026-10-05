@@ -139,10 +139,15 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
     }
   };
 
-  const onHeaderClick = (event: React.MouseEvent<HTMLDivElement>) => {
+  const onCardClick = (event: React.MouseEvent<HTMLElement>) => {
     if (!onSelect) return;
-    // The header's own controls act; the rest of it selects the card.
-    if ((event.target as Element).closest("button, a, input, select, label")) {
+    // The card's own controls act; a click anywhere else in the frame
+    // selects the card (the full page shows every connector at once).
+    if (
+      (event.target as Element).closest(
+        "button, a, input, select, textarea, label, summary, [role='switch'], [role='separator']",
+      )
+    ) {
       return;
     }
     onSelect();
@@ -153,6 +158,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
       data-connector-id={connectorId}
       data-selected={selected === undefined ? undefined : String(selected)}
       aria-label={`Connector ${connectorId}`}
+      onClick={onCardClick}
       className={cn(
         "@container rounded-[10px] border border-cx-border bg-cx-card px-[18px] py-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
         selected && "border-cx-accent ring-1 ring-cx-accent",
@@ -160,7 +166,6 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
     >
       <div
         data-card-header
-        onClick={onHeaderClick}
         title={onSelect && !selected ? "Select this connector" : undefined}
         className={cn(
           "flex flex-wrap items-center gap-x-3 gap-y-2",

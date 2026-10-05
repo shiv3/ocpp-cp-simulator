@@ -1556,3 +1556,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#message-log-tab): the `LogViewer`'s filter sidebar collapses. A **Filters** button at the start of the toolbar (`aria-pressed`) shows or hides it (it stays mounted, so ticked values survive) and, while it is closed, carries a count of the filter groups with a selection. New prop `defaultFiltersOpen` (default `true`); the charge point's bottom panel passes `!isPanel`, so the side panel starts with the filters closed and the full page and the Message Log page with them open (maintainer feedback: the 256 px sidebar ate the side panel's width).
 - Code: `src/components/ui/log-viewer.tsx`, `src/console/pages/cp/CpDetailContent.tsx`; tests `log-viewer.dom.test.tsx` and `CpDetailContent.tabs.dom.test.tsx`.
+
+## [2026-10-05] ingest | Click anywhere in a connector card to select it
+
+- [Web console](entities/web-console.md#charge-point-page): on the full page a click anywhere inside a connector card's frame selects it (writes `?connector=`), not only its header; the card's own controls still act without selecting.

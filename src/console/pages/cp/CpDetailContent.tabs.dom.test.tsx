@@ -225,6 +225,29 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     expect(location?.type).toBe("REPLACE");
   });
 
+  it("clicking anywhere inside a card (not on a control) selects it", async () => {
+    const { container } = await mount("/cp/CP-A");
+    const card = container.querySelector<HTMLElement>(
+      '[data-connector-id="2"]',
+    )!;
+    // A figure label in the card body, well below the header.
+    const label = Array.from(card.querySelectorAll("dt")).find(
+      (el) => el.textContent === "Meter",
+    )!;
+    await click(label);
+    expect(selectedCards(container)).toEqual(["2"]);
+    expect(location?.search).toBe("?connector=2");
+
+    // The Auto meter switch inside the body acts, it does not re-select 1.
+    const first = container.querySelector<HTMLElement>(
+      '[data-connector-id="1"]',
+    )!;
+    await click(
+      first.querySelector('[role="switch"], input[type="checkbox"]')!,
+    );
+    expect(selectedCards(container)).toEqual(["2"]);
+  });
+
   it("?connector=2 marks connector 2 on load and scrolls it into view; a missing connector falls back to the first", async () => {
     const scrolled: string[] = [];
     const options: unknown[] = [];

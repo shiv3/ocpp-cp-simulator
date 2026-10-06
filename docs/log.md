@@ -1394,3 +1394,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#charge-point-page): new _Charge point page_ section — the header's **Delete** (confirmation, `cp.delete` in Remote mode, the saved configuration in Local mode, back to the dashboard). The `/v2` list of classic-only features no longer has it.
 - [GitHub issues](sources/github-issues.md): #415 row.
 - Mechanism: `useCpConfigActions.removeCp` resolves whether the charge point is gone, and in Local mode refuses a charge point that is not in the loaded configuration, so a removal before the configuration has loaded cannot save an empty one.
+
+## [2026-10-02] ingest | bulk actions on every charge point in the web console (#416)
+
+- [Web console](entities/web-console.md#dashboard): new _Dashboard_ section — the **All charge points** menu (two charge points or more) and its table of actions, with the one-line report. The `/v2` list of classic-only features no longer has bulk actions.
+- [GitHub issues](sources/github-issues.md): #416 row.
+- Mechanism: `BulkActionsMenu` runs the action on every charge point with `Promise.all`, each one caught, and reports done / failed / skipped. **Start** pairs TagIDs with charge points in order (as the classic UI did); **Stop** reads the transactions from a fresh `getChargePoint` instead of the dashboard's list, which can lag.

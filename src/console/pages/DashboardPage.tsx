@@ -12,7 +12,6 @@ import { useServerInfo } from "../../data/hooks/useServerInfo";
 import { useDataContext } from "../../data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
-import { consolePath } from "../routes";
 import { formatLogTime, useGlobalLogs } from "../lib/useGlobalLogs";
 import CpCard from "./dashboard/CpCard";
 import { useCpConfigActions } from "./dashboard/useCpConfigActions";
@@ -80,7 +79,7 @@ const DashboardPage: React.FC = () => {
             Recent activity
           </h2>
           <Link
-            to={consolePath("/logs")}
+            to={"/logs"}
             className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             Open Message Log →

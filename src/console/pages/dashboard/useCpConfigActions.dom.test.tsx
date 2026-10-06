@@ -101,7 +101,7 @@ function connectorSnapshot(
   };
 }
 
-type ActionResult = { current: Promise<void> | null };
+type ActionResult = { current: Promise<unknown> | null };
 
 /** Exposes `useCpConfigActions()`'s three actions via buttons, plus
  *  `useConfig().isLoading` (as a data attribute) so tests can wait for the

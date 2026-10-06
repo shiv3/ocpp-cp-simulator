@@ -28,7 +28,7 @@ vi.mock("../dashboard/useCpConfigActions", () => ({
   useCpConfigActions: vi.fn(() => ({
     addCp: vi.fn(async () => {}),
     updateCp: vi.fn(async () => {}),
-    removeCp: vi.fn(async () => {}),
+    removeCp: vi.fn(async () => true),
   })),
 }));
 
@@ -438,7 +438,7 @@ describe("CpDetailPage", () => {
     vi.mocked(useCpConfigActions).mockReturnValue({
       addCp: vi.fn(async () => {}),
       updateCp,
-      removeCp: vi.fn(async () => {}),
+      removeCp: vi.fn(async () => true),
     });
 
     const { container, root } = await renderConsole("/cp/CP-1", { service });

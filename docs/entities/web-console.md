@@ -59,9 +59,8 @@ transition, from the same origin:
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): removing a connector, setting the meter value or SoC and sending
-  a MeterValues by hand, a per-connector auto meter-value curve, a
-  StatusNotification for connector 0, downloading the logs, the
+  move to the console (#411): removing a connector, a per-connector auto
+  meter-value curve, a StatusNotification for connector 0, downloading the logs, the
   charging-profile view, and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
@@ -114,6 +113,21 @@ the charge point's persisted rows ([Control plane](../concepts/control-plane.md)
 in Local mode it drops the charge point from the saved configuration. In Local
 mode it refuses while that configuration has not loaded, instead of saving one
 without any charge point. On a failure the page stays open and says why.
+
+Each connector card shows the status, the transaction, the energy and the SoC,
+with **Start** / **Stop transaction**, **Set status** and **Meter & SoC**
+(#417). **Meter & SoC** opens a dialog that sets the meter value (**Set**,
+**Set and send**) and the SoC (**Set SoC**, **Clear SoC**: the next MeterValues
+carries no SoC sample), and sends a MeterValues with the current reading.
+**Sync SoC and meter** derives one from the other with the EV's battery
+capacity and initial SoC; it needs a capacity above 0 kWh. The flag is one
+simulator-wide preference, applied to the connector when the dialog opens and
+when it is toggled, as the classic side panel did; a connector whose dialog was
+never opened keeps its own flag (on by default). Until the preference is read,
+sync counts as off: the box is unchecked and disabled, and **Set SoC** leaves
+the meter alone. If it cannot be read, the dialog says so and sync stays off
+until the operator turns it on. A failed call, and a sync choice the connector
+did not take or that was not saved, show their error in the dialog.
 
 ### Scenario editor: steps and graph
 

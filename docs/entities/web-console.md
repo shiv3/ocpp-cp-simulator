@@ -60,8 +60,7 @@ transition, from the same origin:
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
   move to the console (#411): the error code of a connector's Faulted
-  status (#434), the
-  charging-profile view, and a scenario's description and EV settings. The
+  status (#434), and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
   back.
@@ -122,43 +121,65 @@ status**, a StatusNotification for connector 0 (`Available`, `Unavailable` or
 `Faulted`, the last with an error code, §7.6). A failed call shows its error in
 the panel.
 
-Each connector card shows the status, the transaction, the energy and the SoC,
-with **Start** / **Stop transaction**, **Set status**, **Meter & SoC** (#417)
-and **Auto meter values** (#418). Its trash button (#419) removes the connector
-after a confirmation, as the classic card did; the removal is not saved, so the
-connector comes back when the charge point is created again (a reload in Local
-mode, a daemon restart). **Meter & SoC** opens a dialog that sets the meter value (**Set**,
-**Set and send**) and the SoC (**Set SoC**, **Clear SoC**: the next MeterValues
-carries no SoC sample), and sends a MeterValues with the current reading.
+Each connector card shows:
+
+- the status, the availability (`Operative` / `Inoperative`, set by
+  ChangeAvailability, #422), the transaction, the energy and the SoC;
+- a collapsed **Charging profiles (n)** list (#422): each profile's purpose,
+  kind, stack level and schedule periods. The profile in effect is marked
+  **Current**, and a profile whose every limit is 0 is marked **Paused**. The
+  list follows SetChargingProfile / ClearChargingProfile live;
+- **Start** / **Stop transaction** and **Set status**;
+- **Meter & SoC** (#417), a dialog described below;
+- **Auto meter values** (#418), described below;
+- a trash button (#419) that removes the connector after a confirmation, as
+  the classic card did. The removal is not saved: the connector comes back
+  when the charge point is created again (a reload in Local mode, a daemon
+  restart).
+
+**Meter & SoC** opens a dialog that:
+
+- sets the meter value (**Set**, **Set and send**);
+- sets the SoC (**Set SoC**), or clears it (**Clear SoC**: the next
+  MeterValues carries no SoC sample);
+- sends a MeterValues with the current reading.
+
 **Sync SoC and meter** derives one from the other with the EV's battery
 capacity and initial SoC; it needs a capacity above 0 kWh. The flag is one
-simulator-wide preference, applied to the connector when the dialog opens and
-when it is toggled, as the classic side panel did; a connector whose dialog was
-never opened keeps its own flag (on by default). Until the preference is read,
-sync counts as off: the box is unchecked and disabled, and **Set SoC** leaves
-the meter alone. If it cannot be read, the dialog says so and sync stays off
-until the operator turns it on. A failed call, and a sync choice the connector
-did not take or that was not saved, show their error in the dialog.
+simulator-wide preference. As in the classic side panel, it is applied to the
+connector when the dialog opens and when it is toggled; a connector whose
+dialog was never opened keeps its own flag (on by default). Until the
+preference is read, sync counts as off: the box is unchecked and disabled, and
+**Set SoC** leaves the meter alone. If it cannot be read, the dialog says so
+and sync stays off until the operator turns it on. A failed call, and a sync
+choice the connector did not take or that was not saved, show their error in
+the dialog.
 
-The **Message Log** tab (#421) shows the charge point's entries from the
-console's log buffer. **Download** saves every persisted log row of the charge
-point as JSON Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
-[log format](../concepts/log-format.md)); **Clear screen** hides the lines on
-screen, and **Clear screen + DB** also deletes the persisted rows (`logs.clear`
-in Remote mode). Before #421 the console's **Clear screen + DB** left the
-persisted rows in place. The global **Message log** page (`/logs`) has the same
-**Download**, for the charge point picked in its filter or for all of them in
-one file (`ocpp-logs-all-<timestamp>.jsonl`); it downloads the persisted rows,
-not the filtered lines on screen.
-
-**Auto meter values** opens the auto MeterValue editor (on / off, send
-interval, energy curve) for that connector, on its live configuration, else
-the one saved for it, else the default. When the saved one cannot be read, the
-editor does not open (it would start on the default) and the card says why.
-**Save** applies it to the connector, which a running transaction picks up at
+**Auto meter values** opens the auto MeterValue editor for that connector: on
+/ off, send interval and energy curve. It starts on the connector's live
+configuration, else the one saved for it, else the default; when the saved
+one cannot be read, the editor does not open (it would start on the default)
+and the card says why. **Save** applies
+the configuration to the connector, where a running transaction picks it up at
 once, and saves it for the connector. The saved copy is only read back by this
 editor: a restart does not restore it into the connector. The classic side
-panel had the same editor wired but no button that opened it.
+panel had the same editor wired, but no button opened it.
+
+The **Message Log** tab (#421) shows the charge point's entries from the
+console's log buffer:
+
+- **Download** saves every persisted log row of the charge point as JSON
+  Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
+  [log format](../concepts/log-format.md));
+- **Clear screen** hides the lines on screen;
+- **Clear screen + DB** also deletes the persisted rows (`logs.clear` in
+  Remote mode). Before #421 the console's **Clear screen + DB** left the
+  persisted rows in place.
+
+The global **Message log** page (`/logs`) has the same **Download**, for the
+charge point picked in its filter or for all of them in one file
+(`ocpp-logs-all-<timestamp>.jsonl`). It downloads the persisted rows, not the
+filtered lines on screen.
 
 ### Scenario editor: steps and graph
 

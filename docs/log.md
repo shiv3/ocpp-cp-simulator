@@ -1433,3 +1433,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Fix: the console's **Clear screen + DB** ignored its scope and never deleted the persisted rows; it now calls `clearStoredLogs`, as the classic card did.
 - [GitHub issues](sources/github-issues.md): #421 row.
 - Mechanism: `downloadStoredLogs` (`src/lib`) builds the JSON Lines file from `listStoredLogs` for one or more charge points; both UIs use it.
+
+## [2026-10-02] ingest | charging profiles and availability in the web console (#422)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's availability and **Charging profiles** list. The _Charge point page_ section is restructured into lists (connector card, **Meter & SoC**, **Auto meter values**, Message Log tab). The `/v2` list of classic-only features no longer has the charging-profile view.
+- [GitHub issues](sources/github-issues.md): #422 row.
+- Mechanism: `ChargingProfilesList` renders `useConnectorView`'s `chargingProfiles` (or the single `chargingProfile` when the list is empty), as the classic side panel did.

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +51,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
   const [tagIdInput, setTagIdInput] = useState<string>("");
   const [isPending, setIsPending] = useState(false);
   const [isMeterOpen, setIsMeterOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const isCharging = view.transactionId != null;
   const effectiveTagId = tagIds.includes(tagIdInput)
@@ -109,6 +110,28 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
     }
   };
 
+  // Runtime only, as in the classic UI: the card goes away on the service's
+  // `connector-removed` event, and the connector comes back when the charge
+  // point is created again (reload, daemon restart).
+  const handleRemove = async () => {
+    if (
+      !window.confirm(
+        `Remove connector ${connectorId} from ${cpId}? The removal is not saved: the connector comes back when the charge point is created again.`,
+      )
+    ) {
+      return;
+    }
+    setRemoveError(null);
+    try {
+      await chargePointService.removeConnector(cpId, connectorId);
+    } catch (err) {
+      console.error(`Failed to remove ${cpId}/${connectorId}`, err);
+      setRemoveError(
+        `Connector not removed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
   return (
     <div
       data-connector-id={connectorId}
@@ -118,8 +141,26 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
           Connector {connectorId}
         </span>
-        <StatusPill status={view.status} />
+        <div className="flex items-center gap-1">
+          <StatusPill status={view.status} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-gray-500 hover:text-rose-700 dark:text-gray-400 dark:hover:text-rose-300"
+            aria-label={`Remove connector ${connectorId}`}
+            title="Remove connector"
+            onClick={() => void handleRemove()}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
+      {removeError && (
+        <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+          {removeError}
+        </p>
+      )}
 
       {view.transactionId != null && (
         <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">

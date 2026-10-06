@@ -172,6 +172,17 @@ interface ScenarioEditorProps {
   executionContext?: ScenarioExecutionContext | null; // Execution context from ScenarioManager
   nodeProgress?: Record<string, { remaining: number; total: number }>; // Node progress from ScenarioManager
   onClose: () => void;
+  /**
+   * Embedded in a page that owns the definition (the web console's scenario
+   * editor): the editor edits the graph only and reports each graph edit
+   * through `onGraphChange` (opening it is not one, even when that drops
+   * orphan edges) — no autosave, no own Save / settings / import /
+   * template, no run controls. The page persists on its own Save. Hydrated
+   * once from `scenario`; remount (`key`) to load another scenario.
+   */
+  embedded?: {
+    onGraphChange: (graph: Pick<ScenarioDefinition, "nodes" | "edges">) => void;
+  };
 }
 
 type StartEndNodeWrapperProps = Omit<
@@ -259,12 +270,22 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   scenarioId,
   executionContext: propsExecutionContext,
   nodeProgress: propsNodeProgress,
+  embedded,
   // onClose is still required by the props interface for back-compat with
   // callers, but the editor itself no longer self-closes — the parent
   // panel owns its visibility now. Intentionally not destructured.
 }) => {
   const { chargePointService, mode, defaultEvSettings } = useDataContext();
   const { isDark } = useDarkMode();
+  const isEmbedded = embedded !== undefined;
+  // Latest callback without re-running the graph effect when the page
+  // re-renders with a new closure.
+  const onGraphChangeRef = useRef(embedded?.onGraphChange);
+  onGraphChangeRef.current = embedded?.onGraphChange;
+  // The last graph the page knows about, serialized: the opened one, then
+  // each one reported. Opening the graph — and dropping its orphan edges —
+  // is not an edit, so only a different graph is reported.
+  const embeddedGraphKeyRef = useRef<string | null>(null);
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
@@ -445,6 +466,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   // Reload scenario when props change
   useEffect(() => {
+    // Embedded: the page feeds every graph change back as a new `scenario`
+    // prop; re-hydrating from it would reset the canvas and the undo
+    // history on each edit. The initial state already came from the prop.
+    if (isEmbedded) return;
     const resetHistory = () => {
       historyRef.current = { past: [], future: [] };
       prevSnapshotRef.current = null;
@@ -521,6 +546,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setNodes,
     setEdges,
     armAppliedScenarioAutosaveSuppression,
+    isEmbedded,
   ]);
 
   // Update execution context from props
@@ -855,6 +881,18 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           : undefined,
       updatedAt: appliedUpdatedAt ?? new Date().toISOString(),
     };
+    if (isEmbedded) {
+      // The page owns the definition (and its trigger / metadata): report
+      // the graph only, synchronously so its Save never misses an edit.
+      const graph = serializeScenarioGraph(nodes, cleanedEdges);
+      const graphKey = JSON.stringify(graph);
+      const isOpening = embeddedGraphKeyRef.current === null;
+      if (graphKey === embeddedGraphKeyRef.current) return;
+      embeddedGraphKeyRef.current = graphKey;
+      if (!isOpening) onGraphChangeRef.current?.(graph);
+      return;
+    }
+
     setScenario(updatedScenario);
 
     if (autosaveIoTimerRef.current !== null) {
@@ -913,6 +951,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     connectorId,
     localCp,
     mode,
+    isEmbedded,
   ]);
 
   // Track structural changes for undo/redo. Position-only changes update
@@ -1554,38 +1593,47 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       <div className="panel px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 text-xs min-w-0 flex-1">
-            <span className="text-muted shrink-0">Scenario:</span>
-            <div className="flex items-center gap-1 shrink-0">
-              {getScenarioStateIndicator(executionState)}
-              <span
-                className={`font-semibold ${getScenarioStateColor(executionState)}`}
-              >
-                {executionState
-                  ? executionState.charAt(0).toUpperCase() +
-                    executionState.slice(1)
-                  : "Idle"}
-              </span>
-            </div>
-            {executionContext && executionContext.currentNodeId && (
+            {/* Embedded: the page shows the run state and runs scenarios
+                from its own run console. */}
+            {!isEmbedded && (
               <>
-                <span className="text-muted shrink-0">·</span>
-                <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
-                  {String(
-                    nodes.find((n) => n.id === executionContext.currentNodeId)
-                      ?.data?.label || executionContext.currentNodeId,
-                  )}
-                </span>
+                <span className="text-muted shrink-0">Scenario:</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {getScenarioStateIndicator(executionState)}
+                  <span
+                    className={`font-semibold ${getScenarioStateColor(executionState)}`}
+                  >
+                    {executionState
+                      ? executionState.charAt(0).toUpperCase() +
+                        executionState.slice(1)
+                      : "Idle"}
+                  </span>
+                </div>
+                {executionContext && executionContext.currentNodeId && (
+                  <>
+                    <span className="text-muted shrink-0">·</span>
+                    <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
+                      {String(
+                        nodes.find(
+                          (n) => n.id === executionContext.currentNodeId,
+                        )?.data?.label || executionContext.currentNodeId,
+                      )}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </div>
           <div className="flex gap-1 shrink-0">
-            <button
-              onClick={handleForceStop}
-              className="btn-danger text-xs px-2 py-1"
-              title="Stop running scenario"
-            >
-              ■ Stop
-            </button>
+            {!isEmbedded && (
+              <button
+                onClick={handleForceStop}
+                className="btn-danger text-xs px-2 py-1"
+                title="Stop running scenario"
+              >
+                ■ Stop
+              </button>
+            )}
             <button
               onClick={handleUndo}
               disabled={historyRef.current.past.length === 0}
@@ -1604,38 +1652,45 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             >
               ↷
             </button>
-            <button
-              onClick={handleManualSave}
-              className={`text-xs px-2 py-1 ${
-                saveFeedback === "saved"
-                  ? "bg-emerald-700 text-white hover:bg-emerald-800"
-                  : "btn-secondary"
-              }`}
-              title="Save scenario"
-            >
-              {saveFeedback === "saved" ? "✓ Saved" : "💾 Save"}
-            </button>
-            <button
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="btn-secondary text-xs px-2 py-1"
-              title="Scenario settings"
-            >
-              ⚙
-            </button>
-            <button
-              onClick={handleImport}
-              className="btn-secondary text-xs px-2 py-1"
-              title="Import JSON"
-            >
-              ↑
-            </button>
-            <button
-              onClick={handleExport}
-              className="btn-secondary text-xs px-2 py-1"
-              title="Export JSON"
-            >
-              ↓
-            </button>
+            {/* Embedded: the page saves, edits the metadata and imports /
+                exports; the template picker (in the settings dialog)
+                would replace the connector's whole scenario set. */}
+            {!isEmbedded && (
+              <>
+                <button
+                  onClick={handleManualSave}
+                  className={`text-xs px-2 py-1 ${
+                    saveFeedback === "saved"
+                      ? "bg-emerald-700 text-white hover:bg-emerald-800"
+                      : "btn-secondary"
+                  }`}
+                  title="Save scenario"
+                >
+                  {saveFeedback === "saved" ? "✓ Saved" : "💾 Save"}
+                </button>
+                <button
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Scenario settings"
+                >
+                  ⚙
+                </button>
+                <button
+                  onClick={handleImport}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Import JSON"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={handleExport}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Export JSON"
+                >
+                  ↓
+                </button>
+              </>
+            )}
           </div>
           <input
             ref={fileInputRef}
@@ -2386,7 +2441,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 }}
                 className="flex-1 btn-primary text-sm"
               >
-                Save
+                {/* Embedded, the page's own Save persists the scenario. */}
+                {isEmbedded ? "Apply" : "Save"}
               </button>
             </div>
           </div>

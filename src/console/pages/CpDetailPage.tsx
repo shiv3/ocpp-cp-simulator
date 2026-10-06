@@ -60,9 +60,7 @@ type TabValue =
  * from whichever source currently holds this CP's settings — remote mode's
  * `ChargePointSnapshot.config` (daemon-owned, echoed back from the CP's
  * creation params) or local mode's single shared `useConfig()` result
- * (browser-owned, one config for every local CP). Mirrors TopPage.tsx's
- * per-mode prefill derivation (`handleEditChargePoint` / the remote/local
- * branches of its `chargePointConfigs` effect). Kept private (not exported)
+ * (browser-owned, one config for every local CP). Kept private (not exported)
  * so this file's only runtime export stays the default component —
  * `ConfigTab` gets the already-built value as a prop instead.
  */
@@ -292,7 +290,7 @@ const CpDetailPage: React.FC = () => {
   const diagnosticsConnectorId =
     diagnosticsConnectorOverride ?? connectorList[0]?.id ?? null;
 
-  // Same proxy for "socket up" that CpCard/ConnectorSidePanel use: after an
+  // Same proxy for "socket up" that CpCard uses: after an
   // auto-reconnect the transport can be up before BootNotification is
   // re-Accepted, so fall back to a non-Unavailable status.
   const isConnected = view.connected || view.status !== OCPPStatus.Unavailable;
@@ -346,7 +344,7 @@ const CpDetailPage: React.FC = () => {
   };
 
   // Domain objects (not the snapshot/view-model) — only obtainable in local
-  // mode, exactly like `ConnectorSidePanel` derives `localCp`/`connector`.
+  // mode (`getLocalChargePoint`).
   // Remote mode has no equivalent (the daemon owns the domain objects), so
   // the Diagnostics tab falls back to an explanatory empty state there.
   const localCp: ChargePoint | null =

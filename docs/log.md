@@ -1457,3 +1457,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#charge-point-page): the connector card's **Faulted with** error code, sent with **Set status → Faulted**. The `/v2` list of classic-only features is now empty: the classic UI stays only until #426 retires it.
 - [GitHub issues](sources/github-issues.md): #434 row, no longer open.
 - Mechanism: `ConnectorCard` passes `{ errorCode }` to `sendStatusNotification` for Faulted only, from the classic side panel's list (`ALL_CHARGE_POINT_ERROR_CODES` without `NoError`).
+
+## [2026-10-02] ingest | classic UI retired (#426)
+
+- [Web console](entities/web-console.md#layout-route-prefixes): `/v2/...` now redirects to the same console route (`/v2/settings` → `/settings`), like `/v3/...`; the sidebar loses its **Classic UI** link and Settings its **Open classic UI** link. Sentences that described the classic UI in the present tense now say what it did; the build line and the reading format describe the console only.
+- [Docker image](entities/docker-image.md), [index](index.md): no classic footer, no `/v2`.
+- [GitHub issues](sources/github-issues.md): #426 row.
+- Mechanism: `AppRoutes` maps both retired prefixes through one `LegacyPrefixRedirect`. Removed: `V2App`, `TopPage`, `Navbar`, `Footer`, `ChargePoint`, `Connector`, `ConnectorSidePanel`, `Logger`, `connectorAutoMeterConfig`, `useScenarios` (only the side panel used it) and their tests, plus the `index.css` rules only they used (`status-*`, `panel-border`, the logger panel). Shared modules stay (Settings, the charge point dialog, the curve editor, the graph editor, the state-transition viewer, `src/data`, `src/cp`, `src/lib`).

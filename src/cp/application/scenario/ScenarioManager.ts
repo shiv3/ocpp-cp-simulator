@@ -22,13 +22,18 @@ export class ScenarioManager {
   private chargePoint: ChargePoint;
   private scenarios: Map<string, ScenarioDefinition> = new Map();
   private executors: Map<string, ScenarioExecutor> = new Map();
-  private callbacks: ScenarioExecutorCallbacks;
+  private callbacks:
+    ScenarioExecutorCallbacks | (() => ScenarioExecutorCallbacks);
   private eventEmitter?: EventEmitter<ScenarioEvents>;
+  private readonly unsubscribeStatusChange: () => void;
 
   constructor(
     connector: Connector,
     chargePoint: ChargePoint,
-    callbacks: ScenarioExecutorCallbacks,
+    /** Either one callbacks object shared by every run, or a factory
+     *  called once per run — a long-lived manager passes a factory so
+     *  per-run state in the callbacks (e.g. the run start time) is fresh. */
+    callbacks: ScenarioExecutorCallbacks | (() => ScenarioExecutorCallbacks),
     eventEmitter?: EventEmitter<ScenarioEvents>,
   ) {
     this.connector = connector;
@@ -37,12 +42,15 @@ export class ScenarioManager {
     this.eventEmitter = eventEmitter;
 
     // Subscribe to connector status changes
-    this.connector.events.on("statusChange", (data) => {
-      this.handleStatusChange(
-        data.previousStatus as OCPPStatus,
-        data.status as OCPPStatus,
-      );
-    });
+    this.unsubscribeStatusChange = this.connector.events.on(
+      "statusChange",
+      (data) => {
+        this.handleStatusChange(
+          data.previousStatus as OCPPStatus,
+          data.status as OCPPStatus,
+        );
+      },
+    );
   }
 
   /**
@@ -287,7 +295,7 @@ export class ScenarioManager {
     // Create executor with event emitter
     const executor = new ScenarioExecutor(
       scenario,
-      this.callbacks,
+      typeof this.callbacks === "function" ? this.callbacks() : this.callbacks,
       this.eventEmitter,
     );
     this.executors.set(scenarioId, executor);
@@ -412,6 +420,9 @@ export class ScenarioManager {
    * Clean up resources
    */
   destroy(): void {
+    // A destroyed manager must stop reacting to the connector: otherwise
+    // a replaced manager keeps firing statusChange-triggered scenarios.
+    this.unsubscribeStatusChange();
     this.stopAllScenarios();
     this.scenarios.clear();
     this.executors.clear();

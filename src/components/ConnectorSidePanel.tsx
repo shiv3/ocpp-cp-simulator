@@ -26,8 +26,7 @@ import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
 } from "../cp/application/scenario/ScenarioTypes";
-import { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
-import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
+import type { ScenarioManager } from "../cp/application/scenario/ScenarioManager";
 import { useConnectorView } from "../data/hooks/useConnectorView";
 import { useScenarios } from "../data/hooks/useScenarios";
 import { useDataContext } from "../data/providers/DataProvider";
@@ -399,48 +398,27 @@ const FullPanelContent: React.FC<{
   useEffect(() => {
     if (!localCp || !connector) return;
 
-    // Reuse the existing ScenarioManager if the connector card already
-    // created one. Replacing it would kill any in-flight scenario AND
-    // reset the auto-start dedup key, which is exactly the bug the user
-    // saw when opening the side panel mid-scenario. We only create a new
-    // manager when none exists (e.g. remote mode, or a connector that
-    // somehow lost its manager).
-    let manager = connector.scenarioManager;
-    let ownsManager = false;
-    if (!manager) {
-      const callbacks = createScenarioExecutorCallbacks({
-        chargePoint: localCp,
-        connector,
-        hooks: {
-          onNodeProgress: (nodeId, remaining, total) => {
-            setNodeProgress((prev) => ({
-              ...prev,
-              [nodeId]: { remaining, total },
-            }));
-          },
-          onStateChange: (context) => {
-            const currentScenario = scenarioRef.current;
-            if (currentScenario && context.scenarioId === currentScenario.id) {
-              setScenarioExecutionContext(context);
-            }
-          },
-        },
-      });
-      manager = new ScenarioManager(
-        connector,
-        localCp,
-        callbacks,
-        connector.scenarioEvents,
-      );
-      connector.setScenarioManager(manager);
-      ownsManager = true;
-    }
+    // The connector's ScenarioManager belongs to the data layer
+    // (LocalScenarioRuntime); this panel only polls it for the editor's
+    // live highlighting and never creates, replaces or destroys it.
+    const manager = connector.scenarioManager;
+    if (!manager) return;
     scenarioManagerRef.current = manager;
 
+    // Per-node countdowns (delay / wait nodes) for the editor.
+    const unsubscribeProgress = connector.scenarioEvents.on(
+      "node.progress",
+      ({ scenarioId, nodeId, remaining, total }) => {
+        if (scenarioRef.current?.id !== scenarioId) return;
+        setNodeProgress((prev) => ({
+          ...prev,
+          [nodeId]: { remaining, total },
+        }));
+      },
+    );
+
     // Per-tick poll keeps the side-panel UI in sync with whichever scenario
-    // is currently running. Works regardless of whether the manager was
-    // created here or by the connector card — `getScenarioExecutionContext`
-    // is the same on both.
+    // is currently running.
     const intervalId = setInterval(() => {
       const activeManager = scenarioManagerRef.current;
       if (!activeManager) return;
@@ -457,13 +435,8 @@ const FullPanelContent: React.FC<{
     }, 500);
 
     return () => {
+      unsubscribeProgress();
       clearInterval(intervalId);
-      // Only destroy the manager if THIS effect created it. If we reused
-      // the connector's existing manager (created by the connector card),
-      // leave it alive — the card still depends on it.
-      if (ownsManager) {
-        manager.destroy();
-      }
       scenarioManagerRef.current = null;
     };
   }, [connector, localCp, connectorId]);
@@ -552,7 +525,8 @@ const FullPanelContent: React.FC<{
     };
   }, [mode, cpId, connectorId, scenario?.id, chargePointService]);
 
-  // Load scenarios from the repository (local mode). Remote mode is hydrated
+  // Select the editor's scenario from the repository (local mode; the
+  // runtime loads them into the ScenarioManager itself). Remote mode is hydrated
   // by the dedicated effect below — skip this path so the local default
   // doesn't clobber the server-loaded template.
   useEffect(() => {
@@ -575,11 +549,6 @@ const FullPanelContent: React.FC<{
     } else {
       setScenario(null);
       scenarioRef.current = null;
-    }
-
-    const manager = scenarioManagerRef.current;
-    if (manager) {
-      manager.loadScenarios(scenarios);
     }
   }, [mode, scenarios]);
 

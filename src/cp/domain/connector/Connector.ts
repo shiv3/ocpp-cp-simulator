@@ -1210,16 +1210,19 @@ export class Connector {
     return this._scenarioManager;
   }
 
+  /** Destroys and detaches the scenario manager, if any. */
+  clearScenarioManager(): void {
+    this._scenarioManager?.destroy();
+    this._scenarioManager = undefined;
+  }
+
   cleanup(): void {
     this.meterScheduler.cleanup();
   }
 
   dispose(): void {
     this.cleanup();
-    if (this._scenarioManager) {
-      this._scenarioManager.destroy();
-      this._scenarioManager = undefined;
-    }
+    this.clearScenarioManager();
     this.eventsEmitter.removeAllListeners();
     this.scenarioEventsEmitter.removeAllListeners();
     this.onMeterSend = null;

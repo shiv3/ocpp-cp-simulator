@@ -888,22 +888,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         }
       }
 
-      // Keep ScenarioManager in sync while editing (local mode only).
-      if (localCp) {
-        const connector = localCp.getConnector(connectorId || 1);
-        if (connector?.scenarioManager) {
-          void chargePointService
-            .listScenarioDefinitions(cpId, connectorId)
-            .then((all) => {
-              const scoped = all.filter((s) =>
-                connectorId === null
-                  ? s.targetType !== "connector"
-                  : s.targetType !== "connector" || s.targetId === connectorId,
-              );
-              connector.scenarioManager?.loadScenarios(scoped);
-            });
-        }
-      }
+      // In Local mode the runtime (LocalScenarioRuntime) reloads the
+      // connector's ScenarioManager from the store after the save above.
     }, AUTOSAVE_DEBOUNCE_MS);
 
     return () => {
@@ -1136,11 +1122,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [setNodes, nodes],
   );
 
-  // Scenario execution is owned by the connector card and ScenarioManager;
-  // the editor only renders the graph and reacts to executionContext from
-  // outside. The previous in-editor handleStart() useCallback lived here
-  // but was orphaned by that refactor — see Connector.tsx for the current
-  // start path.
+  // Scenario execution is owned by the data layer (LocalScenarioRuntime in
+  // Local mode, the daemon in Remote mode); the editor only renders the
+  // graph and reacts to executionContext from outside.
 
   /**
    * Lay nodes out top-to-bottom by topological depth. Roots (no incoming
@@ -1246,10 +1230,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
   }, [setNodes, localCp, connectorId, chargePointService, cpId, scenario.id]);
 
-  // Auto-start now lives in `Connector.tsx` (the always-mounted card) so
-  // it fires for every connector independently of whether the side panel
-  // is open. The editor here only handles manual Start/Stop and visualizes
-  // the running state of the connector's ScenarioManager.
+  // Auto-start lives in the data layer (LocalScenarioRuntime), so it fires
+  // for every connector whatever UI is open. The editor here only handles
+  // manual Start/Stop and visualizes the running state of the connector's
+  // ScenarioManager.
   //
   // Keep the !scenarioEnabled / non-manual-trigger reset so the editor
   // still surfaces "scenario disabled" visually when the user toggles it.

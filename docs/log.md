@@ -1367,3 +1367,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Removed: `entities/legacy-v1-ui.md` (and its links from [Overview](overview.md), [Index](index.md), [GitHub issues](sources/github-issues.md), [README](../README.md)).
 - [GitHub issues](sources/github-issues.md): #411 row.
 - Mechanism: `src/v1/**` deleted (last version at the `legacy-v1-final` tag); `App.tsx` exports `AppRoutes` and maps `/v1/*` to `<Navigate to="/">`; the v1-only `flowbite-react` / `jotai-location` dependencies and the short-circuit ESLint exception go with it.
+
+## [2026-10-02] ingest | Local-mode scenario runtime in the data layer (#411)
+
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): Local-mode scenarios load, trigger, auto-start and report `scenario-*` events from the data layer, whatever page is open; before, the runtime lived in the classic connector card and the redesigned console could not run a scenario in Local mode.
+- [Scenario format](concepts/scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect): the auto-start eligibility rules, now shared by both runtimes.
+- [GitHub issues](sources/github-issues.md): #411 row extended.
+- Mechanism: `LocalScenarioRuntime` (one per registered charge point) owns each connector's `ScenarioManager`, reloads it from `SqliteScenarioRepository` on every save, and maps `connector.scenarioEvents` to service events (a new `wait.intervention` scenario event carries the wait controls). `matchAutoStart` holds the rules for it and for `CLIChargePointService.tryAutoStartForConnector`. `loadScenario` upserts. `ScenarioManager.destroy` releases its connector listener. The classic `Connector` card no longer creates, destroys or rewires anything, which also fixes its unmount resetting the auto meter-value sender.
+- Fix (both runtimes): a disabled definition clears the connector's auto-start dedup key only when that key is its own (`isAutoStartKeyOf`); before, any disabled sibling re-armed an already-fired scenario.

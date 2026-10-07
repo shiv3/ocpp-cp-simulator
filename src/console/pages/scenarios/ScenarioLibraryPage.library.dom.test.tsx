@@ -338,6 +338,34 @@ describe("Scenario Library", () => {
     expect(search().get("edit")).toBe(call?.[2].id);
   });
 
+  it("browsing every template reaches one beyond the gallery's first eight", async () => {
+    const { container, service } = await renderLibrary();
+    expect(scenarioTemplates.length).toBeGreaterThan(8);
+    const beyond = scenarioTemplates[scenarioTemplates.length - 1];
+
+    await click(
+      buttonByText(
+        container,
+        `Browse all ${scenarioTemplates.length} templates`,
+      ),
+    );
+    const row = document.body.querySelector(
+      `[role="dialog"] [data-template-id="${beyond.id}"]`,
+    );
+    expect(row, "the last template is listed in the browser").toBeTruthy();
+    await click(buttonByText(row!, "Use template"));
+
+    const call = vi
+      .mocked(service.saveScenarioDefinition)
+      .mock.calls.find(([cp]) => cp === LIBRARY_SCOPE);
+    expect(call?.[2]).toMatchObject({
+      templateId: beyond.id,
+      targetType: beyond.targetType,
+    });
+    expect(search().get("edit")).toBe(call?.[2].id);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it("Delete names the users, un-assigns them, then deletes the library scenario", async () => {
     const { service, store } = await renderLibrary();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);

@@ -693,7 +693,9 @@ the copy rather than adding one. That copy is what the runtime, auto-start and
 `listScenarios` read. The data model is kept behind the helpers of
 [`src/console/lib/scenarioLibrary.ts`](../../src/console/lib/scenarioLibrary.ts).
 
-**The tab.** The template gallery, the **Charge point** filter (`?cp=`, an
+**The tab.** The template gallery (the first eight [templates](scenario-templates.md)
+as cards; **Browse all N templates** above it opens the template browser, see
+below), the **Charge point** filter (`?cp=`, an
 exact id: the scenarios some connector of that charge point uses; the charge
 point page's **Scenarios** menu item opens it with this set) and **Enabled
 only**, then one row per Library scenario:
@@ -713,6 +715,20 @@ imported file loses its connector target; an imported id already in the
 Library gets a fresh one) and opens it in the editor. **Delete** confirms,
 naming the connectors that use the scenario; it removes the copy from each of
 them (their other definitions stay), then the Library scenario.
+
+**Template browser.** The gallery only shows eight cards, so **Browse all N
+templates** (N is every built-in template, 40+ with the `cert16-*` suites)
+opens a dialog, **Scenario templates**
+([`TemplateBrowserDialog.tsx`](../../src/console/pages/scenarios/TemplateBrowserDialog.tsx)):
+a search box (focused on open; matches the name or the description,
+case-insensitive), the count `N of M`, and a scrollable list with one row per
+template: name, target type chip (`chargePoint` / `connector`), the description
+(two lines) and **Use template**. **Use template** creates the Library scenario
+exactly like the gallery's button and closes the dialog; **Enter** in the search
+uses the first template still listed. The search starts empty each time the
+dialog opens. (The old ReactFlow editor had its own picker; the console's
+scenario editor has none, so this dialog is the only way to a template beyond
+the first eight.)
 
 **The editor.** `?edit=<id>` opens the [editor](#scenario-editor-steps-and-graph)
 in place of the table, with the header `← Library`, the name, the trigger, the

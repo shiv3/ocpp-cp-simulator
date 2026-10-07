@@ -67,13 +67,13 @@ describe("AppShell: the sidebar's mode indicator (#423)", () => {
     expect(dot()?.getAttribute("aria-label")).toBe(
       "Remote connection: connected",
     );
-    expect(dot()?.className).toContain("bg-emerald-500");
+    expect(dot()?.className).toContain("bg-cx-emerald");
 
     await change("disconnected");
     expect(dot()?.getAttribute("aria-label")).toBe(
       "Remote connection: disconnected",
     );
-    expect(dot()?.className).toContain("bg-red-500");
+    expect(dot()?.className).toContain("bg-cx-rose");
     expect(indicator().getAttribute("title")).toContain(
       "Cannot reach the daemon",
     );

@@ -24,16 +24,14 @@ const ChargingProfilesList: React.FC<ChargingProfilesListProps> = ({
   const shown = profiles.length > 0 ? profiles : current ? [current] : [];
 
   return (
-    <details
-      data-testid="charging-profiles"
-      className="rounded-md bg-gray-50 text-xs dark:bg-gray-800"
-    >
-      <summary className="cursor-pointer select-none px-2 py-1.5 font-medium text-gray-700 dark:text-gray-200">
+    <details data-testid="charging-profiles" className="text-xs">
+      {/* Styled as the card's other key-figure labels; the list opens below. */}
+      <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[0.06em] text-cx-faint hover:text-cx-fg2">
         Charging profiles ({shown.length})
       </summary>
-      <div className="space-y-2 px-2 pb-2">
+      <div className="mt-2 space-y-2">
         {shown.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-cx-muted">
             No charging profile: the connector charges at its unrestricted rate
             until the CSMS sends a SetChargingProfile.
           </p>
@@ -48,34 +46,28 @@ const ChargingProfilesList: React.FC<ChargingProfilesListProps> = ({
               <div
                 key={profile.chargingProfileId}
                 data-profile-id={profile.chargingProfileId}
-                className="rounded border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900"
+                className="rounded-md border border-cx-border bg-cx-sub p-2"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-gray-900 dark:text-gray-100">
+                  <span className="font-mono text-cx-fg">
                     #{profile.chargingProfileId}
                   </span>
-                  <span
-                    className={
-                      paused
-                        ? "text-orange-700 dark:text-orange-300"
-                        : "text-gray-600 dark:text-gray-300"
-                    }
-                  >
+                  <span className={paused ? "text-cx-amber" : "text-cx-fg2"}>
                     {paused ? "Paused · " : ""}
                     {isCurrent ? "Current" : "Stored"}
                   </span>
                 </div>
-                <div className="mt-0.5 text-gray-600 dark:text-gray-300">
+                <div className="mt-0.5 text-cx-fg2">
                   {profile.chargingProfilePurpose} ·{" "}
                   {profile.chargingProfileKind} · stack {profile.stackLevel}
                 </div>
                 <ul className="mt-1 space-y-0.5 font-mono">
                   {profile.chargingSchedulePeriods.map((period, idx) => (
                     <li key={idx} className="flex justify-between gap-2">
-                      <span className="text-gray-500 dark:text-gray-400">
+                      <span className="text-cx-muted">
                         @{period.startPeriod}s
                       </span>
-                      <span className="text-gray-900 dark:text-gray-100">
+                      <span className="text-cx-fg">
                         {period.limit} {profile.chargingRateUnit}
                         {period.numberPhases != null
                           ? ` · ${period.numberPhases}φ`

@@ -74,7 +74,7 @@ async function renderDashboard(
 ) {
   const service = createFakeChargePointService({
     snapshots,
-    // The cards' active-scenario badges list each connector's scenarios.
+    // The rows' active-scenario badges list each connector's scenarios.
     listScenarios: vi.fn(async () => []),
     ...overrides,
   });

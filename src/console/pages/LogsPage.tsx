@@ -1,84 +1,32 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { LogLevel, LogType } from "../../cp/shared/Logger";
+import {
+  LogViewer,
+  type ClearLogsScope,
+  type ViewerLogEntry,
+} from "@/components/ui/log-viewer";
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { downloadStoredLogs } from "../../lib/downloadStoredLogs";
-import EmptyState from "../components/EmptyState";
-import {
-  FILTER_INPUT_CLASS,
-  FILTER_SELECT_CLASS,
-} from "../components/filterStyles";
 import PageHeader from "../components/PageHeader";
-import {
-  formatLogTime,
-  useGlobalLogs,
-  type GlobalLogEntry,
-} from "../lib/useGlobalLogs";
-
-/** Maps `LogType` to the `.log-*` badge classes defined in
- *  `src/index.css`. `SCENARIO` and `SYSTEM` have no dedicated color there —
- *  fall back to `.log-general` rather than inventing new colors outside
- *  this task's scope. */
-const LOG_TYPE_CLASS: Record<LogType, string> = {
-  [LogType.WEBSOCKET]: "log-websocket",
-  [LogType.OCPP]: "log-ocpp",
-  [LogType.TRANSACTION]: "log-transaction",
-  [LogType.HEARTBEAT]: "log-heartbeat",
-  [LogType.METER_VALUE]: "log-meter-value",
-  [LogType.STATUS]: "log-status",
-  [LogType.CONFIGURATION]: "log-configuration",
-  [LogType.DIAGNOSTICS]: "log-diagnostics",
-  [LogType.SCENARIO]: "log-general",
-  [LogType.GENERAL]: "log-general",
-  [LogType.SYSTEM]: "log-general",
-  [LogType.NETWORK_SIM]: "log-network-sim",
-};
-
-const LOG_LEVEL_CLASS: Record<LogLevel, string> = {
-  [LogLevel.DEBUG]: "log-level-debug",
-  [LogLevel.INFO]: "log-level-info",
-  [LogLevel.WARN]: "log-level-warn",
-  [LogLevel.ERROR]: "log-level-error",
-};
-
-const LEVEL_OPTIONS: Array<{ value: LogLevel; label: string }> = [
-  { value: LogLevel.DEBUG, label: "Debug+" },
-  { value: LogLevel.INFO, label: "Info+" },
-  { value: LogLevel.WARN, label: "Warn+" },
-  { value: LogLevel.ERROR, label: "Error+" },
-];
+import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
 
 /**
- * Pretty-prints the first `{...}` JSON substring found in `message`, if
- * any, leaving the surrounding prose untouched. Best-effort: any parse
- * failure (unbalanced braces, non-JSON content that merely looks bracketed,
- * …) falls back to the original message unchanged.
- */
-function prettyPrintMessage(message: string): string {
-  const start = message.indexOf("{");
-  const end = message.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return message;
-  const candidate = message.slice(start, end + 1);
-  try {
-    const parsed: unknown = JSON.parse(candidate);
-    const pretty = JSON.stringify(parsed, null, 2);
-    return `${message.slice(0, start)}${pretty}${message.slice(end + 1)}`;
-  } catch {
-    return message;
-  }
-}
-
-/**
- * Global, cross-charge-point Message Log (Task 9). Aggregates every CP's
+ * Global, cross-charge-point Message Log. Aggregates every CP's
  * `{type: "log"}` events via `useGlobalLogs` — there's no server-side
  * aggregate endpoint, so this is purely a client-side merge of per-CP
- * subscriptions (see that hook's doc comment). Two-pane layout: a filterable
- * row list on the left, full detail (with best-effort JSON pretty-printing)
- * for the selected row on the right.
+ * subscriptions (see that hook's doc comment). The page is the `LogViewer`
+ * (filter sidebar with counts, toolbar, search, table) filling the window
+ * under a header that keeps **Pause / Resume**, which is about the buffer, not
+ * the view.
+ *
+ * The charge point filter is the viewer's Charge point group, kept in the URL
+ * as `?cp=<id>` (repeated for several): the charge point page links here with
+ * its own id, and a reload keeps the choice. Download and Clear act on the
+ * selected charge points, on all of them when none is.
  */
 const LogsPage: React.FC = () => {
   const { config, isLoading } = useConfig();
@@ -86,235 +34,100 @@ const LogsPage: React.FC = () => {
   const { entries, paused, setPaused, clear } = useGlobalLogs();
   const { chargePointService } = useDataContext();
 
-  const [cpFilter, setCpFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [levelFilter, setLevelFilter] = useState("all");
-  const [textFilter, setTextFilter] = useState("");
-  const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCpIds = useMemo(
+    () => searchParams.getAll("cp"),
+    [searchParams],
+  );
+  const setSelectedCpIds = (ids: string[]) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("cp");
+    for (const id of ids) next.append("cp", id);
+    setSearchParams(next, { replace: true });
+  };
 
-  const filtered = useMemo(() => {
-    const query = textFilter.trim().toLowerCase();
-    return entries.filter(({ cpId, entry }) => {
-      if (cpFilter !== "all" && cpId !== cpFilter) return false;
-      if (typeFilter !== "all" && entry.type !== typeFilter) return false;
-      if (levelFilter !== "all" && entry.level < Number(levelFilter)) {
-        return false;
-      }
-      if (query && !entry.message.toLowerCase().includes(query)) return false;
-      return true;
-    });
-  }, [entries, cpFilter, typeFilter, levelFilter, textFilter]);
+  // The viewer wants oldest first and `cpId` on the line. It remembers an
+  // expanded row by the entry object, so one object per buffer entry is kept
+  // across renders instead of a fresh copy each time a line arrives.
+  const viewerEntries = useMemo(
+    () => new WeakMap<GlobalLogEntry, ViewerLogEntry>(),
+    [],
+  );
+  const logs = useMemo(
+    () =>
+      [...entries].reverse().map((item) => {
+        let line = viewerEntries.get(item);
+        if (!line) {
+          line = { ...item.entry, cpId: item.cpId };
+          viewerEntries.set(item, line);
+        }
+        return line;
+      }),
+    [entries, viewerEntries],
+  );
 
-  const selected: GlobalLogEntry | null = useMemo(() => {
-    if (selectedSeq != null) {
-      const found = filtered.find((e) => e.seq === selectedSeq);
-      if (found) return found;
-    }
-    return filtered[0] ?? null;
-  }, [filtered, selectedSeq]);
+  // Whose persisted rows Download and Clear screen + DB reach.
+  const scopeIds =
+    selectedCpIds.length > 0 ? selectedCpIds : chargePoints.map((cp) => cp.id);
 
-  // The persisted logs, not the on-screen buffer: the charge point filter
-  // picks whose; the other filters do not apply.
+  // The persisted logs, not the on-screen buffer: the filters other than the
+  // charge point group do not apply.
   const handleDownload = () => {
-    const cpIds =
-      cpFilter === "all" ? chargePoints.map((cp) => cp.id) : [cpFilter];
-    const label = cpFilter === "all" ? "all" : cpFilter;
-    void downloadStoredLogs(chargePointService, cpIds, label).catch((err) => {
-      console.error("Failed to download logs", err);
+    const label =
+      selectedCpIds.length === 0
+        ? "all"
+        : selectedCpIds.length === 1
+          ? selectedCpIds[0]
+          : "selected";
+    void downloadStoredLogs(chargePointService, scopeIds, label).catch(
+      (err) => {
+        console.error("Failed to download logs", err);
+        alert(
+          `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      },
+    );
+  };
+
+  const handleClear = (scope: ClearLogsScope) => {
+    clear(selectedCpIds);
+    if (scope !== "all" || !chargePointService.clearStoredLogs) return;
+    // One alert for the lot, not one per charge point.
+    const { clearStoredLogs } = chargePointService;
+    void Promise.all(
+      scopeIds.map((cpId) => clearStoredLogs.call(chargePointService, cpId)),
+    ).catch((err) => {
+      console.error("Failed to clear stored logs", err);
       alert(
-        `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to clear stored logs: ${err instanceof Error ? err.message : String(err)}`,
       );
     });
   };
 
   return (
-    <div className="p-6">
+    // h-screen: the viewer scrolls its own table, so the page itself must not.
+    <div className="flex h-screen flex-col p-6">
       <PageHeader
         title="Message Log"
-        count={`${filtered.length} shown · ${entries.length} total`}
         actions={
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setPaused(!paused)}
-            >
-              {paused ? "Resume" : "Pause"}
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={clear}>
-              Clear
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              title="Download every persisted log row of the charge point picked in the filter (or of all of them) as a JSON Lines file."
-              onClick={handleDownload}
-            >
-              Download
-            </Button>
-          </>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setPaused(!paused)}
+          >
+            {paused ? "Resume" : "Pause"}
+          </Button>
         }
       />
-
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <select
-          value={cpFilter}
-          onChange={(e) => setCpFilter(e.target.value)}
-          className={FILTER_SELECT_CLASS}
-          aria-label="Filter by charge point"
-        >
-          <option value="all">All charge points</option>
-          {chargePoints.map((cp) => (
-            <option key={cp.id} value={cp.id}>
-              {cp.id}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className={FILTER_SELECT_CLASS}
-          aria-label="Filter by log type"
-        >
-          <option value="all">All types</option>
-          {Object.values(LogType).map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={levelFilter}
-          onChange={(e) => setLevelFilter(e.target.value)}
-          className={FILTER_SELECT_CLASS}
-          aria-label="Minimum log level"
-        >
-          <option value="all">All levels</option>
-          {LEVEL_OPTIONS.map(({ value, label }) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-
-        <input
-          type="text"
-          value={textFilter}
-          onChange={(e) => setTextFilter(e.target.value)}
-          placeholder="Filter messages…"
-          className={`min-w-[200px] flex-1 ${FILTER_INPUT_CLASS}`}
-        />
-      </div>
-
-      {filtered.length === 0 ? (
-        <EmptyState
-          title="Waiting for messages…"
-          hint="OCPP traffic across every charge point will appear here as it happens."
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="max-h-[600px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-800">
-            <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Time</th>
-                  <th className="px-2 py-2 font-medium">CP</th>
-                  <th className="px-2 py-2 font-medium">Type</th>
-                  <th className="px-2 py-2 font-medium">Message</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {filtered.map((item) => (
-                  <tr
-                    key={item.seq}
-                    data-seq={item.seq}
-                    tabIndex={0}
-                    aria-selected={selected?.seq === item.seq}
-                    onClick={() => setSelectedSeq(item.seq)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        // Space also scrolls the page by default — this is
-                        // a selectable row, not a link/button, so prevent
-                        // that before applying the selection.
-                        e.preventDefault();
-                        setSelectedSeq(item.seq);
-                      }
-                    }}
-                    className={cn(
-                      "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset",
-                      selected?.seq === item.seq
-                        ? "bg-blue-50 dark:bg-blue-950"
-                        : "hover:bg-gray-50 dark:hover:bg-gray-900",
-                    )}
-                  >
-                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs text-gray-500 dark:text-gray-400">
-                      {formatLogTime(item.entry.timestamp)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-200">
-                      {item.cpId}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
-                      <span
-                        className={cn(
-                          "rounded px-1.5 py-0.5 text-[10px] font-semibold",
-                          LOG_TYPE_CLASS[item.entry.type],
-                        )}
-                      >
-                        {item.entry.type}
-                      </span>
-                    </td>
-                    <td className="max-w-[280px] truncate px-2 py-1.5 text-xs text-gray-700 dark:text-gray-300">
-                      {item.entry.message}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-            {selected ? (
-              <>
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
-                    {selected.cpId}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs font-semibold",
-                      LOG_TYPE_CLASS[selected.entry.type],
-                    )}
-                  >
-                    {selected.entry.type}
-                  </span>
-                  <span
-                    className={cn(
-                      "text-xs font-semibold",
-                      LOG_LEVEL_CLASS[selected.entry.level],
-                    )}
-                  >
-                    {LogLevel[selected.entry.level]}
-                  </span>
-                </div>
-                <div className="mb-3 font-mono text-xs text-gray-500 dark:text-gray-400">
-                  {selected.entry.timestamp.toISOString()}
-                </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-800 dark:text-gray-200">
-                  {prettyPrintMessage(selected.entry.message)}
-                </pre>
-              </>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Select a message to see details.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+      <LogViewer
+        logs={logs}
+        selectedCpIds={selectedCpIds}
+        onCpFilterChange={setSelectedCpIds}
+        onClear={handleClear}
+        onDownload={handleDownload}
+        className="flex-1"
+      />
     </div>
   );
 };

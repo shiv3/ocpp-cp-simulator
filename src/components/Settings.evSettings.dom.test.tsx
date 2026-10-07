@@ -153,7 +153,7 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
     await act(async () => setInputValue(fractionInputs[0]!, "0.5"));
     await flush();
 
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
@@ -177,7 +177,7 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
 
     await act(async () => setInputValue(powerFactor, "0"));
     await flush();
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
@@ -210,7 +210,7 @@ describe("Settings electrical controls have accessible names (#301)", () => {
   });
 });
 
-describe("Apply saves the electrical model the panel is showing (#301)", () => {
+describe("Save saves the electrical model the panel is showing (#301)", () => {
   // With built-in defaults loaded, `currentType` / `phases` / `voltageV` /
   // `powerFactor` are all undefined while the controls display AC, 1, 230 and
   // 1. Saving them as undefined selected the pre-1.2 conversion, which reads
@@ -225,7 +225,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
     // the fallbacks the controls render.
     await act(async () => findButton(container, "Add point").click());
     await flush();
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
@@ -265,7 +265,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
       ),
     };
 
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
@@ -284,7 +284,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
     const voltage = controlFor(container, "Voltage (V)") as HTMLInputElement;
     await act(async () => setInputValue(voltage, "400"));
     await flush();
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
@@ -292,7 +292,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
   });
 });
 
-describe("Apply is reachable from the default state (#301)", () => {
+describe("Save is reachable from the default state (#301)", () => {
   /**
    * Materializing the displayed model on Apply only helps if Apply can be
    * pressed. With no stored override — and straight after Reset — the draft
@@ -301,8 +301,7 @@ describe("Apply is reachable from the default state (#301)", () => {
    * connector kept the legacy no-model conversion, which reads an amp limit
    * with no `numberPhases` as three-phase and reports 48 A for a 16 A profile.
    */
-  const applyButton = (container: HTMLElement) =>
-    findButton(container, "Apply");
+  const applyButton = (container: HTMLElement) => findButton(container, "Save");
 
   it("enables Apply with no stored override, and saves the displayed model", async () => {
     setDefaultEvSettings = vi.fn();

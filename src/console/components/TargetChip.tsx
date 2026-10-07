@@ -6,7 +6,7 @@ export interface TargetChipProps {
 }
 
 const TargetChip: React.FC<TargetChipProps> = ({ cpId, connectorId }) => (
-  <span className="inline-flex items-center rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+  <span className="inline-flex items-center font-mono text-[11.5px] text-cx-faint">
     {connectorId != null ? `${cpId} · C${connectorId}` : cpId}
   </span>
 );

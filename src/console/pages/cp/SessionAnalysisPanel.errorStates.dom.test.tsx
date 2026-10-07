@@ -84,26 +84,17 @@ function snapshot(id: string): ChargePointSnapshot {
   return { id, status: OCPPStatus.Available, error: "", connectors: [] };
 }
 
-function tabTrigger(
-  container: HTMLElement,
-  label: string,
-): HTMLElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>('[role="tab"]'),
-  ).find((el) => el.textContent?.trim() === label);
-}
-
 async function openAnalysisTab(container: HTMLElement): Promise<void> {
-  const trigger = tabTrigger(container, "Session Analysis");
-  expect(trigger, "expected a Session Analysis tab").toBeTruthy();
+  // The section is a tab of the charge point page's lower half
+  // (`?tab=analysis`).
+  const item = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[role="tablist"][aria-label="Charge point sections"] [role="tab"]',
+    ),
+  ).find((tab) => tab.textContent?.trim() === "Session analysis");
+  expect(item, "expected a Session analysis tab").toBeTruthy();
   await act(async () => {
-    trigger!.dispatchEvent(
-      new MouseEvent("mousedown", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-      }),
-    );
+    item!.click();
     await Promise.resolve();
   });
   for (let i = 0; i < 100; i++) {

@@ -210,21 +210,19 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   const rules = form?.rules ?? [];
 
   if (!form) {
-    return (
-      <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
-    );
+    return <div className="text-sm text-cx-muted">Loading…</div>;
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+        <p className="mb-4 text-sm text-cx-fg2">
           Network simulation rules apply to WebSocket charge points only. SOAP
           CPs are unaffected.
         </p>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+      <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6">
         <div className="space-y-4">
           {isGlobalMode ? (
             <div className="flex items-center gap-3">
@@ -233,11 +231,11 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
                 id="network-sim-enabled"
                 checked={form.enabled}
                 onChange={(e) => updateEnabled(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                className="h-4 w-4 rounded border-cx-border-strong text-cx-accent"
               />
               <label
                 htmlFor="network-sim-enabled"
-                className="text-sm font-medium text-gray-700 dark:text-gray-200"
+                className="text-sm font-medium text-cx-fg2"
               >
                 Enable network simulation
               </label>
@@ -254,7 +252,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
             <div>
               <label
                 htmlFor="network-sim-seed"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-200"
+                className="block text-sm font-medium text-cx-fg2"
               >
                 Seed
               </label>
@@ -264,30 +262,28 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
                 value={form.seed}
                 onChange={(e) => updateSeed(e.target.value)}
                 placeholder="1"
-                className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm placeholder-gray-400 transition ${
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm placeholder:text-cx-faint transition ${
                   errors["seed"]
-                    ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                    : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+                    ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                    : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                 }`}
               />
               {errors["seed"] && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                  {errors["seed"]}
-                </p>
+                <p className="mt-1 text-xs text-cx-rose">{errors["seed"]}</p>
               )}
             </div>
           )}
 
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              <h3 className="text-sm font-semibold text-cx-fg2">
                 Rules ({rules.length}/{NETWORK_SIM_LIMITS.maxRulesPerLayer})
               </h3>
               <button
                 type="button"
                 onClick={addRule}
                 disabled={rules.length >= NETWORK_SIM_LIMITS.maxRulesPerLayer}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed dark:hover:bg-blue-700"
+                className="inline-flex items-center gap-1.5 rounded-md bg-cx-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-cx-primary-hover disabled:bg-cx-gray disabled:cursor-not-allowed"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {isGlobalMode ? "Add Rule" : "Add Local Rule"}
@@ -295,9 +291,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
             </div>
 
             {errors["rules"] && (
-              <p className="mb-3 text-xs text-red-600 dark:text-red-400">
-                {errors["rules"]}
-              </p>
+              <p className="mb-3 text-xs text-cx-rose">{errors["rules"]}</p>
             )}
 
             <div className="space-y-3">
@@ -317,7 +311,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
       </div>
 
       {saveError && (
-        <div className="rounded-md border border-red-500 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500 dark:bg-red-950 dark:text-red-400">
+        <div className="rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
           {saveError}
         </div>
       )}
@@ -329,8 +323,8 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
           disabled={isSaving || hasError}
           className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition ${
             isSaving || hasError
-              ? "bg-gray-400 cursor-not-allowed dark:bg-gray-600"
-              : "bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
+              ? "bg-cx-gray cursor-not-allowed"
+              : "bg-cx-primary hover:bg-cx-primary-hover"
           }`}
         >
           {isSaving ? "Saving…" : "Save"}
@@ -340,7 +334,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
             type="button"
             onClick={handleDeleteOverride}
             disabled={isDeletingOverride || isSaving}
-            className="inline-flex items-center gap-2 rounded-md border border-red-600 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:border-gray-400 disabled:text-gray-400 disabled:cursor-not-allowed dark:border-red-500 dark:text-red-400 dark:hover:bg-red-950"
+            className="inline-flex items-center gap-2 rounded-md border border-cx-rose px-4 py-2 text-sm font-medium text-cx-rose hover:bg-cx-rose/10 disabled:border-cx-border-strong disabled:text-cx-faint disabled:cursor-not-allowed"
           >
             {isDeletingOverride ? "Deleting…" : "Delete per-CP override"}
           </button>
@@ -375,7 +369,7 @@ const TriStateEnabledControl: React.FC<TriStateEnabledControlProps> = ({
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+      <label className="block text-sm font-medium text-cx-fg2 mb-2">
         Enable network simulation
       </label>
       <div className="flex gap-2">
@@ -386,8 +380,8 @@ const TriStateEnabledControl: React.FC<TriStateEnabledControlProps> = ({
             onClick={() => onChange(option.value)}
             className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
               enabled === option.value
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                ? "bg-cx-primary text-white hover:bg-cx-primary-hover"
+                : "border border-cx-border-strong bg-cx-card text-cx-fg2 hover:bg-cx-sub"
             }`}
           >
             {option.label}
@@ -417,10 +411,10 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
   const getError = (field: string) => errors[`${prefix}.${field}`];
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+    <div className="rounded-lg border border-cx-border bg-cx-sub p-4">
       <div className="mb-4 flex items-start justify-between gap-2">
         <div className="flex-1">
-          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+          <label className="block text-xs font-medium text-cx-fg2">
             Rule ID
           </label>
           <input
@@ -429,29 +423,25 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
             onChange={(e) => onUpdate({ id: e.target.value })}
             className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
               getError("id")
-                ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
             }`}
           />
           {getError("id") && (
-            <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-              {getError("id")}
-            </p>
+            <p className="mt-1 text-xs text-cx-rose">{getError("id")}</p>
           )}
         </div>
         <button
           type="button"
           onClick={onRemove}
-          className="mt-6 rounded-md p-1.5 text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
+          className="mt-6 rounded-md p-1.5 text-cx-rose hover:bg-cx-rose/10"
         >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
 
       <div className="mb-4">
-        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-          Type
-        </label>
+        <label className="block text-xs font-medium text-cx-fg2">Type</label>
         <select
           value={rule.type}
           onChange={(e) =>
@@ -467,7 +457,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
               intervalJitterMs: undefined,
             })
           }
-          className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+          className="mt-1 block w-full rounded-md border border-cx-border-strong bg-cx-card px-2 py-1.5 text-xs focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
         >
           <option value="latency">Latency</option>
           <option value="manual-disconnect">Manual Disconnect</option>
@@ -479,7 +469,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
         {rule.type === "latency" && (
           <>
             <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+              <label className="block text-xs font-medium text-cx-fg2">
                 Direction (optional)
               </label>
               <select
@@ -491,7 +481,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                       : undefined,
                   })
                 }
-                className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                className="mt-1 block w-full rounded-md border border-cx-border-strong bg-cx-card px-2 py-1.5 text-xs focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
               >
                 <option value="">Not set</option>
                 <option value="upstream">Upstream</option>
@@ -501,7 +491,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+              <label className="block text-xs font-medium text-cx-fg2">
                 Actions (optional, comma-separated)
               </label>
               <textarea
@@ -509,14 +499,14 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                 onChange={(e) => onUpdate({ actions: e.target.value })}
                 placeholder="BootNotification, StatusNotification"
                 rows={2}
-                className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs placeholder-gray-400 transition ${
+                className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs placeholder:text-cx-faint transition ${
                   getError("actions")
-                    ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                    : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                    : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                 }`}
               />
               {getError("actions") && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                <p className="mt-1 text-xs text-cx-rose">
                   {getError("actions")}
                 </p>
               )}
@@ -524,7 +514,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+                <label className="block text-xs font-medium text-cx-fg2">
                   Delay (ms)
                 </label>
                 <input
@@ -542,19 +532,19 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                   max={NETWORK_SIM_LIMITS.maxDelayMs}
                   className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
                     getError("delayMs")
-                      ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                      : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                      ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                      : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                   }`}
                 />
                 {getError("delayMs") && (
-                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  <p className="mt-1 text-xs text-cx-rose">
                     {getError("delayMs")}
                   </p>
                 )}
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+                <label className="block text-xs font-medium text-cx-fg2">
                   Jitter (ms, optional)
                 </label>
                 <input
@@ -572,12 +562,12 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                   max={NETWORK_SIM_LIMITS.maxDelayMs}
                   className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
                     getError("jitterMs")
-                      ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                      : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                      ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                      : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                   }`}
                 />
                 {getError("jitterMs") && (
-                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  <p className="mt-1 text-xs text-cx-rose">
                     {getError("jitterMs")}
                   </p>
                 )}
@@ -588,7 +578,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
 
         {rule.type === "manual-disconnect" && (
           <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+            <label className="block text-xs font-medium text-cx-fg2">
               Reconnect Delay (ms)
             </label>
             <input
@@ -606,12 +596,12 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
               max={NETWORK_SIM_LIMITS.maxDelayMs}
               className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
                 getError("reconnectDelayMs")
-                  ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                  : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                  ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                  : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
               }`}
             />
             {getError("reconnectDelayMs") && (
-              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+              <p className="mt-1 text-xs text-cx-rose">
                 {getError("reconnectDelayMs")}
               </p>
             )}
@@ -621,7 +611,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
         {rule.type === "periodic-disconnect" && (
           <>
             <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+              <label className="block text-xs font-medium text-cx-fg2">
                 Interval (ms)
               </label>
               <input
@@ -639,19 +629,19 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                 max={2_147_483_647}
                 className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
                   getError("intervalMs")
-                    ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                    : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                    : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                 }`}
               />
               {getError("intervalMs") && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                <p className="mt-1 text-xs text-cx-rose">
                   {getError("intervalMs")}
                 </p>
               )}
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+              <label className="block text-xs font-medium text-cx-fg2">
                 Interval Jitter (ms, optional)
               </label>
               <input
@@ -669,19 +659,19 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                 max={2_147_483_647}
                 className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
                   getError("intervalJitterMs")
-                    ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                    : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                    : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                 }`}
               />
               {getError("intervalJitterMs") && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                <p className="mt-1 text-xs text-cx-rose">
                   {getError("intervalJitterMs")}
                 </p>
               )}
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+              <label className="block text-xs font-medium text-cx-fg2">
                 Reconnect Delay (ms)
               </label>
               <input
@@ -699,12 +689,12 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                 max={NETWORK_SIM_LIMITS.maxDelayMs}
                 className={`mt-1 block w-full rounded-md border px-2 py-1.5 text-xs transition ${
                   getError("reconnectDelayMs")
-                    ? "border-red-500 bg-red-50 focus:outline-none focus:ring-1 focus:ring-red-500 dark:border-red-500 dark:bg-red-950"
-                    : "border-gray-300 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    ? "border-cx-rose bg-cx-rose/10 focus:outline-none focus:ring-1 focus:ring-cx-rose"
+                    : "border-cx-border-strong bg-cx-card focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
                 }`}
               />
               {getError("reconnectDelayMs") && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                <p className="mt-1 text-xs text-cx-rose">
                   {getError("reconnectDelayMs")}
                 </p>
               )}

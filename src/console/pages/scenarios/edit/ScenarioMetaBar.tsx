@@ -19,6 +19,20 @@ export interface ScenarioMetaBarProps {
   isSaving?: boolean;
   onChange: (patch: Partial<ScenarioDefinition>) => void;
   onSave: () => void;
+  /** A back button with this label (`← <label>`) calling `onBack`, instead
+   *  of the `← Back` link to `/scenarios`. */
+  backLabel?: string;
+  onBack?: () => void;
+  /** The Save button's text (default `Save`). */
+  saveLabel?: string;
+  /** The charge point / connector chip and **▶ Run**: a per-connector
+   *  scenario has a target to show and run on; a Library scenario has none. */
+  showTarget?: boolean;
+  /** `panel`: the side panel's header — no back control, the name with Save
+   *  and `actions` on the first row, the trigger and Enabled under it. */
+  variant?: "page" | "panel";
+  /** panel: controls after Save (Cancel, expand, close). */
+  actions?: React.ReactNode;
 }
 
 /**
@@ -30,7 +44,7 @@ export interface ScenarioMetaBarProps {
  * Uses a plain checkbox for "Enabled" (not a Switch primitive — none is
  * installed in this repo's `src/components/ui`; a checkbox toggle is the
  * existing convention for boolean scenario flags, see
- * `ScenarioTable`'s "Enabled" column and the library page's "Enabled only"
+ * `LibraryTable`'s "Enabled" column and the library page's "Enabled only"
  * filter).
  */
 const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
@@ -41,6 +55,12 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
   isSaving,
   onChange,
   onSave,
+  backLabel,
+  onBack,
+  saveLabel = "Save",
+  showTarget = true,
+  variant = "page",
+  actions,
 }) => {
   const triggerType = scenario.trigger?.type ?? "manual";
   const toStatus =
@@ -77,29 +97,40 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
     }
   };
 
-  return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-gray-200 pb-4 dark:border-gray-800">
-      <Link
-        to={"/scenarios"}
-        className="text-sm text-blue-600 hover:underline dark:text-blue-400"
-      >
-        ← Back
-      </Link>
+  const backControl = onBack ? (
+    <button
+      type="button"
+      onClick={onBack}
+      className="text-sm text-cx-accent hover:underline"
+    >
+      ← {backLabel ?? "Back"}
+    </button>
+  ) : (
+    <Link to={"/scenarios"} className="text-sm text-cx-accent hover:underline">
+      ← Back
+    </Link>
+  );
 
-      <input
-        aria-label="Scenario name"
-        value={scenario.name}
-        onChange={(e) => onChange({ name: e.target.value })}
-        className="min-w-0 flex-1 border-0 bg-transparent text-lg font-semibold text-gray-900 focus:outline-none focus:ring-0 dark:text-gray-100"
-      />
+  const nameInput = (
+    <input
+      aria-label="Scenario name"
+      value={scenario.name}
+      onChange={(e) => onChange({ name: e.target.value })}
+      className={
+        variant === "panel"
+          ? "min-w-0 flex-1 border-0 bg-transparent text-[17px] font-semibold text-cx-fg focus:outline-none focus:ring-0"
+          : "min-w-0 flex-1 border-0 bg-transparent text-[20px] font-semibold text-cx-fg focus:outline-none focus:ring-0"
+      }
+    />
+  );
 
-      <TargetChip cpId={cpId} connectorId={connectorId} />
-
+  const triggerControls = (
+    <>
       <select
         aria-label="Trigger"
         value={triggerType}
         onChange={(e) => handleTriggerTypeChange(e.target.value)}
-        className="rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
       >
         <option value="manual">Manual</option>
         <option value="statusChange">On status change</option>
@@ -110,7 +141,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
           aria-label="Trigger to-status"
           value={toStatus}
           onChange={(e) => handleToStatusChange(e.target.value)}
-          className="rounded-md border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
         >
           {Object.values(OCPPStatus).map((status) => (
             <option key={status} value={status}>
@@ -120,38 +151,72 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
         </select>
       )}
 
-      <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+      <label className="flex items-center gap-1.5 text-sm text-cx-fg2">
         <input
           type="checkbox"
           checked={enabled}
           onChange={(e) => onChange({ enabled: e.target.checked })}
-          className="h-4 w-4 rounded border-gray-300 dark:border-gray-600"
+          className="h-4 w-4 rounded border-cx-border-strong"
         />
         Enabled
       </label>
+    </>
+  );
 
+  const saveControls = (
+    <>
+      {dirty && (
+        <span
+          role="status"
+          aria-label="Unsaved changes"
+          title="Unsaved changes"
+          className="h-2 w-2 rounded-full bg-cx-amber"
+        />
+      )}
+      <Button
+        type="button"
+        size="sm"
+        onClick={onSave}
+        disabled={!dirty || isSaving}
+      >
+        {saveLabel}
+      </Button>
+    </>
+  );
+
+  if (variant === "panel") {
+    return (
+      <div className="mb-4 border-b border-cx-border pb-3">
+        <div className="flex items-center gap-2">
+          {nameInput}
+          <div className="flex shrink-0 items-center gap-2">
+            {saveControls}
+            {actions}
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {triggerControls}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-cx-border pb-4">
+      {backControl}
+      {nameInput}
+      {showTarget && <TargetChip cpId={cpId} connectorId={connectorId} />}
+      {triggerControls}
       <div className="ml-auto flex items-center gap-2">
-        {dirty && (
-          <span
-            role="status"
-            aria-label="Unsaved changes"
-            title="Unsaved changes"
-            className="h-2 w-2 rounded-full bg-amber-500"
-          />
+        {saveControls}
+        {showTarget && (
+          <Button asChild variant="outline" size="sm">
+            <Link to={runUrl} onClick={handleRunClick}>
+              ▶ Run
+            </Link>
+          </Button>
         )}
-        <Button
-          type="button"
-          size="sm"
-          onClick={onSave}
-          disabled={!dirty || isSaving}
-        >
-          Save
-        </Button>
-        <Button asChild variant="outline" size="sm">
-          <Link to={runUrl} onClick={handleRunClick}>
-            ▶ Run
-          </Link>
-        </Button>
+        {actions}
       </div>
     </div>
   );

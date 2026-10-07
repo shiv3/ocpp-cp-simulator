@@ -1,15 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import type { Root } from "react-dom/client";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
@@ -22,6 +14,7 @@ import {
   flush,
   pushEvent,
   renderConsole,
+  type ReportedLocation,
 } from "../../../test/harness";
 
 async function unmount(root: Root): Promise<void> {
@@ -40,37 +33,10 @@ function linearFixture(): ScenarioDefinition {
 
 describe("ScenarioRunPage", () => {
   let cleanup: (() => Promise<void>) | null = null;
-  // Tracks whether THIS file installed the polyfill below, so afterAll only
-  // removes it if it's the one that added it (and not, say, a real
-  // `scrollTo` implementation some other environment already provided).
-  let installedScrollToPolyfill = false;
-
   beforeAll(() => {
     (
       globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
-
-    // jsdom doesn't implement `Element.scrollTo` — `LogViewer`'s auto-scroll
-    // effect calls it unconditionally on mount. Every other place that
-    // mounts `LogViewer` in this repo's dom tests happens to do so inside a
-    // lazily-rendered tab (e.g. `CpDetailPage`'s Logs tab isn't the default
-    // active one), so this gap hasn't surfaced before; here the log tail is
-    // always mounted. Scoped to this file rather than the shared
-    // `src/test/setup.dom.ts` since `LogViewer` itself is out of scope
-    // (`src/components/*` is off-limits for Task 8).
-    if (typeof Element.prototype.scrollTo !== "function") {
-      Element.prototype.scrollTo = () => {};
-      installedScrollToPolyfill = true;
-    }
-  });
-
-  afterAll(() => {
-    // Undo the polyfill so it doesn't leak into other test files sharing
-    // this vitest worker/jsdom global — otherwise "scoped to this file"
-    // above would be a false claim.
-    if (installedScrollToPolyfill) {
-      delete (Element.prototype as { scrollTo?: () => void }).scrollTo;
-    }
   });
 
   afterEach(async () => {
@@ -102,7 +68,7 @@ describe("ScenarioRunPage", () => {
     await flush();
 
     expect(container.textContent).toContain("Boot demo");
-    expect(container.textContent).toContain("CP-1 · C1");
+    expect(container.textContent).toContain("CP-1 #1");
     expect(container.textContent).toContain("Idle");
     expect(container.textContent).toContain("Status Change");
     expect(container.textContent).toContain("Delay");
@@ -184,9 +150,9 @@ describe("ScenarioRunPage", () => {
     await flush();
 
     expect(container.textContent).toContain("Boot demo");
-    // TargetChip renders cpId only (no "· C<n>") when connectorId is null.
+    // The target line shows the cpId only (no "#<n>") when connectorId is null.
     expect(container.textContent).toContain("CP-1");
-    expect(container.textContent).not.toContain("CP-1 · C");
+    expect(container.textContent).not.toContain("CP-1 #");
 
     const startButton = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "Start",
@@ -259,10 +225,10 @@ describe("ScenarioRunPage", () => {
     expect(container.textContent).not.toContain("no longer active");
 
     // Timeline is positioned on the runtime's current node.
-    const markers = Array.from(
-      container.querySelectorAll("ol [aria-label]"),
-    ).map((el) => el.getAttribute("aria-label"));
-    expect(markers).toEqual(["done", "current"]);
+    const phases = Array.from(container.querySelectorAll("[data-step-id]")).map(
+      (el) => el.getAttribute("data-phase"),
+    );
+    expect(phases).toEqual(["done", "current"]);
 
     // Waiting expectation and its timeout.
     expect(container.textContent).toContain("Waiting for");
@@ -412,6 +378,104 @@ describe("ScenarioRunPage", () => {
     await flush();
 
     expect(container.textContent).toContain("Scenario not found");
-    expect(container.textContent).toContain("← Back to scenarios");
+    expect(container.textContent).toContain("← Back");
+  });
+
+  it("is read-only: no message log, a Steps | Graph switch in ?view=, and the run history", async () => {
+    const fixture = linearFixture();
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+    });
+    let location: ReportedLocation | null = null;
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1",
+      {
+        service,
+        onLocationChange: (l) => {
+          location = l;
+        },
+      },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    // The message log lives on the charge point page, not here.
+    expect(container.textContent).not.toContain("Clear");
+    expect(container.querySelector('input[placeholder*="Search"]')).toBeNull();
+    expect(container.textContent).toContain("Run history");
+    expect(container.textContent).toMatch(/No runs/);
+
+    // Back defaults to the Scenarios page.
+    const back = Array.from(container.querySelectorAll("a")).find(
+      (a) => a.textContent?.trim() === "← Back",
+    );
+    expect(back?.getAttribute("href")).toBe("/scenarios");
+
+    // Edit scenario opens the editor on the same target.
+    const edit = Array.from(container.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Edit scenario"),
+    );
+    expect(edit?.getAttribute("href")).toBe(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+    );
+
+    // Steps by default; Graph draws the cards and writes ?view=graph.
+    const view = container.querySelector('[role="group"][aria-label="View"]')!;
+    expect(view).toBeTruthy();
+    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(2);
+    const graph = Array.from(view.querySelectorAll("button")).find(
+      (b) => b.textContent === "Graph",
+    )!;
+    await act(async () => graph.click());
+    await flush();
+    expect(new URLSearchParams(location!.search).get("view")).toBe("graph");
+    expect(location!.type).toBe("REPLACE");
+    expect(container.querySelectorAll("[data-node-id]")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(0);
+  });
+
+  it("Edit scenario of a Library copy opens the Library editor", async () => {
+    const fixture = { ...linearFixture(), libraryId: "lib-a" };
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    const edit = Array.from(container.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Edit scenario"),
+    );
+    expect(edit?.getAttribute("href")).toBe(
+      "/scenarios?tab=library&edit=lib-a",
+    );
+  });
+
+  it("falls back to the flat timeline for a scenario it cannot lay out", async () => {
+    let def = linearFixture();
+    const [a, b] = def.nodes.filter(
+      (n) =>
+        n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
+    );
+    // b → a: a loop.
+    def = {
+      ...def,
+      edges: [...def.edges, { id: "loop", source: b.id, target: a.id }],
+    };
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [def]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(container.textContent).toContain("order approximate");
+    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(0);
   });
 });

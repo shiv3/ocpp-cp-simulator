@@ -12,7 +12,7 @@ related:
   - ../entities/docker-image.md
   - state-persistence.md
   - control-plane.md
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 # Local vs Remote mode (browser)
@@ -48,7 +48,7 @@ overridden.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
 - [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the
-  console's Expert tab calls the in-tab charge point in Local mode and
+  console's Expert section calls the in-tab charge point in Local mode and
   `send_ocpp_call` on the daemon in Remote mode, which is also the method the
   MCP tool and JSON-Lines mode use.
 - Scenarios run in both modes without depending on which page is open. In
@@ -66,8 +66,8 @@ overridden.
   them (`interventions`) exists only on the daemon — Local mode has no run
   reports.
 - The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
-  run console's recorded history and the `/scenarios/runs` page need Remote
-  mode. In Local mode the run console lists only the runs started or attached
+  run page's recorded history and the `/scenarios/runs` page need Remote
+  mode. In Local mode the run page lists only the runs started or attached
   while the page is open, and forgets them when it closes. This is a deferred
   part of #388, not a design choice: the browser runtime builds no run
   reports (the transcript capture, assertion evaluation and verdict live in

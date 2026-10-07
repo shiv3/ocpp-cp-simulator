@@ -1,0 +1,148 @@
+import React from "react";
+import { ChevronRight, PlugZap } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
+import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
+import StatusPill from "../../components/StatusPill";
+import { statusDotClass, statusTextClass } from "../../components/statusColor";
+import { formatRelativeTime } from "../../lib/formatRelativeTime";
+import { usePanelParams } from "../../lib/usePanelParams";
+import ConnectorCell from "./ConnectorCell";
+import type { CpListRow } from "./cpListFilters";
+import {
+  cpStatus,
+  firstWaitingExpectation,
+  hasActiveRun,
+  lastHeartbeat,
+} from "./cpRowFormat";
+
+export interface CpHierarchyRowProps {
+  row: CpListRow;
+  /** The connector grid is folded away (kept by the page, not in the URL). */
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+}
+
+/**
+ * One charge point of the Hierarchy view: a head (twist, status icon, id,
+ * version, pills, a dot per connector, the last Heartbeat) over a grid of connector
+ * cells. The head opens the side panel; so do the cells, on their connector.
+ */
+const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
+  row,
+  collapsed,
+  onToggleCollapse,
+}) => {
+  const { cp } = row;
+  const { open, close, isOpen } = usePanelParams();
+  const status = cpStatus(row);
+  const selected = isOpen(cp.id);
+  const toggleOpen = () => (selected ? close() : open(cp.id));
+
+  // The whole head opens the panel, except where the click already means
+  // something else (a button, link or form control inside it handles itself).
+  const handleHeadClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    if (target.closest("button, a, input, select, label")) return;
+    toggleOpen();
+  };
+
+  return (
+    <div className="border-t border-cx-border first:border-t-0">
+      <div
+        data-cp-id={cp.id}
+        data-selected={selected ? "true" : undefined}
+        onClick={handleHeadClick}
+        className={cn(
+          "flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 hover:bg-cx-sub",
+          selected && "bg-cx-sel",
+        )}
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} connectors of ${cp.id}`}
+          className="rounded p-0.5 text-cx-faint hover:bg-cx-sub hover:text-cx-fg2"
+        >
+          <ChevronRight
+            className={cn(
+              "h-4 w-4 transition-transform",
+              !collapsed && "rotate-90",
+            )}
+          />
+        </button>
+        <PlugZap className={cn("h-4 w-4 shrink-0", statusTextClass(status))} />
+        {/* A button, so the panel opens from the keyboard too. */}
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className="font-mono text-sm font-semibold text-cx-fg hover:underline"
+        >
+          {cp.id}
+        </button>
+        {row.ocppVersion && (
+          <span className="font-mono text-[11.5px] text-cx-faint">
+            {row.ocppVersion}
+          </span>
+        )}
+        <StatusPill status={status} />
+        <ActiveScenarioBadge
+          isActive={hasActiveRun(row)}
+          waitingExpectation={firstWaitingExpectation(row)}
+        />
+        <NetworkSimBadge summary={cp.networkSim} />
+        <span className="flex items-center gap-1">
+          {row.connectors.map((connector) => (
+            <span
+              key={connector.id}
+              title={`#${connector.id} ${connector.status}`}
+              className={cn(
+                "h-[7px] w-[7px] rounded-full",
+                statusDotClass(connector.status),
+              )}
+            />
+          ))}
+        </span>
+        {/* Connecting is in the side panel and the bulk menu; the row only
+            tells the Heartbeat, which the old power button's tooltip carried. */}
+        {row.connected && (
+          <span className="ml-auto font-mono text-[11.5px] text-cx-muted">
+            heartbeat {formatRelativeTime(lastHeartbeat(row))}
+          </span>
+        )}
+      </div>
+
+      {!collapsed &&
+        (row.connectors.length === 0 ? (
+          <div className="pb-2 pl-9 pr-3 text-xs text-cx-faint">
+            No connectors
+          </div>
+        ) : (
+          <div
+            className="grid gap-1.5 pb-2 pl-9 pr-3"
+            style={{
+              gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+            }}
+          >
+            {row.connectors.map((connector) => (
+              <ConnectorCell
+                key={connector.id}
+                cpId={cp.id}
+                connector={connector}
+                selected={isOpen(cp.id, connector.id)}
+                onClick={() =>
+                  isOpen(cp.id, connector.id)
+                    ? close()
+                    : open(cp.id, connector.id)
+                }
+              />
+            ))}
+          </div>
+        ))}
+    </div>
+  );
+};
+
+export default CpHierarchyRow;

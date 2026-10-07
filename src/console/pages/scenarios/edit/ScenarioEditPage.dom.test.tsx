@@ -4,6 +4,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
+import { deriveStepLayout } from "../../../lib/stepLayout";
 import {
   ScenarioNodeType,
   type DelayNodeData,
@@ -107,11 +108,44 @@ async function renameGraphNode(
   await act(async () => {
     setInputValue(labelInput, to);
   });
+  // The node panel confirms with Save too (it is the one `btn-primary` button
+  // of the panel; the page's own Save is a different component).
   await act(async () => {
     Array.from(container.querySelectorAll("button"))
-      .find((b) => b.textContent?.trim() === "Apply")!
+      .find(
+        (b) =>
+          b.textContent?.trim() === "Save" &&
+          b.classList.contains("btn-primary"),
+      )!
       .click();
   });
+}
+
+/** The card graph's select button of `nodeId`. */
+function graphCard(container: HTMLElement, nodeId: string): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(
+    `[data-node-id="${nodeId}"] button[aria-label^="Select step"]`,
+  );
+  if (!button) throw new Error(`no graph card ${nodeId}`);
+  return button;
+}
+
+/** The node id of the card whose title is `title`. */
+function titlesIdOf(container: HTMLElement, title: string): string {
+  const card = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-node-id]"),
+  ).find((el) => el.querySelector(".font-medium")?.textContent === title);
+  if (!card) throw new Error(`no graph card titled ${title}`);
+  return card.dataset.nodeId!;
+}
+
+function buttonByText(
+  root: ParentNode,
+  text: string,
+): HTMLButtonElement | undefined {
+  return Array.from(root.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === text,
+  );
 }
 
 function hasUnsavedChanges(container: HTMLElement): boolean {
@@ -220,7 +254,7 @@ describe("ScenarioEditPage", () => {
     expect(saveButton.disabled).toBe(true);
   });
 
-  it("move and delete buttons operate on their own step without changing the current selection", async () => {
+  it("the inspector header moves the selected step within its lane and deletes it", async () => {
     const fixture = linearFixture(); // steps: Status Change, Delay
     const service = createFakeChargePointService({
       listScenarioDefinitions: vi.fn(async () => [fixture]),
@@ -242,7 +276,9 @@ describe("ScenarioEditPage", () => {
         (b) => b.getAttribute("aria-label") === label,
       ) as HTMLButtonElement | undefined;
 
-    // Select the Status Change step (index 1).
+    // Nothing selected: no move or delete controls.
+    expect(findButton("Delete step 1")).toBeUndefined();
+
     const statusChangeButton = selectButtons().find((b) =>
       b.textContent?.includes("Status Change"),
     )!;
@@ -250,37 +286,87 @@ describe("ScenarioEditPage", () => {
       statusChangeButton.click();
     });
     expect(statusChangeButton.getAttribute("aria-pressed")).toBe("true");
+    // The first step of its lane cannot move up.
+    expect(findButton("Move step 1 up")?.disabled).toBe(true);
 
-    // Move the *Delay* step (index 2) up — a different step than the one
-    // selected. Clicking its move button must not select it.
-    const moveDelayUp = findButton("Move step 2 up");
-    expect(moveDelayUp, "expected a move-up button for step 2").toBeTruthy();
     await act(async () => {
-      moveDelayUp!.click();
+      findButton("Move step 1 down")!.click();
     });
 
-    // Order swapped: Delay now first, Status Change now second.
+    // Order swapped, and the selection followed the moved step.
     const afterMove = selectButtons();
     expect(afterMove[0].textContent).toContain("Delay");
     expect(afterMove[1].textContent).toContain("Status Change");
-
-    // Selection followed the Status Change node (still selected), not the
-    // step whose move button was clicked.
     expect(afterMove[1].getAttribute("aria-pressed")).toBe("true");
     expect(afterMove[0].getAttribute("aria-pressed")).toBe("false");
+    expect(findButton("Move step 2 down")?.disabled).toBe(true);
 
-    // Delete the (still-selected) Status Change step, now at index 2.
-    const deleteStatusChange = findButton("Delete step 2");
-    expect(
-      deleteStatusChange,
-      "expected a delete button for step 2",
-    ).toBeTruthy();
     await act(async () => {
-      deleteStatusChange!.click();
+      findButton("Delete step 2")!.click();
     });
 
     expect(container.textContent).not.toContain("Status Change");
     expect(container.textContent).toContain("Delay");
+  });
+
+  it("adds steps under a branch and a parallel branch in the Steps view", async () => {
+    const saveScenarioDefinition = vi.fn(
+      async (_cp: string, _c: number | null, def: ScenarioDefinition) => def,
+    );
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [linearFixture()]),
+      saveScenarioDefinition,
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    const clickText = async (text: string) => {
+      const button = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === text,
+      );
+      expect(button, `expected a "${text}" button`).toBeTruthy();
+      await act(async () => {
+        button!.click();
+      });
+    };
+
+    await clickText("+ Add parallel branch");
+    // The chain forks at its last step; the new branch holds one Delay,
+    // selected in the inspector.
+    expect(
+      container.querySelector('[data-testid="step-branches"]'),
+    ).toBeTruthy();
+    expect(container.querySelectorAll('[data-testid="lane-tag"]')).toHaveLength(
+      2,
+    );
+    expect(
+      container.querySelector('input[type="number"]'),
+      "the new Delay step's form",
+    ).toBeTruthy();
+
+    // + Add step under branch B appends a Meter Value there.
+    const addToB = container.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label^="Add step to"]',
+    )[1];
+    await act(async () => {
+      addToB.click();
+    });
+    await clickText("Meter Value");
+
+    await clickText("Save");
+    await flush();
+    const saved = saveScenarioDefinition.mock.calls[0][2];
+    const layout = deriveStepLayout(saved);
+    expect(layout.supported).toBe(true);
+    expect(layout.main).toHaveLength(2);
+    expect(
+      layout.fork?.branches.map((b) => b.steps.map((n) => n.type)),
+    ).toEqual([[], [ScenarioNodeType.DELAY, ScenarioNodeType.METER_VALUE]]);
   });
 
   it("catches a rejecting save, surfaces an error, and keeps the scenario dirty", async () => {
@@ -343,7 +429,7 @@ describe("ScenarioEditPage", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("edits a branching scenario in the graph view and saves it through the page", async () => {
+  it("edits a branching scenario in the card graph and saves it through the page", async () => {
     const saveScenarioDefinition = vi.fn(
       async (_cp: string, _c: number | null, def: ScenarioDefinition) => def,
     );
@@ -355,56 +441,38 @@ describe("ScenarioEditPage", () => {
     });
 
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor",
+      "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor&view=graph",
       { service },
     );
     cleanup = () => unmount(root);
     await flush();
-    await waitForGraph(container);
 
-    // The graph editor, not a read-only list with a way out to the
-    // classic UI.
-    expect(container.textContent).not.toContain("classic graph editor");
-    expect(container.textContent).not.toContain("Open classic editor");
-    for (const id of ["start-1", "trigger-available", "trigger-faulted"]) {
-      expect(graphNode(container, id), `graph node ${id}`).not.toBeNull();
-    }
-    // The step list cannot show branches, so Graph is forced.
+    // A single fork is drawable: the Graph view is the card graph, not
+    // ReactFlow, and Steps stays available.
+    expect(container.querySelector(".react-flow__node")).toBeNull();
+    expect(container.querySelectorAll("[data-node-id]")).toHaveLength(6);
+    expect(container.querySelectorAll('[data-testid="lane-tag"]')).toHaveLength(
+      3,
+    );
     expect(viewToggle(container, "Graph").getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(viewToggle(container, "Steps").disabled).toBe(true);
-    // Opening the graph alone (ReactFlow measuring and selecting nodes)
-    // is not an edit.
-    expect(
-      container.querySelector('[aria-label="Unsaved changes"]'),
-    ).toBeNull();
+    expect(viewToggle(container, "Steps").disabled).toBe(false);
+    expect(hasUnsavedChanges(container)).toBe(false);
 
-    // Edit one branch's node in the graph's own node panel...
+    // A click on a card opens it in the inspector.
     await act(async () => {
-      graphNode(container, "notify-faulted")!.dispatchEvent(
-        new MouseEvent("dblclick", { bubbles: true }),
-      );
+      graphCard(container, "notify-faulted").click();
     });
     const labelInput = Array.from(
       container.querySelectorAll<HTMLInputElement>("input"),
     ).find((input) => input.value === "Send Status");
-    expect(labelInput, "the node panel's Label field").toBeTruthy();
+    expect(labelInput, "the inspector's Label field").toBeTruthy();
     await act(async () => {
       setInputValue(labelInput!, "Report fault");
     });
-    const apply = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Apply",
-    );
-    expect(apply, "the node panel's Apply button").toBeTruthy();
-    await act(async () => {
-      apply!.click();
-    });
+    expect(hasUnsavedChanges(container)).toBe(true);
 
-    // ...then save once, through the page.
-    expect(
-      container.querySelector('[aria-label="Unsaved changes"]'),
-    ).toBeTruthy();
     const save = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "Save",
     ) as HTMLButtonElement;
@@ -428,19 +496,113 @@ describe("ScenarioEditPage", () => {
     expect(replaceConnectorScenarioDefinitions).not.toHaveBeenCalled();
   });
 
+  it("adds, moves and deletes steps in the card graph", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [linearFixture()]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=graph",
+      { service },
+    );
+    cleanup = async () => {
+      confirm.mockRestore();
+      await unmount(root);
+    };
+    await flush();
+
+    const titles = () =>
+      Array.from(container.querySelectorAll("[data-node-id]")).map(
+        (el) => el.querySelector(".font-medium")?.textContent,
+      );
+    expect(titles()).toEqual(["Status Change", "Delay"]);
+
+    // + after the last card: picked from the step picker, then selected.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Add step after step 2"]',
+        )!
+        .click();
+    });
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent?.trim() === "Meter Value")!
+        .click();
+    });
+    expect(titles()).toEqual(["Status Change", "Delay", "Meter Value"]);
+    expect(hasUnsavedChanges(container)).toBe(true);
+
+    // Drag the first card one row down.
+    const first = container.querySelector<HTMLElement>(
+      "[data-node-id] button",
+    )!;
+    const drag = (type: string, clientY: number) =>
+      act(() => {
+        first.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            pointerId: 1,
+            clientY,
+          }),
+        );
+      });
+    drag("pointerdown", 100);
+    drag("pointermove", 180);
+    drag("pointerup", 180);
+    expect(titles()).toEqual(["Delay", "Status Change", "Meter Value"]);
+
+    // Delete on a focused card asks in the page, not window.confirm.
+    const delay = graphCard(container, titlesIdOf(container, "Delay"));
+    act(() => {
+      delay.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Delete",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    const question = container.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toContain("Delete step 1");
+    await act(async () => {
+      buttonByText(question!, "Keep")!.click();
+    });
+    expect(titles()).toHaveLength(3);
+    act(() => {
+      delay.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Delete",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(async () => {
+      buttonByText(
+        container.querySelector('[role="alertdialog"]')!,
+        "Delete",
+      )!.click();
+    });
+    expect(titles()).toEqual(["Status Change", "Meter Value"]);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it("does not persist anything before the page's Save", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const saveScenarioDefinition = vi.fn(async () => fanOutFixture);
+      const saveScenarioDefinition = vi.fn(async () => loopFixture);
       const replaceConnectorScenarioDefinitions = vi.fn(async () => []);
       const service = createFakeChargePointService({
-        listScenarioDefinitions: vi.fn(async () => [fanOutFixture]),
+        listScenarioDefinitions: vi.fn(async () => [loopFixture]),
         saveScenarioDefinition,
         replaceConnectorScenarioDefinitions,
       });
 
       const { container, root } = await renderConsole(
-        "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor",
+        "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions&view=graph",
         { service },
       );
       cleanup = () => unmount(root);
@@ -469,10 +631,11 @@ describe("ScenarioEditPage", () => {
 
   it("opening a graph with an orphan edge is not an edit; the first real edit saves it without the orphan", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The loop keeps it a scenario only the full graph editor opens.
     const withOrphan: ScenarioDefinition = {
-      ...fanOutFixture,
+      ...loopFixture,
       edges: [
-        ...fanOutFixture.edges,
+        ...loopFixture.edges,
         { id: "e-orphan", source: "start-1", target: "deleted-node" },
       ],
     };
@@ -485,7 +648,7 @@ describe("ScenarioEditPage", () => {
     });
 
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor",
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions&view=graph",
       { service },
     );
     cleanup = () => unmount(root);
@@ -499,9 +662,9 @@ describe("ScenarioEditPage", () => {
 
     await renameGraphNode(
       container,
-      "notify-faulted",
-      "Send Status",
-      "Report fault",
+      "notification-heartbeat",
+      "Send Heartbeat",
+      "Beat",
     );
     expect(hasUnsavedChanges(container)).toBe(true);
     await act(async () => {
@@ -514,17 +677,17 @@ describe("ScenarioEditPage", () => {
     expect(saveScenarioDefinition).toHaveBeenCalledTimes(1);
     const saved = saveScenarioDefinition.mock.calls[0][2];
     expect(saved.edges.map((e) => e.id)).not.toContain("e-orphan");
-    expect(saved.edges).toHaveLength(fanOutFixture.edges.length);
+    expect(saved.edges).toHaveLength(loopFixture.edges.length);
     warn.mockRestore();
   });
 
   it("undoing the only graph edit leaves the page clean", async () => {
     const service = createFakeChargePointService({
-      listScenarioDefinitions: vi.fn(async () => [fanOutFixture]),
+      listScenarioDefinitions: vi.fn(async () => [loopFixture]),
     });
 
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor",
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions&view=graph",
       { service },
     );
     cleanup = () => unmount(root);
@@ -534,9 +697,9 @@ describe("ScenarioEditPage", () => {
 
     await renameGraphNode(
       container,
-      "notify-faulted",
-      "Send Status",
-      "Report fault",
+      "notification-heartbeat",
+      "Send Heartbeat",
+      "Beat",
     );
     expect(hasUnsavedChanges(container)).toBe(true);
 
@@ -564,18 +727,22 @@ describe("ScenarioEditPage", () => {
 
     expect(graphNode(container, "delay-10s")).not.toBeNull();
     expect(viewToggle(container, "Steps").disabled).toBe(true);
+    // ReactFlow only here, said in one line; no card graph.
+    expect(container.textContent).toContain(
+      "This scenario has joins or loops; the full graph editor is used",
+    );
+    expect(container.querySelector("[data-node-id]")).toBeNull();
   });
 
-  it("stays in the graph view when an edit makes the scenario linear again", async () => {
-    // START → A → END plus a START → END shortcut: a branch at START.
+  it("stays in the graph view when an edit makes the scenario drawable again", async () => {
+    // START → A → B → END plus a B → A loop: a shape Steps cannot draw.
     const base = linearFixture();
-    const start = base.nodes.find((n) => n.type === ScenarioNodeType.START)!;
-    const end = base.nodes.find((n) => n.type === ScenarioNodeType.END)!;
+    const [first, second] = deriveStepLayout(base).main;
     const fixture: ScenarioDefinition = {
       ...base,
       edges: [
         ...base.edges,
-        { id: "e-shortcut", source: start.id, target: end.id },
+        { id: "e-shortcut", source: second.id, target: first.id },
       ],
     };
     const service = createFakeChargePointService({
@@ -590,7 +757,8 @@ describe("ScenarioEditPage", () => {
     await flush();
     await waitForGraph(container);
 
-    // Select the shortcut edge and delete it: the graph is linear again.
+    expect(viewToggle(container, "Steps").disabled).toBe(true);
+    // Select the loop edge and delete it: the graph is linear again.
     // Edges render once ReactFlow has measured the nodes.
     let shortcut: SVGElement | null = null;
     for (let i = 0; i < 100 && !shortcut; i++) {
@@ -601,7 +769,7 @@ describe("ScenarioEditPage", () => {
         '.react-flow__edge[data-id="e-shortcut"]',
       );
     }
-    expect(shortcut, "the shortcut edge").not.toBeNull();
+    expect(shortcut, "the loop edge").not.toBeNull();
     await act(async () => {
       shortcut!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -647,8 +815,9 @@ describe("ScenarioEditPage", () => {
     );
     cleanup = () => unmount(graph.root);
     await flush();
-    await waitForGraph(graph.container);
-    expect(graph.container.querySelector(".react-flow__node")).not.toBeNull();
+    // The card graph, not ReactFlow.
+    expect(graph.container.querySelectorAll("[data-node-id]")).toHaveLength(2);
+    expect(graph.container.querySelector(".react-flow__node")).toBeNull();
     expect(graph.container.textContent).not.toContain("+ Add step");
   });
 
@@ -669,10 +838,16 @@ describe("ScenarioEditPage", () => {
       viewToggle(container, "Graph").click();
     });
     await flush();
-    await waitForGraph(container);
     await act(async () => {
       container
-        .querySelector<HTMLButtonElement>('[aria-label="Auto-arrange nodes"]')!
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Add step after step 2"]',
+        )!
+        .click();
+    });
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent?.trim() === "Meter Value")!
         .click();
     });
     expect(
@@ -685,8 +860,38 @@ describe("ScenarioEditPage", () => {
     await flush();
 
     expect(container.textContent).toContain("+ Add step");
+    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(3);
     expect(
       container.querySelector('[aria-label="Unsaved changes"]'),
     ).toBeTruthy();
+  });
+  it("puts the inspector beside the steps when the editor is wide enough (a container query)", async () => {
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [linearFixture()]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    // jsdom has no layout: the classes are the guard.
+    const body = container.querySelector('[data-testid="editor-body"]')!;
+    expect(body.classList.contains("@container")).toBe(true);
+    const grid = body.querySelector('[data-testid="editor-grid"]')!;
+    expect(grid.classList.contains("grid")).toBe(true);
+    expect(grid.classList.contains("grid-cols-1")).toBe(true);
+    expect(
+      grid.classList.contains(
+        "@[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]",
+      ),
+    ).toBe(true);
+    // Steps column, then the inspector (the empty "Select a step" box too).
+    const [steps, inspector] = Array.from(grid.children);
+    expect(steps.classList.contains("min-w-0")).toBe(true);
+    expect(steps.querySelector("[data-step-id]")).toBeTruthy();
+    expect(inspector.textContent).toContain("Select a step");
+    expect(inspector.classList.contains("@[860px]:sticky")).toBe(true);
   });
 });

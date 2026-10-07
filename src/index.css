@@ -1,52 +1,134 @@
 @import "tailwindcss";
+/* The IBM Plex @font-face rules are imported in src/main.tsx: Tailwind inlines
+   CSS @imports without rebasing their url()s, so Vite would not bundle the
+   font files from here. */
 /* Keep the existing v3-style JS config (theme tokens, keyframes, flowbite +
    animate plugins) under Tailwind v4 via the @config bridge. */
 @config "../tailwind.config.js";
 
+/* Console palette (graphite surfaces, one blue accent). Both themes live in
+   the variables, so `bg-cx-card` etc. need no `dark:` twin. */
+:root {
+  --cx-bg: #f6f6f4;
+  --cx-side: #fbfbfa;
+  --cx-card: #ffffff;
+  --cx-sub: #f0f0ee;
+  --cx-sel: #eaf0ff;
+  --cx-border: #e6e6e3;
+  --cx-border-strong: #d4d4d0;
+  --cx-fg: #1b1b1f;
+  --cx-fg2: #46464d;
+  --cx-muted: #70707a;
+  --cx-faint: #a0a0a8;
+  --cx-accent: #2f5fe0;
+  --cx-primary: #2f5fe0;
+  --cx-primary-hover: #244fc4;
+  --cx-emerald: #1a8a57;
+  --cx-blue: #2a62d6;
+  --cx-amber: #b07a09;
+  --cx-rose: #cf3f33;
+  --cx-gray: #9a9aa3;
+  --cx-purple: #7748c9;
+}
+
+.dark {
+  --cx-bg: #101012;
+  --cx-side: #0b0b0d;
+  --cx-card: #17171a;
+  --cx-sub: #1e1e22;
+  --cx-sel: #1c2030;
+  --cx-border: #25252a;
+  --cx-border-strong: #34343b;
+  --cx-fg: #ececef;
+  --cx-fg2: #b5b5bd;
+  --cx-muted: #85858f;
+  --cx-faint: #5c5c66;
+  --cx-accent: #7aa2ff;
+  --cx-primary: #3d6ae8;
+  --cx-primary-hover: #4d79f2;
+  --cx-emerald: #4cc38a;
+  --cx-blue: #6ea8ff;
+  --cx-amber: #e2b04a;
+  --cx-rose: #ee7468;
+  --cx-gray: #6b6b75;
+  --cx-purple: #b497f5;
+}
+
+@theme inline {
+  --color-cx-bg: var(--cx-bg);
+  --color-cx-side: var(--cx-side);
+  --color-cx-card: var(--cx-card);
+  --color-cx-sub: var(--cx-sub);
+  --color-cx-sel: var(--cx-sel);
+  --color-cx-border: var(--cx-border);
+  --color-cx-border-strong: var(--cx-border-strong);
+  --color-cx-fg: var(--cx-fg);
+  --color-cx-fg2: var(--cx-fg2);
+  --color-cx-muted: var(--cx-muted);
+  --color-cx-faint: var(--cx-faint);
+  --color-cx-accent: var(--cx-accent);
+  --color-cx-primary: var(--cx-primary);
+  --color-cx-primary-hover: var(--cx-primary-hover);
+  --color-cx-emerald: var(--cx-emerald);
+  --color-cx-blue: var(--cx-blue);
+  --color-cx-amber: var(--cx-amber);
+  --color-cx-rose: var(--cx-rose);
+  --color-cx-gray: var(--cx-gray);
+  --color-cx-purple: var(--cx-purple);
+  --font-sans:
+    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* The shadcn variables follow the same palette, so dialogs, dropdowns and the
+   graph editor pick the look up for free. */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 60 10% 96.1%;
+    --foreground: 240 6.9% 11.4%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 240 6.9% 11.4%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.3 25% 26.7%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --popover-foreground: 240 6.9% 11.4%;
+    --primary: 223.7 74.1% 53.1%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 60 6.2% 93.7%;
+    --secondary-foreground: 240 6.9% 11.4%;
+    --muted: 60 6.2% 93.7%;
+    /* fg2, not the fainter muted grey: keeps WCAG AA on the --muted surface. */
+    --muted-foreground: 240 4.8% 28.8%;
+    --accent: 60 6.2% 93.7%;
+    --accent-foreground: 240 6.9% 11.4%;
     --destructive: 0 74.7% 41.8%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --destructive-foreground: 0 0% 100%;
+    --border: 60 5.7% 89.6%;
+    --input: 60 5.7% 89.6%;
+    --ring: 223.7 74.1% 53.1%;
+    --radius: 0.625rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 212.7 26.8% 83.9%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --background: 240 5.9% 6.7%;
+    --foreground: 240 8.6% 93.1%;
+    --card: 240 6.1% 9.6%;
+    --card-foreground: 240 8.6% 93.1%;
+    --popover: 240 6.1% 9.6%;
+    --popover-foreground: 240 8.6% 93.1%;
+    --primary: 224.2 78.8% 57.5%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 6.2% 12.5%;
+    --secondary-foreground: 240 8.6% 93.1%;
+    --muted: 240 6.2% 12.5%;
+    --muted-foreground: 240 5.7% 72.5%;
+    --accent: 240 6.2% 12.5%;
+    --accent-foreground: 240 8.6% 93.1%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6.3% 15.5%;
+    --input: 240 6.3% 15.5%;
+    --ring: 222 100% 73.9%;
   }
 }
 
@@ -55,24 +137,67 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-cx-bg text-cx-fg;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.45;
   }
 
-  /* Let the browser draw native form controls (checkbox, radio, etc.) in
-     dark mode so their default "white box" doesn't blend into the dark
-     surface. Combined with accent-color this gives a visible unchecked
-     state plus a clearly-coloured checked state. */
+  /* Radix components that set their own ring (focus-visible:ring-*) keep it. */
+  :focus-visible {
+    outline: 2px solid var(--cx-accent);
+    outline-offset: 2px;
+  }
+
+  /* Native form controls follow the theme: a dark scheme makes the browser
+     draw an unchecked checkbox as a dark box instead of a bright white one
+     (the Connected / Scenario filters, the Enabled checkbox). */
+  :root {
+    color-scheme: light;
+  }
+
   .dark {
     color-scheme: dark;
   }
 
+  /* The scheme is also set on the controls themselves: a control inherits it,
+     but a stylesheet that sets it on a wrapper must not bring the white box
+     back. accent-color is the console's primary blue for the checked state. */
   input[type="checkbox"],
   input[type="radio"] {
-    accent-color: hsl(var(--primary));
+    accent-color: var(--cx-primary);
+    color-scheme: light;
+  }
+
+  .dark input[type="checkbox"],
+  .dark input[type="radio"] {
+    color-scheme: dark;
+  }
+
+  /* 14px next to 13px text; the browser default (13px, 3px margin) floats. */
+  input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
   }
 }
 
 @layer components {
+  /* The filter bars' native selects (filterStyles.ts): the browser's own
+     chevron is missing or too faint on a restyled select in dark mode, so every
+     select draws the same one. The stroke is the --cx-muted of each theme
+     (a data URI cannot read a CSS variable). */
+  .cx-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2370707a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 10px 6px;
+  }
+
+  .dark .cx-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2385858f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+
   /* Card components */
   .card {
     @apply bg-white dark:bg-gray-800 shadow-md rounded-lg transition-colors;
@@ -125,27 +250,6 @@
 
   .text-muted {
     @apply text-gray-700 dark:text-gray-300;
-  }
-
-  /* Text size utilities with default colors for Light Mode */
-  .text-xs {
-    @apply text-gray-900 dark:text-gray-100;
-  }
-
-  .text-sm {
-    @apply text-gray-900 dark:text-gray-100;
-  }
-
-  .text-base {
-    @apply text-gray-900 dark:text-gray-100;
-  }
-
-  .text-lg {
-    @apply text-gray-900 dark:text-gray-100;
-  }
-
-  .text-xl {
-    @apply text-gray-900 dark:text-gray-100;
   }
 
   /* Input components */
@@ -226,15 +330,6 @@
   .log-level-error {
     @apply text-red-800 dark:text-red-200;
   }
-
-  /* Form styles of the charge point dialog */
-  .logger-label {
-    @apply dark:text-gray-200;
-  }
-
-  .logger-input {
-    @apply dark:bg-gray-700 dark:text-white dark:border-gray-600;
-  }
 }
 
 /*
@@ -248,4 +343,16 @@
 
 .text-secondary {
   @apply text-gray-700 dark:text-gray-300;
+}
+
+/*
+  Web console side panel (src/console/components/SidePanel.tsx): from 1100 px
+  the page keeps working beside the fixed panel; below that the panel covers
+  it. SidePanel sets the attribute and the width variable on the root while
+  it is open.
+*/
+@media (min-width: 1100px) {
+  :root[data-side-panel] [data-console-main] {
+    margin-right: var(--console-panel-width);
+  }
 }

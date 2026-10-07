@@ -87,7 +87,7 @@ describe("DashboardPage", () => {
     }
   });
 
-  it("renders registered/connected CPs with connector rows (energy in kWh), an active Tx, and wires Disconnect to the service", async () => {
+  it("renders registered/connected CPs with connector cells (energy in kWh), an active Tx, and has no Connect / Disconnect button in the row", async () => {
     const cpA = snapshot({
       id: "CP-A",
       status: OCPPStatus.Available,
@@ -126,26 +126,17 @@ describe("DashboardPage", () => {
     expect(container.textContent).toContain("CP-A");
     expect(container.textContent).toContain("CP-B");
     expect(container.textContent).toContain("2 registered");
-    expect(container.textContent).toContain("Tx #42");
+    expect(container.textContent).toContain("Tx 42");
 
-    const cardA = container.querySelector('[data-cp-id="CP-A"]');
-    expect(cardA, "expected a card for CP-A").toBeTruthy();
+    const rowA = container.querySelector('[data-cp-id="CP-A"]');
+    expect(rowA, "expected a row for CP-A").toBeTruthy();
     // The meter value is in Wh (#368).
-    expect(cardA!.textContent).toContain("16.21 kWh");
-    const disconnectButton = Array.from(cardA!.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Disconnect",
-    );
-    expect(
-      disconnectButton,
-      "expected a Disconnect button on CP-A's card",
-    ).toBeTruthy();
-
-    await act(async () => {
-      disconnectButton!.click();
-      await Promise.resolve();
-    });
-
-    expect(service.disconnect).toHaveBeenCalledWith("CP-A");
+    const cellA = container.querySelector('[data-connector-cell="CP-A#1"]');
+    expect(cellA, "expected a connector cell for CP-A #1").toBeTruthy();
+    expect(cellA!.textContent).toContain("16.21 kWh");
+    // Connecting lives in the side panel and the bulk menu, not in the row.
+    expect(rowA!.querySelector('[aria-label="Disconnect CP-A"]')).toBeNull();
+    expect(service.disconnect).not.toHaveBeenCalled();
   });
 
   it("shows an empty state with an add action when there are no charge points", async () => {
@@ -167,7 +158,7 @@ describe("DashboardPage", () => {
     expect(addButtons.length).toBeGreaterThan(0);
   });
 
-  it("shows a Recent activity strip that fills in as global log events arrive (Task 9)", async () => {
+  it("has no Recent activity box any more (the Message Log page has the traffic)", async () => {
     const cpA = snapshot({ id: "CP-A" });
     const service = createFakeChargePointService({ snapshots: [cpA] });
     const { container, root } = await renderConsole("/", { service });
@@ -183,16 +174,6 @@ describe("DashboardPage", () => {
       await Promise.resolve();
     });
 
-    // Before any log event, the strip is present but empty.
-    expect(container.textContent).toContain("Recent activity");
-    expect(container.textContent).toContain("No activity yet.");
-
-    const openLogLink = Array.from(container.querySelectorAll("a")).find((a) =>
-      a.textContent?.includes("Open Message Log"),
-    );
-    expect(openLogLink, "expected an Open Message Log link").toBeTruthy();
-    expect(openLogLink!.getAttribute("href")).toBe("/logs");
-
     await pushEvent(service, "CP-A", {
       type: "log",
       entry: {
@@ -203,17 +184,17 @@ describe("DashboardPage", () => {
       },
     });
 
-    expect(container.textContent).not.toContain("No activity yet.");
-    expect(container.textContent).toContain("CP-A");
-    expect(container.textContent).toContain("BootNotification accepted");
+    expect(container.textContent).not.toContain("Recent activity");
+    expect(container.textContent).not.toContain("BootNotification accepted");
+    expect(container.textContent).not.toContain("Open Message Log");
   });
 
-  it("encodes a special-character cpId in both the card link and the Open button's navigation (bug fix)", async () => {
+  it("encodes a special-character cpId in the panel's URL and the full-page link, and the full page opens (bug fix)", async () => {
     const specialId = "CP/Special";
     const cpSpecial = snapshot({ id: specialId, connectors: [] });
     const service = createFakeChargePointService({
       snapshots: [cpSpecial],
-      // Navigating through lands on CpDetailPage, whose Transactions tab
+      // Expanding the panel lands on CpDetailPage, whose Transactions tab
       // renders by default; its `useStateHistory` expects an array back
       // (the generic auto-stub resolves `undefined`), so this is supplied
       // the same way the CpDetailPage.dom.test.tsx fixture does.
@@ -232,78 +213,46 @@ describe("DashboardPage", () => {
       await Promise.resolve();
     });
 
-    const card = container.querySelector(`[data-cp-id="${specialId}"]`);
-    expect(card, "expected a card for CP/Special").toBeTruthy();
+    const row = container.querySelector(`[data-cp-id="${specialId}"]`);
+    expect(row, "expected a row for CP/Special").toBeTruthy();
+    // The id opens the side panel; it no longer links to the full page.
+    expect(row!.querySelector("a")).toBeNull();
+    expect(
+      Array.from(row!.querySelectorAll("button")).some(
+        (b) => b.textContent?.trim() === "Open",
+      ),
+    ).toBe(false);
 
-    // The Link's href must be encodeURIComponent'd — an unencoded "/" would
-    // otherwise create an extra route segment that /cp/:cpId can't match.
-    const link = card!.querySelector("a");
-    expect(link, "expected the cpId link").toBeTruthy();
-    expect(link!.getAttribute("href")).toBe(
-      `/cp/${encodeURIComponent(specialId)}`,
+    const idButton = Array.from(row!.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === specialId,
     );
-    expect(link!.getAttribute("href")).toBe("/cp/CP%2FSpecial");
+    expect(idButton, "expected the cpId button").toBeTruthy();
+    await act(async () => {
+      idButton!.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The expand link's href must be encodeURIComponent'd — an unencoded "/"
+    // would otherwise create an extra route segment that /cp/:cpId can't
+    // match.
+    const expand = container.querySelector('[aria-label="Open as full page"]');
+    expect(expand, "expected the panel's expand link").toBeTruthy();
+    expect(expand!.getAttribute("href")).toBe("/cp/CP%2FSpecial");
 
     // End-to-end: clicking through actually lands on this CP's detail page
     // (an unencoded href would instead produce an extra path segment and
     // land on a blank/unmatched route).
     await act(async () => {
-      link!.click();
+      (expand as HTMLElement).click();
       await Promise.resolve();
     });
     await act(async () => {
       await Promise.resolve();
     });
 
-    const heading = container.querySelector("h1");
-    expect(heading?.textContent).toContain(specialId);
-
-    // A normal (non-special) cpId still routes correctly too.
-    expect(`/cp/${encodeURIComponent("CP-A")}`).toBe("/cp/CP-A");
-  });
-
-  it("encodes a special-character cpId in the Open button's navigate() call (bug fix)", async () => {
-    const specialId = "CP?weird#id";
-    const cpSpecial = snapshot({ id: specialId, connectors: [] });
-    const service = createFakeChargePointService({
-      snapshots: [cpSpecial],
-      // Navigating through lands on CpDetailPage, whose Transactions tab
-      // renders by default; its `useStateHistory` expects an array back
-      // (the generic auto-stub resolves `undefined`), so this is supplied
-      // the same way the CpDetailPage.dom.test.tsx fixture does.
-      getStateHistory: vi.fn(async () => []),
-    });
-    const { container, root } = await renderConsole("/", { service });
-    cleanup = () => unmount(root);
-
-    await act(async () => {
-      for (const handler of service.__handlers.subscribeRegistry) {
-        handler({ type: "snapshot", cps: [cpSpecial] });
-      }
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const card = container.querySelector(`[data-cp-id="${specialId}"]`);
-    expect(card, "expected a card for the special-id CP").toBeTruthy();
-    const openButton = Array.from(card!.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Open",
-    );
-    expect(openButton, "expected an Open button").toBeTruthy();
-
-    await act(async () => {
-      openButton!.click();
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // navigate(`/cp/${encodeURIComponent(cp.id)}`) must land on this CP's
-    // detail page, not a blank route from an unencoded "?"/"#" splitting the
-    // path/query/hash.
     const heading = container.querySelector("h1");
     expect(heading?.textContent).toContain(specialId);
   });

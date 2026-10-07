@@ -66,6 +66,8 @@
     "gen:ocpp": "bun run scripts/generate-ocpp.ts"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "@ocpp-debugkit/toolkit": "0.4.8",
     "@peculiar/x509": "^2.1.0",
     "@radix-ui/react-checkbox": "^1.3.11",

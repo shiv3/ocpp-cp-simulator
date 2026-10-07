@@ -256,6 +256,29 @@ describe("useGlobalLogs", () => {
     expect(latestHookApi?.entries).toHaveLength(0);
   });
 
+  it("clear(cpIds) drops only those charge points' entries", async () => {
+    const service = createFakeChargePointService({
+      snapshots: [snapshot("CP-1"), snapshot("CP-2")],
+    });
+    const { root } = await renderProbe(service);
+    cleanup = () => unmount(root);
+    await pushRegistrySnapshot(service, [snapshot("CP-1"), snapshot("CP-2")]);
+
+    await pushLog(service, "CP-1", "one");
+    await pushLog(service, "CP-2", "two");
+
+    await act(async () => {
+      latestHookApi!.clear(["CP-1"]);
+    });
+    expect(latestHookApi!.entries.map((e) => e.entry.message)).toEqual(["two"]);
+
+    // An empty list is "no scope", not "nothing": it clears like clear().
+    await act(async () => {
+      latestHookApi!.clear([]);
+    });
+    expect(latestHookApi?.entries).toHaveLength(0);
+  });
+
   it("subscribes to every CP id returned by useChargePoints and unsubscribes on unmount", async () => {
     const service = createFakeChargePointService({
       snapshots: [snapshot("CP-1"), snapshot("CP-2")],
@@ -290,8 +313,9 @@ describe("useGlobalLogs", () => {
 
     await pushLog(service, "CP-A", "collected on dashboard");
 
-    // Sanity check: the entry actually landed while on the Dashboard.
-    expect(container.textContent).toContain("collected on dashboard");
+    // The Dashboard shows no log lines (its Recent activity box is gone), so
+    // the entry is only visible once the Message Log page opens below.
+    expect(container.textContent).not.toContain("collected on dashboard");
 
     const logsLink = Array.from(container.querySelectorAll("a")).find(
       (a) => a.textContent?.trim() === "Message Log",
@@ -311,6 +335,6 @@ describe("useGlobalLogs", () => {
     // this entry — collected while on the Dashboard — would be gone.
     expect(container.textContent).toContain("Message Log");
     expect(container.textContent).toContain("collected on dashboard");
-    expect(container.textContent).toContain("1 shown · 1 total");
+    expect(container.textContent).toContain("1 total / 1 filtered");
   });
 });

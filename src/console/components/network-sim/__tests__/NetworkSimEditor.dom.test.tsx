@@ -224,9 +224,12 @@ describe("NetworkSimEditor", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    const saveButton = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Save"),
-    ) as HTMLButtonElement | undefined;
+    // The Settings forms above it confirm with Save as well: scope to the
+    // Network Simulation card.
+    const saveButton = Array.from(
+      container.querySelectorAll("#network-simulation button"),
+    ).find((b) => b.textContent?.includes("Save")) as
+      HTMLButtonElement | undefined;
     expect(saveButton).toBeTruthy();
 
     // Save should succeed with default empty config

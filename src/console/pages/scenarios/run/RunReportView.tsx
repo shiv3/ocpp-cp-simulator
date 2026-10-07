@@ -23,10 +23,10 @@ type ReportState =
   | { status: "ready"; report: ScenarioRunResult };
 
 const ASSERTION_STATUS_STYLES: Record<string, string> = {
-  passed: "text-emerald-700 dark:text-emerald-300",
-  failed: "text-rose-700 dark:text-rose-300",
-  skipped: "text-gray-500 dark:text-gray-400",
-  blocked: "text-amber-700 dark:text-amber-300",
+  passed: "text-cx-emerald",
+  failed: "text-cx-rose",
+  skipped: "text-cx-muted",
+  blocked: "text-cx-amber",
 };
 
 /** One transcript message; its payload is serialised only once opened, so a
@@ -39,9 +39,7 @@ const TranscriptMessage: React.FC<{ entry: TranscriptEntry }> = ({ entry }) => {
         {entry.kind}
         {entry.action ? ` ${entry.action}` : ""}
         {entry.errorCode ? ` ${entry.errorCode}` : ""}{" "}
-        <span className="font-mono text-gray-500 dark:text-gray-400">
-          {entry.uniqueId}
-        </span>
+        <span className="font-mono text-cx-muted">{entry.uniqueId}</span>
       </summary>
       {open && (
         <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[11px]">
@@ -61,7 +59,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   children,
 }) => (
   <section className="mt-4">
-    <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+    <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-cx-muted">
       {title}
     </h3>
     {children}
@@ -105,18 +103,18 @@ const RunReportView: React.FC<RunReportViewProps> = ({
   }, [chargePointService, cpId, connectorId, scenarioId, runId]);
 
   if (state.status === "loading") {
-    return <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>;
+    return <p className="text-sm text-cx-muted">Loading…</p>;
   }
   if (state.status === "missing") {
     return (
-      <p className="text-sm text-gray-500 dark:text-gray-400">
+      <p className="text-sm text-cx-muted">
         The report for run {runId} is no longer available.
       </p>
     );
   }
   if (state.status === "error") {
     return (
-      <p className="text-sm text-rose-700 dark:text-rose-300">
+      <p className="text-sm text-cx-rose">
         Could not load the report: {state.message}
       </p>
     );
@@ -138,7 +136,7 @@ const RunReportView: React.FC<RunReportViewProps> = ({
           >
             {report.verdict}
           </span>
-          <span className="font-mono text-xs text-gray-500 dark:text-gray-400">
+          <span className="font-mono text-xs text-cx-muted">
             {report.runId}
           </span>
         </div>
@@ -158,18 +156,18 @@ const RunReportView: React.FC<RunReportViewProps> = ({
       </div>
 
       <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
-        <dt className="text-gray-500 dark:text-gray-400">Target</dt>
+        <dt className="text-cx-muted">Target</dt>
         <dd>
           {report.cpId} · C{report.connectorId} ·{" "}
           {report.scenarioName ?? report.scenarioId}
         </dd>
-        <dt className="text-gray-500 dark:text-gray-400">Started</dt>
+        <dt className="text-cx-muted">Started</dt>
         <dd>{startedAt.toLocaleString()}</dd>
-        <dt className="text-gray-500 dark:text-gray-400">Ended</dt>
+        <dt className="text-cx-muted">Ended</dt>
         <dd>
           {endedAt.toLocaleString()} ({formatDurationMs(report.durationMs)})
         </dd>
-        <dt className="text-gray-500 dark:text-gray-400">Execution</dt>
+        <dt className="text-cx-muted">Execution</dt>
         <dd>
           {report.executionState}
           {report.stopped ? " · stopped by an operator" : ""}
@@ -177,9 +175,9 @@ const RunReportView: React.FC<RunReportViewProps> = ({
             ? ` · timed out on node ${report.timeout.nodeId}`
             : ""}
         </dd>
-        <dt className="text-gray-500 dark:text-gray-400">Conformance</dt>
+        <dt className="text-cx-muted">Conformance</dt>
         <dd>{report.conformanceVerdict}</dd>
-        <dt className="text-gray-500 dark:text-gray-400">Compatibility</dt>
+        <dt className="text-cx-muted">Compatibility</dt>
         <dd>
           {report.compatibilityVerdict}
           {report.strict ? " (strict)" : ""}
@@ -188,7 +186,7 @@ const RunReportView: React.FC<RunReportViewProps> = ({
 
       {report.errors.length > 0 && (
         <Section title="Errors">
-          <ul className="list-disc pl-5 text-rose-700 dark:text-rose-300">
+          <ul className="list-disc pl-5 text-cx-rose">
             {report.errors.map((message, index) => (
               <li key={index}>{message}</li>
             ))}
@@ -198,7 +196,7 @@ const RunReportView: React.FC<RunReportViewProps> = ({
 
       <Section title={`Assertions (${report.assertions.length})`}>
         {report.assertions.length === 0 ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-cx-muted">
             The scenario declares no assertions.
           </p>
         ) : (
@@ -216,10 +214,7 @@ const RunReportView: React.FC<RunReportViewProps> = ({
                 <span className="font-mono">{assertion.id}</span> —{" "}
                 {assertion.description}
                 {assertion.detail ? (
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {" "}
-                    ({assertion.detail})
-                  </span>
+                  <span className="text-cx-muted"> ({assertion.detail})</span>
                 ) : null}
               </li>
             ))}
@@ -245,13 +240,13 @@ const RunReportView: React.FC<RunReportViewProps> = ({
 
       <Section title={`Transcript (${report.transcript.length} messages)`}>
         {report.transcript.length === 0 ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-cx-muted">
             No OCPP message was exchanged during the run.
           </p>
         ) : (
-          <div className="max-h-[400px] overflow-auto rounded-lg border border-gray-200 dark:border-gray-800">
+          <div className="max-h-[400px] overflow-auto rounded-lg border border-cx-border">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+              <thead className="sticky top-0 bg-cx-sub text-cx-muted">
                 <tr>
                   <th className="px-2 py-1 font-medium">#</th>
                   <th className="px-2 py-1 font-medium">Time</th>
@@ -263,7 +258,7 @@ const RunReportView: React.FC<RunReportViewProps> = ({
                 {report.transcript.map((entry) => (
                   <tr
                     key={entry.seq}
-                    className="border-t border-gray-100 align-top dark:border-gray-800"
+                    className="border-t border-cx-border align-top"
                   >
                     <td className="px-2 py-1 font-mono">{entry.seq}</td>
                     <td className="px-2 py-1 whitespace-nowrap">

@@ -1,623 +1,109 @@
-import React, {
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { Trash2 } from "lucide-react";
+import React, { useCallback, useRef } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 
-import { Button } from "@/components/ui/button";
-import { TabsContent } from "@/components/ui/tabs";
-import { LogViewer } from "@/components/ui/log-viewer";
-import ChargePointConfigModal, {
-  defaultChargePointConfig,
-  type ChargePointConfig,
-} from "@/components/ChargePointConfigModal";
-import { getConfigBasicAuthPassword } from "@/data/configPort";
-import { useChargePointView } from "@/data/hooks/useChargePointView";
-import { downloadStoredLogs } from "@/lib/downloadStoredLogs";
-import { useConfig } from "@/data/hooks/useConfig";
-import { useDataContext } from "@/data/providers/DataProvider";
-import { useServerInfo } from "@/data/hooks/useServerInfo";
-import { useGlobalLogs } from "../lib/useGlobalLogs";
-import type { ChargePointSnapshot } from "@/data/interfaces/ChargePointService";
-import type { WireSimulatorConfig } from "@/protocol";
-import type {
-  NetworkSimLayerConfig,
-  NetworkSimRule,
-} from "@/cp/infrastructure/transport/network-sim/config";
-import type { ChargePoint } from "@/cp/domain/charge-point/ChargePoint";
-import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
-
-import EmptyState from "../components/EmptyState";
-import ExpertCallPanel from "./cp/ExpertCallPanel";
-import PageHeader from "../components/PageHeader";
-import StatusPill from "../components/StatusPill";
-import NetworkSimBadge from "../components/network-sim/NetworkSimBadge";
-import ManualDisconnectButtons from "../components/network-sim/ManualDisconnectButtons";
-import ActiveScenarioPanel from "./cp/ActiveScenarioPanel";
-import ChargePointControls from "./cp/ChargePointControls";
-import ConnectorCard from "./cp/ConnectorCard";
-import ConfigTab from "./cp/ConfigTab";
-import CpTabs from "./cp/CpTabs";
-import TransactionsTab from "./cp/TransactionsTab";
-import { useCpConfigActions } from "./dashboard/useCpConfigActions";
-import { NetworkSimEditor } from "../components/network-sim/NetworkSimEditor";
-
-const StateTransitionViewer = lazy(
-  () => import("@/components/state-transition/StateTransitionViewer"),
-);
-const SessionAnalysisPanel = lazy(() => import("./cp/SessionAnalysisPanel"));
-
-type TabValue =
-  "transactions" | "logs" | "config" | "diagnostics" | "analysis" | "expert";
+import { useChargePoints } from "../../data/hooks/useChargePoints";
+import { useConfig } from "../../data/hooks/useConfig";
+import SidePanel from "../components/SidePanel";
+import {
+  isPanelEditing,
+  withPanelEditing,
+} from "../lib/useScenarioPanelParams";
+import CpDetailContent from "./cp/CpDetailContent";
+import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
 
 /**
- * Builds the `ChargePointConfig` shape `ChargePointConfigModal` expects,
- * from whichever source currently holds this CP's settings — remote mode's
- * `ChargePointSnapshot.config` (daemon-owned, echoed back from the CP's
- * creation params) or local mode's single shared `useConfig()` result
- * (browser-owned, one config for every local CP). Kept private (not exported)
- * so this file's only runtime export stays the default component —
- * `ConfigTab` gets the already-built value as a prop instead.
+ * The full charge point page (`/cp/:cpId`). The body lives in
+ * `CpDetailContent`, shared with the Charge Points list's side panel; this
+ * wrapper keeps the selected connector in the URL (`?connector=`) and, when
+ * `?run=<scenarioId>` names a scenario, shows that scenario's run on the
+ * selected connector in a side panel beside the page (`&edit=1`: the
+ * panel's editor).
  */
-function buildChargePointConfig(
-  cpId: string,
-  cp: ChargePointSnapshot | undefined,
-  mode: "local" | "remote",
-  localConfig: WireSimulatorConfig | null,
-): ChargePointConfig {
-  if (mode === "remote") {
-    const c = cp?.config;
-    const bn = c?.bootNotification ?? null;
-    return {
-      ...defaultChargePointConfig,
-      cpId: cp?.id ?? cpId,
-      connectorNumber:
-        c?.connectors ??
-        cp?.connectors.length ??
-        defaultChargePointConfig.connectorNumber,
-      wsURL: c?.wsUrl ?? defaultChargePointConfig.wsURL,
-      ocppVersion: c?.ocppVersion ?? defaultChargePointConfig.ocppVersion,
-      basicAuthEnabled: !!c?.basicAuth,
-      basicAuthUsername: c?.basicAuth?.username ?? "",
-      basicAuthPassword: c?.basicAuth?.password ?? "",
-      securityProfile: c?.securityProfile,
-      soapCallbackUrl: c?.soapCallbackUrl,
-      soapCallbackUrlDerived: c?.soapCallbackUrlDerived,
-      soapPath: c?.soapPath,
-      cpoName: c?.cpoName,
-      tlsCaPath: c?.tlsCaPath,
-      tlsCertPath: c?.tlsCertPath,
-      tlsKeyPath: c?.tlsKeyPath,
-      chargePointVendor:
-        c?.vendor ?? defaultChargePointConfig.chargePointVendor,
-      chargePointModel: c?.model ?? defaultChargePointConfig.chargePointModel,
-      firmwareVersion:
-        bn?.firmwareVersion ?? defaultChargePointConfig.firmwareVersion,
-      chargeBoxSerialNumber: bn?.chargeBoxSerialNumber ?? "",
-      chargePointSerialNumber: bn?.chargePointSerialNumber ?? "",
-      meterSerialNumber: bn?.meterSerialNumber ?? "",
-      meterType: bn?.meterType ?? "",
-      iccid: bn?.iccid ?? "",
-      imsi: bn?.imsi ?? "",
-    };
-  }
-
-  if (!localConfig) {
-    return { ...defaultChargePointConfig, cpId };
-  }
-
-  const connectorNumber =
-    localConfig.Experimental?.ChargePointIDs.find(
-      (entry) => entry.ChargePointID === cpId,
-    )?.ConnectorNumber ?? localConfig.connectorNumber;
-
-  return {
-    ...defaultChargePointConfig,
-    cpId,
-    connectorNumber,
-    wsURL: localConfig.wsURL,
-    ocppVersion: localConfig.ocppVersion,
-    basicAuthEnabled: localConfig.basicAuthSettings.enabled,
-    basicAuthUsername: localConfig.basicAuthSettings.username,
-    basicAuthPassword: getConfigBasicAuthPassword(localConfig),
-    autoMeterValueEnabled: localConfig.autoMeterValueSetting.enabled,
-    autoMeterValueInterval: localConfig.autoMeterValueSetting.interval,
-    autoMeterValue: localConfig.autoMeterValueSetting.value,
-    chargePointVendor:
-      localConfig.BootNotification?.chargePointVendor ??
-      defaultChargePointConfig.chargePointVendor,
-    chargePointModel:
-      localConfig.BootNotification?.chargePointModel ??
-      defaultChargePointConfig.chargePointModel,
-    firmwareVersion:
-      localConfig.BootNotification?.firmwareVersion ??
-      defaultChargePointConfig.firmwareVersion,
-    chargeBoxSerialNumber:
-      localConfig.BootNotification?.chargeBoxSerialNumber ?? "",
-    chargePointSerialNumber:
-      localConfig.BootNotification?.chargePointSerialNumber ?? "",
-    meterSerialNumber: localConfig.BootNotification?.meterSerialNumber ?? "",
-    meterType: localConfig.BootNotification?.meterType ?? "",
-    iccid: localConfig.BootNotification?.iccid ?? "",
-    imsi: localConfig.BootNotification?.imsi ?? "",
-  };
-}
-
 const CpDetailPage: React.FC = () => {
-  const params = useParams<{ cpId: string }>();
-  const cpId = params.cpId ?? "";
-  const { mode, chargePointService } = useDataContext();
-  const { config: localConfig } = useConfig();
-  const serverInfo = useServerInfo();
-  const { updateCp, removeCp } = useCpConfigActions();
-  const navigate = useNavigate();
+  const { cpId = "" } = useParams<{ cpId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const raw = searchParams.get("connector");
+  const selectedConnectorId =
+    raw !== null && /^\d+$/.test(raw) ? Number(raw) : null;
+  const runScenarioId = searchParams.get("run") || null;
+  const editing = runScenarioId !== null && isPanelEditing(searchParams);
+  // The body reads its snapshot once on mount. On a reload in Local mode the
+  // page mounts before the charge point is created, so remount the body when
+  // the list first names the charge point (tests render without a registry
+  // and keep the immediate content).
+  const { config, isLoading } = useConfig();
+  const { chargePoints } = useChargePoints(config, { isLoading });
+  const known = chargePoints.some((cp) => cp.id === cpId);
 
-  const view = useChargePointView(cpId || null);
-  const { entries: globalLogEntries } = useGlobalLogs();
-  const [snapshot, setSnapshot] = useState<ChargePointSnapshot | undefined>();
-  const [activeTab, setActiveTab] = useState<TabValue>("transactions");
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isConnectPending, setIsConnectPending] = useState(false);
-  const [isDeletePending, setIsDeletePending] = useState(false);
-  const [diagnosticsConnectorOverride, setDiagnosticsConnectorOverride] =
-    useState<number | null>(null);
-  const [networkSimGlobalConfig, setNetworkSimGlobalConfig] = useState<
-    NetworkSimLayerConfig | null | undefined
-  >();
-  const [networkSimCpConfig, setNetworkSimCpConfig] = useState<
-    NetworkSimLayerConfig | null | undefined
-  >();
-  const [networkSimLoadError, setNetworkSimLoadError] = useState<string | null>(
-    null,
-  );
-  // Watermark to track which global log entries have been cleared from this
-  // tab's view. Only entries with seq > logsClearedBeforeSeq are shown.
-  const [logsClearedBeforeSeq, setLogsClearedBeforeSeq] = useState(-1);
-
-  /** Global rules minus tombstones, as the per-CP editor's inherited baseline. */
-  const inheritedNetworkSimRules = useMemo(() => {
-    const filtered: Record<string, NetworkSimRule> = {};
-    for (const [id, rule] of Object.entries(
-      networkSimGlobalConfig?.rules ?? {},
-    )) {
-      if (rule !== null) filtered[id] = rule;
-    }
-    return filtered;
-  }, [networkSimGlobalConfig]);
-
-  const refreshSnapshot = useCallback(() => {
-    if (!cpId) {
-      setSnapshot(undefined);
-      return;
-    }
-    void chargePointService
-      .getChargePoint(cpId)
-      .then((snap) => setSnapshot(snap ?? undefined))
-      .catch((err) => {
-        console.error(`Failed to fetch snapshot for ${cpId}`, err);
-      });
-  }, [cpId, chargePointService]);
-
-  const refreshNetworkSim = useCallback(() => {
-    if (!cpId) {
-      setNetworkSimGlobalConfig(undefined);
-      setNetworkSimCpConfig(undefined);
-      return;
-    }
-    setNetworkSimLoadError(null);
-    Promise.all([
-      chargePointService.getNetworkSimGlobal(),
-      chargePointService.getNetworkSimCp(cpId),
-    ])
-      .then(([global, cp]) => {
-        setNetworkSimGlobalConfig(global);
-        setNetworkSimCpConfig(cp.config);
-      })
-      .catch((err) => {
-        console.error(`Failed to fetch network sim config for ${cpId}`, err);
-        setNetworkSimLoadError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load network simulation config",
-        );
-      });
-  }, [cpId, chargePointService]);
-
-  useEffect(() => {
-    refreshSnapshot();
-    refreshNetworkSim();
-  }, [refreshSnapshot, refreshNetworkSim]);
-
-  // When navigating to a different CP, reset the watermark so all entries in
-  // the global ring buffer for this CP become visible (old cleared entries are
-  // not rehydrated; only new/existing entries in the buffer).
-  useEffect(() => {
-    setLogsClearedBeforeSeq(-1);
-  }, [cpId]);
-
-  const connectorList = useMemo(
-    () => Array.from(view.connectors.values()).sort((a, b) => a.id - b.id),
-    [view.connectors],
-  );
-
-  // Derive the logs to show in the Message Log tab by filtering global entries
-  // for this CP and reversing them to match the chronological order expected
-  // by LogViewer (oldest-first). Entries are newest-first in globalLogEntries,
-  // so we reverse after filtering. The watermark only hides entries the user
-  // cleared from this tab; old cleared entries remain cleared across tab
-  // switches but new global entries appear.
-  const tabLogs = useMemo(() => {
-    const filtered = globalLogEntries.filter(
-      (e) => e.cpId === cpId && e.seq > logsClearedBeforeSeq,
-    );
-    return filtered.reverse().map((e) => e.entry);
-  }, [globalLogEntries, cpId, logsClearedBeforeSeq]);
-
-  const handleClearTabLogs = useCallback(
-    (scope: "screen" | "all") => {
-      // Set watermark to the highest seq in globalLogEntries (newest-first, so
-      // [0] has the max). This ensures only entries logged after this Clear
-      // persist in the tab view; the global buffer itself is read-only from
-      // this tab's perspective.
-      setLogsClearedBeforeSeq(globalLogEntries[0]?.seq ?? -1);
-      // "Clear screen + DB" also deletes the CP's persisted log rows.
-      if (scope === "all" && chargePointService.clearStoredLogs) {
-        void chargePointService.clearStoredLogs(cpId).catch((err) => {
-          console.error(`Failed to clear stored logs for ${cpId}`, err);
-          alert(
-            `Failed to clear stored logs: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
+  const onSelectConnector = useCallback(
+    (id: number) => {
+      let next = new URLSearchParams(searchParams);
+      next.set("connector", String(id));
+      // The run panel shows a run on the connector it was opened from.
+      if (String(id) !== raw) {
+        next.delete("run");
+        next = withPanelEditing(next, false);
       }
+      // Choosing a connector is not a navigation worth a history entry.
+      setSearchParams(next, { replace: true });
     },
-    [globalLogEntries, chargePointService, cpId],
+    [searchParams, setSearchParams, raw],
   );
 
-  const handleDownloadLogs = useCallback(() => {
-    void downloadStoredLogs(chargePointService, [cpId], cpId).catch((err) => {
-      console.error(`Failed to download logs for ${cpId}`, err);
-      alert(
-        `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
-  }, [chargePointService, cpId]);
+  const closeRun = useCallback(() => {
+    const next = withPanelEditing(searchParams, false);
+    next.delete("run");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
-  const diagnosticsConnectorId =
-    diagnosticsConnectorOverride ?? connectorList[0]?.id ?? null;
-
-  // Same proxy for "socket up" that CpCard uses: after an
-  // auto-reconnect the transport can be up before BootNotification is
-  // re-Accepted, so fall back to a non-Unavailable status.
-  const isConnected = view.connected || view.status !== OCPPStatus.Unavailable;
-
-  const resolvedOcppVersion =
-    snapshot?.config?.ocppVersion ??
-    (mode === "local" ? (localConfig?.ocppVersion ?? undefined) : undefined);
-  const resolvedSecurityProfile = snapshot?.config?.securityProfile;
-  const resolvedWsUrl =
-    snapshot?.config?.wsUrl ??
-    (mode === "local" ? (localConfig?.wsURL ?? undefined) : undefined);
-
-  const handleToggleConnect = async () => {
-    setIsConnectPending(true);
-    try {
-      if (isConnected) {
-        await chargePointService.disconnect(cpId);
-      } else {
-        await chargePointService.connect(cpId);
-      }
-    } catch (err) {
-      console.error(
-        `Failed to ${isConnected ? "disconnect" : "connect"} ${cpId}`,
-        err,
-      );
-    } finally {
-      setIsConnectPending(false);
-    }
-  };
-
-  const handleSaveConfig = async (cpConfig: ChargePointConfig) => {
-    try {
-      await updateCp(cpConfig);
-      setIsEditOpen(false);
-      refreshSnapshot();
-    } catch (err) {
-      console.error(`Failed to save config for ${cpId}`, err);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!window.confirm(`Delete charge point ${cpId}?`)) {
-      return;
-    }
-    setIsDeletePending(true);
-    try {
-      if (await removeCp(cpId)) navigate("/");
-    } finally {
-      setIsDeletePending(false);
-    }
-  };
-
-  // Domain objects (not the snapshot/view-model) — only obtainable in local
-  // mode (`getLocalChargePoint`).
-  // Remote mode has no equivalent (the daemon owns the domain objects), so
-  // the Diagnostics tab falls back to an explanatory empty state there.
-  const localCp: ChargePoint | null =
-    mode === "local" && chargePointService.getLocalChargePoint
-      ? ((chargePointService.getLocalChargePoint(cpId) as ChargePoint | null) ??
-        null)
-      : null;
-  const diagnosticsConnector =
-    localCp && diagnosticsConnectorId != null
-      ? localCp.getConnector(diagnosticsConnectorId)
-      : undefined;
-
-  const editInitialConfig = buildChargePointConfig(
-    cpId,
-    snapshot,
-    mode,
-    localConfig,
+  const setEditing = useCallback(
+    (value: boolean) => {
+      setSearchParams(withPanelEditing(searchParams, value), {
+        replace: true,
+      });
+    },
+    [searchParams, setSearchParams],
   );
+
+  // Esc on the editing run panel is the editor's Cancel (asks when dirty),
+  // not a close that would drop the unsaved edits.
+  const cancelEditRef = useRef<(() => void) | null>(null);
+  const handlePanelEscape = () => {
+    if (!editing) closeRun();
+    else if (cancelEditRef.current) cancelEditRef.current();
+    else setEditing(false);
+  };
 
   return (
-    <div className="p-6">
-      <Link
-        to={"/"}
-        className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
-      >
-        ← Back to charge points
-      </Link>
-
-      <PageHeader
-        title={<span className="font-mono">{cpId}</span>}
-        actions={
-          <>
-            <Button asChild variant="outline" size="sm">
-              <Link to={`/scenarios?cp=${encodeURIComponent(cpId)}`}>
-                Scenarios
-              </Link>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsEditOpen(true)}
-            >
-              Edit config
-            </Button>
-            <Button
-              type="button"
-              variant={isConnected ? "destructive" : "success"}
-              size="sm"
-              disabled={isConnectPending}
-              onClick={() => void handleToggleConnect()}
-            >
-              {isConnected ? "Disconnect" : "Connect"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isDeletePending}
-              onClick={() => void handleDelete()}
-              className="text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-300 dark:hover:bg-rose-950"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </Button>
-          </>
-        }
-      >
-        <StatusPill status={isConnected ? view.status : "Disconnected"} />
-        <NetworkSimBadge summary={snapshot?.networkSim} />
-        {resolvedOcppVersion && (
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            {resolvedOcppVersion}
-            {resolvedSecurityProfile != null
-              ? ` · SP${resolvedSecurityProfile}`
-              : ""}
-          </span>
-        )}
-      </PageHeader>
-
-      {resolvedWsUrl && (
-        <div className="-mt-2 mb-4 font-mono text-xs text-gray-500 dark:text-gray-400">
-          {resolvedWsUrl}
-        </div>
-      )}
-
-      <ChargePointControls
+    <>
+      <CpDetailContent
+        key={known ? "listed" : "pending"}
         cpId={cpId}
-        connected={isConnected}
-        heartbeat={view.heartbeat}
+        variant="page"
+        selectedConnectorId={selectedConnectorId}
+        onSelectConnector={onSelectConnector}
       />
-
-      {connectorList.length === 0 ? (
-        <EmptyState
-          title="No connectors"
-          hint="This charge point has no connectors yet."
-        />
-      ) : (
-        <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {connectorList.map((connector) => (
-            <ConnectorCard
-              key={connector.id}
-              cpId={cpId}
-              connectorId={connector.id}
-            />
-          ))}
-        </div>
-      )}
-
-      <ActiveScenarioPanel
-        cpId={cpId}
-        connectorIds={connectorList.map((c) => c.id)}
-      />
-
-      <CpTabs
-        value={activeTab}
-        onValueChange={(value) => setActiveTab(value as TabValue)}
+      <SidePanel
+        open={runScenarioId !== null}
+        onClose={handlePanelEscape}
+        label="Scenario run"
       >
-        <TabsContent value="transactions">
-          <TransactionsTab cpId={cpId} />
-        </TabsContent>
-        <TabsContent value="logs">
-          <LogViewer
-            logs={tabLogs}
-            onClear={handleClearTabLogs}
-            onDownload={handleDownloadLogs}
-          />
-        </TabsContent>
-        <TabsContent value="analysis">
-          <Suspense
-            fallback={
-              <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
-                Loading session analysis…
-              </div>
-            }
-          >
-            <SessionAnalysisPanel
-              cpId={cpId}
-              ocppVersion={resolvedOcppVersion}
-            />
-          </Suspense>
-        </TabsContent>
-        <TabsContent value="config">
-          <ConfigTab
-            config={editInitialConfig}
-            mode={mode}
-            soapPublicBase={serverInfo?.soap ?? null}
-            onEdit={() => setIsEditOpen(true)}
-          />
-        </TabsContent>
-        <TabsContent value="diagnostics">
-          {connectorList.length > 1 && (
-            <select
-              value={diagnosticsConnectorId ?? ""}
-              onChange={(e) =>
-                setDiagnosticsConnectorOverride(Number(e.target.value))
-              }
-              className="mb-3 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-            >
-              {connectorList.map((connector) => (
-                <option key={connector.id} value={connector.id}>
-                  Connector {connector.id}
-                </option>
-              ))}
-            </select>
-          )}
-          {diagnosticsConnector && localCp ? (
-            <div className="h-[520px]">
-              <Suspense
-                fallback={
-                  <div className="p-6 text-sm text-gray-500 dark:text-gray-400">
-                    Loading state diagram…
-                  </div>
-                }
-              >
-                <StateTransitionViewer
-                  connector={diagnosticsConnector}
-                  chargePoint={localCp}
-                />
-              </Suspense>
-            </div>
-          ) : (
-            <EmptyState
-              title="State diagram unavailable"
-              hint="The state transition diagram is available in local mode only."
-            />
-          )}
-        </TabsContent>
-        <TabsContent value="expert">
-          <ExpertCallPanel
+        {runScenarioId !== null && (
+          // Keyed so another run starts from a clean state.
+          <ScenarioRunContent
+            key={`${cpId}\n${selectedConnectorId}\n${runScenarioId}`}
             cpId={cpId}
-            ocppVersion={resolvedOcppVersion}
-            connected={isConnected}
+            connectorId={selectedConnectorId}
+            scenarioId={runScenarioId}
+            variant="panel"
+            onClose={closeRun}
+            editing={editing}
+            onEditingChange={setEditing}
+            cancelEditRef={cancelEditRef}
           />
-        </TabsContent>
-      </CpTabs>
-
-      {snapshot?.networkSim !== null &&
-        networkSimGlobalConfig !== undefined && (
-          <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Network Simulation
-            </h2>
-            {networkSimLoadError && (
-              <div className="mb-4 rounded-md border border-red-500 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500 dark:bg-red-950 dark:text-red-400">
-                {networkSimLoadError}
-              </div>
-            )}
-            {networkSimGlobalConfig !== null && (
-              <>
-                <NetworkSimEditor
-                  mode="cp"
-                  value={networkSimCpConfig ?? null}
-                  inheritedRules={inheritedNetworkSimRules}
-                  inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
-                  onSave={async (config) => {
-                    try {
-                      await chargePointService.saveNetworkSimCp(cpId, config);
-                      await refreshNetworkSim();
-                    } catch (err) {
-                      console.error(
-                        `Failed to save network sim config for ${cpId}`,
-                        err,
-                      );
-                      throw err;
-                    }
-                  }}
-                  onDeleteOverride={async () => {
-                    try {
-                      await chargePointService.saveNetworkSimCp(cpId, null);
-                      await refreshNetworkSim();
-                    } catch (err) {
-                      console.error(
-                        `Failed to delete network sim override for ${cpId}`,
-                        err,
-                      );
-                      throw err;
-                    }
-                  }}
-                />
-                {snapshot?.networkSim?.manualRuleIds &&
-                  snapshot.networkSim.manualRuleIds.length > 0 && (
-                    <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
-                      <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-gray-100">
-                        Manual Rules
-                      </h3>
-                      <ManualDisconnectButtons
-                        manualRuleIds={snapshot.networkSim.manualRuleIds}
-                        isConnected={isConnected}
-                        onTriggerDisconnect={async (ruleId) =>
-                          chargePointService.triggerNetworkSimDisconnect(
-                            cpId,
-                            ruleId,
-                          )
-                        }
-                      />
-                    </div>
-                  )}
-              </>
-            )}
-          </div>
         )}
-
-      <ChargePointConfigModal
-        isOpen={isEditOpen}
-        onClose={() => setIsEditOpen(false)}
-        onSave={(cpConfig) => void handleSaveConfig(cpConfig)}
-        initialConfig={editInitialConfig}
-        isNewChargePoint={false}
-        mode={mode}
-        soapPublicBase={serverInfo?.soap ?? null}
-      />
-    </div>
+      </SidePanel>
+    </>
   );
 };
 

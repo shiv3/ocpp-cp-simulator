@@ -20,7 +20,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-10-01
+updated: 2026-10-04
 ---
 
 # OCPP versions and transports
@@ -196,7 +196,7 @@ Clients read the base from the `server.info` RPC
 ([Control plane](control-plane.md#daemon-methods)). The web console uses it to make
 the callback URL optional in the create / edit form (the derivation is shown as
 the field's placeholder), and shows the effective URL on the charge point's
-Configuration tab with a **Copy** button — that is the value to register in the
+**Config** form with a **Copy** button — that is the value to register in the
 CSMS — noting when it came from the tunnel.
 
 ### Exposing the callback through a tunnel

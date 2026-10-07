@@ -108,9 +108,15 @@ async function renameGraphNode(
   await act(async () => {
     setInputValue(labelInput, to);
   });
+  // The node panel confirms with Save too (it is the one `btn-primary` button
+  // of the panel; the page's own Save is a different component).
   await act(async () => {
     Array.from(container.querySelectorAll("button"))
-      .find((b) => b.textContent?.trim() === "Apply")!
+      .find(
+        (b) =>
+          b.textContent?.trim() === "Save" &&
+          b.classList.contains("btn-primary"),
+      )!
       .click();
   });
 }

@@ -74,4 +74,42 @@ describe("SettingsPage", () => {
       "Network Simulation",
     );
   });
+
+  it("puts the Settings content and the Network Simulation card in one max-w-5xl column", async () => {
+    const service = createFakeChargePointService({
+      getNetworkSimGlobal: vi.fn(async () => null),
+    });
+    const { container, root } = await renderConsole("/settings", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const section = container.querySelector("#network-simulation");
+    const heading = Array.from(container.querySelectorAll("h2")).find(
+      (h) => h.textContent === "Settings",
+    );
+    expect(section).not.toBeNull();
+    expect(heading).toBeDefined();
+    const column = section!.closest(".max-w-5xl");
+    expect(column).not.toBeNull();
+    expect(column!.classList.contains("mx-auto")).toBe(true);
+    expect(column!.contains(heading!)).toBe(true);
+    // Settings itself adds no second centred wrapper inside the column.
+    expect(heading!.closest(".max-w-5xl")).toBe(column);
+  });
+
+  it("confirms the Configuration JSON form with Save", async () => {
+    const service = createFakeChargePointService({
+      getNetworkSimGlobal: vi.fn(async () => null),
+    });
+    const { container, root } = await renderConsole("/settings", { service });
+    cleanup = () => unmount(root);
+    await flush();
+
+    const labels = Array.from(container.querySelectorAll("button")).map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(labels).not.toContain("Apply");
+    expect(labels).not.toContain("Apply Changes");
+    expect(container.textContent).toContain('click "Save" to update');
+  });
 });

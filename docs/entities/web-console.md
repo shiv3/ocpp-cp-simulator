@@ -13,7 +13,7 @@ related:
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/scenario-format.md
-updated: 2026-10-05
+updated: 2026-10-07
 ---
 
 # Web console (browser UI)
@@ -71,7 +71,12 @@ The browser app serves one web console:
   (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
   **Settings** (`/settings`, where global
   [network simulation](../concepts/network-simulation.md) and the **Reset all
-  simulator data** button live). Every page takes its state from the URL, so
+  simulator data** button live; the Settings cards and the Network Simulation
+  card share one centred `max-w-5xl` column so their left edges line up).
+  Every configuration form of the console confirms with **Save** (Default EV
+  settings, Tag IDs, Configuration JSON, the charge point form, network
+  simulation, the scenario editor and its node panel); the buttons that
+  start an action keep their verb. Every page takes its state from the URL, so
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2/...`** — where the classic UI was served from #411 until #426
@@ -833,7 +838,7 @@ scenario or a copy of one (`libraryId`). All use the same content
   draw (a join, a loop, a second fork, a node no path reaches) opens the full
   node graph editor (ReactFlow: nodes, edges, the node palette,
   auto-arrange, undo / redo, a node panel — double-click a node, then
-  **Apply**) under the line "This scenario has joins or loops; the full graph
+  **Save**) under the line "This scenario has joins or loops; the full graph
   editor is used", with **Steps** disabled. Once open, that editor stays for
   the visit even when an edit makes the scenario drawable again (picking
   **Steps** leaves it).

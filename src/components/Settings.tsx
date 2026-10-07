@@ -242,7 +242,7 @@ const Settings: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Settings</h2>
         <Button onClick={handleBackToHome} variant="secondary" size="sm">
@@ -664,7 +664,7 @@ const Settings: React.FC = () => {
               disabled={!evDirty}
               size="sm"
             >
-              Apply
+              Save
             </Button>
             <Button
               onClick={handleResetDefaultEv}
@@ -724,7 +724,7 @@ const Settings: React.FC = () => {
                   globalTagIds.join("|")
               }
             >
-              Apply
+              Save
             </Button>
             <span className="text-xs text-muted-foreground">
               {globalTagIds.length === 0
@@ -772,7 +772,7 @@ const Settings: React.FC = () => {
             <div className="flex justify-between items-center mb-2">
               <h4 className="text-lg font-semibold">Configuration JSON</h4>
               <Button onClick={handleApplyJson} size="sm">
-                Apply Changes
+                Save
               </Button>
             </div>
             <Textarea
@@ -783,8 +783,7 @@ const Settings: React.FC = () => {
               placeholder="Paste your configuration JSON here..."
             />
             <p className="text-muted-foreground text-xs mt-2">
-              Edit the JSON configuration directly and click "Apply Changes" to
-              update.
+              Edit the JSON configuration directly and click "Save" to update.
             </p>
           </div>
 

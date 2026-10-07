@@ -54,30 +54,32 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <Settings />
+    <div className="p-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <Settings />
 
-      {!isLoadingNetSim && loadError && (
-        <div className="rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
-          {loadError}
-        </div>
-      )}
+        {!isLoadingNetSim && loadError && (
+          <div className="rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
+            {loadError}
+          </div>
+        )}
 
-      {!isLoadingNetSim && !loadError && (
-        <div
-          id="network-simulation"
-          className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6"
-        >
-          <h2 className="mb-4 text-lg font-semibold text-cx-fg">
-            Network Simulation
-          </h2>
-          <NetworkSimEditor
-            value={networkSimConfig}
-            onSave={handleSaveNetworkSim}
-            mode="global"
-          />
-        </div>
-      )}
+        {!isLoadingNetSim && !loadError && (
+          <div
+            id="network-simulation"
+            className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6"
+          >
+            <h2 className="mb-4 text-lg font-semibold text-cx-fg">
+              Network Simulation
+            </h2>
+            <NetworkSimEditor
+              value={networkSimConfig}
+              onSave={handleSaveNetworkSim}
+              mode="global"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 };

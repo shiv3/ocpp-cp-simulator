@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-04
+updated: 2026-10-07
 ---
 
 # Log
@@ -1575,3 +1575,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#charge-point-page): with no global network simulation layer saved, the charge point's Network simulation tab shows **Network simulation is not set up** with a link to `/settings#network-simulation` instead of an empty box (it rendered neither the loading text nor the editor for a `null` global layer). The per-CP layer stays an override of the global one ([network simulation](concepts/network-simulation.md)). The Settings page's Network Simulation section got the anchor id `network-simulation` and scrolls into view on that hash.
 - Code: `CpDetailContent.tsx`, `SettingsPage.tsx`; tests `CpDetailContent.tabs.dom.test.tsx`, `SettingsPage.dom.test.tsx`.
+
+## [2026-10-07] ingest | Review round 1: Settings alignment, Save everywhere
+
+- [Web console](entities/web-console.md): maintainer review of the deployed console, items 1 and 6. The Settings page's cards (Runtime Mode ... Configuration JSON) and the Network Simulation card now share one `mx-auto max-w-5xl` column (the Settings component had its own `max-w-5xl mx-auto` while the Network Simulation card under it was full width, so their left edges differed). Every configuration form confirms with **Save**: Default EV settings and Tag IDs (were **Apply**), Configuration JSON (was **Apply Changes**, hint text updated) and the scenario editor's node panel when embedded (was **Apply**). Left unchanged: the checkbox label "Apply the answer to the station's state" (an Expert-call option, not a confirmation button).
+- Code: `Settings.tsx`, `SettingsPage.tsx`, `ScenarioEditor.tsx`; tests `SettingsPage.dom.test.tsx`, `Settings.evSettings.dom.test.tsx`, `ScenarioEditPage.dom.test.tsx`.

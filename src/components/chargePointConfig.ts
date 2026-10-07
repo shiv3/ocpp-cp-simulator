@@ -1,5 +1,14 @@
 import { buildSoapCallbackUrl } from "../cli/soapCallbackUrl";
 import type { ServerInfo } from "../protocol";
+import {
+  OCPP_1_2,
+  OCPP_1_5,
+  OCPP_1_6,
+  OCPP_1_6_SOAP,
+  OCPP_2_0_1,
+  OCPP_2_1,
+  isSoapVersion,
+} from "../cp/domain/types/OcppVersion";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -45,6 +54,63 @@ export interface ChargePointConfig {
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
+}
+
+/** The transport a charge point speaks; the first of the form's two selectors. */
+export type OcppProtocol = "JSON" | "SOAP";
+
+export interface OcppVersionOption {
+  /** The stored `ocppVersion` string (unchanged by the two-selector form). */
+  value: string;
+  /** The bare version, as the Version select shows it. */
+  label: string;
+}
+
+/** The versions each protocol offers, in the order the Version select lists them. */
+export const OCPP_VERSION_OPTIONS: Readonly<
+  Record<OcppProtocol, readonly OcppVersionOption[]>
+> = {
+  JSON: [
+    { value: OCPP_1_6, label: "OCPP 1.6" },
+    { value: OCPP_2_0_1, label: "OCPP 2.0.1" },
+    { value: OCPP_2_1, label: "OCPP 2.1" },
+  ],
+  SOAP: [
+    { value: OCPP_1_2, label: "OCPP 1.2" },
+    { value: OCPP_1_5, label: "OCPP 1.5" },
+    { value: OCPP_1_6_SOAP, label: "OCPP 1.6" },
+  ],
+};
+
+export const OCPP_PROTOCOLS: readonly OcppProtocol[] = ["JSON", "SOAP"];
+
+/** The protocol a stored version belongs to (an unknown value reads as JSON, like the 1.6J fallback). */
+export function protocolOf(version: string | undefined): OcppProtocol {
+  return isSoapVersion(version) ? "SOAP" : "JSON";
+}
+
+export function versionsOfProtocol(
+  protocol: OcppProtocol,
+): readonly OcppVersionOption[] {
+  return OCPP_VERSION_OPTIONS[protocol];
+}
+
+/**
+ * The version to store when `version` is switched to `protocol`: itself when
+ * it already belongs there, else the entry of the same number (1.6 JSON <->
+ * 1.6 SOAP), else the protocol's first entry.
+ */
+export function versionForProtocol(
+  version: string,
+  protocol: OcppProtocol,
+): string {
+  const options = OCPP_VERSION_OPTIONS[protocol];
+  if (options.some((o) => o.value === version)) return version;
+  const current = Object.values(OCPP_VERSION_OPTIONS)
+    .flat()
+    .find((o) => o.value === version);
+  const sameNumber = current && options.find((o) => o.label === current.label);
+  return (sameNumber ?? options[0]).value;
 }
 
 export type SoapPublicBase = ServerInfo["soap"];

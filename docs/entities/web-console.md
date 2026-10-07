@@ -244,6 +244,24 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   point's form shows the effective SOAP callback URL under the field, with a
   **Copy** button and, when it was derived from the daemon's tunnel, a note that
   it may change between daemon runs (#183).
+  The form's sections, in order: **Model specification** (Vendor, Model,
+  Firmware Version, **Number of Connectors**: what the charge point _is_, sent
+  in BootNotification), **Connection** (Charge Point ID, **Protocol**,
+  **Version**, the WebSocket URL, or the Central System URL for SOAP, and the
+  **Effective WebSocket URL**), then Security, Optional settings and the rest.
+  **Protocol** (`JSON` / `SOAP`, derived from the stored version) comes before
+  **Version**, which lists only that protocol's versions (JSON: 1.6, 2.0.1,
+  2.1; SOAP: 1.2, 1.5, 1.6; the stored `ocppVersion` stays `OCPP-1.6J`,
+  `OCPP-1.6S`, ...). Switching the protocol keeps the version number when the
+  other protocol has it (1.6 JSON to 1.6 SOAP) and otherwise takes the first
+  version of the new protocol; the Central System URL scheme follows as before
+  (#164). For a JSON charge point the **Effective WebSocket URL** is a
+  read-only display of the WebSocket URL with the Basic Auth user and password
+  embedded (the URL the charge point dials), with a **Copy** button (**Copied**
+  for 1.5 s; it does nothing when the browser has no clipboard API). It is not
+  an input: the value is edited in the WebSocket URL and Basic Auth fields
+  only. The Add dialog opens with the Charge Point ID focused. The helpers are in
+  [`chargePointConfig.ts`](../../src/components/chargePointConfig.ts).
 - **Charge point (connector 0)**, a card above the connectors (below).
 - **The connectors.** The full page shows **every connector at once**, like the
   classic UI: one [connector card](#connector-card) per connector, each followed

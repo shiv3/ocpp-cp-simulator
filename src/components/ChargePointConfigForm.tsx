@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Save, X } from "lucide-react";
-import { buildFullOcppUrl, parseFullOcppUrl } from "../utils/ocppUrl";
+import { buildFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import {
@@ -26,11 +26,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  OCPP_PROTOCOLS,
   defaultChargePointConfig,
   describeSoapPublicBase,
+  protocolOf,
   previewDerivedSoapCallbackUrl,
   sanitizeChargePointConfigForSave,
+  versionForProtocol,
+  versionsOfProtocol,
   type ChargePointConfig,
+  type OcppProtocol,
   type SoapPublicBase,
 } from "./chargePointConfig";
 
@@ -146,6 +151,62 @@ const SoapCallbackUrlRow: React.FC<{
 };
 
 /**
+ * The URL the charge point will dial, composed from the WebSocket URL and the
+ * Basic Auth settings: a display, never an input, so the value has one place
+ * to be edited. Copy puts it on the clipboard; without the clipboard API
+ * (plain-http origins other than localhost) the button does nothing.
+ */
+const EffectiveWsUrlRow: React.FC<{ url: string }> = ({ url }) => {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  const copy = async () => {
+    if (!navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (error) {
+      console.error("Failed to copy the effective WebSocket URL", error);
+      return;
+    }
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <Field id="effectiveWsURL" label="Effective WebSocket URL" wide>
+      <div className="flex items-center gap-2">
+        <Input
+          id="effectiveWsURL"
+          type="text"
+          readOnly
+          value={url}
+          className="font-mono"
+          spellCheck={false}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void copy()}
+          aria-label="Copy effective WebSocket URL"
+        >
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <p className={HINT_CLASS}>
+        WebSocket URL + Basic Auth below, as the charge point will dial it.
+      </p>
+    </Field>
+  );
+};
+
+/**
  * A derived callback URL belongs to the daemon's current base, not to the
  * charge point: editing it as a value would send it back explicit and freeze
  * one run's tunnel origin into the row. The form keeps the field empty and
@@ -209,7 +270,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       mode === "local" &&
       (profile === 2 || profile === 3 || hasTlsMaterial)
     ) {
-      setFullUrlError(BROWSER_TLS_UNSUPPORTED_MESSAGE);
+      setSaveError(BROWSER_TLS_UNSUPPORTED_MESSAGE);
       return;
     }
     if (
@@ -246,6 +307,15 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
     setConfig({ ...config, [key]: value });
   };
 
+  // Switching the protocol keeps the version number when the other protocol
+  // has it (1.6 JSON <-> 1.6 SOAP), else takes that protocol's first version;
+  // either way through changeOcppVersion, so the URL scheme follows.
+  const changeProtocol = (value: string) => {
+    changeOcppVersion(
+      versionForProtocol(config.ocppVersion, value as OcppProtocol),
+    );
+  };
+
   // Changing the OCPP version also flips the Central System URL scheme to match
   // the new transport (SOAP = http(s), JSON = ws(s)), but only when the current
   // scheme is incompatible — a custom compatible URL is preserved (#164).
@@ -280,9 +350,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
     setConfig((prev) => ({ ...prev, tls: { ...prev.tls, ...patch } }));
   };
 
-  // Full WebSocket URL field — built from wsURL + basic auth on display,
-  // and parsed back into those fields on paste/Enter/blur. `fullUrlDraft`
-  // lets the user type without each keystroke fighting the composed value.
+  // The Effective WebSocket URL display: wsURL + basic auth, composed.
   const composedFullUrl = useMemo(
     () =>
       buildFullOcppUrl(config.wsURL, {
@@ -297,10 +365,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       config.basicAuthPassword,
     ],
   );
-  const [fullUrlDraft, setFullUrlDraft] = useState<string | null>(null);
-  const [fullUrlError, setFullUrlError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const displayFullUrl = fullUrlDraft ?? composedFullUrl;
   const securityProfile = config.securityProfile ?? 0;
   // #178 item F: what actually governs Basic Auth right now, per the same
   // classifier the connection layer uses (wsUrlWithBasic.ts). Drives the
@@ -326,30 +391,6 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
     config.tls?.key,
   ]);
 
-  const applyFullUrl = useCallback((raw: string): boolean => {
-    const parsed = parseFullOcppUrl(raw);
-    if (!parsed) {
-      setFullUrlError(
-        "Invalid WebSocket URL. Use a full ws:// or wss:// URL (optionally with user:password@host for basic auth).",
-      );
-      return false;
-    }
-    setConfig((prev) => ({
-      ...prev,
-      wsURL: parsed.wsURL,
-      basicAuthEnabled: parsed.basicAuthEnabled || prev.basicAuthEnabled,
-      basicAuthUsername: parsed.basicAuthEnabled
-        ? parsed.basicAuthUsername
-        : prev.basicAuthUsername,
-      basicAuthPassword: parsed.basicAuthEnabled
-        ? parsed.basicAuthPassword
-        : prev.basicAuthPassword,
-    }));
-    setFullUrlDraft(null);
-    setFullUrlError(null);
-    return true;
-  }, []);
-
   // What the CSMS will be told to call: the typed value, else what the
   // daemon derives from its public base, else the one it already derived for
   // this charge point (the form blanks a derived URL; see above).
@@ -364,7 +405,51 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
 
   return (
     <div className="space-y-5">
-      <Section title="Basic settings">
+      <Section title="Model specification">
+        <div className={FIELD_GRID_CLASS}>
+          <Field id="chargePointVendor" label="Vendor">
+            <Input
+              id="chargePointVendor"
+              type="text"
+              value={config.chargePointVendor}
+              onChange={(e) =>
+                updateConfig("chargePointVendor", e.target.value)
+              }
+            />
+          </Field>
+          <Field id="chargePointModel" label="Model">
+            <Input
+              id="chargePointModel"
+              type="text"
+              value={config.chargePointModel}
+              onChange={(e) => updateConfig("chargePointModel", e.target.value)}
+            />
+          </Field>
+          <Field id="firmwareVersion" label="Firmware Version">
+            <Input
+              id="firmwareVersion"
+              type="text"
+              value={config.firmwareVersion}
+              onChange={(e) => updateConfig("firmwareVersion", e.target.value)}
+            />
+          </Field>
+          <Field id="connectorNumber" label="Number of Connectors">
+            <Input
+              id="connectorNumber"
+              type="number"
+              min="1"
+              max="10"
+              value={config.connectorNumber}
+              onChange={(e) =>
+                updateConfig("connectorNumber", parseInt(e.target.value))
+              }
+              required
+            />
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="Connection">
         <div className={FIELD_GRID_CLASS}>
           <Field id="cpId" label="Charge Point ID">
             <Input
@@ -384,20 +469,24 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               className="font-mono"
             />
           </Field>
-          <Field id="connectorNumber" label="Number of Connectors">
-            <Input
-              id="connectorNumber"
-              type="number"
-              min="1"
-              max="10"
-              value={config.connectorNumber}
-              onChange={(e) =>
-                updateConfig("connectorNumber", parseInt(e.target.value))
-              }
-              required
-            />
+          <Field id="ocppProtocol" label="Protocol">
+            <Select
+              value={protocolOf(config.ocppVersion)}
+              onValueChange={changeProtocol}
+            >
+              <SelectTrigger id="ocppProtocol">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {OCPP_PROTOCOLS.map((protocol) => (
+                  <SelectItem key={protocol} value={protocol}>
+                    {protocol}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
-          <Field id="ocppVersion" label="OCPP Version">
+          <Field id="ocppVersion" label="Version">
             <Select
               value={config.ocppVersion}
               onValueChange={changeOcppVersion}
@@ -406,52 +495,16 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="OCPP-1.2">OCPP 1.2 (SOAP)</SelectItem>
-                <SelectItem value="OCPP-1.5">OCPP 1.5 (SOAP)</SelectItem>
-                <SelectItem value="OCPP-1.6J">OCPP 1.6 (JSON)</SelectItem>
-                <SelectItem value="OCPP-1.6S">OCPP 1.6 (SOAP)</SelectItem>
-                <SelectItem value="OCPP-2.0.1">OCPP 2.0.1</SelectItem>
-                <SelectItem value="OCPP-2.1">OCPP 2.1</SelectItem>
+                {versionsOfProtocol(protocolOf(config.ocppVersion)).map(
+                  (option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ),
+                )}
               </SelectContent>
             </Select>
           </Field>
-          {!isSoapVersion(config.ocppVersion) && (
-            <Field id="fullWsURL" label="Full WebSocket URL" wide>
-              <Input
-                id="fullWsURL"
-                type="url"
-                value={displayFullUrl}
-                onChange={(e) => {
-                  setFullUrlDraft(e.target.value);
-                  setFullUrlError(null);
-                }}
-                onBlur={() => {
-                  if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (fullUrlDraft !== null) applyFullUrl(fullUrlDraft);
-                  }
-                }}
-                onPaste={(e) => {
-                  const text = e.clipboardData.getData("text").trim();
-                  if (!text) return;
-                  e.preventDefault();
-                  setFullUrlDraft(text);
-                  applyFullUrl(text);
-                }}
-                placeholder="wss://user:password@host:8080/path/"
-                className="font-mono"
-                spellCheck={false}
-              />
-              <p className={HINT_CLASS}>
-                Composed from WebSocket URL + Basic Auth below. Paste a full URL
-                to autofill those fields (basic auth from user:password@host).
-              </p>
-              {fullUrlError && <p className={ERROR_CLASS}>{fullUrlError}</p>}
-            </Field>
-          )}
           <Field
             id="wsURL"
             label={
@@ -470,6 +523,9 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               className="font-mono"
             />
           </Field>
+          {!isSoapVersion(config.ocppVersion) && (
+            <EffectiveWsUrlRow url={composedFullUrl} />
+          )}
           {isSoapVersion(config.ocppVersion) && (
             <>
               {mode === "local" && (
@@ -533,37 +589,6 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               )}
             </>
           )}
-        </div>
-      </Section>
-
-      <Section title="Boot notification">
-        <div className={FIELD_GRID_CLASS}>
-          <Field id="chargePointVendor" label="Vendor">
-            <Input
-              id="chargePointVendor"
-              type="text"
-              value={config.chargePointVendor}
-              onChange={(e) =>
-                updateConfig("chargePointVendor", e.target.value)
-              }
-            />
-          </Field>
-          <Field id="chargePointModel" label="Model">
-            <Input
-              id="chargePointModel"
-              type="text"
-              value={config.chargePointModel}
-              onChange={(e) => updateConfig("chargePointModel", e.target.value)}
-            />
-          </Field>
-          <Field id="firmwareVersion" label="Firmware Version">
-            <Input
-              id="firmwareVersion"
-              type="text"
-              value={config.firmwareVersion}
-              onChange={(e) => updateConfig("firmwareVersion", e.target.value)}
-            />
-          </Field>
         </div>
       </Section>
 

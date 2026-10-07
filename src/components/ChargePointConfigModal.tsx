@@ -58,7 +58,19 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   soapPublicBase = null,
 }) => (
   <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-    <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+    <DialogContent
+      className="sm:max-w-5xl max-h-[90vh] overflow-y-auto"
+      // The Charge Point ID is no longer the first field (Model specification
+      // comes first), so a new charge point opens with the id focused, where
+      // the first Tab used to land.
+      onOpenAutoFocus={(event) => {
+        const cpId = isNewChargePoint ? document.getElementById("cpId") : null;
+        if (!(cpId instanceof HTMLInputElement)) return;
+        event.preventDefault();
+        cpId.focus();
+        cpId.select();
+      }}
+    >
       <DialogHeader>
         <DialogTitle>
           {isNewChargePoint

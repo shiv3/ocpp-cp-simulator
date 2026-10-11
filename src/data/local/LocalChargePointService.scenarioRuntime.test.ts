@@ -1,4 +1,3 @@
-import initSqlJs from "sql.js";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -7,13 +6,13 @@ import {
   type ScenarioNode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
-import type { Database, SqlParam } from "../../cp/domain/persistence/Database";
-import { runMigrations } from "../../cp/domain/persistence/schema";
+import type { Database } from "../../cp/domain/persistence/Database";
 import {
   DefaultBootNotification,
   OCPPStatus,
 } from "../../cp/domain/types/OcppTypes";
 import type { ChargePointEvent } from "../interfaces/ChargePointService";
+import { memoryDatabase } from "../../test/sqlJsMemoryDatabase";
 import { LocalChargePointService } from "./LocalChargePointService";
 
 /**
@@ -25,44 +24,6 @@ import { LocalChargePointService } from "./LocalChargePointService";
  */
 
 const CP_ID = "CP-RT";
-
-/** In-memory sql.js database behind the domain `Database` port, so the
- *  service, its ChargePoints and the scenario repository share real SQL. */
-async function memoryDatabase(): Promise<Database> {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  const coerce = (params: SqlParam[]) =>
-    params.map((p) => (typeof p === "boolean" ? Number(p) : p));
-  const adapter: Database = {
-    exec: (sql) => {
-      db.exec(sql);
-    },
-    run: (sql, params = []) => {
-      db.run(sql, coerce(params));
-    },
-    all: <T>(sql: string, params: SqlParam[] = []) => {
-      const stmt = db.prepare(sql, coerce(params));
-      const rows: T[] = [];
-      try {
-        while (stmt.step()) rows.push(stmt.getAsObject() as T);
-      } finally {
-        stmt.free();
-      }
-      return rows;
-    },
-    get: <T>(sql: string, params: SqlParam[] = []) => {
-      const stmt = db.prepare(sql, coerce(params));
-      try {
-        return stmt.step() ? (stmt.getAsObject() as T) : null;
-      } finally {
-        stmt.free();
-      }
-    },
-    close: () => db.close(),
-  };
-  runMigrations(adapter);
-  return adapter;
-}
 
 function node(
   id: string,

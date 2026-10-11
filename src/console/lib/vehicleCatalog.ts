@@ -8,6 +8,8 @@ import { OpenEvDirectoryClient } from "@/cp/infrastructure/vehicle-catalog/open-
 import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useDataContext } from "@/data/providers/DataProvider";
 
+import { describeError } from "../pages/cp/connectorActions";
+
 /**
  * Which vehicle catalog the console imports from (#458), and with which key.
  *
@@ -107,7 +109,7 @@ export function useVehicleCatalog(): CatalogAccess {
     } catch (error) {
       return {
         catalog: null,
-        error: error instanceof Error ? error.message : String(error),
+        error: describeError(error),
       };
     }
   }, [local.baseUrl, local.apiKey]);
@@ -150,7 +152,7 @@ export function describeCatalogError(
   mode: "local" | "remote",
 ): string {
   if (!(error instanceof VehicleCatalogError)) {
-    return error instanceof Error ? error.message : String(error);
+    return describeError(error);
   }
   switch (error.kind) {
     case "unauthorized":
@@ -170,10 +172,15 @@ export function describeCatalogError(
     case "not_found":
       return `Not found in Open EV Directory: ${error.message}`;
     case "not_configured":
-      return mode === "local"
-        ? "Enter the Open EV Directory URL first."
-        : "The daemon has no Open EV Directory URL; start it with --oed-base-url or OED_BASE_URL.";
+      return catalogNotConfiguredMessage(mode);
     default:
       return error.message;
   }
+}
+
+/** Why there is no catalog to call, and how to get one. */
+export function catalogNotConfiguredMessage(mode: "local" | "remote"): string {
+  return mode === "local"
+    ? "Enter the Open EV Directory URL first."
+    : "The daemon has no Open EV Directory URL; start it with --oed-base-url or OED_BASE_URL.";
 }

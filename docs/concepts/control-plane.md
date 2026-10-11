@@ -604,8 +604,8 @@ are in [`src/protocol/vehicle.ts`](../../src/protocol/vehicle.ts).
 | `vehicle_catalog.list_variants` | `{ "modelId": string, "page"? }`   | A page of variant summaries (sources, curve count).                                                               |
 | `vehicle_catalog.get_variant`   | `{ "variantId": string }`          | The variant with every source record and every DC curve, side by side.                                            |
 
-- **Bounds.** A profile's curve holds at most 512 points, and the daemon
-  stores at most 1,000 profiles: saving a new one past the cap is
+- **Bounds.** A profile's curve holds at most 512 points, and the store
+  holds at most 1,000 profiles: saving a new one past the cap is
   `invalid_params` (replacing an existing id is not refused).
 - **Catalog errors.** Without a configured catalog every `vehicle_catalog.*`
   call answers `unavailable` with a message naming `--oed-base-url` /

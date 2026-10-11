@@ -1,3 +1,5 @@
+import { isHttpUrl } from "./soapCallbackUrl";
+
 /**
  * Where the daemon's vehicle catalog (#458) is and which key it uses.
  *
@@ -77,13 +79,4 @@ export function resolveVehicleCatalogConfig(input: {
 function blankToNull(value: string | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
 }

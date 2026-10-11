@@ -1,4 +1,4 @@
-import type { ChargingCurvePoint, EVSettings } from "../connector/EVSettings";
+import type { EVSettings } from "../connector/EVSettings";
 
 /**
  * A reusable vehicle description, saved locally (#458).
@@ -41,6 +41,14 @@ export interface VehicleSpecs {
 /** The numeric specs a user can edit. */
 export type EditableSpecField =
   "usableBatteryKwh" | "acMaxKw" | "acPhases" | "dcMaxKw";
+
+/** The editable specs, in display order. */
+export const EDITABLE_SPEC_FIELDS: readonly EditableSpecField[] = [
+  "usableBatteryKwh",
+  "acMaxKw",
+  "acPhases",
+  "dcMaxKw",
+];
 
 export type VehicleSpecOverrides = Partial<Record<EditableSpecField, number>>;
 
@@ -92,16 +100,18 @@ export interface VehicleProfileOrigin {
 
 export type VehicleCurrentType = "AC" | "DC";
 
-/** The part of {@link EVSettings} a vehicle determines. */
+/**
+ * The part of {@link EVSettings} a vehicle determines. The curve and the
+ * current type are required: settings are *merged* into a connector's
+ * (`Connector.applyEvSettingsOverride`), where an absent key keeps the
+ * previous vehicle's value, so "no curve" has to be the explicit `[]`.
+ * `phases` stays optional because DC ignores it.
+ */
 export type VehicleEvSettings = Pick<
   EVSettings,
-  | "modelName"
-  | "batteryCapacityKwh"
-  | "maxChargingPowerKw"
-  | "chargingCurve"
-  | "currentType"
-  | "phases"
->;
+  "modelName" | "batteryCapacityKwh" | "maxChargingPowerKw" | "phases"
+> &
+  Required<Pick<EVSettings, "chargingCurve" | "currentType">>;
 
 /** Facts the user should see when a profile is applied. Nothing is hidden. */
 export type ResolveWarning =
@@ -222,16 +232,15 @@ export function resolveEvSettings(
     batteryCapacityKwh,
     maxChargingPowerKw,
     currentType: "DC",
+    chargingCurve: curve.map((p) => ({
+      socPercent: p.socPercent,
+      powerFraction: p.powerKw / maxChargingPowerKw,
+    })),
   };
   if (curve.length === 0) {
     warnings.push({ code: "NO_DC_CURVE" });
-    return { ok: true, settings: { ...settings, chargingCurve: [] }, warnings };
+    return { ok: true, settings, warnings };
   }
-
-  settings.chargingCurve = curve.map((p): ChargingCurvePoint => ({
-    socPercent: p.socPercent,
-    powerFraction: p.powerKw / maxChargingPowerKw,
-  }));
   const socs = curve.map((p) => p.socPercent);
   const first = Math.min(...socs);
   const last = Math.max(...socs);
@@ -250,13 +259,8 @@ export function resolveEvSettings(
 /**
  * Put a resolved vehicle onto existing settings: the session's SoCs and the
  * electrical values a vehicle does not determine (voltage, power factor) are
- * kept.
- *
- * A vehicle without a curve resolves to an explicit empty curve (flat
- * acceptance), and an AC vehicle to an explicit phase count, rather than to
- * absent keys: the connector and a scenario start *merge* settings into the
- * current ones (`Connector.applyEvSettingsOverride`), so an absent key would
- * keep the previous vehicle's curve or phases.
+ * kept. A plain spread, because {@link VehicleEvSettings} already carries an
+ * explicit curve and current type.
  */
 export function applyVehicleSettings<T extends Partial<EVSettings>>(
   base: T,

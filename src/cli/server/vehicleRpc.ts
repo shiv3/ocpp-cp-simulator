@@ -1,14 +1,12 @@
-import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import {
+  VehicleProfileLimitError,
+  type VehicleProfileRepository,
+} from "../../cp/domain/persistence/VehicleProfileRepository";
 import {
   VehicleCatalogError,
   type VehicleCatalog,
 } from "../../cp/domain/vehicle/VehicleCatalog";
-import {
-  MAX_VEHICLE_PROFILES,
-  RpcFailure,
-  type Params,
-  type RpcErrorCode,
-} from "../../protocol";
+import { RpcFailure, type Params, type RpcErrorCode } from "../../protocol";
 
 /**
  * The daemon side of `vehicle_profiles.*` and `vehicle_catalog.*` (#458).
@@ -32,19 +30,14 @@ export function saveVehicleProfile(
   deps: VehicleRpcDeps,
   { profile }: Params<"vehicle_profiles.save">,
 ) {
-  // Checked before the write, like `blueprint.save`: an unbounded store would
-  // make `vehicle_profiles.list` fail its result validation for everyone.
-  const stored = deps.vehicleProfiles.list();
-  if (
-    stored.length >= MAX_VEHICLE_PROFILES &&
-    !stored.some((p) => p.id === profile.id)
-  ) {
-    throw new RpcFailure(
-      "invalid_params",
-      `at most ${MAX_VEHICLE_PROFILES} vehicle profiles can be stored; delete one first`,
-    );
+  try {
+    return deps.vehicleProfiles.save(profile);
+  } catch (error) {
+    if (error instanceof VehicleProfileLimitError) {
+      throw new RpcFailure("invalid_params", error.message);
+    }
+    throw error;
   }
-  return deps.vehicleProfiles.save(profile);
 }
 
 export function deleteVehicleProfile(

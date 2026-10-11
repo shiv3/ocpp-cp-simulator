@@ -381,25 +381,27 @@ function toVehicleCatalogError(error: unknown): VehicleCatalogError {
       error instanceof Error ? error.message : String(error),
     );
   }
-  const kind: VehicleCatalogErrorKind = (() => {
-    switch (error.code) {
-      case "unauthorized":
-      case "not_found":
-      case "rate_limited":
-      case "timeout":
-      case "unavailable":
-        return error.code;
-      case "invalid_params":
-        return "invalid_request";
-      case "disconnected":
-        return "network";
-      default:
-        return "unavailable";
-    }
-  })();
-  return new VehicleCatalogError(kind, error.message, {
+  return new VehicleCatalogError(catalogKindOf(error.code), error.message, {
     retryAfterSeconds: error.retryAfterSeconds,
   });
+}
+
+/** The reverse of the daemon's mapping in `src/cli/server/vehicleRpc.ts`. */
+function catalogKindOf(code: RpcErrorCode): VehicleCatalogErrorKind {
+  switch (code) {
+    case "unauthorized":
+    case "not_found":
+    case "rate_limited":
+    case "timeout":
+    case "unavailable":
+      return code;
+    case "invalid_params":
+      return "invalid_request";
+    case "disconnected":
+      return "network";
+    default:
+      return "unavailable";
+  }
 }
 
 function publicFailure(code: RpcErrorCode): RpcFailure {

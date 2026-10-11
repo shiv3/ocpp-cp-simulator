@@ -181,7 +181,12 @@ describe("OpenEvDirectoryClient — reads (#458)", () => {
     });
     const variant = await c.getVariant("var_ad04fe41e212ef6a");
     expect(variant.id).toBe("var_b16bdbae5aa906a7");
-    expect(calls[1]!.url).toContain("/v1/variants/var_b16bdbae5aa906a7/");
+    // The curves are read again under the id the body names.
+    expect(
+      calls.some((c) =>
+        c.url.includes("/v1/variants/var_b16bdbae5aa906a7/charging-curves"),
+      ),
+    ).toBe(true);
   });
 });
 

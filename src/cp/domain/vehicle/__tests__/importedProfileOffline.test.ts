@@ -90,10 +90,10 @@ describe("an imported vehicle profile works offline (#458)", () => {
 
     // The catalog is gone from here on.
     catalogUp = false;
-    const callsBefore = calls;
     await expect(client.getVariant(id7Variant.id)).rejects.toMatchObject({
       kind: "network",
     });
+    const callsAfterOutage = calls;
 
     const stored = repository.get("vp_id7")!;
     expect(stored).toEqual(imported.profile);
@@ -123,7 +123,7 @@ describe("an imported vehicle profile works offline (#458)", () => {
     expect(reportedPowerW(connector)).toBe(50_000);
 
     // Nothing above reached the catalog, and the stored profile is unchanged.
-    expect(calls).toBe(callsBefore + 1);
+    expect(calls).toBe(callsAfterOutage);
     expect(repository.get("vp_id7")).toEqual(imported.profile);
   });
 });

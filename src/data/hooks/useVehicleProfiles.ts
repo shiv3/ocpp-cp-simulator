@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import type { ChargePointService } from "../interfaces/ChargePointService";
@@ -82,9 +82,12 @@ class VehicleProfileStore {
     if (!this.service.saveVehicleProfile) {
       throw new Error("This console cannot store vehicle profiles");
     }
-    const stored = await this.service.saveVehicleProfile(profile);
-    await this.reload();
-    return stored ?? profile;
+    const stored = (await this.service.saveVehicleProfile(profile)) ?? profile;
+    await this.afterWrite((list) => [
+      ...list.filter((p) => p.id !== stored.id),
+      stored,
+    ]);
+    return stored;
   };
 
   remove = async (id: string): Promise<void> => {
@@ -92,8 +95,28 @@ class VehicleProfileStore {
       throw new Error("This console cannot store vehicle profiles");
     }
     await this.service.deleteVehicleProfile(id);
-    await this.reload();
+    await this.afterWrite((list) => list.filter((p) => p.id !== id));
   };
+
+  /**
+   * Applies a write to the known list instead of reading it all back; any
+   * read still in flight started before the write, so it is superseded.
+   * Without a known list yet, a fresh read is the only source.
+   */
+  private afterWrite(
+    update: (list: VehicleProfile[]) => VehicleProfile[],
+  ): Promise<void> {
+    if (!this.state.isKnown) return this.reload();
+    this.generation++;
+    this.set({
+      profiles: update(this.state.profiles).sort(
+        (a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1),
+      ),
+      isKnown: true,
+      error: null,
+    });
+    return Promise.resolve();
+  }
 
   private set(next: VehicleProfilesState): void {
     this.state = next;
@@ -124,13 +147,16 @@ export function useVehicleProfiles(): VehicleProfiles {
   useEffect(() => {
     store.ensureLoaded();
   }, [store]);
-  return {
-    ...state,
-    supported: store.supported,
-    reload: store.reload,
-    save: store.save,
-    remove: store.remove,
-  };
+  return useMemo(
+    () => ({
+      ...state,
+      supported: store.supported,
+      reload: store.reload,
+      save: store.save,
+      remove: store.remove,
+    }),
+    [state, store],
+  );
 }
 
 function messageOf(error: unknown): string {

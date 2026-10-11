@@ -8,17 +8,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  isPresetName,
   readVehicleChoice,
+  type VehicleChoiceNotesState,
 } from "@/components/vehicle/vehicleChoice";
 import {
+  OwnModelOption,
   VehicleChoiceNotes,
   VehicleProfileOptions,
 } from "@/components/vehicle/VehicleChoiceControls";
 import { EV_PRESETS, type EVSettings } from "@/cp/domain/connector/EVSettings";
 import {
   applyVehicleSettings,
-  type ResolveWarning,
   type VehicleEvSettings,
 } from "@/cp/domain/vehicle/VehicleProfile";
 import {
@@ -140,10 +140,8 @@ const ConfigBody: React.FC<BodyProps> = ({
     value: string;
     settings: VehicleEvSettings;
   } | null>(null);
-  const [vehicleNotes, setVehicleNotes] = useState<{
-    warnings: ResolveWarning[];
-    error: string | null;
-  } | null>(null);
+  const [vehicleNotes, setVehicleNotes] =
+    useState<VehicleChoiceNotesState | null>(null);
 
   const typedEv: EVSettings = {
     ...evSettings,
@@ -357,9 +355,6 @@ const ConfigBody: React.FC<BodyProps> = ({
     }
   };
 
-  // A model that is no preset (an applied profile, a scenario's EV) is shown
-  // under its own name rather than as "Custom".
-  const ownName = !isPresetName(modelName) && modelName !== "";
   const vehicle = profilePick?.value ?? (modelName || CUSTOM);
 
   return (
@@ -458,9 +453,7 @@ const ConfigBody: React.FC<BodyProps> = ({
                   }}
                   className={cn(FILTER_SELECT_CLASS, "w-full")}
                 >
-                  {ownName && !profilePick && (
-                    <option value={modelName}>{modelName}</option>
-                  )}
+                  {!profilePick && <OwnModelOption modelName={modelName} />}
                   <VehicleProfileOptions state={vehicleProfiles} />
                   {Object.entries(EV_PRESETS).map(([name, values]) => (
                     <option key={name} value={name}>

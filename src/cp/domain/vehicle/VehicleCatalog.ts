@@ -141,7 +141,3 @@ export class VehicleCatalogError extends Error {
     this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
-
-export function isVehicleCatalogError(e: unknown): e is VehicleCatalogError {
-  return e instanceof VehicleCatalogError;
-}

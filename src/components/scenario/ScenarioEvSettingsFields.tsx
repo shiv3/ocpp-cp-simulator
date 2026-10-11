@@ -6,17 +6,9 @@ import {
   type EVSettings,
 } from "../../cp/domain/connector/EVSettings";
 import { cn } from "../../lib/utils";
-import { useVehicleProfiles } from "../../data/hooks/useVehicleProfiles";
+import { useVehicleSelect } from "../vehicle/useVehicleSelect";
 import {
-  applyVehicleSettings,
-  type ResolveWarning,
-} from "../../cp/domain/vehicle/VehicleProfile";
-import {
-  isPresetName,
-  readVehicleChoice,
-  withoutProfileFields,
-} from "../vehicle/vehicleChoice";
-import {
+  OwnModelOption,
   VehicleChoiceNotes,
   VehicleProfileOptions,
 } from "../vehicle/VehicleChoiceControls";
@@ -47,15 +39,7 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
   const [expanded, setExpanded] = useState(initiallyExpanded);
   // #458: saved vehicle profiles offered beside the presets. The scenario
   // takes a copy of the values; it does not refer to the profile.
-  const vehicleProfiles = useVehicleProfiles();
-  // The scenario's settings before the first profile pick of this edit, so
-  // a preset picked afterwards does not keep the profile's curve.
-  const [beforeProfile, setBeforeProfile] =
-    useState<Partial<EVSettings> | null>(null);
-  const [vehicleNotes, setVehicleNotes] = useState<{
-    warnings: ResolveWarning[];
-    error: string | null;
-  } | null>(null);
+  const vehicle = useVehicleSelect(value, onChange);
 
   return (
     <div
@@ -86,58 +70,28 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
               value={value.modelName ?? ""}
               onChange={(e) => {
                 const preset = e.target.value;
-                const choice = readVehicleChoice(
-                  preset,
-                  vehicleProfiles.profiles,
+                vehicle.select(preset, (base) =>
+                  !preset
+                    ? {}
+                    : preset === "Custom"
+                      ? { ...base, modelName: "Custom" }
+                      : { ...base, modelName: preset, ...EV_PRESETS[preset] },
                 );
-                if (choice.kind === "unusable") {
-                  setVehicleNotes({ warnings: [], error: choice.message });
-                  return;
-                }
-                if (choice.kind === "profile") {
-                  setBeforeProfile((before) => before ?? value);
-                  onChange(applyVehicleSettings(value, choice.settings));
-                  setVehicleNotes({ warnings: choice.warnings, error: null });
-                  return;
-                }
-                setVehicleNotes(null);
-                if (!preset) {
-                  setBeforeProfile(null);
-                  onChange({});
-                  return;
-                }
-                const base = withoutProfileFields(value, beforeProfile);
-                setBeforeProfile(null);
-                if (preset === "Custom") {
-                  onChange({
-                    ...base,
-                    modelName: "Custom",
-                  });
-                  return;
-                }
-                const presetValues = EV_PRESETS[preset] ?? {};
-                onChange({
-                  ...base,
-                  modelName: preset,
-                  ...presetValues,
-                });
               }}
             >
               <option value="">
                 (use default
                 {defaultEvSettings ? `: ${defaultEvSettings.modelName}` : ""})
               </option>
-              {value.modelName && !isPresetName(value.modelName) && (
-                <option value={value.modelName}>{value.modelName}</option>
-              )}
-              <VehicleProfileOptions state={vehicleProfiles} />
+              <OwnModelOption modelName={value.modelName} />
+              <VehicleProfileOptions state={vehicle.profiles} />
               {Object.keys(EV_PRESETS).map((preset) => (
                 <option key={preset} value={preset}>
                   {preset}
                 </option>
               ))}
             </select>
-            <VehicleChoiceNotes notes={vehicleNotes} className="mt-1" />
+            <VehicleChoiceNotes notes={vehicle.notes} className="mt-1" />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>

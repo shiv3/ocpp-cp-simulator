@@ -13,13 +13,8 @@ const SENSITIVE_ASSIGNMENT =
 const SENSITIVE_BARE_ASSIGNMENT =
   /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY)"?)\s*[:=]\s*)(?!["'])([^\s,}\]]+)/g;
 
-/**
- * #458: an `Authorization: Bearer …` value, and an Open EV Directory API key
- * (`evd_live_…`, `evd_test_…`) wherever it appears — a key quoted in an
- * upstream error is not a named assignment the patterns above would see.
- */
+/** #458: an `Authorization: Bearer …` value. */
 const BEARER_TOKEN = /(\bBearer\s+)[A-Za-z0-9\-._~+/]+=*/g;
-const OED_API_KEY = /\bevd_(?:live|test)_[A-Za-z0-9_-]+/g;
 
 type StringToken = {
   content: string;
@@ -91,8 +86,7 @@ export function redactSensitiveText(text: string): string {
     .replace(SENSITIVE_BARE_ASSIGNMENT, `$1${REDACTED_VALUE}`)
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
     .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`)
-    .replace(BEARER_TOKEN, `$1${REDACTED_VALUE}`)
-    .replace(OED_API_KEY, REDACTED_VALUE);
+    .replace(BEARER_TOKEN, `$1${REDACTED_VALUE}`);
 }
 
 export function redactSensitiveValue(value: unknown): unknown {

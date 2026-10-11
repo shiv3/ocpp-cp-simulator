@@ -166,9 +166,10 @@ Without `--state-db` the daemon keeps them in memory for the life of the
 process. Each row is validated by `vehicleProfileSchema`
 ([`src/protocol/vehicle.ts`](../../src/protocol/vehicle.ts)) on save and on
 read; a stored row that no longer matches is skipped rather than hiding every
-other profile. A curve holds at most 512 points; the daemon stores at most
-1,000 profiles (`vehicle_profiles.save` past the cap answers `invalid_params`
-— the browser store has no cap). A profile never contains an API key.
+other profile. A curve holds at most 512 points, and each store (the daemon's
+and the browser's) holds at most 1,000 profiles: a new one past the cap is
+refused (`vehicle_profiles.save` answers `invalid_params`), replacing an
+existing one is not. A profile never contains an API key.
 
 `state.reset` and the console's **Reset all simulator data** wipe the profiles
 with everything else — a deliberate decision (`resetOnStateReset: true`): a

@@ -42,12 +42,24 @@ export const FIELD_LABELS: Record<EditableSpecField, string> = {
   dcMaxKw: "DC maximum power",
 };
 
+/** Units of the editable specs, for their inputs. */
+export const FIELD_UNITS: Record<EditableSpecField, string> = {
+  usableBatteryKwh: "kWh",
+  acMaxKw: "kW",
+  acPhases: "",
+  dcMaxKw: "kW",
+};
+
+/** What the form shows under a vehicle select after a pick. */
+export interface VehicleChoiceNotesState {
+  warnings: ResolveWarning[];
+  error: string | null;
+}
+
 /** What a pick in a vehicle select means for the form. */
-export type VehicleChoice =
+type VehicleChoice =
   | {
       kind: "profile";
-      profile: VehicleProfile;
-      currentType: VehicleCurrentType;
       settings: VehicleEvSettings;
       warnings: ResolveWarning[];
     }
@@ -86,8 +98,6 @@ export function readVehicleChoice(
   }
   return {
     kind: "profile",
-    profile,
-    currentType,
     settings: result.settings,
     warnings: result.warnings,
   };

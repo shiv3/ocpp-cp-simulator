@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -7,7 +7,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FIELD_LABELS } from "@/components/vehicle/vehicleChoice";
+import { FIELD_LABELS, FIELD_UNITS } from "@/components/vehicle/vehicleChoice";
 import type {
   CatalogCurve,
   CatalogMake,
@@ -20,6 +20,7 @@ import type {
 import { profileFromCatalog } from "@/cp/domain/vehicle/importProfile";
 import {
   availableCurrentTypes,
+  EDITABLE_SPEC_FIELDS as EDITABLE,
   type EditableSpecField,
   type VehicleProfile,
 } from "@/cp/domain/vehicle/VehicleProfile";
@@ -32,6 +33,7 @@ import {
   useVehicleCatalog,
   type CatalogAccess,
 } from "../../lib/vehicleCatalog";
+import { describeError } from "../../pages/cp/connectorActions";
 import CurvePreview from "./CurvePreview";
 
 export interface ImportVehicleDialogProps {
@@ -43,20 +45,6 @@ export interface ImportVehicleDialogProps {
   newId?: () => string;
   now?: () => string;
 }
-
-const EDITABLE: readonly EditableSpecField[] = [
-  "usableBatteryKwh",
-  "acMaxKw",
-  "acPhases",
-  "dcMaxKw",
-];
-
-const UNITS: Record<EditableSpecField, string> = {
-  usableBatteryKwh: "kWh",
-  acMaxKw: "kW",
-  acPhases: "",
-  dcMaxKw: "kW",
-};
 
 const shown = (value: number | null) =>
   value == null ? "missing" : String(value);
@@ -132,7 +120,7 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
   useEffect(() => {
     if (!catalog) return;
     let cancelled = false;
-    catalog.listMakes().then(
+    makesOf(catalog).then(
       (list) => {
         if (cancelled) return;
         setMakes(list);
@@ -280,23 +268,28 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
           busy={busy}
           onBack={() => setVariant(null)}
           onCancel={() => onOpenChange(false)}
-          onSave={async (build) => {
+          onSave={async (draft) => {
             setBusy(true);
             setError(null);
             try {
-              // Built here, inside the try: minting the id can throw.
-              await onSave(build());
+              // Stamped here, inside the try: minting the id can throw.
+              const at = now();
+              await onSave({
+                ...draft,
+                id: newId(),
+                createdAt: at,
+                updatedAt: at,
+                origin: draft.origin
+                  ? { ...draft.origin, importedAt: at }
+                  : null,
+              });
               onOpenChange(false);
             } catch (err) {
-              setError(
-                `The profile was not saved: ${err instanceof Error ? err.message : String(err)}`,
-              );
+              setError(`The profile was not saved: ${describeError(err)}`);
             } finally {
               setBusy(false);
             }
           }}
-          newId={newId}
-          now={now}
         />
       )}
     </div>
@@ -463,6 +456,61 @@ function PickList<T extends { id: string }>({
 const NO_CURVE = "__none__";
 
 /**
+ * The values typed for what the picked record lacks, as its inputs show; a
+ * value typed for another record the user then left is not kept.
+ */
+function filledOverrides(
+  picked: VehicleProfile,
+  filled: Partial<Record<EditableSpecField, string>>,
+): VehicleProfile["overrides"] {
+  const overrides: VehicleProfile["overrides"] = {};
+  for (const field of EDITABLE) {
+    if (picked.specs[field] != null) continue;
+    const value = Number(filled[field]);
+    if (filled[field]?.trim() && Number.isFinite(value) && value >= 0) {
+      overrides[field] = value;
+    }
+  }
+  return overrides;
+}
+
+/** What still stops the import, or null when it can be saved. */
+function blockerOf(
+  recordPicked: boolean,
+  curvePicked: boolean,
+  draft: VehicleProfile | null,
+): string | null {
+  if (!recordPicked) return "Choose the source record whose specs to keep.";
+  if (!curvePicked) return "Choose a curve, or no curve.";
+  if (!draft) return null;
+  if (!draft.name) return "Give the profile a name.";
+  const capacity =
+    draft.overrides.usableBatteryKwh ?? draft.specs.usableBatteryKwh;
+  if (capacity == null) {
+    return "The source gives no usable battery capacity: fill it in.";
+  }
+  if (availableCurrentTypes(draft).length === 0) {
+    return "Fill in an AC or a DC maximum power.";
+  }
+  return null;
+}
+
+/**
+ * The catalog's makes, read once per catalog: reopening the dialog does not
+ * spend another request of a rate-limited key. A failure is not kept.
+ */
+const makesCache = new WeakMap<VehicleCatalog, Promise<CatalogMake[]>>();
+function makesOf(catalog: VehicleCatalog): Promise<CatalogMake[]> {
+  let pending = makesCache.get(catalog);
+  if (!pending) {
+    pending = catalog.listMakes();
+    pending.catch(() => makesCache.delete(catalog));
+    makesCache.set(catalog, pending);
+  }
+  return pending;
+}
+
+/**
  * A new profile id. `crypto.randomUUID` exists only in secure contexts
  * (HTTPS, localhost); a daemon's console reached over plain HTTP from another
  * host is not one, so fall back to `getRandomValues`, which every context has.
@@ -480,11 +528,9 @@ const VariantForm: React.FC<{
   busy: boolean;
   onBack: () => void;
   onCancel: () => void;
-  /** Receives the profile to build, so the caller reports a failure. */
-  onSave: (build: () => VehicleProfile) => Promise<void>;
-  newId: () => string;
-  now: () => string;
-}> = ({ variant, busy, onBack, onCancel, onSave, newId, now }) => {
+  /** Receives the draft; the caller stamps its id and import time. */
+  onSave: (draft: VehicleProfile) => Promise<void>;
+}> = ({ variant, busy, onBack, onCancel, onSave }) => {
   const [recordKey, setRecordKey] = useState<string | null>(null);
   // No curve is preselected, "no curve" included: the user says which.
   const [curveChoice, setCurveChoice] = useState<string | null>(null);
@@ -494,7 +540,9 @@ const VariantForm: React.FC<{
   >({});
 
   const record = variant.sourceRecords.find((r) => r.key === recordKey) ?? null;
-  const draft = (() => {
+  // The picked record and curve, rebuilt only when the pick changes; the name
+  // and the filled-in values go on top.
+  const picked = useMemo(() => {
     if (!record || curveChoice === null) return null;
     const result = profileFromCatalog(
       variant,
@@ -502,36 +550,16 @@ const VariantForm: React.FC<{
         sourceRecordKey: record.key,
         curveId: curveChoice === NO_CURVE ? null : curveChoice,
       },
-      { id: "draft", now: "draft", name },
+      { id: "draft", now: "draft" },
     );
-    if (!result.ok) return null;
-    // Only the values this record lacks, as its inputs show; a value typed
-    // for another record the user then left is not kept.
-    const overrides: VehicleProfile["overrides"] = {};
-    for (const field of EDITABLE) {
-      if (record.specs[field] != null) continue;
-      const value = Number(filled[field]);
-      if (filled[field]?.trim() && Number.isFinite(value) && value >= 0) {
-        overrides[field] = value;
-      }
-    }
-    return { ...result.profile, overrides };
-  })();
-  const usableTypes = draft ? availableCurrentTypes(draft) : [];
-  const capacityKnown =
-    draft != null &&
-    (draft.overrides.usableBatteryKwh ?? draft.specs.usableBatteryKwh) != null;
-  const blocker = !record
-    ? "Choose the source record whose specs to keep."
-    : curveChoice === null
-      ? "Choose a curve, or no curve."
-      : !name.trim()
-        ? "Give the profile a name."
-        : !capacityKnown
-          ? "The source gives no usable battery capacity: fill it in."
-          : usableTypes.length === 0
-            ? "Fill in an AC or a DC maximum power."
-            : null;
+    return result.ok ? result.profile : null;
+  }, [variant, record, curveChoice]);
+  const draft: VehicleProfile | null = picked && {
+    ...picked,
+    name: name.trim(),
+    overrides: filledOverrides(picked, filled),
+  };
+  const blocker = blockerOf(record !== null, curveChoice !== null, draft);
 
   return (
     <section aria-label="Variant" className="flex flex-col gap-4">
@@ -652,8 +680,10 @@ const VariantForm: React.FC<{
                   }
                   className={cn(FILTER_INPUT_CLASS, "min-w-0 flex-1 font-mono")}
                 />
-                {UNITS[field] && (
-                  <span className="text-xs text-cx-muted">{UNITS[field]}</span>
+                {FIELD_UNITS[field] && (
+                  <span className="text-xs text-cx-muted">
+                    {FIELD_UNITS[field]}
+                  </span>
                 )}
               </span>
             </label>
@@ -682,20 +712,7 @@ const VariantForm: React.FC<{
         <Button
           disabled={busy || blocker !== null || !draft}
           onClick={() => {
-            if (!draft) return;
-            void onSave(() => {
-              const at = now();
-              return {
-                ...draft,
-                id: newId(),
-                name: name.trim(),
-                createdAt: at,
-                updatedAt: at,
-                origin: draft.origin
-                  ? { ...draft.origin, importedAt: at }
-                  : null,
-              };
-            });
+            if (draft) void onSave(draft);
           }}
         >
           Save profile

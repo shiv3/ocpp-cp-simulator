@@ -192,17 +192,9 @@ describe("OCPP 2.0.1 SetVariables secrets (#396)", () => {
 });
 
 describe("vehicle catalog API keys (#458)", () => {
-  const KEY = "evd_live_0123456789abcdef_RANDOM";
-
   it("redacts a bearer token", () => {
     expect(redactSensitiveText("Authorization: Bearer abc.def-123")).toBe(
       `Authorization: Bearer ${REDACTED_VALUE}`,
-    );
-  });
-
-  it("redacts an Open EV Directory key wherever it appears", () => {
-    expect(redactSensitiveText(`key ${KEY} is revoked`)).toBe(
-      `key ${REDACTED_VALUE} is revoked`,
     );
   });
 

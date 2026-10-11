@@ -8,17 +8,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import { useDataContext } from "../data/providers/DataProvider";
-import { useVehicleProfiles } from "../data/hooks/useVehicleProfiles";
+import { useVehicleSelect } from "./vehicle/useVehicleSelect";
 import {
-  applyVehicleSettings,
-  type ResolveWarning,
-} from "../cp/domain/vehicle/VehicleProfile";
-import {
-  isPresetName,
-  readVehicleChoice,
-  withoutProfileFields,
-} from "./vehicle/vehicleChoice";
-import {
+  OwnModelOption,
   VehicleChoiceNotes,
   VehicleProfileOptions,
 } from "./vehicle/VehicleChoiceControls";
@@ -88,18 +80,11 @@ const Settings: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
-  // #458: saved vehicle profiles offered beside the presets.
-  const vehicleProfiles = useVehicleProfiles();
-  // The draft before the first profile pick, so a preset picked afterwards
-  // does not keep the profile's curve, current type and phases.
-  const [beforeProfile, setBeforeProfile] = useState<EVSettings | null>(null);
-  const [vehicleNotes, setVehicleNotes] = useState<{
-    warnings: ResolveWarning[];
-    error: string | null;
-  } | null>(null);
   const [draftEv, setDraftEv] = useState<EVSettings>(() =>
     seedDraftEv(defaultEvSettings),
   );
+  // #458: saved vehicle profiles offered beside the presets.
+  const vehicle = useVehicleSelect(draftEv, setDraftEv);
   const { tagIds: globalTagIds, setTagIds: persistGlobalTagIds } =
     useGlobalTagIds();
   // Draft string for the comma-separated input so the user can type literal
@@ -368,43 +353,23 @@ const Settings: React.FC = () => {
               value={draftEv.modelName || "Custom"}
               onChange={(e) => {
                 const preset = e.target.value;
-                const choice = readVehicleChoice(
-                  preset,
-                  vehicleProfiles.profiles,
+                vehicle.select(preset, (base) =>
+                  preset === "Custom"
+                    ? { ...base, modelName: "Custom" }
+                    : { ...base, modelName: preset, ...EV_PRESETS[preset] },
                 );
-                if (choice.kind === "unusable") {
-                  setVehicleNotes({ warnings: [], error: choice.message });
-                  return;
-                }
-                if (choice.kind === "profile") {
-                  setBeforeProfile((before) => before ?? draftEv);
-                  setDraftEv(applyVehicleSettings(draftEv, choice.settings));
-                  setVehicleNotes({ warnings: choice.warnings, error: null });
-                  return;
-                }
-                setVehicleNotes(null);
-                const base = withoutProfileFields(draftEv, beforeProfile);
-                setBeforeProfile(null);
-                if (preset === "Custom") {
-                  setDraftEv({ ...base, modelName: "Custom" });
-                  return;
-                }
-                const values = EV_PRESETS[preset] ?? {};
-                setDraftEv({ ...base, modelName: preset, ...values });
               }}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
             >
-              {draftEv.modelName && !isPresetName(draftEv.modelName) && (
-                <option value={draftEv.modelName}>{draftEv.modelName}</option>
-              )}
-              <VehicleProfileOptions state={vehicleProfiles} />
+              <OwnModelOption modelName={draftEv.modelName} />
+              <VehicleProfileOptions state={vehicle.profiles} />
               {Object.keys(EV_PRESETS).map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
               ))}
             </select>
-            <VehicleChoiceNotes notes={vehicleNotes} className="mt-1.5" />
+            <VehicleChoiceNotes notes={vehicle.notes} className="mt-1.5" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

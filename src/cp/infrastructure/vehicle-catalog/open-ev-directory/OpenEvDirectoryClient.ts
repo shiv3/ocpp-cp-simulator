@@ -11,6 +11,7 @@ import {
   type VehicleCatalog,
 } from "../../../domain/vehicle/VehicleCatalog";
 
+import { REDACTED_VALUE } from "../../../shared/redaction";
 import {
   makePageSchema,
   modelPageSchema,
@@ -123,18 +124,24 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
   }
 
   async getVariant(variantId: string): Promise<CatalogVariant> {
-    // A former id answers with a 302 that fetch follows; the body names the
-    // current id, which the curves request and the stored profile use.
+    // Both requested at once. A former id answers with a 302 that fetch
+    // follows and whose body names the current id; in that rare case the
+    // curves are read again under it, and the early answer is dropped.
+    const curvesOf = (id: string) =>
+      this.get(
+        `/v1/variants/${encodeURIComponent(id)}/charging-curves`,
+        {},
+        variantChargingCurvesSchema,
+      );
+    const early = curvesOf(variantId);
+    early.catch(() => {});
     const variant = await this.get(
       `/v1/variants/${encodeURIComponent(variantId)}`,
       {},
       variantSchema,
     );
-    const curves = await this.get(
-      `/v1/variants/${encodeURIComponent(variant.id)}/charging-curves`,
-      {},
-      variantChargingCurvesSchema,
-    );
+    const curves =
+      variant.id === variantId ? await early : await curvesOf(variant.id);
     return {
       id: variant.id,
       name: variant.name,
@@ -231,7 +238,7 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
     if (!this.apiKey || !error.message.includes(this.apiKey)) return error;
     return new VehicleCatalogError(
       error.kind,
-      error.message.replaceAll(this.apiKey, "[redacted]"),
+      error.message.replaceAll(this.apiKey, REDACTED_VALUE),
       { retryAfterSeconds: error.retryAfterSeconds },
     );
   }

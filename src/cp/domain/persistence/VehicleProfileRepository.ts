@@ -1,4 +1,7 @@
-import { vehicleProfileSchema } from "../../../protocol/vehicle";
+import {
+  MAX_VEHICLE_PROFILES,
+  vehicleProfileSchema,
+} from "../../../protocol/vehicle";
 import type { VehicleProfile } from "../vehicle/VehicleProfile";
 import type { Database } from "./Database";
 
@@ -14,7 +17,8 @@ interface VehicleProfileRow {
  * memory rather than being dropped, and a stored row that no longer matches
  * `vehicleProfileSchema` is skipped rather than thrown, so one bad row cannot
  * hide every other profile. A saved profile is validated on the way in too:
- * fields the schema does not name are not stored.
+ * fields the schema does not name are not stored, and a new profile beyond
+ * {@link MAX_VEHICLE_PROFILES} is refused in both console modes.
  */
 export class VehicleProfileRepository {
   private readonly inMemory = new Map<string, VehicleProfile>();
@@ -43,9 +47,31 @@ export class VehicleProfileRepository {
     return row ? safeParse(row.body) : null;
   }
 
+  has(id: string): boolean {
+    if (!this.database) return this.inMemory.has(id);
+    return (
+      this.database.get("SELECT 1 FROM vehicle_profiles WHERE id = ?", [id]) !==
+      null
+    );
+  }
+
+  count(): number {
+    if (!this.database) return this.inMemory.size;
+    return (
+      this.database.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM vehicle_profiles",
+      )?.n ?? 0
+    );
+  }
+
   /** Inserts or replaces by id. Returns what was stored. */
   save(profile: VehicleProfile): VehicleProfile {
     const stored = vehicleProfileSchema.parse(profile);
+    // Checked before the write: an unbounded store would make
+    // `vehicle_profiles.list` fail its result validation for everyone.
+    if (!this.has(stored.id) && this.count() >= MAX_VEHICLE_PROFILES) {
+      throw new VehicleProfileLimitError();
+    }
     if (!this.database) {
       this.inMemory.set(stored.id, stored);
       return stored;
@@ -62,9 +88,18 @@ export class VehicleProfileRepository {
   /** Returns whether a row was removed, so the caller can report `not_found`. */
   delete(id: string): boolean {
     if (!this.database) return this.inMemory.delete(id);
-    if (!this.get(id)) return false;
+    if (!this.has(id)) return false;
     this.database.run("DELETE FROM vehicle_profiles WHERE id = ?", [id]);
     return true;
+  }
+}
+
+export class VehicleProfileLimitError extends Error {
+  constructor() {
+    super(
+      `at most ${MAX_VEHICLE_PROFILES} vehicle profiles can be stored; delete one first`,
+    );
+    this.name = "VehicleProfileLimitError";
   }
 }
 

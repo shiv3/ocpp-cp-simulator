@@ -3,12 +3,14 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FIELD_LABELS } from "@/components/vehicle/vehicleChoice";
 import { VehicleCatalogError } from "@/cp/domain/vehicle/VehicleCatalog";
+import { describeError } from "../../pages/cp/connectorActions";
 import {
   markRemovedUpstream,
   refreshFromCatalog,
   type RefreshChange,
 } from "@/cp/domain/vehicle/importProfile";
 import {
+  EDITABLE_SPEC_FIELDS as EDITABLE,
   effectiveSpecs,
   missingFields,
   type EditableSpecField,
@@ -20,18 +22,13 @@ import { cn } from "@/lib/utils";
 import { FILTER_INPUT_CLASS } from "../filterStyles";
 import InlineConfirm from "../InlineConfirm";
 import {
+  catalogNotConfiguredMessage,
   describeCatalogError,
   useVehicleCatalog,
+  type CatalogAccess,
 } from "../../lib/vehicleCatalog";
 import CurvePreview from "./CurvePreview";
 import ImportVehicleDialog from "./ImportVehicleDialog";
-
-const EDITABLE: readonly EditableSpecField[] = [
-  "usableBatteryKwh",
-  "acMaxKw",
-  "acPhases",
-  "dcMaxKw",
-];
 
 /**
  * Settings → Vehicle profiles (#458): the saved vehicles a connector, the
@@ -41,6 +38,8 @@ const VehicleProfilesCard: React.FC<{ now?: () => string }> = ({
   now = () => new Date().toISOString(),
 }) => {
   const store = useVehicleProfiles();
+  // Read once for every row: each Refresh uses the same catalog.
+  const access = useVehicleCatalog();
   const [importing, setImporting] = useState(false);
 
   return (
@@ -92,6 +91,7 @@ const VehicleProfilesCard: React.FC<{ now?: () => string }> = ({
             <ProfileRow
               key={profile.id}
               profile={profile}
+              access={access}
               onSave={store.save}
               onDelete={store.remove}
               now={now}
@@ -119,11 +119,11 @@ type RowMode =
 
 const ProfileRow: React.FC<{
   profile: VehicleProfile;
+  access: CatalogAccess;
   onSave: (p: VehicleProfile) => Promise<unknown>;
   onDelete: (id: string) => Promise<void>;
   now: () => string;
-}> = ({ profile, onSave, onDelete, now }) => {
-  const access = useVehicleCatalog();
+}> = ({ profile, access, onSave, onDelete, now }) => {
   const [mode, setMode] = useState<RowMode>({ kind: "view" });
   const [message, setMessage] = useState<{
     text: string;
@@ -144,7 +144,7 @@ const ProfileRow: React.FC<{
       return true;
     } catch (err) {
       setMessage({
-        text: err instanceof Error ? err.message : String(err),
+        text: describeError(err),
         error: true,
       });
       return false;
@@ -155,10 +155,7 @@ const ProfileRow: React.FC<{
     if (!origin) return;
     if (!access.catalog) {
       setMessage({
-        text: describeCatalogError(
-          new VehicleCatalogError("not_configured", ""),
-          access.mode,
-        ),
+        text: catalogNotConfiguredMessage(access.mode),
         error: true,
       });
       return;
@@ -370,25 +367,25 @@ const ProfileRow: React.FC<{
   );
 };
 
+const CHANGE_LABELS: Record<RefreshChange["field"], string> = {
+  ...FIELD_LABELS,
+  acConnectors: "AC connectors",
+  dcConnectors: "DC connectors",
+  variantId: "Variant id",
+  datasetVersion: "Dataset version",
+  dcCurve: "The DC curve",
+};
+
+function showChangeValue(v: unknown): string {
+  if (v == null) return "missing";
+  if (Array.isArray(v)) return v.join(", ") || "none";
+  return String(v);
+}
+
 function describeChange(change: RefreshChange): string {
-  if (change.field === "dcCurve") return "The DC curve";
-  const label =
-    change.field in FIELD_LABELS
-      ? FIELD_LABELS[change.field as EditableSpecField]
-      : change.field === "acConnectors"
-        ? "AC connectors"
-        : change.field === "dcConnectors"
-          ? "DC connectors"
-          : change.field === "variantId"
-            ? "Variant id"
-            : "Dataset version";
-  const show = (v: unknown) =>
-    v == null
-      ? "missing"
-      : Array.isArray(v)
-        ? v.join(", ") || "none"
-        : String(v);
-  return `${label}: ${show(change.before)} → ${show(change.after)}`;
+  const label = CHANGE_LABELS[change.field];
+  if (!("before" in change)) return label;
+  return `${label}: ${showChangeValue(change.before)} → ${showChangeValue(change.after)}`;
 }
 
 /**

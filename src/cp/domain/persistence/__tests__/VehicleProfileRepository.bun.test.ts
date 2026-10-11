@@ -4,7 +4,11 @@ import { describe, expect, it } from "bun:test";
 import type { VehicleProfile } from "../../vehicle/VehicleProfile";
 import { BunSqliteDatabase } from "../BunSqliteDatabase";
 import { resetSimulatorState } from "../resetState";
-import { VehicleProfileRepository } from "../VehicleProfileRepository";
+import { MAX_VEHICLE_PROFILES } from "../../../../protocol/vehicle";
+import {
+  VehicleProfileLimitError,
+  VehicleProfileRepository,
+} from "../VehicleProfileRepository";
 
 function profile(id: string, name: string): VehicleProfile {
   return {
@@ -55,6 +59,18 @@ for (const [label, open] of [
       const repo = new VehicleProfileRepository(open());
       expect(() => repo.save({ ...profile("a", "x"), name: "" })).toThrow();
       expect(repo.list()).toEqual([]);
+    });
+
+    it("refuses a new profile beyond the limit, but still replaces one", () => {
+      const repo = new VehicleProfileRepository(open());
+      for (let i = 0; i < MAX_VEHICLE_PROFILES; i++) {
+        repo.save(profile(`p${i}`, `P${i}`));
+      }
+      expect(() => repo.save(profile("one-more", "X"))).toThrow(
+        VehicleProfileLimitError,
+      );
+      expect(() => repo.save(profile("p0", "Renamed"))).not.toThrow();
+      expect(repo.count()).toBe(MAX_VEHICLE_PROFILES);
     });
 
     it("does not store fields the schema does not name", () => {

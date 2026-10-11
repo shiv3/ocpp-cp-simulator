@@ -95,7 +95,7 @@ No error message the adapter builds contains the key: messages carry the
 request path and what the API said, a problem `detail` that echoes the key is
 scrubbed, and the underlying fetch error is not kept as a cause. The shared
 redaction ([`redaction.ts`](../../src/cp/shared/redaction.ts)) also replaces
-any `Bearer <token>`, any `evd_live_…` / `evd_test_…` key and any
+any `Bearer <token>` and any
 `apiKey` / `api_key` assignment in text with `[redacted]`, and drops an
 `apiKey` field (any spelling with `-` / `_`) from redacted objects. That
 redaction is shared with the diagnostic outputs, so a charge point

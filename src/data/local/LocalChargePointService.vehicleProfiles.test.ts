@@ -1,49 +1,14 @@
-import initSqlJs from "sql.js";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Database, SqlParam } from "../../cp/domain/persistence/Database";
-import { runMigrations } from "../../cp/domain/persistence/schema";
 import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
+import { memoryDatabase } from "../../test/sqlJsMemoryDatabase";
 import { LocalChargePointService } from "./LocalChargePointService";
 
-/** sql.js behind the `Database` port, as the browser runs it. */
-async function memoryDatabase(): Promise<
-  Database & { flush: () => Promise<void> }
-> {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  const coerce = (params: SqlParam[]) =>
-    params.map((p) => (typeof p === "boolean" ? Number(p) : p));
-  const adapter = {
-    exec: (sql: string) => {
-      db.exec(sql);
-    },
-    run: (sql: string, params: SqlParam[] = []) => {
-      db.run(sql, coerce(params));
-    },
-    all: <T>(sql: string, params: SqlParam[] = []) => {
-      const stmt = db.prepare(sql, coerce(params));
-      const rows: T[] = [];
-      try {
-        while (stmt.step()) rows.push(stmt.getAsObject() as T);
-      } finally {
-        stmt.free();
-      }
-      return rows;
-    },
-    get: <T>(sql: string, params: SqlParam[] = []) => {
-      const stmt = db.prepare(sql, coerce(params));
-      try {
-        return stmt.step() ? (stmt.getAsObject() as T) : null;
-      } finally {
-        stmt.free();
-      }
-    },
-    close: () => db.close(),
+/** The browser's sql.js database, with a `flush` spy for its writes. */
+async function flushingDatabase() {
+  return Object.assign(await memoryDatabase(), {
     flush: vi.fn(async () => {}),
-  };
-  runMigrations(adapter);
-  return adapter;
+  });
 }
 
 const PROFILE: VehicleProfile = {
@@ -66,7 +31,7 @@ const PROFILE: VehicleProfile = {
 
 describe("LocalChargePointService vehicle profiles (#458)", () => {
   it("stores profiles in the browser database and flushes each write", async () => {
-    const database = await memoryDatabase();
+    const database = await flushingDatabase();
     const service = new LocalChargePointService(database);
 
     await expect(service.saveVehicleProfile(PROFILE)).resolves.toEqual(PROFILE);
@@ -82,14 +47,14 @@ describe("LocalChargePointService vehicle profiles (#458)", () => {
   });
 
   it("fails to delete a profile that is not there", async () => {
-    const service = new LocalChargePointService(await memoryDatabase());
+    const service = new LocalChargePointService(await flushingDatabase());
     await expect(service.deleteVehicleProfile("nope")).rejects.toThrow(
       /not found/,
     );
   });
 
   it("rejects an invalid profile instead of storing it", async () => {
-    const service = new LocalChargePointService(await memoryDatabase());
+    const service = new LocalChargePointService(await flushingDatabase());
     await expect(
       service.saveVehicleProfile({ ...PROFILE, name: "" }),
     ).rejects.toThrow();
@@ -97,7 +62,7 @@ describe("LocalChargePointService vehicle profiles (#458)", () => {
   });
 
   it("loses the profiles to Reset all simulator data", async () => {
-    const service = new LocalChargePointService(await memoryDatabase());
+    const service = new LocalChargePointService(await flushingDatabase());
     await service.saveVehicleProfile(PROFILE);
     await service.resetAllState();
     await expect(service.listVehicleProfiles()).resolves.toEqual([]);

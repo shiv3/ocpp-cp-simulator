@@ -701,3 +701,38 @@ describe("VehicleProfilesCard — review findings (#458)", () => {
     expect(alert.textContent).not.toContain("kept as it is");
   });
 });
+
+describe("VehicleProfilesCard — insecure context (#458)", () => {
+  // A daemon's console served over plain HTTP from another host is not a
+  // secure context: browsers do not expose crypto.randomUUID there.
+  it("still saves when crypto.randomUUID is unavailable", async () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: globalThis.crypto.getRandomValues.bind(
+        globalThis.crypto,
+      ),
+    });
+    const service = remoteService(
+      fakeCatalog({
+        getVariant: vi.fn(async () => ({
+          ...VARIANT,
+          sourceRecords: [
+            {
+              ...VARIANT.sourceRecords[0]!,
+              specs: {
+                ...VARIANT.sourceRecords[0]!.specs,
+                usableBatteryKwh: 86,
+              },
+            },
+          ],
+        })),
+      }),
+    );
+    await render(service);
+    await openVariant();
+    await click(byLabel("Specs from gaia"));
+    await click(byLabel("No curve"));
+    await click(button("Save profile"));
+    const saved = vi.mocked(service.saveVehicleProfile!).mock.calls[0]?.[0];
+    expect(saved?.id).toMatch(/^vp_[0-9a-f-]{32,36}$/);
+  });
+});

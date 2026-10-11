@@ -121,6 +121,41 @@ describe("ScenarioEvSettingsFields — saved vehicle profiles (#458)", () => {
     );
   });
 
+  it("drops the profile's curve and current type when a preset is picked after it", async () => {
+    const { select, onChange } = await render({ initialSoc: 15 });
+    await act(async () => pick(select, "Volkswagen ID.7 GTX · DC"));
+    const applied = onChange.mock.calls.at(-1)![0];
+    // The host re-renders with what onChange gave it.
+    await act(async () =>
+      root!.render(
+        <DataContext.Provider
+          value={{
+            mode: "local",
+            serverUrl: "",
+            defaultEvSettings: null,
+            setDefaultEvSettings: () => {},
+            chargePointService: createFakeChargePointService({
+              listVehicleProfiles: vi.fn(async () => [PROFILE]),
+            }),
+          }}
+        >
+          <ScenarioEvSettingsFields
+            value={applied}
+            onChange={onChange}
+            defaultEvSettings={null}
+          />
+        </DataContext.Provider>,
+      ),
+    );
+    await act(async () => pick(select, "Tesla Model 3"));
+    expect(onChange.mock.calls.at(-1)![0]).toEqual({
+      initialSoc: 15,
+      modelName: "Tesla Model 3",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 250,
+    });
+  });
+
   it("shows a model that is not a preset under its own name", async () => {
     const { select } = await render({ modelName: "Volkswagen ID.7 GTX" });
     expect(select.value).toBe("Volkswagen ID.7 GTX");

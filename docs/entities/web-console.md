@@ -1071,7 +1071,9 @@ The saved profiles appear in the vehicle selects of the connector
 **Scenario EV Settings**, once per current type (DC and AC). A type the
 profile lacks a value for is listed disabled with what is missing; a pick
 copies the values, so later edits of the profile do not change what was
-applied.
+applied. A preset (or **Custom**) picked after a profile in the same edit
+puts the curve, current type and phases back to what they were before the
+profile, so it never yields a preset with the profile's curve.
 
 ## What the console can do
 

@@ -13,7 +13,11 @@ import {
   applyVehicleSettings,
   type ResolveWarning,
 } from "../cp/domain/vehicle/VehicleProfile";
-import { isPresetName, readVehicleChoice } from "./vehicle/vehicleChoice";
+import {
+  isPresetName,
+  readVehicleChoice,
+  withoutProfileFields,
+} from "./vehicle/vehicleChoice";
 import {
   VehicleChoiceNotes,
   VehicleProfileOptions,
@@ -86,6 +90,9 @@ const Settings: React.FC = () => {
   const [success, setSuccess] = useState<string>("");
   // #458: saved vehicle profiles offered beside the presets.
   const vehicleProfiles = useVehicleProfiles();
+  // The draft before the first profile pick, so a preset picked afterwards
+  // does not keep the profile's curve, current type and phases.
+  const [beforeProfile, setBeforeProfile] = useState<EVSettings | null>(null);
   const [vehicleNotes, setVehicleNotes] = useState<{
     warnings: ResolveWarning[];
     error: string | null;
@@ -370,17 +377,20 @@ const Settings: React.FC = () => {
                   return;
                 }
                 if (choice.kind === "profile") {
+                  setBeforeProfile((before) => before ?? draftEv);
                   setDraftEv(applyVehicleSettings(draftEv, choice.settings));
                   setVehicleNotes({ warnings: choice.warnings, error: null });
                   return;
                 }
                 setVehicleNotes(null);
+                const base = withoutProfileFields(draftEv, beforeProfile);
+                setBeforeProfile(null);
                 if (preset === "Custom") {
-                  setDraftEv({ ...draftEv, modelName: "Custom" });
+                  setDraftEv({ ...base, modelName: "Custom" });
                   return;
                 }
                 const values = EV_PRESETS[preset] ?? {};
-                setDraftEv({ ...draftEv, modelName: preset, ...values });
+                setDraftEv({ ...base, modelName: preset, ...values });
               }}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
             >

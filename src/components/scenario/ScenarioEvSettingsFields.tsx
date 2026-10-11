@@ -11,7 +11,11 @@ import {
   applyVehicleSettings,
   type ResolveWarning,
 } from "../../cp/domain/vehicle/VehicleProfile";
-import { isPresetName, readVehicleChoice } from "../vehicle/vehicleChoice";
+import {
+  isPresetName,
+  readVehicleChoice,
+  withoutProfileFields,
+} from "../vehicle/vehicleChoice";
 import {
   VehicleChoiceNotes,
   VehicleProfileOptions,
@@ -44,6 +48,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
   // #458: saved vehicle profiles offered beside the presets. The scenario
   // takes a copy of the values; it does not refer to the profile.
   const vehicleProfiles = useVehicleProfiles();
+  // The scenario's settings before the first profile pick of this edit, so
+  // a preset picked afterwards does not keep the profile's curve.
+  const [beforeProfile, setBeforeProfile] =
+    useState<Partial<EVSettings> | null>(null);
   const [vehicleNotes, setVehicleNotes] = useState<{
     warnings: ResolveWarning[];
     error: string | null;
@@ -87,25 +95,29 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                   return;
                 }
                 if (choice.kind === "profile") {
+                  setBeforeProfile((before) => before ?? value);
                   onChange(applyVehicleSettings(value, choice.settings));
                   setVehicleNotes({ warnings: choice.warnings, error: null });
                   return;
                 }
                 setVehicleNotes(null);
                 if (!preset) {
+                  setBeforeProfile(null);
                   onChange({});
                   return;
                 }
+                const base = withoutProfileFields(value, beforeProfile);
+                setBeforeProfile(null);
                 if (preset === "Custom") {
                   onChange({
-                    ...value,
+                    ...base,
                     modelName: "Custom",
                   });
                   return;
                 }
                 const presetValues = EV_PRESETS[preset] ?? {};
                 onChange({
-                  ...value,
+                  ...base,
                   modelName: preset,
                   ...presetValues,
                 });

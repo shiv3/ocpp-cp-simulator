@@ -50,7 +50,7 @@ JSON or does not match is `invalid_response`. Each request has a **10 s**
 timeout. The adapter is pinned to the API's published response examples by
 contract fixtures in
 [`__fixtures__/`](../../src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md)
-(verbatim copies, test data only, under the upstream sources' licenses).
+(copies, reformatted by the repository's formatter; test data only, under the upstream sources' licenses).
 
 ## Configuration
 
@@ -97,7 +97,12 @@ scrubbed, and the underlying fetch error is not kept as a cause. The shared
 redaction ([`redaction.ts`](../../src/cp/shared/redaction.ts)) also replaces
 any `Bearer <token>`, any `evd_live_…` / `evd_test_…` key and any
 `apiKey` / `api_key` assignment in text with `[redacted]`, and drops an
-`apiKey` field (any spelling with `-` / `_`) from redacted objects.
+`apiKey` field (any spelling with `-` / `_`) from redacted objects. That
+redaction is shared with the diagnostic outputs, so a charge point
+configuration key named `ApiKey` now shows its value as `[redacted]` in
+Socket.IO events, JSON Lines and scenario reports, like `AuthorizationKey`;
+what the charge point answers the CSMS is unchanged (`GetConfiguration`
+blanks only `AuthorizationKey`).
 
 ## Errors
 

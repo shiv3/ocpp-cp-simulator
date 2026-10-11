@@ -1,4 +1,7 @@
-import { EV_PRESETS } from "../../cp/domain/connector/EVSettings";
+import {
+  EV_PRESETS,
+  type EVSettings,
+} from "../../cp/domain/connector/EVSettings";
 import {
   resolveEvSettings,
   type EditableSpecField,
@@ -106,4 +109,26 @@ export function describeWarning(warning: ResolveWarning): string {
     case "AC_PHASES_UNKNOWN":
       return "The source gives no AC phase count: single phase is assumed.";
   }
+}
+
+/** The fields a profile sets that a preset does not. */
+const PROFILE_ONLY_FIELDS = ["chargingCurve", "currentType", "phases"] as const;
+
+/**
+ * Undo a profile's curve, current type and phases before a preset (or Custom)
+ * is applied in the same edit, so picking "Tesla Model 3" after a DC profile
+ * does not keep that profile's curve: they go back to what they were before
+ * the first profile was picked. Other fields are left as the user has them.
+ */
+export function withoutProfileFields<T extends Partial<EVSettings>>(
+  current: T,
+  beforeProfile: Partial<EVSettings> | null,
+): T {
+  if (!beforeProfile) return current;
+  const next = { ...current } as Record<string, unknown>;
+  for (const field of PROFILE_ONLY_FIELDS) {
+    if (beforeProfile[field] === undefined) delete next[field];
+    else next[field] = beforeProfile[field];
+  }
+  return next as T;
 }

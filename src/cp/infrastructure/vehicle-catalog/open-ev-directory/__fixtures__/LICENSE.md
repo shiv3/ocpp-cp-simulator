@@ -1,9 +1,10 @@
 # Open EV Directory contract fixtures
 
-The JSON files in this directory are verbatim copies of the response examples
+The JSON files in this directory are copies of the response examples
 published by the Open EV Vehicle Directory API
 (<https://github.com/juherr/open-ev-directory>,
-`app/src/main/resources/openapi/examples/`). They are test data only, used to
+`app/src/main/resources/openapi/examples/`), reformatted by this repository's
+formatter and otherwise unchanged. They are test data only, used to
 pin the simulator's adapter to the API contract (#458).
 
 They contain vehicle data from two upstream sources, each under its own terms,

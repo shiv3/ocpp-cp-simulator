@@ -89,7 +89,7 @@ const ImportVehicleDialog: React.FC<ImportVehicleDialogProps> = (props) => (
 const ImportBody: React.FC<ImportVehicleDialogProps> = ({
   onOpenChange,
   onSave,
-  newId = () => `vp_${crypto.randomUUID()}`,
+  newId = newVehicleProfileId,
   now = () => new Date().toISOString(),
 }) => {
   const access = useVehicleCatalog();
@@ -280,11 +280,12 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
           busy={busy}
           onBack={() => setVariant(null)}
           onCancel={() => onOpenChange(false)}
-          onSave={async (profileInput) => {
+          onSave={async (build) => {
             setBusy(true);
             setError(null);
             try {
-              await onSave(profileInput);
+              // Built here, inside the try: minting the id can throw.
+              await onSave(build());
               onOpenChange(false);
             } catch (err) {
               setError(
@@ -461,12 +462,26 @@ function PickList<T extends { id: string }>({
 
 const NO_CURVE = "__none__";
 
+/**
+ * A new profile id. `crypto.randomUUID` exists only in secure contexts
+ * (HTTPS, localhost); a daemon's console reached over plain HTTP from another
+ * host is not one, so fall back to `getRandomValues`, which every context has.
+ */
+function newVehicleProfileId(): string {
+  if (typeof crypto.randomUUID === "function") {
+    return `vp_${crypto.randomUUID()}`;
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `vp_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 const VariantForm: React.FC<{
   variant: CatalogVariant;
   busy: boolean;
   onBack: () => void;
   onCancel: () => void;
-  onSave: (profile: VehicleProfile) => Promise<void>;
+  /** Receives the profile to build, so the caller reports a failure. */
+  onSave: (build: () => VehicleProfile) => Promise<void>;
   newId: () => string;
   now: () => string;
 }> = ({ variant, busy, onBack, onCancel, onSave, newId, now }) => {
@@ -668,14 +683,18 @@ const VariantForm: React.FC<{
           disabled={busy || blocker !== null || !draft}
           onClick={() => {
             if (!draft) return;
-            const at = now();
-            void onSave({
-              ...draft,
-              id: newId(),
-              name: name.trim(),
-              createdAt: at,
-              updatedAt: at,
-              origin: draft.origin ? { ...draft.origin, importedAt: at } : null,
+            void onSave(() => {
+              const at = now();
+              return {
+                ...draft,
+                id: newId(),
+                name: name.trim(),
+                createdAt: at,
+                updatedAt: at,
+                origin: draft.origin
+                  ? { ...draft.origin, importedAt: at }
+                  : null,
+              };
             });
           }}
         >

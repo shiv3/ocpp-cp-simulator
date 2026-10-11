@@ -8,6 +8,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import { useDataContext } from "../data/providers/DataProvider";
+import { useVehicleProfiles } from "../data/hooks/useVehicleProfiles";
+import {
+  applyVehicleSettings,
+  type ResolveWarning,
+} from "../cp/domain/vehicle/VehicleProfile";
+import { isPresetName, readVehicleChoice } from "./vehicle/vehicleChoice";
+import {
+  VehicleChoiceNotes,
+  VehicleProfileOptions,
+} from "./vehicle/VehicleChoiceControls";
 import {
   type EVSettings,
   EV_PRESETS,
@@ -74,6 +84,12 @@ const Settings: React.FC = () => {
   const [jsonText, setJsonText] = useState<string>("{}");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
+  // #458: saved vehicle profiles offered beside the presets.
+  const vehicleProfiles = useVehicleProfiles();
+  const [vehicleNotes, setVehicleNotes] = useState<{
+    warnings: ResolveWarning[];
+    error: string | null;
+  } | null>(null);
   const [draftEv, setDraftEv] = useState<EVSettings>(() =>
     seedDraftEv(defaultEvSettings),
   );
@@ -340,13 +356,23 @@ const Settings: React.FC = () => {
             </label>
             <select
               id="default-ev-preset"
-              value={
-                Object.keys(EV_PRESETS).includes(draftEv.modelName)
-                  ? draftEv.modelName
-                  : "Custom"
-              }
+              value={draftEv.modelName || "Custom"}
               onChange={(e) => {
                 const preset = e.target.value;
+                const choice = readVehicleChoice(
+                  preset,
+                  vehicleProfiles.profiles,
+                );
+                if (choice.kind === "unusable") {
+                  setVehicleNotes({ warnings: [], error: choice.message });
+                  return;
+                }
+                if (choice.kind === "profile") {
+                  setDraftEv(applyVehicleSettings(draftEv, choice.settings));
+                  setVehicleNotes({ warnings: choice.warnings, error: null });
+                  return;
+                }
+                setVehicleNotes(null);
                 if (preset === "Custom") {
                   setDraftEv({ ...draftEv, modelName: "Custom" });
                   return;
@@ -356,12 +382,17 @@ const Settings: React.FC = () => {
               }}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
             >
+              {draftEv.modelName && !isPresetName(draftEv.modelName) && (
+                <option value={draftEv.modelName}>{draftEv.modelName}</option>
+              )}
+              <VehicleProfileOptions state={vehicleProfiles} />
               {Object.keys(EV_PRESETS).map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
               ))}
             </select>
+            <VehicleChoiceNotes notes={vehicleNotes} className="mt-1.5" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -6,6 +6,16 @@ import {
   type EVSettings,
 } from "../../cp/domain/connector/EVSettings";
 import { cn } from "../../lib/utils";
+import { useVehicleProfiles } from "../../data/hooks/useVehicleProfiles";
+import {
+  applyVehicleSettings,
+  type ResolveWarning,
+} from "../../cp/domain/vehicle/VehicleProfile";
+import { isPresetName, readVehicleChoice } from "../vehicle/vehicleChoice";
+import {
+  VehicleChoiceNotes,
+  VehicleProfileOptions,
+} from "../vehicle/VehicleChoiceControls";
 
 export interface ScenarioEvSettingsFieldsProps {
   /** The scenario's EV settings; an empty field inherits. */
@@ -31,6 +41,13 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
   className,
 }) => {
   const [expanded, setExpanded] = useState(initiallyExpanded);
+  // #458: saved vehicle profiles offered beside the presets. The scenario
+  // takes a copy of the values; it does not refer to the profile.
+  const vehicleProfiles = useVehicleProfiles();
+  const [vehicleNotes, setVehicleNotes] = useState<{
+    warnings: ResolveWarning[];
+    error: string | null;
+  } | null>(null);
 
   return (
     <div
@@ -61,6 +78,20 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
               value={value.modelName ?? ""}
               onChange={(e) => {
                 const preset = e.target.value;
+                const choice = readVehicleChoice(
+                  preset,
+                  vehicleProfiles.profiles,
+                );
+                if (choice.kind === "unusable") {
+                  setVehicleNotes({ warnings: [], error: choice.message });
+                  return;
+                }
+                if (choice.kind === "profile") {
+                  onChange(applyVehicleSettings(value, choice.settings));
+                  setVehicleNotes({ warnings: choice.warnings, error: null });
+                  return;
+                }
+                setVehicleNotes(null);
                 if (!preset) {
                   onChange({});
                   return;
@@ -84,12 +115,17 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                 (use default
                 {defaultEvSettings ? `: ${defaultEvSettings.modelName}` : ""})
               </option>
+              {value.modelName && !isPresetName(value.modelName) && (
+                <option value={value.modelName}>{value.modelName}</option>
+              )}
+              <VehicleProfileOptions state={vehicleProfiles} />
               {Object.keys(EV_PRESETS).map((preset) => (
                 <option key={preset} value={preset}>
                   {preset}
                 </option>
               ))}
             </select>
+            <VehicleChoiceNotes notes={vehicleNotes} className="mt-1" />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>

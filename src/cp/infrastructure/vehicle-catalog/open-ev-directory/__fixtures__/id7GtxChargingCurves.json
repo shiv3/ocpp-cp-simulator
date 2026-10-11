@@ -1,0 +1,195 @@
+{
+  "items": [
+    {
+      "chargingType": "DC",
+      "datasetVersion": "sha256:b1e424ab58d32fcf",
+      "id": "crv_2523855ffac08d0a",
+      "license": {
+        "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+        "copyrightNotice": "© EVDB contributors",
+        "id": "CC-BY-SA-4.0",
+        "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+        "shareAlike": true,
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+      },
+      "licenses": [
+        {
+          "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+          "copyrightNotice": "© EVDB contributors",
+          "id": "CC-BY-SA-4.0",
+          "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+          "shareAlike": true,
+          "sourceId": "gaia",
+          "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+        }
+      ],
+      "links": {
+        "self": "/v1/charging-curves/crv_2523855ffac08d0a",
+        "variant": "/v1/variants/var_b16bdbae5aa906a7"
+      },
+      "measurementConditions": null,
+      "observations": ["ENDS_BELOW_FULL_SOC"],
+      "originalQuality": "metadata.data_quality=verified (record-level)",
+      "points": [
+        {
+          "powerKw": 200,
+          "socPercent": 0
+        },
+        {
+          "powerKw": 200,
+          "socPercent": 10
+        },
+        {
+          "powerKw": 200,
+          "socPercent": 20
+        },
+        {
+          "powerKw": 185,
+          "socPercent": 30
+        },
+        {
+          "powerKw": 165,
+          "socPercent": 40
+        },
+        {
+          "powerKw": 140,
+          "socPercent": 50
+        },
+        {
+          "powerKw": 110,
+          "socPercent": 60
+        },
+        {
+          "powerKw": 80,
+          "socPercent": 70
+        },
+        {
+          "powerKw": 55,
+          "socPercent": 80
+        },
+        {
+          "powerKw": 40,
+          "socPercent": 90
+        }
+      ],
+      "provenance": {
+        "fetchedAt": "2026-10-10T14:08:01Z",
+        "repositoryUrl": "https://github.com/gaia-charge/evdb",
+        "revision": "173aaf5ae7720631f5dd9b50084afdac0ef41b24",
+        "revisionTag": "2026.08.14-1800"
+      },
+      "quality": "UNKNOWN",
+      "qualityBasis": "The data quality applies to the whole record and 'verified' only means a URL is cited; there is no curve-level evidence.",
+      "sourceId": "gaia",
+      "sourceRecord": {
+        "citedSources": [
+          "https://www.volkswagen.com/en/models/id-7.html",
+          "https://www.volkswagen-newsroom.com/en/press-releases/id7-gtx-launch-2024",
+          "https://www.adac.de/rund-ums-fahrzeug/autokatalog/marken-modelle/vw/id7/"
+        ],
+        "externalId": "volkswagen-id7-gtx-2024",
+        "key": "gaia:volkswagen-id7-gtx-2024",
+        "sourceUrl": "https://github.com/gaia-charge/evdb/blob/173aaf5ae7720631f5dd9b50084afdac0ef41b24/data/vehicle-variants/volkswagen-id7-gtx-2024.yaml"
+      },
+      "units": {
+        "power": "kW",
+        "soc": "percent"
+      },
+      "variantId": "var_b16bdbae5aa906a7"
+    },
+    {
+      "chargingType": "DC",
+      "datasetVersion": "sha256:b1e424ab58d32fcf",
+      "id": "crv_8fb466d59158ccb5",
+      "license": {
+        "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+        "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+        "id": "LicenseRef-KilowattApp-MIT-Attribution",
+        "name": "MIT License with Attribution Requirement",
+        "shareAlike": false,
+        "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+      },
+      "licenses": [
+        {
+          "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+          "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+          "id": "LicenseRef-KilowattApp-MIT-Attribution",
+          "name": "MIT License with Attribution Requirement",
+          "shareAlike": false,
+          "sourceId": "kilowatt",
+          "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+        }
+      ],
+      "links": {
+        "self": "/v1/charging-curves/crv_8fb466d59158ccb5",
+        "variant": "/v1/variants/var_b16bdbae5aa906a7"
+      },
+      "measurementConditions": null,
+      "observations": [],
+      "originalQuality": "is_default_charging_curve=false",
+      "points": [
+        {
+          "powerKw": 200,
+          "socPercent": 0
+        },
+        {
+          "powerKw": 200,
+          "socPercent": 50
+        },
+        {
+          "powerKw": 120,
+          "socPercent": 80
+        },
+        {
+          "powerKw": 60,
+          "socPercent": 100
+        }
+      ],
+      "provenance": {
+        "fetchedAt": "2026-10-10T14:07:54Z",
+        "repositoryUrl": "https://github.com/KilowattApp/open-ev-data",
+        "revision": "32d7dc59e7b8b7391572ca1e132a1517be9a3b5e",
+        "revisionTag": null
+      },
+      "quality": "UNKNOWN",
+      "qualityBasis": "Not flagged as default, which does not mean measured: the source gives no curve-level provenance and most such curves follow recurring templates.",
+      "sourceId": "kilowatt",
+      "sourceRecord": {
+        "citedSources": [],
+        "externalId": "2854a132-20b9-4bb1-b18a-fc0fec23a346",
+        "key": "kilowatt:2854a132-20b9-4bb1-b18a-fc0fec23a346",
+        "sourceUrl": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/data/v2/models/volkswagen.json"
+      },
+      "units": {
+        "power": "kW",
+        "soc": "percent"
+      },
+      "variantId": "var_b16bdbae5aa906a7"
+    }
+  ],
+  "licenses": [
+    {
+      "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+      "copyrightNotice": "© EVDB contributors",
+      "id": "CC-BY-SA-4.0",
+      "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+      "shareAlike": true,
+      "sourceId": "gaia",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+      "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+      "id": "LicenseRef-KilowattApp-MIT-Attribution",
+      "name": "MIT License with Attribution Requirement",
+      "shareAlike": false,
+      "sourceId": "kilowatt",
+      "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+    }
+  ],
+  "links": {
+    "self": "/v1/variants/var_b16bdbae5aa906a7/charging-curves",
+    "variant": "/v1/variants/var_b16bdbae5aa906a7"
+  },
+  "variantId": "var_b16bdbae5aa906a7"
+}

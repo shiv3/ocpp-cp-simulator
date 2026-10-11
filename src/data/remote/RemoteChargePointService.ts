@@ -1,3 +1,9 @@
+import {
+  VehicleCatalogError,
+  type VehicleCatalog,
+  type VehicleCatalogErrorKind,
+} from "../../cp/domain/vehicle/VehicleCatalog";
+import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import { io, type Socket } from "socket.io-client";
 import type {
   DataTransferData,
@@ -361,6 +367,39 @@ function authFromUrl(
     // errors through the normal connect_error path.
   }
   return undefined;
+}
+
+/**
+ * #458: a failed `vehicle_catalog.*` call as the catalog port's error, so the
+ * console handles Local and Remote failures alike. The daemon's message is
+ * kept; it never contains the key.
+ */
+function toVehicleCatalogError(error: unknown): VehicleCatalogError {
+  if (!(error instanceof RpcFailure)) {
+    return new VehicleCatalogError(
+      "network",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  const kind: VehicleCatalogErrorKind = (() => {
+    switch (error.code) {
+      case "unauthorized":
+      case "not_found":
+      case "rate_limited":
+      case "timeout":
+      case "unavailable":
+        return error.code;
+      case "invalid_params":
+        return "invalid_request";
+      case "disconnected":
+        return "network";
+      default:
+        return "unavailable";
+    }
+  })();
+  return new VehicleCatalogError(kind, error.message, {
+    retryAfterSeconds: error.retryAfterSeconds,
+  });
 }
 
 function publicFailure(code: RpcErrorCode): RpcFailure {
@@ -1606,6 +1645,42 @@ export class RemoteChargePointService implements ChargePointService {
     return this.rpc("server.info", {});
   }
 
+  async listVehicleProfiles(): Promise<VehicleProfile[]> {
+    return this.rpc("vehicle_profiles.list", {});
+  }
+
+  async saveVehicleProfile(profile: VehicleProfile): Promise<VehicleProfile> {
+    return this.rpc("vehicle_profiles.save", { profile });
+  }
+
+  async deleteVehicleProfile(id: string): Promise<void> {
+    await this.rpc("vehicle_profiles.delete", { id });
+  }
+
+  getVehicleCatalog(): VehicleCatalog {
+    const call = async <M extends RpcMethod>(
+      method: M,
+      params: Params<M>,
+    ): Promise<Result<M>> => {
+      try {
+        return await this.rpc(method, params);
+      } catch (error) {
+        throw toVehicleCatalogError(error);
+      }
+    };
+    return {
+      listMakes: () => call("vehicle_catalog.list_makes", {}),
+      searchModels: (query) => call("vehicle_catalog.search_models", query),
+      listVariants: (modelId, page) =>
+        call("vehicle_catalog.list_variants", {
+          modelId,
+          ...(page === undefined ? {} : { page }),
+        }),
+      getVariant: (variantId) =>
+        call("vehicle_catalog.get_variant", { variantId }),
+    };
+  }
+
   async resetAllState(): Promise<void> {
     await this.rpc("state.reset", {});
   }
@@ -1777,7 +1852,9 @@ export class RemoteChargePointService implements ChargePointService {
 
     return this.emitRpcRequest(request, (ack) => {
       if (!ack.ok) {
-        throw new RpcFailure(ack.error.code, ack.error.message);
+        throw new RpcFailure(ack.error.code, ack.error.message, {
+          retryAfterSeconds: ack.error.retryAfterSeconds,
+        });
       }
       return ack.result as Result<M>;
     });

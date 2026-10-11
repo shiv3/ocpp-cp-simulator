@@ -34,6 +34,7 @@ import {
   wireSimulatorConfigSchema,
 } from "./events";
 import { subscribeResultSchema } from "./envelope";
+import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
 import {
   METER_READING_CONTEXTS,
   STOP_REASONS,
@@ -411,6 +412,8 @@ export const serverInfoSchema = z.object({
       })
       .nullable(),
   }),
+  /** #458: the vehicle catalog an import can read. Absent from older daemons. */
+  vehicleCatalog: vehicleCatalogInfoSchema.optional(),
 });
 export type ServerInfo = z.infer<typeof serverInfoSchema>;
 
@@ -992,6 +995,9 @@ export const METHODS = {
     result: subscribeResultSchema,
   },
   "events.unsubscribe": { params: z.object({ scope: STR_64K }), result: ANY },
+  // #458: saved vehicle profiles, and the catalog an import reads through the
+  // daemon so the API key stays server-side.
+  ...VEHICLE_METHODS,
 } satisfies Record<string, { params: z.ZodTypeAny; result: z.ZodTypeAny }>;
 
 /** The explicit (non-jsonMode) op ids — routed to dedicated server handlers. */
@@ -1031,4 +1037,11 @@ export const EXPLICIT_METHODS = [
   "network_sim.cp.get",
   "network_sim.cp.save",
   "network_sim.disconnect.trigger",
+  "vehicle_profiles.list",
+  "vehicle_profiles.save",
+  "vehicle_profiles.delete",
+  "vehicle_catalog.list_makes",
+  "vehicle_catalog.search_models",
+  "vehicle_catalog.list_variants",
+  "vehicle_catalog.get_variant",
 ] as const;

@@ -9,7 +9,7 @@ import {
   type CatalogVariant,
   type CatalogVariantSummary,
   type VehicleCatalog,
-} from "@/cp/domain/vehicle/VehicleCatalog";
+} from "../../../domain/vehicle/VehicleCatalog";
 
 import {
   makePageSchema,

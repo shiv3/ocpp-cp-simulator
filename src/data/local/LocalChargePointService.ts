@@ -1,3 +1,5 @@
+import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
@@ -204,6 +206,7 @@ export class LocalChargePointService implements ChargePointService {
   private readonly configRepository: ConfigRepository;
   private readonly connectorSettingsRepository: ConnectorSettingsRepository;
   private readonly scenarioRepository: SqliteScenarioRepository;
+  private readonly vehicleProfiles: VehicleProfileRepository;
 
   constructor(
     private readonly database: Database | null = null,
@@ -214,6 +217,7 @@ export class LocalChargePointService implements ChargePointService {
       database,
     );
     this.scenarioRepository = new SqliteScenarioRepository(database);
+    this.vehicleProfiles = new VehicleProfileRepository(database);
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -304,6 +308,23 @@ export class LocalChargePointService implements ChargePointService {
 
     // Clear the networkSim atom to reset all network-sim configuration
     this.store.set(networkSimAtom, { version: 1, global: null, perCp: {} });
+  }
+
+  async listVehicleProfiles(): Promise<VehicleProfile[]> {
+    return this.vehicleProfiles.list();
+  }
+
+  async saveVehicleProfile(profile: VehicleProfile): Promise<VehicleProfile> {
+    const stored = this.vehicleProfiles.save(profile);
+    await this.database?.flush?.();
+    return stored;
+  }
+
+  async deleteVehicleProfile(id: string): Promise<void> {
+    if (!this.vehicleProfiles.delete(id)) {
+      throw new Error(`vehicle profile not found: ${id}`);
+    }
+    await this.database?.flush?.();
   }
 
   async clearStoredLogs(cpId: string): Promise<void> {

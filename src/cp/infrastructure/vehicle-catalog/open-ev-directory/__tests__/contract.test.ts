@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { profileFromCatalog } from "@/cp/domain/vehicle/importProfile";
-import { resolveEvSettings } from "@/cp/domain/vehicle/VehicleProfile";
+import { profileFromCatalog } from "../../../../domain/vehicle/importProfile";
+import { resolveEvSettings } from "../../../../domain/vehicle/VehicleProfile";
 import {
   OpenEvDirectoryClient,
   type FetchLike,

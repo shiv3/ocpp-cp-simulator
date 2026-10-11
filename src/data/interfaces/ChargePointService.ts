@@ -1,3 +1,5 @@
+import type { VehicleCatalog } from "../../cp/domain/vehicle/VehicleCatalog";
+import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
   OcppCallOutcome,
@@ -413,6 +415,18 @@ export interface ChargePointService {
    *  {@link getScenarioReport} returns a run's full report. Remote only:
    *  local mode keeps no run history. */
   listScenarioRuns?(query: ScenarioRunQuery): Promise<ScenarioRunPage>;
+
+  // Saved vehicle profiles (#458). Local mode keeps them in the browser's
+  // sql.js database, Remote mode on the daemon (`vehicle_profiles.*`). Both
+  // implement these; they are optional so a test double need not.
+  listVehicleProfiles?(): Promise<VehicleProfile[]>;
+  /** Inserts or replaces by id; resolves with what was stored. */
+  saveVehicleProfile?(profile: VehicleProfile): Promise<VehicleProfile>;
+  deleteVehicleProfile?(id: string): Promise<void>;
+  /** #458: the daemon's vehicle catalog, called with the daemon's API key.
+   *  Remote only: in Local mode the console calls the catalog itself with a
+   *  key the user typed (see `src/console/lib/vehicleCatalog.ts`). */
+  getVehicleCatalog?(): VehicleCatalog;
 
   // Persisted simulator config. Reads may be redacted over wire adapters.
   loadConfig(): Promise<WireSimulatorConfig | null>;

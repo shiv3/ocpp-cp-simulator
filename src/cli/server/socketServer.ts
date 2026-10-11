@@ -78,6 +78,17 @@ import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/ne
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
+import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import type { VehicleCatalog } from "../../cp/domain/vehicle/VehicleCatalog";
+import {
+  deleteVehicleProfile,
+  getCatalogVariant,
+  listCatalogMakes,
+  listCatalogVariants,
+  listVehicleProfiles,
+  saveVehicleProfile,
+  searchCatalogModels,
+} from "./vehicleRpc";
 import {
   builtInBlueprints,
   isBuiltInBlueprint,
@@ -149,6 +160,13 @@ export interface SocketIoDeps {
    * transport `not_found` over the other.
    */
   readonly blueprints?: BlueprintRepository;
+  /** Shared for the same reason as `blueprints` (#458). */
+  readonly vehicleProfiles?: VehicleProfileRepository;
+  /**
+   * The vehicle catalog an import reads (#458), holding the daemon's API
+   * key; absent or null when no `--oed-base-url` was given.
+   */
+  readonly vehicleCatalog?: VehicleCatalog | null;
   readonly chargePointService?: RegistryChargePointService;
   readonly registryEvents?: RegistryEventBridge | null;
   /**
@@ -166,6 +184,8 @@ export interface RuntimeSocketIoDeps extends SocketIoDeps {
   readonly chargePointService: RegistryChargePointService;
   readonly registryEvents: RegistryEventBridge | null;
   readonly blueprints: BlueprintRepository;
+  readonly vehicleProfiles: VehicleProfileRepository;
+  readonly vehicleCatalog: VehicleCatalog | null;
 }
 
 interface SocketRpcState {
@@ -328,6 +348,9 @@ export function createRuntimeDeps(
     configRepository,
     registryEvents,
     blueprints: deps.blueprints ?? new BlueprintRepository(database),
+    vehicleProfiles:
+      deps.vehicleProfiles ?? new VehicleProfileRepository(database),
+    vehicleCatalog: deps.vehicleCatalog ?? null,
     chargePointService:
       deps.chargePointService ??
       new RegistryChargePointService(deps.registry, {
@@ -375,7 +398,13 @@ async function handleRpc(
     ack({ ok: true, result });
   } catch (err) {
     recorder?.countRpc(method, "error");
-    ack(errorAck(errorCodeFrom(err), rpcFailureMessage(err)));
+    ack(
+      errorAck(
+        errorCodeFrom(err),
+        rpcFailureMessage(err),
+        retryAfterSecondsFrom(err),
+      ),
+    );
   } finally {
     state.inFlight = Math.max(0, state.inFlight - 1);
   }
@@ -540,6 +569,20 @@ export async function dispatchRpcCore(
       return shutdownServer(deps);
     case "server.info":
       return serverInfo(deps);
+    case "vehicle_profiles.list":
+      return listVehicleProfiles(deps);
+    case "vehicle_profiles.save":
+      return saveVehicleProfile(deps, call.params);
+    case "vehicle_profiles.delete":
+      return deleteVehicleProfile(deps, call.params);
+    case "vehicle_catalog.list_makes":
+      return listCatalogMakes(deps);
+    case "vehicle_catalog.search_models":
+      return searchCatalogModels(deps, call.params);
+    case "vehicle_catalog.list_variants":
+      return listCatalogVariants(deps, call.params);
+    case "vehicle_catalog.get_variant":
+      return getCatalogVariant(deps, call.params);
     case "events.subscribe":
       throw new RpcFailure(
         "not_found",
@@ -1426,6 +1469,8 @@ export function buildServerInfo(soap: {
   soapPublicBaseUrl: string | null;
   soapPath: string;
   tunnel: ServerInfo["soap"]["tunnel"];
+  /** #458: whether a catalog URL and key are set — never the key itself. */
+  vehicleCatalog?: { configured: boolean; authenticated: boolean };
 }): ServerInfo {
   return {
     version: appVersion(),
@@ -1433,6 +1478,11 @@ export function buildServerInfo(soap: {
       publicBaseUrl: soap.soapPublicBaseUrl,
       path: soap.soapPath,
       tunnel: soap.tunnel,
+    },
+    vehicleCatalog: {
+      provider: "open-ev-directory",
+      configured: soap.vehicleCatalog?.configured ?? false,
+      authenticated: soap.vehicleCatalog?.authenticated ?? false,
     },
   };
 }
@@ -2574,14 +2624,24 @@ export function errorCodeFrom(err: unknown): RpcErrorCode {
 function errorAck(
   code: RpcErrorCode,
   message?: string,
+  retryAfterSeconds?: number,
 ): {
   ok: false;
-  error: { code: RpcErrorCode; message: string };
+  error: { code: RpcErrorCode; message: string; retryAfterSeconds?: number };
 } {
   return {
     ok: false,
-    error: { code, message: message ?? publicErrorMessage(code) },
+    error: {
+      code,
+      message: message ?? publicErrorMessage(code),
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    },
   };
+}
+
+/** #458: how long a `rate_limited` upstream asked the client to wait. */
+export function retryAfterSecondsFrom(err: unknown): number | undefined {
+  return err instanceof RpcFailure ? err.retryAfterSeconds : undefined;
 }
 
 /**
@@ -2598,7 +2658,11 @@ export function rpcFailureMessage(err: unknown): string | undefined {
 }
 
 function directError(err: unknown): unknown {
-  const ack = errorAck(errorCodeFrom(err), rpcFailureMessage(err));
+  const ack = errorAck(
+    errorCodeFrom(err),
+    rpcFailureMessage(err),
+    retryAfterSecondsFrom(err),
+  );
   return { ...ack, code: ack.error.code, message: ack.error.message };
 }
 
@@ -2614,6 +2678,10 @@ function publicErrorMessage(code: RpcErrorCode): string {
       return "unauthorized";
     case "disconnected":
       return "disconnected";
+    case "rate_limited":
+      return "rate limited";
+    case "unavailable":
+      return "unavailable";
     case "internal":
     default:
       return "internal error";

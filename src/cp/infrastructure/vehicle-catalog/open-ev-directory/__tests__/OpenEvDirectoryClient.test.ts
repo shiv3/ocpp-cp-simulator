@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   VehicleCatalogError,
   type VehicleCatalogErrorKind,
-} from "@/cp/domain/vehicle/VehicleCatalog";
+} from "../../../../domain/vehicle/VehicleCatalog";
 import {
   OpenEvDirectoryClient,
   type FetchLike,

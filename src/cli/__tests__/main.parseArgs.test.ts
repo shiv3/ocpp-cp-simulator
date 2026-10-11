@@ -47,6 +47,8 @@ function runParseArgs(args: string[]) {
     "  hasWebConsoleBasicAuth: options.webConsoleBasicAuth !== null,",
     "  traceOutput: options.traceOutput,",
     "  watch: options.watch,",
+    "  oedBaseUrl: options.oedBaseUrl,",
+    "  oedApiKeyFile: options.oedApiKeyFile,",
     "}));",
   ].join("\n");
 
@@ -902,5 +904,44 @@ describe("parseArgs --trace-output", () => {
     expect(result.stderr).toContain(
       "Error: --trace-output requires a file path",
     );
+  });
+});
+
+describe("parseArgs Open EV Directory flags (#458)", () => {
+  it("reads --oed-base-url and --oed-api-key-file", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--oed-base-url",
+      "https://evd.example.test",
+      "--oed-api-key-file",
+      "/run/secrets/oed",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      oedBaseUrl: "https://evd.example.test",
+      oedApiKeyFile: "/run/secrets/oed",
+    });
+  });
+
+  it("defaults both to null", () => {
+    const result = runParseArgs(["--daemon"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      oedBaseUrl: null,
+      oedApiKeyFile: null,
+    });
+  });
+
+  it("refuses a base URL that is not http(s)", () => {
+    const result = runParseArgs(["--daemon", "--oed-base-url", "evd.example"]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "--oed-base-url must be an absolute http(s) URL",
+    );
+  });
+
+  it("has no flag that takes the key itself", () => {
+    const result = runParseArgs(["--daemon", "--oed-api-key", "evd_live_x"]);
+    expect(result.status).not.toBe(0);
   });
 });

@@ -537,8 +537,33 @@ describe("scenario run history schema, v14 (#388)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(Number(version?.value)).toBe(14);
-      expect(SCHEMA_VERSION).toBe(14);
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("vehicle profiles schema, v15 (#458)", () => {
+  it("creates vehicle_profiles on a database stamped 14", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE vehicle_profiles");
+      db.run("UPDATE schema_meta SET value = '14' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("vehicle_profiles");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("vehicle_profiles");
+      const columns = db
+        .all<{ name: string }>("PRAGMA table_info(vehicle_profiles)")
+        .map((c) => c.name);
+      expect(columns).toEqual(["id", "name", "body", "updated_at"]);
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(15);
+      expect(SCHEMA_VERSION).toBe(15);
     } finally {
       db.close();
     }

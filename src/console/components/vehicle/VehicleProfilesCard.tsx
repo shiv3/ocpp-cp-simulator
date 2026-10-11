@@ -255,7 +255,9 @@ const ProfileRow: React.FC<{
           >
             Edit
           </Button>
-          {origin && !origin.removedUpstream && (
+          {/* Still offered for a vehicle the catalog dropped: a later
+              refresh that finds it again clears the flag. */}
+          {origin && (
             <Button
               size="sm"
               variant="outline"

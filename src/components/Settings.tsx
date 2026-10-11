@@ -136,7 +136,8 @@ const Settings: React.FC = () => {
     const proceed = window.confirm(
       "Reset all simulator data?\n\n" +
         "Scenarios, configuration overrides, charging profiles, " +
-        "availability flags, pending messages and logs will be erased. " +
+        "availability flags, pending messages, logs and saved vehicle " +
+        "profiles will be erased. " +
         "The page will reload afterwards.",
     );
     if (!proceed) return;
@@ -311,9 +312,10 @@ const Settings: React.FC = () => {
           <p className="text-muted-foreground text-sm mt-2">
             Wipe every persisted simulator record — scenarios,
             ChangeConfiguration overrides, charging profiles, availability
-            flags, pending transaction messages and any saved logs. Schema stays
-            intact; the next load starts from a clean DB. In remote mode this
-            also drops every charge point registered on the daemon.
+            flags, pending transaction messages, any saved logs and the saved
+            vehicle profiles. Schema stays intact; the next load starts from a
+            clean DB. In remote mode this also drops every charge point
+            registered on the daemon.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">

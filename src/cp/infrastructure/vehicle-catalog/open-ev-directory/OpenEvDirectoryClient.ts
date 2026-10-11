@@ -24,6 +24,11 @@ export const DEFAULT_OED_TIMEOUT_MS = 10_000;
 /** The largest page the API serves. */
 const MAX_PAGE_SIZE = 200;
 const PAGE_SIZE = 50;
+/**
+ * The most pages of makes read (10,000 makes; the catalog has under 100).
+ * Bounds the loop when an upstream reports a `totalPages` it cannot mean.
+ */
+export const MAX_MAKE_PAGES = 50;
 
 /** The part of `fetch` the client uses; narrower than `typeof fetch` so a test double needs no runtime extras. */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -86,7 +91,9 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
           modelCount: m.modelCount,
         })),
       );
-      if (page + 1 >= body.page.totalPages) return makes;
+      if (page + 1 >= Math.min(body.page.totalPages, MAX_MAKE_PAGES)) {
+        return makes;
+      }
     }
   }
 

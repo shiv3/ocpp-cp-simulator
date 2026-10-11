@@ -139,7 +139,7 @@ describe("Open EV Directory contract (#458)", () => {
     expect(variant.curves).toEqual([]);
     const resolved = resolveEvSettings(profile, "DC");
     if (!resolved.ok) throw new Error(resolved.reason);
-    expect(resolved.settings.chargingCurve).toBeUndefined();
+    expect(resolved.settings.chargingCurve).toEqual([]);
     expect(resolved.warnings).toContainEqual({ code: "NO_DC_CURVE" });
   });
 

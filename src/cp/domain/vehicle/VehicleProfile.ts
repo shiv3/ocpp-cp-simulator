@@ -178,14 +178,17 @@ export function resolveEvSettings(
   const warnings: ResolveWarning[] = [];
 
   if (currentType === "AC") {
+    // Explicit flat curve and phase count: see `applyVehicleSettings`.
     const settings: VehicleEvSettings = {
       modelName: profile.name,
       batteryCapacityKwh,
       maxChargingPowerKw: specs.acMaxKw!,
       currentType: "AC",
+      chargingCurve: [],
+      phases: specs.acPhases === 3 ? 3 : 1,
     };
     if (specs.acPhases === 1 || specs.acPhases === 3) {
-      settings.phases = specs.acPhases;
+      // Taken as given.
     } else if (specs.acPhases == null) {
       warnings.push({ code: "AC_PHASES_UNKNOWN" });
     } else {
@@ -222,7 +225,7 @@ export function resolveEvSettings(
   };
   if (curve.length === 0) {
     warnings.push({ code: "NO_DC_CURVE" });
-    return { ok: true, settings, warnings };
+    return { ok: true, settings: { ...settings, chargingCurve: [] }, warnings };
   }
 
   settings.chargingCurve = curve.map((p): ChargingCurvePoint => ({
@@ -247,17 +250,19 @@ export function resolveEvSettings(
 /**
  * Put a resolved vehicle onto existing settings: the session's SoCs and the
  * electrical values a vehicle does not determine (voltage, power factor) are
- * kept; a curve or a phase count the vehicle does not have is removed rather
- * than left over from the previous vehicle.
+ * kept.
+ *
+ * A vehicle without a curve resolves to an explicit empty curve (flat
+ * acceptance), and an AC vehicle to an explicit phase count, rather than to
+ * absent keys: the connector and a scenario start *merge* settings into the
+ * current ones (`Connector.applyEvSettingsOverride`), so an absent key would
+ * keep the previous vehicle's curve or phases.
  */
 export function applyVehicleSettings<T extends Partial<EVSettings>>(
   base: T,
   vehicle: VehicleEvSettings,
 ): T & VehicleEvSettings {
-  const next: T & VehicleEvSettings = { ...base, ...vehicle };
-  if (vehicle.chargingCurve === undefined) delete next.chargingCurve;
-  if (vehicle.phases === undefined) delete next.phases;
-  return next;
+  return { ...base, ...vehicle };
 }
 
 function curvePeakKw(curve: readonly DcCurvePoint[] | null): number {

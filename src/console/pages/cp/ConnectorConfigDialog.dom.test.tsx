@@ -412,8 +412,47 @@ describe("ConnectorConfigDialog: saved vehicle profiles (#458)", () => {
       batteryCapacityKwh: 86,
       maxChargingPowerKw: 11,
       currentType: "AC",
+      chargingCurve: [],
       phases: 3,
     });
+  });
+
+  // The save merges into the connector's settings, so the previous
+  // vehicle's curve and phases must be overwritten, not left out.
+  it("replaces the previous vehicle's curve and phases", async () => {
+    const setEVSettings = vi.fn(async () => {});
+    const { dialog } = await renderDialog(
+      {
+        setEVSettings,
+        listVehicleProfiles: vi.fn(async () => [
+          { ...ID7, specs: { ...ID7.specs, acPhases: null } },
+        ]),
+      },
+      {
+        ev: {
+          ...EV,
+          currentType: "DC",
+          phases: 3,
+          chargingCurve: [{ socPercent: 0, powerFraction: 0.5 }],
+        },
+      },
+    );
+    const vehicle = byLabel<HTMLSelectElement>(dialog, "Vehicle");
+    const ac = Array.from(vehicle.querySelectorAll("option")).find((o) =>
+      o.textContent?.startsWith("Volkswagen ID.7 GTX · AC"),
+    )!;
+    await act(async () => setValue(vehicle, ac.value));
+    expect(dialog.textContent).toContain("AC · 1 phase · flat charging curve");
+    await save(dialog);
+    expect(setEVSettings).toHaveBeenCalledWith(
+      "CP-1",
+      1,
+      expect.objectContaining({
+        currentType: "AC",
+        chargingCurve: [],
+        phases: 1,
+      }),
+    );
   });
 
   it("shows a vehicle that is not a preset under its own name", async () => {

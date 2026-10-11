@@ -576,3 +576,128 @@ describe("VehicleProfilesCard — edits (#458)", () => {
     );
   });
 });
+
+describe("VehicleProfilesCard — review findings (#458)", () => {
+  const TWO_RECORDS: CatalogVariant = {
+    ...VARIANT,
+    sourceRecords: [
+      VARIANT.sourceRecords[0]!,
+      {
+        ...VARIANT.sourceRecords[0]!,
+        key: "kilowatt:id7",
+        sourceId: "kilowatt",
+        specs: { ...VARIANT.sourceRecords[0]!.specs, usableBatteryKwh: 86 },
+      },
+    ],
+  };
+
+  it("does not save a value typed for a record the user then left", async () => {
+    const service = remoteService(
+      fakeCatalog({ getVariant: vi.fn(async () => TWO_RECORDS) }),
+    );
+    await render(service);
+    await openVariant();
+    await click(byLabel("Specs from gaia"));
+    await type(
+      byLabel<HTMLInputElement>("Missing usable battery capacity"),
+      "77",
+    );
+    await click(byLabel("Specs from kilowatt"));
+    expect(byLabel("Missing usable battery capacity")).toBeNull();
+    await click(byLabel("No curve"));
+    await click(button("Save profile"));
+    const saved = vi.mocked(service.saveVehicleProfile!).mock.calls[0]![0];
+    expect(saved.specs.usableBatteryKwh).toBe(86);
+    expect(saved.overrides).toEqual({});
+  });
+
+  it("shows the variant clicked last, whatever order the answers arrive in", async () => {
+    let releaseFirst: (v: CatalogVariant) => void = () => {};
+    const getVariant = vi
+      .fn<VehicleCatalog["getVariant"]>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<CatalogVariant>((resolve) => (releaseFirst = resolve)),
+      )
+      .mockImplementationOnce(async () => ({
+        ...VARIANT,
+        id: "var_2",
+        name: "ID.7 Pro",
+      }));
+    const catalog = fakeCatalog({
+      getVariant,
+      listVariants: vi.fn(async () => ({
+        items: [
+          {
+            id: "var_1",
+            name: "ID.7 GTX",
+            makeId: "volkswagen",
+            modelId: "volkswagen--id-7",
+            sources: ["gaia"],
+            chargingCurveCount: 1,
+          },
+          {
+            id: "var_2",
+            name: "ID.7 Pro",
+            makeId: "volkswagen",
+            modelId: "volkswagen--id-7",
+            sources: ["gaia"],
+            chargingCurveCount: 1,
+          },
+        ],
+        page: 0,
+        totalPages: 1,
+        totalItems: 2,
+      })),
+    });
+    await render(remoteService(catalog));
+    await click(button("Import from Open EV Directory"));
+    await type(byLabel<HTMLInputElement>("Model"), "id.7");
+    await click(button("Search"));
+    await click(
+      Array.from(document.body.querySelectorAll("button")).find((b) =>
+        b.textContent?.startsWith("Volkswagen ID.7"),
+      ),
+    );
+    const variantButton = (name: string) =>
+      Array.from(document.body.querySelectorAll("button")).find((b) =>
+        b.textContent?.startsWith(name),
+      );
+    const first = variantButton("ID.7 GTX")!;
+    const second = variantButton("ID.7 Pro")!;
+    await act(async () => first.click());
+    await act(async () => second.click());
+    await flush();
+    await act(async () => releaseFirst(VARIANT));
+    await flush();
+    const heading = document.body.querySelector('[aria-label="Variant"] h3');
+    expect(heading?.textContent).toContain("ID.7 Pro");
+  });
+
+  it("reports a failed save when flagging a vehicle the catalog dropped", async () => {
+    const { profileFromCatalog } =
+      await import("@/cp/domain/vehicle/importProfile");
+    const result = profileFromCatalog(
+      VARIANT,
+      { sourceRecordKey: "gaia:id7", curveId: null },
+      { id: "vp_1", now: NOW },
+    );
+    if (!result.ok) throw new Error(result.reason);
+    const service = remoteService(
+      fakeCatalog({
+        getVariant: vi.fn(async () => {
+          throw new VehicleCatalogError("not_found", "gone");
+        }),
+      }),
+      [result.profile],
+    );
+    vi.mocked(service.saveVehicleProfile!).mockRejectedValueOnce(
+      new Error("disk full"),
+    );
+    await render(service);
+    await click(button("Refresh"));
+    const alert = document.body.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("disk full");
+    expect(alert.textContent).not.toContain("kept as it is");
+  });
+});

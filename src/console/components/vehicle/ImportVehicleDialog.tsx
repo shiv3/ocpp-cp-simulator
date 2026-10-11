@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -106,17 +106,24 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
     useState<CatalogPage<CatalogVariantSummary> | null>(null);
   const [variant, setVariant] = useState<CatalogVariant | null>(null);
 
+  // Only the latest request may update the dialog: a slower answer to an
+  // earlier click (another model, another variant) is dropped.
+  const latest = useRef(0);
   const run = async <T,>(call: (c: VehicleCatalog) => Promise<T>) => {
     if (!catalog) return null;
+    const request = ++latest.current;
     setBusy(true);
     setError(null);
     try {
-      return await call(catalog);
+      const result = await call(catalog);
+      return request === latest.current ? result : null;
     } catch (err) {
-      setError(describeCatalogError(err, access.mode));
+      if (request === latest.current) {
+        setError(describeCatalogError(err, access.mode));
+      }
       return null;
     } finally {
-      setBusy(false);
+      if (request === latest.current) setBusy(false);
     }
   };
 
@@ -127,7 +134,10 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
     let cancelled = false;
     catalog.listMakes().then(
       (list) => {
-        if (!cancelled) setMakes(list);
+        if (cancelled) return;
+        setMakes(list);
+        // A key typed after a refused first attempt: the refusal is over.
+        setError(null);
       },
       (err: unknown) => {
         if (!cancelled) setError(describeCatalogError(err, access.mode));
@@ -480,8 +490,11 @@ const VariantForm: React.FC<{
       { id: "draft", now: "draft", name },
     );
     if (!result.ok) return null;
+    // Only the values this record lacks, as its inputs show; a value typed
+    // for another record the user then left is not kept.
     const overrides: VehicleProfile["overrides"] = {};
     for (const field of EDITABLE) {
+      if (record.specs[field] != null) continue;
       const value = Number(filled[field]);
       if (filled[field]?.trim() && Number.isFinite(value) && value >= 0) {
         overrides[field] = value;

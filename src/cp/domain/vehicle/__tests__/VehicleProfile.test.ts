@@ -170,7 +170,7 @@ describe("resolveEvSettings — DC (#458)", () => {
   it("charges flat at the DC maximum without a curve, and says so", () => {
     const result = resolveEvSettings(profile({ dcCurve: null }), "DC");
     if (!result.ok) throw new Error("expected ok");
-    expect(result.settings.chargingCurve).toBeUndefined();
+    expect(result.settings.chargingCurve).toEqual([]);
     expect(result.settings.maxChargingPowerKw).toBe(200);
     expect(result.warnings).toContainEqual({ code: "NO_DC_CURVE" });
   });
@@ -221,31 +221,32 @@ describe("resolveEvSettings — AC (#458)", () => {
       batteryCapacityKwh: 86,
       maxChargingPowerKw: 11,
       currentType: "AC",
+      chargingCurve: [],
       phases: 3,
     });
     expect(result.warnings).toEqual([]);
   });
 
-  it("leaves an unsupported phase count unset and says so", () => {
+  it("charges an unsupported phase count on one phase and says so", () => {
     const result = resolveEvSettings(
       profile({ specs: { ...profile().specs, acPhases: 2 } }),
       "AC",
     );
     if (!result.ok) throw new Error("expected ok");
-    expect(result.settings.phases).toBeUndefined();
+    expect(result.settings.phases).toBe(1);
     expect(result.warnings).toContainEqual({
       code: "UNSUPPORTED_AC_PHASES",
       acPhases: 2,
     });
   });
 
-  it("leaves an unknown phase count unset and says so", () => {
+  it("charges an unknown phase count on one phase and says so", () => {
     const result = resolveEvSettings(
       profile({ specs: { ...profile().specs, acPhases: null } }),
       "AC",
     );
     if (!result.ok) throw new Error("expected ok");
-    expect(result.settings.phases).toBeUndefined();
+    expect(result.settings.phases).toBe(1);
     expect(result.warnings).toContainEqual({ code: "AC_PHASES_UNKNOWN" });
   });
 });
@@ -273,11 +274,25 @@ describe("applyVehicleSettings (#458)", () => {
     expect(applied.batteryCapacityKwh).toBe(86);
   });
 
-  it("removes a previous curve and phase count the vehicle does not have", () => {
+  // The connector and a scenario start *merge* settings into the current
+  // ones (`applyEvSettingsOverride`), so "no curve" has to be a value: a
+  // missing key would keep the previous vehicle's curve and phases.
+  it("overwrites a previous curve when merged the way the connector merges", () => {
     const result = resolveEvSettings(profile({ dcCurve: null }), "DC");
     if (!result.ok) throw new Error("expected ok");
-    const applied = applyVehicleSettings(base, result.settings);
-    expect("chargingCurve" in applied).toBe(false);
-    expect("phases" in applied).toBe(false);
+    const merged = { ...base, ...applyVehicleSettings(base, result.settings) };
+    expect(merged.chargingCurve).toEqual([]);
+  });
+
+  it("overwrites a previous curve and phase count for AC", () => {
+    const result = resolveEvSettings(
+      profile({ specs: { ...profile().specs, acPhases: null } }),
+      "AC",
+    );
+    if (!result.ok) throw new Error("expected ok");
+    const merged = { ...base, ...applyVehicleSettings(base, result.settings) };
+    expect(merged.chargingCurve).toEqual([]);
+    expect(merged.phases).toBe(1);
+    expect(merged.currentType).toBe("AC");
   });
 });

@@ -102,7 +102,7 @@ export function describeWarning(warning: ResolveWarning): string {
     case "NO_DC_CURVE":
       return "No DC curve: the vehicle charges flat at its maximum power.";
     case "UNSUPPORTED_AC_PHASES":
-      return `The source gives ${warning.acPhases} AC phases; the simulator models 1 or 3, so the phase count is left unset (single phase).`;
+      return `The source gives ${warning.acPhases} AC phases; the simulator models 1 or 3, so a single phase is used.`;
     case "AC_PHASES_UNKNOWN":
       return "The source gives no AC phase count: single phase is assumed.";
   }

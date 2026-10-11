@@ -136,15 +136,18 @@ const ProfileRow: React.FC<{
     DC: missingFields(profile, "DC"),
   };
 
-  const act = async (work: () => Promise<void>) => {
+  /** Runs a write; reports a failure and says whether it succeeded. */
+  const act = async (work: () => Promise<void>): Promise<boolean> => {
     setMessage(null);
     try {
       await work();
+      return true;
     } catch (err) {
       setMessage({
         text: err instanceof Error ? err.message : String(err),
         error: true,
       });
+      return false;
     }
   };
 
@@ -192,13 +195,15 @@ const ProfileRow: React.FC<{
     } catch (err) {
       setMode({ kind: "view" });
       if (err instanceof VehicleCatalogError && err.kind === "not_found") {
-        await act(() =>
+        const flagged = await act(() =>
           onSave(markRemovedUpstream(profile, now())).then(() => {}),
         );
-        setMessage({
-          text: "Open EV Directory no longer has this vehicle; the profile is kept as it is.",
-          error: true,
-        });
+        if (flagged) {
+          setMessage({
+            text: "Open EV Directory no longer has this vehicle; the profile is kept as it is.",
+            error: true,
+          });
+        }
         return;
       }
       setMessage({ text: describeCatalogError(err, access.mode), error: true });

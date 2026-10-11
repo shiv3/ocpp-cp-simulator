@@ -36,7 +36,10 @@ class VehicleProfileStore {
     error: null,
   };
   private readonly listeners = new Set<() => void>();
-  private loading: Promise<void> | null = null;
+  private started = false;
+  /** Only the latest read may publish: an older one, started before a
+   *  write, answers with a list that no longer holds. */
+  private generation = 0;
 
   constructor(private readonly service: ChargePointService) {}
 
@@ -53,25 +56,26 @@ class VehicleProfileStore {
 
   /** Loads once; later mounts read the shared state. */
   ensureLoaded(): void {
-    if (!this.state.isKnown && !this.loading && !this.state.error) {
-      void this.reload();
-    }
+    if (this.started) return;
+    this.started = true;
+    void this.reload();
   }
 
-  reload = (): Promise<void> => {
-    if (!this.supported) return Promise.resolve();
-    this.loading ??= (async () => {
-      try {
-        const profiles = (await this.service.listVehicleProfiles!()) ?? [];
+  reload = async (): Promise<void> => {
+    if (!this.supported) return;
+    this.started = true;
+    const generation = ++this.generation;
+    try {
+      const profiles = (await this.service.listVehicleProfiles!()) ?? [];
+      if (generation === this.generation) {
         this.set({ profiles, isKnown: true, error: null });
-      } catch (error) {
-        console.error("Failed to load vehicle profiles", error);
-        this.set({ ...this.state, error: messageOf(error) });
-      } finally {
-        this.loading = null;
       }
-    })();
-    return this.loading;
+    } catch (error) {
+      console.error("Failed to load vehicle profiles", error);
+      if (generation === this.generation) {
+        this.set({ ...this.state, error: messageOf(error) });
+      }
+    }
   };
 
   save = async (profile: VehicleProfile): Promise<VehicleProfile> => {

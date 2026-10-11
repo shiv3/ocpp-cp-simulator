@@ -5,6 +5,7 @@ import {
   type VehicleCatalogErrorKind,
 } from "../../../../domain/vehicle/VehicleCatalog";
 import {
+  MAX_MAKE_PAGES,
   OpenEvDirectoryClient,
   type FetchLike,
 } from "../OpenEvDirectoryClient";
@@ -181,6 +182,21 @@ describe("OpenEvDirectoryClient — reads (#458)", () => {
     const variant = await c.getVariant("var_ad04fe41e212ef6a");
     expect(variant.id).toBe("var_b16bdbae5aa906a7");
     expect(calls[1]!.url).toContain("/v1/variants/var_b16bdbae5aa906a7/");
+  });
+});
+
+describe("OpenEvDirectoryClient — paging (#458)", () => {
+  it("stops reading makes after a bounded number of pages", async () => {
+    const { client: c, calls } = client({
+      "/v1/makes": () =>
+        json({
+          items: [{ id: "x", name: "X", modelCount: 1 }],
+          page: { number: 0, size: 200, totalItems: 1e9, totalPages: 1e7 },
+        }),
+    });
+    const result = await c.listMakes();
+    expect(calls).toHaveLength(MAX_MAKE_PAGES);
+    expect(result).toHaveLength(MAX_MAKE_PAGES);
   });
 });
 

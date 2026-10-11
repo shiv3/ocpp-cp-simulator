@@ -85,8 +85,7 @@ type (`acMaxKw` for AC; `dcMaxKw` or a curve for DC), fails with
 75 kWh car. The console lists that current type **disabled** with what is
 missing. A DC curve with a point outside 0–100 % SoC or below 0 kW fails with
 `invalid_curve`. An unknown or unsupported AC phase count is the only value
-filled by an assumption: `phases` is left unset, which the simulator runs as single phase,
-and a warning says so.
+filled by an assumption: `phases: 1`, and a warning says so.
 
 A successful resolution returns warnings, which the console shows under the
 select (`describeWarning` in
@@ -98,8 +97,8 @@ select (`describeWarning` in
 | `CURVE_STARTS_ABOVE_ZERO_SOC` | First curve point is above 0 % SoC          | Below it the first power is held; nothing is extrapolated   |
 | `CURVE_ENDS_BELOW_FULL_SOC`   | Last curve point is below 100 % SoC         | Above it the last power is held; nothing is extrapolated    |
 | `NO_DC_CURVE`                 | DC with no curve                            | Flat acceptance at the maximum power                        |
-| `UNSUPPORTED_AC_PHASES`       | AC phase count other than 1 or 3            | `phases` left unset (single phase)                          |
-| `AC_PHASES_UNKNOWN`           | AC phase count missing                      | `phases` left unset (single phase)                          |
+| `UNSUPPORTED_AC_PHASES`       | AC phase count other than 1 or 3            | `phases: 1` (single phase)                                  |
+| `AC_PHASES_UNKNOWN`           | AC phase count missing                      | `phases: 1` (single phase)                                  |
 
 The hold at either end of the curve is the simulator's normal
 [curve clamping](scenario-format.md#charging-curve-v12), not something the
@@ -107,9 +106,13 @@ resolution adds.
 
 `applyVehicleSettings(base, vehicle)` puts the result onto existing settings:
 the session's SoCs and the electrical values a vehicle does not determine
-(`voltageV`, `powerFactor`) are kept, and a curve or a phase count the new
-vehicle does not have is **removed** rather than left over from the previous
-one. The connector Config dialog keeps Battery and Max power editable after a
+(`voltageV`, `powerFactor`) are kept. A vehicle without a curve resolves to an
+**explicit** empty curve (`chargingCurve: []`, flat acceptance), and an AC
+vehicle to an explicit `phases`, never to absent keys: the connector and a
+scenario start _merge_ settings into the current ones
+(`Connector.applyEvSettingsOverride`), so an absent key would keep the previous
+vehicle's curve or phases. A DC resolution does not set `phases`, which DC
+ignores. The connector Config dialog keeps Battery and Max power editable after a
 pick; its curve, current type and phases come from the profile.
 
 ## Snapshot, not reference — the offline guarantee

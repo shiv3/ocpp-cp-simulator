@@ -12,7 +12,9 @@ related:
   - ../entities/docker-image.md
   - state-persistence.md
   - control-plane.md
-updated: 2026-10-04
+  - vehicle-profiles.md
+  - ../entities/open-ev-directory.md
+updated: 2026-10-11
 ---
 
 # Local vs Remote mode (browser)
@@ -45,6 +47,14 @@ overridden.
   only on the daemon.
 - The **Reset all simulator data** button calls `state.reset` in Remote mode
   and clears the local DB in Local mode.
+- [Vehicle profiles](vehicle-profiles.md) (#458) work in both modes and are
+  stored where the charge points' state is (daemon or sql.js), but the
+  catalog is reached differently. Remote mode imports through the daemon's
+  `vehicle_catalog.*` methods with the key the daemon was started with; the
+  key never reaches the browser. Local mode calls
+  [Open EV Directory](../entities/open-ev-directory.md) from the tab with a
+  key you type, held in memory only, and only works if the API allows the
+  page's origin (CORS); otherwise the console points you to daemon mode.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
 - [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the

@@ -18,7 +18,9 @@ related:
   - ../concepts/file-hot-reload.md
   - ../analyses/fleet-load-and-observability-roadmap.md
   - ../sources/bench-readme.md
-updated: 2026-09-30
+  - open-ev-directory.md
+  - ../concepts/vehicle-profiles.md
+updated: 2026-10-11
 ---
 
 # Daemon (server mode)
@@ -92,6 +94,8 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--ngrok-domain <domain>`           | -                            | Reserved ngrok domain for the spawned agent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `--ngrok-api-url <url>`             | -                            | Attach to a running agent's local API (Docker sidecar) instead of spawning one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `--soap-tunnel-port <port>`         | `0`                          | Local port of the SOAP-only listener the tunnel forwards to (`0`: a free port). Required with `--ngrok-api-url`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `--oed-base-url <url>`              | `OED_BASE_URL`, else none    | [Open EV Directory](open-ev-directory.md) API the console imports [vehicle profiles](../concepts/vehicle-profiles.md) through, with the daemon's key (#458). Absolute http(s) URL, else exit 1. Without it `vehicle_catalog.*` answers `unavailable`.                                                                                                                                                                                                                                                                                                                                           |
+| `--oed-api-key-file <path>`         | `OED_API_KEY_FILE`           | File holding the Open EV Directory API key (a Docker secret, say); else `OED_API_KEY_FILE`, else the key in `OED_API_KEY`. Unreadable or empty: exit 1. No flag takes the key itself (`ps` shows a command line).                                                                                                                                                                                                                                                                                                                                                                               |
 
 The full flag list, including the CP-bootstrap and startup-scenario flags, is
 in [CLI → CLI Options](cli.md#cli-options).
@@ -247,6 +251,11 @@ requires either `--web-console-basic-auth-user/pass` or `--unsafe-remote`, and
 should be paired with a tight `--cors-origin` allowlist when browsers can reach
 the daemon. The full rules — bind gate, Basic Auth, CORS modes, reverse
 proxies — are in [Access control](../concepts/access-control.md).
+
+The [Open EV Directory](open-ev-directory.md#keys-and-redaction) API key
+(#458) is read from a file or the environment, never from a flag; it is sent
+only to the catalog, never to a browser, an event or a log, and `server.info`
+says only whether one is set.
 
 ## Docker
 

@@ -25,7 +25,8 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-10-04
+  - vehicle-profiles.md
+updated: 2026-10-11
 ---
 
 # Scenario File Format (v1.4)
@@ -460,6 +461,10 @@ acceptance at `maxChargingPowerKw`, 230 V, single phase.
 | `phases`        | `1` (default) or `3`, AC only.                                                     |
 | `voltageV`      | **Phase-to-neutral** volts. Default 230; see below for a non-positive value.       |
 | `powerFactor`   | cos φ, AC only. Range `(0, 1]`; default 1.                                         |
+
+The console can fill these fields from a saved
+[vehicle profile](vehicle-profiles.md) (#458). The values are copied in, so the
+scenario refers to no profile and runs without the catalog it came from.
 
 `chargingCurve` is normalized at every boundary it can enter through (sorted
 by `socPercent`, points outside `0-100` / `0-1` dropped) — a scenario file may

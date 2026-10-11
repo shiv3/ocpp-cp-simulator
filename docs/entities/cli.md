@@ -12,6 +12,7 @@ sources:
   - .github/workflows/cli-release.yml
   - "issue #320"
   - "issue #321"
+  - src/cli/vehicleCatalogConfig.ts
 related:
   - daemon.md
   - analyze.md
@@ -19,7 +20,8 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
-updated: 2026-10-01
+  - open-ev-directory.md
+updated: 2026-10-11
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -861,6 +863,8 @@ the OCPP answer are unchanged.
 | `--watch`                           | No       | off                                     | Server mode: re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. **Refused outside a server mode** rather than silently ignored, like `--cp-count`. See [Daemon → File hot-reload](daemon.md#file-hot-reload) (#314)                                                                                                                                                                                                                                 |
 | `--cors-origin <origin>`            | No       | loopback: open; remote: same-origin     | Restrict browser Origins. Repeatable. Pass literal `"*"` to opt into open CORS. See [Access control](../concepts/access-control.md).                                                                                                                                                                                                                                                                                                                                                          |
 | `--trust-forwarded-headers`         | No       | -                                       | With same-origin CORS, also accept the public origin reported by `X-Forwarded-Proto` / `X-Forwarded-Host`. Use only behind a trusted reverse proxy.                                                                                                                                                                                                                                                                                                                                           |
+| `--oed-base-url <url>`              | No       | `OED_BASE_URL`, else none               | Server mode: the [Open EV Directory](open-ev-directory.md) API the console imports [vehicle profiles](../concepts/vehicle-profiles.md) through (#458). Absolute http(s) URL, else exit 1 (a malformed `OED_BASE_URL` too). Without it import is off and `vehicle_catalog.*` answers `unavailable`.                                                                                                                                                                                            |
+| `--oed-api-key-file <path>`         | No       | `OED_API_KEY_FILE`, else `OED_API_KEY`  | Server mode: file holding your personal Open EV Directory API key (e.g. a Docker secret). An unreadable or empty file is exit 1. No flag takes the key itself (a command line shows in `ps`); a key without a base URL only warns.                                                                                                                                                                                                                                                            |
 
 \* `--cp-id` is **optional** in server mode (no bootstrap CP). Required for
 REPL/JSON and for `--send`/`--events` without `--all`.
@@ -868,3 +872,9 @@ REPL/JSON and for `--send`/`--events` without `--all`.
 \*\* `--ws-url` is required for REPL/JSON, and only when bootstrapping a CP in
 server mode. CPs created later via Socket.IO `cp.create` supply their own
 `wsUrl` in the RPC params.
+
+Environment variables (server mode, #458): `OED_BASE_URL` (used when
+`--oed-base-url` is absent), `OED_API_KEY_FILE` and `OED_API_KEY`. The key
+comes from `--oed-api-key-file`, else `OED_API_KEY_FILE`, else `OED_API_KEY`;
+the rules and failure cases are in
+[Open EV Directory → Configuration](open-ev-directory.md#configuration).

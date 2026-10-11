@@ -2,7 +2,7 @@
 title: Overview
 type: overview
 summary: Master summary of the OCPP CP Simulator — what it is, how the pieces fit together, and where to read next.
-updated: 2026-10-02
+updated: 2026-10-11
 ---
 
 # OCPP CP Simulator — overview
@@ -50,6 +50,10 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
   authored in the editor or loaded from files / [built-in templates](entities/scenario-templates.md)
   (including 47 OCPP 1.6 certification test cases). Runs produce a
   machine-readable verdict with conformance and compatibility axes.
+- **Vehicles** — reusable [vehicle profiles](concepts/vehicle-profiles.md)
+  imported from the external [Open EV Directory](entities/open-ev-directory.md)
+  catalog, saved locally and copied into a connector's, the default or a
+  scenario's EV settings, so simulations never depend on the catalog.
 - **Observability** — one [log line shape](concepts/log-format.md) everywhere;
   wire frames can be streamed as a versioned [trace](concepts/trace-format.md)
   and analyzed with [`analyze`](entities/analyze.md) (OCPP DebugKit).

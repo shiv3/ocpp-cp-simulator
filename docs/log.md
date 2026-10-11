@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-07
+updated: 2026-10-11
 ---
 
 # Log
@@ -1590,3 +1590,15 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console](entities/web-console.md#charge-point-page): maintainer review items 3, 4 and 5 on the Add Charge Point / Config form (`ChargePointConfigForm`, shared by the dialog and the charge point page's inline Config card). The single **OCPP Version** select that mixed the transport into each option (`OCPP 1.6 (JSON)`, `OCPP 1.6 (SOAP)`, ...) became **Protocol** (`JSON` / `SOAP`) followed by **Version**, filtered by it; the stored `ocppVersion` strings are unchanged, and a protocol switch keeps the version number when the other protocol has it. The editable **Full WebSocket URL** (which was parsed back into the WebSocket URL and Basic Auth fields) became the read-only **Effective WebSocket URL** with a **Copy** button; the form no longer parses a pasted URL (`parseFullOcppUrl` stays in `src/utils/ocppUrl.ts`, tested but unused by the form). **Number of Connectors** moved into the first section, **Boot notification** renamed **Model specification**, and **Basic settings** renamed **Connection** (now second). The local-mode "TLS is not supported in the browser" save error now shows in the form's bottom alert instead of under the Full WebSocket URL field (where SOAP forms never showed it). The Add dialog focuses the Charge Point ID on open (it is no longer the first field).
 - Code: `ChargePointConfigForm.tsx`, `chargePointConfig.ts` (`OCPP_VERSION_OPTIONS`, `protocolOf`, `versionForProtocol`, `versionsOfProtocol`), `ocppUrl.ts` (comment); tests `ChargePointConfigForm.dom.test.tsx`, `ChargePointConfigModal.dom.test.tsx`, `chargePointConfig.test.ts`.
+
+## [2026-10-11] ingest | Vehicle profiles and Open EV Directory import (#458)
+
+- New [Vehicle profiles](concepts/vehicle-profiles.md): the `VehicleProfile` model (specs with `null` for a missing value, DC curve in kW, overrides, provenance with curve quality and licenses), `resolveEvSettings` for AC and DC with its warnings table and the `missing_fields` / `invalid_curve` failures, `applyVehicleSettings`, the snapshot / offline guarantee, explicit import, refresh (overrides kept, `removedUpstream` on 404), storage and reset, the #311 / #327 boundary, attribution, open points.
+- New [Open EV Directory](entities/open-ev-directory.md): endpoints used, daemon configuration (`--oed-base-url` / `OED_BASE_URL`, `--oed-api-key-file` / `OED_API_KEY_FILE` / `OED_API_KEY`, no flag carrying the key, exit 1 cases) and Local-mode configuration (in-memory key, `ocpp-cp.oed-base-url`), Bearer scheme pending juherr/open-ev-directory#10, redaction additions, HTTP → catalog kind → RPC code table, `Retry-After`, CORS, smoke test (verified against a stub: Bearer header sent, `list_makes` and `rate_limited: … retry in 7 s` over MCP `call_method`).
+- [Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog): new subsection with the seven `vehicle_profiles.*` / `vehicle_catalog.*` methods; daemon-methods table rows; error codes `rate_limited` and `unavailable` (nine codes) and `retryAfterSeconds` on the error object; `server.info.vehicleCatalog`.
+- [State persistence](concepts/state-persistence.md): `vehicle_profiles` table (schema v15), `.tables` sample, reset wipes profiles, `cp.delete` does not.
+- [CLI](entities/cli.md#cli-options) and [Daemon](entities/daemon.md): `--oed-base-url`, `--oed-api-key-file` rows kept in sync; environment-variable note; daemon security posture on the key.
+- [Web console](entities/web-console.md#settings-page): new Settings page subsection with the Vehicle profiles card (import, edit, refresh, delete; Remote vs Local catalog access); Config dialog EV tab (profiles in the Vehicle select, non-preset model shown under its own name, current-type / curve line); Scenario EV Settings offers profiles.
+- [MCP endpoint](entities/mcp-endpoint.md): eight of nine error codes, `retryAfterSeconds` only in the message text, vehicle methods via `call_method`.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences), [Scenario format](concepts/scenario-format.md#charging-curve-v12), [Overview](overview.md), [GitHub issues](sources/github-issues.md) (#311, #327, #458, juherr/open-ev-directory#10 / #14), [Index](index.md), `README.md` documentation links.
+- Raw-source follow-up in the same change: the **Reset all simulator data** card and confirmation now name the saved vehicle profiles, and **Refresh** stays offered on a profile marked _no longer in the catalog_ (a refresh that finds the vehicle again clears the mark).

@@ -492,6 +492,35 @@ describe("VehicleProfilesCard — refresh (#458)", () => {
     expect(saved.origin!.datasetVersion).toBe("sha256:v2");
   });
 
+  it("clears the removed flag of a vehicle the catalog has again", async () => {
+    const { markRemovedUpstream } =
+      await import("@/cp/domain/vehicle/importProfile");
+    const profile = markRemovedUpstream(await importedProfile(), NOW);
+    const sameVariant: CatalogVariant = {
+      ...VARIANT,
+      sourceRecords: [
+        {
+          ...VARIANT.sourceRecords[0]!,
+          specs: { ...VARIANT.sourceRecords[0]!.specs, usableBatteryKwh: 86 },
+        },
+      ],
+    };
+    const service = remoteService(
+      fakeCatalog({ getVariant: vi.fn(async () => sameVariant) }),
+      [profile],
+    );
+    await render(service);
+    expect(document.body.textContent).toContain("no longer in the catalog");
+    await click(button("Refresh"));
+    expect(byLabel("Refresh changes")!.textContent).toContain(
+      "Back in the catalog after being removed",
+    );
+    await click(button("Replace"));
+    const saved = vi.mocked(service.saveVehicleProfile!).mock.calls[0]![0];
+    expect(saved.origin!.removedUpstream).toBeUndefined();
+    expect(document.body.textContent).not.toContain("no longer in the catalog");
+  });
+
   it("leaves the profile as it is when the user keeps it", async () => {
     const profile = await importedProfile();
     const service = remoteService(

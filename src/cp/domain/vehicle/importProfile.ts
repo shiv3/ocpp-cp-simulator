@@ -51,14 +51,25 @@ export function profileFromCatalog(
   };
 }
 
+/** Provenance a refresh does not compare: when, and the removal flag. */
+type UncomparedOriginField = "importedAt" | "removedUpstream";
+
 /** One difference a refresh would bring, shown before it is applied. */
 export type RefreshChange =
   | {
-      field: keyof VehicleSpecs | "variantId" | "datasetVersion";
+      field:
+        | keyof VehicleSpecs
+        | Exclude<
+            keyof VehicleProfileOrigin,
+            UncomparedOriginField | "licenses"
+          >;
       before: unknown;
       after: unknown;
     }
-  | { field: "dcCurve" };
+  /** The curve or the licenses (with their attribution) differ. */
+  | { field: "dcCurve" | "licenses" }
+  /** The variant was flagged as removed and the catalog has it again. */
+  | { field: "backInCatalog" };
 
 export type RefreshResult =
   | {
@@ -108,20 +119,18 @@ export function refreshFromCatalog(
     if (!sameJson(before, after)) changes.push({ field, before, after });
   }
   if (!sameJson(profile.dcCurve, nextCurve)) changes.push({ field: "dcCurve" });
-  if (origin.variantId !== variant.id) {
-    changes.push({
-      field: "variantId",
-      before: origin.variantId,
-      after: variant.id,
-    });
+  // Every provenance key, so a field added to the origin later is compared
+  // too: a new curve quality or attribution matters as much as a new value.
+  const keys = new Set([...Object.keys(nextOrigin), ...Object.keys(origin)]);
+  for (const key of keys as Set<keyof VehicleProfileOrigin>) {
+    if (key === "importedAt" || key === "removedUpstream") continue;
+    const before = origin[key];
+    const after = nextOrigin[key];
+    if (sameJson(before, after)) continue;
+    if (key === "licenses") changes.push({ field: "licenses" });
+    else changes.push({ field: key, before, after });
   }
-  if (origin.datasetVersion !== nextOrigin.datasetVersion) {
-    changes.push({
-      field: "datasetVersion",
-      before: origin.datasetVersion,
-      after: nextOrigin.datasetVersion,
-    });
-  }
+  if (origin.removedUpstream) changes.push({ field: "backInCatalog" });
 
   return {
     ok: true,

@@ -140,7 +140,9 @@ override.
 
 `refreshFromCatalog(profile, variant)` re-reads the **same** source record and
 curve from a fresh copy of the variant and lists the changes (each spec field,
-the curve, the variant id, the dataset version) before anything is saved. It
+the curve, and every provenance field but the import time — the variant id,
+the dataset version, the curve quality and its basis, the observations, the
+licenses and their attribution) before anything is saved. It
 replaces only the imported values: the name, `overrides` and `createdAt` are
 kept, so a refresh never loses a local edit. When the catalog has renamed the
 variant (a former id redirects), the new id is followed and listed as a
@@ -150,8 +152,9 @@ values?** before saving.
 When the catalog answers `not_found` for the variant, `markRemovedUpstream`
 flags the profile (`origin.removedUpstream`) and keeps every value; it stays
 usable and the console marks it _no longer in the catalog_, still offering
-**Refresh**: a refresh that finds the variant again rebuilds the provenance
-without the flag. When the variant
+**Refresh**: a refresh that finds the variant again lists _back in the
+catalog_ as a change, even when nothing else differs, and **Replace** clears
+the flag. When the variant
 still exists but the imported source record or curve does not, the refresh
 fails and the profile is left untouched (not flagged). Any other failure —
 key refused, rate limit, timeout, network — also leaves the profile as it

@@ -236,6 +236,44 @@ describe("refreshFromCatalog (#458)", () => {
     expect(result.profile.updatedAt).toBe(LATER);
   });
 
+  it("sees a change in the provenance alone", () => {
+    const next = variant();
+    next.curves[0] = curve({
+      quality: "ESTIMATED",
+      qualityBasis: "now flagged as a default curve",
+      observations: [],
+    });
+    next.sourceRecords[0] = {
+      ...next.sourceRecords[0]!,
+      license: { ...GAIA_LICENSE, attribution: "Contains data from EVDB v2 …" },
+    };
+    const result = refreshFromCatalog(imported(), next, LATER);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.upToDate).toBe(false);
+    expect(result.changes).toEqual([
+      { field: "curveQuality", before: "UNKNOWN", after: "ESTIMATED" },
+      {
+        field: "qualityBasis",
+        before: "record-level only",
+        after: "now flagged as a default curve",
+      },
+      { field: "observations", before: ["ENDS_BELOW_FULL_SOC"], after: [] },
+      { field: "licenses" },
+    ]);
+    expect(result.profile.origin!.licenses[0]!.attribution).toBe(
+      "Contains data from EVDB v2 …",
+    );
+  });
+
+  it("brings back a vehicle flagged as removed that reappears unchanged", () => {
+    const removed = markRemovedUpstream(imported(), LATER);
+    const result = refreshFromCatalog(removed, variant(), LATER);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.upToDate).toBe(false);
+    expect(result.changes).toEqual([{ field: "backInCatalog" }]);
+    expect(result.profile.origin!.removedUpstream).toBeUndefined();
+  });
+
   it("follows a variant that moved to a new id", () => {
     const result = refreshFromCatalog(
       imported(),

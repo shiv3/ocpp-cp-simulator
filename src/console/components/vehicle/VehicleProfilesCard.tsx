@@ -374,6 +374,20 @@ const CHANGE_LABELS: Record<RefreshChange["field"], string> = {
   variantId: "Variant id",
   datasetVersion: "Dataset version",
   dcCurve: "The DC curve",
+  licenses: "The licenses or their attribution",
+  backInCatalog: "Back in the catalog after being removed",
+  provider: "Provider",
+  makeName: "Make name",
+  modelName: "Model name",
+  variantName: "Variant name",
+  sourceId: "Source",
+  sourceRecordKey: "Source record",
+  sourceUrl: "Source URL",
+  curveId: "Curve id",
+  curveSourceId: "Curve source",
+  curveQuality: "Curve quality",
+  qualityBasis: "Curve quality basis",
+  observations: "Curve observations",
 };
 
 function showChangeValue(v: unknown): string {

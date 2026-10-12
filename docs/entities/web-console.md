@@ -1052,7 +1052,8 @@ specs, curve preview, origin and **Attribution** — and manages them:
   differences and asks **Replace the imported values?** (**Replace** /
   **Keep current**); your edits are kept. If the catalog no longer has the
   vehicle, the profile is kept and marked _no longer in the catalog_ (a later
-  refresh that finds it again clears the mark); any other failure leaves it
+  refresh that finds it again lists _back in the catalog_, and **Replace**
+  clears the mark); any other failure leaves it
   untouched and says why.
 - **Delete**, with an inline confirmation.
 

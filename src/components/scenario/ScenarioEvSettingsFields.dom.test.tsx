@@ -145,15 +145,16 @@ describe("ScenarioEvSettingsFields — saved vehicle profiles (#458)", () => {
     };
     const { select, onChange } = await render(saved);
     await act(async () => pick(select, "Tesla Model 3"));
-    // The curve is explicit so the run does not inherit the connector's;
-    // the electrical model is left to the connector, like every field a
-    // scenario leaves empty.
+    // The curve and the attribution are explicit so the run inherits
+    // neither from the connector; the electrical model is left to the
+    // connector, like every field a scenario leaves empty.
     expect(onChange.mock.calls.at(-1)![0]).toEqual({
       initialSoc: 15,
       modelName: "Tesla Model 3",
       batteryCapacityKwh: 75,
       maxChargingPowerKw: 250,
       chargingCurve: [],
+      attribution: [],
     });
   });
 

@@ -185,11 +185,21 @@ describe("a scenario runs on an imported profile with the catalog gone (#458)", 
     ]);
     const chargePoint = service.getLocalChargePoint(CP_ID) as ChargePoint;
     const connector = chargePoint.getConnector(1)!;
+    // A connector holding an imported Gaia profile: its curve and credit.
     connector.evSettings = {
       ...connector.evSettings,
       chargingCurve: [
         { socPercent: 0, powerFraction: 1 },
         { socPercent: 100, powerFraction: 0.1 },
+      ],
+      attribution: [
+        {
+          sourceId: "gaia",
+          text: "Contains data from EVDB",
+          licenseName: "CC BY-SA 4.0",
+          licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+          shareAlike: true,
+        },
       ],
     };
 
@@ -229,6 +239,10 @@ describe("a scenario runs on an imported profile with the catalog gone (#458)", 
     const { scenarioId } = await service.loadScenario(CP_ID, 1, definition);
     await service.runScenario(CP_ID, 1, scenarioId);
     await settle();
+
+    // The Gaia data is gone, and so is its credit.
+    expect(connector.evSettings.modelName).toBe("Tesla Model 3");
+    expect(connector.evSettings.attribution ?? []).toEqual([]);
 
     connector.socMeterSyncEnabled = false;
     connector.status = OCPPStatus.Charging;

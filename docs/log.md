@@ -1623,3 +1623,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-12] ingest | EV settings patch and preset scenario attribution (#458, review 2)
 
 - [Control plane](concepts/control-plane.md): a `set_ev_settings` patch can remove only optional fields; `null` on a required one (`modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`) is `invalid_params` and nothing is applied.
+- [Vehicle profiles → Replacing a vehicle](concepts/vehicle-profiles.md#replacing-a-vehicle), [Scenario format](concepts/scenario-format.md#charging-curve-v12): a preset scenario writes an explicit empty `attribution`, so a run over a connector holding an imported profile does not keep that profile's credit.

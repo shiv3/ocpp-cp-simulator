@@ -157,7 +157,8 @@ export function presetForDefaults<T extends Partial<EVSettings>>(
 
 /**
  * A scenario's EV settings, where an empty field inherits the connector's:
- * the flat curve is explicit, so a run does not take the connector's curve;
+ * the flat curve and the empty attribution are explicit, so a run takes
+ * neither the connector's curve nor the credit of data it no longer holds;
  * the electrical model is left to the connector, like every field a scenario
  * leaves empty (removing it would take a `null` in the scenario file).
  */
@@ -169,6 +170,7 @@ export function presetForScenario<T extends Partial<EVSettings>>(
     ...withoutProfileFields(settings),
     ...presetFields(name),
     chargingCurve: [],
+    attribution: [],
   };
 }
 

@@ -467,8 +467,8 @@ The console can fill these fields from a saved
 [vehicle profile](vehicle-profiles.md) (#458). The values are copied in, so the
 scenario refers to no profile and runs without the catalog it came from; the
 sources' credit comes with them in `attribution`, so an export carries it. A
-preset picked afterwards writes a flat curve (`[]`) and leaves the electrical
-fields empty ([Replacing a vehicle](vehicle-profiles.md#replacing-a-vehicle)).
+preset picked afterwards writes a flat curve and an empty attribution (both
+`[]`) and leaves the electrical fields empty ([Replacing a vehicle](vehicle-profiles.md#replacing-a-vehicle)).
 An absent field still inherits the connector's value; the schema stays at its
 current version, as `attribution` is an optional addition.
 

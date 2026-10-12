@@ -128,11 +128,11 @@ and no third-party data. The fields a preset lacks — the curve, the current
 type, the phases and the attribution — are handled per form
 ([`vehicleChoice.ts`](../../src/components/vehicle/vehicleChoice.ts)):
 
-| Form                                  | A preset picked over a profile's vehicle                                                                                                                                                                                          |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Connector **Config** dialog           | Removes them (`null` in the `set_ev_settings` merge patch, [Control plane](control-plane.md)): a flat curve and no electrical model, as presets always had.                                                                       |
-| **Default EV Settings**               | Removes them; Save then writes the page's displayed electrical model (AC, 1 phase, 230 V, unity), as it always does.                                                                                                              |
-| A scenario's **Scenario EV Settings** | Writes an explicit flat curve (`chargingCurve: []`) so the run does not take the connector's; removes the current type, the phases and the attribution, which then follow the connector like every field a scenario leaves empty. |
+| Form                                  | A preset picked over a profile's vehicle                                                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connector **Config** dialog           | Removes them (`null` in the `set_ev_settings` merge patch, [Control plane](control-plane.md)): a flat curve and no electrical model, as presets always had.                                                                   |
+| **Default EV Settings**               | Removes them; Save then writes the page's displayed electrical model (AC, 1 phase, 230 V, unity), as it always does.                                                                                                          |
+| A scenario's **Scenario EV Settings** | Writes an explicit flat curve and an explicit empty attribution (`[]`) so the run takes neither from the connector; removes the current type and the phases, which then follow the connector like every empty scenario field. |
 
 The scenario row is the one deliberate asymmetry: clearing the connector's
 electrical model from a scenario would need a `null` in the scenario file,

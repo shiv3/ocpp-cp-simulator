@@ -132,6 +132,7 @@ describe("scenario export attribution (#458)", () => {
       scenario(presetForScenario(importedEvSettings(), "Tesla Model 3")),
     );
     expect(text).not.toContain("EVDB");
-    expect(text).not.toContain("attribution");
+    // Explicitly none, so a run does not keep a connector's previous credit.
+    expect(parseScenarioJSON(text).evSettings?.attribution).toEqual([]);
   });
 });

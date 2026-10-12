@@ -447,9 +447,12 @@ const ConfigBody: React.FC<BodyProps> = ({
                     }
                     setVehicleNotes(null);
                     if (preset === CUSTOM || !isPresetName(preset)) {
-                      // Custom, or the current model again: the connector's
-                      // vehicle is kept.
-                      setVehiclePick(null);
+                      // Custom, or the current model again: the vehicle on
+                      // screen is kept — a pick made earlier in this session
+                      // included — only its option is no longer selected.
+                      setVehiclePick((current) =>
+                        current ? { value: null, patch: current.patch } : null,
+                      );
                       setModelName(preset);
                       return;
                     }

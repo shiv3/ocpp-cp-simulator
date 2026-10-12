@@ -5,6 +5,10 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import Settings from "./Settings";
+import { Connector } from "../cp/domain/connector/Connector";
+import { buildSampledValues } from "../cp/domain/connector/MeterValueBuilder";
+import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import { Logger, LogLevel } from "../cp/shared/Logger";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 
 /**
@@ -429,5 +433,30 @@ describe("Default EV Settings replaces the vehicle (#458 review)", () => {
     });
     expect(applied.chargingCurve ?? []).toEqual([]);
     expect("attribution" in applied).toBe(false);
+
+    // Propagated to a connector still holding the profile's curve, it
+    // charges like the preset: flat at its maximum.
+    const connector = new Connector(1, new Logger(LogLevel.ERROR));
+    connector.evSettings = { ...storedDefaultEv! };
+    connector.applyDefaultEvSettings(applied);
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction({
+      id: 1,
+      connectorId: 1,
+      tagId: "TAG",
+      meterStart: 0,
+      meterStop: null,
+      startTime: new Date("2026-10-12T00:00:00.000Z"),
+      stopTime: null,
+      meterSent: false,
+    });
+    connector.soc = 90;
+    const power = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    ).find((sample) => sample.measurand === "Power.Active.Import")?.value;
+    expect(Number(power)).toBe(250_000);
   });
 });

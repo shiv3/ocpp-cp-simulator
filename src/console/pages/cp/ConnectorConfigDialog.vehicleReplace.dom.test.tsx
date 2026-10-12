@@ -204,6 +204,36 @@ describe("ConnectorConfigDialog replaces the vehicle (#458 review)", () => {
     expect(Number(power)).toBe(250_000);
   });
 
+  it("keeps a preset's vehicle when Custom is picked after it", async () => {
+    const connector = await setup();
+    let dialog = await openDialog(connector.evSettings);
+    await pick(dialog, "Volkswagen ID.7 GTX · DC");
+    await save(dialog);
+    dialog = await openDialog(connector.evSettings);
+    await pick(dialog, "Tesla Model 3");
+    await pick(dialog, "Custom");
+    await save(dialog);
+    const settings = connector.evSettings;
+    expect(settings).toMatchObject({
+      modelName: "Custom",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 250,
+    });
+    expect("chargingCurve" in settings).toBe(false);
+    expect("currentType" in settings).toBe(false);
+    expect("phases" in settings).toBe(false);
+  });
+
+  it("keeps a profile's vehicle when Custom is picked after it", async () => {
+    const connector = await setup();
+    const dialog = await openDialog(connector.evSettings);
+    await pick(dialog, "Volkswagen ID.7 GTX · DC");
+    await pick(dialog, "Custom");
+    await save(dialog);
+    expect(connector.evSettings.currentType).toBe("DC");
+    expect(connector.evSettings.chargingCurve).toHaveLength(2);
+  });
+
   it("keeps the current vehicle's fields for Custom", async () => {
     const connector = await setup();
     let dialog = await openDialog(connector.evSettings);

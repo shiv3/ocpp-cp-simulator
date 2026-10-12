@@ -1,4 +1,4 @@
-import type { EVSettings } from "../connector/EVSettings";
+import type { DataAttribution, EVSettings } from "../connector/EVSettings";
 
 /**
  * A reusable vehicle description, saved locally (#458).
@@ -105,13 +105,14 @@ export type VehicleCurrentType = "AC" | "DC";
  * current type are required: settings are *merged* into a connector's
  * (`Connector.applyEvSettingsOverride`), where an absent key keeps the
  * previous vehicle's value, so "no curve" has to be the explicit `[]`.
- * `phases` stays optional because DC ignores it.
+ * `phases` stays optional because DC ignores it. The attribution is explicit
+ * too (`[]` for a hand-made profile): it travels with the copied values.
  */
 export type VehicleEvSettings = Pick<
   EVSettings,
   "modelName" | "batteryCapacityKwh" | "maxChargingPowerKw" | "phases"
 > &
-  Required<Pick<EVSettings, "chargingCurve" | "currentType">>;
+  Required<Pick<EVSettings, "chargingCurve" | "currentType" | "attribution">>;
 
 /** Facts the user should see when a profile is applied. Nothing is hidden. */
 export type ResolveWarning =
@@ -196,6 +197,7 @@ export function resolveEvSettings(
       currentType: "AC",
       chargingCurve: [],
       phases: specs.acPhases === 3 ? 3 : 1,
+      attribution: attributionOf(profile),
     };
     if (specs.acPhases === 1 || specs.acPhases === 3) {
       // Taken as given.
@@ -232,6 +234,7 @@ export function resolveEvSettings(
     batteryCapacityKwh,
     maxChargingPowerKw,
     currentType: "DC",
+    attribution: attributionOf(profile),
     chargingCurve: curve.map((p) => ({
       socPercent: p.socPercent,
       powerFraction: p.powerKw / maxChargingPowerKw,
@@ -267,6 +270,17 @@ export function applyVehicleSettings<T extends Partial<EVSettings>>(
   vehicle: VehicleEvSettings,
 ): T & VehicleEvSettings {
   return { ...base, ...vehicle };
+}
+
+/** The credit the profile's sources ask for, in the settings' shape. */
+function attributionOf(profile: VehicleProfile): DataAttribution[] {
+  return (profile.origin?.licenses ?? []).map((license) => ({
+    ...(license.sourceId ? { sourceId: license.sourceId } : {}),
+    text: license.attribution,
+    licenseName: license.name,
+    licenseUrl: license.url,
+    shareAlike: license.shareAlike,
+  }));
 }
 
 function curvePeakKw(curve: readonly DcCurvePoint[] | null): number {

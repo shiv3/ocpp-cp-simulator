@@ -9,6 +9,7 @@ import { useConfig } from "../data/hooks/useConfig";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import { useDataContext } from "../data/providers/DataProvider";
 import { useVehicleSelect } from "./vehicle/useVehicleSelect";
+import { isPresetName, presetForDefaults } from "./vehicle/vehicleChoice";
 import {
   OwnModelOption,
   VehicleChoiceNotes,
@@ -354,9 +355,9 @@ const Settings: React.FC = () => {
               onChange={(e) => {
                 const preset = e.target.value;
                 vehicle.select(preset, (base) =>
-                  preset === "Custom"
-                    ? { ...base, modelName: "Custom" }
-                    : { ...base, modelName: preset, ...EV_PRESETS[preset] },
+                  isPresetName(preset) && preset !== "Custom"
+                    ? presetForDefaults(base, preset)
+                    : { ...base, modelName: preset },
                 );
               }}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"

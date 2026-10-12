@@ -719,6 +719,7 @@ the offending type named, rather than exported and silently skipped.
 | `phases`             | No — no per-phase samples                                      |
 | `voltageV`           | No — no voltage or current samples                             |
 | `powerFactor`        | No — no reactive-power model                                   |
+| `attribution`        | No — informational credit for imported data (#458)             |
 
 ## Events
 

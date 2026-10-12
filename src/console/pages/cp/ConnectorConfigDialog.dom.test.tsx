@@ -158,12 +158,17 @@ describe("ConnectorConfigDialog: EV and auto meter of one connector", () => {
 
     await save(dialog);
 
+    // A preset replaces the vehicle: the fields it lacks are removed (#458).
     expect(setEVSettings).toHaveBeenCalledWith("CP-1", 1, {
       ...EV,
       modelName: "Nissan Leaf (40kWh)",
       batteryCapacityKwh: 40,
       maxChargingPowerKw: 50,
       targetSoc: 90,
+      chargingCurve: null,
+      currentType: null,
+      phases: null,
+      attribution: null,
     });
     // The auto meter was not touched: nothing rewritten there.
     expect(service.setAutoMeterValueConfig).not.toHaveBeenCalled();
@@ -391,6 +396,7 @@ describe("ConnectorConfigDialog: saved vehicle profiles (#458)", () => {
         { socPercent: 10, powerFraction: 1 },
         { socPercent: 90, powerFraction: 0.2 },
       ],
+      attribution: [],
     });
   });
 
@@ -414,6 +420,7 @@ describe("ConnectorConfigDialog: saved vehicle profiles (#458)", () => {
       currentType: "AC",
       chargingCurve: [],
       phases: 3,
+      attribution: [],
     });
   });
 

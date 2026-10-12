@@ -7,6 +7,7 @@ import {
 } from "../../cp/domain/connector/EVSettings";
 import { cn } from "../../lib/utils";
 import { useVehicleSelect } from "../vehicle/useVehicleSelect";
+import { isPresetName, presetForScenario } from "../vehicle/vehicleChoice";
 import {
   OwnModelOption,
   VehicleChoiceNotes,
@@ -70,13 +71,12 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
               value={value.modelName ?? ""}
               onChange={(e) => {
                 const preset = e.target.value;
-                vehicle.select(preset, (base) =>
-                  !preset
-                    ? {}
-                    : preset === "Custom"
-                      ? { ...base, modelName: "Custom" }
-                      : { ...base, modelName: preset, ...EV_PRESETS[preset] },
-                );
+                vehicle.select(preset, (base) => {
+                  if (!preset) return {};
+                  return isPresetName(preset) && preset !== "Custom"
+                    ? presetForScenario(base, preset)
+                    : { ...base, modelName: preset };
+                });
               }}
             >
               <option value="">

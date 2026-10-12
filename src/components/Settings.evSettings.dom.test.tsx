@@ -376,3 +376,58 @@ describe("Settings reset all simulator data (#374)", () => {
     expect(container.textContent).toContain("database is locked");
   });
 });
+
+describe("Default EV Settings replaces the vehicle (#458 review)", () => {
+  // A default saved from a profile, the page reopened: the form only knows
+  // the stored default.
+  it("drops a saved profile's curve, current type, phases and attribution for a preset", async () => {
+    storedDefaultEv = {
+      modelName: "Volkswagen ID.7 GTX",
+      batteryCapacityKwh: 86,
+      maxChargingPowerKw: 200,
+      initialSoc: 20,
+      targetSoc: 80,
+      currentType: "DC",
+      phases: 3,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0.2 },
+      ],
+      attribution: [
+        {
+          text: "Contains data from EVDB",
+          licenseName: "CC BY-SA 4.0",
+          licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+          shareAlike: true,
+        },
+      ],
+    };
+    setDefaultEvSettings = vi.fn();
+    const container = await renderSettings();
+    const select =
+      container.querySelector<HTMLSelectElement>("#default-ev-preset")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        "value",
+      )!.set!.call(select, "Tesla Model 3");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+    await act(async () => findButton(container, "Save").click());
+    await flush();
+
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect(applied).toMatchObject({
+      modelName: "Tesla Model 3",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 250,
+      // This page always saves the electrical model it displays; with the
+      // profile's gone, that is its own default.
+      currentType: "AC",
+      phases: 1,
+    });
+    expect(applied.chargingCurve ?? []).toEqual([]);
+    expect("attribution" in applied).toBe(false);
+  });
+});

@@ -112,8 +112,32 @@ vehicle to an explicit `phases`, never to absent keys: the connector and a
 scenario start _merge_ settings into the current ones
 (`Connector.applyEvSettingsOverride`), so an absent key would keep the previous
 vehicle's curve or phases. A DC resolution does not set `phases`, which DC
-ignores. The connector Config dialog keeps Battery and Max power editable after a
-pick; its curve, current type and phases come from the profile.
+ignores. The resolution also carries an explicit `attribution` (see
+[Licensing and attribution](#licensing-and-attribution)). The connector Config
+dialog keeps Battery and Max power editable after a pick; its curve, current
+type and phases come from the profile.
+
+## Replacing a vehicle
+
+Picking a vehicle in a vehicle select **replaces** the one the settings hold,
+whatever it was and whether or not this edit applied it — the rule works from
+the saved settings alone, so it holds after a save and a reopen. A profile
+sets its battery, power, curve, current type, phases and attribution. A
+**preset** is a whole vehicle too: its name, battery and power, a flat curve
+and no third-party data. The fields a preset lacks — the curve, the current
+type, the phases and the attribution — are handled per form
+([`vehicleChoice.ts`](../../src/components/vehicle/vehicleChoice.ts)):
+
+| Form                                  | A preset picked over a profile's vehicle                                                                                                                                                                                          |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connector **Config** dialog           | Removes them (`null` in the `set_ev_settings` merge patch, [Control plane](control-plane.md)): a flat curve and no electrical model, as presets always had.                                                                       |
+| **Default EV Settings**               | Removes them; Save then writes the page's displayed electrical model (AC, 1 phase, 230 V, unity), as it always does.                                                                                                              |
+| A scenario's **Scenario EV Settings** | Writes an explicit flat curve (`chargingCurve: []`) so the run does not take the connector's; removes the current type, the phases and the attribution, which then follow the connector like every field a scenario leaves empty. |
+
+The scenario row is the one deliberate asymmetry: clearing the connector's
+electrical model from a scenario would need a `null` in the scenario file,
+which the format does not carry. **Custom**, and re-selecting the current
+model's own name, keep the current vehicle's fields.
 
 ## Snapshot, not reference — the offline guarantee
 
@@ -202,6 +226,15 @@ A profile keeps each license with its attribution text in `origin.licenses`
 (the specs' source and, when different, the curve's), and the console shows
 it under **Attribution** on each profile and before the import is saved.
 
+The credit travels with the data. Applying a profile writes its licenses into
+the settings' `attribution` (`{ sourceId, text, licenseName, licenseUrl,
+shareAlike }[]`), so a scenario filled from a profile carries them in its
+`evSettings` and in its JSON export
+([scenario format](scenario-format.md#charging-curve-v12)); a preset clears
+them. When an entry has `shareAlike` (Gaia's CC BY-SA 4.0), an exported
+scenario that contains the data is to be shared under that license, with the
+credit kept.
+
 ## Open points
 
 - **Browser-only mode and CORS.** The public instance
@@ -209,9 +242,6 @@ it under **Attribution** on each profile and before the import is saved.
   import from a Local-mode page is refused by the browser and explained;
   import through the daemon instead
   ([Open EV Directory → CORS](../entities/open-ev-directory.md#cors)).
-- **Attribution in scenario exports.** A scenario whose EV settings were
-  filled from a profile carries the copied curve — Gaia-derived values under
-  CC BY-SA — but no attribution. Not decided.
 - **No live sync in Remote mode.** The profile list is read when a console
   first shows it and re-read after each save or delete from that console;
   there is no event push, so another browser's change appears on reload.

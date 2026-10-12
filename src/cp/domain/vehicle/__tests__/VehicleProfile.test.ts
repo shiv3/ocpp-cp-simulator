@@ -223,6 +223,7 @@ describe("resolveEvSettings — AC (#458)", () => {
       currentType: "AC",
       chargingCurve: [],
       phases: 3,
+      attribution: [],
     });
     expect(result.warnings).toEqual([]);
   });
@@ -248,6 +249,59 @@ describe("resolveEvSettings — AC (#458)", () => {
     if (!result.ok) throw new Error("expected ok");
     expect(result.settings.phases).toBe(1);
     expect(result.warnings).toContainEqual({ code: "AC_PHASES_UNKNOWN" });
+  });
+});
+
+describe("resolveEvSettings — attribution (#458)", () => {
+  const GAIA = {
+    id: "CC-BY-SA-4.0",
+    name: "Creative Commons Attribution-ShareAlike 4.0 International",
+    url: "https://creativecommons.org/licenses/by-sa/4.0/",
+    attribution: "Contains data from EVDB …",
+    shareAlike: true,
+    sourceId: "gaia",
+  };
+
+  it("carries the licenses of an imported profile into the settings", () => {
+    const imported = profile({
+      origin: {
+        provider: "open-ev-directory",
+        variantId: "var_1",
+        makeName: "Volkswagen",
+        modelName: "ID.7",
+        variantName: "GTX",
+        sourceId: "gaia",
+        sourceRecordKey: "gaia:x",
+        sourceUrl: null,
+        curveId: "crv_1",
+        curveSourceId: "gaia",
+        curveQuality: "UNKNOWN",
+        qualityBasis: null,
+        observations: [],
+        datasetVersion: null,
+        licenses: [GAIA],
+        importedAt: "2026-10-11T00:00:00.000Z",
+      },
+    });
+    for (const type of ["AC", "DC"] as const) {
+      const result = resolveEvSettings(imported, type);
+      if (!result.ok) throw new Error("expected ok");
+      expect(result.settings.attribution).toEqual([
+        {
+          sourceId: "gaia",
+          text: "Contains data from EVDB …",
+          licenseName: GAIA.name,
+          licenseUrl: GAIA.url,
+          shareAlike: true,
+        },
+      ]);
+    }
+  });
+
+  it("owes nothing for a hand-made profile, explicitly", () => {
+    const result = resolveEvSettings(profile(), "DC");
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.settings.attribution).toEqual([]);
   });
 });
 

@@ -110,6 +110,7 @@ describe("ScenarioEvSettingsFields — saved vehicle profiles (#458)", () => {
         { socPercent: 0, powerFraction: 1 },
         { socPercent: 100, powerFraction: 0.25 },
       ],
+      attribution: [],
     });
   });
 
@@ -121,38 +122,52 @@ describe("ScenarioEvSettingsFields — saved vehicle profiles (#458)", () => {
     );
   });
 
-  it("drops the profile's curve and current type when a preset is picked after it", async () => {
-    const { select, onChange } = await render({ initialSoc: 15 });
-    await act(async () => pick(select, "Volkswagen ID.7 GTX · DC"));
-    const applied = onChange.mock.calls.at(-1)![0];
-    // The host re-renders with what onChange gave it.
-    await act(async () =>
-      root!.render(
-        <DataContext.Provider
-          value={{
-            mode: "local",
-            serverUrl: "",
-            defaultEvSettings: null,
-            setDefaultEvSettings: () => {},
-            chargePointService: createFakeChargePointService({
-              listVehicleProfiles: vi.fn(async () => [PROFILE]),
-            }),
-          }}
-        >
-          <ScenarioEvSettingsFields
-            value={applied}
-            onChange={onChange}
-            defaultEvSettings={null}
-          />
-        </DataContext.Provider>,
-      ),
-    );
+  // #458 review: the scenario was saved with a profile's vehicle and is
+  // reopened — the form only knows its saved EV settings.
+  it("replaces a saved profile's vehicle with a preset's, flat curve explicit", async () => {
+    const saved: Partial<EVSettings> = {
+      initialSoc: 15,
+      modelName: "Volkswagen ID.7 GTX",
+      batteryCapacityKwh: 86,
+      maxChargingPowerKw: 11,
+      currentType: "AC",
+      phases: 3,
+      chargingCurve: [],
+      attribution: [
+        {
+          sourceId: "gaia",
+          text: "Contains data from EVDB",
+          licenseName: "CC BY-SA 4.0",
+          licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+          shareAlike: true,
+        },
+      ],
+    };
+    const { select, onChange } = await render(saved);
     await act(async () => pick(select, "Tesla Model 3"));
+    // The curve is explicit so the run does not inherit the connector's;
+    // the electrical model is left to the connector, like every field a
+    // scenario leaves empty.
     expect(onChange.mock.calls.at(-1)![0]).toEqual({
       initialSoc: 15,
       modelName: "Tesla Model 3",
       batteryCapacityKwh: 75,
       maxChargingPowerKw: 250,
+      chargingCurve: [],
+    });
+  });
+
+  it("keeps the saved vehicle's fields for Custom", async () => {
+    const saved: Partial<EVSettings> = {
+      modelName: "Volkswagen ID.7 GTX",
+      currentType: "DC",
+      chargingCurve: [{ socPercent: 0, powerFraction: 1 }],
+    };
+    const { select, onChange } = await render(saved);
+    await act(async () => pick(select, "Custom"));
+    expect(onChange.mock.calls.at(-1)![0]).toEqual({
+      ...saved,
+      modelName: "Custom",
     });
   });
 

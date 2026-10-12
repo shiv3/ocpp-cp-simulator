@@ -141,6 +141,21 @@
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 1
+        },
+        "attribution": {
+          "description": "Credit owed for third-party data copied into these settings (issue #458): set when an imported vehicle profile is applied, one entry per source license, so the credit travels with the copied values. Informational: it changes nothing at run time. A preset clears it. When an entry has shareAlike, the copied data is shared under that license.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "licenseName", "licenseUrl", "shareAlike"],
+            "properties": {
+              "sourceId": { "type": "string" },
+              "text": { "type": "string" },
+              "licenseName": { "type": "string" },
+              "licenseUrl": { "type": "string" },
+              "shareAlike": { "type": "boolean" }
+            }
+          }
         }
       }
     },

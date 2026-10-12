@@ -1,6 +1,7 @@
 import {
   EV_PRESETS,
   type EVSettings,
+  type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
 import {
   resolveEvSettings,
@@ -121,24 +122,67 @@ export function describeWarning(warning: ResolveWarning): string {
   }
 }
 
-/** The fields a profile sets that a preset does not. */
-const PROFILE_ONLY_FIELDS = ["chargingCurve", "currentType", "phases"] as const;
+/** The fields a profile sets that a preset does not have (#458). */
+const PROFILE_ONLY_FIELDS = [
+  "chargingCurve",
+  "currentType",
+  "phases",
+  "attribution",
+] as const;
 
 /**
- * Undo a profile's curve, current type and phases before a preset (or Custom)
- * is applied in the same edit, so picking "Tesla Model 3" after a DC profile
- * does not keep that profile's curve: they go back to what they were before
- * the first profile was picked. Other fields are left as the user has them.
+ * A preset is a whole vehicle: its name, battery and power, a flat curve and
+ * no third-party data. Picking one replaces the vehicle the settings hold —
+ * whatever it was, and whether or not this edit applied it — so a preset
+ * never keeps a profile's curve. What happens to the current type and the
+ * phases a preset does not have depends on the form, hence one rule per form.
  */
-export function withoutProfileFields<T extends Partial<EVSettings>>(
-  current: T,
-  beforeProfile: Partial<EVSettings> | null,
+function presetFields(name: string): Partial<EVSettings> {
+  return { modelName: name, ...EV_PRESETS[name] };
+}
+
+function withoutProfileFields<T extends Partial<EVSettings>>(settings: T): T {
+  const next = { ...settings };
+  for (const field of PROFILE_ONLY_FIELDS) delete next[field];
+  return next;
+}
+
+/** Default EV Settings, stored wholesale: the fields a preset lacks go. */
+export function presetForDefaults<T extends Partial<EVSettings>>(
+  settings: T,
+  name: string,
 ): T {
-  if (!beforeProfile) return current;
-  const next = { ...current } as Record<string, unknown>;
-  for (const field of PROFILE_ONLY_FIELDS) {
-    if (beforeProfile[field] === undefined) delete next[field];
-    else next[field] = beforeProfile[field];
-  }
-  return next as T;
+  return { ...withoutProfileFields(settings), ...presetFields(name) };
+}
+
+/**
+ * A scenario's EV settings, where an empty field inherits the connector's:
+ * the flat curve is explicit, so a run does not take the connector's curve;
+ * the electrical model is left to the connector, like every field a scenario
+ * leaves empty (removing it would take a `null` in the scenario file).
+ */
+export function presetForScenario<T extends Partial<EVSettings>>(
+  settings: T,
+  name: string,
+): T {
+  return {
+    ...withoutProfileFields(settings),
+    ...presetFields(name),
+    chargingCurve: [],
+  };
+}
+
+/**
+ * A connector's settings, written as a merge patch: every field the preset
+ * lacks is removed (`null`), back to the vehicle a preset always was — a flat
+ * curve and no electrical model.
+ */
+export function presetForConnector(name: string): EVSettingsPatch {
+  return {
+    ...presetFields(name),
+    chargingCurve: null,
+    currentType: null,
+    phases: null,
+    attribution: null,
+  };
 }

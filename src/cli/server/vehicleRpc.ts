@@ -80,7 +80,7 @@ async function withCatalog<T>(
   if (!deps.vehicleCatalog) {
     throw new RpcFailure(
       "unavailable",
-      "No vehicle catalog is configured on the daemon; start it with --oed-base-url or OED_BASE_URL",
+      "Vehicle import is turned off on the daemon (--oed-base-url none or OED_BASE_URL=none)",
     );
   }
   try {

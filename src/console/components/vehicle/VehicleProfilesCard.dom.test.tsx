@@ -348,18 +348,38 @@ describe("VehicleProfilesCard — import (#458)", () => {
     ).toContain("try again in 42 s");
   });
 
-  it("explains how to configure a daemon without a catalog", async () => {
+  it("explains a daemon with vehicle import turned off", async () => {
     const service = remoteService(fakeCatalog(), [], false);
     await render(service);
     await click(button("Import from Open EV Directory"));
     expect(document.body.textContent).toContain(
-      "The daemon has no Open EV Directory URL",
+      "Vehicle import is turned off on the daemon",
     );
     expect(byLabel("Model")).toBeNull();
   });
 });
 
 describe("VehicleProfilesCard — browser-only mode (#458)", () => {
+  it("offers the public Open EV Directory and where to get a key", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    await render(profileService(), "local");
+    await click(button("Import from Open EV Directory"));
+    expect(byLabel<HTMLInputElement>("Open EV Directory URL")!.value).toBe(
+      "https://evdb.juherr.dev",
+    );
+    const link = Array.from(document.body.querySelectorAll("a")).find((a) =>
+      a.textContent?.includes("Open EV Directory"),
+    );
+    expect(link?.getAttribute("href")).toBe(
+      "https://evdb.juherr.dev/explorer/",
+    );
+  });
+
   const KEY = "evd_live_SENTINEL_browser";
 
   it("calls the catalog with the typed key, keeps it in memory only, and explains a blocked call", async () => {

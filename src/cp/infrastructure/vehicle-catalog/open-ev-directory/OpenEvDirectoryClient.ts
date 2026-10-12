@@ -22,6 +22,13 @@ import {
 } from "./dto";
 
 export const DEFAULT_OED_TIMEOUT_MS = 10_000;
+/**
+ * The public Open EV Directory. It serves the catalog anonymously; a personal
+ * key, created from its explorer after a GitHub sign-in, is optional.
+ */
+export const PUBLIC_OED_BASE_URL = "https://evdb.juherr.dev";
+/** Where a user signs in and creates a personal key. */
+export const PUBLIC_OED_EXPLORER_URL = `${PUBLIC_OED_BASE_URL}/explorer/`;
 /** The largest page the API serves. */
 const MAX_PAGE_SIZE = 200;
 const PAGE_SIZE = 50;

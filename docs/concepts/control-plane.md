@@ -607,9 +607,9 @@ are in [`src/protocol/vehicle.ts`](../../src/protocol/vehicle.ts).
 - **Bounds.** A profile's curve holds at most 512 points, and the store
   holds at most 1,000 profiles: saving a new one past the cap is
   `invalid_params` (replacing an existing id is not refused).
-- **Catalog errors.** Without a configured catalog every `vehicle_catalog.*`
-  call answers `unavailable` with a message naming `--oed-base-url` /
-  `OED_BASE_URL`. Otherwise a catalog failure keeps its meaning —
+- **Catalog errors.** With import turned off (`--oed-base-url none`) every
+  `vehicle_catalog.*` call answers `unavailable` with a message naming
+  `--oed-base-url none` / `OED_BASE_URL=none`. Otherwise a catalog failure keeps its meaning —
   `unauthorized`, `not_found`, `rate_limited` (with `retryAfterSeconds` when
   known), `timeout` — a request the catalog rejected is `invalid_params`, and
   an unreachable, failing or malformed catalog is `unavailable`

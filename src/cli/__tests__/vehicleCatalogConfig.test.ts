@@ -22,8 +22,24 @@ function resolve(
 }
 
 describe("resolveVehicleCatalogConfig (#458)", () => {
-  it("is off when nothing is set", () => {
-    expect(resolve()).toEqual({ ok: true, config: null, warnings: [] });
+  it("uses the public Open EV Directory, anonymously, when nothing is set", () => {
+    expect(resolve()).toEqual({
+      ok: true,
+      config: { baseUrl: "https://evdb.juherr.dev", apiKey: undefined },
+      warnings: [],
+    });
+  });
+
+  it("is off when the base URL is none, from the flag or OED_BASE_URL", () => {
+    expect(resolve({ baseUrl: "none" })).toEqual({
+      ok: true,
+      config: null,
+      warnings: [],
+    });
+    expect(resolve({}, { OED_BASE_URL: "NONE" })).toMatchObject({
+      ok: true,
+      config: null,
+    });
   });
 
   it("takes the base URL from the flag, then from OED_BASE_URL", () => {
@@ -42,7 +58,7 @@ describe("resolveVehicleCatalogConfig (#458)", () => {
   it("refuses an OED_BASE_URL that is not http(s)", () => {
     expect(resolve({}, { OED_BASE_URL: "evd.example" })).toEqual({
       ok: false,
-      message: "OED_BASE_URL must be an absolute http(s) URL",
+      message: "OED_BASE_URL must be an absolute http(s) URL or none",
     });
   });
 
@@ -83,13 +99,13 @@ describe("resolveVehicleCatalogConfig (#458)", () => {
     });
   });
 
-  it("warns about a key without a base URL, and never names the key", () => {
-    const result = resolve({}, { OED_API_KEY: KEY });
+  it("warns about a key with import turned off, and never names the key", () => {
+    const result = resolve({ baseUrl: "none" }, { OED_API_KEY: KEY });
     expect(result).toEqual({
       ok: true,
       config: null,
       warnings: [
-        "An Open EV Directory API key is set but no base URL (--oed-base-url or OED_BASE_URL); vehicle import is disabled",
+        "An Open EV Directory API key is set but vehicle import is turned off (--oed-base-url none / OED_BASE_URL=none)",
       ],
     });
     expect(JSON.stringify(result)).not.toContain(KEY);
@@ -98,7 +114,7 @@ describe("resolveVehicleCatalogConfig (#458)", () => {
   it("ignores blank values", () => {
     expect(resolve({}, { OED_BASE_URL: "  ", OED_API_KEY: " " })).toEqual({
       ok: true,
-      config: null,
+      config: { baseUrl: "https://evdb.juherr.dev", apiKey: undefined },
       warnings: [],
     });
   });

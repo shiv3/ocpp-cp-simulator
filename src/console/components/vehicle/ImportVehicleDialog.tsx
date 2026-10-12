@@ -308,9 +308,11 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
           role="status"
           className="rounded-md border border-cx-border bg-cx-sub px-3 py-2"
         >
-          The daemon has no Open EV Directory URL. Start it with{" "}
-          <code>--oed-base-url</code> (or <code>OED_BASE_URL</code>) and your
-          key in <code>OED_API_KEY</code> to import vehicles.
+          Vehicle import is turned off on the daemon (it was started with{" "}
+          <code>--oed-base-url none</code> or <code>OED_BASE_URL=none</code>).
+          Start it without that setting to import from the public Open EV
+          Directory, or with <code>--oed-base-url</code> naming another
+          instance.
         </p>
       );
     }
@@ -318,7 +320,7 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
       <p className="text-[12.5px] text-cx-muted">
         Searched through the daemon
         {access.authenticated === false
-          ? ", which has no API key: the catalog may refuse it."
+          ? ", anonymously (the catalog needs no key)."
           : ", with its API key; the key never reaches this page."}
       </p>
     );

@@ -932,11 +932,17 @@ describe("parseArgs Open EV Directory flags (#458)", () => {
     });
   });
 
+  it("accepts none to turn vehicle import off", () => {
+    const result = runParseArgs(["--daemon", "--oed-base-url", "none"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ oedBaseUrl: "none" });
+  });
+
   it("refuses a base URL that is not http(s)", () => {
     const result = runParseArgs(["--daemon", "--oed-base-url", "evd.example"]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "--oed-base-url must be an absolute http(s) URL",
+      "--oed-base-url must be an absolute http(s) URL or none",
     );
   });
 

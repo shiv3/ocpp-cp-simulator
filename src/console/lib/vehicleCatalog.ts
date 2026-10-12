@@ -4,7 +4,11 @@ import {
   VehicleCatalogError,
   type VehicleCatalog,
 } from "@/cp/domain/vehicle/VehicleCatalog";
-import { OpenEvDirectoryClient } from "@/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import {
+  OpenEvDirectoryClient,
+  PUBLIC_OED_BASE_URL,
+  PUBLIC_OED_EXPLORER_URL,
+} from "@/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useDataContext } from "@/data/providers/DataProvider";
 
@@ -19,11 +23,12 @@ import { describeError } from "../pages/cp/connectorActions";
  * Local mode: the console calls Open EV Directory itself with a key the user
  * typed. That key is held **in memory only** — never in localStorage,
  * IndexedDB, an export or a URL — so it is gone when the tab closes. The base
- * URL is not a secret and is remembered in localStorage.
+ * URL is not a secret and is remembered in localStorage; it starts as the
+ * public instance.
  */
 
-/** Where to get a personal key; the self-service page is not live yet. */
-export const OED_KEY_HELP_URL = "https://github.com/juherr/open-ev-directory";
+/** Where to sign in and create a personal key. */
+export const OED_KEY_HELP_URL = PUBLIC_OED_EXPLORER_URL;
 
 export const OED_BASE_URL_STORAGE_KEY = "ocpp-cp.oed-base-url";
 
@@ -37,9 +42,11 @@ let credentials: LocalCredentials | null = null;
 
 function readCredentials(): LocalCredentials {
   if (!credentials) {
-    let baseUrl = "";
+    let baseUrl = PUBLIC_OED_BASE_URL;
     try {
-      baseUrl = window.localStorage.getItem(OED_BASE_URL_STORAGE_KEY) ?? "";
+      baseUrl =
+        window.localStorage.getItem(OED_BASE_URL_STORAGE_KEY) ??
+        PUBLIC_OED_BASE_URL;
     } catch {
       // Storage disabled: the URL is asked for each session.
     }
@@ -182,5 +189,5 @@ export function describeCatalogError(
 export function catalogNotConfiguredMessage(mode: "local" | "remote"): string {
   return mode === "local"
     ? "Enter the Open EV Directory URL first."
-    : "The daemon has no Open EV Directory URL; start it with --oed-base-url or OED_BASE_URL.";
+    : "Vehicle import is turned off on the daemon (--oed-base-url none or OED_BASE_URL=none).";
 }

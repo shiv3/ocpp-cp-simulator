@@ -26,7 +26,7 @@ updated: 2026-10-11
 # Open EV Directory
 
 [Open EV Directory](https://github.com/juherr/open-ev-directory) is a
-read-only REST API over a normalized, source-attributed dataset of electric
+read-only REST API, publicly served at <https://evdb.juherr.dev>, over a normalized, source-attributed dataset of electric
 vehicles: makes, models, variants, the specifications each upstream source
 gives (side by side, never merged) and DC charging curves with their quality.
 The simulator reads it **only to import and refresh** [vehicle profiles](../concepts/vehicle-profiles.md)
@@ -38,12 +38,12 @@ which runs in the [daemon](daemon.md) and, in Local mode, in the browser.
 
 ## Endpoints used
 
-| Port method    | Request                                                              | Notes                                                                                     |
-| -------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `listMakes`    | `GET /v1/makes?size=200&page=n`                                      | Pages through every make.                                                                 |
-| `searchModels` | `GET /v1/models?size=50&page=n[&make=<id>][&model=<text>]`           | `model` is a model id or part of its name.                                                |
-| `listVariants` | `GET /v1/models/{id}/variants?size=50&page=n`                        | Variant summaries: sources, curve count.                                                  |
-| `getVariant`   | `GET /v1/variants/{id}` then `GET /v1/variants/{id}/charging-curves` | Every source record and every curve. A former id's redirect is followed; the new id wins. |
+| Port method    | Request                                                             | Notes                                                                                 |
+| -------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `listMakes`    | `GET /v1/makes?size=200&page=n`                                     | Pages through every make.                                                             |
+| `searchModels` | `GET /v1/models?size=50&page=n[&make=<id>][&model=<text>]`          | `model` is a model id or part of its name.                                            |
+| `listVariants` | `GET /v1/models/{id}/variants?size=50&page=n`                       | Variant summaries: sources, curve count.                                              |
+| `getVariant`   | `GET /v1/variants/{id}` and `GET /v1/variants/{id}/charging-curves` | Both at once. A former id's redirect is followed; the curves are read again under it. |
 
 Every successful response is validated against the shapes in `dto.ts`; a body that is not
 JSON or does not match is `invalid_response`. Each request has a **10 s**
@@ -55,42 +55,50 @@ contract fixtures in
 ## Configuration
 
 **Daemon (Remote mode).** Server mode only. The base URL comes from
-`--oed-base-url <url>`, else `OED_BASE_URL`; the key from the file named by
+`--oed-base-url <url>`, else `OED_BASE_URL`, else the public instance
+`https://evdb.juherr.dev`; nothing is called until a user imports a vehicle,
+and `none` (either setting, any case) turns import off. The catalog is
+anonymous: a key is optional. It comes from the file named by
 `--oed-api-key-file <path>`, else the file named by `OED_API_KEY_FILE`, else
 `OED_API_KEY` (the flags are in [CLI → CLI Options](cli.md#cli-options)).
 There is deliberately **no flag that takes the key itself**: a command line is
 visible to every user of the host (`ps`), an environment variable or a mounted
 secret file (a Docker secret) is not.
 
-| Situation                                    | Result                                                               |
-| -------------------------------------------- | -------------------------------------------------------------------- |
-| `--oed-base-url` not an absolute http(s) URL | Exit 1 with `--oed-base-url must be an absolute http(s) URL`         |
-| `OED_BASE_URL` malformed (and no flag)       | Exit 1 with `OED_BASE_URL must be an absolute http(s) URL`           |
-| Key file unreadable or empty                 | Exit 1 naming the source (`--oed-api-key-file` / `OED_API_KEY_FILE`) |
-| A key but no base URL                        | Warning; import disabled                                             |
-| No base URL, no key                          | Import disabled; `vehicle_catalog.*` answers `unavailable`           |
-| Base URL without a key                       | Calls are sent unauthenticated                                       |
+| Situation                                   | Result                                                               |
+| ------------------------------------------- | -------------------------------------------------------------------- |
+| `--oed-base-url` neither http(s) nor `none` | Exit 1 with `--oed-base-url must be … http(s) URL or none`           |
+| `OED_BASE_URL` malformed (and no flag)      | Exit 1 with `OED_BASE_URL must be … http(s) URL or none`             |
+| Key file unreadable or empty                | Exit 1 naming the source (`--oed-api-key-file` / `OED_API_KEY_FILE`) |
+| A key with the URL set to `none`            | Warning; import off                                                  |
+| URL set to `none`                           | Import off; `vehicle_catalog.*` answers `unavailable`                |
+| No key                                      | Calls are anonymous (the public catalog serves them)                 |
 
 `server.info` reports `vehicleCatalog: { provider: "open-ev-directory",
 configured, authenticated }` — whether a URL and a key are set, never the key
 ([Control plane](../concepts/control-plane.md#vehicle-profiles-and-catalog)).
 The console in Remote mode imports through the daemon's
-`vehicle_catalog.*` methods, so the key never reaches the browser; when the
-daemon has no URL, the import dialog says how to start it.
+`vehicle_catalog.*` methods, so the key never reaches the browser; when
+import is off, the import dialog says so.
 
 **Browser-only Local mode.** The console calls the API directly
 ([`vehicleCatalog.ts`](../../src/console/lib/vehicleCatalog.ts)) with a key
 you type in the import dialog. The key is held **in memory only** — never in
 `localStorage`, IndexedDB, an export or a URL — so it is gone when the tab
-closes (**Forget** drops it sooner). The base URL is not a secret and is
-remembered in `localStorage` under `ocpp-cp.oed-base-url`. A key typed into a
+closes (**Forget** drops it sooner). The base URL starts as the public
+instance, is not a secret, and is remembered in `localStorage` under
+`ocpp-cp.oed-base-url`. A key typed into a
 page cannot be secret from that browser; use daemon mode where that matters.
 
 ## Keys and redaction
 
-The key is sent as `Authorization: Bearer <key>`, only when one is set. That
-scheme is an assumption until Open EV Directory issues individual keys
+The key is sent as `Authorization: Bearer <key>`, only when one is set — the
+scheme Open EV Directory issues individual keys for
 ([juherr/open-ev-directory#10](https://github.com/juherr/open-ev-directory/issues/10)).
+A personal key (`evd_live_…`) is created from the explorer,
+<https://evdb.juherr.dev/explorer/>, after a GitHub sign-in, and shown once.
+A key that is sent must be valid: a malformed, unknown, revoked or expired one
+is `401` (`unauthorized`), while no key at all is served anonymously.
 No error message the adapter builds contains the key: messages carry the
 request path and what the API said, a problem `detail` that echoes the key is
 scrubbed, and the underlying fetch error is not kept as a cause. The shared
@@ -129,16 +137,24 @@ reached; retry in 7 s`).
 
 ## CORS
 
-In Local mode the browser calls the API cross-origin. Unless the API allows
-the console's origin, the browser blocks the call, which looks exactly like
-being offline (`network`). The console explains it and points to daemon mode
-(`--oed-base-url` and `OED_API_KEY`), where the call is server-to-server and
-CORS does not apply.
+In Local mode the browser calls the API cross-origin. The public instance
+sends no CORS headers (checked 2026-10-12), so the browser blocks the call,
+which looks exactly like being offline (`network`). The console explains it
+and points to daemon mode, where the call is server-to-server and CORS does
+not apply.
 
 ## Smoke test
 
-Reproducible against a local Open EV Directory (or any stub serving the same
-paths). Follow its README:
+Against the public instance, with no setting at all (`bun run build` first,
+so `--web-console` has a `dist/`):
+
+```bash
+bun src/cli/main.ts --http-port 9700 --web-console
+# optional, a personal key: OED_API_KEY=evd_live_… bun src/cli/main.ts …
+```
+
+Against a local Open EV Directory (or any stub serving the same paths),
+follow its README:
 
 ```bash
 # In an open-ev-directory checkout (JDK 25, Docker)
@@ -147,12 +163,10 @@ docker compose up -d --wait   # PostgreSQL on host port 55432
 ./gradlew bootRun             # the API on http://localhost:8080
 ```
 
-Then, in this repository (`bun run build` first, so `--web-console` has a
-`dist/`):
+then point the daemon at it:
 
 ```bash
-# OED_API_KEY is optional until open-ev-directory#10 ships keys
-OED_API_KEY=evd_test_… bun src/cli/main.ts --http-port 9700 --web-console \
+bun src/cli/main.ts --http-port 9700 --web-console \
   --oed-base-url http://localhost:8080
 ```
 
@@ -171,5 +185,5 @@ curl -s -X POST http://127.0.0.1:9700/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"call_method","arguments":{"method":"vehicle_catalog.list_makes"}}}'
 ```
 
-A daemon started without a URL answers `unavailable: No vehicle catalog is
-configured on the daemon; start it with --oed-base-url or OED_BASE_URL`.
+A daemon started with `--oed-base-url none` answers `unavailable: Vehicle
+import is turned off on the daemon (--oed-base-url none or OED_BASE_URL=none)`.

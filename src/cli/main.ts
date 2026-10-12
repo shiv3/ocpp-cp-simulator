@@ -17,6 +17,7 @@ import {
 } from "./soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "./soapPath";
 import {
+  isOff,
   resolveVehicleCatalogConfig,
   type VehicleCatalogConfig,
 } from "./vehicleCatalogConfig";
@@ -483,9 +484,9 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.stderr.write("Error: --oed-base-url requires a URL\n");
           process.exit(1);
         }
-        if (!isHttpUrl(next)) {
+        if (!isHttpUrl(next) && !isOff(next)) {
           process.stderr.write(
-            "Error: --oed-base-url must be an absolute http(s) URL\n",
+            "Error: --oed-base-url must be an absolute http(s) URL or none\n",
           );
           process.exit(1);
         }
@@ -1295,15 +1296,20 @@ Options:
                            trusted network; the --soap-tunnel listener has
                            neither, only the route's identity check, so put a
                            boundary (ngrok traffic policy, allow-list) in front.
-  --oed-base-url <url>     Open EV Directory API to import vehicle profiles
-                           from (server mode; optional). Also OED_BASE_URL.
-                           The console imports through the daemon, so the API
-                           key stays on the server.
+  --oed-base-url <url|none>
+                           Open EV Directory API to import vehicle profiles
+                           from (server mode). Also OED_BASE_URL. Default: the
+                           public https://evdb.juherr.dev, called only when a
+                           user imports; none turns import off. The console
+                           imports through the daemon, so the API key stays
+                           on the server.
   --oed-api-key-file <path>
                            File holding your personal Open EV Directory API
-                           key (e.g. a Docker secret). Also OED_API_KEY_FILE,
-                           or the key itself in OED_API_KEY. There is no flag
-                           taking the key: a command line is visible in ps.
+                           key (optional: the catalog is also anonymous; create
+                           one at https://evdb.juherr.dev/explorer/ after a
+                           GitHub sign-in). Also OED_API_KEY_FILE, or the key
+                           itself in OED_API_KEY. There is no flag taking the
+                           key: a command line is visible in ps.
   -h, --help               Show this help
 
 HTTP endpoints (see docs/entities/daemon.md):

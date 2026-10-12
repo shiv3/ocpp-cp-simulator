@@ -200,12 +200,11 @@ it under **Attribution** on each profile and before the import is saved.
 
 ## Open points
 
-- **Authentication scheme.** The key is sent as `Authorization: Bearer <key>`,
-  an assumption until Open EV Directory ships individual keys
-  ([juherr/open-ev-directory#10](https://github.com/juherr/open-ev-directory/issues/10));
-  self-service keys are tracked in
-  [juherr/open-ev-directory#14](https://github.com/juherr/open-ev-directory/issues/14).
-- **No public URL yet.** There is no default base URL; you configure one.
+- **Browser-only mode and CORS.** The public instance
+  (<https://evdb.juherr.dev>, the default) sends no CORS headers, so a direct
+  import from a Local-mode page is refused by the browser and explained;
+  import through the daemon instead
+  ([Open EV Directory → CORS](../entities/open-ev-directory.md#cors)).
 - **Attribution in scenario exports.** A scenario whose EV settings were
   filled from a profile carries the copied curve — Gaia-derived values under
   CC BY-SA — but no attribution. Not decided.

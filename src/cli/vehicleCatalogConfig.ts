@@ -1,3 +1,4 @@
+import { PUBLIC_OED_BASE_URL } from "../cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import { isHttpUrl } from "./soapCallbackUrl";
 
 /**
@@ -7,6 +8,9 @@ import { isHttpUrl } from "./soapCallbackUrl";
  * carries its value: a command line is visible to every user of the host
  * (`ps`), an environment or a mounted secret file is not. Nothing here puts
  * the key in a message.
+ *
+ * Without a base URL the public instance is used: nothing is called until a
+ * user imports a vehicle, and `none` turns import off.
  */
 export interface VehicleCatalogConfig {
   baseUrl: string;
@@ -18,7 +22,7 @@ export type VehicleCatalogConfigResult =
   | { ok: false; message: string };
 
 export function resolveVehicleCatalogConfig(input: {
-  /** `--oed-base-url`, already checked to be http(s) by the parser. */
+  /** `--oed-base-url`, already checked to be http(s) or `none` by the parser. */
   flagBaseUrl: string | null;
   /** `--oed-api-key-file`. */
   flagApiKeyFile: string | null;
@@ -26,13 +30,19 @@ export function resolveVehicleCatalogConfig(input: {
   readFile: (path: string) => string;
 }): VehicleCatalogConfigResult {
   const envBaseUrl = blankToNull(input.env.OED_BASE_URL);
-  if (!input.flagBaseUrl && envBaseUrl && !isHttpUrl(envBaseUrl)) {
+  if (
+    !input.flagBaseUrl &&
+    envBaseUrl &&
+    !isOff(envBaseUrl) &&
+    !isHttpUrl(envBaseUrl)
+  ) {
     return {
       ok: false,
-      message: "OED_BASE_URL must be an absolute http(s) URL",
+      message: "OED_BASE_URL must be an absolute http(s) URL or none",
     };
   }
-  const baseUrl = input.flagBaseUrl ?? envBaseUrl;
+  const chosen = input.flagBaseUrl ?? envBaseUrl ?? PUBLIC_OED_BASE_URL;
+  const baseUrl = isOff(chosen) ? null : chosen;
 
   let apiKey: string | undefined;
   const keyFile = input.flagApiKeyFile
@@ -68,12 +78,17 @@ export function resolveVehicleCatalogConfig(input: {
       config: null,
       warnings: apiKey
         ? [
-            "An Open EV Directory API key is set but no base URL (--oed-base-url or OED_BASE_URL); vehicle import is disabled",
+            "An Open EV Directory API key is set but vehicle import is turned off (--oed-base-url none / OED_BASE_URL=none)",
           ]
         : [],
     };
   }
   return { ok: true, config: { baseUrl, apiKey }, warnings: [] };
+}
+
+/** `none` (any case) turns vehicle import off. */
+export function isOff(baseUrl: string): boolean {
+  return baseUrl.trim().toLowerCase() === "none";
 }
 
 function blankToNull(value: string | undefined): string | null {

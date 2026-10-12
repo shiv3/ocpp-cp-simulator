@@ -237,8 +237,28 @@ describe("daemon vehicle catalog (#458)", () => {
       },
       "CP-PATCH",
     );
+    // A required field cannot be removed: refused, and nothing changes.
+    const refused = await rpc(
+      "set_ev_settings",
+      {
+        connector: 1,
+        settings: { batteryCapacityKwh: null, modelName: "Kept out" },
+      },
+      "CP-PATCH",
+    );
+    expect(refused).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_params",
+        message: expect.stringContaining(
+          "batteryCapacityKwh cannot be removed",
+        ),
+      },
+    });
+
     const ack = await rpc("get_ev_settings", { connector: 1 }, "CP-PATCH");
     expect(ack.ok).toBe(true);
+    expect(ack.result.batteryCapacityKwh).toBeGreaterThan(0);
     expect(ack.result.modelName).toBe("Tesla Model 3");
     expect("chargingCurve" in ack.result).toBe(false);
     expect("currentType" in ack.result).toBe(false);

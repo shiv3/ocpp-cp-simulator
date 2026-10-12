@@ -1619,3 +1619,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `set_ev_settings` is a merge patch where `null` removes a key; the connector and the user's default never keep a `null` ([Control plane](concepts/control-plane.md)).
 - [Vehicle profiles → Replacing a vehicle](concepts/vehicle-profiles.md#replacing-a-vehicle): a preset replaces a profile's vehicle after a save and a reopen too — removed on a connector, removed in the Default EV Settings, an explicit flat curve with the electrical fields left to the connector in a scenario (the deliberate asymmetry); Custom keeps the fields. [Web console](entities/web-console.md#settings-page) updated.
 - [Vehicle profiles → Licensing and attribution](concepts/vehicle-profiles.md#licensing-and-attribution), [Scenario format](concepts/scenario-format.md#charging-curve-v12), [CLI → export-k6](entities/cli.md): `evSettings.attribution` carries the sources' credit into scenarios and their exports; ShareAlike noted; the open point is closed.
+
+## [2026-10-12] ingest | EV settings patch and preset scenario attribution (#458, review 2)
+
+- [Control plane](concepts/control-plane.md): a `set_ev_settings` patch can remove only optional fields; `null` on a required one (`modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`) is `invalid_params` and nothing is applied.

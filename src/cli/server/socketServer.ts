@@ -54,7 +54,10 @@ import {
 } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import {
+  InvalidEvSettingsPatchError,
+  type EVSettings,
+} from "../../cp/domain/connector/EVSettings";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
 import {
   hasStatusNotificationOptions,
@@ -2257,6 +2260,10 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   // authorizationKey for profiles 1-2, missing client cert/key for profile 3)
   // eagerly via CPRegistry.prepareInit, before anything is mutated.
   if (err instanceof OcppSecurityProfileConfigError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  // #458: a set_ev_settings patch that would remove a required field.
+  if (err instanceof InvalidEvSettingsPatchError) {
     return new RpcFailure("invalid_params", err.message);
   }
   if (!(err instanceof Error)) return null;

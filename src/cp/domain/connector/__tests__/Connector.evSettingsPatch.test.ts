@@ -4,6 +4,7 @@ import { Logger, LogLevel } from "../../../shared/Logger";
 import { Connector } from "../Connector";
 import {
   getDefaultEVSettings,
+  InvalidEvSettingsPatchError,
   setUserDefaultEVSettings,
   type EVSettings,
   type EVSettingsPatch,
@@ -77,5 +78,38 @@ describe("EV settings merge patch (#458)", () => {
     } finally {
       setUserDefaultEVSettings(null);
     }
+  });
+
+  it("refuses to remove a required field and leaves the settings as they were", () => {
+    const connector = connectorWithProfileVehicle();
+    const before = structuredClone(connector.evSettings);
+    const patch = {
+      modelName: null,
+      batteryCapacityKwh: null,
+      maxChargingPowerKw: null,
+      initialSoc: null,
+      targetSoc: null,
+      phases: null,
+    } as unknown as EVSettingsPatch;
+    expect(() => connector.applyEvSettingsOverride(patch)).toThrow(
+      InvalidEvSettingsPatchError,
+    );
+    expect(() => connector.applyEvSettingsOverride(patch)).toThrow(
+      "modelName, batteryCapacityKwh, maxChargingPowerKw, initialSoc, targetSoc cannot be removed",
+    );
+    // Nothing applied — not even the optional field of the same patch.
+    expect(connector.evSettings).toEqual(before);
+  });
+
+  it("refuses a required field written as null wholesale too", () => {
+    const connector = connectorWithProfileVehicle();
+    const before = structuredClone(connector.evSettings);
+    expect(() => {
+      connector.evSettings = {
+        ...connector.evSettings,
+        batteryCapacityKwh: null,
+      } as unknown as EVSettings;
+    }).toThrow(InvalidEvSettingsPatchError);
+    expect(connector.evSettings).toEqual(before);
   });
 });

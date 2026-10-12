@@ -27,6 +27,7 @@ import { Transaction } from "./Transaction";
 import {
   type EVSettings,
   type EVSettingsPatch,
+  assertRequiredFieldsKept,
   getDefaultEVSettings,
   withoutNulls,
 } from "./EVSettings";
@@ -798,7 +799,9 @@ export class Connector {
     // (`powerFractionAtSoc`, the meter scheduler) can assume an
     // already-sorted, already-validated curve rather than re-normalizing
     // per sample (#301).
-    // A `null` is a merge patch's "remove" (#458): never stored.
+    // A `null` is a merge patch's "remove" (#458): never stored, and refused
+    // for a required field before anything is written.
+    assertRequiredFieldsKept(settings);
     this._evSettings = withNormalizedChargingCurve(
       withoutNulls({ ...settings }),
     );
@@ -812,6 +815,9 @@ export class Connector {
    * {@link clearEvSettingsOverride} runs.
    */
   applyEvSettingsOverride(partial: EVSettingsPatch): void {
+    // Refused before the override is claimed: a rejected write changes
+    // nothing, the ownership included.
+    assertRequiredFieldsKept(partial);
     this._evSettingsOverridden = true;
     // A merge patch: absent keys keep their value, `null` removes the key
     // (the setter drops it).

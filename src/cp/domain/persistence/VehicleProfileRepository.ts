@@ -85,6 +85,18 @@ export class VehicleProfileRepository {
     return stored;
   }
 
+  /**
+   * Removes every profile — the table, or the in-memory store without a
+   * database, which `resetSimulatorState` (a table truncation) cannot reach.
+   */
+  clear(): void {
+    if (!this.database) {
+      this.inMemory.clear();
+      return;
+    }
+    this.database.run("DELETE FROM vehicle_profiles");
+  }
+
   /** Returns whether a row was removed, so the caller can report `not_found`. */
   delete(id: string): boolean {
     if (!this.database) return this.inMemory.delete(id);

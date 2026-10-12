@@ -73,6 +73,15 @@ for (const [label, open] of [
       expect(repo.count()).toBe(MAX_VEHICLE_PROFILES);
     });
 
+    it("clears every profile", () => {
+      const repo = new VehicleProfileRepository(open());
+      repo.save(profile("a", "A"));
+      repo.save(profile("b", "B"));
+      repo.clear();
+      expect(repo.list()).toEqual([]);
+      expect(repo.count()).toBe(0);
+    });
+
     it("does not store fields the schema does not name", () => {
       const repo = new VehicleProfileRepository(open());
       repo.save({ ...profile("a", "x"), apiKey: "secret" } as VehicleProfile);

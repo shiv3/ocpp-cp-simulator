@@ -68,6 +68,13 @@ describe("LocalChargePointService vehicle profiles (#458)", () => {
     await expect(service.listVehicleProfiles()).resolves.toEqual([]);
   });
 
+  it("loses the profiles to Reset all simulator data without a database", async () => {
+    const service = new LocalChargePointService(null);
+    await service.saveVehicleProfile(PROFILE);
+    await service.resetAllState();
+    await expect(service.listVehicleProfiles()).resolves.toEqual([]);
+  });
+
   it("has no catalog of its own: Local mode calls the catalog from the console", () => {
     const service = new LocalChargePointService(null);
     expect(

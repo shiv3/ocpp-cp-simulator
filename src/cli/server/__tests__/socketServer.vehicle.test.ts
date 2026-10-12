@@ -168,6 +168,16 @@ describe("vehicle_profiles.* (#458)", () => {
     ).toMatchObject({ ok: false, error: { code: "invalid_params" } });
   });
 
+  it("is emptied by state.reset without a database too", async () => {
+    const { socket } = connect();
+    await socket.rpc("vehicle_profiles.save", { profile: PROFILE });
+    expect(await socket.rpc("state.reset")).toMatchObject({ ok: true });
+    expect(await socket.rpc("vehicle_profiles.list")).toEqual({
+      ok: true,
+      result: [],
+    });
+  });
+
   it("shares the store between connections", async () => {
     const bus = new EventBus();
     const registry = new CPRegistry(bus, null);

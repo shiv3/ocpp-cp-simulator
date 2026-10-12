@@ -1067,6 +1067,9 @@ async function clearLogs(
 
 async function resetState(deps: RuntimeSocketIoDeps): Promise<{ ok: true }> {
   await runFacadeOperation(() => deps.chargePointService.resetAllState());
+  // The table is truncated with the others; without --state-db the profiles
+  // live in the repository's memory, which only the repository can empty.
+  deps.vehicleProfiles.clear();
   deps.registryEvents?.emitReset();
   return { ok: true };
 }

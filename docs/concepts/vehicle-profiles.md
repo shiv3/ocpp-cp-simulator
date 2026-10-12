@@ -171,7 +171,8 @@ and the browser's) holds at most 1,000 profiles: a new one past the cap is
 refused (`vehicle_profiles.save` answers `invalid_params`), replacing an
 existing one is not. A profile never contains an API key.
 
-`state.reset` and the console's **Reset all simulator data** wipe the profiles
+`state.reset` and the console's **Reset all simulator data** wipe the profiles —
+the in-memory store too, when there is no database —
 with everything else — a deliberate decision (`resetOnStateReset: true`): a
 reset means a clean simulator. `cp.delete` never touches them; they belong to
 no charge point.

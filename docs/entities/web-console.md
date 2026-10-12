@@ -1064,8 +1064,9 @@ when import is off on the daemon (`--oed-base-url none`) it says so.
 In browser-only Local mode the dialog asks for the API URL (the public
 `https://evdb.juherr.dev` by default, remembered in
 `localStorage` as `ocpp-cp.oed-base-url`) and **your API key** (held in memory
-for this tab only, **Forget** to drop it; created from the
-[explorer](https://evdb.juherr.dev/explorer/)); a network or CORS failure is
+for this tab only, **Forget** to drop it; optional, as the catalog is
+anonymous, and provisioned by the Open EV Directory operator while keys are
+not self-service); a network or CORS failure is
 explained with a pointer to daemon mode — the public instance sends no CORS
 headers. See
 [Open EV Directory](open-ev-directory.md).

@@ -95,8 +95,12 @@ page cannot be secret from that browser; use daemon mode where that matters.
 The key is sent as `Authorization: Bearer <key>`, only when one is set — the
 scheme Open EV Directory issues individual keys for
 ([juherr/open-ev-directory#10](https://github.com/juherr/open-ev-directory/issues/10)).
-A personal key (`evd_live_…`) is created from the explorer,
-<https://evdb.juherr.dev/explorer/>, after a GitHub sign-in, and shown once.
+A personal key (`evd_live_…`) is optional — the catalog is anonymous — and
+not self-service yet: the explorer has GitHub sign-in but no key page
+([juherr/open-ev-directory#14](https://github.com/juherr/open-ev-directory/issues/14)),
+so the operator provisions keys (its README,
+[API keys](https://github.com/juherr/open-ev-directory#api-keys)). A key is
+shown once.
 A key that is sent must be valid: a malformed, unknown, revoked or expired one
 is `401` (`unauthorized`), while no key at all is served anonymously.
 No error message the adapter builds contains the key: messages carry the

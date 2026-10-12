@@ -360,7 +360,7 @@ describe("VehicleProfilesCard — import (#458)", () => {
 });
 
 describe("VehicleProfilesCard — browser-only mode (#458)", () => {
-  it("offers the public Open EV Directory and where to get a key", async () => {
+  it("offers the public Open EV Directory and says a key is optional", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -372,11 +372,13 @@ describe("VehicleProfilesCard — browser-only mode (#458)", () => {
     expect(byLabel<HTMLInputElement>("Open EV Directory URL")!.value).toBe(
       "https://evdb.juherr.dev",
     );
+    // Keys are not self-service yet (juherr/open-ev-directory#14).
+    expect(document.body.textContent).toContain("The catalog needs no key");
     const link = Array.from(document.body.querySelectorAll("a")).find((a) =>
-      a.textContent?.includes("Open EV Directory"),
+      a.textContent?.includes("API keys"),
     );
     expect(link?.getAttribute("href")).toBe(
-      "https://evdb.juherr.dev/explorer/",
+      "https://github.com/juherr/open-ev-directory#api-keys",
     );
   });
 

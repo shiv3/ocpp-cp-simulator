@@ -6,8 +6,8 @@ import {
 } from "@/cp/domain/vehicle/VehicleCatalog";
 import {
   OpenEvDirectoryClient,
+  OED_API_KEYS_HELP_URL,
   PUBLIC_OED_BASE_URL,
-  PUBLIC_OED_EXPLORER_URL,
 } from "@/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useDataContext } from "@/data/providers/DataProvider";
@@ -27,8 +27,8 @@ import { describeError } from "../pages/cp/connectorActions";
  * public instance.
  */
 
-/** Where to sign in and create a personal key. */
-export const OED_KEY_HELP_URL = PUBLIC_OED_EXPLORER_URL;
+/** How personal keys are obtained (not self-service yet, juherr/open-ev-directory#14). */
+export const OED_KEY_HELP_URL = OED_API_KEYS_HELP_URL;
 
 export const OED_BASE_URL_STORAGE_KEY = "ocpp-cp.oed-base-url";
 

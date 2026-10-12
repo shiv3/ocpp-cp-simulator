@@ -1610,3 +1610,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The public instance is <https://evdb.juherr.dev>. The daemon now uses it by default (`--oed-base-url` / `OED_BASE_URL` override it, `none` turns import off) and the Local-mode dialog starts with it; personal keys come from its explorer. Checked live: anonymous reads, `Authorization: Bearer` keys (juherr/open-ev-directory#10 shipped; an invalid key is `401`), no CORS headers, every ID.7 variant's records and curves import.
 - Pages: [Open EV Directory](entities/open-ev-directory.md) (configuration table, keys, CORS, smoke test against the public instance), [Vehicle profiles](concepts/vehicle-profiles.md#open-points) (Bearer and public-URL open points closed, CORS noted), [CLI](entities/cli.md#cli-options) and [Daemon](entities/daemon.md) flag rows, [Web console](entities/web-console.md#settings-page), [Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog), [GitHub issues](sources/github-issues.md).
+
+## [2026-10-12] ingest | Vehicle profiles review fixes (#458)
+
+- [State persistence](concepts/state-persistence.md) and [Vehicle profiles](concepts/vehicle-profiles.md#storage-and-reset): `state.reset` also empties the in-memory profile store (no `--state-db`, or a Local service without its database).
+- [Vehicle profiles → Refresh](concepts/vehicle-profiles.md#refresh): every provenance field is compared (curve quality, basis, observations, licenses and attribution), and a profile flagged as removed whose variant reappears lists _back in the catalog_; [Web console](entities/web-console.md#settings-page) updated.
+- [Open EV Directory → Keys and redaction](entities/open-ev-directory.md#keys-and-redaction) and [Web console](entities/web-console.md#settings-page): keys are not self-service yet (juherr/open-ev-directory#14 open; the explorer has sign-in but no key page) — operator-provisioned, optional; [GitHub issues](sources/github-issues.md).

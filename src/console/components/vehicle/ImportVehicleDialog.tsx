@@ -385,19 +385,20 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
         </p>
       )}
       <p className="text-xs text-cx-muted">
-        Browser-only mode calls the catalog from this page. Your key is kept in
-        this tab's memory only — never stored or exported — and anyone using
-        this browser could read it. Get a personal key from{" "}
+        The catalog needs no key. A personal key is optional and not
+        self-service yet: the Open EV Directory operator provisions it (see its{" "}
         <a
           href={OED_KEY_HELP_URL}
           target="_blank"
           rel="noreferrer"
           className="text-cx-accent underline"
         >
-          Open EV Directory
+          API keys
         </a>
-        . If the API does not accept calls from this page, import through the
-        daemon instead.
+        ). Browser-only mode calls the catalog from this page: a key is kept in
+        this tab's memory only — never stored or exported — and anyone using
+        this browser could read it. If the API does not accept calls from this
+        page, import through the daemon instead.
       </p>
     </section>
   );

@@ -1305,11 +1305,12 @@ Options:
                            on the server.
   --oed-api-key-file <path>
                            File holding your personal Open EV Directory API
-                           key (optional: the catalog is also anonymous; create
-                           one at https://evdb.juherr.dev/explorer/ after a
-                           GitHub sign-in). Also OED_API_KEY_FILE, or the key
-                           itself in OED_API_KEY. There is no flag taking the
-                           key: a command line is visible in ps.
+                           key (optional: the catalog is anonymous; keys are
+                           provisioned by its operator, see
+                           https://github.com/juherr/open-ev-directory#api-keys).
+                           Also OED_API_KEY_FILE, or the key itself in
+                           OED_API_KEY. There is no flag taking the key: a
+                           command line is visible in ps.
   -h, --help               Show this help
 
 HTTP endpoints (see docs/entities/daemon.md):

@@ -66,6 +66,7 @@ import { LogLevel, LogType } from "../../cp/shared/Logger";
 import {
   getDefaultEVSettings,
   type EVSettings,
+  type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
@@ -592,7 +593,7 @@ export class LocalChargePointService implements ChargePointService {
   async setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void> {
     // Explicit set (#105): marks the connector overridden so a later
     // Default EV Settings propagation doesn't clobber it.

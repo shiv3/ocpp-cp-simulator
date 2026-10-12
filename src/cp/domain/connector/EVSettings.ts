@@ -35,6 +35,47 @@ export interface EVSettings {
   voltageV?: number;
   /** cos φ, AC only. Absent means 1 (unity). */
   powerFactor?: number;
+  /**
+   * Credit owed for third-party data in these settings (#458): set when a
+   * vehicle profile imported from a catalog is applied, so the attribution
+   * travels with the copied values — into a scenario and its export.
+   */
+  attribution?: DataAttribution[];
+}
+
+/** One source's credit, as its license requires it to be given. */
+export interface DataAttribution {
+  /** The catalog source the data comes from (`gaia`, `kilowatt`). */
+  sourceId?: string;
+  /** The attribution text the source asks for. */
+  text: string;
+  licenseName: string;
+  licenseUrl: string;
+  /** Adapted material must be shared under the same license (CC BY-SA). */
+  shareAlike: boolean;
+}
+
+/**
+ * An EV settings write as a merge patch (JSON Merge Patch, RFC 7396): an
+ * absent key keeps the current value and `null` removes it (#458). Removing
+ * is how a vehicle without a curve or an electrical model replaces one that
+ * has them; JSON drops `undefined`, so over the control plane only `null`
+ * can say it.
+ */
+export type EVSettingsPatch = {
+  [K in keyof EVSettings]?: EVSettings[K] | null;
+};
+
+/**
+ * The settings without the keys a patch set to `null`. Applied where
+ * settings are stored (the connector, the user's default), so a `null`
+ * is never read back.
+ */
+export function withoutNulls<T extends object>(settings: T): T {
+  if (!Object.values(settings).includes(null)) return settings;
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, value]) => value !== null),
+  ) as T;
 }
 
 export const defaultEVSettings: EVSettings = {
@@ -69,7 +110,9 @@ export function getDefaultEVSettings(): EVSettings {
  * `powerFractionAtSoc` on the first meter tick.
  */
 export function setUserDefaultEVSettings(s: EVSettings | null): void {
-  userDefaultEVSettings = s ? withNormalizedChargingCurve({ ...s }) : null;
+  userDefaultEVSettings = s
+    ? withNormalizedChargingCurve(withoutNulls({ ...s }))
+    : null;
 }
 
 export function getUserDefaultEVSettings(): EVSettings | null {

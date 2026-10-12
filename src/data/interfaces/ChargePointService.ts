@@ -16,7 +16,10 @@ import type {
 } from "../../cp/domain/types/FirmwareLogStatus";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "../../cp/domain/connector/EVSettings";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -529,10 +532,11 @@ export interface ChargePointService {
   removeConnector(id: string, connectorId: number): Promise<void>;
 
   // Connector settings
+  /** A merge patch: absent keys keep their value, `null` removes one (#458). */
   setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void>;
   getEVSettings(id: string, connectorId: number): Promise<EVSettings | null>;
   /**

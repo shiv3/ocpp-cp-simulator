@@ -37,7 +37,10 @@ import type {
   TransactionUpdateOptions,
 } from "../../cp/domain/connector/Transaction";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "../../cp/domain/connector/EVSettings";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
   DiagnosticsStatus,
@@ -1050,7 +1053,7 @@ export class RemoteChargePointService implements ChargePointService {
   async setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void> {
     await this.runCpRpc(id, "set_ev_settings", {
       connector: connectorId,

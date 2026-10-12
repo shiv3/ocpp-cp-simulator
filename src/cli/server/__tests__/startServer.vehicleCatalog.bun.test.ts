@@ -175,4 +175,74 @@ describe("daemon vehicle catalog (#458)", () => {
     );
     expect(ack).toMatchObject({ ok: false, error: { code: "unavailable" } });
   });
+
+  it("removes the EV settings fields a set_ev_settings patch sets to null", async () => {
+    const running: RunningServer = await startServer({
+      ...BASE_OPTIONS,
+      httpPort: 0,
+    });
+    cleanups.push(() => running.stop());
+    const socket = await connectTestClient(
+      `http://127.0.0.1:${running.httpPort}`,
+    );
+    cleanups.push(() => socket.disconnect());
+    const rpc = (
+      method: string,
+      params: unknown,
+      cpId?: string,
+    ): Promise<any> =>
+      new Promise((resolve) =>
+        socket.emit(
+          "rpc",
+          { ...(cpId ? { cpId } : {}), method, params },
+          resolve,
+        ),
+      );
+    expect(
+      (
+        await rpc("cp.create", {
+          cpId: "CP-PATCH",
+          wsUrl: "ws://example.test/ocpp/",
+          connectors: 1,
+          vendor: "V",
+          model: "M",
+        })
+      ).ok,
+    ).toBe(true);
+    // A profile's vehicle, then a preset's: JSON drops undefined, so only
+    // null can remove the curve and the electrical model over the wire.
+    await rpc(
+      "set_ev_settings",
+      {
+        connector: 1,
+        settings: {
+          modelName: "Volkswagen ID.7 GTX",
+          currentType: "AC",
+          phases: 3,
+          chargingCurve: [{ socPercent: 0, powerFraction: 0.5 }],
+        },
+      },
+      "CP-PATCH",
+    );
+    await rpc(
+      "set_ev_settings",
+      {
+        connector: 1,
+        settings: {
+          modelName: "Tesla Model 3",
+          chargingCurve: null,
+          currentType: null,
+          phases: null,
+        },
+      },
+      "CP-PATCH",
+    );
+    const ack = await rpc("get_ev_settings", { connector: 1 }, "CP-PATCH");
+    expect(ack.ok).toBe(true);
+    expect(ack.result.modelName).toBe("Tesla Model 3");
+    expect("chargingCurve" in ack.result).toBe(false);
+    expect("currentType" in ack.result).toBe(false);
+    expect("phases" in ack.result).toBe(false);
+    expect(JSON.stringify(ack.result)).not.toContain("null");
+  });
 });

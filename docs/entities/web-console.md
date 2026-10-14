@@ -60,7 +60,7 @@ transition, from the same origin:
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
   move to the console (#411): the error code of a connector's Faulted
-  status (#434), and a scenario's description and EV settings. The
+  status (#434). The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
   back.
@@ -207,7 +207,12 @@ views, switched by the **Steps | Graph** toggle and kept in the URL
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until the page's **Save**, which saves this scenario only
 (the connector's other scenarios are kept). The name, trigger and enabled
-flag are edited in the header in both views; unlike the classic graph editor,
+flag are edited in the header in both views, and under it the description and
+the collapsed **Scenario EV Settings** (#424): the EV the scenario applies to
+its connector when it starts, field by field (an empty field keeps the
+connector's value; the placeholders show the Default EV Settings from
+**Settings**). The form is the classic graph editor's, shared; a scenario
+whose fields are all empty saves no EV settings. Unlike the classic graph editor,
 the graph view does not rewrite the trigger from a **Status Trigger** node,
 so pick **On status change** in the header for a scenario that should start
 on a status. A graph view opened because the scenario branches stays open

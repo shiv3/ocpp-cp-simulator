@@ -10,6 +10,8 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { saveEditorScenario } from "../../components/scenario/scenarioPersistence";
 import { serializeScenarioGraph } from "../../components/scenario/scenarioSerialize";
+import ScenarioEvSettingsFields from "../../components/scenario/ScenarioEvSettingsFields";
+import { compactScenarioEvSettings } from "../../components/scenario/compactScenarioEvSettings";
 import type {
   ScenarioDefinition,
   ScenarioNodeData,
@@ -62,7 +64,7 @@ function serializedSnapshot(def: ScenarioDefinition): string {
  */
 const ScenarioEditPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { mode, chargePointService } = useDataContext();
+  const { mode, chargePointService, defaultEvSettings } = useDataContext();
 
   const cpId = searchParams.get("cp") ?? "";
   const connectorParam = searchParams.get("connector") ?? "";
@@ -239,6 +241,30 @@ const ScenarioEditPage: React.FC = () => {
         onChange={handleMetaChange}
         onSave={() => void handleSave()}
       />
+
+      {/* The rest of the scenario's settings, which the classic graph
+          editor's settings dialog also edits (#424). */}
+      <div className="mb-4 space-y-2">
+        <input
+          aria-label="Scenario description"
+          placeholder="Description (optional)"
+          value={scenario.description ?? ""}
+          // An erased description is no description, not "".
+          onChange={(e) =>
+            handleMetaChange({ description: e.target.value || undefined })
+          }
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100"
+        />
+        <ScenarioEvSettingsFields
+          className="bg-white dark:bg-gray-950"
+          value={scenario.evSettings ?? {}}
+          onChange={(next) =>
+            handleMetaChange({ evSettings: compactScenarioEvSettings(next) })
+          }
+          defaultEvSettings={defaultEvSettings}
+          initiallyExpanded={false}
+        />
+      </div>
 
       {saveError && (
         <div

@@ -58,6 +58,6 @@ describe("SettingsPage", () => {
     expect(container.textContent).not.toContain("Enable network simulation");
 
     // But the page itself should still be visible (not just blank)
-    expect(container.textContent).toContain("Open classic UI");
+    expect(container.textContent).toContain("RFID Tag IDs");
   });
 });

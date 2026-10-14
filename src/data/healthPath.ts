@@ -2,8 +2,6 @@
 //   * DataProvider auto-detects Remote mode by probing this path at the
 //     page origin (a 2xx with `{ ok: true }` means a daemon is on the
 //     other end).
-//   * Navbar polls the same path via RemoteChargePointService.ping() to
-//     show the green/red connection dot while in Remote mode.
 //
 // Must match the daemon's `--health-path` flag (default `/v1/healthz`).
 // Override at UI build time via `VITE_HEALTH_PATH=/custom/path` when the

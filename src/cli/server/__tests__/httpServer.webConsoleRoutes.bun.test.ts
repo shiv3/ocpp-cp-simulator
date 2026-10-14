@@ -11,9 +11,10 @@ import { createLifecycle } from "../lifecycle";
 /**
  * `--web-console` serves the browser app's routes from one `index.html`
  * (the client router picks the page), while `/v1/...` stays the daemon's
- * own namespace. #411 moved the web console to `/`, kept the classic UI
- * under `/v2` and turned `/v3/...` into client-side redirects: each of those
- * must reach the app on a hard load (bookmark, reload, deep link).
+ * own namespace. #411 moved the web console to `/` and turned `/v3/...`
+ * into client-side redirects; #426 did the same for `/v2/...`, the retired
+ * classic UI. Each of those must reach the app on a hard load (bookmark,
+ * reload, deep link).
  */
 const tempDirs: string[] = [];
 type FetchServer = Parameters<

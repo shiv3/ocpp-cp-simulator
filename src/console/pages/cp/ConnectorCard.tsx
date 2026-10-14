@@ -50,8 +50,8 @@ const FAULT_ERROR_CODES = ALL_CHARGE_POINT_ERROR_CODES.filter(
 /**
  * Per-connector operational card for the CP detail page: status, active
  * transaction, meters, start/stop, and a manual status-notification
- * override. Mirrors the controls `ConnectorSidePanel` exposes (same
- * `chargePointService` calls), simplified to the console's card layout.
+ * override, plus the meter / SoC, auto meter values, charging profiles and
+ * removal controls ported from the classic UI's connector side panel.
  */
 const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
   const { chargePointService } = useDataContext();

@@ -53,20 +53,12 @@ describe("ConsoleApp routing", () => {
     expect(container.textContent).toContain("No charge points");
   });
 
-  it("renders the real Settings page with a link to the classic UI at /v2", async () => {
+  it("renders the real Settings page", async () => {
     const { container, root } = await renderConsole("/settings");
     cleanup = () => unmount(root);
 
     expect(container.textContent).toContain("RFID Tag IDs");
     expect(container.textContent).toContain("Export Configuration");
-
-    // The Settings page itself carries an "Open classic UI" link to the
-    // classic UI, served under /v2. (The sidebar's "Classic UI" link also
-    // points there, so match on the link text rather than just the href.)
-    const classicLink = Array.from(
-      container.querySelectorAll('a[href="/v2"]'),
-    ).find((a) => a.textContent?.includes("Open classic UI"));
-    expect(classicLink).toBeTruthy();
   });
 
   it('"Back to Home" on the embedded Settings page returns to the console Dashboard (relative navigate("..") from /settings)', async () => {

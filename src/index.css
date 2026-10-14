@@ -114,10 +114,6 @@
     @apply bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 transition-colors;
   }
 
-  .panel-border {
-    @apply bg-white dark:bg-gray-800 rounded-xl p-4 border-2 border-gray-300 dark:border-gray-600 shadow-sm transition-colors;
-  }
-
   /* Text styles */
   .text-primary {
     @apply text-gray-900 dark:text-white;
@@ -171,27 +167,6 @@
 
   .badge-secondary {
     @apply px-2 py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200;
-  }
-
-  /* Status colors */
-  .status-available {
-    @apply text-green-700 dark:text-green-300;
-  }
-
-  .status-preparing {
-    @apply text-amber-700 dark:text-amber-300;
-  }
-
-  .status-charging {
-    @apply text-blue-700 dark:text-blue-300;
-  }
-
-  .status-unavailable {
-    @apply text-gray-900 dark:text-gray-100;
-  }
-
-  .status-error {
-    @apply text-red-700 dark:text-red-300;
   }
 
   /* Log type colors */
@@ -252,19 +227,7 @@
     @apply text-red-800 dark:text-red-200;
   }
 
-  /* Logger specific styles */
-  .logger-container {
-    @apply mt-4 border border-gray-300 dark:border-gray-600 rounded-lg p-4 bg-white dark:bg-gray-800 transition-colors;
-  }
-
-  .logger-display {
-    @apply bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-3 h-96 overflow-y-auto font-mono text-xs;
-  }
-
-  .logger-log-line {
-    @apply mb-1 hover:bg-gray-100 dark:hover:bg-gray-800 px-1 rounded;
-  }
-
+  /* Form styles of the charge point dialog */
   .logger-label {
     @apply dark:text-gray-200;
   }

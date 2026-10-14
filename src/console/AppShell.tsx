@@ -6,7 +6,6 @@ import {
   Play,
   ScrollText,
   Settings as SettingsIcon,
-  SquarePen,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -152,22 +151,13 @@ const AppShell: React.FC = () => {
               </span>
               <ThemeToggle />
             </div>
-            {/* The classic UI stays under /v2 until the features only it has
-                move here (#411); its navbar links back to the console. */}
-            <Link
-              to="/v2"
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              <SquarePen className="h-3.5 w-3.5" />
-              Classic UI
-            </Link>
             <div
               className="truncate font-mono text-xs text-gray-500 dark:text-gray-400"
               title={serverUrl}
             >
               {serverUrl}
             </div>
-            {/* Same version line as the classic UI's footer (issue #364). */}
+            {/* Build and daemon version line (issue #364). */}
             <AppBuildInfo
               className="flex-wrap"
               daemonVersion={serverInfo?.version}

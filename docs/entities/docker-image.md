@@ -49,7 +49,7 @@ docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
 
 > **Why `X.Y.Z` and `sha-<short>`/`latest` digests differ for the same commit:**
 > a release-tag build stamps the semver into `package.json` before building so
-> the CLI and the web console (console sidebar, classic footer) report the real version, then rebuilds the
+> the CLI and the web console's sidebar report the real version, then rebuilds the
 > image. The stamped bytes make it a different image (different digest) from
 > the `main` build of the same commit — expected, not a packaging error.
 > `sha-<short>` always refers to the un-stamped branch build.

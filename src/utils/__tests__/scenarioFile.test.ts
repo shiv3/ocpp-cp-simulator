@@ -198,12 +198,12 @@ describe("withScenarioSchemaVersion", () => {
     expect(scenario.schemaVersion).toBeUndefined();
   });
 
-  it("is at the current v1.3 ocppCall schema version (#389)", () => {
+  it("is at the current v1.4 libraryId schema version", () => {
     // Each additive schema version bumps the stamp: the v1.2 evSettings
     // fields (#301) once shipped with the stamp left at "1.1", and a browser
     // export could not be told apart from one written before them. v1.3
-    // adds the ocppCall node type.
-    expect(SCENARIO_SCHEMA_VERSION).toBe("1.3");
+    // adds the ocppCall node type (#389), v1.4 the optional libraryId.
+    expect(SCENARIO_SCHEMA_VERSION).toBe("1.4");
   });
 
   it("produces a scenario that still validates against schema/scenario.schema.json", () => {

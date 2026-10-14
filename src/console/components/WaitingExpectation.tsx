@@ -52,7 +52,7 @@ const WaitingExpectation: React.FC<WaitingExpectationProps> = ({
     <div className={cn("flex flex-col gap-1", className)}>
       <div>
         Waiting for{" "}
-        <code className="font-mono text-xs bg-gray-200 px-1 py-0.5 rounded dark:bg-gray-700">
+        <code className="rounded bg-cx-sub px-1 py-0.5 font-mono text-xs">
           {describeExpectation(expectation)}
         </code>
       </div>

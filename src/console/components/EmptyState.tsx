@@ -14,16 +14,10 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   hint,
   action,
 }) => (
-  <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 p-10 text-center dark:border-gray-700">
-    {Icon && <Icon className="h-8 w-8 text-gray-400 dark:text-gray-500" />}
-    <div className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-      {title}
-    </div>
-    {hint != null && (
-      <p className="max-w-sm text-sm text-gray-500 dark:text-gray-400">
-        {hint}
-      </p>
-    )}
+  <div className="flex flex-col items-center justify-center gap-3 rounded-[10px] border border-dashed border-cx-border-strong p-10 text-center text-cx-muted">
+    {Icon && <Icon className="h-8 w-8 text-cx-faint" />}
+    <div className="text-sm font-semibold text-cx-fg2">{title}</div>
+    {hint != null && <p className="max-w-sm text-sm text-cx-muted">{hint}</p>}
     {action != null && <div className="mt-1">{action}</div>}
   </div>
 );

@@ -4,9 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
-  findMenuItem,
   flush,
-  openDropdownMenu,
   renderConsole,
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
@@ -71,16 +69,24 @@ function faultCodeSelect(): HTMLSelectElement {
   return found;
 }
 
-async function setStatus(status: OCPPStatus): Promise<void> {
-  const trigger = Array.from(card().querySelectorAll("button")).find((b) =>
-    b.textContent?.includes("Set status"),
+function controlsButton(text: string): HTMLButtonElement {
+  const found = Array.from(card().querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === text,
   );
-  if (!trigger) throw new Error("no Set status trigger");
-  await openDropdownMenu(trigger);
-  const item = findMenuItem(status);
-  if (!item) throw new Error(`no ${status} item`);
+  if (!found) throw new Error(`no ${text} button`);
+  return found;
+}
+
+async function select(field: HTMLSelectElement, value: string): Promise<void> {
   await act(async () => {
-    item.click();
+    field.value = value;
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+async function press(text: string): Promise<void> {
+  await act(async () => {
+    controlsButton(text).click();
   });
   await flush();
 }
@@ -104,11 +110,8 @@ describe("ConnectorCard: the error code of a Faulted status (#434)", () => {
     const { root, sendStatusNotification } = await renderCpPage();
     unmount = () => act(() => root.unmount());
 
-    await act(async () => {
-      faultCodeSelect().value = "GroundFailure";
-      faultCodeSelect().dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await setStatus(OCPPStatus.Faulted);
+    await select(faultCodeSelect(), "GroundFailure");
+    await press("Send Faulted");
 
     expect(sendStatusNotification).toHaveBeenCalledWith(
       "CP-1",
@@ -126,7 +129,7 @@ describe("ConnectorCard: the error code of a Faulted status (#434)", () => {
     expect(codes).toContain("GroundFailure");
     expect(codes).not.toContain("NoError");
 
-    await setStatus(OCPPStatus.Faulted);
+    await press("Send Faulted");
     expect(sendStatusNotification).toHaveBeenCalledWith(
       "CP-1",
       1,
@@ -135,11 +138,15 @@ describe("ConnectorCard: the error code of a Faulted status (#434)", () => {
     );
   });
 
-  it("sends any other status without an error code", async () => {
+  it("Send status sends any other status without an error code", async () => {
     const { root, sendStatusNotification } = await renderCpPage();
     unmount = () => act(() => root.unmount());
 
-    await setStatus(OCPPStatus.Unavailable);
+    const status = card().querySelector<HTMLSelectElement>(
+      'select[aria-label="Status"]',
+    )!;
+    await select(status, OCPPStatus.Unavailable);
+    await press("Send status");
 
     expect(sendStatusNotification).toHaveBeenCalledWith(
       "CP-1",

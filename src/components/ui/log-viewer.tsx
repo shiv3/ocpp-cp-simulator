@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, SlidersHorizontal } from "lucide-react";
+
 import { LogEntry, LogLevel, LogType } from "@/cp/shared/Logger";
 import {
   annotateOcppLogs,
@@ -6,24 +8,39 @@ import {
 } from "@/components/ui/logEntryParsing";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight } from "lucide-react";
 
 /** Where "Clear" should reach: just the in-memory log buffer the screen
  *  is reading (`"screen"`), or also the persisted DB rows (`"all"`). */
 export type ClearLogsScope = "screen" | "all";
 
-interface LogViewerProps {
-  logs: LogEntry[];
+/** A log line, optionally tagged with the charge point it came from. With
+ *  tagged lines the viewer grows a Charge point filter group and column. */
+export type ViewerLogEntry = LogEntry & { cpId?: string };
+
+export interface LogViewerProps {
+  /** Oldest first. Keep the entry objects stable across renders (the ring
+   *  buffer's own objects do): an expanded row is remembered by identity. */
+  logs: ViewerLogEntry[];
   onClear?: (scope: ClearLogsScope) => void;
-  /** Hook for the "Download logs" button. The component invokes this when
-   *  the user clicks Download; ChargePoint.tsx pulls the persisted log
-   *  rows from the DB and writes a JSON Lines file. Omitting this prop
-   *  hides the button (used by demo / nested viewers without a CP id). */
+  /** Hook for the "Download" button. Omitting it hides the button. */
   onDownload?: () => void;
+  /** The checked Charge point ids; owning them lets a page keep them in the
+   *  URL. Without it the viewer keeps the selection itself. */
+  selectedCpIds?: string[];
+  onCpFilterChange?: (ids: string[]) => void;
+  /** The checked Connector values (`null` is "(none)"); owning them lets the
+   *  charge point page follow its selected connector. Without it the viewer
+   *  keeps the selection itself. */
+  selectedConnectorIds?: ConnectorFilterValue[];
+  onConnectorFilterChange?: (ids: ConnectorFilterValue[]) => void;
+  /** Caps the table's height; without it the table fills the viewer, which
+   *  the caller sizes (`className="h-full"` in a flex column). */
   maxHeight?: string;
+  /** Whether the filter sidebar starts open (default `true`). The toolbar's
+   *  Filters button shows or hides it afterwards; the viewer owns the state.
+   *  A narrow host such as the charge point's side panel starts it closed. */
+  defaultFiltersOpen?: boolean;
   className?: string;
 }
 
@@ -32,7 +49,7 @@ interface LogViewerProps {
  * don't reference any connector. `null` represents the real "no connector"
  * case so we can keep the filter list as `(number | null)[]`.
  */
-type ConnectorFilterValue = number | null;
+export type ConnectorFilterValue = number | null;
 
 /**
  * "(none)" pseudo-value for the Direction/Action filters, used for log
@@ -42,6 +59,37 @@ type ConnectorFilterValue = number | null;
  */
 type DirectionFilterValue = LogDirection | null;
 type ActionFilterValue = string | null;
+
+// Full literal class strings: Tailwind only sees class names that appear
+// verbatim in source. The `cx-*` tokens switch with the theme, so there is no
+// `dark:` twin. The old filled `.log-*` badges are not used here: a dot carries
+// the color, the text beside it carries the meaning.
+const LEVEL_DOT: Record<LogLevel, string> = {
+  [LogLevel.DEBUG]: "bg-cx-gray",
+  [LogLevel.INFO]: "bg-cx-blue",
+  [LogLevel.WARN]: "bg-cx-amber",
+  [LogLevel.ERROR]: "bg-cx-rose",
+};
+
+const TYPE_DOT: Record<LogType, string> = {
+  [LogType.WEBSOCKET]: "bg-cx-purple",
+  [LogType.OCPP]: "bg-cx-blue",
+  [LogType.TRANSACTION]: "bg-cx-emerald",
+  [LogType.HEARTBEAT]: "bg-cx-rose",
+  [LogType.METER_VALUE]: "bg-cx-amber",
+  [LogType.STATUS]: "bg-cx-accent",
+  [LogType.CONFIGURATION]: "bg-cx-amber",
+  [LogType.DIAGNOSTICS]: "bg-cx-rose",
+  [LogType.SCENARIO]: "bg-cx-gray",
+  [LogType.GENERAL]: "bg-cx-gray",
+  [LogType.SYSTEM]: "bg-cx-gray",
+  [LogType.NETWORK_SIM]: "bg-cx-purple",
+};
+
+const DIRECTION_DOT: Record<LogDirection, string> = {
+  sent: "bg-cx-accent",
+  received: "bg-cx-emerald",
+};
 
 /**
  * Best-effort: pull every connector id referenced by a log message.
@@ -67,17 +115,147 @@ function extractConnectorIds(message: string): number[] {
   return [...found];
 }
 
+/**
+ * Pretty-prints the first `{...}` JSON substring found in `message`, leaving
+ * the surrounding prose untouched. Best-effort: any parse failure (unbalanced
+ * braces, non-JSON content that merely looks bracketed, …) falls back to the
+ * original message unchanged.
+ */
+function prettyPrintMessage(message: string): string {
+  const start = message.indexOf("{");
+  const end = message.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return message;
+  try {
+    const parsed: unknown = JSON.parse(message.slice(start, end + 1));
+    return `${message.slice(0, start)}${JSON.stringify(parsed, null, 2)}${message.slice(end + 1)}`;
+  } catch {
+    return message;
+  }
+}
+
+/** Toggles `value` in `list` (add when absent, remove when present). */
+function toggled<T>(list: readonly T[], value: T): T[] {
+  return list.includes(value)
+    ? list.filter((v) => v !== value)
+    : [...list, value];
+}
+
+/** Increments `key`'s count in `counts`. */
+function bump<K>(counts: Map<K, number>, key: K) {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+interface FilterOption {
+  key: string;
+  label: string;
+  count: number;
+  checked: boolean;
+  /** `bg-cx-*` class of a small dot before the label. */
+  dot?: string;
+  onToggle: () => void;
+}
+
+/** One sidebar group: an uppercase heading that folds it, a search box over
+ *  the values and a checkbox per value with its count. */
+const FilterGroup: React.FC<{
+  title: string;
+  options: FilterOption[];
+  emptyText?: string;
+  /** Tailwind `max-h-*` of the option list. */
+  listClassName?: string;
+}> = ({ title, options, emptyText, listClassName = "max-h-48" }) => {
+  const [expanded, setExpanded] = useState(true);
+  const [search, setSearch] = useState("");
+  const query = search.toLowerCase();
+  const shown = query
+    ? options.filter((o) => o.label.toLowerCase().includes(query))
+    : options;
+
+  return (
+    <section data-filter-group={title} className="border-b border-cx-border">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-cx-muted hover:bg-cx-sub"
+      >
+        {title}
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" />
+        )}
+      </button>
+      {expanded && (
+        <div className="space-y-2 px-3 pb-3">
+          <Input
+            placeholder="Filter values"
+            aria-label={`Filter ${title} values`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-7 text-xs"
+          />
+          <div className={cn("space-y-0.5 overflow-y-auto", listClassName)}>
+            {shown.length === 0 && emptyText ? (
+              <p className="px-1 text-xs italic text-cx-faint">{emptyText}</p>
+            ) : (
+              shown.map((option) => (
+                <label
+                  key={option.key}
+                  data-filter-option={option.label}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-cx-sub"
+                >
+                  <input
+                    type="checkbox"
+                    checked={option.checked}
+                    onChange={option.onToggle}
+                  />
+                  {option.dot && (
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "h-[7px] w-[7px] shrink-0 rounded-full",
+                        option.dot,
+                      )}
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-xs text-cx-fg2">
+                    {option.label}
+                  </span>
+                  <span className="font-mono text-[11px] text-cx-faint">
+                    {option.count}
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+};
+
+const TH_CLASS =
+  "h-9 px-2 text-left align-middle text-[11px] font-semibold uppercase tracking-[0.06em] text-cx-muted";
+
 export function LogViewer({
   logs,
   onClear,
   onDownload,
-  maxHeight = "500px",
+  selectedCpIds,
+  onCpFilterChange,
+  selectedConnectorIds,
+  onConnectorFilterChange,
+  maxHeight,
+  defaultFiltersOpen = true,
   className,
 }: LogViewerProps) {
+  const filtersId = useId();
+  const [filtersOpen, setFiltersOpen] = useState(defaultFiltersOpen);
   const [filter, setFilter] = useState("");
   const [logLevelFilter, setLogLevelFilter] = useState<LogLevel[]>([]);
   const [logTypeFilter, setLogTypeFilter] = useState<LogType[]>([]);
-  const [logConnectorFilter, setLogConnectorFilter] = useState<
+  const [ownConnectorFilter, setOwnConnectorFilter] = useState<
     ConnectorFilterValue[]
   >([]);
   const [logDirectionFilter, setLogDirectionFilter] = useState<
@@ -86,17 +264,42 @@ export function LogViewer({
   const [logActionFilter, setLogActionFilter] = useState<ActionFilterValue[]>(
     [],
   );
+  const [ownCpFilter, setOwnCpFilter] = useState<string[]>([]);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
-  const [levelSearch, setLevelSearch] = useState("");
-  const [typeSearch, setTypeSearch] = useState("");
-  const [connectorSearch, setConnectorSearch] = useState("");
-  const [directionSearch, setDirectionSearch] = useState("");
-  const [actionSearch, setActionSearch] = useState("");
-  const [levelExpanded, setLevelExpanded] = useState(true);
-  const [typeExpanded, setTypeExpanded] = useState(true);
-  const [connectorExpanded, setConnectorExpanded] = useState(true);
-  const [directionExpanded, setDirectionExpanded] = useState(true);
-  const [actionExpanded, setActionExpanded] = useState(true);
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+
+  // Charge point selection: the owner's when it passes one, else ours.
+  const cpFilter = selectedCpIds ?? ownCpFilter;
+  const setCpFilter = (next: string[]) => {
+    if (selectedCpIds === undefined) setOwnCpFilter(next);
+    onCpFilterChange?.(next);
+  };
+
+  // Connector selection: likewise.
+  const logConnectorFilter = selectedConnectorIds ?? ownConnectorFilter;
+  const setLogConnectorFilter = (next: ConnectorFilterValue[]) => {
+    if (selectedConnectorIds === undefined) setOwnConnectorFilter(next);
+    onConnectorFilterChange?.(next);
+  };
+
+  // A stable id per entry object: the React key and the "expanded" marker,
+  // neither of which may follow the row's index while the ring buffer drops
+  // its oldest lines.
+  const rowIds = useRef(new WeakMap<LogEntry, number>());
+  const nextRowId = useRef(0);
+  const rowId = (log: LogEntry): number => {
+    let id = rowIds.current.get(log);
+    if (id === undefined) {
+      id = nextRowId.current++;
+      rowIds.current.set(log, id);
+    }
+    return id;
+  };
+
+  const hasCp = useMemo(
+    () => logs.some((log) => log.cpId !== undefined) || cpFilter.length > 0,
+    [logs, cpFilter],
+  );
 
   // Each log's set of referenced connector ids — memoized so we don't
   // re-parse the message on every render or every filter toggle.
@@ -114,40 +317,31 @@ export function LogViewer({
 
   // Calculate statistics
   const stats = useMemo(() => {
-    const levelCounts: Record<LogLevel, number> = {
-      [LogLevel.DEBUG]: 0,
-      [LogLevel.INFO]: 0,
-      [LogLevel.WARN]: 0,
-      [LogLevel.ERROR]: 0,
-    };
-    const typeCounts: Record<LogType, number> = {} as Record<LogType, number>;
+    const levelCounts = new Map<LogLevel, number>();
+    const typeCounts = new Map<LogType, number>();
+    const cpCounts = new Map<string, number>();
     const connectorCounts = new Map<ConnectorFilterValue, number>();
     const directionCounts = new Map<DirectionFilterValue, number>();
     const actionCounts = new Map<ActionFilterValue, number>();
 
     logs.forEach((log, idx) => {
-      levelCounts[log.level] = (levelCounts[log.level] || 0) + 1;
-      typeCounts[log.type] = (typeCounts[log.type] || 0) + 1;
+      bump(levelCounts, log.level);
+      bump(typeCounts, log.type);
+      if (log.cpId !== undefined) bump(cpCounts, log.cpId);
 
       const ids = logConnectors[idx];
-      if (ids.length === 0) {
-        connectorCounts.set(null, (connectorCounts.get(null) ?? 0) + 1);
-      } else {
-        for (const id of ids) {
-          connectorCounts.set(id, (connectorCounts.get(id) ?? 0) + 1);
-        }
-      }
+      if (ids.length === 0) bump(connectorCounts, null);
+      else for (const id of ids) bump(connectorCounts, id);
 
       const info = logOcppInfo[idx];
-      const direction = info.direction ?? null;
-      directionCounts.set(direction, (directionCounts.get(direction) ?? 0) + 1);
-      const action = info.action ?? null;
-      actionCounts.set(action, (actionCounts.get(action) ?? 0) + 1);
+      bump(directionCounts, info.direction ?? null);
+      bump(actionCounts, info.action ?? null);
     });
 
     return {
       levelCounts,
       typeCounts,
+      cpCounts,
       connectorCounts,
       directionCounts,
       actionCounts,
@@ -158,13 +352,12 @@ export function LogViewer({
   // (not its position after filtering) so the row renderer can still look
   // up per-entry data — like `logOcppInfo` — keyed against the full list.
   const filteredLogs = useMemo(() => {
+    const query = filter.toLowerCase();
     return logs
       .map((log, idx) => ({ log, idx }))
       .filter(({ log, idx }) => {
-        if (
-          filter &&
-          !log.message.toLowerCase().includes(filter.toLowerCase())
-        ) {
+        if (query && !log.message.toLowerCase().includes(query)) return false;
+        if (cpFilter.length > 0 && !cpFilter.includes(log.cpId ?? "")) {
           return false;
         }
         if (logLevelFilter.length > 0 && !logLevelFilter.includes(log.level)) {
@@ -194,6 +387,7 @@ export function LogViewer({
   }, [
     logs,
     filter,
+    cpFilter,
     logLevelFilter,
     logTypeFilter,
     logConnectorFilter,
@@ -203,7 +397,7 @@ export function LogViewer({
     logOcppInfo,
   ]);
 
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
@@ -214,519 +408,240 @@ export function LogViewer({
     }
   }, [filteredLogs, autoScroll]);
 
-  const getLogLevelBadgeVariant = (
-    level: LogLevel,
-  ): "default" | "secondary" | "destructive" | "outline" => {
-    switch (level) {
-      case LogLevel.ERROR:
-        return "destructive";
-      case LogLevel.WARN:
-        return "default";
-      case LogLevel.INFO:
-        return "secondary";
-      case LogLevel.DEBUG:
-        return "outline";
-      default:
-        return "secondary";
-    }
-  };
+  const toggleExpanded = (id: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
-  const getLogTypeBadgeColor = (type: LogType): string => {
-    switch (type) {
-      case LogType.WEBSOCKET:
-        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
-      case LogType.OCPP:
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
-      case LogType.TRANSACTION:
-        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
-      case LogType.HEARTBEAT:
-        return "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-300";
-      case LogType.METER_VALUE:
-        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
-      case LogType.STATUS:
-        return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-300";
-      case LogType.CONFIGURATION:
-        return "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300";
-      case LogType.DIAGNOSTICS:
-        return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300";
-      case LogType.SCENARIO:
-        return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300";
-      case LogType.NETWORK_SIM:
-        return "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-300";
-      default:
-        return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300";
-    }
-  };
+  // Sidebar option lists. Null ("(none)") sorts last in every group.
+  const cpOptions: FilterOption[] = [
+    ...new Set([...stats.cpCounts.keys(), ...cpFilter]),
+  ]
+    .sort()
+    .map((id) => ({
+      key: id,
+      label: id,
+      count: stats.cpCounts.get(id) ?? 0,
+      checked: cpFilter.includes(id),
+      onToggle: () => setCpFilter(toggled(cpFilter, id)),
+    }));
 
-  const toggleLogLevel = (level: LogLevel) => {
-    if (logLevelFilter.includes(level)) {
-      setLogLevelFilter(logLevelFilter.filter((l) => l !== level));
-    } else {
-      setLogLevelFilter([...logLevelFilter, level]);
-    }
-  };
+  const levelOptions: FilterOption[] = [
+    LogLevel.DEBUG,
+    LogLevel.INFO,
+    LogLevel.WARN,
+    LogLevel.ERROR,
+  ].map((level) => ({
+    key: String(level),
+    label: LogLevel[level],
+    count: stats.levelCounts.get(level) ?? 0,
+    checked: logLevelFilter.includes(level),
+    dot: LEVEL_DOT[level],
+    onToggle: () => setLogLevelFilter(toggled(logLevelFilter, level)),
+  }));
 
-  const toggleLogType = (type: LogType) => {
-    if (logTypeFilter.includes(type)) {
-      setLogTypeFilter(logTypeFilter.filter((t) => t !== type));
-    } else {
-      setLogTypeFilter([...logTypeFilter, type]);
-    }
-  };
+  // Most frequent first.
+  const typeOptions: FilterOption[] = Object.values(LogType)
+    .sort(
+      (a, b) => (stats.typeCounts.get(b) ?? 0) - (stats.typeCounts.get(a) ?? 0),
+    )
+    .map((type) => ({
+      key: type,
+      label: type,
+      count: stats.typeCounts.get(type) ?? 0,
+      checked: logTypeFilter.includes(type),
+      dot: TYPE_DOT[type],
+      onToggle: () => setLogTypeFilter(toggled(logTypeFilter, type)),
+    }));
 
-  const toggleLogConnector = (value: ConnectorFilterValue) => {
-    if (logConnectorFilter.includes(value)) {
-      setLogConnectorFilter(logConnectorFilter.filter((v) => v !== value));
-    } else {
-      setLogConnectorFilter([...logConnectorFilter, value]);
-    }
-  };
+  const connectorOptions: FilterOption[] = [...stats.connectorCounts.keys()]
+    .sort((a, b) => (a === null ? 1 : b === null ? -1 : a - b))
+    .map((value) => ({
+      key: value === null ? "none" : `c${value}`,
+      label:
+        value === null
+          ? "(none)"
+          : value === 0
+            ? "0 (charge point)"
+            : `Connector ${value}`,
+      count: stats.connectorCounts.get(value) ?? 0,
+      checked: logConnectorFilter.includes(value),
+      onToggle: () => setLogConnectorFilter(toggled(logConnectorFilter, value)),
+    }));
 
-  const toggleLogDirection = (value: DirectionFilterValue) => {
-    if (logDirectionFilter.includes(value)) {
-      setLogDirectionFilter(logDirectionFilter.filter((v) => v !== value));
-    } else {
-      setLogDirectionFilter([...logDirectionFilter, value]);
-    }
-  };
+  const directionOptions: FilterOption[] = [...stats.directionCounts.keys()]
+    .sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)))
+    .map((value) => ({
+      key: value ?? "none",
+      label: value === null ? "(none)" : value === "sent" ? "Sent" : "Received",
+      count: stats.directionCounts.get(value) ?? 0,
+      checked: logDirectionFilter.includes(value),
+      dot: value === null ? undefined : DIRECTION_DOT[value],
+      onToggle: () => setLogDirectionFilter(toggled(logDirectionFilter, value)),
+    }));
 
-  const toggleLogAction = (value: ActionFilterValue) => {
-    if (logActionFilter.includes(value)) {
-      setLogActionFilter(logActionFilter.filter((v) => v !== value));
-    } else {
-      setLogActionFilter([...logActionFilter, value]);
-    }
-  };
+  // Most frequent first (mirrors the Type group), (none) last (#178 2.4).
+  const actionOptions: FilterOption[] = [...stats.actionCounts.keys()]
+    .sort((a, b) =>
+      a === null
+        ? 1
+        : b === null
+          ? -1
+          : (stats.actionCounts.get(b) ?? 0) - (stats.actionCounts.get(a) ?? 0),
+    )
+    .map((value) => ({
+      key: value ?? "none",
+      label: value ?? "(none)",
+      count: stats.actionCounts.get(value) ?? 0,
+      checked: logActionFilter.includes(value),
+      onToggle: () => setLogActionFilter(toggled(logActionFilter, value)),
+    }));
 
-  const connectorLabel = (value: ConnectorFilterValue): string =>
-    value === null
-      ? "(none)"
-      : value === 0
-        ? "0 (charge point)"
-        : `Connector ${value}`;
+  const columnCount = hasCp ? 8 : 7;
 
-  const directionLabel = (value: DirectionFilterValue): string =>
-    value === null ? "(none)" : value === "sent" ? "Sent" : "Received";
-
-  const actionLabel = (value: ActionFilterValue): string => value ?? "(none)";
-
-  // Surface every connector id that's appeared in logs so far, sorted with
-  // (none) last. Filter by the search box (matches the rendered label).
-  const filteredConnectors = useMemo(() => {
-    const all: ConnectorFilterValue[] = [...stats.connectorCounts.keys()].sort(
-      (a, b) => {
-        if (a === null) return 1;
-        if (b === null) return -1;
-        return a - b;
-      },
-    );
-    if (!connectorSearch) return all;
-    const q = connectorSearch.toLowerCase();
-    return all.filter((v) => connectorLabel(v).toLowerCase().includes(q));
-  }, [stats.connectorCounts, connectorSearch]);
-
-  // Sent / Received / (none), with (none) last — same shape as the
-  // Connector filter above (#178 2.4).
-  const filteredDirections = useMemo(() => {
-    const all: DirectionFilterValue[] = [...stats.directionCounts.keys()].sort(
-      (a, b) => {
-        if (a === null) return 1;
-        if (b === null) return -1;
-        return a.localeCompare(b);
-      },
-    );
-    if (!directionSearch) return all;
-    const q = directionSearch.toLowerCase();
-    return all.filter((v) => directionLabel(v).toLowerCase().includes(q));
-  }, [stats.directionCounts, directionSearch]);
-
-  // Every OCPP action name that's appeared in logs so far, most-frequent
-  // first (mirrors the Type filter's sort), with (none) last (#178 2.4).
-  const filteredActions = useMemo(() => {
-    const all: ActionFilterValue[] = [...stats.actionCounts.keys()].sort(
-      (a, b) => {
-        if (a === null) return 1;
-        if (b === null) return -1;
-        return (
-          (stats.actionCounts.get(b) || 0) - (stats.actionCounts.get(a) || 0)
-        );
-      },
-    );
-    if (!actionSearch) return all;
-    const q = actionSearch.toLowerCase();
-    return all.filter((v) => actionLabel(v).toLowerCase().includes(q));
-  }, [stats.actionCounts, actionSearch]);
-
-  // Filtered level and type lists for search
-  const filteredLevels = useMemo(() => {
-    return Object.values(LogLevel)
-      .filter((value) => typeof value === "number")
-      .filter((level) =>
-        LogLevel[level as LogLevel]
-          .toLowerCase()
-          .includes(levelSearch.toLowerCase()),
-      ) as LogLevel[];
-  }, [levelSearch]);
-
-  const filteredTypes = useMemo(() => {
-    return Object.values(LogType)
-      .filter((type) => type.toLowerCase().includes(typeSearch.toLowerCase()))
-      .sort((a, b) => (stats.typeCounts[b] || 0) - (stats.typeCounts[a] || 0));
-  }, [typeSearch, stats.typeCounts]);
+  // Filter groups with a selection: a closed sidebar hides them, so the
+  // Filters button counts them.
+  const activeFilterGroups = [
+    cpFilter,
+    logLevelFilter,
+    logTypeFilter,
+    logConnectorFilter,
+    logDirectionFilter,
+    logActionFilter,
+  ].filter((selection) => selection.length > 0).length;
 
   return (
     <div
-      className={cn("flex h-full border rounded-lg overflow-hidden", className)}
+      className={cn(
+        "flex min-h-0 overflow-hidden rounded-[10px] border border-cx-border bg-cx-card",
+        className,
+      )}
     >
-      {/* Left Sidebar - Filters */}
-      <div className="w-64 border-r bg-muted/20 flex flex-col">
-        {/* Header */}
-        <div className="p-3 border-b bg-muted/50">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            Filters
-          </h3>
+      {/* Left sidebar: filters */}
+      <div
+        id={filtersId}
+        hidden={!filtersOpen}
+        className="flex w-64 shrink-0 flex-col border-r border-cx-border bg-cx-side"
+      >
+        <div className="border-b border-cx-border px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-cx-muted">
+          Filters
         </div>
-
         <div className="flex-1 overflow-y-auto">
-          {/* Log Level Filter */}
-          <div className="border-b">
-            <button
-              onClick={() => setLevelExpanded(!levelExpanded)}
-              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-            >
-              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Level
-              </span>
-              {levelExpanded ? (
-                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              )}
-            </button>
-            {levelExpanded && (
-              <div className="px-3 pb-3 space-y-2">
-                <Input
-                  placeholder="Filter values"
-                  value={levelSearch}
-                  onChange={(e) => setLevelSearch(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {filteredLevels.map((level) => (
-                    <label
-                      key={level}
-                      className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <Checkbox
-                          checked={logLevelFilter.includes(level)}
-                          onCheckedChange={() => toggleLogLevel(level)}
-                        />
-                        <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
-                          {LogLevel[level]}
-                        </span>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="ml-2 text-xs px-1.5 py-0"
-                      >
-                        {stats.levelCounts[level] || 0}
-                      </Badge>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Log Type Filter */}
-          <div className="border-b">
-            <button
-              onClick={() => setTypeExpanded(!typeExpanded)}
-              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-            >
-              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Type
-              </span>
-              {typeExpanded ? (
-                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              )}
-            </button>
-            {typeExpanded && (
-              <div className="px-3 pb-3 space-y-2">
-                <Input
-                  placeholder="Filter values"
-                  value={typeSearch}
-                  onChange={(e) => setTypeSearch(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {filteredTypes.map((type) => (
-                    <label
-                      key={type}
-                      className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <Checkbox
-                          checked={logTypeFilter.includes(type)}
-                          onCheckedChange={() => toggleLogType(type)}
-                        />
-                        <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
-                          {type}
-                        </span>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="ml-2 text-xs px-1.5 py-0"
-                      >
-                        {stats.typeCounts[type] || 0}
-                      </Badge>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Connector Filter */}
-          <div className="border-b">
-            <button
-              onClick={() => setConnectorExpanded(!connectorExpanded)}
-              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-            >
-              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Connector
-              </span>
-              {connectorExpanded ? (
-                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              )}
-            </button>
-            {connectorExpanded && (
-              <div className="px-3 pb-3 space-y-2">
-                <Input
-                  placeholder="Filter values"
-                  value={connectorSearch}
-                  onChange={(e) => setConnectorSearch(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {filteredConnectors.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic px-1">
-                      No connector references yet
-                    </p>
-                  ) : (
-                    filteredConnectors.map((value) => {
-                      const key = value === null ? "none" : `c${value}`;
-                      return (
-                        <label
-                          key={key}
-                          className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
-                        >
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <Checkbox
-                              checked={logConnectorFilter.includes(value)}
-                              onCheckedChange={() => toggleLogConnector(value)}
-                            />
-                            <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
-                              {connectorLabel(value)}
-                            </span>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className="ml-2 text-xs px-1.5 py-0"
-                          >
-                            {stats.connectorCounts.get(value) || 0}
-                          </Badge>
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Direction Filter (#178 2.4) */}
-          <div className="border-b">
-            <button
-              onClick={() => setDirectionExpanded(!directionExpanded)}
-              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-            >
-              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Direction
-              </span>
-              {directionExpanded ? (
-                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              )}
-            </button>
-            {directionExpanded && (
-              <div className="px-3 pb-3 space-y-2">
-                <Input
-                  placeholder="Filter values"
-                  value={directionSearch}
-                  onChange={(e) => setDirectionSearch(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {filteredDirections.map((value) => {
-                    const key = value ?? "none";
-                    return (
-                      <label
-                        key={key}
-                        className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <Checkbox
-                            checked={logDirectionFilter.includes(value)}
-                            onCheckedChange={() => toggleLogDirection(value)}
-                          />
-                          <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
-                            {directionLabel(value)}
-                          </span>
-                        </div>
-                        <Badge
-                          variant="outline"
-                          className="ml-2 text-xs px-1.5 py-0"
-                        >
-                          {stats.directionCounts.get(value) || 0}
-                        </Badge>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Action Filter (#178 2.4) */}
-          <div className="border-b">
-            <button
-              onClick={() => setActionExpanded(!actionExpanded)}
-              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-            >
-              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Action
-              </span>
-              {actionExpanded ? (
-                <ChevronDown className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-              )}
-            </button>
-            {actionExpanded && (
-              <div className="px-3 pb-3 space-y-2">
-                <Input
-                  placeholder="Filter values"
-                  value={actionSearch}
-                  onChange={(e) => setActionSearch(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {filteredActions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic px-1">
-                      No OCPP actions parsed yet
-                    </p>
-                  ) : (
-                    filteredActions.map((value) => {
-                      const key = value ?? "none";
-                      return (
-                        <label
-                          key={key}
-                          className="flex items-center justify-between p-1.5 hover:bg-muted/50 rounded cursor-pointer group"
-                        >
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <Checkbox
-                              checked={logActionFilter.includes(value)}
-                              onCheckedChange={() => toggleLogAction(value)}
-                            />
-                            <span className="text-xs text-gray-900 dark:text-gray-100 truncate">
-                              {actionLabel(value)}
-                            </span>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className="ml-2 text-xs px-1.5 py-0"
-                          >
-                            {stats.actionCounts.get(value) || 0}
-                          </Badge>
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          {hasCp && (
+            <FilterGroup
+              title="Charge point"
+              options={cpOptions}
+              emptyText="No charge points yet"
+            />
+          )}
+          <FilterGroup title="Level" options={levelOptions} />
+          <FilterGroup
+            title="Type"
+            options={typeOptions}
+            listClassName="max-h-64"
+          />
+          <FilterGroup
+            title="Connector"
+            options={connectorOptions}
+            emptyText="No connector references yet"
+          />
+          <FilterGroup title="Direction" options={directionOptions} />
+          <FilterGroup
+            title="Action"
+            options={actionOptions}
+            emptyText="No OCPP actions parsed yet"
+            listClassName="max-h-64"
+          />
         </div>
       </div>
 
-      {/* Right Side - Logs */}
-      {/* min-w-0 overrides the flex-item default `min-width: auto`, which
-       *  would otherwise let a wide log table force this column (and the
-       *  whole page) wider instead of scrolling inside its own container
-       *  (#178 2.1). */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <div className="flex justify-between items-center p-3 border-b bg-muted/50">
-          <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Logs
-            </h3>
-            <Badge variant="outline">
+      {/* Right side: toolbar, search, table. min-w-0 overrides the flex-item
+       *  default `min-width: auto`, which would otherwise let a wide log
+       *  table force this column (and the whole page) wider instead of
+       *  scrolling inside its own container (#178 2.1). */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Toolbar. Wraps instead of clipping when the viewer is narrow (#405). */}
+        <div
+          data-testid="log-toolbar"
+          className="flex flex-wrap items-center justify-between gap-2 border-b border-cx-border bg-cx-sub px-3 py-2"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed={filtersOpen}
+              aria-controls={filtersId}
+              aria-label="Filters"
+              title="Show or hide the filters"
+              onClick={() => setFiltersOpen((open) => !open)}
+              className={cn(filtersOpen && "bg-cx-sub text-cx-fg")}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filters
+              {!filtersOpen && activeFilterGroups > 0 && (
+                <span className="rounded-full bg-cx-accent px-1.5 text-[10.5px] leading-4 text-white">
+                  {activeFilterGroups}
+                </span>
+              )}
+            </Button>
+            <h3 className="text-[13px] font-semibold text-cx-fg">Logs</h3>
+            <span className="font-mono text-[11.5px] text-cx-muted">
               {logs.length} total / {filteredLogs.length} filtered
-            </Badge>
+            </span>
           </div>
-          <div className="flex gap-2 items-center">
-            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-              <Checkbox
+          <div
+            data-toolbar-actions
+            className="flex flex-wrap items-center gap-2"
+          >
+            <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-cx-fg2">
+              <input
+                type="checkbox"
                 checked={autoScroll}
-                onCheckedChange={(checked) => setAutoScroll(checked as boolean)}
+                onChange={(e) => setAutoScroll(e.target.checked)}
               />
               Auto-scroll
             </label>
-            <div className="flex items-center gap-1">
-              {onDownload && (
+            {onDownload && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onDownload}
+                title="Download every persisted log row as a JSON Lines file."
+              >
+                Download
+              </Button>
+            )}
+            {onClear && (
+              <>
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
-                  onClick={onDownload}
-                  title="Download every persisted log row for this CP as a JSON Lines file."
+                  onClick={() => onClear("screen")}
+                  title="Hide the currently-displayed log lines. Persisted history stays."
                 >
-                  Download
+                  Clear screen
                 </Button>
-              )}
-              {onClear && (
-                <>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => onClear("screen")}
-                    title="Hide the currently-displayed log lines. Persisted history stays."
-                  >
-                    Clear screen
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => onClear("all")}
-                    title="Hide the displayed lines AND delete persisted log rows for this CP."
-                  >
-                    Clear screen + DB
-                  </Button>
-                </>
-              )}
-            </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => onClear("all")}
+                  title="Hide the displayed lines AND delete the persisted log rows."
+                >
+                  Clear screen + DB
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="p-3 border-b">
+        {/* Search */}
+        <div className="border-b border-cx-border p-3">
           <Input
             placeholder="Search in messages..."
             value={filter}
@@ -735,41 +650,35 @@ export function LogViewer({
           />
         </div>
 
-        {/* Log Table */}
+        {/* Table */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto relative"
+          className="relative min-h-0 flex-1 overflow-x-auto overflow-y-auto"
           ref={containerRef}
-          style={{ maxHeight }}
+          style={maxHeight ? { maxHeight } : undefined}
         >
           <table className="w-full caption-bottom text-sm">
-            <thead className="sticky top-0 bg-background z-10 border-b shadow-sm">
-              <tr className="border-b">
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[140px]">
-                  Timestamp
+            <thead className="sticky top-0 z-10 border-b border-cx-border bg-cx-card">
+              <tr>
+                <th className="h-9 w-8 px-2">
+                  <span className="sr-only">Details</span>
                 </th>
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[90px]">
-                  Level
-                </th>
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[140px]">
-                  Type
-                </th>
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[100px]">
-                  Direction
-                </th>
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[180px]">
-                  Action
-                </th>
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">
-                  Message
-                </th>
+                <th className={cn(TH_CLASS, "w-[110px]")}>Timestamp</th>
+                {hasCp && (
+                  <th className={cn(TH_CLASS, "w-[120px]")}>Charge point</th>
+                )}
+                <th className={cn(TH_CLASS, "w-[90px]")}>Level</th>
+                <th className={cn(TH_CLASS, "w-[140px]")}>Type</th>
+                <th className={cn(TH_CLASS, "w-[110px]")}>Direction</th>
+                <th className={cn(TH_CLASS, "w-[180px]")}>Action</th>
+                <th className={TH_CLASS}>Message</th>
               </tr>
             </thead>
             <tbody>
               {filteredLogs.length === 0 ? (
-                <tr className="border-b">
+                <tr>
                   <td
-                    colSpan={6}
-                    className="p-2 text-center text-muted-foreground py-8"
+                    colSpan={columnCount}
+                    className="px-2 py-8 text-center text-cx-muted"
                   >
                     {logs.length === 0
                       ? "No logs yet"
@@ -779,63 +688,106 @@ export function LogViewer({
               ) : (
                 filteredLogs.map(({ log, idx }) => {
                   const ocppInfo = logOcppInfo[idx];
+                  const id = rowId(log);
+                  const open = expanded.has(id);
                   return (
-                    <tr
-                      key={idx}
-                      className="border-b transition-colors hover:bg-muted/50 font-mono text-xs"
-                    >
-                      <td className="p-2 align-middle text-muted-foreground">
-                        {log.timestamp.toISOString().substring(11, 23)}
-                      </td>
-                      <td className="p-2 align-middle">
-                        <Badge variant={getLogLevelBadgeVariant(log.level)}>
-                          {LogLevel[log.level]}
-                        </Badge>
-                      </td>
-                      <td className="p-2 align-middle">
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            "font-normal",
-                            getLogTypeBadgeColor(log.type),
-                          )}
-                        >
-                          {log.type}
-                        </Badge>
-                      </td>
-                      <td className="p-2 align-middle">
-                        {ocppInfo.direction ? (
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "font-normal whitespace-nowrap",
-                              ocppInfo.direction === "sent"
-                                ? "border-sky-300 text-sky-700 dark:border-sky-700 dark:text-sky-300"
-                                : "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300",
-                            )}
+                    <React.Fragment key={id}>
+                      <tr className="border-b border-cx-border font-mono text-xs text-cx-fg2 hover:bg-cx-sub">
+                        <td className="px-2 align-middle">
+                          <button
+                            type="button"
+                            aria-expanded={open}
+                            aria-label={open ? "Hide details" : "Show details"}
+                            onClick={() => toggleExpanded(id)}
+                            className="rounded p-0.5 text-cx-faint hover:bg-cx-sub hover:text-cx-fg2"
                           >
-                            {ocppInfo.direction === "sent"
-                              ? "→ Sent"
-                              : "← Received"}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
+                            <ChevronRight
+                              className={cn(
+                                "h-4 w-4 transition-transform",
+                                open && "rotate-90",
+                              )}
+                            />
+                          </button>
+                        </td>
+                        <td className="whitespace-nowrap p-2 align-middle font-mono text-cx-muted">
+                          {log.timestamp.toISOString().substring(11, 23)}
+                        </td>
+                        {hasCp && (
+                          <td className="whitespace-nowrap p-2 align-middle font-mono text-cx-fg">
+                            {log.cpId ?? (
+                              <span className="text-cx-faint">—</span>
+                            )}
+                          </td>
                         )}
-                      </td>
-                      <td className="p-2 align-middle whitespace-nowrap">
-                        {ocppInfo.action ?? (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      {/* whitespace-nowrap (was break-all): a long payload
-                       *  now stays on one line and scrolls horizontally in
-                       *  the container above instead of wrapping
-                       *  character-by-character into a mangled block
-                       *  (#178 2.1). */}
-                      <td className="p-2 align-middle whitespace-nowrap">
-                        {log.message}
-                      </td>
-                    </tr>
+                        <td className="p-2 align-middle">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              data-level-dot
+                              className={cn(
+                                "h-[7px] w-[7px] rounded-full",
+                                LEVEL_DOT[log.level],
+                              )}
+                            />
+                            {LogLevel[log.level]}
+                          </span>
+                        </td>
+                        <td className="p-2 align-middle">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              data-type-dot
+                              className={cn(
+                                "h-[7px] w-[7px] rounded-full",
+                                TYPE_DOT[log.type],
+                              )}
+                            />
+                            {log.type}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap p-2 align-middle">
+                          {ocppInfo.direction ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                data-direction-dot
+                                className={cn(
+                                  "h-[7px] w-[7px] rounded-full",
+                                  DIRECTION_DOT[ocppInfo.direction],
+                                )}
+                              />
+                              {ocppInfo.direction === "sent"
+                                ? "→ Sent"
+                                : "← Received"}
+                            </span>
+                          ) : (
+                            <span className="text-cx-faint">—</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap p-2 align-middle font-mono text-cx-fg">
+                          {ocppInfo.action ?? (
+                            <span className="text-cx-faint">—</span>
+                          )}
+                        </td>
+                        {/* whitespace-nowrap (was break-all): a long payload
+                         *  stays on one line and scrolls horizontally in the
+                         *  container above instead of wrapping
+                         *  character-by-character into a mangled block
+                         *  (#178 2.1). The chevron shows the whole message. */}
+                        <td className="whitespace-nowrap p-2 align-middle">
+                          {log.message}
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr
+                          data-log-detail
+                          className="border-b border-cx-border bg-cx-sub"
+                        >
+                          <td colSpan={columnCount} className="px-4 py-3">
+                            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-cx-fg">
+                              {prettyPrintMessage(log.message)}
+                            </pre>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}

@@ -16,7 +16,7 @@ related:
   - ocpp-versions-and-transports.md
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
-updated: 2026-10-02
+updated: 2026-10-05
 ---
 
 # Expert OCPP calls
@@ -29,7 +29,7 @@ high-level simulator action (#389).
 
 Three surfaces use the same API, `ChargePoint.sendOcppCall`:
 
-- the **Expert** tab of a charge point in the
+- the **Expert** tab of a charge point's bottom panel in the
   [web console](../entities/web-console.md);
 - the `send_ocpp_call` [control-plane](control-plane.md#cp-command-methods)
   method, also a curated [MCP tool](../entities/mcp-endpoint.md) and a

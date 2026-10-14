@@ -82,16 +82,12 @@ const ManualDisconnectButtons: React.FC<ManualDisconnectButtonsProps> = ({
                     ? "Triggering disconnect..."
                     : undefined
               }
-              className="rounded-md border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950"
+              className="rounded-md border border-cx-amber/40 px-3 py-1.5 text-xs font-medium text-cx-amber hover:bg-cx-amber/10 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid={`disconnect-btn-${ruleId}`}
             >
               {isPending ? "Triggering…" : `Force disconnect: ${ruleId}`}
             </button>
-            {error && (
-              <div className="mt-1 text-xs text-red-600 dark:text-red-400">
-                {error}
-              </div>
-            )}
+            {error && <div className="mt-1 text-xs text-cx-rose">{error}</div>}
           </div>
         );
       })}

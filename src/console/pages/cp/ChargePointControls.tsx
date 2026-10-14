@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   ALL_CHARGE_POINT_ERROR_CODES,
   OCPPStatus,
@@ -9,8 +11,11 @@ import type { HeartbeatView } from "@/data/hooks/useChargePointView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
 
+import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import { formatRelativeTime } from "../../lib/formatRelativeTime";
 import { useNow } from "../../lib/useNow";
+import { Group, Hint, Row } from "./controlPrimitives";
+import Figure from "./Figure";
 
 /** The statuses connector 0 (the charge point itself) may report. */
 const CP_STATUSES = [
@@ -19,8 +24,9 @@ const CP_STATUSES = [
   OCPPStatus.Faulted,
 ] as const;
 
-const SELECT_CLASS =
-  "rounded-md border border-gray-300 py-1 pl-2 pr-8 text-xs text-gray-900 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100";
+const SELECT_CLASS = cn(FILTER_SELECT_CLASS, "min-w-0 flex-1 text-xs");
+
+type GroupId = "heartbeat" | "authorize" | "status";
 
 export interface ChargePointControlsProps {
   cpId: string;
@@ -29,9 +35,12 @@ export interface ChargePointControlsProps {
 }
 
 /**
- * Charge-point-level calls of the classic charge point card: Heartbeat (with
- * the interval and the last one sent), Authorize, and a StatusNotification
- * for connector 0 — with an error code when Faulted (§7.6).
+ * Charge-point-level calls of the classic charge point card, in the
+ * connector card's shape: a header with the Heartbeat figure (interval, time
+ * to the next one, a bar between heartbeats), Send Heartbeat and a Controls
+ * toggle; behind the toggle the Heartbeat, Authorize and Status and faults
+ * groups (StatusNotification for connector 0, with an error code when
+ * Faulted, §7.6). Each group reports its own failure.
  */
 const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   cpId,
@@ -40,33 +49,47 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
 }) => {
   const { chargePointService } = useDataContext();
   const { tagIds } = useGlobalTagIds();
-  // Re-render so "last sent" stays current between heartbeats.
-  useNow();
+  // Re-render every second: the countdown and the bar follow the clock.
+  const now = useNow(1_000);
+  const controlsId = useId();
+  const [open, setOpen] = useState(false);
   const [tagIdInput, setTagIdInput] = useState("");
   const [status, setStatus] = useState<OCPPStatus>(OCPPStatus.Available);
   const [errorCode, setErrorCode] = useState("InternalError");
   const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<GroupId, string | null>>({
+    heartbeat: null,
+    authorize: null,
+    status: null,
+  });
 
   const tagId = tagIds.includes(tagIdInput) ? tagIdInput : (tagIds[0] ?? "");
 
-  const run = async (label: string, call: () => Promise<void>) => {
+  const run = async (
+    group: GroupId,
+    label: string,
+    call: () => Promise<void>,
+  ) => {
     setIsPending(true);
-    setError(null);
+    setErrors((prev) => ({ ...prev, [group]: null }));
     try {
       await call();
     } catch (err) {
       console.error(`${label} failed on ${cpId}`, err);
-      setError(
-        `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      setErrors((prev) => ({
+        ...prev,
+        [group]: `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
+      }));
     } finally {
       setIsPending(false);
     }
   };
 
+  const sendHeartbeat = () =>
+    run("heartbeat", "Heartbeat", () => chargePointService.sendHeartbeat(cpId));
+
   const sendStatus = () =>
-    run("StatusNotification", () =>
+    run("status", "StatusNotification", () =>
       status === OCPPStatus.Faulted
         ? chargePointService.sendStatusNotification(cpId, 0, status, {
             errorCode,
@@ -76,120 +99,189 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
 
   const disabled = !connected || isPending;
 
+  const { intervalSeconds, lastSentAt } = heartbeat;
+  const configured = intervalSeconds > 0;
+  const elapsed =
+    lastSentAt == null ? null : (now - lastSentAt.getTime()) / 1000;
+  const lastSent =
+    lastSentAt == null
+      ? "not sent yet"
+      : `last sent ${formatRelativeTime(lastSentAt)}`;
+  let note: string;
+  if (!configured) note = "not configured";
+  else if (!connected || elapsed == null) note = lastSent;
+  else note = `next in ${Math.max(0, Math.ceil(intervalSeconds - elapsed))}s`;
+  const pct =
+    configured && elapsed != null ? (elapsed / intervalSeconds) * 100 : 0;
+
   return (
-    <div
+    <section
       data-testid="charge-point-controls"
-      className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+      aria-label="Charge point"
+      className="mb-4 rounded-[10px] border border-cx-border bg-cx-card px-[18px] py-4"
     >
-      <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-        Charge point
-        <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
-          (connector 0)
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
-        <div className="flex items-center gap-2">
-          <span
-            className="text-gray-600 dark:text-gray-300"
-            title="Set by BootNotification.conf and ChangeConfiguration HeartbeatInterval (§4.6)"
-          >
-            {heartbeat.intervalSeconds > 0
-              ? `Heartbeat every ${heartbeat.intervalSeconds} s`
-              : "Heartbeat not configured"}
-            {` · last sent ${formatRelativeTime(heartbeat.lastSentAt)}`}
-          </span>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex items-baseline gap-2 whitespace-nowrap">
+          <b className="text-[15px] font-semibold text-cx-fg">Charge point</b>
+          <span className="text-[12.5px] text-cx-muted">connector 0</span>
+        </div>
+        <dl
+          className="m-0 min-w-[180px]"
+          title="Set by BootNotification.conf and ChangeConfiguration HeartbeatInterval (§4.6)"
+        >
+          <Figure
+            label="Heartbeat"
+            value={configured ? `${intervalSeconds} s` : "—"}
+            note={note}
+            bar={
+              configured
+                ? {
+                    // One decimal, so the width is stable between renders.
+                    pct: Number(Math.min(100, Math.max(0, pct)).toFixed(1)),
+                    className: connected ? "bg-cx-accent" : "bg-cx-fg2",
+                  }
+                : undefined
+            }
+          />
+        </dl>
+        <span className="ml-auto flex items-center gap-2">
           <Button
             type="button"
             variant="outline"
             size="sm"
             disabled={disabled}
-            onClick={() =>
-              void run("Heartbeat", () =>
-                chargePointService.sendHeartbeat(cpId),
-              )
-            }
+            onClick={() => void sendHeartbeat()}
           >
             Send Heartbeat
           </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <select
-            aria-label="TagID to authorize"
-            value={tagId}
-            onChange={(e) => setTagIdInput(e.target.value)}
-            disabled={tagIds.length === 0}
-            className={SELECT_CLASS}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-expanded={open}
+            aria-controls={controlsId}
+            onClick={() => setOpen((v) => !v)}
+            className={cn(open && "bg-cx-sub text-cx-fg")}
           >
-            {tagIds.length === 0 ? (
-              <option value="">No TagIDs configured</option>
+            Controls
+            {open ? (
+              <ChevronUp className="h-3.5 w-3.5" />
             ) : (
-              tagIds.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))
+              <ChevronDown className="h-3.5 w-3.5" />
             )}
-          </select>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled || !tagId}
-            onClick={() =>
-              void run("Authorize", () =>
-                chargePointService.authorize(cpId, tagId),
-              )
-            }
-          >
-            Authorize
           </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <select
-            aria-label="Charge point status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as OCPPStatus)}
-            className={SELECT_CLASS}
-          >
-            {CP_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Error code"
-            value={errorCode}
-            onChange={(e) => setErrorCode(e.target.value)}
-            disabled={status !== OCPPStatus.Faulted}
-            title="errorCode sent with Faulted"
-            className={SELECT_CLASS}
-          >
-            {ALL_CHARGE_POINT_ERROR_CODES.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </select>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            onClick={() => void sendStatus()}
-          >
-            Send status
-          </Button>
-        </div>
+        </span>
       </div>
-      {error && (
-        <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
-          {error}
+      {/* A failed header Send Heartbeat must not hide in the folded block. */}
+      {!open && errors.heartbeat && (
+        <p role="alert" className="mt-2 text-xs text-cx-rose">
+          {errors.heartbeat}
         </p>
       )}
-    </div>
+
+      <div
+        id={controlsId}
+        hidden={!open}
+        className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-2.5"
+      >
+        <Group title="Heartbeat" error={open ? errors.heartbeat : null}>
+          <Hint>
+            {configured ? `every ${intervalSeconds} s` : "not configured"} ·{" "}
+            {lastSent}
+          </Hint>
+          <Row>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              onClick={() => void sendHeartbeat()}
+            >
+              Send Heartbeat
+            </Button>
+          </Row>
+        </Group>
+
+        <Group title="Authorize" error={errors.authorize}>
+          <Row>
+            <select
+              aria-label="TagID to authorize"
+              value={tagId}
+              onChange={(e) => setTagIdInput(e.target.value)}
+              disabled={tagIds.length === 0}
+              className={cn(SELECT_CLASS, "disabled:opacity-60")}
+            >
+              {tagIds.length === 0 ? (
+                <option value="">No TagIDs configured</option>
+              ) : (
+                tagIds.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))
+              )}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled || !tagId}
+              onClick={() =>
+                void run("authorize", "Authorize", () =>
+                  chargePointService.authorize(cpId, tagId),
+                )
+              }
+            >
+              Authorize
+            </Button>
+          </Row>
+          {tagIds.length === 0 && <Hint>Tag IDs come from Settings</Hint>}
+        </Group>
+
+        <Group title="Status and faults" error={errors.status}>
+          <Row>
+            <select
+              aria-label="Charge point status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as OCPPStatus)}
+              className={SELECT_CLASS}
+            >
+              {CP_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Error code"
+              value={errorCode}
+              onChange={(e) => setErrorCode(e.target.value)}
+              disabled={status !== OCPPStatus.Faulted}
+              title="errorCode sent with Faulted"
+              className={cn(SELECT_CLASS, "disabled:opacity-60")}
+            >
+              {ALL_CHARGE_POINT_ERROR_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              onClick={() => void sendStatus()}
+            >
+              Send status
+            </Button>
+          </Row>
+          <Hint>
+            StatusNotification for connector 0 · errorCode only with Faulted
+          </Hint>
+        </Group>
+      </div>
+    </section>
   );
 };
 

@@ -101,8 +101,12 @@ export const GlobalLogsProvider: React.FC<GlobalLogsProviderProps> = ({
     };
   }, [cpIds, chargePointService, max]);
 
-  const clear = useCallback(() => {
-    setEntries([]);
+  const clear = useCallback((cpIds?: readonly string[]) => {
+    setEntries((prev) =>
+      cpIds && cpIds.length > 0
+        ? prev.filter((e) => !cpIds.includes(e.cpId))
+        : [],
+    );
   }, []);
 
   const value = useMemo<UseGlobalLogsResult>(

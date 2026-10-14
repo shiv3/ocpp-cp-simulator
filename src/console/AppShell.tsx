@@ -66,9 +66,9 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const HEALTH_DOT: Record<RemoteHealth, string> = {
-  checking: "bg-amber-400 animate-pulse",
-  ok: "bg-emerald-500",
-  down: "bg-red-500 animate-pulse",
+  checking: "bg-cx-amber animate-pulse",
+  ok: "bg-cx-emerald",
+  down: "bg-cx-rose animate-pulse",
 };
 
 const AppShell: React.FC = () => {
@@ -85,14 +85,14 @@ const AppShell: React.FC = () => {
     // resetting each time a page mounts a fresh instance.
     <GlobalLogsProvider>
       <div className="flex h-screen">
-        <aside className="w-60 shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-cx-border bg-cx-side">
           <div className="flex items-center gap-2 px-4 py-4">
-            <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            <Zap className="h-6 w-6 text-cx-accent" />
             <div>
               <div className="text-sm font-semibold leading-tight">
                 CP Simulator
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 leading-tight">
+              <div className="font-mono text-[11px] leading-tight text-cx-faint">
                 OCPP 1.2–2.1
               </div>
             </div>
@@ -107,19 +107,18 @@ const AppShell: React.FC = () => {
                   to={to}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800",
-                    active &&
-                      "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 rounded-lg",
+                    "flex items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[13.5px] font-medium text-cx-muted hover:text-cx-fg",
+                    active && "bg-cx-sub text-cx-fg",
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className={cn("h-4 w-4", active && "text-cx-accent")} />
                   {label}
                 </Link>
               );
             })}
           </nav>
 
-          <div className="space-y-2 border-t border-gray-200 p-3 dark:border-gray-800">
+          <div className="space-y-2 border-t border-cx-border p-3 text-[11.5px] text-cx-faint">
             <div className="flex items-center justify-between">
               <span
                 data-testid="mode-indicator"
@@ -128,7 +127,7 @@ const AppShell: React.FC = () => {
                     ? `${serverUrl} — ${REMOTE_HEALTH_TEXT[health].reason}`
                     : "Local mode: the simulator runs in this browser"
                 }
-                className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-cx-fg2"
               >
                 {/* Remote: the daemon connection (#423). Local mode has no
                     daemon, so its dot carries no status. */}
@@ -137,14 +136,14 @@ const AppShell: React.FC = () => {
                     role="status"
                     aria-label={REMOTE_HEALTH_TEXT[health].aria}
                     className={cn(
-                      "h-1.5 w-1.5 rounded-full",
+                      "h-[7px] w-[7px] rounded-full",
                       HEALTH_DOT[health],
                     )}
                   />
                 ) : (
                   <span
                     aria-hidden
-                    className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                    className="h-[7px] w-[7px] rounded-full bg-cx-emerald"
                   />
                 )}
                 {isRemote ? "Remote mode" : "Local mode"}
@@ -152,7 +151,7 @@ const AppShell: React.FC = () => {
               <ThemeToggle />
             </div>
             <div
-              className="truncate font-mono text-xs text-gray-500 dark:text-gray-400"
+              className="truncate font-mono text-[11.5px] text-cx-faint"
               title={serverUrl}
             >
               {serverUrl}
@@ -165,7 +164,9 @@ const AppShell: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-900">
+        {/* data-console-main: src/index.css gives it a right margin while a
+            side panel is open, so the page is not hidden under the panel. */}
+        <main data-console-main className="flex-1 overflow-y-auto bg-cx-bg">
           <Outlet />
         </main>
       </div>

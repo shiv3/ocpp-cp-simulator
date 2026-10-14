@@ -1,15 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import type { Root } from "react-dom/client";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
@@ -82,23 +74,11 @@ const PATH = "/scenarios/run?cp=CP-1&connector=1&id=s1";
 
 describe("ScenarioRunPage run history (#388)", () => {
   let cleanup: (() => Promise<void>) | null = null;
-  let installedScrollToPolyfill = false;
 
   beforeAll(() => {
     (
       globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
-    // jsdom has no Element.scrollTo; LogViewer calls it on mount.
-    if (typeof Element.prototype.scrollTo !== "function") {
-      Element.prototype.scrollTo = () => {};
-      installedScrollToPolyfill = true;
-    }
-  });
-
-  afterAll(() => {
-    if (installedScrollToPolyfill) {
-      delete (Element.prototype as { scrollTo?: () => void }).scrollTo;
-    }
   });
 
   afterEach(async () => {

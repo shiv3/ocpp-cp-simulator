@@ -17,10 +17,10 @@ export function isLiveRunState(state: string): state is LiveRunState {
  *  lifecycle event — no event says a run is parked, so views re-query. */
 export const STATUS_REFRESH_DEBOUNCE_MS = 200;
 
+/** `bg-*` class of the dot that carries a run state (RunStatePill). */
 export const LIVE_RUN_STATE_STYLES: Record<LiveRunState, string> = {
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-  paused: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  stepping:
-    "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-  waiting: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  running: "bg-cx-blue",
+  paused: "bg-cx-gray",
+  stepping: "bg-cx-purple",
+  waiting: "bg-cx-amber",
 };

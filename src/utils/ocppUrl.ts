@@ -1,12 +1,12 @@
 /**
- * Bidirectional helpers between the "Full WebSocket URL" Settings field and
- * the per-CP form fields (wsURL + basic auth username/password).
+ * Helpers between a charge point's `wsURL` + basic auth username/password and
+ * one full connection string.
  *
- * Pasting a `wss://user:pass@host/path` URL splits the basic auth out of the
- * URL and back into the dedicated form fields. Rendering the field goes the
- * other way: when basic auth is enabled, the username/password are embedded
- * back into the URL's userinfo so the displayed URL is a complete, ready-to-
- * paste connection string.
+ * `buildFullOcppUrl` composes the read-only "Effective WebSocket URL" the
+ * charge point form displays: when basic auth is enabled, the username and
+ * password are embedded in the URL's userinfo. `parseFullOcppUrl` is the
+ * inverse (it splits a `wss://user:pass@host/path` URL back into the fields);
+ * the form no longer uses it since that display stopped being editable.
  */
 
 export interface OcppUrlBasicAuth {

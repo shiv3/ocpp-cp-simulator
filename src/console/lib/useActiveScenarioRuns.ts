@@ -1,35 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ScenarioExpectation } from "../../cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
 import {
-  isLiveRunState,
-  STATUS_REFRESH_DEBOUNCE_MS,
-  type LiveRunState,
-} from "./scenarioRunState";
+  fetchActiveRuns,
+  type ActiveScenarioRun,
+  type DefinitionCache,
+} from "./activeRuns";
+import { STATUS_REFRESH_DEBOUNCE_MS } from "./scenarioRunState";
 
-export interface ActiveScenarioRun {
-  connectorId: number;
-  scenarioId: string;
-  name: string;
-  runId?: string;
-  state: LiveRunState;
-  currentNodeId: string | null;
-  currentNodeLabel: string | null;
-  nodeCount: number | null;
-  executedCount: number;
-  expectation: ScenarioExpectation | null;
-  currentNodeStartedAt: number | null;
-  /** #240: when the parked wait times out; null without one. */
-  waitDeadlineAt: number | null;
-}
-
-/** What we keep per scenario definition so repeat refreshes don't refetch it:
- *  node id → label, and the node count for the "k/N steps" display. */
-interface CachedDefinition {
-  labelsById: Map<string, string>;
-  nodeCount: number;
-}
+export type { ActiveScenarioRun } from "./activeRuns";
 
 /**
  * Tracks the scenario runs currently executing (or parked waiting) on a
@@ -49,7 +28,7 @@ export function useActiveScenarioRuns(
   const { chargePointService } = useDataContext();
 
   const [runs, setRuns] = useState<ActiveScenarioRun[]>([]);
-  const definitionCacheRef = useRef<Map<string, CachedDefinition>>(new Map());
+  const definitionCacheRef = useRef<DefinitionCache>(new Map());
   const isMountedRef = useRef(true);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Generation counter: an older, slower refresh must not overwrite the
@@ -78,93 +57,15 @@ export function useActiveScenarioRuns(
   const refresh = useCallback(async () => {
     if (!cpId) return;
     const requestId = ++requestIdRef.current;
-
-    const fetchRun = async (
-      connectorId: number,
-      scenario: { scenarioId: string; name: string },
-    ): Promise<ActiveScenarioRun | null> => {
-      try {
-        const status = await chargePointService.getScenarioStatus(
-          cpId,
-          connectorId,
-          scenario.scenarioId,
-        );
-        if (!status || !isLiveRunState(status.state)) {
-          return null;
-        }
-
-        const cacheKey = `${connectorId}:${scenario.scenarioId}`;
-        let cached = definitionCacheRef.current.get(cacheKey);
-        if (!cached) {
-          const definition = await chargePointService.getScenario(
-            cpId,
-            connectorId,
-            scenario.scenarioId,
-          );
-          if (definition) {
-            cached = {
-              labelsById: new Map(
-                definition.nodes.map((n) => [n.id, n.data?.label ?? ""]),
-              ),
-              nodeCount: definition.nodes.length,
-            };
-            definitionCacheRef.current.set(cacheKey, cached);
-          }
-        }
-
-        const currentNodeId = status.currentNodeId ?? null;
-        return {
-          connectorId,
-          scenarioId: scenario.scenarioId,
-          name: scenario.name,
-          runId: status.runId,
-          state: status.state,
-          currentNodeId,
-          currentNodeLabel: currentNodeId
-            ? cached?.labelsById.get(currentNodeId) || currentNodeId
-            : null,
-          nodeCount: cached?.nodeCount ?? null,
-          executedCount: status.executedNodes.length,
-          expectation: status.expectation ?? null,
-          currentNodeStartedAt: status.currentNodeStartedAt ?? null,
-          waitDeadlineAt: status.waitDeadlineAt ?? null,
-        };
-      } catch (err) {
-        console.warn(
-          `Failed to fetch scenario status for ${cpId}/${connectorId}/${scenario.scenarioId}`,
-          err,
-        );
-        return null;
-      }
-    };
-
-    const perConnector = await Promise.all(
-      ids.map(async (connectorId) => {
-        try {
-          const scenarios = await chargePointService.listScenarios(
-            cpId,
-            connectorId,
-          );
-          const runsForConnector = await Promise.all(
-            scenarios
-              .filter((s) => s.active)
-              .map((scenario) => fetchRun(connectorId, scenario)),
-          );
-          return runsForConnector.filter(
-            (r): r is ActiveScenarioRun => r !== null,
-          );
-        } catch (err) {
-          console.warn(
-            `Failed to list scenarios for ${cpId}/${connectorId}`,
-            err,
-          );
-          return [];
-        }
-      }),
+    const found = await fetchActiveRuns(
+      chargePointService,
+      cpId,
+      ids,
+      definitionCacheRef.current,
     );
 
     if (isMountedRef.current && requestId === requestIdRef.current) {
-      setRuns(perConnector.flat());
+      setRuns(found);
     }
   }, [cpId, ids, chargePointService]);
 

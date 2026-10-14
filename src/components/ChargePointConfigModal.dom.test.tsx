@@ -180,20 +180,35 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     document.body.innerHTML = "";
   });
 
+  it("focuses the Charge Point ID when adding, though Model specification comes first", async () => {
+    const rendered = await renderModal({
+      mode: "remote",
+      isNewChargePoint: true,
+    });
+    roots.push(rendered.root);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(document.activeElement).toBe(document.getElementById("cpId"));
+  });
+
   it("offers OCPP-1.5 in local mode", async () => {
     const rendered = await renderModal({ mode: "local" });
+    await selectOption("ocppProtocol", "SOAP");
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.5 (SOAP)")).toBeDefined();
+    expect(queryOptionByText("OCPP 1.5")).toBeDefined();
 
     await unmount(rendered);
   });
 
   it("offers OCPP-1.5 in remote mode", async () => {
     const rendered = await renderModal({ mode: "remote" });
+    await selectOption("ocppProtocol", "SOAP");
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.5 (SOAP)")).toBeDefined();
+    expect(queryOptionByText("OCPP 1.5")).toBeDefined();
 
     await unmount(rendered);
   });
@@ -426,7 +441,7 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
       "SOAP Callback URL is required",
     );
 
-    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
+    await selectOption("ocppProtocol", "JSON");
 
     expect(document.body.textContent).not.toContain(
       "SOAP Callback URL is required",
@@ -600,18 +615,20 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
 
   it("offers OCPP-1.2 in local mode", async () => {
     const rendered = await renderModal({ mode: "local" });
+    await selectOption("ocppProtocol", "SOAP");
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.2 (SOAP)")).toBeDefined();
+    expect(queryOptionByText("OCPP 1.2")).toBeDefined();
 
     await unmount(rendered);
   });
 
   it("offers OCPP-1.2 in remote mode", async () => {
     const rendered = await renderModal({ mode: "remote" });
+    await selectOption("ocppProtocol", "SOAP");
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.2 (SOAP)")).toBeDefined();
+    expect(queryOptionByText("OCPP 1.2")).toBeDefined();
 
     await unmount(rendered);
   });
@@ -637,18 +654,20 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
 
   it("offers OCPP-1.6S in local mode", async () => {
     const rendered = await renderModal({ mode: "local" });
+    await selectOption("ocppProtocol", "SOAP");
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.6 (SOAP)")).toBeDefined();
+    expect(queryOptionByText("OCPP 1.6")).toBeDefined();
 
     await unmount(rendered);
   });
 
   it("offers OCPP-1.6S in remote mode", async () => {
     const rendered = await renderModal({ mode: "remote" });
+    await selectOption("ocppProtocol", "SOAP");
     await openSelect("ocppVersion");
 
-    expect(queryOptionByText("OCPP 1.6 (SOAP)")).toBeDefined();
+    expect(queryOptionByText("OCPP 1.6")).toBeDefined();
 
     await unmount(rendered);
   });
@@ -689,7 +708,7 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
       "SOAP Callback URL is required",
     );
 
-    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
+    await selectOption("ocppProtocol", "JSON");
 
     expect(document.body.textContent).not.toContain(
       "SOAP Callback URL is required",
@@ -713,7 +732,7 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
       "SOAP Callback URL is required",
     );
 
-    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
+    await selectOption("ocppProtocol", "JSON");
 
     expect(document.body.textContent).not.toContain(
       "SOAP Callback URL is required",
@@ -736,14 +755,14 @@ describe("ChargePointConfigModal — OCPP-1.5 + Security Profile UI", () => {
     // JSON -> SOAP: ws:// becomes http://; host/port preserved. The SteVe
     // default path is transport-specific, so the well-known /websocket/
     // boilerplate is also rewritten to the SOAP /services/ path (#178).
-    await selectOption("ocppVersion", "OCPP 1.2 (SOAP)");
+    await selectOption("ocppProtocol", "SOAP");
     expect(wsURLValue()).toBe(
       "http://localhost:8080/steve/services/CentralSystemService",
     );
 
     // SOAP -> JSON: http:// converts back to ws://, and the SteVe /services/
     // path is rewritten back to /websocket/.
-    await selectOption("ocppVersion", "OCPP 1.6 (JSON)");
+    await selectOption("ocppProtocol", "JSON");
     expect(wsURLValue()).toBe(
       "ws://localhost:8080/steve/websocket/CentralSystemService/",
     );

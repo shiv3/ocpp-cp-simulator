@@ -4,7 +4,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
+  findMenuItem,
   flush,
+  openDropdownMenu,
   renderConsole,
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
@@ -55,17 +57,15 @@ function cpService(
   });
 }
 
-function deleteButton(): HTMLButtonElement {
-  const button = Array.from(
-    document.body.querySelectorAll<HTMLButtonElement>("button"),
-  ).find((b) => b.textContent?.trim() === "Delete");
-  if (!button) throw new Error("no Delete button");
-  return button;
-}
-
+/** Delete is the last item of the header's More menu. */
 async function clickDelete(): Promise<void> {
+  const more = document.body.querySelector<HTMLElement>('[aria-label="More"]');
+  if (!more) throw new Error("no More button");
+  await openDropdownMenu(more);
+  const item = findMenuItem("Delete");
+  if (!item) throw new Error("no Delete item in the More menu");
   await act(async () => {
-    deleteButton().click();
+    item.click();
   });
   await flush();
 }

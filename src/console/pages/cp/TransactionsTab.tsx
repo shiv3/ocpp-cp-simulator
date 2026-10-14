@@ -34,9 +34,9 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
+    <div className="overflow-x-auto rounded-lg border border-cx-border">
       <table className="w-full text-left text-sm">
-        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+        <thead className="bg-cx-sub text-xs uppercase tracking-wide text-cx-muted">
           <tr>
             <th className="px-3 py-2 font-medium">Time</th>
             <th className="px-3 py-2 font-medium">Connector</th>
@@ -44,27 +44,25 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
             <th className="px-3 py-2 font-medium">Result</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+        <tbody className="divide-y divide-cx-border">
           {history.map((entry) => (
             <tr key={entry.id}>
-              <td className="px-3 py-2 font-mono text-xs text-gray-600 dark:text-gray-300">
+              <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
                 {entry.timestamp.toLocaleString()}
               </td>
-              <td className="px-3 py-2 text-gray-700 dark:text-gray-200">
-                {entry.entityId ?? "—"}
-              </td>
-              <td className="px-3 py-2 text-gray-700 dark:text-gray-200">
+              <td className="px-3 py-2 text-cx-fg2">{entry.entityId ?? "—"}</td>
+              <td className="px-3 py-2 text-cx-fg2">
                 {entry.fromState} → {entry.toState}
               </td>
               <td className="px-3 py-2">
                 {entry.success ? (
                   <CheckCircle2
-                    className="h-4 w-4 text-emerald-600 dark:text-emerald-400"
+                    className="h-4 w-4 text-cx-emerald"
                     aria-label="success"
                   />
                 ) : (
                   <XCircle
-                    className="h-4 w-4 text-rose-600 dark:text-rose-400"
+                    className="h-4 w-4 text-cx-rose"
                     aria-label="failed"
                   />
                 )}

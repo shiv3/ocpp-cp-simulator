@@ -140,8 +140,8 @@ const ExpertCallForm: React.FC<{
   const problem = "problem" in parsed ? parsed.problem : schemaWarning;
 
   return (
-    <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 text-sm dark:border-gray-800 dark:bg-gray-900">
-      <p className="text-gray-600 dark:text-gray-400">
+    <div className="space-y-4 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6 text-sm">
+      <p className="text-cx-fg2">
         Send any station-initiated {ocppVersion} call through the normal
         connection. The answer is logged and shown below; it changes the
         station's state only when you ask for it.
@@ -149,14 +149,12 @@ const ExpertCallForm: React.FC<{
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-            Action
-          </span>
+          <span className="text-xs font-semibold text-cx-fg2">Action</span>
           <select
             aria-label="Action"
             value={action}
             onChange={(e) => loadDefault(e.target.value)}
-            className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            className="rounded-md border border-cx-border-strong px-2 py-1 text-sm text-cx-fg"
           >
             {catalog.actions.map((name) => (
               <option key={name} value={name}>
@@ -176,7 +174,7 @@ const ExpertCallForm: React.FC<{
       </div>
 
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+        <span className="text-xs font-semibold text-cx-fg2">
           Payload (JSON)
         </span>
         <Textarea
@@ -190,10 +188,7 @@ const ExpertCallForm: React.FC<{
       </label>
 
       {problem && (
-        <p
-          role="alert"
-          className="whitespace-pre-wrap text-xs text-amber-700 dark:text-amber-400"
-        >
+        <p role="alert" className="whitespace-pre-wrap text-xs text-cx-amber">
           {problem}
         </p>
       )}
@@ -226,13 +221,13 @@ const ExpertCallForm: React.FC<{
         Send
       </Button>
       {!connected && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-cx-muted">
           Connect the charge point to send a call.
         </p>
       )}
 
       {failure && (
-        <p role="alert" className="text-xs text-rose-700 dark:text-rose-400">
+        <p role="alert" className="text-xs text-cx-rose">
           {failure}
         </p>
       )}
@@ -240,20 +235,18 @@ const ExpertCallForm: React.FC<{
       {outcome && (
         <section aria-label="Result" className="space-y-2">
           <div>
-            <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Sent frame
-            </div>
-            <pre className="whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-xs dark:bg-gray-800">
+            <div className="text-xs font-semibold text-cx-fg2">Sent frame</div>
+            <pre className="whitespace-pre-wrap break-all rounded bg-cx-sub p-2 font-mono text-xs">
               {outcome.sentFrame}
             </pre>
           </div>
           <div>
-            <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+            <div className="text-xs font-semibold text-cx-fg2">
               {outcome.kind === "callResult"
                 ? "CALLRESULT"
                 : `CALLERROR ${outcome.errorCode}`}
             </div>
-            <pre className="overflow-x-auto rounded bg-gray-50 p-2 font-mono text-xs dark:bg-gray-800">
+            <pre className="overflow-x-auto rounded bg-cx-sub p-2 font-mono text-xs">
               {outcome.kind === "callResult"
                 ? pretty(outcome.payload)
                 : [outcome.errorDescription, pretty(outcome.errorDetails)]

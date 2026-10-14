@@ -2003,7 +2003,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 className="flex-1 btn-primary text-sm"
               >
                 {/* Embedded, the page's own Save persists the scenario. */}
-                {isEmbedded ? "Apply" : "Save"}
+                Save
               </button>
             </div>
           </div>

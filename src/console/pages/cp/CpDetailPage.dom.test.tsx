@@ -5,8 +5,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createFakeChargePointService,
-  findMenuItem,
-  openDropdownMenu,
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
@@ -49,6 +47,37 @@ async function flush(times = 3): Promise<void> {
       await Promise.resolve();
     });
   }
+}
+
+/** Picks a section of the lower half from its tab strip. */
+async function openMoreSection(
+  container: HTMLElement,
+  label: string,
+): Promise<void> {
+  const item = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[role="tablist"][aria-label="Charge point sections"] [role="tab"]',
+    ),
+  ).find((tab) => tab.textContent?.trim() === label);
+  expect(item, `expected a "${label}" section tab`).toBeTruthy();
+  await act(async () => {
+    item!.click();
+    await Promise.resolve();
+  });
+  await flush();
+}
+
+/** Opens the inline Config form from the header. */
+async function openConfig(container: HTMLElement): Promise<void> {
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === "Config",
+  );
+  expect(button, "expected a Config button").toBeTruthy();
+  await act(async () => {
+    button!.click();
+    await Promise.resolve();
+  });
+  await flush();
 }
 
 /** Pushes a synthetic event to all handlers subscribed to a specific CP. */
@@ -130,12 +159,12 @@ describe("CpDetailPage", () => {
     }
   });
 
-  it("shows the CP header, a disabled Start transaction with no tags, and the fixture's transaction history on tab switch", async () => {
+  it("shows the CP header, a disabled Start charging with no tags, and the fixture's transaction history in its tab", async () => {
     const cp = snapshot({
       id: "CP-1",
       status: OCPPStatus.Available,
       connectors: [
-        connector({ id: 1, status: OCPPStatus.Available }),
+        connector({ id: 1, status: OCPPStatus.Preparing }),
         connector({
           id: 2,
           status: OCPPStatus.Charging,
@@ -160,46 +189,37 @@ describe("CpDetailPage", () => {
     const heading = container.querySelector("h1");
     expect(heading?.textContent).toContain("CP-1");
 
-    // Connector 1 card: no transaction, no global tag ids configured (fresh
-    // jsdom localStorage) — the tag select is empty and Start transaction is
+    // Connector 1 card: plugged in, no global tag ids configured (fresh
+    // jsdom localStorage) — the tag select is empty and Start charging is
     // disabled by the tag-flow, not by the button being unconditionally off.
     const connector1Card = container.querySelector('[data-connector-id="1"]');
     expect(connector1Card, "expected a card for connector 1").toBeTruthy();
-    const startButton = Array.from(
-      connector1Card!.querySelectorAll("button"),
-    ).find((b) => b.textContent?.trim() === "Start transaction");
-    expect(startButton, "expected a Start transaction button").toBeTruthy();
+    const startButton = connector1Card!.querySelector<HTMLButtonElement>(
+      '[data-step="start"]',
+    );
+    expect(startButton?.dataset.state).toBe("next");
     expect(startButton!.disabled).toBe(true);
 
-    // Connector 2 card: already has an active transaction — Stop transaction
-    // instead, with the Tx chip visible.
+    // Connector 2's card, beside it on the full page: an active transaction,
+    // so Stop charging is next, with the transaction and its tag.
     const connector2Card = container.querySelector('[data-connector-id="2"]');
-    expect(connector2Card!.textContent).toContain("Tx #7");
-    expect(connector2Card!.textContent).toContain("TAG-7");
-    const stopButton = Array.from(
-      connector2Card!.querySelectorAll("button"),
-    ).find((b) => b.textContent?.trim() === "Stop transaction");
-    expect(stopButton, "expected a Stop transaction button").toBeTruthy();
+    expect(connector2Card, "expected a card for connector 2").toBeTruthy();
+    expect(connector2Card!.textContent).toContain("Tx #7 · TAG-7");
+    const stopButton = connector2Card!.querySelector<HTMLButtonElement>(
+      '[data-step="stop"][data-state="next"]',
+    );
+    expect(stopButton, "expected a Stop charging step").toBeTruthy();
 
-    // Switch to the Transactions tab and see the fixture row rendered from
-    // useStateHistory's fetched history.
-    const transactionsTrigger = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).find((el) => el.textContent?.trim() === "Transactions");
-    expect(transactionsTrigger, "expected a Transactions tab").toBeTruthy();
-
-    await act(async () => {
-      transactionsTrigger!.click();
-      await Promise.resolve();
-    });
-    await flush();
+    // Pick the Transactions tab and see the fixture row rendered
+    // from useStateHistory's fetched history.
+    await openMoreSection(container, "Transactions");
 
     expect(getStateHistory).toHaveBeenCalledWith("CP-1", {
       transitionType: "transaction",
     });
     expect(container.textContent).toContain("Available → Preparing");
 
-    // A real service call: toggling Stop transaction on connector 2 wires
+    // A real service call: Stop charging on connector 2 wires
     // through to chargePointService.stopTransaction.
     await act(async () => {
       stopButton!.click();
@@ -234,13 +254,17 @@ describe("CpDetailPage", () => {
 
     const connector1Card = container.querySelector('[data-connector-id="1"]');
     expect(connector1Card, "expected a card for connector 1").toBeTruthy();
-    expect(connector1Card!.textContent).toContain("Energy16.21 kWh");
-    expect(connector1Card!.textContent).toContain("SoC20.5%");
+    expect(connector1Card!.textContent).toContain("Meter16.21 kWh");
+    expect(
+      connector1Card!.querySelector('[data-testid="soc-hero"]')?.textContent,
+    ).toBe("20.5%");
 
     const connector2Card = container.querySelector('[data-connector-id="2"]');
     expect(connector2Card, "expected a card for connector 2").toBeTruthy();
-    expect(connector2Card!.textContent).toContain("Energy0.00 kWh");
-    expect(connector2Card!.textContent).toContain("SoC—");
+    expect(connector2Card!.textContent).toContain("Meter0.00 kWh");
+    expect(
+      connector2Card!.querySelector('[data-testid="soc-hero"]')?.textContent,
+    ).toBe("—");
   });
 
   it("ConnectorCard: a rejecting stopTransaction is caught, isPending resets, and the failure is logged (not an unhandled rejection)", async () => {
@@ -272,10 +296,10 @@ describe("CpDetailPage", () => {
 
     const card = container.querySelector('[data-connector-id="1"]');
     expect(card, "expected a card for connector 1").toBeTruthy();
-    const stopButton = Array.from(card!.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Stop transaction",
+    const stopButton = card!.querySelector<HTMLButtonElement>(
+      '[data-step="stop"][data-state="next"]',
     );
-    expect(stopButton, "expected a Stop transaction button").toBeTruthy();
+    expect(stopButton, "expected a Stop charging step").toBeTruthy();
 
     await act(async () => {
       stopButton!.click();
@@ -285,8 +309,11 @@ describe("CpDetailPage", () => {
 
     expect(stopTransaction).toHaveBeenCalledWith("CP-1", 1);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Failed to stop transaction on CP-1/1"),
+      expect.stringContaining("Stop charging failed on CP-1/1"),
       expect.any(Error),
+    );
+    expect(card!.querySelector('[role="alert"]')?.textContent).toBe(
+      "Stop charging failed: stop boom",
     );
     // isPending reset in `finally` — the button isn't stuck disabled after
     // the rejection settles.
@@ -295,7 +322,7 @@ describe("CpDetailPage", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("ConnectorCard: the status dropdown ignores a second status click while the first call is still pending", async () => {
+  it("ConnectorCard: Send status ignores a second click while the first call is still pending", async () => {
     const cp = snapshot({
       id: "CP-1",
       connectors: [connector({ id: 1 })],
@@ -319,21 +346,21 @@ describe("CpDetailPage", () => {
 
     const card = container.querySelector('[data-connector-id="1"]');
     expect(card, "expected a card for connector 1").toBeTruthy();
-    const trigger = Array.from(card!.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Set status"),
-    );
-    expect(trigger, "expected a Set status trigger").toBeTruthy();
-
-    const openDropdown = () => openDropdownMenu(trigger!);
-
-    await openDropdown();
-    const firstItem = findMenuItem(OCPPStatus.Charging);
-    expect(firstItem, "expected a Charging status item").toBeTruthy();
+    const status = card!.querySelector<HTMLSelectElement>(
+      'select[aria-label="Status"]',
+    )!;
     await act(async () => {
-      firstItem!.click();
+      status.value = OCPPStatus.Charging;
+      status.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const send = Array.from(card!.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Send status",
+    )!;
+
+    await act(async () => {
+      send.click();
       await Promise.resolve();
     });
-
     expect(sendStatusNotification).toHaveBeenCalledTimes(1);
     expect(sendStatusNotification).toHaveBeenCalledWith(
       "CP-1",
@@ -341,36 +368,26 @@ describe("CpDetailPage", () => {
       OCPPStatus.Charging,
     );
 
-    // Re-open while the first call is still pending and try a second,
-    // different status — the pending guard must drop this click.
-    await openDropdown();
-    const secondItem = findMenuItem(OCPPStatus.Faulted);
-    expect(secondItem, "expected a Faulted status item").toBeTruthy();
+    // While the first call is pending the group waits: a second click is
+    // dropped.
+    expect(send.disabled).toBe(true);
     await act(async () => {
-      secondItem!.click();
+      send.click();
       await Promise.resolve();
     });
-
     expect(sendStatusNotification).toHaveBeenCalledTimes(1);
 
-    // The second click's item was disabled (isPending), so Radix's own
-    // onSelect-driven close never ran — the menu is still open. Resolving
-    // the in-flight call resets isPending (re-enabling the still-open
-    // menu's items), so a subsequent status change goes through normally
-    // without needing to reopen the dropdown.
     await act(async () => {
       resolveStatus?.();
       await Promise.resolve();
     });
     await flush();
 
-    const thirdItem = findMenuItem(OCPPStatus.Faulted);
-    expect(thirdItem, "expected a Faulted status item").toBeTruthy();
+    expect(send.disabled).toBe(false);
     await act(async () => {
-      thirdItem!.click();
+      send.click();
       await Promise.resolve();
     });
-
     expect(sendStatusNotification).toHaveBeenCalledTimes(2);
   });
 
@@ -445,19 +462,15 @@ describe("CpDetailPage", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    const editButton = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Edit config",
-    );
-    expect(editButton, "expected an Edit config button").toBeTruthy();
-    await act(async () => {
-      editButton!.click();
-      await Promise.resolve();
-    });
+    await openConfig(container);
 
     const saveButton = Array.from(
       document.body.querySelectorAll("button"),
     ).find((b) => b.textContent?.trim() === "Save");
-    expect(saveButton, "expected a Save button in the edit modal").toBeTruthy();
+    expect(
+      saveButton,
+      "expected a Save button in the config form",
+    ).toBeTruthy();
 
     await act(async () => {
       saveButton!.click();
@@ -474,7 +487,7 @@ describe("CpDetailPage", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("Message Log tab shows entries logged before navigating to the CP (from global ring buffer)", async () => {
+  it("the message log shows entries logged before navigating to the CP (from global ring buffer)", async () => {
     const cp = snapshot({
       id: "CP-1",
       status: OCPPStatus.Available,
@@ -514,48 +527,46 @@ describe("CpDetailPage", () => {
         timestamp: new Date("2026-01-01T10:00:00.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "BootNotification accepted",
+        // Names connector 1, the selected one: the log tab filters to it.
+        message: "BootNotification accepted on connector 1",
       },
     });
     await flush();
 
-    // Navigate to CP-1's detail page by clicking the link to it in the
-    // dashboard. Find the link by looking for CP-1 text and finding an <a> tag.
-    const cpLink = Array.from(container.querySelectorAll("a")).find((a) =>
-      a.textContent?.trim().startsWith("CP-1"),
+    // Navigate to CP-1's detail page: open its card in the side panel, then
+    // expand the panel to the full page.
+    const cpButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "CP-1",
     );
-    expect(cpLink, "expected a link to CP-1 in the dashboard").toBeTruthy();
+    expect(cpButton, "expected CP-1's card in the dashboard").toBeTruthy();
 
     await act(async () => {
-      cpLink!.click();
+      cpButton!.click();
       await Promise.resolve();
     });
     await flush();
 
-    // Click on the "Message Log" tab to see if pre-navigation logs are visible.
-    const logsTrigger = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).find((el) => el.textContent?.trim() === "Message Log");
-    expect(logsTrigger, "expected a Message Log tab").toBeTruthy();
+    const expandLink = container.querySelector<HTMLElement>(
+      '[aria-label="Open as full page"]',
+    );
+    expect(expandLink, "expected the panel's expand link").toBeTruthy();
 
     await act(async () => {
-      logsTrigger!.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-      );
-      logsTrigger!.click();
+      expandLink!.click();
       await Promise.resolve();
     });
     await flush();
 
-    // The message emitted BEFORE navigating to this CP should now be visible.
+    // The message log is the lower half by default: the message emitted
+    // BEFORE navigating to this CP should be visible.
     // The old code would fail here because useChargePointView's view.logs
-    // never received the event (it wasn't mounted yet). The fix makes the tab
+    // never received the event (it wasn't mounted yet). The fix makes the log
     // read from the global ring buffer instead, so it shows all entries for
     // this CP, including those logged before the page mounted.
     expect(container.textContent).toContain("BootNotification accepted");
   });
 
-  it("Message Log tab Clear button hides old entries but shows new ones", async () => {
+  it("the message log Clear button hides old entries but shows new ones", async () => {
     const cp = snapshot({
       id: "CP-1",
       status: OCPPStatus.Available,
@@ -586,23 +597,8 @@ describe("CpDetailPage", () => {
         timestamp: new Date("2026-01-01T10:00:00.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "initial entry",
+        message: "initial entry on connector 1",
       },
-    });
-    await flush();
-
-    // Click on the "Message Log" tab to show the logs.
-    const logsTrigger = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).find((el) => el.textContent?.trim() === "Message Log");
-    expect(logsTrigger, "expected a Message Log tab").toBeTruthy();
-
-    await act(async () => {
-      logsTrigger!.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-      );
-      logsTrigger!.click();
-      await Promise.resolve();
     });
     await flush();
 
@@ -631,7 +627,7 @@ describe("CpDetailPage", () => {
         timestamp: new Date("2026-01-01T10:00:01.000Z"),
         level: LogLevel.INFO,
         type: LogType.OCPP,
-        message: "new entry after clear",
+        message: "new entry after clear on connector 1",
       },
     });
     await flush();
@@ -657,21 +653,6 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     }
   });
 
-  async function openConfigTab(container: HTMLElement): Promise<void> {
-    const trigger = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).find((el) => el.textContent?.trim() === "Configuration");
-    expect(trigger, "expected a Configuration tab").toBeTruthy();
-    await act(async () => {
-      trigger!.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-      );
-      trigger!.click();
-      await Promise.resolve();
-    });
-    await flush();
-  }
-
   const soapCp = snapshot({
     id: "CP-1",
     connectors: [connector({ id: 1 })],
@@ -690,7 +671,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     },
   });
 
-  it("shows the effective callback URL with a copy button, and says it comes from the tunnel", async () => {
+  it("the Config form shows the effective callback URL with a copy button, and says it comes from the tunnel", async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText },
@@ -712,7 +693,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     const { container, root } = await renderConsole("/cp/CP-1", { service });
     cleanup = () => unmount(root);
     await flush();
-    await openConfigTab(container);
+    await openConfig(container);
 
     expect(container.textContent).toContain(
       "https://a1b2.ngrok-free.app/ocpp/soap/CP-1/ChargePointService",
@@ -750,7 +731,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     const { container, root } = await renderConsole("/cp/CP-1", { service });
     cleanup = () => unmount(root);
     await flush();
-    await openConfigTab(container);
+    await openConfig(container);
 
     const copyButton = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "Copy",
@@ -781,16 +762,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     const { container, root } = await renderConsole("/cp/CP-1", { service });
     cleanup = () => unmount(root);
     await flush();
-    await openConfigTab(container);
-
-    const editButton = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Edit config",
-    );
-    await act(async () => {
-      editButton!.click();
-      await Promise.resolve();
-    });
-    await flush();
+    await openConfig(container);
 
     const input = document.getElementById(
       "soapCallbackUrl",
@@ -822,7 +794,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     const { container, root } = await renderConsole("/cp/CP-1", { service });
     cleanup = () => unmount(root);
     await flush();
-    await openConfigTab(container);
+    await openConfig(container);
 
     expect(container.textContent).toContain(
       "https://explicit.test/ocpp/soap/CP-1/ChargePointService",
@@ -830,7 +802,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     expect(container.textContent).not.toContain("derived from");
   });
 
-  it("Expert tab offers the station calls of the CP's OCPP version (#389)", async () => {
+  it("Expert section offers the station calls of the CP's OCPP version (#389)", async () => {
     const cp = snapshot({
       id: "CP-1",
       connectors: [connector({ id: 1 })],
@@ -844,18 +816,7 @@ describe("CpDetailPage SOAP callback URL (#183)", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    const expertTab = Array.from(
-      container.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).find((el) => el.textContent?.trim() === "Expert");
-    expect(expertTab, "expected an Expert tab").toBeTruthy();
-    await act(async () => {
-      expertTab!.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-      );
-      expertTab!.click();
-      await Promise.resolve();
-    });
-    await flush();
+    await openMoreSection(container, "Expert");
 
     const actions = Array.from(
       container.querySelectorAll<HTMLOptionElement>(

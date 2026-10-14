@@ -9,12 +9,12 @@ const NotFoundPage: React.FC = () => {
     <div className="p-6">
       <Link
         to="/"
-        className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+        className="mb-2 inline-block text-sm text-cx-accent hover:underline"
       >
         ← Back to charge points
       </Link>
       <PageHeader title="Page not found" />
-      <p className="text-sm text-gray-600 dark:text-gray-400">
+      <p className="text-sm text-cx-fg2">
         Nothing lives at <span className="font-mono">{pathname}</span>.
       </p>
     </div>

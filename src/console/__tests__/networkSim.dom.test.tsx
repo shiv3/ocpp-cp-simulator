@@ -172,7 +172,7 @@ describe("Network Simulation DOM Tests (Composed/Cross-feature)", () => {
   });
 
   describe("NETWORK_SIM log surfaces render", () => {
-    it("LogsPage renders a NETWORK_SIM entry with type label and class", async () => {
+    it("LogsPage renders a NETWORK_SIM entry with its type label and dot", async () => {
       const cpA = snapshot("CP-A");
       const service = createFakeChargePointService({ snapshots: [cpA] });
 
@@ -196,12 +196,13 @@ describe("Network Simulation DOM Tests (Composed/Cross-feature)", () => {
       expect(container.textContent).toContain("NetworkSim");
       expect(container.textContent).toContain("Latency applied: 100ms");
 
-      // Assert the class is applied
-      const networkSimBadge = Array.from(
-        container.querySelectorAll("span"),
-      ).find((span) => span.textContent === "NetworkSim");
-      expect(networkSimBadge).toBeTruthy();
-      expect(networkSimBadge?.className).toContain("log-network-sim");
+      // The type is a violet status dot beside its label, not a filled
+      // `.log-network-sim` badge (the viewer uses console tokens).
+      const row = container.querySelector("tbody tr");
+      const typeDot = row?.querySelector("[data-type-dot]");
+      expect(typeDot).toBeTruthy();
+      expect(typeDot?.className).toContain("bg-cx-purple");
+      expect(typeDot?.parentElement?.textContent).toBe("NetworkSim");
     });
 
     it("log-viewer renders a NETWORK_SIM entry with control characters escaped", async () => {

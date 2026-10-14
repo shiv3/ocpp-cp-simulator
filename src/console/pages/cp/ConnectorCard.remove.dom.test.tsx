@@ -54,7 +54,8 @@ async function renderCpPage(overrides: Partial<ChargePointService>) {
     listScenarios: vi.fn(async () => []),
     ...overrides,
   });
-  const { root } = await renderConsole("/cp/CP-1", { service });
+  // Connector 2 is the selected tab: its card is the one on screen.
+  const { root } = await renderConsole("/cp/CP-1?connector=2", { service });
   await flush();
   return { service, root };
 }
@@ -108,7 +109,14 @@ describe("ConnectorCard: remove a connector (#419)", () => {
       connectorId: 2,
     });
     expect(card(2)).toBeNull();
+    // The other connector stays, and becomes the selected one.
     expect(card(1)).not.toBeNull();
+    expect(
+      document.body
+        .querySelector('[data-connector-id="1"]')
+        ?.closest("[data-selected]")
+        ?.getAttribute("data-selected"),
+    ).toBe("true");
   });
 
   it("keeps the connector when the confirmation is cancelled", async () => {

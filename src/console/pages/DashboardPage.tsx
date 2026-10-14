@@ -13,6 +13,7 @@ import { useDataContext } from "../../data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import { formatLogTime, useGlobalLogs } from "../lib/useGlobalLogs";
+import BulkActionsMenu from "./dashboard/BulkActionsMenu";
 import CpCard from "./dashboard/CpCard";
 import { useCpConfigActions } from "./dashboard/useCpConfigActions";
 
@@ -25,6 +26,7 @@ const DashboardPage: React.FC = () => {
   const { chargePoints } = useChargePoints(config, { isLoading });
   const { addCp } = useCpConfigActions();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [bulkReport, setBulkReport] = useState<string | null>(null);
   const { entries: logEntries } = useGlobalLogs();
   const recentActivity = logEntries.slice(0, RECENT_ACTIVITY_LIMIT);
 
@@ -48,8 +50,29 @@ const DashboardPage: React.FC = () => {
       <PageHeader
         title="Charge Points"
         count={`${chargePoints.length} registered · ${connectedCount} connected`}
-        actions={addButton}
+        actions={
+          <>
+            {/* Bulk actions only make sense with several charge points. */}
+            {chargePoints.length >= 2 && (
+              <BulkActionsMenu
+                cpIds={chargePoints.map((cp) => cp.id)}
+                onReport={setBulkReport}
+              />
+            )}
+            {addButton}
+          </>
+        }
       />
+
+      {bulkReport && (
+        <p
+          role="status"
+          data-testid="bulk-result"
+          className="-mt-2 mb-4 text-xs text-gray-600 dark:text-gray-300"
+        >
+          {bulkReport}
+        </p>
+      )}
 
       {chargePoints.length === 0 ? (
         <EmptyState

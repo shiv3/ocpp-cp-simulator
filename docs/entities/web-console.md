@@ -59,8 +59,7 @@ transition, from the same origin:
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): removing a connector, bulk
-  actions on every charge point, setting the meter value or SoC and sending
+  move to the console (#411): removing a connector, setting the meter value or SoC and sending
   a MeterValues by hand, a per-connector auto meter-value curve, a
   StatusNotification for connector 0, downloading the logs, the
   charging-profile view, and a scenario's description and EV settings. The
@@ -82,6 +81,25 @@ transition, from the same origin:
   over: they had not loaded since the v1 code moved under `src/v1` (the
   hash key became `config-v1`). To share a configuration, use the JSON
   export / import in **Settings**.
+
+### Dashboard
+
+The dashboard (`/`) shows a card per charge point (status, connectors, last
+Heartbeat, **Open**, **Connect** / **Disconnect**) and the recent activity.
+With two charge points or more, its **All charge points** menu (#416) runs an
+action on every charge point at once, as the classic UI's Multi-CP dialog did:
+
+| Action                       | What each charge point does                                                                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Connect all**              | Connects.                                                                                                                                                   |
+| **Disconnect all**           | Disconnects.                                                                                                                                                |
+| **Send Heartbeat to all**    | Sends a Heartbeat.                                                                                                                                          |
+| **Start transaction on all** | Starts a transaction on connector 1 with its own TagID: the first charge point gets the first TagID, and so on. A charge point left without one is skipped. |
+| **Stop transaction on all**  | Stops every running transaction, read when the action runs. A charge point without one is skipped.                                                          |
+
+The action runs on every charge point in parallel and ends with a one-line
+report under the header, for example `Send Heartbeat to all: 1 of 2 charge
+points. Failed: CP-2 (not connected).` The TagIDs come from **Settings**.
 
 ### Charge point page
 

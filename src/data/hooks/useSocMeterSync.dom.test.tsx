@@ -121,4 +121,47 @@ describe("useSocMeterSync", () => {
       false,
     );
   });
+
+  it("pushes nothing to the connector before the saved preference has loaded", async () => {
+    // Pushing the initial `true` first would flip an off connector on, and
+    // `Connector.socMeterSyncEnabled` then replaces a hand-set SoC with the
+    // meter-derived one, before the saved `false` arrives.
+    const loaded = deferred<boolean>();
+    const service = {
+      getSocMeterSync: vi.fn(() => loaded.promise),
+      saveSocMeterSync: vi.fn(() => Promise.resolve()),
+      setConnectorSocMeterSync: vi.fn(() => Promise.resolve()),
+    };
+
+    const rendered = await renderHarness(service);
+    roots.push(rendered.root);
+    expect(service.setConnectorSocMeterSync).not.toHaveBeenCalled();
+
+    await act(async () => {
+      loaded.resolve(false);
+      await loaded.promise;
+    });
+
+    expect(checkbox(rendered.container).checked).toBe(false);
+    expect(service.setConnectorSocMeterSync.mock.calls).toEqual([
+      ["CP-1", 1, false],
+    ]);
+  });
+
+  it("leaves the connector alone when the preference cannot be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const service = {
+      getSocMeterSync: vi.fn(() => Promise.reject(new Error("db closed"))),
+      saveSocMeterSync: vi.fn(() => Promise.resolve()),
+      setConnectorSocMeterSync: vi.fn(() => Promise.resolve()),
+    };
+
+    const rendered = await renderHarness(service);
+    roots.push(rendered.root);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(service.setConnectorSocMeterSync).not.toHaveBeenCalled();
+  });
 });

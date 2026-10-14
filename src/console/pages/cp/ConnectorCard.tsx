@@ -15,6 +15,7 @@ import { formatEnergyKwh, formatSoc } from "@/lib/connectorFormat";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
 import StatusPill from "../../components/StatusPill";
+import ConnectorMeterDialog from "./ConnectorMeterDialog";
 
 export interface ConnectorCardProps {
   cpId: string;
@@ -48,6 +49,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
   const view = useConnectorView(cpId, connectorId);
   const [tagIdInput, setTagIdInput] = useState<string>("");
   const [isPending, setIsPending] = useState(false);
+  const [isMeterOpen, setIsMeterOpen] = useState(false);
 
   const isCharging = view.transactionId != null;
   const effectiveTagId = tagIds.includes(tagIdInput)
@@ -203,7 +205,27 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full text-xs"
+          onClick={() => setIsMeterOpen(true)}
+        >
+          Meter & SoC
+        </Button>
       </div>
+
+      <ConnectorMeterDialog
+        cpId={cpId}
+        connectorId={connectorId}
+        open={isMeterOpen}
+        onOpenChange={setIsMeterOpen}
+        meterValue={view.meterValue}
+        soc={view.soc}
+        evSettings={view.evSettings}
+      />
     </div>
   );
 };

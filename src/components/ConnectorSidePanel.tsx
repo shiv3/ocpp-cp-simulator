@@ -33,7 +33,7 @@ import { useDataContext } from "../data/providers/DataProvider";
 import { formatEnergyKwh, formatSoc } from "../lib/connectorFormat";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import { saveConnectorAutoMeterConfig } from "./connectorAutoMeterConfig";
-import { useSocMeterSync } from "./hooks/useSocMeterSync";
+import { useSocMeterSync } from "../data/hooks/useSocMeterSync";
 
 // Dynamic imports for heavy components (bundle-dynamic-imports)
 const StateTransitionViewer = lazy(

@@ -49,7 +49,8 @@ transition, from the same origin:
   detail (`/cp/:id`), a cross-CP **Scenario library** (`/scenarios`; each
   row's `…` menu — Duplicate, Export JSON, Delete — opens in a portal and
   flips upward near the bottom of the window, so it is never clipped by the
-  table, #365) with a step editor (`/scenarios/edit`) and a separate run
+  table, #365) with an editor (`/scenarios/edit`, see
+  [Scenario editor](#scenario-editor-steps-and-graph)) and a separate run
   console (`/scenarios/run`), a cross-CP **Run history**
   (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
   **Settings** (`/settings`, where global
@@ -62,7 +63,7 @@ transition, from the same origin:
   actions on every charge point, setting the meter value or SoC and sending
   a MeterValues by hand, a per-connector auto meter-value curve, a
   StatusNotification for connector 0, downloading the logs, the
-  charging-profile view, and the graph editor for branching scenarios. The
+  charging-profile view, and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
   back.
@@ -81,6 +82,34 @@ transition, from the same origin:
   over: they had not loaded since the v1 code moved under `src/v1` (the
   hash key became `config-v1`). To share a configuration, use the JSON
   export / import in **Settings**.
+
+### Scenario editor: steps and graph
+
+The editor (`/scenarios/edit?cp=…&connector=…&id=…`) shows one scenario in two
+views, switched by the **Steps | Graph** toggle and kept in the URL
+(`&view=steps|graph`):
+
+- **Steps** — an ordered list of steps with a form for the selected one. It
+  can only show a single START → … → END chain, so it is the default for such
+  a scenario.
+- **Graph** — the node graph editor (ReactFlow): nodes, edges, the node
+  palette, auto-arrange, undo / redo, and a node panel (double-click a node,
+  then **Apply**). A scenario with branches (a node with more than one
+  outgoing edge — the executor runs them in parallel) or a loop always opens
+  here, with **Steps** disabled; a linear one can be turned into a branching
+  one here.
+
+Both views edit the same definition: unsaved changes survive a switch, and
+nothing is written until the page's **Save**, which saves this scenario only
+(the connector's other scenarios are kept). The name, trigger and enabled
+flag are edited in the header in both views; unlike the classic graph editor,
+the graph view does not rewrite the trigger from a **Status Trigger** node,
+so pick **On status change** in the header for a scenario that should start
+on a status. A graph view opened because the scenario branches stays open
+when an edit makes it linear again. Opening a scenario in the graph view is
+not an edit: an edge to a missing node is hidden there, and leaves the saved
+definition only with the first save after a graph edit. Before #411 a branching
+scenario opened read-only, with a link to the classic UI's graph editor.
 
 In the console, a charge point's **Active scenarios** panel lists the runs executing
 or parked on its connectors, and its **Open run** link opens the scenario's run

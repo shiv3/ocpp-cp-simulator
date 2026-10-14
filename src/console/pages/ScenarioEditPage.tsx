@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { saveEditorScenario } from "../../components/scenario/scenarioPersistence";
@@ -21,6 +28,16 @@ import ScenarioMetaBar from "./scenarios/edit/ScenarioMetaBar";
 import StepInspector from "./scenarios/edit/StepInspector";
 import StepList from "./scenarios/edit/StepList";
 
+// The ReactFlow graph editor is heavy; load it only when the Graph view
+// opens.
+const ScenarioEditor = lazy(
+  () => import("../../components/scenario/ScenarioEditor"),
+);
+
+type EditorView = "steps" | "graph";
+
+const noop = () => {};
+
 /** JSON snapshot used for dirty-tracking: deep-compares the *serialized*
  *  def (runtime-only node/edge fields stripped, same as what
  *  `saveEditorScenario` persists) rather than the raw editor state, so
@@ -34,20 +51,25 @@ function serializedSnapshot(def: ScenarioDefinition): string {
 }
 
 /**
- * Linear scenario editor (Task 7): an ordered step list + schema-driven
- * inspector, replacing the ReactFlow graph editor for scenarios that form a
- * single START→…→END chain. Non-linear scenarios (branches) are shown
- * read-only with a link back to the classic graph editor — see the
- * `deriveLinearSteps(...).isLinear` guard below.
+ * Scenario editor with two views of the same definition:
+ * - **Steps**: an ordered step list + schema-driven inspector, for scenarios
+ *   that form a single START→…→END chain;
+ * - **Graph**: the ReactFlow graph editor (`ScenarioEditor`, embedded), for
+ *   any scenario — the only view for branching or looping ones, which the
+ *   step list cannot represent (`deriveLinearSteps(...).isLinear`).
+ * The page owns the definition, the dirty state and Save in both views; the
+ * view is kept in the URL (`view=steps|graph`).
  */
 const ScenarioEditPage: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { mode, chargePointService } = useDataContext();
 
   const cpId = searchParams.get("cp") ?? "";
   const connectorParam = searchParams.get("connector") ?? "";
   const connectorId = connectorParam === "" ? null : Number(connectorParam);
   const scenarioId = searchParams.get("id") ?? "";
+  const requestedView: EditorView =
+    searchParams.get("view") === "graph" ? "graph" : "steps";
 
   const [original, setOriginal] = useState<ScenarioDefinition | null>(null);
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
@@ -94,6 +116,12 @@ const ScenarioEditPage: React.FC = () => {
     [scenario],
   );
 
+  // A branching or looping scenario can only be shown as a graph. Pinned in
+  // the URL (below) rather than derived on each render, so an edit that
+  // makes the graph linear again does not eject the user from it mid-edit.
+  const forcedGraph = linear !== null && !linear.isLinear;
+  const view: EditorView = forcedGraph ? "graph" : requestedView;
+
   const dirty = useMemo(() => {
     if (!scenario || !original) return false;
     return serializedSnapshot(scenario) !== serializedSnapshot(original);
@@ -131,6 +159,29 @@ const ScenarioEditPage: React.FC = () => {
     if (!scenario) return;
     setScenario(updateStepData(scenario, nodeId, data));
   };
+
+  const handleGraphChange = useCallback(
+    (graph: Pick<ScenarioDefinition, "nodes" | "edges">) => {
+      setScenario((prev) => (prev ? { ...prev, ...graph } : prev));
+    },
+    [],
+  );
+
+  const setView = (view: EditorView) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("view", view);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  useEffect(() => {
+    if (forcedGraph && requestedView !== "graph") setView("graph");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setView only wraps the stable setSearchParams
+  }, [forcedGraph, requestedView]);
 
   const handleSave = async () => {
     if (!scenario) return;
@@ -198,41 +249,89 @@ const ScenarioEditPage: React.FC = () => {
         </div>
       )}
 
-      {!linear.isLinear && (
-        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          This scenario has branches — edit it in the classic graph editor.{" "}
-          <Link to="/v2" className="font-medium underline">
-            Open classic editor
-          </Link>
+      <div
+        role="group"
+        aria-label="Editor view"
+        className="mb-4 inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm dark:border-gray-800 dark:bg-gray-950"
+      >
+        {(
+          [
+            ["steps", "Steps"],
+            ["graph", "Graph"],
+          ] as const
+        ).map(([value, label]) => {
+          const disabled = value === "steps" && !linear.isLinear;
+          return (
+            <button
+              key={value}
+              type="button"
+              data-view={value}
+              aria-pressed={view === value}
+              disabled={disabled}
+              title={
+                disabled
+                  ? "This scenario has branches or loops: the step list can only show a single chain"
+                  : undefined
+              }
+              onClick={() => setView(value)}
+              className={`rounded-md px-3 py-1 font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+                view === value
+                  ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                  : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === "graph" ? (
+        <div className="h-[70vh] min-h-[480px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+          <Suspense
+            fallback={
+              <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
+                Loading graph editor…
+              </div>
+            }
+          >
+            <ScenarioEditor
+              key={scenario.id}
+              cpId={cpId}
+              connectorId={connectorId}
+              scenario={scenario}
+              onClose={noop}
+              embedded={{ onGraphChange: handleGraphChange }}
+            />
+          </Suspense>
+        </div>
+      ) : (
+        <div className="flex gap-4">
+          <div className="w-[380px] shrink-0">
+            <StepList
+              steps={linear.steps}
+              selectedStepId={selectedStepId}
+              onSelect={setSelectedStepId}
+              onDelete={handleDelete}
+              onMove={handleMove}
+              onInsert={handleInsert}
+            />
+          </div>
+          <div className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+            {linear.isLinear && selectedNode ? (
+              <StepInspector
+                node={selectedNode}
+                onChange={(data) => handleStepDataChange(selectedNode.id, data)}
+              />
+            ) : (
+              <EmptyState
+                title="Select a step"
+                hint="Pick a step from the list on the left to edit its configuration."
+              />
+            )}
+          </div>
         </div>
       )}
-
-      <div className="flex gap-4">
-        <div className="w-[380px] shrink-0">
-          <StepList
-            steps={linear.steps}
-            selectedStepId={selectedStepId}
-            onSelect={setSelectedStepId}
-            onDelete={handleDelete}
-            onMove={handleMove}
-            onInsert={handleInsert}
-            readOnly={!linear.isLinear}
-          />
-        </div>
-        <div className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-          {linear.isLinear && selectedNode ? (
-            <StepInspector
-              node={selectedNode}
-              onChange={(data) => handleStepDataChange(selectedNode.id, data)}
-            />
-          ) : (
-            <EmptyState
-              title="Select a step"
-              hint="Pick a step from the list on the left to edit its configuration."
-            />
-          )}
-        </div>
-      </div>
     </div>
   );
 };

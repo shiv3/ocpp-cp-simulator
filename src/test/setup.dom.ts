@@ -9,8 +9,14 @@ class MockResizeObserver {
 
   observe(target: Element) {
     setTimeout(() => {
+      // xyflow's pane reads `contentRect` from the entry (zoom extent).
       this.callback(
-        [{ target } as ResizeObserverEntry],
+        [
+          {
+            target,
+            contentRect: target.getBoundingClientRect(),
+          } as ResizeObserverEntry,
+        ],
         this as unknown as ResizeObserver,
       );
     }, 0);

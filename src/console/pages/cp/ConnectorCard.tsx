@@ -16,6 +16,7 @@ import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
 import StatusPill from "../../components/StatusPill";
 import AutoMeterButton from "./AutoMeterButton";
+import ChargingProfilesList from "./ChargingProfilesList";
 import ConnectorMeterDialog from "./ConnectorMeterDialog";
 
 export interface ConnectorCardProps {
@@ -162,6 +163,19 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         </p>
       )}
 
+      <div
+        className="mt-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+        title="Set by the CSMS with ChangeAvailability"
+      >
+        <span
+          aria-hidden
+          className={`h-1.5 w-1.5 rounded-full ${
+            view.availability === "Operative" ? "bg-emerald-500" : "bg-rose-500"
+          }`}
+        />
+        <span data-testid="availability">{view.availability}</span>
+      </div>
+
       {view.transactionId != null && (
         <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
           Tx #{view.transactionId}
@@ -182,6 +196,13 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             {view.soc != null ? formatSoc(view.soc) : "—"}
           </div>
         </div>
+      </div>
+
+      <div className="mt-2">
+        <ChargingProfilesList
+          profiles={view.chargingProfiles}
+          current={view.chargingProfile}
+        />
       </div>
 
       <div className="mt-3 space-y-2">

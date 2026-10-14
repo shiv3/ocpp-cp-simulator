@@ -200,6 +200,31 @@ describe("resolveEvSettings — DC (#458)", () => {
     expect(result).toMatchObject({ ok: false, reason: "invalid_curve" });
   });
 
+  it("caps the curve at a DC maximum the user lowered", () => {
+    // The ID.7 curve peaks at 200 kW; the user says this car takes 100 kW.
+    const result = resolveEvSettings(
+      profile({ overrides: { dcMaxKw: 100 } }),
+      "DC",
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.settings.maxChargingPowerKw).toBe(100);
+    const curve = result.settings.chargingCurve;
+    expect(curve).toHaveLength(10);
+    // 200, 185, 165, 140, 110 kW are all held at the 100 kW the user set;
+    // 80, 55 and 40 kW keep their shape below it.
+    expect(curve.map((p) => p.powerFraction)).toEqual([
+      1, 1, 1, 1, 1, 1, 1, 0.8, 0.55, 0.4,
+    ]);
+    expect(result.warnings).toContainEqual({
+      code: "CURVE_CAPPED_AT_DC_MAX",
+      dcMaxKw: 100,
+      peakKw: 200,
+    });
+    expect(result.warnings.some((w) => w.code === "POWER_ABOVE_DC_MAX")).toBe(
+      false,
+    );
+  });
+
   it("uses overrides over imported values", () => {
     const result = resolveEvSettings(
       profile({ overrides: { usableBatteryKwh: 80, dcMaxKw: 250 } }),

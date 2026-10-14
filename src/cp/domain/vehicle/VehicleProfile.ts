@@ -117,6 +117,7 @@ export type VehicleEvSettings = Pick<
 /** Facts the user should see when a profile is applied. Nothing is hidden. */
 export type ResolveWarning =
   | { code: "POWER_ABOVE_DC_MAX"; dcMaxKw: number; peakKw: number }
+  | { code: "CURVE_CAPPED_AT_DC_MAX"; dcMaxKw: number; peakKw: number }
   | { code: "CURVE_STARTS_ABOVE_ZERO_SOC"; firstSocPercent: number }
   | { code: "CURVE_ENDS_BELOW_FULL_SOC"; lastSocPercent: number }
   | { code: "NO_DC_CURVE" }
@@ -175,6 +176,10 @@ export function availableCurrentTypes(
  * `normalizeChargingCurve` silently drops. Dividing by the peak keeps every
  * point and the warning says why the maximum is higher than declared.
  *
+ * A DC maximum the *user* set (an override) is a limit, not a source claim:
+ * the curve is held at it (`CURVE_CAPPED_AT_DC_MAX`), so lowering it lowers
+ * the session's power.
+ *
  * AC: the AC maximum and the phase count; the catalog's curves are DC only.
  */
 export function resolveEvSettings(
@@ -224,8 +229,13 @@ export function resolveEvSettings(
 
   const peakKw = curvePeakKw(curve);
   const dcMaxKw = isPositive(specs.dcMaxKw) ? specs.dcMaxKw : 0;
-  const maxChargingPowerKw = Math.max(dcMaxKw, peakKw);
-  if (dcMaxKw > 0 && peakKw > dcMaxKw) {
+  const capKw = isPositive(profile.overrides.dcMaxKw)
+    ? profile.overrides.dcMaxKw
+    : null;
+  const maxChargingPowerKw = capKw ?? Math.max(dcMaxKw, peakKw);
+  if (capKw !== null && peakKw > capKw) {
+    warnings.push({ code: "CURVE_CAPPED_AT_DC_MAX", dcMaxKw: capKw, peakKw });
+  } else if (capKw === null && dcMaxKw > 0 && peakKw > dcMaxKw) {
     warnings.push({ code: "POWER_ABOVE_DC_MAX", dcMaxKw, peakKw });
   }
 
@@ -237,7 +247,8 @@ export function resolveEvSettings(
     attribution: attributionOf(profile),
     chargingCurve: curve.map((p) => ({
       socPercent: p.socPercent,
-      powerFraction: p.powerKw / maxChargingPowerKw,
+      powerFraction:
+        Math.min(p.powerKw, maxChargingPowerKw) / maxChargingPowerKw,
     })),
   };
   if (curve.length === 0) {

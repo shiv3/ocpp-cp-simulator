@@ -109,6 +109,8 @@ export function describeWarning(warning: ResolveWarning): string {
   switch (warning.code) {
     case "POWER_ABOVE_DC_MAX":
       return `The curve peaks at ${warning.peakKw} kW, above the declared DC maximum of ${warning.dcMaxKw} kW: the maximum is set to ${warning.peakKw} kW so no point of the curve is lost.`;
+    case "CURVE_CAPPED_AT_DC_MAX":
+      return `The curve peaks at ${warning.peakKw} kW, above the ${warning.dcMaxKw} kW DC maximum you set: it is held at ${warning.dcMaxKw} kW.`;
     case "CURVE_STARTS_ABOVE_ZERO_SOC":
       return `The curve starts at ${warning.firstSocPercent} % SoC: below that, its first power is held.`;
     case "CURVE_ENDS_BELOW_FULL_SOC":

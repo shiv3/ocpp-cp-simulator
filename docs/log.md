@@ -1624,3 +1624,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Control plane](concepts/control-plane.md): a `set_ev_settings` patch can remove only optional fields; `null` on a required one (`modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`) is `invalid_params` and nothing is applied.
 - [Vehicle profiles → Replacing a vehicle](concepts/vehicle-profiles.md#replacing-a-vehicle), [Scenario format](concepts/scenario-format.md#charging-curve-v12): a preset scenario writes an explicit empty `attribution`, so a run over a connector holding an imported profile does not keep that profile's credit.
+
+## [2026-10-14] ingest | Vehicle profiles maintainer review (#458)
+
+- [Vehicle profiles → Resolution](concepts/vehicle-profiles.md#resolution-to-ev-settings): a DC maximum the user set is a limit — the curve is held at it (`CURVE_CAPPED_AT_DC_MAX`); the peak-wins rule applies to source data only.

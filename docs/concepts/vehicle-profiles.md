@@ -73,7 +73,10 @@ selects, because the same car charges differently on AC and DC.
   peaks above its own DC maximum; dividing by the declared maximum would give
   fractions above 1, which the curve normalization silently drops, so the
   peak wins and a warning says why. A curve's peak also stands in for a
-  missing `dcMaxKw`. Without a curve the vehicle charges flat at its maximum.
+  missing `dcMaxKw`. A DC maximum **you** set (an override) is a limit
+  instead: it is the maximum, and the curve is held at it
+  (`CURVE_CAPPED_AT_DC_MAX`), so lowering it lowers the session's power.
+  Without a curve the vehicle charges flat at its maximum.
 - **AC.** `maxChargingPowerKw` is `acMaxKw`; `phases` is set only for 1 or
   3 (what the simulator models). There is no AC curve: Open EV Directory's
   curves are DC only.
@@ -94,6 +97,7 @@ select (`describeWarning` in
 | Warning                       | When                                        | Effect                                                      |
 | ----------------------------- | ------------------------------------------- | ----------------------------------------------------------- |
 | `POWER_ABOVE_DC_MAX`          | DC curve peaks above the declared `dcMaxKw` | `maxChargingPowerKw` is the curve peak, so no point is lost |
+| `CURVE_CAPPED_AT_DC_MAX`      | Your DC maximum is below the curve peak     | The curve is held at your maximum                           |
 | `CURVE_STARTS_ABOVE_ZERO_SOC` | First curve point is above 0 % SoC          | Below it the first power is held; nothing is extrapolated   |
 | `CURVE_ENDS_BELOW_FULL_SOC`   | Last curve point is below 100 % SoC         | Above it the last power is held; nothing is extrapolated    |
 | `NO_DC_CURVE`                 | DC with no curve                            | Flat acceptance at the maximum power                        |

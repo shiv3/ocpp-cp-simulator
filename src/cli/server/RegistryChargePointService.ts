@@ -14,7 +14,10 @@ import type {
 } from "../../cp/domain/types/FirmwareLogStatus";
 
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "../../cp/domain/connector/EVSettings";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import {
@@ -377,7 +380,7 @@ export class RegistryChargePointService implements ChargePointService {
   async setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void> {
     this.requireService(id).setEVSettings(connectorId, settings);
   }

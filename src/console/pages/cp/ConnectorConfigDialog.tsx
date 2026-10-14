@@ -7,13 +7,30 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { EV_PRESETS, type EVSettings } from "@/cp/domain/connector/EVSettings";
+import {
+  isPresetName,
+  presetForConnector,
+  readVehicleChoice,
+  type VehicleChoiceNotesState,
+} from "@/components/vehicle/vehicleChoice";
+import {
+  OwnModelOption,
+  VehicleChoiceNotes,
+  VehicleProfileOptions,
+} from "@/components/vehicle/VehicleChoiceControls";
+import {
+  EV_PRESETS,
+  type EVSettings,
+  type EVSettingsPatch,
+  withoutNulls,
+} from "@/cp/domain/connector/EVSettings";
 import {
   defaultAutoMeterValueConfig,
   type AutoMeterValueConfig,
 } from "@/cp/domain/connector/MeterValueCurve";
 import type { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 import { useSocMeterSync } from "@/data/hooks/useSocMeterSync";
+import { useVehicleProfiles } from "@/data/hooks/useVehicleProfiles";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { cn } from "@/lib/utils";
 
@@ -119,7 +136,20 @@ const ConfigBody: React.FC<BodyProps> = ({
     setEvDirty(true);
   };
 
-  const draftEv: EVSettings = {
+  // #458: the vehicle picked in the Vehicle select — a saved profile or a
+  // preset — as a merge patch over the connector's settings: it replaces the
+  // previous vehicle's curve, current type, phases and attribution (a preset
+  // removes them), whatever the connector held. Battery and power stay
+  // editable. `value` is the select option of a profile pick.
+  const vehicleProfiles = useVehicleProfiles();
+  const [vehiclePick, setVehiclePick] = useState<{
+    value: string | null;
+    patch: EVSettingsPatch;
+  } | null>(null);
+  const [vehicleNotes, setVehicleNotes] =
+    useState<VehicleChoiceNotesState | null>(null);
+
+  const typedEv: EVSettings = {
     ...evSettings,
     modelName,
     batteryCapacityKwh: parse(battery) ?? evSettings.batteryCapacityKwh,
@@ -127,6 +157,17 @@ const ConfigBody: React.FC<BodyProps> = ({
     initialSoc: parse(initialSoc) ?? evSettings.initialSoc,
     targetSoc: parse(targetSoc) ?? evSettings.targetSoc,
   };
+  // What Save sends, and what the connector will hold.
+  const evPatch: EVSettingsPatch = vehiclePick
+    ? {
+        ...typedEv,
+        ...vehiclePick.patch,
+        modelName: typedEv.modelName,
+        batteryCapacityKwh: typedEv.batteryCapacityKwh,
+        maxChargingPowerKw: typedEv.maxChargingPowerKw,
+      }
+    : typedEv;
+  const draftEv = withoutNulls(evPatch) as EVSettings;
   const capKw = draftEv.maxChargingPowerKw > 0 ? draftEv.maxChargingPowerKw : 1;
 
   // The sync preference, read as the former Meter & SoC dialog did; a toggle
@@ -221,7 +262,7 @@ const ConfigBody: React.FC<BodyProps> = ({
 
   const handleSave = async () => {
     setError(null);
-    let ev: EVSettings | null = null;
+    let ev: EVSettingsPatch | null = null;
     if (evDirty) {
       const values = {
         battery: parse(battery),
@@ -248,7 +289,7 @@ const ConfigBody: React.FC<BodyProps> = ({
         setError(problem);
         return;
       }
-      ev = draftEv;
+      ev = evPatch;
     }
     let auto: AutoMeterValueConfig | null = null;
     if (autoDirty && base) {
@@ -323,9 +364,7 @@ const ConfigBody: React.FC<BodyProps> = ({
     }
   };
 
-  const vehicle = Object.keys(EV_PRESETS).includes(modelName)
-    ? modelName
-    : CUSTOM;
+  const vehicle = vehiclePick?.value ?? (modelName || CUSTOM);
 
   return (
     <>
@@ -383,11 +422,44 @@ const ConfigBody: React.FC<BodyProps> = ({
                   value={vehicle}
                   onChange={(e) => {
                     const preset = e.target.value;
-                    setEvDirty(true);
-                    if (preset === CUSTOM) {
-                      setModelName(CUSTOM);
+                    const choice = readVehicleChoice(
+                      preset,
+                      vehicleProfiles.profiles,
+                    );
+                    if (choice.kind === "unusable") {
+                      setVehicleNotes({ warnings: [], error: choice.message });
                       return;
                     }
+                    setEvDirty(true);
+                    if (choice.kind === "profile") {
+                      setVehiclePick({
+                        value: preset,
+                        patch: choice.settings,
+                      });
+                      setVehicleNotes({
+                        warnings: choice.warnings,
+                        error: null,
+                      });
+                      setModelName(choice.settings.modelName);
+                      setBattery(String(choice.settings.batteryCapacityKwh));
+                      setMaxKw(String(choice.settings.maxChargingPowerKw));
+                      return;
+                    }
+                    setVehicleNotes(null);
+                    if (preset === CUSTOM || !isPresetName(preset)) {
+                      // Custom, or the current model again: the vehicle on
+                      // screen is kept — a pick made earlier in this session
+                      // included — only its option is no longer selected.
+                      setVehiclePick((current) =>
+                        current ? { value: null, patch: current.patch } : null,
+                      );
+                      setModelName(preset);
+                      return;
+                    }
+                    setVehiclePick({
+                      value: null,
+                      patch: presetForConnector(preset),
+                    });
                     const values = EV_PRESETS[preset] ?? {};
                     setModelName(preset);
                     if (values.batteryCapacityKwh != null) {
@@ -399,6 +471,10 @@ const ConfigBody: React.FC<BodyProps> = ({
                   }}
                   className={cn(FILTER_SELECT_CLASS, "w-full")}
                 >
+                  {!vehiclePick?.value && (
+                    <OwnModelOption modelName={modelName} />
+                  )}
+                  <VehicleProfileOptions state={vehicleProfiles} />
                   {Object.entries(EV_PRESETS).map(([name, values]) => (
                     <option key={name} value={name}>
                       {name === CUSTOM
@@ -408,6 +484,18 @@ const ConfigBody: React.FC<BodyProps> = ({
                   ))}
                 </select>
               </Field>
+              <div className="col-span-full -mt-1 flex flex-col gap-1">
+                <span className="text-xs text-cx-muted">
+                  {draftEv.currentType ?? "AC"}
+                  {draftEv.currentType !== "DC" &&
+                    ` · ${draftEv.phases ?? 1} phase${(draftEv.phases ?? 1) > 1 ? "s" : ""}`}
+                  {" · "}
+                  {draftEv.chargingCurve?.length
+                    ? `${draftEv.chargingCurve.length}-point charging curve`
+                    : "flat charging curve"}
+                </span>
+                <VehicleChoiceNotes notes={vehicleNotes} />
+              </div>
               <Field label="Battery" unit="kWh">
                 <input
                   type="number"

@@ -1,0 +1,66 @@
+{
+  "items": [
+    {
+      "id": "abarth",
+      "links": {
+        "models": "/v1/makes/abarth/models",
+        "self": "/v1/makes/abarth"
+      },
+      "modelCount": 9,
+      "name": "Abarth",
+      "variantCount": 12
+    },
+    {
+      "id": "alfa-romeo",
+      "links": {
+        "models": "/v1/makes/alfa-romeo/models",
+        "self": "/v1/makes/alfa-romeo"
+      },
+      "modelCount": 1,
+      "name": "Alfa Romeo",
+      "variantCount": 2
+    },
+    {
+      "id": "alpine",
+      "links": {
+        "models": "/v1/makes/alpine/models",
+        "self": "/v1/makes/alpine"
+      },
+      "modelCount": 4,
+      "name": "Alpine",
+      "variantCount": 6
+    }
+  ],
+  "licenses": [
+    {
+      "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+      "copyrightNotice": "© EVDB contributors",
+      "id": "CC-BY-SA-4.0",
+      "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+      "shareAlike": true,
+      "sourceId": "gaia",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+      "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+      "id": "LicenseRef-KilowattApp-MIT-Attribution",
+      "name": "MIT License with Attribution Requirement",
+      "shareAlike": false,
+      "sourceId": "kilowatt",
+      "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+    }
+  ],
+  "links": {
+    "first": "/v1/makes?size=3&page=0",
+    "last": "/v1/makes?size=3&page=24",
+    "next": "/v1/makes?size=3&page=1",
+    "self": "/v1/makes?size=3&page=0"
+  },
+  "page": {
+    "number": 0,
+    "size": 3,
+    "totalItems": 74,
+    "totalPages": 25
+  }
+}

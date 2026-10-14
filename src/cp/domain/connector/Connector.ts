@@ -24,7 +24,13 @@ import {
   ScenarioEvents,
 } from "../../application/scenario/ScenarioTypes";
 import { Transaction } from "./Transaction";
-import { type EVSettings, getDefaultEVSettings } from "./EVSettings";
+import {
+  type EVSettings,
+  type EVSettingsPatch,
+  assertRequiredFieldsKept,
+  getDefaultEVSettings,
+  withoutNulls,
+} from "./EVSettings";
 import {
   resolveEffectiveLimitWatts,
   resolveEffectivePhaseLimit,
@@ -793,7 +799,12 @@ export class Connector {
     // (`powerFractionAtSoc`, the meter scheduler) can assume an
     // already-sorted, already-validated curve rather than re-normalizing
     // per sample (#301).
-    this._evSettings = withNormalizedChargingCurve({ ...settings });
+    // A `null` is a merge patch's "remove" (#458): never stored, and refused
+    // for a required field before anything is written.
+    assertRequiredFieldsKept(settings);
+    this._evSettings = withNormalizedChargingCurve(
+      withoutNulls({ ...settings }),
+    );
     this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
   }
 
@@ -803,9 +814,14 @@ export class Connector {
    * Settings propagation (`applyDefaultEvSettings`) no-ops until
    * {@link clearEvSettingsOverride} runs.
    */
-  applyEvSettingsOverride(partial: Partial<EVSettings>): void {
+  applyEvSettingsOverride(partial: EVSettingsPatch): void {
+    // Refused before the override is claimed: a rejected write changes
+    // nothing, the ownership included.
+    assertRequiredFieldsKept(partial);
     this._evSettingsOverridden = true;
-    this.evSettings = { ...this._evSettings, ...partial };
+    // A merge patch: absent keys keep their value, `null` removes the key
+    // (the setter drops it).
+    this.evSettings = { ...this._evSettings, ...partial } as EVSettings;
   }
 
   /**

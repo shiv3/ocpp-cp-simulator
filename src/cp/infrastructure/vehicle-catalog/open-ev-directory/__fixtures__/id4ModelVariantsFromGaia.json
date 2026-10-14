@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "chargingCurveCount": 1,
+      "id": "var_83dc5c0fda10eefd",
+      "links": {
+        "chargingCurves": "/v1/variants/var_83dc5c0fda10eefd/charging-curves",
+        "make": "/v1/makes/volkswagen",
+        "model": "/v1/models/volkswagen--id-4",
+        "self": "/v1/variants/var_83dc5c0fda10eefd"
+      },
+      "makeId": "volkswagen",
+      "modelId": "volkswagen--id-4",
+      "name": "ID.4 GTX",
+      "sources": ["gaia"]
+    },
+    {
+      "chargingCurveCount": 1,
+      "id": "var_91788d66fb9aab8a",
+      "links": {
+        "chargingCurves": "/v1/variants/var_91788d66fb9aab8a/charging-curves",
+        "make": "/v1/makes/volkswagen",
+        "model": "/v1/models/volkswagen--id-4",
+        "self": "/v1/variants/var_91788d66fb9aab8a"
+      },
+      "makeId": "volkswagen",
+      "modelId": "volkswagen--id-4",
+      "name": "ID.4 Pro 4MOTION",
+      "sources": ["gaia"]
+    },
+    {
+      "chargingCurveCount": 1,
+      "id": "var_9b2be62781b8cf18",
+      "links": {
+        "chargingCurves": "/v1/variants/var_9b2be62781b8cf18/charging-curves",
+        "make": "/v1/makes/volkswagen",
+        "model": "/v1/models/volkswagen--id-4",
+        "self": "/v1/variants/var_9b2be62781b8cf18"
+      },
+      "makeId": "volkswagen",
+      "modelId": "volkswagen--id-4",
+      "name": "ID.4 Pro",
+      "sources": ["gaia"]
+    }
+  ],
+  "licenses": [
+    {
+      "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+      "copyrightNotice": "© EVDB contributors",
+      "id": "CC-BY-SA-4.0",
+      "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+      "shareAlike": true,
+      "sourceId": "gaia",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  ],
+  "links": {
+    "first": "/v1/models/volkswagen--id-4/variants?source=gaia&size=3&page=0",
+    "last": "/v1/models/volkswagen--id-4/variants?source=gaia&size=3&page=1",
+    "next": "/v1/models/volkswagen--id-4/variants?source=gaia&size=3&page=1",
+    "self": "/v1/models/volkswagen--id-4/variants?source=gaia&size=3&page=0"
+  },
+  "page": {
+    "number": 0,
+    "size": 3,
+    "totalItems": 5,
+    "totalPages": 2
+  }
+}

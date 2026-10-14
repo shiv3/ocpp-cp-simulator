@@ -1,3 +1,5 @@
+import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
@@ -64,6 +66,7 @@ import { LogLevel, LogType } from "../../cp/shared/Logger";
 import {
   getDefaultEVSettings,
   type EVSettings,
+  type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
@@ -204,6 +207,7 @@ export class LocalChargePointService implements ChargePointService {
   private readonly configRepository: ConfigRepository;
   private readonly connectorSettingsRepository: ConnectorSettingsRepository;
   private readonly scenarioRepository: SqliteScenarioRepository;
+  private readonly vehicleProfiles: VehicleProfileRepository;
 
   constructor(
     private readonly database: Database | null = null,
@@ -214,6 +218,7 @@ export class LocalChargePointService implements ChargePointService {
       database,
     );
     this.scenarioRepository = new SqliteScenarioRepository(database);
+    this.vehicleProfiles = new VehicleProfileRepository(database);
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -297,6 +302,8 @@ export class LocalChargePointService implements ChargePointService {
     // will rebuild them from the (now empty) Config + scenario tables.
     const ids = Array.from(this.chargePoints.keys());
     for (const id of ids) this.unregisterChargePoint(id);
+    // Also reaches the in-memory store a service without a database keeps.
+    this.vehicleProfiles.clear();
     if (this.database) {
       resetSimulatorState(this.database);
       await this.database.flush?.();
@@ -304,6 +311,23 @@ export class LocalChargePointService implements ChargePointService {
 
     // Clear the networkSim atom to reset all network-sim configuration
     this.store.set(networkSimAtom, { version: 1, global: null, perCp: {} });
+  }
+
+  async listVehicleProfiles(): Promise<VehicleProfile[]> {
+    return this.vehicleProfiles.list();
+  }
+
+  async saveVehicleProfile(profile: VehicleProfile): Promise<VehicleProfile> {
+    const stored = this.vehicleProfiles.save(profile);
+    await this.database?.flush?.();
+    return stored;
+  }
+
+  async deleteVehicleProfile(id: string): Promise<void> {
+    if (!this.vehicleProfiles.delete(id)) {
+      throw new Error(`vehicle profile not found: ${id}`);
+    }
+    await this.database?.flush?.();
   }
 
   async clearStoredLogs(cpId: string): Promise<void> {
@@ -569,7 +593,7 @@ export class LocalChargePointService implements ChargePointService {
   async setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void> {
     // Explicit set (#105): marks the connector overridden so a later
     // Default EV Settings propagation doesn't clobber it.

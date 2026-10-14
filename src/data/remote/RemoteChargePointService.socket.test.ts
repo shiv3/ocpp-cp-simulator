@@ -1874,3 +1874,130 @@ describe("RemoteChargePointService socket.io rpc", () => {
     });
   });
 });
+
+describe("RemoteChargePointService vehicle profiles and catalog (#458)", () => {
+  const profile = {
+    id: "vp_1",
+    name: "Volkswagen ID.7 GTX",
+    specs: {
+      usableBatteryKwh: 86,
+      acMaxKw: 11,
+      acPhases: 3,
+      dcMaxKw: 200,
+      acConnectors: [],
+      dcConnectors: [],
+    },
+    dcCurve: null,
+    overrides: {},
+    origin: null,
+    createdAt: "2026-10-11T10:00:00.000Z",
+    updatedAt: "2026-10-11T10:00:00.000Z",
+  };
+
+  it("lists, saves and deletes profiles on the daemon", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+
+    const list = service.listVehicleProfiles!();
+    let ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_profiles.list",
+      params: {},
+    });
+    ack.resolve({ ok: true, result: [profile] });
+    await expect(list).resolves.toEqual([profile]);
+
+    const save = service.saveVehicleProfile!(profile);
+    ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_profiles.save",
+      params: { profile },
+    });
+    ack.resolve({ ok: true, result: profile });
+    await expect(save).resolves.toEqual(profile);
+
+    const remove = service.deleteVehicleProfile!("vp_1");
+    ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_profiles.delete",
+      params: { id: "vp_1" },
+    });
+    ack.resolve({ ok: true, result: { ok: true } });
+    await expect(remove).resolves.toBeUndefined();
+    service.dispose();
+  });
+
+  it("reads the catalog through the daemon", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const catalog = service.getVehicleCatalog!();
+
+    const models = catalog.searchModels({ makeId: "volkswagen", model: "id" });
+    let ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_catalog.search_models",
+      params: { makeId: "volkswagen", model: "id" },
+    });
+    const page = { items: [], page: 0, totalPages: 0, totalItems: 0 };
+    ack.resolve({ ok: true, result: page });
+    await expect(models).resolves.toEqual(page);
+
+    const variants = catalog.listVariants("volkswagen--id-7", 2);
+    ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_catalog.list_variants",
+      params: { modelId: "volkswagen--id-7", page: 2 },
+    });
+    ack.resolve({ ok: true, result: page });
+    await variants;
+
+    const variant = catalog.getVariant("var_1");
+    ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_catalog.get_variant",
+      params: { variantId: "var_1" },
+    });
+    ack.resolve({ ok: true, result: { id: "var_1" } });
+    await expect(variant).resolves.toEqual({ id: "var_1" });
+
+    const makes = catalog.listMakes();
+    ack = nextAck();
+    expect(ack.request).toEqual({
+      method: "vehicle_catalog.list_makes",
+      params: {},
+    });
+    ack.resolve({ ok: true, result: [] });
+    await makes;
+    service.dispose();
+  });
+
+  it("turns a daemon catalog failure back into a typed catalog error", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const catalog = service.getVehicleCatalog!();
+    const cases = [
+      ["rate_limited", "rate_limited", 30],
+      ["unauthorized", "unauthorized", undefined],
+      ["not_found", "not_found", undefined],
+      ["unavailable", "unavailable", undefined],
+      ["timeout", "timeout", undefined],
+      ["invalid_params", "invalid_request", undefined],
+      ["disconnected", "network", undefined],
+    ] as const;
+    for (const [code, kind, retryAfterSeconds] of cases) {
+      const call = catalog.listMakes();
+      nextAck().resolve({
+        ok: false,
+        error: {
+          code,
+          message: `daemon said ${code}`,
+          ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+        },
+      });
+      await expect(call).rejects.toMatchObject({
+        name: "VehicleCatalogError",
+        kind,
+        message: `daemon said ${code}`,
+        retryAfterSeconds,
+      });
+    }
+    service.dispose();
+  });
+});

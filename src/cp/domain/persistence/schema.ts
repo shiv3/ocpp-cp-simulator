@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -235,6 +235,17 @@ CREATE INDEX IF NOT EXISTS scenario_runs_cp_started
   ON scenario_runs (cp_id, started_at);
 CREATE INDEX IF NOT EXISTS scenario_runs_cp_scenario
   ON scenario_runs (cp_id, scenario_id);
+
+-- Saved vehicle profiles (#458): reusable vehicles, hand-made or imported
+-- from a catalog, that a connector, the default EV settings or a scenario
+-- take a copy of. \`body\` is the whole profile (specs, curve, the user's
+-- edits, provenance); never an API key.
+CREATE TABLE IF NOT EXISTS vehicle_profiles (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
 `;
 
 /**
@@ -275,6 +286,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
   { name: "scenario_runs", perCp: true, resetOnStateReset: true },
+  { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
 ];
 
 /** Names of the tables `state.reset` truncates, in `TABLES` order. */
@@ -532,6 +544,9 @@ export function runMigrations(db: Database): void {
   // v13 → v14 (#388): the `scenario_runs` history table and its indexes. All
   // are `IF NOT EXISTS` in SCHEMA_SQL, which already ran above; the step is
   // here so the version bump has a recorded reason.
+
+  // v14 → v15 (#458): the `vehicle_profiles` table, `IF NOT EXISTS` in
+  // SCHEMA_SQL like the step above.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

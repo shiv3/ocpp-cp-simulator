@@ -1,0 +1,9 @@
+{
+  "allowedValues": ["MEASURED", "DERIVED", "ESTIMATED", "UNKNOWN"],
+  "detail": "Invalid parameter 'quality': 'GOOD' is not one of MEASURED, DERIVED, ESTIMATED, UNKNOWN (case-insensitive)",
+  "instance": "/v1/variants?quality=GOOD",
+  "parameter": "quality",
+  "status": 400,
+  "title": "Invalid request parameter",
+  "type": "/problems/invalid-parameter"
+}

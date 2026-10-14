@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-10-02
+updated: 2026-10-11
 ---
 
 # Index
@@ -25,6 +25,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Built-in scenario templates](entities/scenario-templates.md) | Six general templates + 47 `cert16-*` certification templates + OCTT probe; where they are used; instance semantics                                                                                                                                                                                                                           |
 | [CSMS peers](entities/csms-peers.md)                          | SteVe (SOAP, security profiles, steve-verify) and gocpp (e2e) — URL conventions and known quirks                                                                                                                                                                                                                                              |
 | [OCPP DebugKit](entities/ocpp-debugkit.md)                    | The pinned third-party analysis engine behind `analyze`; version policy; limits                                                                                                                                                                                                                                                               |
+| [Open EV Directory](entities/open-ev-directory.md)            | External vehicle catalog behind vehicle-profile import: endpoints, daemon and Local-mode configuration, key handling, error mapping, CORS, smoke test                                                                                                                                                                                         |
 
 ## Concepts (`concepts/`)
 
@@ -42,6 +43,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security extension messages and keys                                                                     |
 | [Local vs Remote mode](concepts/local-vs-remote-mode.md)                 | How the browser picks in-tab vs daemon operation via the health probe, and what differs                                                           |
 | [File hot-reload (`--watch`)](concepts/file-hot-reload.md)               | Why each `--watch` reload rule is shaped as it is, and how a watched file's origin survives a restart — the contract itself is on the daemon page |
+| [Vehicle profiles](concepts/vehicle-profiles.md)                         | Saved vehicles imported from Open EV Directory; resolution to EV settings, refresh, storage, offline copy, open points                            |
 
 ## Sources (`sources/`)
 

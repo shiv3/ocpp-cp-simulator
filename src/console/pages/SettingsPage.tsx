@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import Settings from "../../components/Settings";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { NetworkSimEditor } from "../components/network-sim/NetworkSimEditor";
+import VehicleProfilesCard from "../components/vehicle/VehicleProfilesCard";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 
 const SettingsPage: React.FC = () => {
@@ -47,6 +48,11 @@ const SettingsPage: React.FC = () => {
     if (hash !== "#network-simulation" || !networkSimShown) return;
     document.getElementById("network-simulation")?.scrollIntoView?.();
   }, [hash, networkSimShown]);
+  // `/settings#vehicle-profiles` (the vehicle selects link here, #458).
+  useEffect(() => {
+    if (hash !== "#vehicle-profiles") return;
+    document.getElementById("vehicle-profiles")?.scrollIntoView?.();
+  }, [hash]);
 
   const handleSaveNetworkSim = async (config: NetworkSimLayerConfig | null) => {
     await chargePointService.saveNetworkSimGlobal(config);
@@ -57,6 +63,8 @@ const SettingsPage: React.FC = () => {
     <div className="p-6">
       <div className="mx-auto max-w-5xl space-y-6">
         <Settings />
+
+        <VehicleProfilesCard />
 
         {!isLoadingNetSim && loadError && (
           <div className="rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">

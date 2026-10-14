@@ -1,0 +1,404 @@
+{
+  "chargingCurves": [
+    {
+      "id": "crv_2523855ffac08d0a",
+      "links": {
+        "self": "/v1/charging-curves/crv_2523855ffac08d0a",
+        "variant": "/v1/variants/var_b16bdbae5aa906a7"
+      },
+      "pointCount": 10,
+      "quality": "UNKNOWN",
+      "sourceId": "gaia"
+    },
+    {
+      "id": "crv_8fb466d59158ccb5",
+      "links": {
+        "self": "/v1/charging-curves/crv_8fb466d59158ccb5",
+        "variant": "/v1/variants/var_b16bdbae5aa906a7"
+      },
+      "pointCount": 4,
+      "quality": "UNKNOWN",
+      "sourceId": "kilowatt"
+    }
+  ],
+  "datasetVersion": "sha256:b1e424ab58d32fcf",
+  "formerIds": ["var_ad04fe41e212ef6a"],
+  "id": "var_b16bdbae5aa906a7",
+  "licenses": [
+    {
+      "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+      "copyrightNotice": "© EVDB contributors",
+      "id": "CC-BY-SA-4.0",
+      "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+      "shareAlike": true,
+      "sourceId": "gaia",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    {
+      "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+      "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+      "id": "LicenseRef-KilowattApp-MIT-Attribution",
+      "name": "MIT License with Attribution Requirement",
+      "shareAlike": false,
+      "sourceId": "kilowatt",
+      "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+    }
+  ],
+  "links": {
+    "chargingCurves": "/v1/variants/var_b16bdbae5aa906a7/charging-curves",
+    "make": "/v1/makes/volkswagen",
+    "model": "/v1/models/volkswagen--id-7",
+    "self": "/v1/variants/var_b16bdbae5aa906a7"
+  },
+  "make": {
+    "id": "volkswagen",
+    "name": "Volkswagen"
+  },
+  "model": {
+    "id": "volkswagen--id-7",
+    "name": "ID.7"
+  },
+  "name": "ID.7 GTX",
+  "sourceRecords": [
+    {
+      "citedSources": [
+        "https://www.volkswagen.com/en/models/id-7.html",
+        "https://www.volkswagen-newsroom.com/en/press-releases/id7-gtx-launch-2024",
+        "https://www.adac.de/rund-ums-fahrzeug/autokatalog/marken-modelle/vw/id7/"
+      ],
+      "connectorMappings": [
+        {
+          "connectorType": "IEC_62196_T2",
+          "current": "AC",
+          "rule": "DIRECT",
+          "sourceValue": "Type2"
+        },
+        {
+          "connectorType": "IEC_62196_T2_COMBO",
+          "current": "DC",
+          "rule": "DIRECT",
+          "sourceValue": "CCS2"
+        }
+      ],
+      "externalId": "volkswagen-id7-gtx-2024",
+      "key": "gaia:volkswagen-id7-gtx-2024",
+      "license": {
+        "attribution": "Contains data from EVDB (https://github.com/gaia-charge/evdb), © EVDB contributors, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: normalised to the Open EV Vehicle Directory schema.",
+        "copyrightNotice": "© EVDB contributors",
+        "id": "CC-BY-SA-4.0",
+        "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+        "shareAlike": true,
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+      },
+      "makeName": "Volkswagen",
+      "markets": ["DE", "ES"],
+      "modelName": "ID.7",
+      "raw": {
+        "battery": {
+          "cell_type": "pouch",
+          "chemistry": "NCM",
+          "manufacturer": "LG Energy Solution",
+          "total_kwh": 91.0,
+          "usable_kwh": 86.0,
+          "warranty_capacity_percent": 70,
+          "warranty_km": 160000,
+          "warranty_years": 8
+        },
+        "bidirectional": {
+          "v2g": false,
+          "v2h": false,
+          "v2l": false,
+          "v2l_max_kw": null
+        },
+        "cargo": {
+          "frunk_capacity_liters": 0,
+          "trunk_capacity_liters": 532,
+          "trunk_max_liters": 1586
+        },
+        "charging": {
+          "ac_connector": "Type2",
+          "ac_max_kw": 11,
+          "ac_phases": 3,
+          "charging_speed_kmh": 1200,
+          "dc_connector": "CCS2",
+          "dc_curve": [
+            {
+              "power_kw": 200,
+              "soc_percent": 0
+            },
+            {
+              "power_kw": 200,
+              "soc_percent": 10
+            },
+            {
+              "power_kw": 200,
+              "soc_percent": 20
+            },
+            {
+              "power_kw": 185,
+              "soc_percent": 30
+            },
+            {
+              "power_kw": 165,
+              "soc_percent": 40
+            },
+            {
+              "power_kw": 140,
+              "soc_percent": 50
+            },
+            {
+              "power_kw": 110,
+              "soc_percent": 60
+            },
+            {
+              "power_kw": 80,
+              "soc_percent": 70
+            },
+            {
+              "power_kw": 55,
+              "soc_percent": 80
+            },
+            {
+              "power_kw": 40,
+              "soc_percent": 90
+            }
+          ],
+          "dc_max_kw": 200,
+          "time_10_to_80_min": 30,
+          "time_20_to_80_min": 26
+        },
+        "dimensions": {
+          "ground_clearance_mm": 152,
+          "height_mm": 1538,
+          "length_mm": 4961,
+          "wheelbase_mm": 2966,
+          "width_mm": 1862
+        },
+        "efficiency": {
+          "efficiency_rating": "A",
+          "epa_kwh_per_100km": null,
+          "real_world_kwh_per_100km": 18.2,
+          "wltp_kwh_per_100km": 16.5
+        },
+        "features": {
+          "adaptive_suspension": true,
+          "air_suspension": false,
+          "autopilot_level": 2,
+          "heat_pump": true,
+          "one_pedal_driving": true,
+          "torque_vectoring": true
+        },
+        "id": "volkswagen-id7-gtx-2024",
+        "metadata": {
+          "created_at": "2026-02-08",
+          "data_quality": "verified",
+          "sources": [
+            "https://www.volkswagen.com/en/models/id-7.html",
+            "https://www.volkswagen-newsroom.com/en/press-releases/id7-gtx-launch-2024",
+            "https://www.adac.de/rund-ums-fahrzeug/autokatalog/marken-modelle/vw/id7/"
+          ]
+        },
+        "model_id": "volkswagen-id7",
+        "model_year": 2024,
+        "name": "GTX",
+        "notes": "The ID.7 GTX is the performance flagship of VW's electric sedan lineup.\nWith dual-motor AWD system producing 340 hp, it accelerates 0-100 km/h\nin just 5.4 seconds while maintaining 595 km WLTP range thanks to the\n86 kWh battery. The GTX trim includes sport-tuned DCC adaptive dampers,\ntorque vectoring, GTX-specific styling, and a comprehensive premium\nequipment package (AR HUD, climate comfort seats, matrix LED headlights).\nBuilt on MEB platform at VW's Emden factory. Competes with BMW i5 M60,\nTesla Model 3 Performance, and Mercedes EQE 500. Perfect for drivers who\nwant both performance and practicality in a spacious executive sedan.\n",
+        "optional_equipment": [
+          {
+            "category": "safety",
+            "code": "IQDMAX",
+            "included_in_base": true,
+            "name": "IQ.DRIVE Max Package"
+          },
+          {
+            "category": "infotainment",
+            "code": "ARHUD",
+            "included_in_base": true,
+            "name": "AR Head-Up Display"
+          },
+          {
+            "category": "comfort",
+            "code": "ERGOACT",
+            "included_in_base": true,
+            "name": "ergoActive Climate Seats"
+          },
+          {
+            "category": "charging",
+            "code": "AC22",
+            "included_in_base": false,
+            "name": "22kW AC Charging"
+          },
+          {
+            "category": "comfort",
+            "code": "PGR",
+            "included_in_base": false,
+            "name": "Panoramic Glass Roof"
+          },
+          {
+            "category": "infotainment",
+            "code": "DYNAUDIO",
+            "included_in_base": false,
+            "name": "DynAudio Sound System"
+          }
+        ],
+        "performance": {
+          "acceleration_0_100_sec": 5.4,
+          "drive_type": "AWD",
+          "motors": [
+            {
+              "position": "front",
+              "power_kw": 80,
+              "torque_nm": 134,
+              "type": "AC induction"
+            },
+            {
+              "position": "rear",
+              "power_kw": 210,
+              "torque_nm": 545,
+              "type": "permanent magnet"
+            }
+          ],
+          "top_speed_kmh": 180,
+          "total_power_kw": 250,
+          "total_torque_nm": 545
+        },
+        "range": {
+          "epa_km": null,
+          "real_world_km": 510,
+          "real_world_source": "ADAC EcoTest",
+          "wltp_city_km": 775,
+          "wltp_highway_km": 500,
+          "wltp_km": 595
+        },
+        "variant_code": "ID7-GTX",
+        "weight": {
+          "curb_weight_kg": 2258,
+          "gross_vehicle_weight_kg": 2815,
+          "payload_kg": 557,
+          "towing_capacity_braked_kg": 1000,
+          "towing_capacity_unbraked_kg": 750
+        }
+      },
+      "sourceId": "gaia",
+      "sourceUrl": "https://github.com/gaia-charge/evdb/blob/173aaf5ae7720631f5dd9b50084afdac0ef41b24/data/vehicle-variants/volkswagen-id7-gtx-2024.yaml",
+      "specifications": {
+        "acConnectors": ["IEC_62196_T2"],
+        "acMaxKw": 11,
+        "acPhases": 3,
+        "batteryChemistry": "NCM",
+        "chargingVoltage": null,
+        "dcConnectors": ["IEC_62196_T2_COMBO"],
+        "dcMaxKw": 200,
+        "driveType": "AWD",
+        "energyConsumptionBasis": "WLTP",
+        "energyConsumptionKwhPer100km": 16.5,
+        "epaRangeKm": null,
+        "grossBatteryKwh": 91.0,
+        "systemPowerKw": 250,
+        "usableBatteryKwh": 86.0,
+        "wltpRangeKm": 595
+      },
+      "variantName": "GTX",
+      "vehicleType": null,
+      "year": 2024,
+      "yearKind": "MODEL_YEAR"
+    },
+    {
+      "citedSources": [],
+      "connectorMappings": [
+        {
+          "connectorType": "IEC_62196_T2",
+          "current": "AC",
+          "rule": "DIRECT",
+          "sourceValue": "type2"
+        },
+        {
+          "connectorType": "IEC_62196_T2_COMBO",
+          "current": "DC",
+          "rule": "CCS_FROM_AC_INLET",
+          "sourceValue": "ccs"
+        }
+      ],
+      "externalId": "2854a132-20b9-4bb1-b18a-fc0fec23a346",
+      "key": "kilowatt:2854a132-20b9-4bb1-b18a-fc0fec23a346",
+      "license": {
+        "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+        "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+        "id": "LicenseRef-KilowattApp-MIT-Attribution",
+        "name": "MIT License with Attribution Requirement",
+        "shareAlike": false,
+        "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+      },
+      "makeName": "Volkswagen",
+      "markets": [],
+      "modelName": "ID.7",
+      "raw": {
+        "ac_charger": {
+          "max_power": 11,
+          "ports": ["type2"],
+          "usable_phases": 3
+        },
+        "battery_size": 86,
+        "brand": "Volkswagen",
+        "brand_id": "481793f5-c8b0-4dc9-b3d4-cc615085ac07",
+        "charging_voltage": 400,
+        "consumption": 17.7,
+        "dc_charger": {
+          "charging_curve": [
+            {
+              "percentage": 0,
+              "power": 200
+            },
+            {
+              "percentage": 50,
+              "power": 200
+            },
+            {
+              "percentage": 80,
+              "power": 120
+            },
+            {
+              "percentage": 100,
+              "power": 60
+            }
+          ],
+          "is_default_charging_curve": false,
+          "max_power": 200,
+          "ports": ["ccs"]
+        },
+        "energy_consumption": {
+          "average_consumption": 17.7
+        },
+        "id": "2854a132-20b9-4bb1-b18a-fc0fec23a346",
+        "model": "ID.7",
+        "range": 485,
+        "release_year": 2024,
+        "usable_battery_size": 86,
+        "variant": "GTX",
+        "vehicle_type": "car"
+      },
+      "sourceId": "kilowatt",
+      "sourceUrl": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/data/v2/models/volkswagen.json",
+      "specifications": {
+        "acConnectors": ["IEC_62196_T2"],
+        "acMaxKw": 11,
+        "acPhases": 3,
+        "batteryChemistry": null,
+        "chargingVoltage": 400,
+        "dcConnectors": ["IEC_62196_T2_COMBO"],
+        "dcMaxKw": 200,
+        "driveType": null,
+        "energyConsumptionBasis": "UNSPECIFIED",
+        "energyConsumptionKwhPer100km": 17.7,
+        "epaRangeKm": null,
+        "grossBatteryKwh": null,
+        "systemPowerKw": null,
+        "usableBatteryKwh": 86,
+        "wltpRangeKm": null
+      },
+      "variantName": "GTX",
+      "vehicleType": "car",
+      "year": 2024,
+      "yearKind": "RELEASE_YEAR"
+    }
+  ]
+}

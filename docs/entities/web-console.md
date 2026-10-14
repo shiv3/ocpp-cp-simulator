@@ -13,7 +13,9 @@ related:
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/scenario-format.md
-updated: 2026-10-07
+  - ../concepts/vehicle-profiles.md
+  - open-ev-directory.md
+updated: 2026-10-11
 ---
 
 # Web console (browser UI)
@@ -70,7 +72,8 @@ The browser app serves one web console:
   [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
   (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
   **Settings** (`/settings`, where global
-  [network simulation](../concepts/network-simulation.md) and the **Reset all
+  [network simulation](../concepts/network-simulation.md), the
+  [**Vehicle profiles**](#settings-page) card and the **Reset all
   simulator data** button live; the Settings cards and the Network Simulation
   card share one centred `max-w-5xl` column so their left edges line up).
   Every configuration form of the console confirms with **Save** (Default EV
@@ -438,7 +441,14 @@ when it opens; **Save** applies only what changed and closes, **Cancel** drops
 it. A failed or refused value keeps the dialog open with the reason.
 
 - **EV**: **Vehicle** (the presets of `EV_PRESETS` with their battery and
-  power, and **Custom**; a preset fills Battery and Max power), **Battery**
+  power, **Custom**, and the saved [vehicle profiles](#settings-page); a
+  preset fills Battery and Max power; a model name that is no preset — an
+  applied profile, a scenario's EV — is listed under its own name, where it
+  used to read **Custom**). Picking a profile fills Battery and Max power and
+  takes its curve, current type and phases; the line under the select
+  summarizes what will run (`DC · 12-point charging curve`,
+  `AC · 3 phases · flat charging curve`) with the profile's
+  [resolution notes](../concepts/vehicle-profiles.md#resolution-to-ev-settings). **Battery**
   (kWh), **Max power** (kW), **Initial SoC** and **Target SoC** (%), checked on
   Save (battery and power above 0, SoCs within 0–100), then `setEVSettings`.
   **Sync SoC and meter through the battery capacity** is the simulator-wide
@@ -893,6 +903,8 @@ the collapsed **Scenario EV Settings** (#424): the EV the scenario applies to
 its connector when it starts, field by field (an empty field keeps the
 connector's value; the placeholders show the Default EV Settings from
 **Settings**); a scenario whose fields are all empty saves no EV settings.
+Its vehicle select offers the saved [vehicle profiles](#settings-page) too,
+copying their values into the scenario (#458).
 Whether the inspector (and its empty **Select a step** box) sits beside the
 steps or graph or under them follows the editor's own width, not the
 window's (a container query: two columns above about 860 px), on the page and
@@ -1011,6 +1023,63 @@ console's connector card shows `—` when no SoC is reported (#368).
 
 The console promotes scenarios, charge points and logs to first-class routes,
 where the classic UI nested them in panels.
+
+### Settings page
+
+`/settings` holds the runtime mode, the **Default EV Settings**, Tag IDs, the
+Configuration JSON export / import, the **Vehicle profiles** card,
+[network simulation](../concepts/network-simulation.md) (`#network-simulation`)
+and **Reset all simulator data**, which also deletes the saved vehicle
+profiles ([State persistence → Reset](../concepts/state-persistence.md#reset)).
+
+**Vehicle profiles** (`/settings#vehicle-profiles`, #458;
+[`VehicleProfilesCard.tsx`](../../src/console/components/vehicle/VehicleProfilesCard.tsx),
+[`ImportVehicleDialog.tsx`](../../src/console/components/vehicle/ImportVehicleDialog.tsx))
+lists the saved [vehicle profiles](../concepts/vehicle-profiles.md) — name,
+specs, curve preview, origin and **Attribution** — and manages them:
+
+- **Import from Open EV Directory**: search by make and model, pick a
+  variant, then an explicit **source record** (the sources' specs side by
+  side, a value the source does not give shown as _missing_) and an explicit
+  **curve** (source, quality, quality basis, observations, a preview) or
+  **No curve — charge flat at the maximum power**. Nothing is preselected.
+  Fill in what is missing (a usable battery capacity, and an AC or a DC
+  maximum power, are required), read the attribution, **Save**.
+- **Edit** the name and the four numeric values; only the differences from
+  the imported values are stored (as overrides). **Reset to imported values**
+  drops them.
+- **Refresh** re-reads the profile's source record and curve, lists the
+  differences and asks **Replace the imported values?** (**Replace** /
+  **Keep current**); your edits are kept. If the catalog no longer has the
+  vehicle, the profile is kept and marked _no longer in the catalog_ (a later
+  refresh that finds it again lists _back in the catalog_, and **Replace**
+  clears the mark); any other failure leaves it
+  untouched and says why.
+- **Delete**, with an inline confirmation.
+
+Where the catalog is reached depends on the
+[mode](../concepts/local-vs-remote-mode.md#consequences). In Remote mode the
+dialog searches through the daemon and its key, which never reaches the page;
+when import is off on the daemon (`--oed-base-url none`) it says so.
+In browser-only Local mode the dialog asks for the API URL (the public
+`https://evdb.juherr.dev` by default, remembered in
+`localStorage` as `ocpp-cp.oed-base-url`) and **your API key** (held in memory
+for this tab only, **Forget** to drop it; optional, as the catalog is
+anonymous, and provisioned by the Open EV Directory operator while keys are
+not self-service); a network or CORS failure is
+explained with a pointer to daemon mode — the public instance sends no CORS
+headers. See
+[Open EV Directory](open-ev-directory.md).
+
+The saved profiles appear in the vehicle selects of the connector
+[Config dialog](#config-dialog), the Default EV Settings and a scenario's
+**Scenario EV Settings**, once per current type (DC and AC). A type the
+profile lacks a value for is listed disabled with what is missing; a pick
+copies the values, so later edits of the profile do not change what was
+applied. A preset picked over a profile's vehicle — in the same edit or after
+a save and a reopen — replaces it, curve included; **Custom** keeps the
+current vehicle's fields
+([Replacing a vehicle](../concepts/vehicle-profiles.md#replacing-a-vehicle)).
 
 ## What the console can do
 

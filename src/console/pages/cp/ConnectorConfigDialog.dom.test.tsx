@@ -15,6 +15,7 @@ import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ChargePointService } from "../../../data/interfaces/ChargePointService";
 import ConnectorConfigDialog, { type ConfigTab } from "./ConnectorConfigDialog";
 import { curvePointsToPower } from "./powerCurve";
+import type { VehicleProfile } from "../../../cp/domain/vehicle/VehicleProfile";
 
 let root: Root | null = null;
 
@@ -55,7 +56,11 @@ const LIVE: AutoMeterValueConfig = {
 
 async function renderDialog(
   overrides: Partial<ChargePointService> = {},
-  props: { tab?: ConfigTab; live?: AutoMeterValueConfig | null } = {},
+  props: {
+    tab?: ConfigTab;
+    live?: AutoMeterValueConfig | null;
+    ev?: EVSettings;
+  } = {},
 ) {
   const service = createFakeChargePointService({
     getSocMeterSync: vi.fn(async () => true),
@@ -81,7 +86,7 @@ async function renderDialog(
           onOpenChange={onOpenChange}
           initialTab={props.tab ?? "ev"}
           status={OCPPStatus.Charging}
-          evSettings={EV}
+          evSettings={props.ev ?? EV}
           liveAutoMeter={props.live === undefined ? LIVE : props.live}
         />
       </DataContext.Provider>,
@@ -153,12 +158,17 @@ describe("ConnectorConfigDialog: EV and auto meter of one connector", () => {
 
     await save(dialog);
 
+    // A preset replaces the vehicle: the fields it lacks are removed (#458).
     expect(setEVSettings).toHaveBeenCalledWith("CP-1", 1, {
       ...EV,
       modelName: "Nissan Leaf (40kWh)",
       batteryCapacityKwh: 40,
       maxChargingPowerKw: 50,
       targetSoc: 90,
+      chargingCurve: null,
+      currentType: null,
+      phases: null,
+      attribution: null,
     });
     // The auto meter was not touched: nothing rewritten there.
     expect(service.setAutoMeterValueConfig).not.toHaveBeenCalled();
@@ -313,5 +323,152 @@ describe("ConnectorConfigDialog: EV and auto meter of one connector", () => {
       "Auto meter values applied, but not saved: disk full",
     );
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConnectorConfigDialog: saved vehicle profiles (#458)", () => {
+  const ID7: VehicleProfile = {
+    id: "vp_id7",
+    name: "Volkswagen ID.7 GTX",
+    specs: {
+      usableBatteryKwh: 86,
+      acMaxKw: 11,
+      acPhases: 3,
+      dcMaxKw: 175,
+      acConnectors: [],
+      dcConnectors: [],
+    },
+    dcCurve: [
+      { socPercent: 10, powerKw: 200 },
+      { socPercent: 90, powerKw: 40 },
+    ],
+    overrides: {},
+    origin: null,
+    createdAt: "2026-10-11T10:00:00.000Z",
+    updatedAt: "2026-10-11T10:00:00.000Z",
+  };
+  const NO_CAPACITY: VehicleProfile = {
+    ...ID7,
+    id: "vp_nocap",
+    name: "No capacity",
+    specs: { ...ID7.specs, usableBatteryKwh: null },
+  };
+
+  it("applies a profile for DC: battery, power, curve and current type, with its notes", async () => {
+    const setEVSettings = vi.fn(async () => {});
+    const { dialog } = await renderDialog({
+      setEVSettings,
+      listVehicleProfiles: vi.fn(async () => [ID7, NO_CAPACITY]),
+    });
+    const vehicle = byLabel<HTMLSelectElement>(dialog, "Vehicle");
+    const options = Array.from(vehicle.querySelectorAll("option"));
+    const dc = options.find((o) =>
+      o.textContent?.startsWith("Volkswagen ID.7 GTX · DC"),
+    )!;
+    expect(dc).toBeDefined();
+    // A type the profile lacks a value for is listed, disabled, with why.
+    const blocked = options.find((o) =>
+      o.textContent?.startsWith("No capacity · DC"),
+    )!;
+    expect(blocked.disabled).toBe(true);
+    expect(blocked.textContent).toContain("missing usable battery capacity");
+
+    await act(async () => setValue(vehicle, dc.value));
+    expect(byLabel<HTMLInputElement>(dialog, "Battery (kWh)").value).toBe("86");
+    // The curve peaks above the declared maximum: the peak is used, and said.
+    expect(byLabel<HTMLInputElement>(dialog, "Max power (kW)").value).toBe(
+      "200",
+    );
+    const notes = dialog.querySelector('[aria-label="Vehicle profile notes"]')!;
+    expect(notes.textContent).toContain(
+      "above the declared DC maximum of 175 kW",
+    );
+    expect(notes.textContent).toContain("starts at 10 % SoC");
+
+    await save(dialog);
+    expect(setEVSettings).toHaveBeenCalledWith("CP-1", 1, {
+      ...EV,
+      modelName: "Volkswagen ID.7 GTX",
+      batteryCapacityKwh: 86,
+      maxChargingPowerKw: 200,
+      currentType: "DC",
+      chargingCurve: [
+        { socPercent: 10, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0.2 },
+      ],
+      attribution: [],
+    });
+  });
+
+  it("applies a profile for AC with its phase count and no curve", async () => {
+    const setEVSettings = vi.fn(async () => {});
+    const { dialog } = await renderDialog({
+      setEVSettings,
+      listVehicleProfiles: vi.fn(async () => [ID7]),
+    });
+    const vehicle = byLabel<HTMLSelectElement>(dialog, "Vehicle");
+    const ac = Array.from(vehicle.querySelectorAll("option")).find((o) =>
+      o.textContent?.startsWith("Volkswagen ID.7 GTX · AC"),
+    )!;
+    await act(async () => setValue(vehicle, ac.value));
+    await save(dialog);
+    expect(setEVSettings).toHaveBeenCalledWith("CP-1", 1, {
+      ...EV,
+      modelName: "Volkswagen ID.7 GTX",
+      batteryCapacityKwh: 86,
+      maxChargingPowerKw: 11,
+      currentType: "AC",
+      chargingCurve: [],
+      phases: 3,
+      attribution: [],
+    });
+  });
+
+  // The save merges into the connector's settings, so the previous
+  // vehicle's curve and phases must be overwritten, not left out.
+  it("replaces the previous vehicle's curve and phases", async () => {
+    const setEVSettings = vi.fn(async () => {});
+    const { dialog } = await renderDialog(
+      {
+        setEVSettings,
+        listVehicleProfiles: vi.fn(async () => [
+          { ...ID7, specs: { ...ID7.specs, acPhases: null } },
+        ]),
+      },
+      {
+        ev: {
+          ...EV,
+          currentType: "DC",
+          phases: 3,
+          chargingCurve: [{ socPercent: 0, powerFraction: 0.5 }],
+        },
+      },
+    );
+    const vehicle = byLabel<HTMLSelectElement>(dialog, "Vehicle");
+    const ac = Array.from(vehicle.querySelectorAll("option")).find((o) =>
+      o.textContent?.startsWith("Volkswagen ID.7 GTX · AC"),
+    )!;
+    await act(async () => setValue(vehicle, ac.value));
+    expect(dialog.textContent).toContain("AC · 1 phase · flat charging curve");
+    await save(dialog);
+    expect(setEVSettings).toHaveBeenCalledWith(
+      "CP-1",
+      1,
+      expect.objectContaining({
+        currentType: "AC",
+        chargingCurve: [],
+        phases: 1,
+      }),
+    );
+  });
+
+  it("shows a vehicle that is not a preset under its own name", async () => {
+    const { dialog } = await renderDialog(
+      { listVehicleProfiles: vi.fn(async () => []) },
+      { ev: { ...EV, modelName: "Volkswagen ID.7 GTX" } },
+    );
+    const vehicle = byLabel<HTMLSelectElement>(dialog, "Vehicle");
+    expect(vehicle.value).toBe("Volkswagen ID.7 GTX");
+    expect(vehicle.selectedOptions[0]!.textContent).toBe("Volkswagen ID.7 GTX");
   });
 });

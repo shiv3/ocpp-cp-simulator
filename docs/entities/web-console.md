@@ -59,8 +59,8 @@ transition, from the same origin:
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): removing a connector, a per-connector auto
-  meter-value curve, a StatusNotification for connector 0, downloading the logs, the
+  move to the console (#411): removing a connector, a StatusNotification for
+  connector 0, downloading the logs, the
   charging-profile view, and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
@@ -115,8 +115,8 @@ mode it refuses while that configuration has not loaded, instead of saving one
 without any charge point. On a failure the page stays open and says why.
 
 Each connector card shows the status, the transaction, the energy and the SoC,
-with **Start** / **Stop transaction**, **Set status** and **Meter & SoC**
-(#417). **Meter & SoC** opens a dialog that sets the meter value (**Set**,
+with **Start** / **Stop transaction**, **Set status**, **Meter & SoC** (#417)
+and **Auto meter values** (#418). **Meter & SoC** opens a dialog that sets the meter value (**Set**,
 **Set and send**) and the SoC (**Set SoC**, **Clear SoC**: the next MeterValues
 carries no SoC sample), and sends a MeterValues with the current reading.
 **Sync SoC and meter** derives one from the other with the EV's battery
@@ -128,6 +128,15 @@ sync counts as off: the box is unchecked and disabled, and **Set SoC** leaves
 the meter alone. If it cannot be read, the dialog says so and sync stays off
 until the operator turns it on. A failed call, and a sync choice the connector
 did not take or that was not saved, show their error in the dialog.
+
+**Auto meter values** opens the auto MeterValue editor (on / off, send
+interval, energy curve) for that connector, on its live configuration, else
+the one saved for it, else the default. When the saved one cannot be read, the
+editor does not open (it would start on the default) and the card says why.
+**Save** applies it to the connector, which a running transaction picks up at
+once, and saves it for the connector. The saved copy is only read back by this
+editor: a restart does not restore it into the connector. The classic side
+panel had the same editor wired but no button that opened it.
 
 ### Scenario editor: steps and graph
 

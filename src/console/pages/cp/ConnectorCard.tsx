@@ -15,6 +15,7 @@ import { formatEnergyKwh, formatSoc } from "@/lib/connectorFormat";
 import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
 import StatusPill from "../../components/StatusPill";
+import AutoMeterButton from "./AutoMeterButton";
 import ConnectorMeterDialog from "./ConnectorMeterDialog";
 
 export interface ConnectorCardProps {
@@ -215,6 +216,11 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
         >
           Meter & SoC
         </Button>
+        <AutoMeterButton
+          cpId={cpId}
+          connectorId={connectorId}
+          liveConfig={view.autoMeterValueConfig}
+        />
       </div>
 
       <ConnectorMeterDialog

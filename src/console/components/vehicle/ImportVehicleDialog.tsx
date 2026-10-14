@@ -12,6 +12,7 @@ import type {
   CatalogCurve,
   CatalogMake,
   CatalogModel,
+  CatalogModelQuery,
   CatalogPage,
   CatalogVariant,
   CatalogVariantSummary,
@@ -136,17 +137,21 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
     };
   }, [catalog, access.mode]);
 
-  const search = async (page = 0) => {
-    const result = await run((c) =>
-      c.searchModels({ makeId: makeId || undefined, model: query, page }),
-    );
+  // The search the shown models answer, so paging stays on it even after
+  // the Make or Model field is edited.
+  const [searched, setSearched] = useState<CatalogModelQuery | null>(null);
+  const searchModels = async (searchQuery: CatalogModelQuery) => {
+    const result = await run((c) => c.searchModels(searchQuery));
     if (result) {
+      setSearched(searchQuery);
       setModels(result);
       setModel(null);
       setVariants(null);
       setVariant(null);
     }
   };
+  const search = () =>
+    searchModels({ makeId: makeId || undefined, model: query, page: 0 });
 
   const openModel = async (m: CatalogModel, page = 0) => {
     const result = await run((c) => c.listVariants(m.id, page));
@@ -221,7 +226,9 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
           label="Models"
           page={models}
           empty="No model matches."
-          onPage={(p) => void search(p)}
+          onPage={(p) => {
+            if (searched) void searchModels({ ...searched, page: p });
+          }}
           render={(m) => (
             <button
               type="button"

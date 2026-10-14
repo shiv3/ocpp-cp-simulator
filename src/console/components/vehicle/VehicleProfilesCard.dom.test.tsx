@@ -329,6 +329,35 @@ describe("VehicleProfilesCard — import (#458)", () => {
     expect(document.body.textContent).toContain("curve from gaia, unknown");
   });
 
+  it("pages through the search that was run, not the fields edited since", async () => {
+    const searchModels = vi.fn(async () => ({
+      items: [
+        {
+          id: "volkswagen--id-7",
+          name: "ID.7",
+          makeId: "volkswagen",
+          makeName: "Volkswagen",
+          variantCount: 1,
+        },
+      ],
+      page: 0,
+      totalPages: 2,
+      totalItems: 2,
+    }));
+    const service = remoteService(fakeCatalog({ searchModels }));
+    await render(service);
+    await click(button("Import from Open EV Directory"));
+    await type(byLabel<HTMLInputElement>("Model"), "id.7");
+    await click(button("Search"));
+    await type(byLabel<HTMLInputElement>("Model"), "zoe");
+    await click(button("Next"));
+    expect(searchModels).toHaveBeenLastCalledWith({
+      makeId: undefined,
+      model: "id.7",
+      page: 1,
+    });
+  });
+
   it("says how long to wait when the catalog rate-limits", async () => {
     const service = remoteService(
       fakeCatalog({

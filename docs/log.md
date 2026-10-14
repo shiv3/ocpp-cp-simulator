@@ -1420,3 +1420,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#charge-point-page): the connector card's trash button, and that the removal is not saved. The `/v2` list of classic-only features no longer has it.
 - [GitHub issues](sources/github-issues.md): #419 row.
 - Mechanism: `ConnectorCard` calls `removeConnector` after a `window.confirm`; the card goes away on the service's `connector-removed` event, and a failure shows on the card.
+
+## [2026-10-02] ingest | connector 0 status, Heartbeat and Authorize in the web console (#420)
+
+- [Web console](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** panel (heartbeat interval and last sent, **Send Heartbeat**, **Authorize** with a TagID, **Send status** for connector 0 with an error code when Faulted). The `/v2` list of classic-only features loses it and gains the error code of a connector's Faulted status (#434), which the audit had missed.
+- [GitHub issues](sources/github-issues.md): #420 and #434 rows.
+- Mechanism: `ChargePointControls` on `CpDetailPage`, fed by `useChargePointView`'s heartbeat; `formatRelativeTime` moves from `CpCard` to `src/console/lib` for both.

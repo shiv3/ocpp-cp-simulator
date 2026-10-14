@@ -38,6 +38,7 @@ import StatusPill from "../components/StatusPill";
 import NetworkSimBadge from "../components/network-sim/NetworkSimBadge";
 import ManualDisconnectButtons from "../components/network-sim/ManualDisconnectButtons";
 import ActiveScenarioPanel from "./cp/ActiveScenarioPanel";
+import ChargePointControls from "./cp/ChargePointControls";
 import ConnectorCard from "./cp/ConnectorCard";
 import ConfigTab from "./cp/ConfigTab";
 import CpTabs from "./cp/CpTabs";
@@ -410,6 +411,12 @@ const CpDetailPage: React.FC = () => {
           {resolvedWsUrl}
         </div>
       )}
+
+      <ChargePointControls
+        cpId={cpId}
+        connected={isConnected}
+        heartbeat={view.heartbeat}
+      />
 
       {connectorList.length === 0 ? (
         <EmptyState

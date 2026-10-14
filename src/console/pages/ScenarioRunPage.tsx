@@ -12,7 +12,6 @@ import PageHeader from "../components/PageHeader";
 import TargetChip from "../components/TargetChip";
 import WaitControls from "../components/WaitControls";
 import WaitingExpectation from "../components/WaitingExpectation";
-import { consolePath } from "../routes";
 import { isLiveRunState, LIVE_RUN_STATE_STYLES } from "../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../lib/scenarioSteps";
 import { useScenarioRun, type ScenarioRunState } from "../lib/useScenarioRun";
@@ -195,7 +194,7 @@ const ScenarioRunPage: React.FC = () => {
     return (
       <div className="p-6">
         <Link
-          to={consolePath("/scenarios")}
+          to={"/scenarios"}
           className="mb-4 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
         >
           ← Back to scenarios
@@ -213,7 +212,7 @@ const ScenarioRunPage: React.FC = () => {
   return (
     <div className="p-6">
       <Link
-        to={consolePath("/scenarios")}
+        to={"/scenarios"}
         className="mb-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
       >
         ← Back to scenarios

@@ -2,7 +2,7 @@
 const UNSTAMPED_VERSION = "0.0.0";
 
 /**
- * The build identifier shown by both UIs (classic footer, issue #93; `/v3`
+ * The build identifier shown by both UIs (classic footer, issue #93; web
  * console sidebar, issue #364), resolved in one place so they cannot drift.
  *
  * Only tag-triggered builds (Docker / Tauri / CLI release) carry a semver. The

@@ -1,7 +1,7 @@
 ---
 title: Web console (browser UI)
 type: entity
-summary: The React + TypeScript browser UI — classic console at `/`, redesigned console at `/v3` — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
+summary: The React + TypeScript web console at `/` (the classic UI stays at `/v2` for a transition) — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
 sources:
   - src/ (React app)
   - index.html
@@ -42,19 +42,35 @@ The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mo
 
 ## Layout (route prefixes)
 
-The browser app serves the UIs under distinct route prefixes from the same origin:
+The browser app serves one web console, plus the classic UI during a
+transition, from the same origin:
 
-- **`/`** — the classic console (the default). Also reachable at **`/v2`** for
-  backward-compatible bookmarks.
-- **`/v3`** — the redesigned console: a fleet of **Charge Points**,
-  per-charge-point detail (`/v3/cp/:id`), a cross-CP **Scenario library** with
-  a linear step editor and a separate run console (`/v3/scenarios`; each row's
-  `…` menu — Duplicate, Export JSON, Delete — opens in a portal and flips
-  upward near the bottom of the window, so it is never clipped by the table,
-  #365), a cross-CP **Run history** (`/v3/scenarios/runs`, #388), a global
-  **Message log** (`/v3/logs`), and **Settings** (`/v3/settings`, where
-  global [network simulation](../concepts/network-simulation.md) and the
-  **Reset all simulator data** button live).
+- **`/`** — the web console: a fleet of **Charge Points**, per-charge-point
+  detail (`/cp/:id`), a cross-CP **Scenario library** (`/scenarios`; each
+  row's `…` menu — Duplicate, Export JSON, Delete — opens in a portal and
+  flips upward near the bottom of the window, so it is never clipped by the
+  table, #365) with a step editor (`/scenarios/edit`) and a separate run
+  console (`/scenarios/run`), a cross-CP **Run history**
+  (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
+  **Settings** (`/settings`, where global
+  [network simulation](../concepts/network-simulation.md) and the **Reset all
+  simulator data** button live). Every page takes its state from the URL, so
+  a deep link or a reload opens the same view; an unknown path shows a **Page
+  not found** page with a link back to the charge points.
+- **`/v2`** — the classic UI, kept while the features it still has alone
+  move to the console (#411): deleting a charge point or a connector, bulk
+  actions on every charge point, setting the meter value or SoC and sending
+  a MeterValues by hand, a per-connector auto meter-value curve, a
+  StatusNotification for connector 0, downloading the logs, the
+  charging-profile view, and the graph editor for branching scenarios. The
+  console's sidebar **Classic UI** link and the Settings page's **Open
+  classic UI** link go there; the classic navbar's **Web console** link comes
+  back.
+- **`/v3/...`** — where the console was served before #411. A bookmark
+  redirects to the same route without the prefix, keeping the query string
+  and the hash (`/v3/scenarios/run?cp=…&id=…` → `/scenarios/run?cp=…&id=…`).
+  The redirect is client-side, so the GitHub Pages base path applies; the
+  [daemon](daemon.md) serves the app for these paths like any other.
 - **`/v1`** — no longer a UI. The original single-page UI was removed in
   #411; its last version is the `legacy-v1-final` tag. A browser route under
   `/v1/...` redirects to `/`, so an old bookmark opens the console rather
@@ -66,9 +82,9 @@ The browser app serves the UIs under distinct route prefixes from the same origi
   hash key became `config-v1`). To share a configuration, use the JSON
   export / import in **Settings**.
 
-In `/v3`, a charge point's **Active scenarios** panel lists the runs executing
+In the console, a charge point's **Active scenarios** panel lists the runs executing
 or parked on its connectors, and its **Open run** link opens the scenario's run
-console (`/v3/scenarios/run?cp=…&connector=…&id=…&run=<runId>`). The run
+console (`/scenarios/run?cp=…&connector=…&id=…&run=<runId>`). The run
 console **attaches** to a run that is already live in the runtime rather than
 showing a fresh idle state: it hydrates the state (`running` / `waiting` / …),
 current and already-executed nodes, the waiting expectation with its timeout
@@ -104,7 +120,7 @@ it, so the history survives navigating away and back or a daemon restart with
 `--state-db`. Selecting a recorded run opens its report: verdicts, timing,
 errors, assertion results, wait interventions and the run's OCPP transcript,
 downloadable as JSON. **View all runs** opens the **Run History** page
-(`/v3/scenarios/runs`), which lists every recorded run across charge points
+(`/scenarios/runs`), which lists every recorded run across charge points
 with filters on charge point, connector, scenario id, verdict and execution
 state, pages of 50, and the selected run's report beside the list. Filters, the
 page and the selected run are kept in the URL (`?cp=&connector=&scenario=
@@ -120,12 +136,8 @@ In Local mode the run console keeps a history of this page view only, and the
 Run History page says it needs the daemon — local run reports are tracked in
 #394.
 
-The two consoles link to each other with a design switcher (the classic
-navbar's **New design** button ↔ the redesigned sidebar's **Switch to classic
-design** button).
-
-Both consoles show the running build as `ocpp-cp-simulator vX.Y.Z · GitHub` —
-in the classic UI's footer (#93) and at the bottom of the `/v3` sidebar
+Both UIs show the running build as `ocpp-cp-simulator vX.Y.Z · GitHub` —
+in the classic UI's footer (#93) and at the bottom of the console's sidebar
 (#364). The two render the same component from the same source
 (`src/lib/appBuildLabel.ts`): the package version stamped by the release
 tooling (`__APP_VERSION__`), falling back to the short commit SHA on the
@@ -138,16 +150,16 @@ console pointed at a self-hosted daemon. An unstamped daemon reports
 `0.0.0-dev`. Local mode has no daemon and shows no daemon version; neither
 does a daemon that predates `server.info`.
 
-The `/v3` dashboard and connector cards, and the classic connector card and
+The console's dashboard and connector cards, and the classic connector card and
 expanded side panel, format a connector's live readings with
 `src/lib/connectorFormat.ts`: the meter value, which is in Wh, as kWh with
 2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`). The
-`/v3` connector card shows `—` when no SoC is reported; the classic side
+console's connector card shows `—` when no SoC is reported; the classic side
 panel's collapsed rail rounds the SoC to a whole percent (#368).
 
-The redesign reuses the existing data layer, scenario engine, and per-step
-forms unchanged; scenarios, charge points, and logs are simply promoted to
-first-class routes instead of nested panels.
+The console and the classic UI share the data layer, the scenario engine and
+the per-step forms; the console promotes scenarios, charge points and logs
+to first-class routes instead of nested panels.
 
 ## What the console can do
 

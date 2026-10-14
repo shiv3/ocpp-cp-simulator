@@ -48,7 +48,7 @@ const SettingsPage: React.FC = () => {
     <div className="p-6 space-y-6">
       <div className="flex justify-end">
         <Link
-          to="/"
+          to="/v2"
           className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
         >
           Open classic UI

@@ -238,7 +238,7 @@ const Settings: React.FC = () => {
   const handleBackToHome = () => {
     // Relative navigation: from `/v2/settings` (nested under the `/v2/*`
     // classic UI route) this resolves to `/v2`; from `/settings` (embedded
-    // in the new console) it resolves to `/`. See
+    // in the web console) it resolves to `/`. See
     // src/console/ConsoleApp.dom.test.tsx for the empirical verification.
     navigate("..");
   };

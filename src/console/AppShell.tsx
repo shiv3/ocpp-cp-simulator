@@ -15,7 +15,6 @@ import { useServerInfo } from "../data/hooks/useServerInfo";
 import ThemeToggle from "../components/ThemeToggle";
 import AppBuildInfo from "../components/AppBuildInfo";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
-import { consolePath } from "./routes";
 
 interface NavItem {
   label: string;
@@ -24,45 +23,41 @@ interface NavItem {
   isActive: (pathname: string) => boolean;
 }
 
-// The console is mounted under `/v3`, so links go through `consolePath()` and
-// `isActive` matches against the `/v3`-prefixed pathname.
-//
 // "Charge Points" is the home screen (there's no separate Dashboard route —
 // the console root lists the charge points), and it also stays lit while the
 // operator is drilled into a specific CP at `/cp/:cpId`.
 const NAV_ITEMS: NavItem[] = [
   {
     label: "Charge Points",
-    to: consolePath("/"),
+    to: "/",
     icon: PlugZap,
-    isActive: (pathname) =>
-      pathname === consolePath("/") || pathname.startsWith(consolePath("/cp/")),
+    isActive: (pathname) => pathname === "/" || pathname.startsWith("/cp/"),
   },
   {
     label: "Scenarios",
-    to: consolePath("/scenarios"),
+    to: "/scenarios",
     icon: Play,
     isActive: (pathname) =>
-      pathname.startsWith(consolePath("/scenarios")) &&
-      !pathname.startsWith(consolePath("/scenarios/runs")),
+      pathname.startsWith("/scenarios") &&
+      !pathname.startsWith("/scenarios/runs"),
   },
   {
     label: "Run History",
-    to: consolePath("/scenarios/runs"),
+    to: "/scenarios/runs",
     icon: History,
-    isActive: (pathname) => pathname.startsWith(consolePath("/scenarios/runs")),
+    isActive: (pathname) => pathname.startsWith("/scenarios/runs"),
   },
   {
     label: "Message Log",
-    to: consolePath("/logs"),
+    to: "/logs",
     icon: ScrollText,
-    isActive: (pathname) => pathname.startsWith(consolePath("/logs")),
+    isActive: (pathname) => pathname.startsWith("/logs"),
   },
   {
     label: "Settings",
-    to: consolePath("/settings"),
+    to: "/settings",
     icon: SettingsIcon,
-    isActive: (pathname) => pathname.startsWith(consolePath("/settings")),
+    isActive: (pathname) => pathname.startsWith("/settings"),
   },
 ];
 
@@ -121,15 +116,14 @@ const AppShell: React.FC = () => {
               </span>
               <ThemeToggle />
             </div>
-            {/* Design switcher — mirrored on the classic UI's navbar so the
-                operator can hop between the two designs from either side.
-                The classic UI is served at the root. */}
+            {/* The classic UI stays under /v2 until the features only it has
+                move here (#411); its navbar links back to the console. */}
             <Link
-              to="/"
+              to="/v2"
               className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               <SquarePen className="h-3.5 w-3.5" />
-              Switch to classic design
+              Classic UI
             </Link>
             <div
               className="truncate font-mono text-xs text-gray-500 dark:text-gray-400"

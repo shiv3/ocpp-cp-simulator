@@ -1,6 +1,6 @@
 /**
  * Display formatting for a connector's live readings, shared by the classic
- * connector UI and the `/v3` console card so they cannot drift (issue #368).
+ * connector UI and the web console card so they cannot drift (issue #368).
  */
 
 /** A connector meter value, which is in Wh, as kWh with 2 decimals. */

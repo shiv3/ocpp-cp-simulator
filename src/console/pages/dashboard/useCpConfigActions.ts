@@ -16,7 +16,9 @@ import { getTemplateById } from "../../../utils/scenarioTemplates";
 export interface UseCpConfigActionsResult {
   addCp: (cpConfig: ChargePointConfig) => Promise<void>;
   updateCp: (cpConfig: ChargePointConfig) => Promise<void>;
-  removeCp: (cpId: string) => Promise<void>;
+  /** Resolves `true` once the charge point is gone; `false` when the
+   *  removal failed (the operator has been told). */
+  removeCp: (cpId: string) => Promise<boolean>;
 }
 
 /**
@@ -300,7 +302,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
 
   // Mirrors TopPage.tsx's handleDeleteChargePoint (~lines 343-379).
   const removeCp = useCallback(
-    async (cpId: string) => {
+    async (cpId: string): Promise<boolean> => {
       if (mode === "remote") {
         try {
           if (!chargePointService.removeChargePoint) {
@@ -308,27 +310,32 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           }
           await chargePointService.removeChargePoint(cpId);
           await refresh();
+          return true;
         } catch (err) {
           console.error("Failed to remove remote CP", err);
           alert(
             `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
           );
+          return false;
         }
-        return;
       }
 
       try {
         const existingIds = config?.Experimental?.ChargePointIDs ?? [];
+        // Also covers a configuration that has not loaded yet: filtering an
+        // empty list would "remove" the last CP and save no configuration
+        // at all, deleting every charge point.
+        if (!config || !existingIds.some((e) => e.ChargePointID === cpId)) {
+          throw new Error(`Charge point "${cpId}" is not in the configuration`);
+        }
         const nextIds = existingIds.filter(
           (entry) => entry.ChargePointID !== cpId,
         );
 
         if (nextIds.length === 0) {
           await persistConfig(null);
-          return;
+          return true;
         }
-
-        if (!config) return;
 
         const newConfig: SimulatorConfigInput = {
           ...config,
@@ -338,6 +345,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           },
         };
         await persistConfig(newConfig);
+        return true;
       } catch (err) {
         // Same operator-facing contract as the remote branch above, so a
         // local storage failure doesn't become an unhandled rejection.
@@ -345,6 +353,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         alert(
           `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
         );
+        return false;
       }
     },
     [mode, chargePointService, refresh, config, tagIDs, persistConfig],

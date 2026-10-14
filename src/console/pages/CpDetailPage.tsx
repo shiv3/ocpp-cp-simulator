@@ -6,7 +6,8 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
@@ -153,7 +154,8 @@ const CpDetailPage: React.FC = () => {
   const { mode, chargePointService } = useDataContext();
   const { config: localConfig } = useConfig();
   const serverInfo = useServerInfo();
-  const { updateCp } = useCpConfigActions();
+  const { updateCp, removeCp } = useCpConfigActions();
+  const navigate = useNavigate();
 
   const view = useChargePointView(cpId || null);
   const { entries: globalLogEntries } = useGlobalLogs();
@@ -161,6 +163,7 @@ const CpDetailPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabValue>("transactions");
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isConnectPending, setIsConnectPending] = useState(false);
+  const [isDeletePending, setIsDeletePending] = useState(false);
   const [diagnosticsConnectorOverride, setDiagnosticsConnectorOverride] =
     useState<number | null>(null);
   const [networkSimGlobalConfig, setNetworkSimGlobalConfig] = useState<
@@ -308,6 +311,18 @@ const CpDetailPage: React.FC = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete charge point ${cpId}?`)) {
+      return;
+    }
+    setIsDeletePending(true);
+    try {
+      if (await removeCp(cpId)) navigate("/");
+    } finally {
+      setIsDeletePending(false);
+    }
+  };
+
   // Domain objects (not the snapshot/view-model) — only obtainable in local
   // mode, exactly like `ConnectorSidePanel` derives `localCp`/`connector`.
   // Remote mode has no equivalent (the daemon owns the domain objects), so
@@ -363,6 +378,17 @@ const CpDetailPage: React.FC = () => {
               onClick={() => void handleToggleConnect()}
             >
               {isConnected ? "Disconnect" : "Connect"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isDeletePending}
+              onClick={() => void handleDelete()}
+              className="text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-300 dark:hover:bg-rose-950"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
             </Button>
           </>
         }

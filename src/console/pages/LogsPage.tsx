@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { LogLevel, LogType } from "../../cp/shared/Logger";
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
+import { useDataContext } from "../../data/providers/DataProvider";
+import { downloadStoredLogs } from "../../lib/downloadStoredLogs";
 import EmptyState from "../components/EmptyState";
 import {
   FILTER_INPUT_CLASS,
@@ -82,6 +84,7 @@ const LogsPage: React.FC = () => {
   const { config, isLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, { isLoading });
   const { entries, paused, setPaused, clear } = useGlobalLogs();
+  const { chargePointService } = useDataContext();
 
   const [cpFilter, setCpFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -110,6 +113,20 @@ const LogsPage: React.FC = () => {
     return filtered[0] ?? null;
   }, [filtered, selectedSeq]);
 
+  // The persisted logs, not the on-screen buffer: the charge point filter
+  // picks whose; the other filters do not apply.
+  const handleDownload = () => {
+    const cpIds =
+      cpFilter === "all" ? chargePoints.map((cp) => cp.id) : [cpFilter];
+    const label = cpFilter === "all" ? "all" : cpFilter;
+    void downloadStoredLogs(chargePointService, cpIds, label).catch((err) => {
+      console.error("Failed to download logs", err);
+      alert(
+        `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  };
+
   return (
     <div className="p-6">
       <PageHeader
@@ -127,6 +144,15 @@ const LogsPage: React.FC = () => {
             </Button>
             <Button type="button" size="sm" variant="outline" onClick={clear}>
               Clear
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              title="Download every persisted log row of the charge point picked in the filter (or of all of them) as a JSON Lines file."
+              onClick={handleDownload}
+            >
+              Download
             </Button>
           </>
         }

@@ -8,6 +8,7 @@ import {
 } from "../cp/domain/types/OcppTypes";
 import { useChargePointView } from "../data/hooks/useChargePointView";
 import { useDataContext } from "../data/providers/DataProvider";
+import { downloadStoredLogs } from "../lib/downloadStoredLogs";
 
 interface ChargePointProps {
   cpId: string;
@@ -77,28 +78,8 @@ const ChargePoint: React.FC<ChargePointProps> = ({
   );
 
   const handleDownloadLogs = useCallback(async () => {
-    if (!chargePointService.listStoredLogs) {
-      console.warn("This runtime does not expose persisted logs for download");
-      return;
-    }
     try {
-      const rows = await chargePointService.listStoredLogs(cpId);
-      // JSON Lines: one entry per line. Plays well with `jq -c`, grep, and
-      // log analyzers; smaller than a JSON array because lines are
-      // independently parseable.
-      const body = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
-      const blob = new Blob([body], { type: "application/x-ndjson" });
-      const url = URL.createObjectURL(blob);
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `ocpp-logs-${cpId}-${stamp}.jsonl`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      // Schedule revoke on the next tick so Safari has time to start the
-      // download — revoking too early aborts it.
-      setTimeout(() => URL.revokeObjectURL(url), 0);
+      await downloadStoredLogs(chargePointService, [cpId], cpId);
     } catch (err) {
       console.error("Failed to download logs", err);
     }

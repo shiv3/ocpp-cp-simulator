@@ -60,7 +60,7 @@ transition, from the same origin:
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
   move to the console (#411): the error code of a connector's Faulted
-  status (#434), downloading the logs, the
+  status (#434), the
   charging-profile view, and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
@@ -139,6 +139,17 @@ sync counts as off: the box is unchecked and disabled, and **Set SoC** leaves
 the meter alone. If it cannot be read, the dialog says so and sync stays off
 until the operator turns it on. A failed call, and a sync choice the connector
 did not take or that was not saved, show their error in the dialog.
+
+The **Message Log** tab (#421) shows the charge point's entries from the
+console's log buffer. **Download** saves every persisted log row of the charge
+point as JSON Lines (`ocpp-logs-<cp>-<timestamp>.jsonl`, the
+[log format](../concepts/log-format.md)); **Clear screen** hides the lines on
+screen, and **Clear screen + DB** also deletes the persisted rows (`logs.clear`
+in Remote mode). Before #421 the console's **Clear screen + DB** left the
+persisted rows in place. The global **Message log** page (`/logs`) has the same
+**Download**, for the charge point picked in its filter or for all of them in
+one file (`ocpp-logs-all-<timestamp>.jsonl`); it downloads the persisted rows,
+not the filtered lines on screen.
 
 **Auto meter values** opens the auto MeterValue editor (on / off, send
 interval, energy curve) for that connector, on its live configuration, else

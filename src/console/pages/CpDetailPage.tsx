@@ -18,6 +18,7 @@ import ChargePointConfigModal, {
 } from "@/components/ChargePointConfigModal";
 import { getConfigBasicAuthPassword } from "@/data/configPort";
 import { useChargePointView } from "@/data/hooks/useChargePointView";
+import { downloadStoredLogs } from "@/lib/downloadStoredLogs";
 import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { useServerInfo } from "@/data/hooks/useServerInfo";
@@ -259,14 +260,34 @@ const CpDetailPage: React.FC = () => {
     return filtered.reverse().map((e) => e.entry);
   }, [globalLogEntries, cpId, logsClearedBeforeSeq]);
 
-  const handleClearTabLogs = useCallback(() => {
-    // Set watermark to the highest seq in globalLogEntries (newest-first, so [0]
-    // has the max). This ensures only entries logged after this Clear persist
-    // in the tab view. Ignores scope parameter from LogViewer (which offers
-    // "screen" vs "all" options) because the global buffer is read-only from
-    // this tab's perspective; clearing only affects this tab's watermark.
-    setLogsClearedBeforeSeq(globalLogEntries[0]?.seq ?? -1);
-  }, [globalLogEntries]);
+  const handleClearTabLogs = useCallback(
+    (scope: "screen" | "all") => {
+      // Set watermark to the highest seq in globalLogEntries (newest-first, so
+      // [0] has the max). This ensures only entries logged after this Clear
+      // persist in the tab view; the global buffer itself is read-only from
+      // this tab's perspective.
+      setLogsClearedBeforeSeq(globalLogEntries[0]?.seq ?? -1);
+      // "Clear screen + DB" also deletes the CP's persisted log rows.
+      if (scope === "all" && chargePointService.clearStoredLogs) {
+        void chargePointService.clearStoredLogs(cpId).catch((err) => {
+          console.error(`Failed to clear stored logs for ${cpId}`, err);
+          alert(
+            `Failed to clear stored logs: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+    },
+    [globalLogEntries, chargePointService, cpId],
+  );
+
+  const handleDownloadLogs = useCallback(() => {
+    void downloadStoredLogs(chargePointService, [cpId], cpId).catch((err) => {
+      console.error(`Failed to download logs for ${cpId}`, err);
+      alert(
+        `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }, [chargePointService, cpId]);
 
   const diagnosticsConnectorId =
     diagnosticsConnectorOverride ?? connectorList[0]?.id ?? null;
@@ -448,7 +469,11 @@ const CpDetailPage: React.FC = () => {
           <TransactionsTab cpId={cpId} />
         </TabsContent>
         <TabsContent value="logs">
-          <LogViewer logs={tabLogs} onClear={handleClearTabLogs} />
+          <LogViewer
+            logs={tabLogs}
+            onClear={handleClearTabLogs}
+            onDownload={handleDownloadLogs}
+          />
         </TabsContent>
         <TabsContent value="analysis">
           <Suspense

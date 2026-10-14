@@ -1000,6 +1000,9 @@ export interface ScenarioEvents {
     total: number;
   };
 
+  /** #240: an operator extended, retried or continued a parked wait. */
+  "wait.intervention": ScenarioWaitIntervention & { scenarioId: string };
+
   // Hierarchical execution events - execution.{event}
   "execution.started": {
     scenarioId: string;

@@ -29,6 +29,7 @@ import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargeP
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import type { ScenarioManager } from "../../cp/application/scenario/ScenarioManager";
+import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import {
   BootNotification,
@@ -50,7 +51,6 @@ import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
   BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
-  BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
@@ -196,6 +196,7 @@ export class LocalChargePointService implements ChargePointService {
     Set<(event: ChargePointEvent) => void>
   >();
   private readonly eventSubscriptions = new Map<string, Array<() => void>>();
+  private readonly scenarioRuntimes = new Map<string, LocalScenarioRuntime>();
 
   /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
    *  and per-connector availability. Passed through to every ChargePoint we
@@ -227,10 +228,18 @@ export class LocalChargePointService implements ChargePointService {
 
     this.chargePoints.set(chargePoint.id, chargePoint);
     this.attachEventForwarders(chargePoint);
+    this.scenarioRuntimes.set(
+      chargePoint.id,
+      new LocalScenarioRuntime(chargePoint, this.scenarioRepository, (event) =>
+        this.emit(chargePoint.id, event),
+      ),
+    );
   }
 
   unregisterChargePoint(id: string): void {
     const cp = this.chargePoints.get(id);
+    this.scenarioRuntimes.get(id)?.dispose();
+    this.scenarioRuntimes.delete(id);
     if (cp) {
       cp.disconnect();
     }
@@ -800,7 +809,7 @@ export class LocalChargePointService implements ChargePointService {
         ...evSettings,
       };
     }
-    manager.loadScenarios([definition]);
+    manager.setScenario(definition);
     return { scenarioId: definition.id };
   }
 
@@ -809,8 +818,9 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     definition: ScenarioDefinition,
   ): Promise<{ scenarioId: string }> {
-    const manager = this.requireScenarioManager(id, connectorId);
-    manager.loadScenarios([definition]);
+    // Upsert, like the daemon: loading one definition must not unload the
+    // connector's other (e.g. status-triggered) scenarios.
+    this.requireScenarioManager(id, connectorId).setScenario(definition);
     return { scenarioId: definition.id };
   }
 
@@ -863,14 +873,7 @@ export class LocalChargePointService implements ChargePointService {
     opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
     const connectorId = opts.connectorId ?? 1;
-    const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
-    if (!manager) {
-      throw new UnsupportedFeatureError(
-        "browser_scenario_executor_unavailable",
-        BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
-      );
-    }
+    const manager = this.requireScenarioManager(id, connectorId);
     const template = getTemplateById(templateId);
     if (!template) throw new Error(`Unknown template: ${templateId}`);
     const definition = template.createScenario(id, connectorId);
@@ -881,13 +884,10 @@ export class LocalChargePointService implements ChargePointService {
       };
     }
     // #352: `once` loads the instance disabled so the connect-triggered
-    // walker never re-arms it. Note the browser never had #318's race — the
-    // ScenarioManager does not auto-start on load, and Connector.tsx's
-    // connect gate reads the persisted store, which this ephemeral instance
-    // never enters — so here the flag only keeps the instance's shape the
-    // same as the daemon's.
+    // auto-start never re-arms it (LocalScenarioRuntime walks every loaded
+    // definition, as the daemon does).
     if (opts.once) definition.enabled = false;
-    manager.loadScenarios([definition]);
+    manager.setScenario(definition);
     await manager.executeScenario(definition.id);
     return { scenarioId: definition.id };
   }

@@ -24,7 +24,7 @@ related:
   - trace-format.md
   - control-plane.md
   - ../entities/cli.md
-updated: 2026-09-30
+updated: 2026-10-02
 ---
 
 # Scenario File Format (v1.3)
@@ -161,6 +161,23 @@ template, `run_scenario_template { "once": true }`, which loads the instance
 with `enabled: false` (the walker skips it at every connect) and starts it
 once (#352). A status oscillation on a still-connected charge point does
 **not** re-fire the scenario.
+
+The daemon and the browser's Local mode apply the same auto-start rules
+(`matchAutoStart`, #411). A scenario is eligible when it is enabled, its
+`trigger` is `manual` or absent, it has no `statusTrigger` node (those are
+fired by the `statusChange` trigger instead), and its start node's
+`triggerOn` matches — for `"status"`, the connector must be in
+`targetStatus`. On each connector the first eligible scenario fires, and only
+while the charge point is `Available` and nothing else runs on that
+connector. Before #411, Local mode only considered the scenario the classic
+connector card had selected, and only an explicit `manual` trigger.
+
+Disabling a scenario releases its own "already fired" mark, so re-enabling it
+re-arms it. It never releases another scenario's mark: before #411, a
+disabled sibling on the same connector — a `run_scenario_template
+{ "once": true }` instance, for example — let an unchanged scenario that had
+already fired start again on the next connect or status change, in both
+runtimes.
 
 ### `responseOverride` notes
 

@@ -32,8 +32,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * `isCallAllowed` check silently drops any gated outgoing CALL sent before
  * Accepted — the scenario then falls back to a locally fabricated
  * `transactionId` (0) and the CSMS never sees the transaction at all. This
- * mirrors the gate the browser's `Connector.tsx` auto-start effect already
- * applies (`cpStatus === Available`) and the one `CLIChargePointService`
+ * mirrors the gate the browser's `LocalScenarioRuntime` auto-start already
+ * applies (CP `Available`) and the one `CLIChargePointService`
  * already applies to scenarios loaded via `loadScenario()` on an
  * already-running daemon (see `attachEventForwarders`'s `statusChange`
  * handler) — this helper brings the CLI's *startup* scenario path in line

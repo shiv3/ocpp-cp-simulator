@@ -111,6 +111,19 @@ describe("resolveVehicleCatalogConfig (#458)", () => {
     expect(JSON.stringify(result)).not.toContain(KEY);
   });
 
+  it("refuses a key with a plain-http URL to another host", () => {
+    expect(
+      resolve({ baseUrl: "http://evd.example.test" }, { OED_API_KEY: KEY }),
+    ).toEqual({
+      ok: false,
+      message:
+        "An Open EV Directory API key is only sent over https (or to this machine over http)",
+    });
+    expect(
+      resolve({ baseUrl: "http://localhost:8080" }, { OED_API_KEY: KEY }),
+    ).toMatchObject({ ok: true, config: { apiKey: KEY } });
+  });
+
   it("ignores blank values", () => {
     expect(resolve({}, { OED_BASE_URL: "  ", OED_API_KEY: " " })).toEqual({
       ok: true,

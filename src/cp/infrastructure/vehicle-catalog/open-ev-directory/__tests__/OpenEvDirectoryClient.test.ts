@@ -340,3 +340,72 @@ describe("OpenEvDirectoryClient — failures never leak the key (#458)", () => {
     expect(error.retryAfterSeconds).toBeUndefined();
   });
 });
+
+describe("OpenEvDirectoryClient — maintainer review (#458)", () => {
+  it("does not call a vehicle removed when only its curves are missing", async () => {
+    const { client: c } = client({
+      "/v1/variants/var_b16bdbae5aa906a7": () => json(id7Variant),
+      "/v1/variants/var_b16bdbae5aa906a7/charging-curves": () =>
+        json(unknownVariant, 404),
+    });
+    const error = await failure(c.getVariant("var_b16bdbae5aa906a7"));
+    // The variant answered: the catalog is inconsistent, not the vehicle gone.
+    expect(error.kind).toBe("invalid_response");
+  });
+
+  for (const id of ["..", ".", "a/b", "var_1?x=1", "", "var 1"]) {
+    it(`refuses the id ${JSON.stringify(id)} without calling the API`, async () => {
+      const { client: c, calls } = client({});
+      expect((await failure(c.getVariant(id))).kind).toBe("invalid_request");
+      expect((await failure(c.listVariants(id))).kind).toBe("invalid_request");
+      expect(calls).toHaveLength(0);
+    });
+  }
+
+  it("refuses a variant beyond the simulator's limits, the same in both modes", async () => {
+    const curves = structuredClone(id7Curves);
+    curves.items = Array.from({ length: 65 }, () => curves.items[0]!);
+    const { client: c } = client({
+      "/v1/variants/var_b16bdbae5aa906a7": () => json(id7Variant),
+      "/v1/variants/var_b16bdbae5aa906a7/charging-curves": () => json(curves),
+    });
+    const error = await failure(c.getVariant("var_b16bdbae5aa906a7"));
+    expect(error.kind).toBe("invalid_response");
+    expect(error.message).toContain("curves");
+  });
+
+  it("refuses a negative power instead of failing later", async () => {
+    const curves = structuredClone(id7Curves);
+    curves.items[0]!.points[0]!.powerKw = -5;
+    const { client: c } = client({
+      "/v1/variants/var_b16bdbae5aa906a7": () => json(id7Variant),
+      "/v1/variants/var_b16bdbae5aa906a7/charging-curves": () => json(curves),
+    });
+    expect((await failure(c.getVariant("var_b16bdbae5aa906a7"))).kind).toBe(
+      "invalid_response",
+    );
+  });
+
+  it("never sends a key over plain http to another host", () => {
+    expect(
+      () =>
+        new OpenEvDirectoryClient({
+          baseUrl: "http://evd.example.test",
+          apiKey: KEY,
+        }),
+    ).toThrow(VehicleCatalogError);
+    // Without a key, or to this machine, http is fine.
+    expect(
+      () => new OpenEvDirectoryClient({ baseUrl: "http://evd.example.test" }),
+    ).not.toThrow();
+    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+      expect(
+        () =>
+          new OpenEvDirectoryClient({
+            baseUrl: `http://${host}:8080`,
+            apiKey: KEY,
+          }),
+      ).not.toThrow();
+    }
+  });
+});

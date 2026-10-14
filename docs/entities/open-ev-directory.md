@@ -45,8 +45,14 @@ which runs in the [daemon](daemon.md) and, in Local mode, in the browser.
 | `listVariants` | `GET /v1/models/{id}/variants?size=50&page=n`                       | Variant summaries: sources, curve count.                                              |
 | `getVariant`   | `GET /v1/variants/{id}` and `GET /v1/variants/{id}/charging-curves` | Both at once. A former id's redirect is followed; the curves are read again under it. |
 
-Every successful response is validated against the shapes in `dto.ts`; a body that is not
-JSON or does not match is `invalid_response`. Each request has a **10 s**
+Every successful response is validated against the shapes in `dto.ts`, then
+against the limits the simulator carries a catalog answer under (the
+`src/protocol/vehicle.ts` schemas the daemon's RPC results use: at most 64
+records or curves, 512 points, non-negative powers, SoC within 0–100 %, bounded
+strings); a body that is not JSON, does not match or exceeds them is
+`invalid_response`, in both console modes alike. Ids sent as path segments
+must be letters, digits, `_` or `-` (`invalid_request` otherwise, before any
+call). Each request has a **10 s**
 timeout. The adapter is pinned to the API's published response examples by
 contract fixtures in
 [`__fixtures__/`](../../src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md)
@@ -102,7 +108,12 @@ so the operator provisions keys (its README,
 [API keys](https://github.com/juherr/open-ev-directory#api-keys)). A key is
 shown once.
 A key that is sent must be valid: a malformed, unknown, revoked or expired one
-is `401` (`unauthorized`), while no key at all is served anonymously.
+is `401` (`unauthorized`), while no key at all is served anonymously. A key is
+sent only over https, or over http to this machine (`localhost`, `127.0.0.1`,
+`[::1]`): a key with a plain-http URL to another host is refused — exit 1 for
+the daemon, an error under the URL in the import dialog. A redirect keeps the
+key on the same origin only; the runtime drops `Authorization` when a
+redirect leaves it, which a test pins for the daemon's Bun.
 No error message the adapter builds contains the key: messages carry the
 request path and what the API said, a problem `detail` that echoes the key is
 scrubbed, and the underlying fetch error is not kept as a cause. The shared
@@ -125,11 +136,12 @@ as an RPC error code, and the Remote console maps it back.
 | Upstream                           | Catalog kind       | RPC code         |
 | ---------------------------------- | ------------------ | ---------------- |
 | HTTP 401 / 403                     | `unauthorized`     | `unauthorized`   |
-| HTTP 404                           | `not_found`        | `not_found`      |
+| HTTP 404 (on the variant itself)   | `not_found`        | `not_found`      |
 | HTTP 429 (+ `Retry-After`)         | `rate_limited`     | `rate_limited`   |
 | HTTP 5xx                           | `unavailable`      | `unavailable`    |
 | Other HTTP 4xx                     | `invalid_request`  | `invalid_params` |
-| Bad JSON or unexpected shape       | `invalid_response` | `unavailable`    |
+| Bad JSON, shape or limits          | `invalid_response` | `unavailable`    |
+| Variant found, its curves 404      | `invalid_response` | `unavailable`    |
 | No answer within 10 s              | `timeout`          | `timeout`        |
 | Offline, DNS, cross-origin refusal | `network`          | `unavailable`    |
 | No base URL configured             | `not_configured`   | `unavailable`    |

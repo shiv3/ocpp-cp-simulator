@@ -11,6 +11,13 @@ import {
   type VehicleCatalog,
 } from "../../../domain/vehicle/VehicleCatalog";
 
+import {
+  CATALOG_ID_PATTERN,
+  catalogMakesSchema,
+  catalogModelPageSchema,
+  catalogVariantPageSchema,
+  catalogVariantSchema,
+} from "../../../../protocol/vehicle";
 import { REDACTED_VALUE } from "../../../shared/redaction";
 import {
   makePageSchema,
@@ -76,6 +83,12 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
   constructor(options: OpenEvDirectoryClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey?.trim() || undefined;
+    if (this.apiKey && this.baseUrl && !keySafeOver(this.baseUrl)) {
+      throw new VehicleCatalogError(
+        "not_configured",
+        KEY_OVER_PLAIN_HTTP_MESSAGE,
+      );
+    }
     this.timeoutMs = options.timeoutMs ?? DEFAULT_OED_TIMEOUT_MS;
     this.fetchImpl = options.fetch ?? ((url, init) => fetch(url, init));
   }
@@ -104,7 +117,7 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
         })),
       );
       if (page + 1 >= Math.min(body.page.totalPages, MAX_MAKE_PAGES)) {
-        return makes;
+        return withinLimits(catalogMakesSchema, makes, "/v1/makes");
       }
     }
   }
@@ -118,83 +131,115 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
     };
     if (query.makeId?.trim()) params.make = query.makeId.trim();
     if (query.model?.trim()) params.model = query.model.trim();
+    if (params.make) requireId(params.make, "make");
     const body = await this.get("/v1/models", params, modelPageSchema);
-    return pageOf(body.page, body.items);
+    return withinLimits(
+      catalogModelPageSchema,
+      pageOf(body.page, body.items),
+      "/v1/models",
+    );
   }
 
   async listVariants(
     modelId: string,
     page = 0,
   ): Promise<CatalogPage<CatalogVariantSummary>> {
+    requireId(modelId, "model");
+    const path = `/v1/models/${modelId}/variants`;
     const body = await this.get(
-      `/v1/models/${encodeURIComponent(modelId)}/variants`,
+      path,
       { size: String(PAGE_SIZE), page: String(page) },
       variantPageSchema,
     );
-    return pageOf(body.page, body.items);
+    return withinLimits(
+      catalogVariantPageSchema,
+      pageOf(body.page, body.items),
+      path,
+    );
   }
 
   async getVariant(variantId: string): Promise<CatalogVariant> {
+    requireId(variantId, "variant");
     // Both requested at once. A former id answers with a 302 that fetch
     // follows and whose body names the current id; in that rare case the
     // curves are read again under it, and the early answer is dropped.
+    // Only the variant request says whether the vehicle exists: a 404 on
+    // its curves, once the variant answered, is an inconsistent catalog,
+    // not a removed vehicle.
     const curvesOf = (id: string) =>
       this.get(
-        `/v1/variants/${encodeURIComponent(id)}/charging-curves`,
+        `/v1/variants/${id}/charging-curves`,
         {},
         variantChargingCurvesSchema,
-      );
+      ).catch((error: unknown) => {
+        if (
+          error instanceof VehicleCatalogError &&
+          error.kind === "not_found"
+        ) {
+          throw new VehicleCatalogError(
+            "invalid_response",
+            `Open EV Directory has variant ${id} but not its charging curves`,
+          );
+        }
+        throw error;
+      });
     const early = curvesOf(variantId);
     early.catch(() => {});
     const variant = await this.get(
-      `/v1/variants/${encodeURIComponent(variantId)}`,
+      `/v1/variants/${variantId}`,
       {},
       variantSchema,
     );
+    // The id the body names becomes a path segment too.
+    requireId(variant.id, "variant");
     const curves =
       variant.id === variantId ? await early : await curvesOf(variant.id);
-    return {
-      id: variant.id,
-      name: variant.name,
-      makeName: variant.make.name,
-      modelName: variant.model.name,
-      datasetVersion: variant.datasetVersion ?? null,
-      sourceRecords: variant.sourceRecords.map((r) => ({
-        key: r.key,
-        sourceId: r.sourceId,
-        makeName: r.makeName,
-        modelName: r.modelName,
-        variantName: r.variantName ?? "",
-        year: r.year ?? null,
-        yearKind: r.yearKind ?? null,
-        markets: r.markets ?? [],
-        sourceUrl: r.sourceUrl ?? null,
-        specs: {
-          usableBatteryKwh: r.specifications.usableBatteryKwh ?? null,
-          acMaxKw: r.specifications.acMaxKw ?? null,
-          acPhases: r.specifications.acPhases ?? null,
-          dcMaxKw: r.specifications.dcMaxKw ?? null,
-          acConnectors: r.specifications.acConnectors ?? [],
-          dcConnectors: r.specifications.dcConnectors ?? [],
-        },
-        license: { ...r.license },
-      })),
-      curves: curves.items.map((c) => ({
-        id: c.id,
-        sourceId: c.sourceId,
-        sourceRecordKey: c.sourceRecord.key,
-        quality: c.quality,
-        qualityBasis: c.qualityBasis,
-        originalQuality: c.originalQuality,
-        observations: [...c.observations],
-        points: c.points.map((p) => ({
-          socPercent: p.socPercent,
-          powerKw: p.powerKw,
+    return withinLimits(
+      catalogVariantSchema,
+      {
+        id: variant.id,
+        name: variant.name,
+        makeName: variant.make.name,
+        modelName: variant.model.name,
+        datasetVersion: variant.datasetVersion ?? null,
+        sourceRecords: variant.sourceRecords.map((r) => ({
+          key: r.key,
+          sourceId: r.sourceId,
+          makeName: r.makeName,
+          modelName: r.modelName,
+          variantName: r.variantName ?? "",
+          year: r.year ?? null,
+          yearKind: r.yearKind ?? null,
+          markets: r.markets ?? [],
+          sourceUrl: r.sourceUrl ?? null,
+          specs: {
+            usableBatteryKwh: r.specifications.usableBatteryKwh ?? null,
+            acMaxKw: r.specifications.acMaxKw ?? null,
+            acPhases: r.specifications.acPhases ?? null,
+            dcMaxKw: r.specifications.dcMaxKw ?? null,
+            acConnectors: r.specifications.acConnectors ?? [],
+            dcConnectors: r.specifications.dcConnectors ?? [],
+          },
+          license: { ...r.license },
         })),
-        datasetVersion: c.datasetVersion ?? null,
-        license: { ...c.license },
-      })),
-    };
+        curves: curves.items.map((c) => ({
+          id: c.id,
+          sourceId: c.sourceId,
+          sourceRecordKey: c.sourceRecord.key,
+          quality: c.quality,
+          qualityBasis: c.qualityBasis,
+          originalQuality: c.originalQuality,
+          observations: [...c.observations],
+          points: c.points.map((p) => ({
+            socPercent: p.socPercent,
+            powerKw: p.powerKw,
+          })),
+          datasetVersion: c.datasetVersion ?? null,
+          license: { ...c.license },
+        })),
+      },
+      `/v1/variants/${variant.id}`,
+    );
   }
 
   private async get<S extends z.ZodType>(
@@ -253,6 +298,50 @@ export class OpenEvDirectoryClient implements VehicleCatalog {
       { retryAfterSeconds: error.retryAfterSeconds },
     );
   }
+}
+
+/**
+ * A path segment the catalog's own ids always match; anything else (`..`,
+ * `/`, `?`) could reach another path with the daemon's key.
+ */
+function requireId(id: string, what: string): void {
+  if (!CATALOG_ID_PATTERN.test(id)) {
+    throw new VehicleCatalogError(
+      "invalid_request",
+      `${JSON.stringify(id)} is not an Open EV Directory ${what} id`,
+    );
+  }
+}
+
+/**
+ * The answer, checked against the limits the simulator carries it under
+ * (`src/protocol/vehicle.ts`): the same schema the daemon's RPC validates
+ * its result with, so a variant past them is refused the same way in both
+ * console modes instead of failing only through the daemon.
+ */
+function withinLimits<S extends z.ZodType>(
+  schema: S,
+  value: z.infer<S>,
+  path: string,
+): z.infer<S> {
+  const checked = schema.safeParse(value);
+  if (checked.success) return value;
+  const issue = checked.error.issues[0];
+  const where = issue?.path.join(".") || "answer";
+  throw new VehicleCatalogError(
+    "invalid_response",
+    `Open EV Directory ${path} answered beyond the simulator's limits (${where}: ${issue?.message ?? "invalid"})`,
+  );
+}
+
+export const KEY_OVER_PLAIN_HTTP_MESSAGE =
+  "An Open EV Directory API key is only sent over https (or to this machine over http)";
+
+/** Whether a key may be sent to this base URL: https, or http to loopback. */
+export function keySafeOver(baseUrl: string): boolean {
+  const url = new URL(baseUrl);
+  if (url.protocol === "https:") return true;
+  return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
 }
 
 function normalizeBaseUrl(raw: string): string | null {

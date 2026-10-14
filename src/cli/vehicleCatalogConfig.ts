@@ -1,4 +1,8 @@
-import { PUBLIC_OED_BASE_URL } from "../cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import {
+  KEY_OVER_PLAIN_HTTP_MESSAGE,
+  keySafeOver,
+  PUBLIC_OED_BASE_URL,
+} from "../cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import { isHttpUrl } from "./soapCallbackUrl";
 
 /**
@@ -82,6 +86,9 @@ export function resolveVehicleCatalogConfig(input: {
           ]
         : [],
     };
+  }
+  if (apiKey && !keySafeOver(baseUrl)) {
+    return { ok: false, message: KEY_OVER_PLAIN_HTTP_MESSAGE };
   }
   return { ok: true, config: { baseUrl, apiKey }, warnings: [] };
 }

@@ -232,6 +232,25 @@ describe("vehicle_catalog.* (#458)", () => {
     ).toMatchObject({ ok: false, error: { code: "invalid_params" } });
   });
 
+  it("refuses ids that would leave their path segment", async () => {
+    const vehicleCatalog = catalog();
+    const { socket } = connect({ vehicleCatalog });
+    for (const [method, params] of [
+      ["vehicle_catalog.get_variant", { variantId: ".." }],
+      ["vehicle_catalog.get_variant", { variantId: "a/b" }],
+      ["vehicle_catalog.list_variants", { modelId: "." }],
+      ["vehicle_catalog.search_models", { makeId: "../x" }],
+    ] as const) {
+      expect(await socket.rpc(method, params)).toMatchObject({
+        ok: false,
+        error: { code: "invalid_params" },
+      });
+    }
+    expect(vehicleCatalog.getVariant).not.toHaveBeenCalled();
+    expect(vehicleCatalog.listVariants).not.toHaveBeenCalled();
+    expect(vehicleCatalog.searchModels).not.toHaveBeenCalled();
+  });
+
   it("answers unavailable when no catalog is configured", async () => {
     const { socket } = connect();
     const ack = await socket.rpc("vehicle_catalog.list_makes");

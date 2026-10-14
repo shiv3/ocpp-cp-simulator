@@ -98,6 +98,14 @@ export const vehicleProfileSchema = z.object({
 export const MAX_CATALOG_PAGE_ITEMS = 200;
 
 const catalogLicenseSchema = licenseSchema.omit({ sourceId: true });
+/**
+ * A make, model or variant id as a path segment: letters, digits, `_` and
+ * `-` only. `.`, `..`, `/` or `?` would let an id reach another path of the
+ * catalog with the daemon's key.
+ */
+export const CATALOG_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+const CATALOG_ID = STR_256.regex(CATALOG_ID_PATTERN);
+
 const catalogPage = <T extends z.ZodType>(item: T) =>
   z.object({
     items: z.array(item).max(MAX_CATALOG_PAGE_ITEMS),
@@ -165,7 +173,12 @@ export const catalogVariantSchema = z.object({
         originalQuality: STR_1K,
         observations: z.array(STR_256).max(32),
         points: z
-          .array(z.object({ socPercent: z.number(), powerKw: z.number() }))
+          .array(
+            z.object({
+              socPercent: z.number().finite().min(0).max(100),
+              powerKw: KW,
+            }),
+          )
           .max(MAX_VEHICLE_CURVE_POINTS),
         datasetVersion: STR_256.nullable(),
         license: catalogLicenseSchema,
@@ -173,6 +186,12 @@ export const catalogVariantSchema = z.object({
     )
     .max(64),
 });
+
+export const catalogMakesSchema = z.array(catalogMakeSchema).max(10_000);
+export const catalogModelPageSchema = catalogPage(catalogModelSchema);
+export const catalogVariantPageSchema = catalogPage(
+  catalogVariantSummarySchema,
+);
 
 /** `vehicle_catalog.*` and `vehicle_profiles.*` entries of the METHODS table. */
 export const VEHICLE_METHODS = {
@@ -190,22 +209,22 @@ export const VEHICLE_METHODS = {
   },
   "vehicle_catalog.list_makes": {
     params: z.object({}),
-    result: z.array(catalogMakeSchema).max(10_000),
+    result: catalogMakesSchema,
   },
   "vehicle_catalog.search_models": {
     params: z.object({
-      makeId: STR_256.optional(),
+      makeId: CATALOG_ID.optional(),
       model: STR_256.optional(),
       page: CATALOG_PAGE_PARAM,
     }),
-    result: catalogPage(catalogModelSchema),
+    result: catalogModelPageSchema,
   },
   "vehicle_catalog.list_variants": {
-    params: z.object({ modelId: STR_256.min(1), page: CATALOG_PAGE_PARAM }),
-    result: catalogPage(catalogVariantSummarySchema),
+    params: z.object({ modelId: CATALOG_ID, page: CATALOG_PAGE_PARAM }),
+    result: catalogVariantPageSchema,
   },
   "vehicle_catalog.get_variant": {
-    params: z.object({ variantId: STR_256.min(1) }),
+    params: z.object({ variantId: CATALOG_ID }),
     result: catalogVariantSchema,
   },
 } as const;

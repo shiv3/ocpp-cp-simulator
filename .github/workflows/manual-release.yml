@@ -66,7 +66,7 @@ jobs:
       # icon` step below. Dependency install + the tauri build itself go
       # through Bun (see below), so there's no npm cache to prime here.
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
 
@@ -84,7 +84,7 @@ jobs:
         # force-pushes `stable`, which orphans the SHA and leaves Dependabot
         # unable to resolve it back to a ref (`unknown_error`, and the whole
         # github-actions ecosystem job fails).
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}

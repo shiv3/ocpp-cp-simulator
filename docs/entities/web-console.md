@@ -58,9 +58,9 @@ transition, from the same origin:
   simulator data** button live). Every page takes its state from the URL, so
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
-- **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): the error code of a connector's Faulted
-  status (#434). The
+- **`/v2`** — the classic UI, kept for a transition (#411) until #426 retires
+  it. The console now has the features the #411 audit found only there
+  (#415–#424), and the connector Faulted error code (#434). The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
   back.
@@ -136,7 +136,11 @@ Each connector card shows:
   kind, stack level and schedule periods. The profile in effect is marked
   **Current**, and a profile whose every limit is 0 is marked **Paused**. The
   list follows SetChargingProfile / ClearChargingProfile live;
-- **Start** / **Stop transaction** and **Set status**;
+- **Start** / **Stop transaction** and **Set status**. **Faulted** is sent
+  with the error code picked under the menu (#434): `InternalError` by
+  default, any code but `NoError`, as in the classic side panel. Before #434
+  the console sent none, so the charge point reported the connector's current
+  error code (`NoError` unless something set one);
 - **Meter & SoC** (#417), a dialog described below;
 - **Auto meter values** (#418), described below;
 - a trash button (#419) that removes the connector after a confirmation, as

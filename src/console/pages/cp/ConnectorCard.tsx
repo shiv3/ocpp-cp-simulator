@@ -12,7 +12,10 @@ import { useConnectorView } from "@/data/hooks/useConnectorView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { formatEnergyKwh, formatSoc } from "@/lib/connectorFormat";
-import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
+import {
+  ALL_CHARGE_POINT_ERROR_CODES,
+  OCPPStatus,
+} from "@/cp/domain/types/OcppTypes";
 
 import StatusPill from "../../components/StatusPill";
 import AutoMeterButton from "./AutoMeterButton";
@@ -39,6 +42,11 @@ const STATUS_OPTIONS: OCPPStatus[] = [
   OCPPStatus.Faulted,
 ];
 
+// A fault has an error to report (§7.6), as in the classic side panel.
+const FAULT_ERROR_CODES = ALL_CHARGE_POINT_ERROR_CODES.filter(
+  (code) => code !== "NoError",
+);
+
 /**
  * Per-connector operational card for the CP detail page: status, active
  * transaction, meters, start/stop, and a manual status-notification
@@ -53,6 +61,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
   const [isPending, setIsPending] = useState(false);
   const [isMeterOpen, setIsMeterOpen] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [faultErrorCode, setFaultErrorCode] = useState("InternalError");
 
   const isCharging = view.transactionId != null;
   const effectiveTagId = tagIds.includes(tagIdInput)
@@ -96,11 +105,20 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
     if (isPending) return;
     setIsPending(true);
     try {
-      await chargePointService.sendStatusNotification(
-        cpId,
-        connectorId,
-        status,
-      );
+      if (status === OCPPStatus.Faulted) {
+        await chargePointService.sendStatusNotification(
+          cpId,
+          connectorId,
+          status,
+          { errorCode: faultErrorCode },
+        );
+      } else {
+        await chargePointService.sendStatusNotification(
+          cpId,
+          connectorId,
+          status,
+        );
+      }
     } catch (err) {
       console.error(
         `Failed to set status ${status} on ${cpId}/${connectorId}`,
@@ -268,6 +286,22 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({ cpId, connectorId }) => {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <span className="shrink-0">Faulted with</span>
+          <select
+            aria-label="Fault error code"
+            value={faultErrorCode}
+            onChange={(e) => setFaultErrorCode(e.target.value)}
+            title="errorCode sent with Set status → Faulted"
+            className="min-w-0 flex-1 rounded-md border border-gray-300 py-1 pl-2 pr-8 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          >
+            {FAULT_ERROR_CODES.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <Button
           type="button"

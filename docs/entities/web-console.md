@@ -80,6 +80,13 @@ transition, from the same origin:
   hash key became `config-v1`). To share a configuration, use the JSON
   export / import in **Settings**.
 
+The console's sidebar holds the navigation, the mode pill (**Local mode** or
+**Remote mode**), the **Classic UI** link and the version line. In Remote mode
+the pill's dot follows the connection to the daemon (#423): amber while
+connecting, green once connected, red when the daemon cannot be reached, with
+the reason in its tooltip, as the classic navbar's badge does. Before #423 it
+was always green. Local mode has no daemon, so its dot carries no status.
+
 ### Dashboard
 
 The dashboard (`/`) shows a card per charge point (status, connectors, last

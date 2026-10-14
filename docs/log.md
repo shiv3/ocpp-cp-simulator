@@ -1414,3 +1414,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Correction to the #411 audit: the classic side panel never opened its curve editor (`MeterValueCurveModal` was mounted behind a flag nothing set), so this is new in practice rather than a port.
 - [GitHub issues](sources/github-issues.md): #418 row.
 - Mechanism: `AutoMeterButton` lazy-loads the shared `MeterValueCurveModal`; **Save** calls `setAutoMeterValueConfig` then `saveAutoMeterConfig`. The saved per-connector copy (`connector_settings.auto_meter`) is not restored into connectors at startup.
+
+## [2026-10-02] ingest | remove a connector from the web console (#419)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's trash button, and that the removal is not saved. The `/v2` list of classic-only features no longer has it.
+- [GitHub issues](sources/github-issues.md): #419 row.
+- Mechanism: `ConnectorCard` calls `removeConnector` after a `window.confirm`; the card goes away on the service's `connector-removed` event, and a failure shows on the card.

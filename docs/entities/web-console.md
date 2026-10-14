@@ -59,8 +59,7 @@ transition, from the same origin:
   a deep link or a reload opens the same view; an unknown path shows a **Page
   not found** page with a link back to the charge points.
 - **`/v2`** — the classic UI, kept while the features it still has alone
-  move to the console (#411): removing a connector, a StatusNotification for
-  connector 0, downloading the logs, the
+  move to the console (#411): a StatusNotification for connector 0, downloading the logs, the
   charging-profile view, and a scenario's description and EV settings. The
   console's sidebar **Classic UI** link and the Settings page's **Open
   classic UI** link go there; the classic navbar's **Web console** link comes
@@ -116,7 +115,10 @@ without any charge point. On a failure the page stays open and says why.
 
 Each connector card shows the status, the transaction, the energy and the SoC,
 with **Start** / **Stop transaction**, **Set status**, **Meter & SoC** (#417)
-and **Auto meter values** (#418). **Meter & SoC** opens a dialog that sets the meter value (**Set**,
+and **Auto meter values** (#418). Its trash button (#419) removes the connector
+after a confirmation, as the classic card did; the removal is not saved, so the
+connector comes back when the charge point is created again (a reload in Local
+mode, a daemon restart). **Meter & SoC** opens a dialog that sets the meter value (**Set**,
 **Set and send**) and the SoC (**Set SoC**, **Clear SoC**: the next MeterValues
 carries no SoC sample), and sends a MeterValues with the current reading.
 **Sync SoC and meter** derives one from the other with the EV's battery

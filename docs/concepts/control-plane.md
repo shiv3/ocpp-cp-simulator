@@ -16,7 +16,9 @@ related:
   - ../analyses/rest-to-socketio-migration.md
   - ../analyses/fleet-load-and-observability-roadmap.md
   - expert-ocpp-calls.md
-updated: 2026-10-01
+  - vehicle-profiles.md
+  - ../entities/open-ev-directory.md
+updated: 2026-10-11
 ---
 
 # Socket.IO control plane
@@ -34,7 +36,7 @@ All request/response control calls use the `rpc` event:
 ```js
 socket.emit("rpc", { cpId, method, params }, (ack) => {
   // ack is { ok: true, result } or
-  //        { ok: false, error: { code, message } }
+  //        { ok: false, error: { code, message, retryAfterSeconds? } }
 });
 ```
 
@@ -45,7 +47,9 @@ routes them through the same command handler used by `--json`.
 
 Error codes are closed over:
 `not_found`, `invalid_params`, `internal`, `connect_failed`, `unauthorized`,
-`timeout`, and `disconnected`.
+`timeout`, `disconnected`, `rate_limited` and `unavailable`. An error object
+may also carry `retryAfterSeconds` (with `rate_limited` only, when the
+upstream said how long to wait).
 
 | Code             | Means                                                                                                                                                                                    |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -56,6 +60,8 @@ Error codes are closed over:
 | `unauthorized`   | The web-console Basic Auth gate rejected the caller ([Access control](access-control.md)).                                                                                               |
 | `timeout`        | The 30 s deadline elapsed. The server returns it when a handler exceeds the deadline (`withRpcDeadline`), and the Socket.IO client also synthesises it when no ack arrives at all.       |
 | `disconnected`   | The socket dropped before the ack — client-synthesised. The daemon answers it too for a [`send_ocpp_call`](expert-ocpp-calls.md#errors) whose CALL was dropped.                          |
+| `rate_limited`   | An upstream service the daemon calls for you (the [vehicle catalog](vehicle-profiles.md), #458) refused for now. The daemon's own RPC bucket answers `invalid_params`, not this.         |
+| `unavailable`    | That upstream service is not configured, unreachable, failed or answered nonsense (#458). The daemon is fine.                                                                            |
 
 A scenario control (`stop_scenario`, `step_scenario`, the wait controls)
 aimed at an unknown scenario, or at one that is not running, not parked on a
@@ -108,7 +114,7 @@ bucket with the same numbers).
 | `set_meter_value`                 | `{ "connector": number, "value": number }`                                                                                | `value` is Wh and must be a non-negative integer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `send_meter_value`                | `{ "connector": number, "context"?: string }`                                                                             | Send current meter value to the CSMS. `context` (#335) is the `ReadingContext` the sampled values carry (default `Sample.Periodic`); on 2.x it is now emitted as `sampledValue.context`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `remove_connector`                | `{ "connector": number }`                                                                                                 | Remove a connector from the simulated CP.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `set_ev_settings`                 | `{ "connector": number, "settings": object }`                                                                             | Store EV settings for a connector.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `set_ev_settings`                 | `{ "connector": number, "settings": object }`                                                                             | Store EV settings for a connector, as a merge patch (#458): an absent key keeps its value, `null` removes an optional key (a vehicle without a curve or an electrical model replacing one that has them). `null` on `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc` or `targetSoc` is `invalid_params` and nothing is applied. A `null` is never read back.                                                                                                                                                                                                                                                                                                                                  |
 | `get_ev_settings`                 | `{ "connector": number }`                                                                                                 | Return EV settings for a connector.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `set_auto_meter_config`           | `{ "connector": number, "config": object }`                                                                               | Configure automatic meter values.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `get_auto_meter_config`           | `{ "connector": number }`                                                                                                 | Return automatic meter-value config.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -533,6 +539,12 @@ Guarantees a conformance driver can rely on:
 | `connector_settings.soc_meter_sync.get` / `.save`              | `{ "cpId", "connectorId" }` (+ `enabled` on save)                                                   | Persisted SoC↔meter sync flag: one simulator-wide value in `kv`; `cpId` / `connectorId` are accepted but not used.                                                                                               |
 | `ev_settings.apply_default`                                    | `{ "settings": object }`                                                                            | Push default EV settings onto every connector of every CP that has no explicit / scenario override (issue #105). Distinct from the per-CP `set_ev_settings`, which always marks an override.                     |
 | `network_sim.*`                                                | see [Network simulation → RPC methods](network-simulation.md#rpc-methods)                           | Global / per-CP fault-injection config and manual disconnect trigger.                                                                                                                                            |
+| `vehicle_profiles.list` / `.save` / `.delete`                  | see [Vehicle profiles and catalog](#vehicle-profiles-and-catalog)                                   | Saved [vehicle profiles](vehicle-profiles.md) (#458).                                                                                                                                                            |
+| `vehicle_catalog.*`                                            | see [Vehicle profiles and catalog](#vehicle-profiles-and-catalog)                                   | Search and read the vehicle catalog through the daemon, with the daemon's API key ([Open EV Directory](../entities/open-ev-directory.md)).                                                                       |
+
+`server.info` also reports `vehicleCatalog: { provider: "open-ev-directory",
+configured, authenticated }` (#458): whether the daemon has a catalog URL and
+an API key — never the key. A daemon older than #458 omits it.
 
 ### Scenario run history
 
@@ -574,6 +586,41 @@ without a verdict and leaves no report. One history serves the whole daemon:
   before the field existed has none, which reads as not stopped.
 
 Local mode records no runs ([Local vs Remote mode](local-vs-remote-mode.md#consequences)).
+
+### Vehicle profiles and catalog
+
+Daemon-level methods (no `cpId`) behind the console's **Vehicle profiles**
+card (#458); the model is described in [Vehicle profiles](vehicle-profiles.md),
+the catalog in [Open EV Directory](../entities/open-ev-directory.md). Schemas
+are in [`src/protocol/vehicle.ts`](../../src/protocol/vehicle.ts).
+
+| Method                          | Params                             | Result                                                                                                            |
+| ------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `vehicle_profiles.list`         | `{}`                               | Every saved profile, by name then id.                                                                             |
+| `vehicle_profiles.save`         | `{ "profile": VehicleProfile }`    | Insert or replace by `id`; returns what was stored (fields the schema does not name are dropped).                 |
+| `vehicle_profiles.delete`       | `{ "id": string }`                 | `{ "ok": true }`; `not_found` when no profile has that id.                                                        |
+| `vehicle_catalog.list_makes`    | `{}`                               | Every make: `{ id, name, modelCount }[]`.                                                                         |
+| `vehicle_catalog.search_models` | `{ "makeId"?, "model"?, "page"? }` | A page of models (`{ items, page, totalPages, totalItems }`, `page` 0-based); `model` is an id or part of a name. |
+| `vehicle_catalog.list_variants` | `{ "modelId": string, "page"? }`   | A page of variant summaries (sources, curve count).                                                               |
+| `vehicle_catalog.get_variant`   | `{ "variantId": string }`          | The variant with every source record and every DC curve, side by side.                                            |
+
+- **Bounds.** A profile's curve holds at most 512 points, and the store
+  holds at most 1,000 profiles: saving a new one past the cap is
+  `invalid_params` (replacing an existing id is not refused). `makeId`,
+  `modelId` and `variantId` are letters, digits, `_` and `-` only; anything
+  else (`..`, `/`) is `invalid_params` and reaches no catalog path.
+- **Catalog errors.** With import turned off (`--oed-base-url none`) every
+  `vehicle_catalog.*` call answers `unavailable` with a message naming
+  `--oed-base-url none` / `OED_BASE_URL=none`. Otherwise a catalog failure keeps its meaning —
+  `unauthorized`, `not_found`, `rate_limited` (with `retryAfterSeconds` when
+  known), `timeout` — a request the catalog rejected is `invalid_params`, and
+  an unreachable, failing or malformed catalog is `unavailable`
+  ([full mapping](../entities/open-ev-directory.md#errors)). No message
+  contains the API key.
+- **No events.** These methods push nothing: a client re-lists after its own
+  writes.
+- **MCP.** Reachable through `call_method` only; there is no curated tool
+  ([MCP endpoint](../entities/mcp-endpoint.md#generic-escape-hatch)).
 
 ## Event push and rooms
 

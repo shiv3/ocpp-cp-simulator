@@ -16,6 +16,11 @@ import {
   soapCallbackUrlSuffixWarning,
 } from "./soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "./soapPath";
+import {
+  isOff,
+  resolveVehicleCatalogConfig,
+  type VehicleCatalogConfig,
+} from "./vehicleCatalogConfig";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { hasIdPatternPlaceholder } from "../protocol";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
@@ -223,6 +228,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   const extraWsSubprotocols: string[] = [];
   let soapCallbackUrl: string | null = null;
   let soapPublicBaseUrl: string | null = null;
+  let oedBaseUrl: string | null = null;
+  let oedApiKeyFile: string | null = null;
   let soapTunnel: "none" | "ngrok" = "none";
   let soapTunnelPort: number | null = null;
   const ngrok: Record<
@@ -470,6 +477,28 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         soapCallbackUrl = next;
+        i++;
+        break;
+      case "--oed-base-url":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --oed-base-url requires a URL\n");
+          process.exit(1);
+        }
+        if (!isHttpUrl(next) && !isOff(next)) {
+          process.stderr.write(
+            "Error: --oed-base-url must be an absolute http(s) URL or none\n",
+          );
+          process.exit(1);
+        }
+        oedBaseUrl = next;
+        i++;
+        break;
+      case "--oed-api-key-file":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --oed-api-key-file requires a path\n");
+          process.exit(1);
+        }
+        oedApiKeyFile = next;
         i++;
         break;
       case "--soap-public-base-url":
@@ -1006,6 +1035,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     soapCallbackUrl: resolvedSoapCallbackUrl,
     soapCallbackUrlExplicit: soapCallbackUrl,
     soapPublicBaseUrl,
+    oedBaseUrl,
+    oedApiKeyFile,
     soapTunnel: soapTunnelConfig,
     soapPath,
     securityProfile,
@@ -1018,6 +1049,31 @@ export function parseArgs(argv: string[]): CLIOptions {
     insecureTlsKeyPerms,
     traceOutput,
   };
+}
+
+/**
+ * #458: the daemon's Open EV Directory settings, from the flags and the
+ * environment. A broken setting (an unreadable key file, a malformed
+ * OED_BASE_URL) stops the daemon rather than starting with import silently
+ * disabled; a key without a URL only warns.
+ */
+function vehicleCatalogConfigOrExit(
+  options: CLIOptions,
+): VehicleCatalogConfig | null {
+  const result = resolveVehicleCatalogConfig({
+    flagBaseUrl: options.oedBaseUrl,
+    flagApiKeyFile: options.oedApiKeyFile,
+    env: process.env,
+    readFile: (file) => fs.readFileSync(file, "utf8"),
+  });
+  if (!result.ok) {
+    process.stderr.write(`Error: ${result.message}\n`);
+    process.exit(1);
+  }
+  for (const warning of result.warnings) {
+    process.stderr.write(`Warning: ${warning}\n`);
+  }
+  return result.config;
 }
 
 function printUsage(): void {
@@ -1240,6 +1296,21 @@ Options:
                            trusted network; the --soap-tunnel listener has
                            neither, only the route's identity check, so put a
                            boundary (ngrok traffic policy, allow-list) in front.
+  --oed-base-url <url|none>
+                           Open EV Directory API to import vehicle profiles
+                           from (server mode). Also OED_BASE_URL. Default: the
+                           public https://evdb.juherr.dev, called only when a
+                           user imports; none turns import off. The console
+                           imports through the daemon, so the API key stays
+                           on the server.
+  --oed-api-key-file <path>
+                           File holding your personal Open EV Directory API
+                           key (optional: the catalog is anonymous; keys are
+                           provisioned by its operator, see
+                           https://github.com/juherr/open-ev-directory#api-keys).
+                           Also OED_API_KEY_FILE, or the key itself in
+                           OED_API_KEY. There is no flag taking the key: a
+                           command line is visible in ps.
   -h, --help               Show this help
 
 HTTP endpoints (see docs/entities/daemon.md):
@@ -1486,6 +1557,7 @@ async function main(): Promise<void> {
       healthPath: options.healthPath,
       webConsoleBasicAuth: options.webConsoleBasicAuth,
       insecureTlsKeyPerms: options.insecureTlsKeyPerms,
+      vehicleCatalog: vehicleCatalogConfigOrExit(options),
     });
     return;
   }

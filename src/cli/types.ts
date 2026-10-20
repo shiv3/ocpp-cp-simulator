@@ -44,6 +44,16 @@ export interface CLIOptions {
   readonly soapCallbackUrlExplicit: string | null;
   readonly soapPublicBaseUrl: string | null;
   /**
+   * #458: `--oed-base-url`, the Open EV Directory API the daemon imports
+   * vehicles from. `OED_BASE_URL` is read at startup when this is null.
+   */
+  readonly oedBaseUrl: string | null;
+  /**
+   * #458: `--oed-api-key-file`, a file holding the API key. There is no flag
+   * carrying the key itself; see `vehicleCatalogConfig.ts`.
+   */
+  readonly oedApiKeyFile: string | null;
+  /**
    * `--soap-tunnel ngrok` with its `--ngrok-*` options, or null (#183):
    * expose the SOAP callback endpoint through a tunnel and derive the public
    * base from it. parseArgs refuses it alongside an explicit callback /

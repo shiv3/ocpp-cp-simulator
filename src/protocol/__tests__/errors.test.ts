@@ -30,7 +30,10 @@ describe("rpc error codes", () => {
     expect(RPC_ERROR_CODES).toContain("unauthorized");
     expect(RPC_ERROR_CODES).toContain("timeout");
     expect(RPC_ERROR_CODES).toContain("disconnected");
-    expect(RPC_ERROR_CODES).toHaveLength(7);
+    // #458: an upstream the daemon calls for the client refused or failed.
+    expect(RPC_ERROR_CODES).toContain("rate_limited");
+    expect(RPC_ERROR_CODES).toContain("unavailable");
+    expect(RPC_ERROR_CODES).toHaveLength(9);
   });
 
   it("rpcErrorSchema rejects an unknown code", () => {

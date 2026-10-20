@@ -86,7 +86,10 @@ import {
   type ConnectorRuntimeRepository,
   type ScenarioPositionSnapshot,
 } from "../cp/domain/persistence/ConnectorRuntimeRepository";
-import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "../cp/domain/connector/EVSettings";
 import { getDefaultEVSettings } from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type {
@@ -1139,7 +1142,7 @@ export class CLIChargePointService {
     this._chargePoint.updateConnectorStatus(connectorId, status);
   }
 
-  setEVSettings(connectorId: number, settings: EVSettings): void {
+  setEVSettings(connectorId: number, settings: EVSettingsPatch): void {
     // Explicit set (#105): marks the connector overridden so a later Default
     // EV Settings propagation doesn't clobber it. See applyDefaultEVSettings
     // for the default-propagation counterpart, which respects this flag.

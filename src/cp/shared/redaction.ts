@@ -1,6 +1,7 @@
 export const REDACTED_VALUE = "[redacted]";
 
 const SENSITIVE_KEY_NAMES = new Set([
+  "apikey",
   "authorizationkey",
   "password",
   "privatekey",
@@ -8,9 +9,12 @@ const SENSITIVE_KEY_NAMES = new Set([
 ]);
 
 const SENSITIVE_ASSIGNMENT =
-  /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey)"?)\s*[:=]\s*)(["'])(.*?)\2/g;
+  /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY)"?)\s*[:=]\s*)(["'])(.*?)\2/g;
 const SENSITIVE_BARE_ASSIGNMENT =
-  /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey)"?)\s*[:=]\s*)(?!["'])([^\s,}\]]+)/g;
+  /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY)"?)\s*[:=]\s*)(?!["'])([^\s,}\]]+)/g;
+
+/** #458: an `Authorization: Bearer …` value. */
+const BEARER_TOKEN = /(\bBearer\s+)[A-Za-z0-9\-._~+/]+=*/g;
 
 type StringToken = {
   content: string;
@@ -81,7 +85,8 @@ export function redactSensitiveText(text: string): string {
     .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
     .replace(SENSITIVE_BARE_ASSIGNMENT, `$1${REDACTED_VALUE}`)
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
-    .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`);
+    .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`)
+    .replace(BEARER_TOKEN, `$1${REDACTED_VALUE}`);
 }
 
 export function redactSensitiveValue(value: unknown): unknown {

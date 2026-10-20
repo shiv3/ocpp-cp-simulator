@@ -82,6 +82,10 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
     "INSERT OR REPLACE INTO blueprints (id, name, definition, updated_at) VALUES ('bp', 'BP', '{}', ?)",
     [t],
   );
+  db.run(
+    "INSERT OR REPLACE INTO vehicle_profiles (id, name, body, updated_at) VALUES ('vp', 'VP', '{}', ?)",
+    [t],
+  );
 }
 
 function count(db: BunSqliteDatabase, table: string, cpId?: string): number {
@@ -117,6 +121,8 @@ describe("TABLES is the schema's own list (#326)", () => {
     ).toEqual(["schema_meta"]);
     expect(tablesResetOnStateReset()).not.toContain("schema_meta");
     expect(tablesResetOnStateReset()).toContain("blueprints");
+    // #458: imported vehicle profiles go with "Reset all simulator data".
+    expect(tablesResetOnStateReset()).toContain("vehicle_profiles");
     expect(perChargePointTables()).toContain("logs");
   });
 });

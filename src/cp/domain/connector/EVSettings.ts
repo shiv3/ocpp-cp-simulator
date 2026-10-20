@@ -35,6 +35,98 @@ export interface EVSettings {
   voltageV?: number;
   /** cos φ, AC only. Absent means 1 (unity). */
   powerFactor?: number;
+  /**
+   * Credit owed for third-party data in these settings (#458): set when a
+   * vehicle profile imported from a catalog is applied, so the attribution
+   * travels with the copied values — into a scenario and its export.
+   */
+  attribution?: DataAttribution[];
+}
+
+/** One source's credit, as its license requires it to be given. */
+export interface DataAttribution {
+  /** The catalog source the data comes from (`gaia`, `kilowatt`). */
+  sourceId?: string;
+  /** The attribution text the source asks for. */
+  text: string;
+  licenseName: string;
+  licenseUrl: string;
+  /** Adapted material must be shared under the same license (CC BY-SA). */
+  shareAlike: boolean;
+}
+
+/**
+ * The fields every EV settings object has. A patch may change them, never
+ * remove them: settings without a battery or a maximum power describe no
+ * vehicle.
+ */
+export const REQUIRED_EV_SETTINGS_FIELDS = [
+  "modelName",
+  "batteryCapacityKwh",
+  "maxChargingPowerKw",
+  "initialSoc",
+  "targetSoc",
+] as const satisfies readonly (keyof EVSettings)[];
+
+type RequiredEvSettingsField = (typeof REQUIRED_EV_SETTINGS_FIELDS)[number];
+
+// The list above is every non-optional field of EVSettings: a required field
+// added to the interface fails to compile here until it is listed.
+type UnlistedRequiredField = Exclude<
+  {
+    [K in keyof EVSettings]-?: undefined extends EVSettings[K] ? never : K;
+  }[keyof EVSettings],
+  RequiredEvSettingsField
+>;
+const REQUIRED_FIELDS_ARE_LISTED: [UnlistedRequiredField] extends [never]
+  ? true
+  : never = true;
+void REQUIRED_FIELDS_ARE_LISTED;
+
+/**
+ * An EV settings write as a merge patch (JSON Merge Patch, RFC 7396): an
+ * absent key keeps the current value and `null` removes it (#458). Removing
+ * is how a vehicle without a curve or an electrical model replaces one that
+ * has them; JSON drops `undefined`, so over the control plane only `null`
+ * can say it. Only optional fields can be removed.
+ */
+export type EVSettingsPatch = {
+  [K in RequiredEvSettingsField]?: EVSettings[K];
+} & {
+  [K in Exclude<keyof EVSettings, RequiredEvSettingsField>]?:
+    EVSettings[K] | null;
+};
+
+/** A write that would remove a required field. Nothing of it is applied. */
+export class InvalidEvSettingsPatchError extends Error {
+  constructor(readonly fields: readonly string[]) {
+    super(`${fields.join(", ")} cannot be removed`);
+    this.name = "InvalidEvSettingsPatchError";
+  }
+}
+
+/**
+ * Refuses settings or a patch that set a required field to `null`. Checked
+ * before anything is written, so a refused write changes nothing.
+ */
+export function assertRequiredFieldsKept(settings: object): void {
+  const values = settings as Record<string, unknown>;
+  const removed = REQUIRED_EV_SETTINGS_FIELDS.filter(
+    (field) => values[field] === null,
+  );
+  if (removed.length > 0) throw new InvalidEvSettingsPatchError(removed);
+}
+
+/**
+ * The settings without the keys a patch set to `null`. Applied where
+ * settings are stored (the connector, the user's default), so a `null`
+ * is never read back.
+ */
+export function withoutNulls<T extends object>(settings: T): T {
+  if (!Object.values(settings).includes(null)) return settings;
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, value]) => value !== null),
+  ) as T;
 }
 
 export const defaultEVSettings: EVSettings = {
@@ -69,7 +161,10 @@ export function getDefaultEVSettings(): EVSettings {
  * `powerFractionAtSoc` on the first meter tick.
  */
 export function setUserDefaultEVSettings(s: EVSettings | null): void {
-  userDefaultEVSettings = s ? withNormalizedChargingCurve({ ...s }) : null;
+  if (s) assertRequiredFieldsKept(s);
+  userDefaultEVSettings = s
+    ? withNormalizedChargingCurve(withoutNulls({ ...s }))
+    : null;
 }
 
 export function getUserDefaultEVSettings(): EVSettings | null {

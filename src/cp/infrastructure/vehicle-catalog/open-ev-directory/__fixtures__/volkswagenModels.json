@@ -1,0 +1,63 @@
+{
+  "items": [
+    {
+      "id": "volkswagen--1st",
+      "links": {
+        "make": "/v1/makes/volkswagen",
+        "self": "/v1/models/volkswagen--1st",
+        "variants": "/v1/models/volkswagen--1st/variants"
+      },
+      "makeId": "volkswagen",
+      "makeName": "Volkswagen",
+      "name": "1st",
+      "variantCount": 1
+    },
+    {
+      "id": "volkswagen--buzz-pro",
+      "links": {
+        "make": "/v1/makes/volkswagen",
+        "self": "/v1/models/volkswagen--buzz-pro",
+        "variants": "/v1/models/volkswagen--buzz-pro/variants"
+      },
+      "makeId": "volkswagen",
+      "makeName": "Volkswagen",
+      "name": "buzz pro",
+      "variantCount": 1
+    },
+    {
+      "id": "volkswagen--e-golf",
+      "links": {
+        "make": "/v1/makes/volkswagen",
+        "self": "/v1/models/volkswagen--e-golf",
+        "variants": "/v1/models/volkswagen--e-golf/variants"
+      },
+      "makeId": "volkswagen",
+      "makeName": "Volkswagen",
+      "name": "e-Golf",
+      "variantCount": 5
+    }
+  ],
+  "licenses": [
+    {
+      "attribution": "Open EV Data (https://github.com/KilowattApp/open-ev-data)",
+      "copyrightNotice": "Copyright (c) 2024 Tijs Teulings",
+      "id": "LicenseRef-KilowattApp-MIT-Attribution",
+      "name": "MIT License with Attribution Requirement",
+      "shareAlike": false,
+      "sourceId": "kilowatt",
+      "url": "https://github.com/KilowattApp/open-ev-data/blob/32d7dc59e7b8b7391572ca1e132a1517be9a3b5e/LICENSE"
+    }
+  ],
+  "links": {
+    "first": "/v1/makes/volkswagen/models?size=3&page=0",
+    "last": "/v1/makes/volkswagen/models?size=3&page=5",
+    "next": "/v1/makes/volkswagen/models?size=3&page=1",
+    "self": "/v1/makes/volkswagen/models?size=3&page=0"
+  },
+  "page": {
+    "number": 0,
+    "size": 3,
+    "totalItems": 18,
+    "totalPages": 6
+  }
+}

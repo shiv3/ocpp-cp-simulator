@@ -9,6 +9,7 @@ export * from "./limits";
 export * from "./errors";
 export * from "./events";
 export * from "./envelope";
+export * from "./vehicle";
 export {
   METHODS,
   EXPLICIT_METHODS,

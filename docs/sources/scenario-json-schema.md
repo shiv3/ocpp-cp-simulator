@@ -1,14 +1,14 @@
 ---
 title: "Source: schema/scenario.schema.json"
 type: source
-summary: The published JSON Schema (Draft 2020-12) for scenario files v1.1 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
+summary: The published JSON Schema (Draft 2020-12) for scenario files v1.4 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
   - schema/scenario.schema.json
 related:
   - ../concepts/scenario-format.md
   - ../entities/scenario-templates.md
   - example-scenarios.md
-updated: 2026-09-03
+updated: 2026-10-04
 ---
 
 # Source: `schema/scenario.schema.json`
@@ -23,8 +23,21 @@ fields the schema deliberately does not reject.
 
 **Key facts.**
 
-- Version `1.1` (issue #214 introduced 1.0; issue #240 added the
-  `connectionTrigger` node and the `csmsCallTrigger` `payload` condition).
+- Version `1.4` (issue #214 introduced 1.0; issue #240 added the
+  `connectionTrigger` node and the `csmsCallTrigger` `payload` condition in
+  1.1; issue #301 the charging-curve and electrical `evSettings` fields in
+  1.2; issue #389 the `ocppCall` node in 1.3; the web console's Library the
+  optional `libraryId` in 1.4 — the version history is the
+  [changelog](../concepts/scenario-format.md#changelog)).
+- `evSettings.attribution` (optional array, #458) carries the credit owed for
+  data copied from an imported vehicle profile — source, attribution text,
+  license name and URL, ShareAlike — into the scenario and its export. It is
+  informational and additive, so the version is unchanged
+  ([Vehicle profiles](../concepts/vehicle-profiles.md#licensing-and-attribution)).
+- `libraryId` (optional string) marks a connector's copy of a web console
+  [Library](../entities/web-console.md#scenario-library) scenario with that
+  scenario's `id`; `templateId` likewise names the built-in template an
+  instance came from.
 - Mirrors `src/cp/application/scenario/ScenarioTypes.ts`; the closed
   vocabularies (node `type`, `OCPPStatus`, …) are enumerated here.
 - Validation is **advisory**: the simulator warns on mismatch but never

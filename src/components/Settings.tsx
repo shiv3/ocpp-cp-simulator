@@ -8,6 +8,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import { useDataContext } from "../data/providers/DataProvider";
+import { useVehicleSelect } from "./vehicle/useVehicleSelect";
+import { isPresetName, presetForDefaults } from "./vehicle/vehicleChoice";
+import {
+  OwnModelOption,
+  VehicleChoiceNotes,
+  VehicleProfileOptions,
+} from "./vehicle/VehicleChoiceControls";
 import {
   type EVSettings,
   EV_PRESETS,
@@ -77,6 +84,8 @@ const Settings: React.FC = () => {
   const [draftEv, setDraftEv] = useState<EVSettings>(() =>
     seedDraftEv(defaultEvSettings),
   );
+  // #458: saved vehicle profiles offered beside the presets.
+  const vehicle = useVehicleSelect(draftEv, setDraftEv);
   const { tagIds: globalTagIds, setTagIds: persistGlobalTagIds } =
     useGlobalTagIds();
   // Draft string for the comma-separated input so the user can type literal
@@ -120,7 +129,8 @@ const Settings: React.FC = () => {
     const proceed = window.confirm(
       "Reset all simulator data?\n\n" +
         "Scenarios, configuration overrides, charging profiles, " +
-        "availability flags, pending messages and logs will be erased. " +
+        "availability flags, pending messages, logs and saved vehicle " +
+        "profiles will be erased. " +
         "The page will reload afterwards.",
     );
     if (!proceed) return;
@@ -236,15 +246,13 @@ const Settings: React.FC = () => {
   };
 
   const handleBackToHome = () => {
-    // Relative navigation: from `/v2/settings` (nested under the `/v2/*`
-    // classic UI route) this resolves to `/v2`; from `/settings` (embedded
-    // in the new console) it resolves to `/`. See
-    // src/console/ConsoleApp.dom.test.tsx for the empirical verification.
+    // Relative navigation: from `/settings` (embedded in the web console)
+    // it resolves to `/`. See src/console/ConsoleApp.dom.test.tsx.
     navigate("..");
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Settings</h2>
         <Button onClick={handleBackToHome} variant="secondary" size="sm">
@@ -297,9 +305,10 @@ const Settings: React.FC = () => {
           <p className="text-muted-foreground text-sm mt-2">
             Wipe every persisted simulator record — scenarios,
             ChangeConfiguration overrides, charging profiles, availability
-            flags, pending transaction messages and any saved logs. Schema stays
-            intact; the next load starts from a clean DB. In remote mode this
-            also drops every charge point registered on the daemon.
+            flags, pending transaction messages, any saved logs and the saved
+            vehicle profiles. Schema stays intact; the next load starts from a
+            clean DB. In remote mode this also drops every charge point
+            registered on the daemon.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -342,28 +351,26 @@ const Settings: React.FC = () => {
             </label>
             <select
               id="default-ev-preset"
-              value={
-                Object.keys(EV_PRESETS).includes(draftEv.modelName)
-                  ? draftEv.modelName
-                  : "Custom"
-              }
+              value={draftEv.modelName || "Custom"}
               onChange={(e) => {
                 const preset = e.target.value;
-                if (preset === "Custom") {
-                  setDraftEv({ ...draftEv, modelName: "Custom" });
-                  return;
-                }
-                const values = EV_PRESETS[preset] ?? {};
-                setDraftEv({ ...draftEv, modelName: preset, ...values });
+                vehicle.select(preset, (base) =>
+                  isPresetName(preset) && preset !== "Custom"
+                    ? presetForDefaults(base, preset)
+                    : { ...base, modelName: preset },
+                );
               }}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
             >
+              <OwnModelOption modelName={draftEv.modelName} />
+              <VehicleProfileOptions state={vehicle.profiles} />
               {Object.keys(EV_PRESETS).map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
               ))}
             </select>
+            <VehicleChoiceNotes notes={vehicle.notes} className="mt-1.5" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -666,7 +673,7 @@ const Settings: React.FC = () => {
               disabled={!evDirty}
               size="sm"
             >
-              Apply
+              Save
             </Button>
             <Button
               onClick={handleResetDefaultEv}
@@ -726,7 +733,7 @@ const Settings: React.FC = () => {
                   globalTagIds.join("|")
               }
             >
-              Apply
+              Save
             </Button>
             <span className="text-xs text-muted-foreground">
               {globalTagIds.length === 0
@@ -774,7 +781,7 @@ const Settings: React.FC = () => {
             <div className="flex justify-between items-center mb-2">
               <h4 className="text-lg font-semibold">Configuration JSON</h4>
               <Button onClick={handleApplyJson} size="sm">
-                Apply Changes
+                Save
               </Button>
             </div>
             <Textarea
@@ -785,8 +792,7 @@ const Settings: React.FC = () => {
               placeholder="Paste your configuration JSON here..."
             />
             <p className="text-muted-foreground text-xs mt-2">
-              Edit the JSON configuration directly and click "Apply Changes" to
-              update.
+              Edit the JSON configuration directly and click "Save" to update.
             </p>
           </div>
 

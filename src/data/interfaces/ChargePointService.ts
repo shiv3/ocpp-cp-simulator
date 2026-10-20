@@ -1,3 +1,5 @@
+import type { VehicleCatalog } from "../../cp/domain/vehicle/VehicleCatalog";
+import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
   OcppCallOutcome,
@@ -14,7 +16,10 @@ import type {
 } from "../../cp/domain/types/FirmwareLogStatus";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../../cp/domain/connector/Connector";
-import type { EVSettings } from "../../cp/domain/connector/EVSettings";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "../../cp/domain/connector/EVSettings";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -414,6 +419,18 @@ export interface ChargePointService {
    *  local mode keeps no run history. */
   listScenarioRuns?(query: ScenarioRunQuery): Promise<ScenarioRunPage>;
 
+  // Saved vehicle profiles (#458). Local mode keeps them in the browser's
+  // sql.js database, Remote mode on the daemon (`vehicle_profiles.*`). Both
+  // implement these; they are optional so a test double need not.
+  listVehicleProfiles?(): Promise<VehicleProfile[]>;
+  /** Inserts or replaces by id; resolves with what was stored. */
+  saveVehicleProfile?(profile: VehicleProfile): Promise<VehicleProfile>;
+  deleteVehicleProfile?(id: string): Promise<void>;
+  /** #458: the daemon's vehicle catalog, called with the daemon's API key.
+   *  Remote only: in Local mode the console calls the catalog itself with a
+   *  key the user typed (see `src/console/lib/vehicleCatalog.ts`). */
+  getVehicleCatalog?(): VehicleCatalog;
+
   // Persisted simulator config. Reads may be redacted over wire adapters.
   loadConfig(): Promise<WireSimulatorConfig | null>;
   saveConfig(config: SimulatorConfigInput | null): Promise<void>;
@@ -515,10 +532,11 @@ export interface ChargePointService {
   removeConnector(id: string, connectorId: number): Promise<void>;
 
   // Connector settings
+  /** A merge patch: absent keys keep their value, `null` removes one (#458). */
   setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void>;
   getEVSettings(id: string, connectorId: number): Promise<EVSettings | null>;
   /**

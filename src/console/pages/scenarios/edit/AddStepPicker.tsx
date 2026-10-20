@@ -31,7 +31,7 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
   }, [query]);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+    <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-2">
       <div className="mb-2 flex items-center gap-2">
         <input
           autoFocus
@@ -40,24 +40,24 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search step types…"
           aria-label="Search step types"
-          className="flex-1 rounded-md border border-gray-300 bg-transparent px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          className="flex-1 rounded-md border border-cx-border-strong bg-transparent px-2 py-1 text-sm"
         />
         <button
           type="button"
           aria-label="Close add-step picker"
           onClick={onClose}
-          className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="rounded p-1 text-cx-faint hover:bg-cx-sub"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
       <div className="max-h-64 space-y-2 overflow-y-auto">
         {sections.length === 0 && (
-          <div className="px-1 py-2 text-xs text-gray-400">No matches</div>
+          <div className="px-1 py-2 text-xs text-cx-faint">No matches</div>
         )}
         {sections.map((category) => (
           <div key={category.label}>
-            <div className="px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <div className="px-1 text-xs font-semibold uppercase tracking-wide text-cx-faint">
               {category.label}
             </div>
             {category.types.map((type) => (
@@ -65,7 +65,7 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
                 key={type}
                 type="button"
                 onClick={() => onPick(type)}
-                className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-cx-fg2 hover:bg-cx-sub"
               >
                 {NODE_FORM_REGISTRY[type].title}
               </button>

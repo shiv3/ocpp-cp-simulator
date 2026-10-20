@@ -19,6 +19,11 @@ export const RPC_ERROR_CODES = [
   "unauthorized",
   "timeout",
   "disconnected",
+  // #458: an upstream service the daemon calls on the client's behalf (the
+  // vehicle catalog) refused for now or failed. Neither is the daemon
+  // breaking, and a client that retries needs to tell them from `internal`.
+  "rate_limited",
+  "unavailable",
 ] as const;
 
 export const rpcErrorCodeSchema = z.enum(RPC_ERROR_CODES);
@@ -28,16 +33,25 @@ export const rpcErrorSchema = z.object({
   code: rpcErrorCodeSchema,
   // Human-readable; MUST NOT contain credentials (Sec-2 / non-leakage).
   message: z.string().max(2_000),
+  /** `rate_limited` only, when the upstream said how long to wait. */
+  retryAfterSeconds: z.number().int().min(0).optional(),
 });
 export type RpcError = z.infer<typeof rpcErrorSchema>;
 
 /** Thrown by the client rpc wrapper; carries a typed `code`. */
 export class RpcFailure extends Error {
   readonly code: RpcErrorCode;
-  constructor(code: RpcErrorCode, message: string) {
+  /** See {@link RpcError.retryAfterSeconds}. */
+  readonly retryAfterSeconds: number | undefined;
+  constructor(
+    code: RpcErrorCode,
+    message: string,
+    options: { retryAfterSeconds?: number } = {},
+  ) {
     super(message);
     this.name = "RpcFailure";
     this.code = code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 

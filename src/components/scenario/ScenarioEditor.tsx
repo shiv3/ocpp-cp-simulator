@@ -61,14 +61,10 @@ import {
   shouldSuppressAppliedScenarioAutosave,
 } from "./scenarioPersistence";
 import { serializeScenarioGraph } from "./scenarioSerialize";
-import {
-  type EVSettings,
-  EV_PRESETS,
-} from "../../cp/domain/connector/EVSettings";
-import {
-  MIN_UI_POWER_FACTOR,
-  withNormalizedChargingCurve,
-} from "../../cp/domain/connector/ChargingCurve";
+import { type EVSettings } from "../../cp/domain/connector/EVSettings";
+import { withNormalizedChargingCurve } from "../../cp/domain/connector/ChargingCurve";
+import ScenarioEvSettingsFields from "./ScenarioEvSettingsFields";
+import { compactScenarioEvSettings } from "./compactScenarioEvSettings";
 
 // Dynamic import for heavy component (bundle-dynamic-imports)
 const MeterValueCurveModal = lazy(() => import("../MeterValueCurveModal"));
@@ -172,6 +168,17 @@ interface ScenarioEditorProps {
   executionContext?: ScenarioExecutionContext | null; // Execution context from ScenarioManager
   nodeProgress?: Record<string, { remaining: number; total: number }>; // Node progress from ScenarioManager
   onClose: () => void;
+  /**
+   * Embedded in a page that owns the definition (the web console's scenario
+   * editor): the editor edits the graph only and reports each graph edit
+   * through `onGraphChange` (opening it is not one, even when that drops
+   * orphan edges) — no autosave, no own Save / settings / import /
+   * template, no run controls. The page persists on its own Save. Hydrated
+   * once from `scenario`; remount (`key`) to load another scenario.
+   */
+  embedded?: {
+    onGraphChange: (graph: Pick<ScenarioDefinition, "nodes" | "edges">) => void;
+  };
 }
 
 type StartEndNodeWrapperProps = Omit<
@@ -259,12 +266,22 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   scenarioId,
   executionContext: propsExecutionContext,
   nodeProgress: propsNodeProgress,
+  embedded,
   // onClose is still required by the props interface for back-compat with
   // callers, but the editor itself no longer self-closes — the parent
   // panel owns its visibility now. Intentionally not destructured.
 }) => {
   const { chargePointService, mode, defaultEvSettings } = useDataContext();
   const { isDark } = useDarkMode();
+  const isEmbedded = embedded !== undefined;
+  // Latest callback without re-running the graph effect when the page
+  // re-renders with a new closure.
+  const onGraphChangeRef = useRef(embedded?.onGraphChange);
+  onGraphChangeRef.current = embedded?.onGraphChange;
+  // The last graph the page knows about, serialized: the opened one, then
+  // each one reported. Opening the graph — and dropping its orphan edges —
+  // is not an edit, so only a different graph is reported.
+  const embeddedGraphKeyRef = useRef<string | null>(null);
   const localCp: ChargePoint | null =
     mode === "local" && chargePointService.getLocalChargePoint
       ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
@@ -325,7 +342,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [scenarioEvSettings, setScenarioEvSettings] = useState<
     Partial<EVSettings>
   >(() => withNormalizedChargingCurve({ ...(scenario.evSettings ?? {}) }));
-  const [isEvSettingsExpanded, setIsEvSettingsExpanded] = useState(true);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   const executorRef = useRef<ScenarioExecutor | null>(null);
@@ -445,6 +461,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
 
   // Reload scenario when props change
   useEffect(() => {
+    // Embedded: the page feeds every graph change back as a new `scenario`
+    // prop; re-hydrating from it would reset the canvas and the undo
+    // history on each edit. The initial state already came from the prop.
+    if (isEmbedded) return;
     const resetHistory = () => {
       historyRef.current = { past: [], future: [] };
       prevSnapshotRef.current = null;
@@ -521,6 +541,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setNodes,
     setEdges,
     armAppliedScenarioAutosaveSuppression,
+    isEmbedded,
   ]);
 
   // Update execution context from props
@@ -824,16 +845,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setEdges(cleanedEdges);
     }
 
-    // Drop empty / blank fields so we don't serialize useless `{}` blobs.
-    const cleanedEvSettings: Partial<EVSettings> = {};
-    (
-      Object.entries(scenarioEvSettings) as [keyof EVSettings, unknown][]
-    ).forEach(([k, v]) => {
-      if (v === undefined || v === null || v === "") return;
-      // @ts-expect-error narrowed by key
-      cleanedEvSettings[k] = v;
-    });
-
     const pendingRemoteApply = appliedRemoteScenarioAutosaveRef.current;
     const appliedUpdatedAt =
       pendingRemoteApply?.scenarioId === scenario.id
@@ -849,12 +860,21 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       trigger,
       defaultExecutionMode,
       enabled: scenarioEnabled,
-      evSettings:
-        Object.keys(cleanedEvSettings).length > 0
-          ? cleanedEvSettings
-          : undefined,
+      evSettings: compactScenarioEvSettings(scenarioEvSettings),
       updatedAt: appliedUpdatedAt ?? new Date().toISOString(),
     };
+    if (isEmbedded) {
+      // The page owns the definition (and its trigger / metadata): report
+      // the graph only, synchronously so its Save never misses an edit.
+      const graph = serializeScenarioGraph(nodes, cleanedEdges);
+      const graphKey = JSON.stringify(graph);
+      const isOpening = embeddedGraphKeyRef.current === null;
+      if (graphKey === embeddedGraphKeyRef.current) return;
+      embeddedGraphKeyRef.current = graphKey;
+      if (!isOpening) onGraphChangeRef.current?.(graph);
+      return;
+    }
+
     setScenario(updatedScenario);
 
     if (autosaveIoTimerRef.current !== null) {
@@ -888,22 +908,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         }
       }
 
-      // Keep ScenarioManager in sync while editing (local mode only).
-      if (localCp) {
-        const connector = localCp.getConnector(connectorId || 1);
-        if (connector?.scenarioManager) {
-          void chargePointService
-            .listScenarioDefinitions(cpId, connectorId)
-            .then((all) => {
-              const scoped = all.filter((s) =>
-                connectorId === null
-                  ? s.targetType !== "connector"
-                  : s.targetType !== "connector" || s.targetId === connectorId,
-              );
-              connector.scenarioManager?.loadScenarios(scoped);
-            });
-        }
-      }
+      // In Local mode the runtime (LocalScenarioRuntime) reloads the
+      // connector's ScenarioManager from the store after the save above.
     }, AUTOSAVE_DEBOUNCE_MS);
 
     return () => {
@@ -927,6 +933,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     connectorId,
     localCp,
     mode,
+    isEmbedded,
   ]);
 
   // Track structural changes for undo/redo. Position-only changes update
@@ -983,14 +990,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   }, [nodes, edges, setNodes, setEdges]);
 
   const handleManualSave = useCallback(() => {
-    const cleanedEvSettings: Partial<EVSettings> = {};
-    (
-      Object.entries(scenarioEvSettings) as [keyof EVSettings, unknown][]
-    ).forEach(([k, v]) => {
-      if (v === undefined || v === null || v === "") return;
-      // @ts-expect-error narrowed by key
-      cleanedEvSettings[k] = v;
-    });
     const trigger = scenario.trigger ?? { type: "manual" as const };
     const updated: ScenarioDefinition = {
       ...scenario,
@@ -1001,10 +1000,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       trigger,
       defaultExecutionMode,
       enabled: scenarioEnabled,
-      evSettings:
-        Object.keys(cleanedEvSettings).length > 0
-          ? cleanedEvSettings
-          : undefined,
+      evSettings: compactScenarioEvSettings(scenarioEvSettings),
       updatedAt: new Date().toISOString(),
     };
     if (scenario.id) {
@@ -1136,11 +1132,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [setNodes, nodes],
   );
 
-  // Scenario execution is owned by the connector card and ScenarioManager;
-  // the editor only renders the graph and reacts to executionContext from
-  // outside. The previous in-editor handleStart() useCallback lived here
-  // but was orphaned by that refactor — see Connector.tsx for the current
-  // start path.
+  // Scenario execution is owned by the data layer (LocalScenarioRuntime in
+  // Local mode, the daemon in Remote mode); the editor only renders the
+  // graph and reacts to executionContext from outside.
 
   /**
    * Lay nodes out top-to-bottom by topological depth. Roots (no incoming
@@ -1246,10 +1240,10 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
   }, [setNodes, localCp, connectorId, chargePointService, cpId, scenario.id]);
 
-  // Auto-start now lives in `Connector.tsx` (the always-mounted card) so
-  // it fires for every connector independently of whether the side panel
-  // is open. The editor here only handles manual Start/Stop and visualizes
-  // the running state of the connector's ScenarioManager.
+  // Auto-start lives in the data layer (LocalScenarioRuntime), so it fires
+  // for every connector whatever UI is open. The editor here only handles
+  // manual Start/Stop and visualizes the running state of the connector's
+  // ScenarioManager.
   //
   // Keep the !scenarioEnabled / non-manual-trigger reset so the editor
   // still surfaces "scenario disabled" visually when the user toggles it.
@@ -1564,44 +1558,53 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       ) : null}
 
       {/* Header — slim toolbar.
-          Connector status / meter / SoC etc. are rendered by the parent
-          (ConnectorSidePanel left column); we just show the scenario-level
-          state + action buttons. */}
+          Connector status / meter / SoC etc. are rendered by the page around
+          the editor; we just show the scenario-level state + action
+          buttons. */}
       <div className="panel px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 text-xs min-w-0 flex-1">
-            <span className="text-muted shrink-0">Scenario:</span>
-            <div className="flex items-center gap-1 shrink-0">
-              {getScenarioStateIndicator(executionState)}
-              <span
-                className={`font-semibold ${getScenarioStateColor(executionState)}`}
-              >
-                {executionState
-                  ? executionState.charAt(0).toUpperCase() +
-                    executionState.slice(1)
-                  : "Idle"}
-              </span>
-            </div>
-            {executionContext && executionContext.currentNodeId && (
+            {/* Embedded: the page shows the run state and runs scenarios
+                from its own run console. */}
+            {!isEmbedded && (
               <>
-                <span className="text-muted shrink-0">·</span>
-                <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
-                  {String(
-                    nodes.find((n) => n.id === executionContext.currentNodeId)
-                      ?.data?.label || executionContext.currentNodeId,
-                  )}
-                </span>
+                <span className="text-muted shrink-0">Scenario:</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {getScenarioStateIndicator(executionState)}
+                  <span
+                    className={`font-semibold ${getScenarioStateColor(executionState)}`}
+                  >
+                    {executionState
+                      ? executionState.charAt(0).toUpperCase() +
+                        executionState.slice(1)
+                      : "Idle"}
+                  </span>
+                </div>
+                {executionContext && executionContext.currentNodeId && (
+                  <>
+                    <span className="text-muted shrink-0">·</span>
+                    <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
+                      {String(
+                        nodes.find(
+                          (n) => n.id === executionContext.currentNodeId,
+                        )?.data?.label || executionContext.currentNodeId,
+                      )}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </div>
           <div className="flex gap-1 shrink-0">
-            <button
-              onClick={handleForceStop}
-              className="btn-danger text-xs px-2 py-1"
-              title="Stop running scenario"
-            >
-              ■ Stop
-            </button>
+            {!isEmbedded && (
+              <button
+                onClick={handleForceStop}
+                className="btn-danger text-xs px-2 py-1"
+                title="Stop running scenario"
+              >
+                ■ Stop
+              </button>
+            )}
             <button
               onClick={handleUndo}
               disabled={historyRef.current.past.length === 0}
@@ -1620,38 +1623,45 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             >
               ↷
             </button>
-            <button
-              onClick={handleManualSave}
-              className={`text-xs px-2 py-1 ${
-                saveFeedback === "saved"
-                  ? "bg-emerald-700 text-white hover:bg-emerald-800"
-                  : "btn-secondary"
-              }`}
-              title="Save scenario"
-            >
-              {saveFeedback === "saved" ? "✓ Saved" : "💾 Save"}
-            </button>
-            <button
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="btn-secondary text-xs px-2 py-1"
-              title="Scenario settings"
-            >
-              ⚙
-            </button>
-            <button
-              onClick={handleImport}
-              className="btn-secondary text-xs px-2 py-1"
-              title="Import JSON"
-            >
-              ↑
-            </button>
-            <button
-              onClick={handleExport}
-              className="btn-secondary text-xs px-2 py-1"
-              title="Export JSON"
-            >
-              ↓
-            </button>
+            {/* Embedded: the page saves, edits the metadata and imports /
+                exports; the template picker (in the settings dialog)
+                would replace the connector's whole scenario set. */}
+            {!isEmbedded && (
+              <>
+                <button
+                  onClick={handleManualSave}
+                  className={`text-xs px-2 py-1 ${
+                    saveFeedback === "saved"
+                      ? "bg-emerald-700 text-white hover:bg-emerald-800"
+                      : "btn-secondary"
+                  }`}
+                  title="Save scenario"
+                >
+                  {saveFeedback === "saved" ? "✓ Saved" : "💾 Save"}
+                </button>
+                <button
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Scenario settings"
+                >
+                  ⚙
+                </button>
+                <button
+                  onClick={handleImport}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Import JSON"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={handleExport}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Export JSON"
+                >
+                  ↓
+                </button>
+              </>
+            )}
           </div>
           <input
             ref={fileInputRef}
@@ -1741,422 +1751,12 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 </label>
               </div>
 
-              {/* Scenario EV Settings — applied to the target connector when the
-              scenario starts. Partial — empty fields keep the connector's
-              current values. */}
-              <div className="col-span-2 mt-1 rounded border border-gray-200 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={() => setIsEvSettingsExpanded((v) => !v)}
-                  className="w-full flex items-center justify-between px-2 py-1.5 text-xs font-semibold text-primary hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  <span>🚗 Scenario EV Settings</span>
-                  <span className="text-gray-700 dark:text-gray-300">
-                    {isEvSettingsExpanded ? "▾" : "▸"}
-                  </span>
-                </button>
-                {isEvSettingsExpanded ? (
-                  <div className="px-2 pb-2 space-y-2">
-                    <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                        EV Model preset
-                      </label>
-                      <select
-                        className="input-base w-full text-xs"
-                        value={scenarioEvSettings.modelName ?? ""}
-                        onChange={(e) => {
-                          const preset = e.target.value;
-                          if (!preset) {
-                            setScenarioEvSettings({});
-                            return;
-                          }
-                          if (preset === "Custom") {
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              modelName: "Custom",
-                            });
-                            return;
-                          }
-                          const presetValues = EV_PRESETS[preset] ?? {};
-                          setScenarioEvSettings({
-                            ...scenarioEvSettings,
-                            modelName: preset,
-                            ...presetValues,
-                          });
-                        }}
-                      >
-                        <option value="">
-                          (use default
-                          {defaultEvSettings
-                            ? `: ${defaultEvSettings.modelName}`
-                            : ""}
-                          )
-                        </option>
-                        {Object.keys(EV_PRESETS).map((preset) => (
-                          <option key={preset} value={preset}>
-                            {preset}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Battery (kWh)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-xs"
-                          placeholder={
-                            defaultEvSettings
-                              ? String(defaultEvSettings.batteryCapacityKwh)
-                              : "—"
-                          }
-                          value={scenarioEvSettings.batteryCapacityKwh ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              batteryCapacityKwh:
-                                v === ""
-                                  ? undefined
-                                  : Math.max(1, parseFloat(v)),
-                            });
-                          }}
-                          min={1}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Max Power (kW)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-xs"
-                          placeholder={
-                            defaultEvSettings
-                              ? String(defaultEvSettings.maxChargingPowerKw)
-                              : "—"
-                          }
-                          value={scenarioEvSettings.maxChargingPowerKw ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              maxChargingPowerKw:
-                                v === ""
-                                  ? undefined
-                                  : Math.max(1, parseFloat(v)),
-                            });
-                          }}
-                          min={1}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Initial SoC (%)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-xs"
-                          placeholder={
-                            defaultEvSettings
-                              ? String(defaultEvSettings.initialSoc)
-                              : "—"
-                          }
-                          value={scenarioEvSettings.initialSoc ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              initialSoc:
-                                v === ""
-                                  ? undefined
-                                  : Math.min(100, Math.max(0, parseInt(v, 10))),
-                            });
-                          }}
-                          min={0}
-                          max={100}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Target SoC (%)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-xs"
-                          placeholder={
-                            defaultEvSettings
-                              ? String(defaultEvSettings.targetSoc)
-                              : "—"
-                          }
-                          value={scenarioEvSettings.targetSoc ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              targetSoc:
-                                v === ""
-                                  ? undefined
-                                  : Math.min(100, Math.max(0, parseInt(v, 10))),
-                            });
-                          }}
-                          min={0}
-                          max={100}
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Current Type
-                        </label>
-                        <select
-                          className="input-base w-full text-xs"
-                          value={scenarioEvSettings.currentType ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              currentType:
-                                v === "" ? undefined : (v as "AC" | "DC"),
-                              phases:
-                                v === "DC"
-                                  ? undefined
-                                  : scenarioEvSettings.phases,
-                            });
-                          }}
-                        >
-                          <option value="">
-                            (use default
-                            {defaultEvSettings
-                              ? `: ${defaultEvSettings.currentType ?? "AC"}`
-                              : ""}
-                            )
-                          </option>
-                          <option value="AC">AC</option>
-                          <option value="DC">DC</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Phases
-                        </label>
-                        <select
-                          className="input-base w-full text-xs"
-                          value={
-                            scenarioEvSettings.phases !== undefined
-                              ? String(scenarioEvSettings.phases)
-                              : ""
-                          }
-                          disabled={scenarioEvSettings.currentType === "DC"}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              phases:
-                                v === ""
-                                  ? undefined
-                                  : ((v === "3" ? 3 : 1) as 1 | 3),
-                            });
-                          }}
-                        >
-                          <option value="">(use default)</option>
-                          <option value="1">1 (single-phase)</option>
-                          <option value="3">3 (three-phase)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Voltage (V)
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-xs"
-                          placeholder={
-                            defaultEvSettings?.voltageV
-                              ? String(defaultEvSettings.voltageV)
-                              : "230"
-                          }
-                          value={scenarioEvSettings.voltageV ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              voltageV:
-                                v === ""
-                                  ? undefined
-                                  : Math.max(1, parseFloat(v)),
-                            });
-                          }}
-                          min={1}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                          Power Factor
-                        </label>
-                        <input
-                          type="number"
-                          className="input-base w-full text-xs"
-                          placeholder={
-                            defaultEvSettings?.powerFactor
-                              ? String(defaultEvSettings.powerFactor)
-                              : "1"
-                          }
-                          value={scenarioEvSettings.powerFactor ?? ""}
-                          disabled={scenarioEvSettings.currentType === "DC"}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            // Clamped to MIN_UI_POWER_FACTOR, never 0: a
-                            // cos phi of 0 means no real power flows, so the
-                            // derived current would be infinite (#301).
-                            // Empty stays undefined — that is "inherit the
-                            // default", not "zero".
-                            const parsed = parseFloat(v);
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              powerFactor:
-                                v === "" || !Number.isFinite(parsed)
-                                  ? undefined
-                                  : Math.min(
-                                      1,
-                                      Math.max(MIN_UI_POWER_FACTOR, parsed),
-                                    ),
-                            });
-                          }}
-                          min={MIN_UI_POWER_FACTOR}
-                          max={1}
-                          step={0.01}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                        Charging curve
-                      </label>
-                      <div className="space-y-1">
-                        {(scenarioEvSettings.chargingCurve ?? []).map(
-                          (point, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center gap-1"
-                            >
-                              <input
-                                type="number"
-                                className="input-base w-16 text-xs"
-                                aria-label={`Charging curve point ${index + 1} SoC percent`}
-                                value={point.socPercent}
-                                min={0}
-                                max={100}
-                                onChange={(e) => {
-                                  const curve = [
-                                    ...(scenarioEvSettings.chargingCurve ?? []),
-                                  ];
-                                  curve[index] = {
-                                    ...curve[index]!,
-                                    socPercent: Math.min(
-                                      100,
-                                      Math.max(
-                                        0,
-                                        parseFloat(e.target.value) || 0,
-                                      ),
-                                    ),
-                                  };
-                                  setScenarioEvSettings({
-                                    ...scenarioEvSettings,
-                                    chargingCurve: curve,
-                                  });
-                                }}
-                              />
-                              <span className="text-xs text-gray-700 dark:text-gray-300">
-                                % →
-                              </span>
-                              <input
-                                type="number"
-                                className="input-base w-16 text-xs"
-                                aria-label={`Charging curve point ${index + 1} power fraction`}
-                                value={point.powerFraction}
-                                min={0}
-                                max={1}
-                                step={0.01}
-                                onChange={(e) => {
-                                  const curve = [
-                                    ...(scenarioEvSettings.chargingCurve ?? []),
-                                  ];
-                                  curve[index] = {
-                                    ...curve[index]!,
-                                    powerFraction: Math.min(
-                                      1,
-                                      Math.max(
-                                        0,
-                                        parseFloat(e.target.value) || 0,
-                                      ),
-                                    ),
-                                  };
-                                  setScenarioEvSettings({
-                                    ...scenarioEvSettings,
-                                    chargingCurve: curve,
-                                  });
-                                }}
-                              />
-                              <span className="text-xs text-gray-700 dark:text-gray-300">
-                                fraction
-                              </span>
-                              <button
-                                type="button"
-                                aria-label={`Remove charging curve point ${index + 1}`}
-                                className="text-xs text-gray-700 dark:text-gray-300 hover:text-red-600 px-1"
-                                onClick={() => {
-                                  const curve = (
-                                    scenarioEvSettings.chargingCurve ?? []
-                                  ).filter((_, i) => i !== index);
-                                  setScenarioEvSettings({
-                                    ...scenarioEvSettings,
-                                    chargingCurve:
-                                      curve.length > 0 ? curve : undefined,
-                                  });
-                                }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ),
-                        )}
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline"
-                          onClick={() =>
-                            setScenarioEvSettings({
-                              ...scenarioEvSettings,
-                              chargingCurve: [
-                                ...(scenarioEvSettings.chargingCurve ?? []),
-                                { socPercent: 0, powerFraction: 1 },
-                              ],
-                            })
-                          }
-                        >
-                          + Add point
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-700 dark:text-gray-300 leading-snug">
-                      Empty fields fall back to{" "}
-                      {defaultEvSettings ? (
-                        <>
-                          the <strong>Default EV Settings</strong> (
-                          {defaultEvSettings.modelName}) configured in Settings.
-                        </>
-                      ) : (
-                        <>the connector's current value (built-in default).</>
-                      )}{" "}
-                      The auto-meter "Stop mode" inside MeterValue nodes can
-                      derive its stop condition from these settings.
-                    </p>
-                  </div>
-                ) : null}
-              </div>
+              <ScenarioEvSettingsFields
+                className="col-span-2 mt-1"
+                value={scenarioEvSettings}
+                onChange={setScenarioEvSettings}
+                defaultEvSettings={defaultEvSettings}
+              />
             </div>
             <DialogFooter>
               <Button
@@ -2402,6 +2002,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 }}
                 className="flex-1 btn-primary text-sm"
               >
+                {/* Embedded, the page's own Save persists the scenario. */}
                 Save
               </button>
             </div>

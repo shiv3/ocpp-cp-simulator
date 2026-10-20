@@ -5,9 +5,10 @@ import type { UseGlobalLogsResult } from "./globalLogsContext";
 
 export type { GlobalLogEntry, UseGlobalLogsResult } from "./globalLogsContext";
 
-/** HH:mm:ss in local time — shared by LogsPage's row list and the
- *  Dashboard's "Recent activity" strip so both render timestamps the same
- *  way. Deliberately hand-rolled instead of `toLocaleTimeString` so output
+/** HH:mm:ss in local time — the charge point page's compact log renders
+ *  timestamps with it (it was shared with the Dashboard's "Recent activity"
+ *  box, since removed).
+ *  Deliberately hand-rolled instead of `toLocaleTimeString` so output
  *  doesn't depend on the runtime's ICU/locale data (dom tests included). */
 export function formatLogTime(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");

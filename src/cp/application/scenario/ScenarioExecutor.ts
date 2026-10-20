@@ -1534,6 +1534,10 @@ export class ScenarioExecutor {
       "info",
     );
     this.callbacks.onWaitIntervention?.(intervention);
+    this.eventEmitter?.emit("wait.intervention", {
+      scenarioId: this.scenario.id,
+      ...intervention,
+    });
     this.notifyStateChange();
   }
 

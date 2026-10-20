@@ -1,6 +1,7 @@
 import React from "react";
 
 import { cn } from "@/lib/utils";
+import RunStatePill from "../../../components/RunStatePill";
 import type { RunHistoryRow } from "../../../lib/runHistoryRows";
 import { formatDuration, formatDurationMs, VERDICT_STYLES } from "./runFormat";
 
@@ -17,14 +18,6 @@ export interface RunHistoryProps {
   showTarget?: boolean;
 }
 
-const RESULT_STYLES: Record<RunHistoryRow["result"], string> = {
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-  completed:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-  stopped: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  error: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
-};
-
 /**
  * A scenario run history list, newest first (#388): the daemon's recorded
  * runs, plus — on the run page — the runs the page tracked that are not
@@ -40,9 +33,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
   showTarget = false,
 }) => {
   if (rows.length === 0) {
-    return (
-      <p className="text-sm text-gray-500 dark:text-gray-400">{emptyText}</p>
-    );
+    return <p className="text-sm text-cx-muted">{emptyText}</p>;
   }
 
   return (
@@ -53,14 +44,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
         const content = (
           <>
             <span className="flex min-w-0 flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-xs font-semibold",
-                  RESULT_STYLES[row.result],
-                )}
-              >
-                {row.result}
-              </span>
+              <RunStatePill state={row.result} />
               {row.summary && (
                 <span
                   className={cn(
@@ -74,23 +58,23 @@ const RunHistory: React.FC<RunHistoryProps> = ({
               )}
               {row.attached && (
                 <span
-                  className="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300"
+                  className="rounded-full border border-cx-border-strong px-2 py-0.5 text-xs text-cx-fg2"
                   title="Started outside this page"
                 >
                   attached
                 </span>
               )}
               {showTarget && row.summary && (
-                <span className="truncate text-xs text-gray-700 dark:text-gray-200">
+                <span className="truncate text-xs text-cx-fg2">
                   {row.summary.cpId} · C{row.summary.connectorId} ·{" "}
                   {row.summary.scenarioName ?? row.summary.scenarioId}
                 </span>
               )}
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-xs text-cx-muted">
                 {row.startedAt.toLocaleString()}
               </span>
             </span>
-            <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 text-xs text-cx-muted">
               {row.summary
                 ? formatDurationMs(row.summary.durationMs)
                 : formatDuration(row.startedAt, row.endedAt)}
@@ -100,9 +84,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
         );
         const className = cn(
           "flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm",
-          selected
-            ? "border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950"
-            : "border-gray-200 dark:border-gray-800",
+          selected ? "border-cx-accent bg-cx-sel" : "border-cx-border",
         );
         return (
           <li key={row.key}>
@@ -112,10 +94,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
                 data-run-id={row.runId}
                 data-cp-id={row.summary?.cpId}
                 aria-pressed={selected}
-                className={cn(
-                  className,
-                  "hover:bg-gray-50 dark:hover:bg-gray-900",
-                )}
+                className={cn(className, "hover:bg-cx-sub")}
                 onClick={() => onSelect(row)}
               >
                 {content}

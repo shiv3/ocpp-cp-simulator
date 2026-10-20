@@ -13,7 +13,9 @@ related:
   - ../concepts/network-simulation.md
   - ../analyses/driving-from-an-ai-agent.md
   - ../concepts/expert-ocpp-calls.md
-updated: 2026-09-30
+  - ../concepts/vehicle-profiles.md
+  - open-ev-directory.md
+updated: 2026-10-11
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -94,14 +96,23 @@ For any RPC method not in the curated set, use the generic tools:
 - **`list_methods`** — no params → returns all method names with one-line descriptions and whether `cpId` is required. Pass `{ method }` to retrieve the full JSON Schema for one method.
 - **`call_method`** — `{ method, cpId?, params? }` → dispatches any RPC method. Rejects `events.subscribe` / `events.unsubscribe` (socket-bound) with an error. The description warns that `server.shutdown` and `state.reset` are destructive operations.
 
+The [vehicle profile](../concepts/vehicle-profiles.md) methods
+(`vehicle_profiles.*`, `vehicle_catalog.*`, #458) have no curated tool: call
+them through `call_method`, without `cpId` (`list_methods` reports
+`cpIdRequired: false`). See the
+[Open EV Directory smoke test](open-ev-directory.md#smoke-test).
+
 ## Error Handling
 
 Tool-level failures return an MCP tool result with `isError: true` and text in the format
 `"<code>: <message>"`, using the same error codes as the Socket.IO RPC:
 `not_found`, `invalid_params`, `connect_failed`, `timeout`, `internal`,
-`unauthorized` — six of the seven codes the
+`unauthorized`, and — from the `vehicle_catalog.*` methods (#458) —
+`rate_limited` and `unavailable`: eight of the nine codes the
 [Control plane](../concepts/control-plane.md#rpc) defines, with the same
-meanings. `disconnected` is mostly absent: the Socket.IO client synthesises
+meanings. An error's `retryAfterSeconds` is not a separate field here; the
+wait survives only in the message text
+(`rate_limited: Open EV Directory rate limit reached; retry in 7 s`). `disconnected` is mostly absent: the Socket.IO client synthesises
 it when the socket drops before an ack arrives, and an HTTP request/response
 has no such state to report. The one exception is `send_ocpp_call`, which
 answers `disconnected` when its CALL was dropped before the CSMS could answer

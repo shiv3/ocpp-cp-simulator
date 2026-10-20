@@ -41,6 +41,9 @@ import {
   setGlobalMetricsRecorder,
 } from "./metrics/MetricsRecorder";
 import { renderMetrics } from "./metrics/render";
+import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import { OpenEvDirectoryClient } from "../../cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
@@ -86,6 +89,12 @@ export interface ServerOptions {
    */
   readonly soapCallbackUrlExplicit?: string | null;
   readonly soapPublicBaseUrl?: string | null;
+  /**
+   * #458: the Open EV Directory API the console imports vehicle profiles
+   * through, with the daemon's API key. Null or absent: import is off and
+   * `vehicle_catalog.*` answers `unavailable`.
+   */
+  readonly vehicleCatalog?: VehicleCatalogConfig | null;
   /** `--soap-path`; the daemon-wide default for derived callback URLs. */
   readonly soapPath: string;
   /**
@@ -248,6 +257,15 @@ export async function startServer(
   // blueprints in memory, so a per-transport instance would make a blueprint
   // saved over socket.io `not_found` over MCP, and vice versa.
   const blueprints = new BlueprintRepository(database);
+  // #458: one store and one catalog client for both transports, for the
+  // same reason as the blueprints above.
+  const vehicleProfiles = new VehicleProfileRepository(database);
+  const vehicleCatalog = opts.vehicleCatalog
+    ? new OpenEvDirectoryClient({
+        baseUrl: opts.vehicleCatalog.baseUrl,
+        apiKey: opts.vehicleCatalog.apiKey,
+      })
+    : null;
 
   const bus = new EventBus();
   // Passed so a restored charge point resumes the background traffic it was
@@ -404,6 +422,10 @@ export async function startServer(
     tunnel: soapTunnel
       ? { provider: soapTunnel.provider, mode: soapTunnel.mode }
       : null,
+    vehicleCatalog: {
+      configured: vehicleCatalog?.configured ?? false,
+      authenticated: vehicleCatalog?.authenticated ?? false,
+    },
   });
   const socketIo = attachSocketIo({
     registry,
@@ -414,6 +436,8 @@ export async function startServer(
     scenarioRepository,
     connectorSettingsRepository,
     blueprints,
+    vehicleProfiles,
+    vehicleCatalog,
     chargePointService,
     fileReload,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
@@ -462,6 +486,8 @@ export async function startServer(
     scenarioRepository,
     connectorSettingsRepository,
     blueprints,
+    vehicleProfiles,
+    vehicleCatalog,
     chargePointService,
     fileReload,
   });

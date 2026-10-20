@@ -6,18 +6,18 @@ export interface ModePillProps {
   mode: "local" | "remote";
 }
 
+/** Local / Remote as a dot plus text, with no fill. */
 const ModePill: React.FC<ModePillProps> = ({ mode }) => {
   const isRemote = mode === "remote";
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-        isRemote
-          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
-          : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-      )}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+    <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-cx-fg2">
+      <span
+        aria-hidden
+        className={cn(
+          "h-[7px] w-[7px] rounded-full",
+          isRemote ? "bg-cx-accent" : "bg-cx-emerald",
+        )}
+      />
       {isRemote ? "Remote mode" : "Local mode"}
     </span>
   );

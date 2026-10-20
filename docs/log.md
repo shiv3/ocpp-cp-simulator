@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-01
+updated: 2026-10-11
 ---
 
 # Log
@@ -1367,3 +1367,265 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Removed: `entities/legacy-v1-ui.md` (and its links from [Overview](overview.md), [Index](index.md), [GitHub issues](sources/github-issues.md), [README](../README.md)).
 - [GitHub issues](sources/github-issues.md): #411 row.
 - Mechanism: `src/v1/**` deleted (last version at the `legacy-v1-final` tag); `App.tsx` exports `AppRoutes` and maps `/v1/*` to `<Navigate to="/">`; the v1-only `flowbite-react` / `jotai-location` dependencies and the short-circuit ESLint exception go with it.
+
+## [2026-10-02] ingest | Local-mode scenario runtime in the data layer (#411)
+
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences): Local-mode scenarios load, trigger, auto-start and report `scenario-*` events from the data layer, whatever page is open; before, the runtime lived in the classic connector card and the redesigned console could not run a scenario in Local mode.
+- [Scenario format](concepts/scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect): the auto-start eligibility rules, now shared by both runtimes.
+- [GitHub issues](sources/github-issues.md): #411 row extended.
+- Mechanism: `LocalScenarioRuntime` (one per registered charge point) owns each connector's `ScenarioManager`, reloads it from `SqliteScenarioRepository` on every save, and maps `connector.scenarioEvents` to service events (a new `wait.intervention` scenario event carries the wait controls). `matchAutoStart` holds the rules for it and for `CLIChargePointService.tryAutoStartForConnector`. `loadScenario` upserts. `ScenarioManager.destroy` releases its connector listener. The classic `Connector` card no longer creates, destroys or rewires anything, which also fixes its unmount resetting the auto meter-value sender.
+- Fix (both runtimes): a disabled definition clears the connector's auto-start dedup key only when that key is its own (`isAutoStartKeyOf`); before, any disabled sibling re-armed an already-fired scenario.
+
+## [2026-10-02] ingest | web console served at `/`, `/v3` redirects (#411)
+
+- [Web console](entities/web-console.md#layout-route-prefixes): the console moves from `/v3` to `/` (routes `/cp/:id`, `/scenarios`, `/scenarios/edit`, `/scenarios/run`, `/scenarios/runs`, `/logs`, `/settings`, plus a "Page not found" page); `/v3/...` bookmarks redirect with query string and hash; the classic UI moves to `/v2` and lists the features it still has alone. The design switcher becomes plain "Classic UI" / "Web console" links.
+- `/v3/...` paths updated to the new routes: [Local vs Remote mode](concepts/local-vs-remote-mode.md), [Network simulation](concepts/network-simulation.md), [Expert OCPP calls](concepts/expert-ocpp-calls.md), [Choosing an interface](analyses/choosing-an-interface.md), [Docker image](entities/docker-image.md), [Index](index.md), [README](../README.md).
+- [GitHub issues](sources/github-issues.md): #411 row.
+- Mechanism: `AppRoutes` mounts `ConsoleApp` at `/*`, `V2App` at `/v2/*`, and `LegacyConsoleRedirect` (a router `<Navigate>`, so the Pages basename applies) at `/v3/*`; `src/console/routes.ts` (`consolePath`) is gone — console links are plain root paths. The daemon's SPA fallback already served `index.html` for these paths.
+
+## [2026-10-02] ingest | Steps / Graph views in the console's scenario editor (#411)
+
+- [Web console](entities/web-console.md#scenario-editor-steps-and-graph): new section — the **Steps | Graph** toggle (`view=` in the URL), branching and looping scenarios open in the graph view, both views edit one definition saved by the page's Save. The `/v2` list of classic-only features loses the graph editor and gains a scenario's description and EV settings, which the console does not edit yet.
+- [GitHub issues](sources/github-issues.md): #411 row.
+- Mechanism: `ScenarioEditPage` lazy-loads the classic `ScenarioEditor` with a new `embedded` prop: hydrated once, no autosave, no own Save / settings / import / export / run controls, the node panel's button reads **Apply**, and each graph edit is reported through `onGraphChange` — not the opening, nor its drop of orphan edges (edges to a missing node), so opening a scenario never leaves the page with unsaved changes. The step list's read-only mode is gone (a non-linear scenario never reaches it). The jsdom `ResizeObserver` mock now reports a `contentRect`, which xyflow's pane reads.
+
+## [2026-10-02] ingest | delete a charge point from the web console (#415)
+
+- [Web console](entities/web-console.md#charge-point-page): new _Charge point page_ section — the header's **Delete** (confirmation, `cp.delete` in Remote mode, the saved configuration in Local mode, back to the dashboard). The `/v2` list of classic-only features no longer has it.
+- [GitHub issues](sources/github-issues.md): #415 row.
+- Mechanism: `useCpConfigActions.removeCp` resolves whether the charge point is gone, and in Local mode refuses a charge point that is not in the loaded configuration, so a removal before the configuration has loaded cannot save an empty one.
+
+## [2026-10-02] ingest | bulk actions on every charge point in the web console (#416)
+
+- [Web console](entities/web-console.md#dashboard): new _Dashboard_ section — the **All charge points** menu (two charge points or more) and its table of actions, with the one-line report. The `/v2` list of classic-only features no longer has bulk actions.
+- [GitHub issues](sources/github-issues.md): #416 row.
+- Mechanism: `BulkActionsMenu` runs the action on every charge point with `Promise.all`, each one caught, and reports done / failed / skipped. **Start** pairs TagIDs with charge points in order (as the classic UI did); **Stop** reads the transactions from a fresh `getChargePoint` instead of the dashboard's list, which can lag.
+
+## [2026-10-02] ingest | meter value and SoC by hand in the web console (#417)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector cards and their **Meter & SoC** dialog (set the meter value, set or clear the SoC, sync SoC and meter, send MeterValues). Sync counts as off until its preference is read; a preference that cannot be read, saved or applied is reported in the dialog. The `/v2` list of classic-only features no longer has it.
+- Lint: [Control plane](concepts/control-plane.md) and [State persistence](concepts/state-persistence.md) said the SoC↔meter sync flag was stored per connector; it is one simulator-wide `kv` value (`soc_meter_sync`), and `connector_settings` has no such column.
+- [GitHub issues](sources/github-issues.md): #417 row.
+- Mechanism: `ConnectorMeterDialog` reuses `useSocMeterSync`, moved from `src/components/hooks` to `src/data/hooks` since both UIs use it. Its body mounts only while the dialog is open, so the preference is pushed to the connector on open, as the classic side panel did on mount.
+
+## [2026-10-02] ingest | per-connector auto meter values in the web console (#418)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's **Auto meter values** button and what its **Save** applies and stores; a saved configuration that cannot be read keeps the editor closed instead of opening it on the default. The `/v2` list of classic-only features no longer has it.
+- Correction to the #411 audit: the classic side panel never opened its curve editor (`MeterValueCurveModal` was mounted behind a flag nothing set), so this is new in practice rather than a port.
+- [GitHub issues](sources/github-issues.md): #418 row.
+- Mechanism: `AutoMeterButton` lazy-loads the shared `MeterValueCurveModal`; **Save** calls `setAutoMeterValueConfig` then `saveAutoMeterConfig`. The saved per-connector copy (`connector_settings.auto_meter`) is not restored into connectors at startup.
+
+## [2026-10-02] ingest | remove a connector from the web console (#419)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's trash button, and that the removal is not saved. The `/v2` list of classic-only features no longer has it.
+- [GitHub issues](sources/github-issues.md): #419 row.
+- Mechanism: `ConnectorCard` calls `removeConnector` after a `window.confirm`; the card goes away on the service's `connector-removed` event, and a failure shows on the card.
+
+## [2026-10-02] ingest | connector 0 status, Heartbeat and Authorize in the web console (#420)
+
+- [Web console](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** panel (heartbeat interval and last sent, **Send Heartbeat**, **Authorize** with a TagID, **Send status** for connector 0 with an error code when Faulted). The `/v2` list of classic-only features loses it and gains the error code of a connector's Faulted status (#434), which the audit had missed.
+- [GitHub issues](sources/github-issues.md): #420 and #434 rows.
+- Mechanism: `ChargePointControls` on `CpDetailPage`, fed by `useChargePointView`'s heartbeat; `formatRelativeTime` moves from `CpCard` to `src/console/lib` for both.
+
+## [2026-10-02] ingest | download a charge point's logs from the web console (#421)
+
+- [Web console](entities/web-console.md#charge-point-page): **Download** on the charge point's Message Log tab and on `/logs` (one charge point, or all of them in one file), and what **Clear screen + DB** deletes. The `/v2` list of classic-only features no longer has the download.
+- Fix: the console's **Clear screen + DB** ignored its scope and never deleted the persisted rows; it now calls `clearStoredLogs`, as the classic card did.
+- [GitHub issues](sources/github-issues.md): #421 row.
+- Mechanism: `downloadStoredLogs` (`src/lib`) builds the JSON Lines file from `listStoredLogs` for one or more charge points; both UIs use it.
+
+## [2026-10-02] ingest | charging profiles and availability in the web console (#422)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's availability and **Charging profiles** list. The _Charge point page_ section is restructured into lists (connector card, **Meter & SoC**, **Auto meter values**, Message Log tab). The `/v2` list of classic-only features no longer has the charging-profile view.
+- [GitHub issues](sources/github-issues.md): #422 row.
+- Mechanism: `ChargingProfilesList` renders `useConnectorView`'s `chargingProfiles` (or the single `chargingProfile` when the list is empty), as the classic side panel did.
+
+## [2026-10-02] ingest | the web console's mode pill follows the daemon connection (#423)
+
+- [Web console](entities/web-console.md#layout-route-prefixes): the sidebar (navigation, mode pill, **Classic UI** link, version) and the pill's Remote-mode connection dot; it was always a pulsing green dot before.
+- [GitHub issues](sources/github-issues.md): #423 row.
+- Mechanism: `useRemoteHealth` (`src/data/hooks`) holds the classic navbar's logic (`RemoteChargePointService.getConnectionState` / `onConnectionChange`) and its labels; the navbar and `AppShell` both use it.
+
+## [2026-10-02] ingest | a scenario's description and EV settings in the web console (#424)
+
+- [Web console](entities/web-console.md#scenario-editor-steps-and-graph): the editor's description field and collapsed **Scenario EV Settings**. The `/v2` list of classic-only features now holds only the connector Faulted error code (#434).
+- [GitHub issues](sources/github-issues.md): #424 row.
+- Mechanism: the classic graph editor's EV settings form moves into `ScenarioEvSettingsFields` (its controls gain `aria-label`s) and `compactScenarioEvSettings` drops the empty fields; the classic settings dialog and `ScenarioEditPage` both use them.
+
+## [2026-10-02] ingest | the error code of a connector's Faulted status in the web console (#434)
+
+- [Web console](entities/web-console.md#charge-point-page): the connector card's **Faulted with** error code, sent with **Set status → Faulted**. The `/v2` list of classic-only features is now empty: the classic UI stays only until #426 retires it.
+- [GitHub issues](sources/github-issues.md): #434 row, no longer open.
+- Mechanism: `ConnectorCard` passes `{ errorCode }` to `sendStatusNotification` for Faulted only, from the classic side panel's list (`ALL_CHARGE_POINT_ERROR_CODES` without `NoError`).
+
+## [2026-10-02] ingest | classic UI retired (#426)
+
+- [Web console](entities/web-console.md#layout-route-prefixes): `/v2/...` now redirects to the same console route (`/v2/settings` → `/settings`), like `/v3/...`; the sidebar loses its **Classic UI** link and Settings its **Open classic UI** link. Sentences that described the classic UI in the present tense now say what it did; the build line and the reading format describe the console only.
+- [Docker image](entities/docker-image.md), [index](index.md): no classic footer, no `/v2`.
+- [GitHub issues](sources/github-issues.md): #426 row.
+- Mechanism: `AppRoutes` maps both retired prefixes through one `LegacyPrefixRedirect`. Removed: `V2App`, `TopPage`, `Navbar`, `Footer`, `ChargePoint`, `Connector`, `ConnectorSidePanel`, `Logger`, `connectorAutoMeterConfig`, `useScenarios` (only the side panel used it) and their tests, plus the `index.css` rules only they used (`status-*`, `panel-border`, the logger panel). Shared modules stay (Settings, the charge point dialog, the curve editor, the graph editor, the state-transition viewer, `src/data`, `src/cp`, `src/lib`).
+
+## [2026-10-04] ingest | side panel for a charge point on the Charge Points list
+
+- [Web console](entities/web-console.md#dashboard): clicking a charge point opens it in a side panel beside the list (`/?cp=<id>&connector=<n>`); swap, toggle and close rules (button, Esc, list background); the resize handle (drag, arrow keys, width kept in the browser); **Open as full page** (`/cp/<id>?connector=<n>`) and the Back link that returns to the list with the panel open and the card in view. The card's **Open** button and the id link are gone. The [charge point page](entities/web-console.md#charge-point-page) section gains `?connector=`.
+- Mechanism: `SidePanel` (`src/console/components`) is the generic shell (width, Esc, margin via the root's `data-side-panel` and `index.css`); `usePanelParams` (`src/console/lib`) holds the URL state with the push / replace rules; `CpDetailContent` (`src/console/pages/cp`) is the old `CpDetailPage` body, shared by the full page and the panel.
+
+## [2026-10-04] ingest | three views and filters on the Charge Points list
+
+- [Web console](entities/web-console.md#dashboard): the list has three views behind a switch in the header (Hierarchy, the default; Charge points; Connectors; `?view=`), a filter row (Charge point and Connector / Tx comboboxes, Status and OCPP version selects, Connected and Scenario checkboxes; `?q=`, `?conn=`, `?status=`, `?version=`, `?connected=1`, `?scenario=1`) with a `<n> CPs · <m> connectors` counter, and connector cells that show `#n`, the status, and `Tx <id>` or the kWh, the rest in the tooltip. The card grid, the card's **Connect** / **Disconnect** text buttons (now an icon button) and the **Recent activity** box are gone.
+- Mechanism: `cpListFilters.ts` (pure parse + filter), `useCpListRows` (one reporter component per charge point lifts its live row, from `useChargePointView` and `useActiveScenarioRuns`, into the page), `useCpListParams` (URL state, replace), `Combobox` (`src/console/components`), `statusColor.ts` (one status, one color for the pill, dots and icons). `CpCard` and `RECENT_ACTIVITY_LIMIT` are removed; `formatLogTime` stays for the Message Log page.
+
+## [2026-10-04] ingest | visual refresh of the web console (tokens, bundled fonts, status dots)
+
+- [Web console](entities/web-console.md): a **Look** paragraph in the intro (graphite surfaces, one blue accent for selection and the primary action, status as a dot plus text, IBM Plex Sans / Mono bundled so it works offline); the Hierarchy row's version is plain muted text and its status a dot plus text.
+- Mechanism: `--cx-*` palette variables for light and dark in `src/index.css` (exposed with `@theme inline`; the shadcn HSL variables retuned to the same palette); the five `.text-xs` … `.text-xl` colour overrides are removed; `@fontsource/ibm-plex-sans` and `@fontsource/ibm-plex-mono` are imported in `src/main.tsx` (Tailwind inlines CSS `@import`s without rebasing `url()`, so Vite would not bundle the files from `index.css`). `StatusPill`, the new `RunStatePill`, `ActiveScenarioBadge`, `ModePill` and `NetworkSimBadge` are dot plus text; `SegmentedControl` backs the Charge Points view switch and the scenario editor's Steps / Graph switch; the console pages use the tokens instead of `gray-*` / `blue-*` pairs.
+
+## [2026-10-04] ingest | connector tabs, inline config and the message log on the charge point page (#405)
+
+- [Web console](entities/web-console.md#charge-point-page): the charge point page (and the side panel) is rebuilt: the header has **Config**, **Connect** / **Disconnect** and a **More** menu (Message log, Transactions, Session analysis, Diagnostics, Expert, Network simulation, a **Scenarios** link, **Delete**); connectors are tabs with the selected connector's card and, under it, its scenario run row (the **Active scenarios** panel is gone); **Config** opens the settings as an inline form instead of a read-only tab and a dialog; the lower half is the charge point's message log with **Open in Message Log →**, or the section picked in **More** (`?tab=transactions|analysis|diagnostics|expert|network`). `?connector=` now selects the connector shown. `/logs` takes `?cp=` to preselect the charge point. Docs that named the Configuration, Expert or Active scenarios tabs ([OCPP versions & transports](concepts/ocpp-versions-and-transports.md), [Expert OCPP calls](concepts/expert-ocpp-calls.md), [Local vs Remote mode](concepts/local-vs-remote-mode.md)) follow.
+- [GitHub issues](sources/github-issues.md): #405 row (the log viewer's toolbar wraps).
+- Mechanism: `ChargePointConfigForm` is the body of `ChargePointConfigModal` (which keeps its behaviour as `Dialog` + the form); the config shape and helpers moved to `chargePointConfig.ts`. `ConnectorTabs`, `ConnectorRunRow` (the old `ActiveScenarioPanel`, fed by one `useActiveScenarioRuns` in `CpDetailContent`) and `CompactLogList` (direction and action from `annotateOcppLogs`) are new; `ConfigTab` and `CpTabs` are removed. `usePanelParams` drops `tab` with the charge point it belonged to. The Config form keeps the effective SOAP callback URL with its **Copy** button (it was on `ConfigTab`, #183). Checkboxes follow the theme (`accent-color`, `color-scheme`, 14px) and every native select draws one chevron (`.cx-select`, via `FILTER_SELECT_CLASS`).
+
+## [2026-10-04] ingest | active runs of every charge point on the Scenarios page
+
+- [Web console](entities/web-console.md#scenarios-page): the Scenarios page has two tabs, **Active runs** (the default) and **Library** (`?tab=library`, today's table and gallery). Active runs lists every charge point's live runs with state tiles that act as the filter (`?state=`), **Scenario** and **Charge point** comboboxes (`?q=`, `?cp=`), a `<k> / <n>` counter, and per-row **Skip** (waiting), **Next** (stepping) and **Stop**; there is no Pause / Resume because the service has no such method. The charge point page's **Scenarios** menu item now links to `/scenarios?tab=library&cp=<id>`.
+- Mechanism: `fetchActiveRuns` (`src/console/lib/activeRuns.ts`) holds the fetch logic that `useActiveScenarioRuns` had; `useAllActiveScenarioRuns` reads and subscribes per charge point (re-reads only the charge point whose event arrived; resubscribes when the set of ids changes); `ActiveRunsTab` (`src/console/pages/scenarios`) is the tab.
+
+## [2026-10-04] ingest | scenario run panel, read-only run page, Steps and Graph views
+
+- [Web console](entities/web-console.md#scenario-runs-panel-and-page): a new **Scenario runs: panel and page** section. A row of the Scenarios page's Active runs or Library opens a side panel (`?open=run:<cp>/<connector>/<id>` or `def:<cp>/<connector|cp>/<id>`, push / replace / close like the Charge Points list's panel; Esc and the page background close it); a Library entry's panel shows its steps, **Used by** and **Edit scenario**. A connector run row's scenario name opens the run panel beside the full charge point page (`/cp/<id>?connector=<n>&run=<scenarioId>`); from the list's panel it switches to the full page. The run page (`/scenarios/run`) is read-only, has no message log, keeps **Run history**, and switches **Steps | Graph** in `?view=`; the panel's expand opens it and its **← Back** returns to the panel. Steps shows a fork's branches as side-by-side columns with a lane tag and `done/total`; Graph draws the same order as connected cards. A join, a loop, a second fork or an unreachable step falls back to the flat "order approximate" list. The `LogViewer` sentence of the charge point section now says the run page no longer embeds it.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md): "run console" → "run page".
+- Mechanism: `deriveStepLayout` / `stepIndexOf` / `stepPhase` (`src/console/lib/stepLayout.ts`, pure, unit-tested) give the chain and the one fork; `StepsView` and `StepsGraphView` (`src/console/pages/scenarios/run/`, SVG + absolutely placed cards, no ReactFlow) draw it; `ScenarioRunContent` (definition load with the charge-point-scope fallback, `useScenarioRun`, header, controls) backs both the panel and `ScenarioRunPage`; `RunHistoryCard` is the page's history; `ScenarioDefinitionPanel` is the Library panel; `useScenarioPanelParams` holds `?open=`. `RunTimeline` stays as the fallback and shares `stepPhase`.
+
+## [2026-10-04] ingest | Scenario Library and per-connector scenario selection
+
+- [Web console](entities/web-console.md#scenarios-page): a new **Scenario Library** subsection. Scenarios are edited once, in the Library (stored under the reserved charge point id `__library__`, no schema change); a connector uses one through a `libraryId`-tagged copy (`<libraryId>@<cpId>#<connector>`). The Library table has Scenario, Steps, Used by, Running, Enabled and Edit; **+ New scenario** (name only), **Use template** and **Import JSON** create Library scenarios; **Delete** un-assigns the users first; `?edit=<id>` opens the editor inline (`← Library`, **Used by** chips, **Save and apply to <n> connectors**, a confirmation when a copy is running); a one-time migration fills an empty Library from the connectors' definitions. The [charge point page](entities/web-console.md#charge-point-page) gains the connector's **scenario row** (select, **▶ Run**, the gear, **Apply to all connectors**). The [editor](entities/web-console.md#scenario-editor-steps-and-graph) section is rewritten: the Steps view now edits a chain plus one fork (add a step under the chain or a branch, **+ Add parallel branch**, move within a lane, delete in the inspector header); **Edit scenario** of a Library copy goes to the Library editor. The `LogViewer` sentence now records that the component (and its #405 toolbar) is gone.
+- [Scenario format](concepts/scenario-format.md#changelog): **v1.4** — the optional `libraryId`; field table, status line (it still said 1.2) and `schemaVersion` row follow. [Scenario JSON Schema](sources/scenario-json-schema.md): version history brought up to 1.4 (the page still said 1.1). [State persistence](concepts/state-persistence.md): the `scenarios` row names the `__library__` scope. [Index](index.md): titles and summaries.
+- Mechanism: `src/console/lib/scenarioLibrary.ts` (the scope constant and pure helpers: assign, used-by, runs, save with re-push, delete with un-assign, `migrateToLibrary`, the edit URLs) and `useScenarioLibrary.ts` (`useScopeDefinitions`; the copies follow the charge point list and each scope's subscription, which fixes the Library showing "0 total" after a hard reload in Local mode); `insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch` / `findStepLane` in `scenarioSteps.ts`; `ScenarioEditorContent` (shared by `ScenarioEditPage` and the Library tab), `LibraryTable`, `ConnectorScenarioSelect`; `SCENARIO_SCHEMA_VERSION` is `1.4`. Removed: `ScenarioTable`, `StepList`, the target pickers of `NewScenarioDialog`, and the unused `src/components/ui/log-viewer.tsx` with its test and the `scrollTo` polyfill only it needed.
+
+## [2026-10-04] ingest | review round: separate connector and transaction filters, no connect buttons in the list, Message Log with a filter sidebar
+
+- [Web console](entities/web-console.md#dashboard): the single **Connector / Tx** combobox is two, **Connector** (`?conn=`, a number: `3` or `#3`, stored as `3`) and **Transaction** (`?tx=`, an id or part of one: `42` or `#42`, stored as `42`; suggestions `#<id>` with `<cp id> #<n>`); the old `Tx 42` form is gone, without a shim, and `?conn=` is documented as distinct from the side panel's `?connector=`. The list has no **Connect** / **Disconnect** button (the Hierarchy head's power button and the Charge points table's actions column are removed); the head tells `heartbeat 12s ago` while connected, and connecting stays in the side panel header and the **All charge points** menu.
+- [Web console](entities/web-console.md#message-log-page): a new **Message Log page** section. `/logs` is the `LogViewer` again (restored from the commit before its removal and restyled with `cx-*` tokens): a filter sidebar with counts (Charge point, Level, Type, Connector, Direction, Action), a toolbar (`<n> total / <m> filtered`, Auto-scroll, Download, Clear screen, Clear screen + DB, wraps, #405), a search box and a table with an expandable row (chevron) for the pretty-printed message. **Pause / Resume** stays in the page header; the Charge point group is `?cp=` (repeated for several) and Download / Clear act on the ticked charge points, all when none. The charge point page keeps the compact list. [GitHub issues](sources/github-issues.md) is unchanged (#405 and #421 still apply).
+- Mechanism: `LogViewer` takes `ViewerLogEntry` (`LogEntry & { cpId? }`) and derives the Charge point group and column from the `cpId`s, with `selectedCpIds` / `onCpFilterChange` for an owner that keeps the selection in the URL; `useGlobalLogs().clear(cpIds?)` clears only those charge points' lines; `src/test/setup.dom.ts` has its `scrollTo` polyfill back for the viewer's auto-scroll; `CpPowerButton.tsx` is deleted.
+
+## [2026-10-04] ingest | review round: edit scenarios in the side panel, graph editor in the mock's look, insert-between and drag in the Steps view
+
+- [Web console](entities/web-console.md#editing-in-the-side-panel): a new **Editing in the side panel** subsection. **Edit scenario** in the Scenarios page's definition panel and in a run panel (Active runs, or beside the charge point page) switches the panel to the editor (`&edit=1` beside `?open=` or `?run=`, kept on reload; with `?open=`, `edit` is always this flag): name, **Save**, **Cancel** (an in-page **Discard unsaved changes?** when dirty), the expand link to the editor page and close in the header; trigger and Enabled under it; Used by, the Steps | Graph switch and the inspector under the steps. A copy of a Library scenario edits the Library entry and Save re-pushes the copies; anything else edits itself. The run page keeps **Edit scenario** as a link. A click on the Scenarios page's background no longer closes a panel in edit mode. The [`?open=` table](entities/web-console.md#scenarios-page), the definition panel and the [run panel](entities/web-console.md#scenario-runs-panel-and-page) paragraphs and the charge point page's gear item follow.
+- [Web console](entities/web-console.md#scenario-editor-steps-and-graph): the **Graph** view is the run page's card graph, editable: click to select (✕ on the selected card), a `+` disc after the last card of the chain and of each branch, a `+` on hover between two cards, **+ branch** by the fork (or the last chain card), drag a card within its lane (6 px threshold, drop line, Escape cancels), Alt+↑/↓ and Delete (asked in the page) on a focused card. Only a layout `deriveStepLayout` cannot draw opens the ReactFlow editor, under "This scenario has joins or loops; the full graph editor is used". The **Steps** view gains a `+` between two boxes of a lane (as the old step list) and a grab handle to drag a box within its lane, with the same keys. The inspector's fields go in two columns when it is wide enough. [Index](index.md): the page's summary.
+- Mechanism: `useLaneDrag` (`src/console/lib/`, pointer events, pointer capture only once a drag starts so a press still clicks, Escape in the capture phase with `preventDefault` so the side panel's Esc stays put) and `useStepEditing` (`src/console/pages/scenarios/edit/stepEditing.tsx`: one open step picker, the drag, the keys, focus kept on a moved step) are shared by `StepsView` and `StepsGraphView`; `moveLaneStep` takes any `delta` within the lane; `InlineConfirm` (`src/console/components/`) replaces `window.confirm` for Cancel and keyboard Delete; `scenarioEditTarget` / `libraryEditorUsers` (`scenarioLibrary.ts`) and `useLibraryEditorBinding` back the panels; `useScenarioPanelParams` exposes `editing` / `setEditing` (`withPanelEditing`, also used by `CpDetailPage`); `ScenarioEditorContent` and `ScenarioMetaBar` have a `variant="panel"`; `StepInspector` uses a container query. `ScenarioEditor` (ReactFlow) stays only as the fallback.
+
+## [2026-10-04] ingest | Esc in an editing side panel is Cancel
+
+- [Web console](entities/web-console.md#editing-in-the-side-panel): **Esc** on a scenario panel in edit mode (the Scenarios page's `?open=…&edit=1`, the charge point page's `?run=…&edit=1`) now behaves like **Cancel** — back to the read view when the editor is clean, else the in-panel **Discard unsaved changes?** with the panel kept open — instead of closing the panel and losing the edits.
+- Mechanism: `SidePanel` still calls `onClose` on Esc; both hosts route it, while editing, to the editor's Cancel through a `cancelEditRef` that `ScenarioEditorContent` (`cancelRef`) fills, passed via `ScenarioDefinitionPanel` / `ScenarioRunContent`.
+- Follow-up: the editing panel's close button takes the same path — a clean editor closes the panel, a dirty one asks **Discard unsaved changes?** first (**Discard** closes, **Keep editing** stays) on both hosts. `ScenarioEditorContent` remembers whether the question came from Cancel / Esc or from close.
+- Follow-up: the editor body is a container (`@container`) with a two-column grid above about 860 px (`@[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]`, the inspector sticky in its column) and one column below, on the page and in the panel alike, so a panel dragged wide gets the inspector on the right; the graph scrolls inside its own column.
+
+## [2026-10-04] ingest | review round: the connector card as a charging session (stepper, battery, figures, config dialog, controls)
+
+- [Web console](entities/web-console.md#charge-point-page): the Charge point page section is rewritten. New subsections [Connector card](entities/web-console.md#connector-card) (header with **⚙ Config** and **Controls ▾**; the **Plug in → Start charging → Stop charging → Unplug** stepper, positioned from the status and the transaction, with the TagID select, `Tx #id · tag`, Faulted and Unavailable rules; the EV as an SVG battery with the hero SoC, target line, time to target and the drag-to-set SoC; the figures Energy added / Power / Session / Meter; **Power this session** with the auto meter ghost and the auto meter switch; the footer with the tag and the charging profiles), [Config dialog](entities/web-console.md#config-dialog) (EV tab with presets and the staged sync switch; Auto meter tab with the presets and the pointer-driven curve editor, and how power points map to the energy Bézier `curvePoints`), [Simulator controls](entities/web-console.md#simulator-controls) (Readings, Status and faults, Connector), [Scenario card](entities/web-console.md#scenario-card) (replaces the run row and the scenario row: live run with progress bar, or **No scenario running** with **▶ Run**, **Edit in Library**, **Use on all N connectors**) and [Message log tab](entities/web-console.md#message-log-tab). Plug in / Unplug send StatusNotification `Preparing` / `Available`, what the `connectorPlug` node means on the wire (the simulator runs a no-op callback for it; the k6 runtime sends these); no service method was added.
+- Same entry, three more requests: the full page shows **every connector at once** (a one- or two-column container-query grid, each card followed by its scenario card; `?connector=` marks the selected card with an accent ring and `data-selected`, scrolls it into view on load, and a click on a card's header selects it), while the side panel keeps the `#n` tabs and one card; the lower half switches through an **underline tab strip** (Message log, Transactions, Session analysis, Diagnostics, Expert, Network simulation when gated on; same `?tab=` values), so **More** holds only **Scenarios** and **Delete** and the **← Message log** links are gone; the **Message log** tab is the Message Log page's `LogViewer` on this charge point's lines (sidebar, toolbar, search, table; no Charge point group), filling the panel (min 360 px) or 480 px on the page. The `?connector=` / `?tab=` table, the panel URL table, the scenario-run paragraphs ("run row" → scenario card) and the Expert mention follow; [Expert OCPP calls](concepts/expert-ocpp-calls.md) says "the **Expert** tab"; [GitHub issues](sources/github-issues.md): #417 / #419 point at Simulator controls, #418 at the Config dialog; [Index](index.md): the page's summary.
+- Mechanism: `src/console/pages/cp/` gains `SessionFlow`, `EvBattery`, `PowerSparkline`, `CurveEditor`, `ConnectorConfigDialog`, `ConnectorControls`, `ScenarioCard`, `useConnectorPower` (per-connector readings kept outside React so a remount keeps them), `powerCurve.ts` (power points ↔ energy `curvePoints`, presets, summary; unit-tested), `connectorCardModel.ts` and `connectorActions.ts`, plus `src/console/components/Switch.tsx`. Removed: `AutoMeterButton`, `ConnectorMeterDialog`, `ConnectorRunRow`, `ConnectorScenarioSelect`, `CompactLogList` and their tests (the run-row and scenario-select tests became `ScenarioCard.run.dom.test.tsx` / `ScenarioCard.dom.test.tsx`). `MeterValueCurveModal` stays for the scenario editor's meter node.
+
+## [2026-10-04] ingest | Connector cards up to four across
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid packs as many cards per row as fit, at most four, with a minimum card width of about 420 px (`auto-fit` with `max(420px, quarter)`; fewer connectors share the row, a phone gets one column), replacing the one-or-two-column grid. The connector card is its own container (`@container`) and lays itself out by its own width: battery beside the figures from about 400 px (wider columns from about 560 px), the stepper compact under about 520 px, the figures' notes under their values under about 560 px; the side panel follows the same rule. The Readings SoC input no longer clips its "not reported" placeholder.
+- Code: `CpDetailContent.tsx` (grid, `data-testid="connector-grid"`), `ConnectorCard.tsx`, `SessionFlow.tsx`, `EvBattery.tsx`, `ConnectorControls.tsx`; tests `CpDetailContent.connectorGrid.dom.test.tsx` and `SessionFlow.dom.test.tsx`.
+
+## [2026-10-04] ingest | Charge point controls as a card with a Controls toggle
+
+- [Web console](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** paragraph describes the new card: a header with the Heartbeat figure (interval, `next in Ns` / `last sent ...` / `not configured`, a bar between heartbeats), **Send Heartbeat** and a **Controls** toggle, and behind the toggle the Heartbeat, Authorize and Status and faults groups with per-group errors (a failed header Send Heartbeat also shows under the header while folded). The list entry no longer says "one compact row".
+- Code: `ChargePointControls.tsx` (rewritten), `Figure.tsx` and `controlPrimitives.tsx` (extracted from `ConnectorCard.tsx` / `ConnectorControls.tsx`, shared by both cards); tests in `ChargePointControls.dom.test.tsx`.
+
+## [2026-10-04] ingest | Connector cards in one scrolling row
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is now one row that scrolls horizontally instead of wrapping (`grid-auto-flow: column`, `grid-auto-columns: minmax(min(100%, max(400px, quarter)), 1fr)`, `overflow-x: auto`, scroll snapping): at most four cards are visible, each at least a quarter of the row and about 400 px (lowered from 420 so four cards fit a 2000 px window with classic scrollbars), fewer connectors share the width, the row is a focusable `region` named Connectors, and the connector in `?connector=` is scrolled into view along the row (`inline: "nearest"`). The card's own container queries are unchanged.
+- Code: `CpDetailContent.tsx` (grid, scroll-into-view); tests `CpDetailContent.connectorGrid.dom.test.tsx` and `CpDetailContent.tabs.dom.test.tsx`.
+
+## [2026-10-04] ingest | Connector cards back to two columns
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is a two-column grid again (one column under about 1100 px of content width, two above; maintainer decision after trying four across and one scrolling row). The card keeps its own container queries, the scroll-into-view of `?connector=` stays.
+
+## [2026-10-05] ingest | Charge point bottom panel
+
+- [Web console](entities/web-console.md#charge-point-page): the charge point's lower half (the tab strip and the active tab's content) is a **bottom panel** docked to the bottom of the full page and of the list's side panel, like an editor's Panel: always visible, the content above (header, charge point box, connector cards) scrolls in its own area, the tab strip sits in the panel's header bar with the tab's actions (**Open in Message Log →**) and a chevron that folds the panel to that bar (a double-click on the bar does too; clicking a tab while folded unfolds it), and the top edge drags (or ↑ / ↓, 32 px) between 120 px and the room that leaves 160 px above, default 320 px. Height and folded state are kept in `localStorage` per variant (`ocpp-cp.console.cp-panel.page.*` / `.side.*`). The Message log viewer fills the body instead of a fixed 480 px / 360 px. The `?tab=` rows follow; [Expert OCPP calls](concepts/expert-ocpp-calls.md) says "bottom panel"; [Index](index.md): the page's summary.
+- Code: new `src/console/components/BottomPanel.tsx` (generic, tested in `BottomPanel.dom.test.tsx`); `CpDetailContent.tsx` uses it; `SidePanel` gets `padded` (`false` lets the child own padding and scrolling; `DashboardPage` passes it for the charge point panel).
+
+## [2026-10-05] ingest | LogViewer filter sidebar toggle
+
+- [Web console](entities/web-console.md#message-log-tab): the `LogViewer`'s filter sidebar collapses. A **Filters** button at the start of the toolbar (`aria-pressed`) shows or hides it (it stays mounted, so ticked values survive) and, while it is closed, carries a count of the filter groups with a selection. New prop `defaultFiltersOpen` (default `true`); the charge point's bottom panel passes `!isPanel`, so the side panel starts with the filters closed and the full page and the Message Log page with them open (maintainer feedback: the 256 px sidebar ate the side panel's width).
+- Code: `src/components/ui/log-viewer.tsx`, `src/console/pages/cp/CpDetailContent.tsx`; tests `log-viewer.dom.test.tsx` and `CpDetailContent.tabs.dom.test.tsx`.
+
+## [2026-10-05] ingest | Click anywhere in a connector card to select it
+
+- [Web console](entities/web-console.md#charge-point-page): on the full page a click anywhere inside a connector card's frame selects it (writes `?connector=`), not only its header; the card's own controls still act without selecting.
+
+## [2026-10-05] ingest | Connector row restored, two columns inside the card
+
+- [Web console](entities/web-console.md#charge-point-page): the full page's connector grid is one row that scrolls horizontally again (`grid-auto-flow: column`, `grid-auto-columns: minmax(min(100%, max(400px, quarter)), 1fr)`, `overflow-x: auto`, scroll snapping, a focusable `region` named Connectors, `inline: "nearest"` scroll-into-view; maintainer feedback after the two-column grid, which had been meant as two columns _inside the card_). The card's battery-beside-figures tier now starts at about 340 px of card width (was 400 px, so a 400 px card in the row got one column), and under about 560 px the battery drawing sits above the SoC figure and its text.
+- Code: `CpDetailContent.tsx` (grid), `ConnectorCard.tsx` (`@min-[340px]:` tier), `EvBattery.tsx` (`@max-[560px]:flex-col`); tests `CpDetailContent.connectorGrid.dom.test.tsx`, `ConnectorCard.dom.test.tsx`.
+
+## [2026-10-05] ingest | Message log tab follows the selected connector
+
+- [Web console](entities/web-console.md#message-log-tab): the charge point's Message log tab filters to the selected connector (page card click, panel `#N` tab); a chip **Connector N** with a **×** (`Show every connector`) in the bottom panel's header bar clears it, widening in the Filters sidebar holds until the selection changes. Lines that name no connector are hidden while a connector is selected (tick `(none)` to see them).
+- Code: `log-viewer.tsx` (new controlled props `selectedConnectorIds` / `onConnectorFilterChange`, exported `ConnectorFilterValue`), `CpDetailContent.tsx`; tests `log-viewer.dom.test.tsx`, `CpDetailContent.tabs.dom.test.tsx`, `DashboardPage.panel.dom.test.tsx`.
+
+## [2026-10-05] ingest | Network simulation tab says when no global layer exists
+
+- [Web console](entities/web-console.md#charge-point-page): with no global network simulation layer saved, the charge point's Network simulation tab shows **Network simulation is not set up** with a link to `/settings#network-simulation` instead of an empty box (it rendered neither the loading text nor the editor for a `null` global layer). The per-CP layer stays an override of the global one ([network simulation](concepts/network-simulation.md)). The Settings page's Network Simulation section got the anchor id `network-simulation` and scrolls into view on that hash.
+- Code: `CpDetailContent.tsx`, `SettingsPage.tsx`; tests `CpDetailContent.tabs.dom.test.tsx`, `SettingsPage.dom.test.tsx`.
+
+## [2026-10-07] ingest | Review round 1: Settings alignment, Save everywhere
+
+- [Web console](entities/web-console.md): maintainer review of the deployed console, items 1 and 6. The Settings page's cards (Runtime Mode ... Configuration JSON) and the Network Simulation card now share one `mx-auto max-w-5xl` column (the Settings component had its own `max-w-5xl mx-auto` while the Network Simulation card under it was full width, so their left edges differed). Every configuration form confirms with **Save**: Default EV settings and Tag IDs (were **Apply**), Configuration JSON (was **Apply Changes**, hint text updated) and the scenario editor's node panel when embedded (was **Apply**). Left unchanged: the checkbox label "Apply the answer to the station's state" (an Expert-call option, not a confirmation button).
+- Code: `Settings.tsx`, `SettingsPage.tsx`, `ScenarioEditor.tsx`; tests `SettingsPage.dom.test.tsx`, `Settings.evSettings.dom.test.tsx`, `ScenarioEditPage.dom.test.tsx`.
+
+## [2026-10-07] ingest | Review round 1: template browser
+
+- [Web console](entities/web-console.md#scenarios-page): maintainer review item 2. The Library tab's template gallery said "+N more available in the scenario editor", but the console's scenario editor has no template picker, so templates beyond the first eight could not be reached. The note is now the button **Browse all N templates**, which opens the **Scenario templates** dialog: search (name and description, case-insensitive, focused, Enter uses the first match), the `N of M` count, and every template with its target type chip and **Use template** (creates the Library scenario like the gallery card and closes the dialog).
+- Code: new `TemplateBrowserDialog.tsx`, `TemplateGallery.tsx`; tests `TemplateBrowserDialog.dom.test.tsx`, `ScenarioLibraryPage.library.dom.test.tsx`.
+
+## [2026-10-07] ingest | Review round 1: charge point form
+
+- [Web console](entities/web-console.md#charge-point-page): maintainer review items 3, 4 and 5 on the Add Charge Point / Config form (`ChargePointConfigForm`, shared by the dialog and the charge point page's inline Config card). The single **OCPP Version** select that mixed the transport into each option (`OCPP 1.6 (JSON)`, `OCPP 1.6 (SOAP)`, ...) became **Protocol** (`JSON` / `SOAP`) followed by **Version**, filtered by it; the stored `ocppVersion` strings are unchanged, and a protocol switch keeps the version number when the other protocol has it. The editable **Full WebSocket URL** (which was parsed back into the WebSocket URL and Basic Auth fields) became the read-only **Effective WebSocket URL** with a **Copy** button; the form no longer parses a pasted URL (`parseFullOcppUrl` stays in `src/utils/ocppUrl.ts`, tested but unused by the form). **Number of Connectors** moved into the first section, **Boot notification** renamed **Model specification**, and **Basic settings** renamed **Connection** (now second). The local-mode "TLS is not supported in the browser" save error now shows in the form's bottom alert instead of under the Full WebSocket URL field (where SOAP forms never showed it). The Add dialog focuses the Charge Point ID on open (it is no longer the first field).
+- Code: `ChargePointConfigForm.tsx`, `chargePointConfig.ts` (`OCPP_VERSION_OPTIONS`, `protocolOf`, `versionForProtocol`, `versionsOfProtocol`), `ocppUrl.ts` (comment); tests `ChargePointConfigForm.dom.test.tsx`, `ChargePointConfigModal.dom.test.tsx`, `chargePointConfig.test.ts`.
+
+## [2026-10-11] ingest | Vehicle profiles and Open EV Directory import (#458)
+
+- New [Vehicle profiles](concepts/vehicle-profiles.md): the `VehicleProfile` model (specs with `null` for a missing value, DC curve in kW, overrides, provenance with curve quality and licenses), `resolveEvSettings` for AC and DC with its warnings table and the `missing_fields` / `invalid_curve` failures, `applyVehicleSettings`, the snapshot / offline guarantee, explicit import, refresh (overrides kept, `removedUpstream` on 404), storage and reset, the #311 / #327 boundary, attribution, open points.
+- New [Open EV Directory](entities/open-ev-directory.md): endpoints used, daemon configuration (`--oed-base-url` / `OED_BASE_URL`, `--oed-api-key-file` / `OED_API_KEY_FILE` / `OED_API_KEY`, no flag carrying the key, exit 1 cases) and Local-mode configuration (in-memory key, `ocpp-cp.oed-base-url`), Bearer scheme pending juherr/open-ev-directory#10, redaction additions, HTTP → catalog kind → RPC code table, `Retry-After`, CORS, smoke test (verified against a stub: Bearer header sent, `list_makes` and `rate_limited: … retry in 7 s` over MCP `call_method`).
+- [Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog): new subsection with the seven `vehicle_profiles.*` / `vehicle_catalog.*` methods; daemon-methods table rows; error codes `rate_limited` and `unavailable` (nine codes) and `retryAfterSeconds` on the error object; `server.info.vehicleCatalog`.
+- [State persistence](concepts/state-persistence.md): `vehicle_profiles` table (schema v15), `.tables` sample, reset wipes profiles, `cp.delete` does not.
+- [CLI](entities/cli.md#cli-options) and [Daemon](entities/daemon.md): `--oed-base-url`, `--oed-api-key-file` rows kept in sync; environment-variable note; daemon security posture on the key.
+- [Web console](entities/web-console.md#settings-page): new Settings page subsection with the Vehicle profiles card (import, edit, refresh, delete; Remote vs Local catalog access); Config dialog EV tab (profiles in the Vehicle select, non-preset model shown under its own name, current-type / curve line); Scenario EV Settings offers profiles.
+- [MCP endpoint](entities/mcp-endpoint.md): eight of nine error codes, `retryAfterSeconds` only in the message text, vehicle methods via `call_method`.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md#consequences), [Scenario format](concepts/scenario-format.md#charging-curve-v12), [Overview](overview.md), [GitHub issues](sources/github-issues.md) (#311, #327, #458, juherr/open-ev-directory#10 / #14), [Index](index.md), `README.md` documentation links.
+- `resolveEvSettings` now returns an explicit `chargingCurve: []` and, for AC, an explicit `phases` (1 for an unknown or unsupported count) instead of leaving keys out: a review found the connector's and the scenario start's merge (`applyEvSettingsOverride`) kept the previous vehicle's curve and phases. [Vehicle profiles](concepts/vehicle-profiles.md#resolution-to-ev-settings) updated.
+- Review round 2: the import dialog mints profile ids without `crypto.randomUUID` when the page is not a secure context (a daemon console over plain HTTP); a preset picked after a profile no longer keeps the profile's curve, current type and phases ([Web console](entities/web-console.md#settings-page)); the `apiKey` redaction's effect on an OCPP `ApiKey` configuration key in diagnostic outputs is recorded on [Open EV Directory](entities/open-ev-directory.md#keys-and-redaction); a scenario-level acceptance test pins the offline run.
+- Simplify pass: the 1,000-profile cap moved into the repository, so the browser store has it too ([Vehicle profiles](concepts/vehicle-profiles.md#storage-and-reset), [Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog)); the shared redaction no longer carries an Open EV Directory-specific key pattern — the client scrubs the exact key it holds ([Open EV Directory](entities/open-ev-directory.md#keys-and-redaction)).
+- Raw-source follow-up in the same change: the **Reset all simulator data** card and confirmation now name the saved vehicle profiles, and **Refresh** stays offered on a profile marked _no longer in the catalog_ (a refresh that finds the vehicle again clears the mark).
+
+## [2026-10-12] ingest | Open EV Directory is public (#458)
+
+- The public instance is <https://evdb.juherr.dev>. The daemon now uses it by default (`--oed-base-url` / `OED_BASE_URL` override it, `none` turns import off) and the Local-mode dialog starts with it; personal keys come from its explorer. Checked live: anonymous reads, `Authorization: Bearer` keys (juherr/open-ev-directory#10 shipped; an invalid key is `401`), no CORS headers, every ID.7 variant's records and curves import.
+- Pages: [Open EV Directory](entities/open-ev-directory.md) (configuration table, keys, CORS, smoke test against the public instance), [Vehicle profiles](concepts/vehicle-profiles.md#open-points) (Bearer and public-URL open points closed, CORS noted), [CLI](entities/cli.md#cli-options) and [Daemon](entities/daemon.md) flag rows, [Web console](entities/web-console.md#settings-page), [Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog), [GitHub issues](sources/github-issues.md).
+
+## [2026-10-12] ingest | Vehicle profiles review fixes (#458)
+
+- [State persistence](concepts/state-persistence.md) and [Vehicle profiles](concepts/vehicle-profiles.md#storage-and-reset): `state.reset` also empties the in-memory profile store (no `--state-db`, or a Local service without its database).
+- [Vehicle profiles → Refresh](concepts/vehicle-profiles.md#refresh): every provenance field is compared (curve quality, basis, observations, licenses and attribution), and a profile flagged as removed whose variant reappears lists _back in the catalog_; [Web console](entities/web-console.md#settings-page) updated.
+- [Open EV Directory → Keys and redaction](entities/open-ev-directory.md#keys-and-redaction) and [Web console](entities/web-console.md#settings-page): keys are not self-service yet (juherr/open-ev-directory#14 open; the explorer has sign-in but no key page) — operator-provisioned, optional; [GitHub issues](sources/github-issues.md).
+- `set_ev_settings` is a merge patch where `null` removes a key; the connector and the user's default never keep a `null` ([Control plane](concepts/control-plane.md)).
+- [Vehicle profiles → Replacing a vehicle](concepts/vehicle-profiles.md#replacing-a-vehicle): a preset replaces a profile's vehicle after a save and a reopen too — removed on a connector, removed in the Default EV Settings, an explicit flat curve with the electrical fields left to the connector in a scenario (the deliberate asymmetry); Custom keeps the fields. [Web console](entities/web-console.md#settings-page) updated.
+- [Vehicle profiles → Licensing and attribution](concepts/vehicle-profiles.md#licensing-and-attribution), [Scenario format](concepts/scenario-format.md#charging-curve-v12), [CLI → export-k6](entities/cli.md): `evSettings.attribution` carries the sources' credit into scenarios and their exports; ShareAlike noted; the open point is closed.
+
+## [2026-10-12] ingest | EV settings patch and preset scenario attribution (#458, review 2)
+
+- [Control plane](concepts/control-plane.md): a `set_ev_settings` patch can remove only optional fields; `null` on a required one (`modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`) is `invalid_params` and nothing is applied.
+- [Vehicle profiles → Replacing a vehicle](concepts/vehicle-profiles.md#replacing-a-vehicle), [Scenario format](concepts/scenario-format.md#charging-curve-v12): a preset scenario writes an explicit empty `attribution`, so a run over a connector holding an imported profile does not keep that profile's credit.
+
+## [2026-10-14] ingest | Vehicle profiles maintainer review (#458)
+
+- [Vehicle profiles → Resolution](concepts/vehicle-profiles.md#resolution-to-ev-settings): a DC maximum the user set is a limit — the curve is held at it (`CURVE_CAPPED_AT_DC_MAX`); the peak-wins rule applies to source data only.
+- [Open EV Directory](entities/open-ev-directory.md): answers are checked against the protocol limits in both modes (`invalid_response`), a 404 on the curves of a variant that answered is `invalid_response` rather than a removal, ids are restricted to `[A-Za-z0-9_-]` ([Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog): `invalid_params`), a key is never sent over plain http to another host, and same-origin-only redirects are pinned.

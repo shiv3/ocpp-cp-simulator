@@ -5,6 +5,10 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import Settings from "./Settings";
+import { Connector } from "../cp/domain/connector/Connector";
+import { buildSampledValues } from "../cp/domain/connector/MeterValueBuilder";
+import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import { Logger, LogLevel } from "../cp/shared/Logger";
 import type { EVSettings } from "../cp/domain/connector/EVSettings";
 
 /**
@@ -153,7 +157,7 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
     await act(async () => setInputValue(fractionInputs[0]!, "0.5"));
     await flush();
 
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
@@ -177,7 +181,7 @@ describe("Settings default EV settings panel — charging curve (#301)", () => {
 
     await act(async () => setInputValue(powerFactor, "0"));
     await flush();
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
@@ -210,7 +214,7 @@ describe("Settings electrical controls have accessible names (#301)", () => {
   });
 });
 
-describe("Apply saves the electrical model the panel is showing (#301)", () => {
+describe("Save saves the electrical model the panel is showing (#301)", () => {
   // With built-in defaults loaded, `currentType` / `phases` / `voltageV` /
   // `powerFactor` are all undefined while the controls display AC, 1, 230 and
   // 1. Saving them as undefined selected the pre-1.2 conversion, which reads
@@ -225,7 +229,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
     // the fallbacks the controls render.
     await act(async () => findButton(container, "Add point").click());
     await flush();
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     expect(setDefaultEvSettings).toHaveBeenCalledTimes(1);
@@ -265,7 +269,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
       ),
     };
 
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
@@ -284,7 +288,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
     const voltage = controlFor(container, "Voltage (V)") as HTMLInputElement;
     await act(async () => setInputValue(voltage, "400"));
     await flush();
-    await act(async () => findButton(container, "Apply").click());
+    await act(async () => findButton(container, "Save").click());
     await flush();
 
     const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
@@ -292,7 +296,7 @@ describe("Apply saves the electrical model the panel is showing (#301)", () => {
   });
 });
 
-describe("Apply is reachable from the default state (#301)", () => {
+describe("Save is reachable from the default state (#301)", () => {
   /**
    * Materializing the displayed model on Apply only helps if Apply can be
    * pressed. With no stored override — and straight after Reset — the draft
@@ -301,8 +305,7 @@ describe("Apply is reachable from the default state (#301)", () => {
    * connector kept the legacy no-model conversion, which reads an amp limit
    * with no `numberPhases` as three-phase and reports 48 A for a 16 A profile.
    */
-  const applyButton = (container: HTMLElement) =>
-    findButton(container, "Apply");
+  const applyButton = (container: HTMLElement) => findButton(container, "Save");
 
   it("enables Apply with no stored override, and saves the displayed model", async () => {
     setDefaultEvSettings = vi.fn();
@@ -375,5 +378,85 @@ describe("Settings reset all simulator data (#374)", () => {
 
     expect(resetAllState).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("database is locked");
+  });
+});
+
+describe("Default EV Settings replaces the vehicle (#458 review)", () => {
+  // A default saved from a profile, the page reopened: the form only knows
+  // the stored default.
+  it("drops a saved profile's curve, current type, phases and attribution for a preset", async () => {
+    storedDefaultEv = {
+      modelName: "Volkswagen ID.7 GTX",
+      batteryCapacityKwh: 86,
+      maxChargingPowerKw: 200,
+      initialSoc: 20,
+      targetSoc: 80,
+      currentType: "DC",
+      phases: 3,
+      chargingCurve: [
+        { socPercent: 0, powerFraction: 1 },
+        { socPercent: 90, powerFraction: 0.2 },
+      ],
+      attribution: [
+        {
+          text: "Contains data from EVDB",
+          licenseName: "CC BY-SA 4.0",
+          licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
+          shareAlike: true,
+        },
+      ],
+    };
+    setDefaultEvSettings = vi.fn();
+    const container = await renderSettings();
+    const select =
+      container.querySelector<HTMLSelectElement>("#default-ev-preset")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        "value",
+      )!.set!.call(select, "Tesla Model 3");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+    await act(async () => findButton(container, "Save").click());
+    await flush();
+
+    const applied = setDefaultEvSettings.mock.calls[0]![0] as EVSettings;
+    expect(applied).toMatchObject({
+      modelName: "Tesla Model 3",
+      batteryCapacityKwh: 75,
+      maxChargingPowerKw: 250,
+      // This page always saves the electrical model it displays; with the
+      // profile's gone, that is its own default.
+      currentType: "AC",
+      phases: 1,
+    });
+    expect(applied.chargingCurve ?? []).toEqual([]);
+    expect("attribution" in applied).toBe(false);
+
+    // Propagated to a connector still holding the profile's curve, it
+    // charges like the preset: flat at its maximum.
+    const connector = new Connector(1, new Logger(LogLevel.ERROR));
+    connector.evSettings = { ...storedDefaultEv! };
+    connector.applyDefaultEvSettings(applied);
+    connector.socMeterSyncEnabled = false;
+    connector.status = OCPPStatus.Charging;
+    connector.beginTransaction({
+      id: 1,
+      connectorId: 1,
+      tagId: "TAG",
+      meterStart: 0,
+      meterStop: null,
+      startTime: new Date("2026-10-12T00:00:00.000Z"),
+      stopTime: null,
+      meterSent: false,
+    });
+    connector.soc = 90;
+    const power = buildSampledValues(
+      connector,
+      ["Power.Active.Import"],
+      "Sample.Periodic",
+    ).find((sample) => sample.measurand === "Power.Active.Import")?.value;
+    expect(Number(power)).toBe(250_000);
   });
 });

@@ -9,9 +9,10 @@ import ScenarioRunPage from "./pages/ScenarioRunPage";
 import ScenarioRunsPage from "./pages/scenarios/runs/ScenarioRunsPage";
 import LogsPage from "./pages/LogsPage";
 import SettingsPage from "./pages/SettingsPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
 /**
- * Route tree for the new console. Exported without a top-level `<Router>`
+ * Route tree for the web console. Exported without a top-level `<Router>`
  * so tests can mount it inside their own `<MemoryRouter>` (see
  * `src/console/test/harness.tsx`).
  */
@@ -26,6 +27,7 @@ export const ConsoleRoutes: React.FC = () => (
       <Route path="/scenarios/runs" element={<ScenarioRunsPage />} />
       <Route path="/logs" element={<LogsPage />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Route>
   </Routes>
 );

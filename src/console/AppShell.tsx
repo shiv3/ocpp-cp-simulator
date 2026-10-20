@@ -6,16 +6,19 @@ import {
   Play,
   ScrollText,
   Settings as SettingsIcon,
-  SquarePen,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDataContext } from "../data/providers/DataProvider";
 import { useServerInfo } from "../data/hooks/useServerInfo";
+import {
+  REMOTE_HEALTH_TEXT,
+  useRemoteHealth,
+  type RemoteHealth,
+} from "../data/hooks/useRemoteHealth";
 import ThemeToggle from "../components/ThemeToggle";
 import AppBuildInfo from "../components/AppBuildInfo";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
-import { consolePath } from "./routes";
 
 interface NavItem {
   label: string;
@@ -24,52 +27,55 @@ interface NavItem {
   isActive: (pathname: string) => boolean;
 }
 
-// The console is mounted under `/v3`, so links go through `consolePath()` and
-// `isActive` matches against the `/v3`-prefixed pathname.
-//
 // "Charge Points" is the home screen (there's no separate Dashboard route —
 // the console root lists the charge points), and it also stays lit while the
 // operator is drilled into a specific CP at `/cp/:cpId`.
 const NAV_ITEMS: NavItem[] = [
   {
     label: "Charge Points",
-    to: consolePath("/"),
+    to: "/",
     icon: PlugZap,
-    isActive: (pathname) =>
-      pathname === consolePath("/") || pathname.startsWith(consolePath("/cp/")),
+    isActive: (pathname) => pathname === "/" || pathname.startsWith("/cp/"),
   },
   {
     label: "Scenarios",
-    to: consolePath("/scenarios"),
+    to: "/scenarios",
     icon: Play,
     isActive: (pathname) =>
-      pathname.startsWith(consolePath("/scenarios")) &&
-      !pathname.startsWith(consolePath("/scenarios/runs")),
+      pathname.startsWith("/scenarios") &&
+      !pathname.startsWith("/scenarios/runs"),
   },
   {
     label: "Run History",
-    to: consolePath("/scenarios/runs"),
+    to: "/scenarios/runs",
     icon: History,
-    isActive: (pathname) => pathname.startsWith(consolePath("/scenarios/runs")),
+    isActive: (pathname) => pathname.startsWith("/scenarios/runs"),
   },
   {
     label: "Message Log",
-    to: consolePath("/logs"),
+    to: "/logs",
     icon: ScrollText,
-    isActive: (pathname) => pathname.startsWith(consolePath("/logs")),
+    isActive: (pathname) => pathname.startsWith("/logs"),
   },
   {
     label: "Settings",
-    to: consolePath("/settings"),
+    to: "/settings",
     icon: SettingsIcon,
-    isActive: (pathname) => pathname.startsWith(consolePath("/settings")),
+    isActive: (pathname) => pathname.startsWith("/settings"),
   },
 ];
+
+const HEALTH_DOT: Record<RemoteHealth, string> = {
+  checking: "bg-cx-amber animate-pulse",
+  ok: "bg-cx-emerald",
+  down: "bg-cx-rose animate-pulse",
+};
 
 const AppShell: React.FC = () => {
   const location = useLocation();
   const { mode, serverUrl } = useDataContext();
   const serverInfo = useServerInfo();
+  const health = useRemoteHealth();
   const isRemote = mode === "remote";
 
   return (
@@ -79,14 +85,14 @@ const AppShell: React.FC = () => {
     // resetting each time a page mounts a fresh instance.
     <GlobalLogsProvider>
       <div className="flex h-screen">
-        <aside className="w-60 shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-cx-border bg-cx-side">
           <div className="flex items-center gap-2 px-4 py-4">
-            <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            <Zap className="h-6 w-6 text-cx-accent" />
             <div>
               <div className="text-sm font-semibold leading-tight">
                 CP Simulator
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 leading-tight">
+              <div className="font-mono text-[11px] leading-tight text-cx-faint">
                 OCPP 1.2–2.1
               </div>
             </div>
@@ -101,43 +107,56 @@ const AppShell: React.FC = () => {
                   to={to}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800",
-                    active &&
-                      "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 rounded-lg",
+                    "flex items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[13.5px] font-medium text-cx-muted hover:text-cx-fg",
+                    active && "bg-cx-sub text-cx-fg",
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className={cn("h-4 w-4", active && "text-cx-accent")} />
                   {label}
                 </Link>
               );
             })}
           </nav>
 
-          <div className="space-y-2 border-t border-gray-200 p-3 dark:border-gray-800">
+          <div className="space-y-2 border-t border-cx-border p-3 text-[11.5px] text-cx-faint">
             <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span
+                data-testid="mode-indicator"
+                title={
+                  isRemote
+                    ? `${serverUrl} — ${REMOTE_HEALTH_TEXT[health].reason}`
+                    : "Local mode: the simulator runs in this browser"
+                }
+                className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-cx-fg2"
+              >
+                {/* Remote: the daemon connection (#423). Local mode has no
+                    daemon, so its dot carries no status. */}
+                {isRemote ? (
+                  <span
+                    role="status"
+                    aria-label={REMOTE_HEALTH_TEXT[health].aria}
+                    className={cn(
+                      "h-[7px] w-[7px] rounded-full",
+                      HEALTH_DOT[health],
+                    )}
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    className="h-[7px] w-[7px] rounded-full bg-cx-emerald"
+                  />
+                )}
                 {isRemote ? "Remote mode" : "Local mode"}
               </span>
               <ThemeToggle />
             </div>
-            {/* Design switcher — mirrored on the classic UI's navbar so the
-                operator can hop between the two designs from either side.
-                The classic UI is served at the root. */}
-            <Link
-              to="/"
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              <SquarePen className="h-3.5 w-3.5" />
-              Switch to classic design
-            </Link>
             <div
-              className="truncate font-mono text-xs text-gray-500 dark:text-gray-400"
+              className="truncate font-mono text-[11.5px] text-cx-faint"
               title={serverUrl}
             >
               {serverUrl}
             </div>
-            {/* Same version line as the classic UI's footer (issue #364). */}
+            {/* Build and daemon version line (issue #364). */}
             <AppBuildInfo
               className="flex-wrap"
               daemonVersion={serverInfo?.version}
@@ -145,7 +164,9 @@ const AppShell: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-900">
+        {/* data-console-main: src/index.css gives it a right margin while a
+            side panel is open, so the page is not hidden under the panel. */}
+        <main data-console-main className="flex-1 overflow-y-auto bg-cx-bg">
           <Outlet />
         </main>
       </div>

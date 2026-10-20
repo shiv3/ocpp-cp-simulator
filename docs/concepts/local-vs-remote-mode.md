@@ -12,7 +12,9 @@ related:
   - ../entities/docker-image.md
   - state-persistence.md
   - control-plane.md
-updated: 2026-09-30
+  - vehicle-profiles.md
+  - ../entities/open-ev-directory.md
+updated: 2026-10-11
 ---
 
 # Local vs Remote mode (browser)
@@ -41,24 +43,41 @@ overridden.
   security profiles 2/3 and TLS files are daemon-only
   ([OCPP versions & transports](ocpp-versions-and-transports.md),
   [Security profiles](security-profiles.md)); [network simulation](network-simulation.md)
-  works in both modes from `/v3/settings`, but its RPC / MCP methods exist
+  works in both modes from `/settings`, but its RPC / MCP methods exist
   only on the daemon.
 - The **Reset all simulator data** button calls `state.reset` in Remote mode
   and clears the local DB in Local mode.
+- [Vehicle profiles](vehicle-profiles.md) (#458) work in both modes and are
+  stored where the charge points' state is (daemon or sql.js), but the
+  catalog is reached differently. Remote mode imports through the daemon's
+  `vehicle_catalog.*` methods with the key the daemon was started with; the
+  key never reaches the browser. Local mode calls
+  [Open EV Directory](../entities/open-ev-directory.md) from the tab with a
+  key you type, held in memory only, and only works if the API allows the
+  page's origin (CORS); otherwise the console points you to daemon mode.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
 - [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the
-  console's Expert tab calls the in-tab charge point in Local mode and
+  console's Expert section calls the in-tab charge point in Local mode and
   `send_ocpp_call` on the daemon in Remote mode, which is also the method the
   MCP tool and JSON-Lines mode use.
+- Scenarios run in both modes without depending on which page is open. In
+  Local mode each charge point's scenario runtime (`LocalScenarioRuntime`,
+  owned by the browser's data layer) loads the connector's saved scenarios,
+  fires status triggers and the connect / status auto-start, and reports runs
+  as `scenario-started` / `-node-execute` / `-completed` / `-error` /
+  `-wait-changed` events — the same events the daemon pushes, without a
+  `runId`. Before #411 that runtime lived in the classic UI's connector card:
+  with only the web console open, a Local-mode scenario could not run.
+  Auto-start follows the daemon's rules
+  ([Scenario format → start notes](scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)).
 - The scenario wait controls (extend / retry / continue, #240) work in both
   modes and refuse an idle scenario the same way. The run report that records
-  them (`interventions`) and the `scenario_wait_changed` event that refreshes
-  other consoles exist only on the daemon — Local mode has no run reports and
-  no scenario events.
+  them (`interventions`) exists only on the daemon — Local mode has no run
+  reports.
 - The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
-  run console's recorded history and the `/v3/scenarios/runs` page need Remote
-  mode. In Local mode the run console lists only the runs started or attached
+  run page's recorded history and the `/scenarios/runs` page need Remote
+  mode. In Local mode the run page lists only the runs started or attached
   while the page is open, and forgets them when it closes. This is a deferred
   part of #388, not a design choice: the browser runtime builds no run
   reports (the transcript capture, assertion evaluation and verdict live in

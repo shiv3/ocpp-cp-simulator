@@ -2,12 +2,10 @@ import type { ScenarioVerdict } from "../../../../cp/application/scenario/Scenar
 
 /** Verdict pill colours shared by the run history list and the run report. */
 export const VERDICT_STYLES: Record<ScenarioVerdict, string> = {
-  PASS: "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300",
-  FAIL: "border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300",
-  BLOCKED:
-    "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300",
-  SKIPPED:
-    "border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300",
+  PASS: "border-cx-emerald/40 text-cx-emerald",
+  FAIL: "border-cx-rose/40 text-cx-rose",
+  BLOCKED: "border-cx-amber/40 text-cx-amber",
+  SKIPPED: "border-cx-border-strong text-cx-fg2",
 };
 
 export function formatDurationMs(ms: number): string {

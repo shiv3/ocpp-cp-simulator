@@ -48,8 +48,7 @@ const fixtureConfig: ChargePointConfig = {
   imsi: "IMSI-1",
 };
 
-// Mirrors what `buildRemoteParams` (and, before it, TopPage.tsx's inline
-// `params` object) should produce from `fixtureConfig`.
+// What `buildRemoteParams` should produce from `fixtureConfig`.
 const expectedRemoteParams: CreateChargePointParams = {
   cpId: "CP-1",
   wsUrl: "ws://localhost:9000/CP-1",
@@ -101,7 +100,7 @@ function connectorSnapshot(
   };
 }
 
-type ActionResult = { current: Promise<void> | null };
+type ActionResult = { current: Promise<unknown> | null };
 
 /** Exposes `useCpConfigActions()`'s three actions via buttons, plus
  *  `useConfig().isLoading` (as a data attribute) so tests can wait for the

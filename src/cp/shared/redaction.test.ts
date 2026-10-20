@@ -190,3 +190,24 @@ describe("OCPP 2.0.1 SetVariables secrets (#396)", () => {
     expect(redactSensitiveValue(payload)).toEqual(payload);
   });
 });
+
+describe("vehicle catalog API keys (#458)", () => {
+  it("redacts a bearer token", () => {
+    expect(redactSensitiveText("Authorization: Bearer abc.def-123")).toBe(
+      `Authorization: Bearer ${REDACTED_VALUE}`,
+    );
+  });
+
+  it("redacts apiKey assignments and drops apiKey object fields", () => {
+    expect(redactSensitiveText('{"apiKey":"s3cret"}')).toBe(
+      `{"apiKey":"${REDACTED_VALUE}"}`,
+    );
+    expect(redactSensitiveText("api_key=s3cret")).toBe(
+      `api_key=${REDACTED_VALUE}`,
+    );
+    // Like every other sensitive key name, the field is dropped.
+    expect(redactSensitiveValue({ apiKey: "s3cret", name: "x" })).toEqual({
+      name: "x",
+    });
+  });
+});

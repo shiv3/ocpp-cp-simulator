@@ -1,3 +1,5 @@
+import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
@@ -29,6 +31,7 @@ import type { AutoMeterValueSetting } from "../../cp/domain/charge-point/ChargeP
 import type { Database } from "../../cp/domain/persistence/Database";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import type { ScenarioManager } from "../../cp/application/scenario/ScenarioManager";
+import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import {
   BootNotification,
@@ -50,7 +53,6 @@ import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
   BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
-  BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
@@ -64,6 +66,7 @@ import { LogLevel, LogType } from "../../cp/shared/Logger";
 import {
   getDefaultEVSettings,
   type EVSettings,
+  type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
@@ -196,6 +199,7 @@ export class LocalChargePointService implements ChargePointService {
     Set<(event: ChargePointEvent) => void>
   >();
   private readonly eventSubscriptions = new Map<string, Array<() => void>>();
+  private readonly scenarioRuntimes = new Map<string, LocalScenarioRuntime>();
 
   /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
    *  and per-connector availability. Passed through to every ChargePoint we
@@ -203,6 +207,7 @@ export class LocalChargePointService implements ChargePointService {
   private readonly configRepository: ConfigRepository;
   private readonly connectorSettingsRepository: ConnectorSettingsRepository;
   private readonly scenarioRepository: SqliteScenarioRepository;
+  private readonly vehicleProfiles: VehicleProfileRepository;
 
   constructor(
     private readonly database: Database | null = null,
@@ -213,6 +218,7 @@ export class LocalChargePointService implements ChargePointService {
       database,
     );
     this.scenarioRepository = new SqliteScenarioRepository(database);
+    this.vehicleProfiles = new VehicleProfileRepository(database);
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -227,10 +233,18 @@ export class LocalChargePointService implements ChargePointService {
 
     this.chargePoints.set(chargePoint.id, chargePoint);
     this.attachEventForwarders(chargePoint);
+    this.scenarioRuntimes.set(
+      chargePoint.id,
+      new LocalScenarioRuntime(chargePoint, this.scenarioRepository, (event) =>
+        this.emit(chargePoint.id, event),
+      ),
+    );
   }
 
   unregisterChargePoint(id: string): void {
     const cp = this.chargePoints.get(id);
+    this.scenarioRuntimes.get(id)?.dispose();
+    this.scenarioRuntimes.delete(id);
     if (cp) {
       cp.disconnect();
     }
@@ -288,6 +302,8 @@ export class LocalChargePointService implements ChargePointService {
     // will rebuild them from the (now empty) Config + scenario tables.
     const ids = Array.from(this.chargePoints.keys());
     for (const id of ids) this.unregisterChargePoint(id);
+    // Also reaches the in-memory store a service without a database keeps.
+    this.vehicleProfiles.clear();
     if (this.database) {
       resetSimulatorState(this.database);
       await this.database.flush?.();
@@ -295,6 +311,23 @@ export class LocalChargePointService implements ChargePointService {
 
     // Clear the networkSim atom to reset all network-sim configuration
     this.store.set(networkSimAtom, { version: 1, global: null, perCp: {} });
+  }
+
+  async listVehicleProfiles(): Promise<VehicleProfile[]> {
+    return this.vehicleProfiles.list();
+  }
+
+  async saveVehicleProfile(profile: VehicleProfile): Promise<VehicleProfile> {
+    const stored = this.vehicleProfiles.save(profile);
+    await this.database?.flush?.();
+    return stored;
+  }
+
+  async deleteVehicleProfile(id: string): Promise<void> {
+    if (!this.vehicleProfiles.delete(id)) {
+      throw new Error(`vehicle profile not found: ${id}`);
+    }
+    await this.database?.flush?.();
   }
 
   async clearStoredLogs(cpId: string): Promise<void> {
@@ -560,7 +593,7 @@ export class LocalChargePointService implements ChargePointService {
   async setEVSettings(
     id: string,
     connectorId: number,
-    settings: EVSettings,
+    settings: EVSettingsPatch,
   ): Promise<void> {
     // Explicit set (#105): marks the connector overridden so a later
     // Default EV Settings propagation doesn't clobber it.
@@ -800,7 +833,7 @@ export class LocalChargePointService implements ChargePointService {
         ...evSettings,
       };
     }
-    manager.loadScenarios([definition]);
+    manager.setScenario(definition);
     return { scenarioId: definition.id };
   }
 
@@ -809,8 +842,9 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     definition: ScenarioDefinition,
   ): Promise<{ scenarioId: string }> {
-    const manager = this.requireScenarioManager(id, connectorId);
-    manager.loadScenarios([definition]);
+    // Upsert, like the daemon: loading one definition must not unload the
+    // connector's other (e.g. status-triggered) scenarios.
+    this.requireScenarioManager(id, connectorId).setScenario(definition);
     return { scenarioId: definition.id };
   }
 
@@ -863,14 +897,7 @@ export class LocalChargePointService implements ChargePointService {
     opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
     const connectorId = opts.connectorId ?? 1;
-    const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
-    if (!manager) {
-      throw new UnsupportedFeatureError(
-        "browser_scenario_executor_unavailable",
-        BROWSER_SCENARIO_EXECUTOR_UNAVAILABLE_MESSAGE,
-      );
-    }
+    const manager = this.requireScenarioManager(id, connectorId);
     const template = getTemplateById(templateId);
     if (!template) throw new Error(`Unknown template: ${templateId}`);
     const definition = template.createScenario(id, connectorId);
@@ -881,13 +908,10 @@ export class LocalChargePointService implements ChargePointService {
       };
     }
     // #352: `once` loads the instance disabled so the connect-triggered
-    // walker never re-arms it. Note the browser never had #318's race — the
-    // ScenarioManager does not auto-start on load, and Connector.tsx's
-    // connect gate reads the persisted store, which this ephemeral instance
-    // never enters — so here the flag only keeps the instance's shape the
-    // same as the daemon's.
+    // auto-start never re-arms it (LocalScenarioRuntime walks every loaded
+    // definition, as the daemon does).
     if (opts.once) definition.enabled = false;
-    manager.loadScenarios([definition]);
+    manager.setScenario(definition);
     await manager.executeScenario(definition.id);
     return { scenarioId: definition.id };
   }

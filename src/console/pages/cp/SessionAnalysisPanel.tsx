@@ -181,13 +181,11 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
     <div className="space-y-4">
       <Card>
         <CardContent className="space-y-3 p-4">
-          <p className="text-sm text-gray-600 dark:text-gray-300">
+          <p className="text-sm text-cx-fg2">
             Snapshot this charge point&apos;s stored logs and run OCPP
             DebugKit&apos;s failure-pattern analysis in your browser.
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {ANALYZE_DISCLAIMER}
-          </p>
+          <p className="text-xs text-cx-muted">{ANALYZE_DISCLAIMER}</p>
           <Button
             type="button"
             size="sm"
@@ -197,7 +195,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
             {state.kind === "analyzing" ? "Analyzing…" : "Analyze"}
           </Button>
           {state.kind === "error" && (
-            <div className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">
+            <div className="rounded-md border border-cx-rose/40 bg-cx-rose/10 px-3 py-2 text-sm text-cx-rose">
               {state.message}
             </div>
           )}
@@ -208,7 +206,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
 
       {state.kind === "results" && (
         <div className="space-y-4">
-          <div className="text-sm text-gray-600 dark:text-gray-300">
+          <div className="text-sm text-cx-fg2">
             {state.data.events.length} events · {state.data.sessions.length}{" "}
             sessions · {state.data.failures.length} failures
             {state.data.warnings.length > 0

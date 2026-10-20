@@ -11,8 +11,8 @@ import * as ocpp from "../../types/OcppTypes";
  * restart a scenario that is already up.
  *
  * The arm must NOT survive the socket dying. Both auto-start engines --
- * `CLIChargePointService.tryAutoStartForConnector` (daemon) and the
- * `useEffect` in `src/components/Connector.tsx` (browser local mode) -- gate
+ * `CLIChargePointService.tryAutoStartForConnector` (daemon) and
+ * `LocalScenarioRuntime` (browser local mode) -- gate
  * on that key, so a stale arm means a reconnect never re-fires the scenario.
  * In the daemon that silently kills the CLI-bootstrapped RemoteStart
  * responder: the CP reconnects and boots, but nothing answers a

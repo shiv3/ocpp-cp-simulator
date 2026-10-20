@@ -24,7 +24,10 @@ import type {
   ScenarioTemplateInfo,
 } from "../data/interfaces/ChargePointService";
 import type { ChargePointStatus } from "./types";
-import type { EVSettings } from "../cp/domain/connector/EVSettings";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "../cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "../cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "../cp/domain/connector/Connector";
 import type {
@@ -174,7 +177,7 @@ export interface SingleCpCommandOps {
   continueScenarioWait(connectorId: number, scenarioId: string): Promise<void>;
   stopAllScenarios(connectorId: number): Promise<void>;
   removeScenario(connectorId: number, scenarioId: string): Promise<boolean>;
-  setEVSettings(connectorId: number, settings: EVSettings): Promise<void>;
+  setEVSettings(connectorId: number, settings: EVSettingsPatch): Promise<void>;
   getEVSettings(connectorId: number): Promise<EVSettings | null>;
   setAutoMeterValueConfig(
     connectorId: number,

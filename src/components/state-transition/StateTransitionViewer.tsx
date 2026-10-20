@@ -636,8 +636,8 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
 /**
  * Inner ReactFlow canvas. Lives behind a ReactFlowProvider so it can pull
  * `useReactFlow().fitView()` and call it whenever its container actually
- * gains a non-zero size — the tab strip in ConnectorSidePanel renders
- * this view with `display: none` on first paint, so ReactFlow's initial
+ * gains a non-zero size — a tab strip can render this view with
+ * `display: none` on first paint, so ReactFlow's initial
  * `fitView` measures a 0×0 container and leaves the diagram floating
  * off-center once the tab is finally shown. The ResizeObserver below
  * catches that "first real layout" moment and refits exactly once;

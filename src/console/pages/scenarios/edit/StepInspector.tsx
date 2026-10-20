@@ -35,7 +35,7 @@ export interface StepInspectorProps {
 }
 
 /**
- * Right-hand panel of the linear scenario editor: renders the registry form
+ * The scenario editor's step inspector: renders the registry form
  * for whichever step is selected (Task 7 brief — `entry.Component` reused
  * verbatim outside ReactFlow), plus a common Label/Description section that
  * every step type gets regardless of whether its own form surfaces those
@@ -49,7 +49,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
     return (
       <EmptyState
         title="Select a step"
-        hint="Pick a step from the list on the left to edit its configuration."
+        hint="Pick a step to edit its configuration."
       />
     );
   }
@@ -73,13 +73,14 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
     setIsCurveModalOpen(false);
   };
 
+  // Two columns once the inspector is wide enough (under the steps in the
+  // side panel), one beside the steps on the page: a container query, since
+  // the window width says nothing about where the inspector sits.
   return (
-    <div className="space-y-4">
-      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-        {entry.title}
-      </h2>
+    <div data-testid="step-inspector" className="@container space-y-4">
+      <h2 className="text-base font-semibold text-cx-fg">{entry.title}</h2>
 
-      <div className="space-y-3 border-b border-gray-100 pb-4 dark:border-gray-800">
+      <div className="grid grid-cols-1 gap-3 border-b border-cx-border pb-4 @lg:grid-cols-2">
         <TextField
           label="Label"
           value={(formValue.label as string | undefined) ?? ""}
@@ -95,11 +96,16 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
         />
       </div>
 
-      <Form
-        value={formValue}
-        onChange={handleFormChange}
-        onOpenMeterCurve={() => setIsCurveModalOpen(true)}
-      />
+      {/* The registry forms stack their fields in one `space-y-3` div: lay
+          that div out as the same grid, a textarea (JSON, payloads) across
+          both columns. */}
+      <div className="@lg:[&>div]:grid @lg:[&>div]:grid-cols-2 @lg:[&>div]:gap-3 @lg:[&>div>*]:my-0 @lg:[&>div>*:has(textarea)]:col-span-2">
+        <Form
+          value={formValue}
+          onChange={handleFormChange}
+          onOpenMeterCurve={() => setIsCurveModalOpen(true)}
+        />
+      </div>
 
       {isCurveModalOpen && (
         <Suspense fallback={null}>

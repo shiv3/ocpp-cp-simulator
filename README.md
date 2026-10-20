@@ -4,14 +4,13 @@
 
 OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CSMS development. Comes with a browser UI, a headless CLI, and a Socket.IO control API that any agent or script can drive. Also speaks OCPP 2.0.1 / 2.1 (WebSocket) and OCPP 1.2 / 1.5 / 1.6S (SOAP).
 
-| Interface       | Description                                             | Docs                                                                                      |
-| --------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Browser**     | Classic console (default, at `/`) / Tauri desktop app   | [Web console](docs/entities/web-console.md) · [Desktop app](docs/entities/desktop-app.md) |
-| **New console** | Redesigned console (React + Tailwind), served at `/v3`  | [Web console → Layout](docs/entities/web-console.md#layout-route-prefixes)                |
-| **CLI**         | Headless mode for scripting, CI, and AI integration     | [CLI](docs/entities/cli.md)                                                               |
-| **Server**      | Long-running Socket.IO server, multi-CP per process     | [Daemon](docs/entities/daemon.md) · [Control plane](docs/concepts/control-plane.md)       |
-| **Docker**      | Pre-built image (daemon + web console) on GHCR          | [Docker image](docs/entities/docker-image.md)                                             |
-| **MCP**         | `POST /mcp` tools for Claude Code and other MCP clients | [MCP endpoint](docs/entities/mcp-endpoint.md)                                             |
+| Interface   | Description                                             | Docs                                                                                      |
+| ----------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Browser** | Web console at `/` / Tauri desktop app                  | [Web console](docs/entities/web-console.md) · [Desktop app](docs/entities/desktop-app.md) |
+| **CLI**     | Headless mode for scripting, CI, and AI integration     | [CLI](docs/entities/cli.md)                                                               |
+| **Server**  | Long-running Socket.IO server, multi-CP per process     | [Daemon](docs/entities/daemon.md) · [Control plane](docs/concepts/control-plane.md)       |
+| **Docker**  | Pre-built image (daemon + web console) on GHCR          | [Docker image](docs/entities/docker-image.md)                                             |
+| **MCP**     | `POST /mcp` tools for Claude Code and other MCP clients | [MCP endpoint](docs/entities/mcp-endpoint.md)                                             |
 
 ![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
 
@@ -81,8 +80,8 @@ ocpp-cp-sim --http-port 5172 --web-console \
 `docs/` is organized as an [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f): an interlinked knowledge base maintained by an LLM agent under the schema in [`CLAUDE.md`](CLAUDE.md).
 
 - **Start here:** [Overview](docs/overview.md) · [Index of all pages](docs/index.md) · [Choosing an interface](docs/analyses/choosing-an-interface.md)
-- **Entities** — [CLI](docs/entities/cli.md), [analyze](docs/entities/analyze.md), [Daemon](docs/entities/daemon.md), [Web console](docs/entities/web-console.md), [Desktop app](docs/entities/desktop-app.md), [Docker image](docs/entities/docker-image.md), [MCP endpoint](docs/entities/mcp-endpoint.md), [Scenario templates](docs/entities/scenario-templates.md), [CSMS peers](docs/entities/csms-peers.md)
-- **Concepts** — [Control plane](docs/concepts/control-plane.md), [Scenario format](docs/concepts/scenario-format.md), [Trace format](docs/concepts/trace-format.md), [State persistence](docs/concepts/state-persistence.md), [Log format](docs/concepts/log-format.md), [Network simulation](docs/concepts/network-simulation.md), [Access control](docs/concepts/access-control.md), [OCPP versions & transports](docs/concepts/ocpp-versions-and-transports.md), [Security profiles](docs/concepts/security-profiles.md), [Local vs Remote mode](docs/concepts/local-vs-remote-mode.md)
+- **Entities** — [CLI](docs/entities/cli.md), [analyze](docs/entities/analyze.md), [Daemon](docs/entities/daemon.md), [Web console](docs/entities/web-console.md), [Desktop app](docs/entities/desktop-app.md), [Docker image](docs/entities/docker-image.md), [MCP endpoint](docs/entities/mcp-endpoint.md), [Scenario templates](docs/entities/scenario-templates.md), [CSMS peers](docs/entities/csms-peers.md), [Open EV Directory](docs/entities/open-ev-directory.md)
+- **Concepts** — [Control plane](docs/concepts/control-plane.md), [Scenario format](docs/concepts/scenario-format.md), [Trace format](docs/concepts/trace-format.md), [State persistence](docs/concepts/state-persistence.md), [Log format](docs/concepts/log-format.md), [Network simulation](docs/concepts/network-simulation.md), [Access control](docs/concepts/access-control.md), [OCPP versions & transports](docs/concepts/ocpp-versions-and-transports.md), [Security profiles](docs/concepts/security-profiles.md), [Local vs Remote mode](docs/concepts/local-vs-remote-mode.md), [Vehicle profiles](docs/concepts/vehicle-profiles.md)
 - **Analyses** — [Driving from an AI agent](docs/analyses/driving-from-an-ai-agent.md), [REST → Socket.IO migration](docs/analyses/rest-to-socketio-migration.md), [Testing strategy](docs/analyses/testing-strategy.md)
 - **Sources** — summaries of the raw inputs (JSON schemas, example files, sibling READMEs, issues): [docs/sources/](docs/index.md#sources-sources)
 

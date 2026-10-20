@@ -24,14 +24,13 @@ const NetworkSimBadge: React.FC<NetworkSimBadgeProps> = ({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-        "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200",
+        "inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-medium text-cx-fg2",
         className,
       )}
       title="Network simulation enabled"
       aria-label="Network simulation enabled"
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-cx-purple" />
       Net sim
     </span>
   );

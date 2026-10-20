@@ -29,6 +29,8 @@ import {
   type UnlockOutcomeNodeData,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+// Type-only: stepLayout imports this module's helpers at runtime.
+import type { StepLayout } from "./stepLayout";
 
 /**
  * Maps a scenario graph (`nodes`/`edges`) to an ordered, list-editable
@@ -232,6 +234,192 @@ export function moveStep(
     steps.splice(toIndex, 0, moved);
   }
   return rebuildLinearScenario(def, steps);
+}
+
+/** A lane of a `StepLayout`: the main chain, or a branch by its index. */
+export type StepLane = "main" | number;
+
+/** The editable shape behind a supported `StepLayout`: the chain, then the
+ *  branches of its one fork (null without a fork). An empty branch is an
+ *  edge from the fork node straight to END. */
+interface LaneShape {
+  main: ScenarioNode[];
+  branches: ScenarioNode[][] | null;
+}
+
+function laneShape(layout: StepLayout): LaneShape {
+  return {
+    main: [...layout.main],
+    branches: layout.fork
+      ? layout.fork.branches.map((branch) => [...branch.steps])
+      : null,
+  };
+}
+
+const BRANCH_SPACING_X = 280;
+
+/**
+ * Rebuilds `nodes`/`edges` from a chain plus at most one fork, the shape
+ * `deriveStepLayout` reads back: START → main… → fork node (the last main
+ * step, else START) → each branch → END. Without branches this is
+ * `rebuildLinearScenario`. Branches are laid out side by side under the fork
+ * so the graph editor shows them as lanes. Never mutates its inputs.
+ */
+function rebuildLaneScenario(
+  def: ScenarioDefinition,
+  shape: LaneShape,
+): ScenarioDefinition {
+  const branches = shape.branches;
+  if (!branches || branches.length === 0) {
+    return rebuildLinearScenario(def, shape.main);
+  }
+  const startNode =
+    findNodeByType(def.nodes, ScenarioNodeType.START) ??
+    createDefaultNode(ScenarioNodeType.START);
+  const endNode =
+    findNodeByType(def.nodes, ScenarioNodeType.END) ??
+    createDefaultNode(ScenarioNodeType.END);
+
+  const nodes: ScenarioNode[] = [];
+  const place = (node: ScenarioNode, x: number, row: number) =>
+    nodes.push({ ...node, position: { x, y: row * 120 } });
+  place(startNode, 250, 0);
+  shape.main.forEach((node, i) => place(node, 250, i + 1));
+  const firstBranchRow = shape.main.length + 1;
+  branches.forEach((steps, b) => {
+    const x = 250 + (b - (branches.length - 1) / 2) * BRANCH_SPACING_X;
+    steps.forEach((node, i) => place(node, x, firstBranchRow + i));
+  });
+  const longest = Math.max(...branches.map((steps) => steps.length));
+  place(endNode, 250, firstBranchRow + longest);
+
+  const edges: Edge[] = [];
+  const link = (source: ScenarioNode, target: ScenarioNode) =>
+    edges.push({
+      id: crypto.randomUUID(),
+      source: source.id,
+      target: target.id,
+    });
+  const chain = [startNode, ...shape.main];
+  for (let i = 0; i < chain.length - 1; i++) link(chain[i], chain[i + 1]);
+  const forkNode = chain[chain.length - 1];
+  for (const steps of branches) {
+    const lane = [forkNode, ...steps, endNode];
+    for (let i = 0; i < lane.length - 1; i++) link(lane[i], lane[i + 1]);
+  }
+
+  return { ...def, nodes, edges, updatedAt: new Date().toISOString() };
+}
+
+/** Where a step sits in a layout: its lane, its index there, and the lane's
+ *  length (for move bounds). Null when the node is not a step of it. */
+export function findStepLane(
+  layout: StepLayout,
+  nodeId: string,
+): { lane: StepLane; index: number; length: number } | null {
+  const mainIndex = layout.main.findIndex((n) => n.id === nodeId);
+  if (mainIndex !== -1) {
+    return { lane: "main", index: mainIndex, length: layout.main.length };
+  }
+  const branches = layout.fork?.branches ?? [];
+  for (const [lane, branch] of branches.entries()) {
+    const index = branch.steps.findIndex((n) => n.id === nodeId);
+    if (index !== -1) return { lane, index, length: branch.steps.length };
+  }
+  return null;
+}
+
+function laneSteps(shape: LaneShape, lane: StepLane): ScenarioNode[] | null {
+  if (lane === "main") return shape.main;
+  return shape.branches?.[lane] ?? null;
+}
+
+/**
+ * Inserts a new step of `type` at `index` of one lane of `layout` (the
+ * layout of `def`). `index` is clamped to the lane. Inserting at the end of
+ * the main chain of a forked scenario makes the new step the fork node. An
+ * unsupported layout (or an unknown lane) returns `def` unchanged.
+ */
+export function insertLaneStep(
+  def: ScenarioDefinition,
+  layout: StepLayout,
+  lane: StepLane,
+  index: number,
+  type: ScenarioNodeType,
+): ScenarioDefinition {
+  if (!layout.supported) return def;
+  const shape = laneShape(layout);
+  const steps = laneSteps(shape, lane);
+  if (!steps) return def;
+  const clamped = Math.max(0, Math.min(index, steps.length));
+  steps.splice(clamped, 0, createDefaultNode(type));
+  return rebuildLaneScenario(def, shape);
+}
+
+/** Moves a step `delta` places within its own lane (`-1` up, `1` down, more
+ *  for a drag); a target past the lane's edge is a no-op — a move never
+ *  crosses lanes. */
+export function moveLaneStep(
+  def: ScenarioDefinition,
+  layout: StepLayout,
+  nodeId: string,
+  delta: number,
+): ScenarioDefinition {
+  if (!layout.supported) return def;
+  const found = findStepLane(layout, nodeId);
+  if (!found) return def;
+  const target = found.index + delta;
+  if (delta === 0 || target < 0 || target >= found.length) return def;
+  const shape = laneShape(layout);
+  const steps = laneSteps(shape, found.lane)!;
+  const [moved] = steps.splice(found.index, 1);
+  steps.splice(target, 0, moved);
+  return rebuildLaneScenario(def, shape);
+}
+
+/**
+ * Removes a step from its lane. A branch left empty is dropped, and when a
+ * single branch remains it folds into the chain (a one-branch fork is just a
+ * chain).
+ */
+export function removeLaneStep(
+  def: ScenarioDefinition,
+  layout: StepLayout,
+  nodeId: string,
+): ScenarioDefinition {
+  if (!layout.supported) return def;
+  const found = findStepLane(layout, nodeId);
+  if (!found) return def;
+  const shape = laneShape(layout);
+  laneSteps(shape, found.lane)!.splice(found.index, 1);
+  if (found.lane !== "main" && shape.branches) {
+    if (shape.branches[found.lane].length === 0) {
+      shape.branches.splice(found.lane, 1);
+    }
+    if (shape.branches.length === 1) {
+      shape.main.push(...shape.branches[0]);
+      shape.branches = null;
+    }
+  }
+  return rebuildLaneScenario(def, shape);
+}
+
+/**
+ * Adds a branch holding one Delay step. A forked scenario gets one more lane
+ * from its fork node; a chain gets a fork at its last step (START when it has
+ * none), whose first branch is the chain's own (empty) continuation to END.
+ */
+export function addParallelBranch(
+  def: ScenarioDefinition,
+  layout: StepLayout,
+): ScenarioDefinition {
+  if (!layout.supported) return def;
+  const shape = laneShape(layout);
+  const delay = createDefaultNode(ScenarioNodeType.DELAY);
+  shape.branches = shape.branches
+    ? [...shape.branches, [delay]]
+    : [[], [delay]];
+  return rebuildLaneScenario(def, shape);
 }
 
 export function updateStepData(

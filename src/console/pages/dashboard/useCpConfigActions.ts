@@ -16,16 +16,17 @@ import { getTemplateById } from "../../../utils/scenarioTemplates";
 export interface UseCpConfigActionsResult {
   addCp: (cpConfig: ChargePointConfig) => Promise<void>;
   updateCp: (cpConfig: ChargePointConfig) => Promise<void>;
-  removeCp: (cpId: string) => Promise<void>;
+  /** Resolves `true` once the charge point is gone; `false` when the
+   *  removal failed (the operator has been told). */
+  removeCp: (cpId: string) => Promise<boolean>;
 }
 
 /**
- * CP create/update/remove, mirroring `TopPage.tsx`'s `handleSaveChargePoint`
- * / `handleDeleteChargePoint` exactly so the console's Add/Edit/Remove
- * behave identically to the classic UI in both local and remote mode. This
- * hook is self-contained (no params) so both Dashboard (Add CP) and the CP
- * detail page (Edit CP, task 5) can call it independently — each mounts its
- * own `useConfig`/`useChargePoints` instance, same as `TopPage` does.
+ * CP create/update/remove in both local and remote mode (ported from the
+ * classic UI, retired by #426). This hook is self-contained (no params) so
+ * both Dashboard (Add CP) and the CP detail page (Edit CP) can call it
+ * independently — each mounts its own `useConfig`/`useChargePoints`
+ * instance.
  */
 export function useCpConfigActions(): UseCpConfigActionsResult {
   const { mode, chargePointService } = useDataContext();
@@ -33,8 +34,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
   const { tagIds: tagIDs } = useGlobalTagIds();
   const { refresh } = useChargePoints(config, { isLoading });
 
-  // Mirrors TopPage.tsx's inline `params` object (handleSaveChargePoint,
-  // ~lines 171-212) — same shape is used for both create and update.
+  // The same shape is used for both create and update.
   const buildRemoteParams = useCallback(
     (cpConfig: ChargePointConfig): CreateChargePointParams => ({
       cpId: cpConfig.cpId,
@@ -72,8 +72,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     [],
   );
 
-  // Mirrors TopPage.tsx's post-save auto-meter-value block
-  // (handleSaveChargePoint, ~lines 218-262): the Add/Edit form exposes
+  // The Add/Edit form exposes
   // auto-meter settings that createChargePoint/updateChargePoint's request
   // body has no field for, so apply them per-connector after the CP exists.
   const applyAutoMeterValueDefaults = useCallback(
@@ -127,10 +126,9 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     [chargePointService],
   );
 
-  // Mirrors TopPage.tsx's remote branch of handleSaveChargePoint (~lines
-  // 162-272): same create-vs-update dispatch, same auto-meter follow-up,
-  // same refresh + alert-on-failure error handling (errors are reported to
-  // the operator, not rethrown — the returned promise always resolves).
+  // Create-vs-update dispatch, then the auto-meter follow-up, then a
+  // refresh; errors are reported to the operator with an alert, not
+  // rethrown — the returned promise always resolves.
   const saveRemote = useCallback(
     async (cpConfig: ChargePointConfig, isEdit: boolean) => {
       try {
@@ -164,8 +162,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     ],
   );
 
-  // Mirrors TopPage.tsx's brand-new-local-CP scenario seeding (~lines
-  // 320-340): pre-loads the Essential CP Behavior template on every
+  // A brand-new local CP: pre-loads the Essential CP Behavior template on every
   // connector so the editor opens with the canonical demo flow already
   // loaded. Edits intentionally skip this.
   const seedEssentialTemplate = useCallback(
@@ -187,12 +184,11 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     [chargePointService],
   );
 
-  // Mirrors TopPage.tsx's local branch of handleSaveChargePoint (~lines
-  // 274-340): only `Experimental.ChargePointIDs` (cpId + connector count)
+  // Only `Experimental.ChargePointIDs` (cpId + connector count)
   // actually varies per CP in local mode — every other field (wsURL,
   // vendor, ocppVersion, boot notification, ...) is a single config shared
   // by all local CPs, so it's simply overwritten with the saved form's
-  // values, exactly as TopPage does.
+  // values.
   const saveLocal = useCallback(
     async (cpConfig: ChargePointConfig, isNew: boolean) => {
       try {
@@ -298,9 +294,8 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
     [mode, saveRemote, saveLocal],
   );
 
-  // Mirrors TopPage.tsx's handleDeleteChargePoint (~lines 343-379).
   const removeCp = useCallback(
-    async (cpId: string) => {
+    async (cpId: string): Promise<boolean> => {
       if (mode === "remote") {
         try {
           if (!chargePointService.removeChargePoint) {
@@ -308,27 +303,32 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           }
           await chargePointService.removeChargePoint(cpId);
           await refresh();
+          return true;
         } catch (err) {
           console.error("Failed to remove remote CP", err);
           alert(
             `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
           );
+          return false;
         }
-        return;
       }
 
       try {
         const existingIds = config?.Experimental?.ChargePointIDs ?? [];
+        // Also covers a configuration that has not loaded yet: filtering an
+        // empty list would "remove" the last CP and save no configuration
+        // at all, deleting every charge point.
+        if (!config || !existingIds.some((e) => e.ChargePointID === cpId)) {
+          throw new Error(`Charge point "${cpId}" is not in the configuration`);
+        }
         const nextIds = existingIds.filter(
           (entry) => entry.ChargePointID !== cpId,
         );
 
         if (nextIds.length === 0) {
           await persistConfig(null);
-          return;
+          return true;
         }
-
-        if (!config) return;
 
         const newConfig: SimulatorConfigInput = {
           ...config,
@@ -338,6 +338,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           },
         };
         await persistConfig(newConfig);
+        return true;
       } catch (err) {
         // Same operator-facing contract as the remote branch above, so a
         // local storage failure doesn't become an unhandled rejection.
@@ -345,6 +346,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         alert(
           `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
         );
+        return false;
       }
     },
     [mode, chargePointService, refresh, config, tagIDs, persistConfig],

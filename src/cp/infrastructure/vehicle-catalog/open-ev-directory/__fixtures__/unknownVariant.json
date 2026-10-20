@@ -1,0 +1,9 @@
+{
+  "detail": "No variant with id 'var_0000000000000000'",
+  "id": "var_0000000000000000",
+  "instance": "/v1/variants/var_0000000000000000",
+  "resource": "variant",
+  "status": 404,
+  "title": "Variant not found",
+  "type": "/problems/not-found"
+}

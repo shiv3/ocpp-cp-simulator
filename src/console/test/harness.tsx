@@ -4,8 +4,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 
 import { ConsoleRoutes } from "../ConsoleApp";
-import { CONSOLE_BASENAME, consolePath } from "../routes";
 import { DarkModeProvider } from "../../contexts/DarkModeContext";
+import LocationReporter, { type ReportedLocation } from "./LocationReporter";
 import { DataContext } from "../../data/providers/DataProvider";
 import type {
   ChargePointEvent,
@@ -122,6 +122,8 @@ export function createFakeChargePointService(
   return service as unknown as FakeChargePointService;
 }
 
+export type { ReportedLocation };
+
 export interface RenderConsoleResult<S extends ChargePointService> {
   container: HTMLElement;
   root: Root;
@@ -134,16 +136,20 @@ export interface RenderConsoleResult<S extends ChargePointService> {
  * with `DarkModeProvider` since `AppShell` (mounted on every route) renders
  * `ThemeToggle`, which needs it.
  *
- * The console is mounted at `/v3/*` (mirroring `App.tsx`), so `initialPath`
- * is given console-relative (`/`, `/settings`, `/cp/:id`, …) and is
- * prefixed here — matching how the app's in-console links resolve via
- * `consolePath()`.
+ * The console is mounted at `/*`, as in `App.tsx`; `initialPath` is the
+ * route to open (`/`, `/settings`, `/cp/:id`, …). `onLocationChange` (optional)
+ * is called with the router's location after every navigation, so a test can
+ * assert on the URL (`?cp=…`) without reading it from the DOM.
  */
 export async function renderConsole<
   S extends ChargePointService = FakeChargePointService,
 >(
   initialPath: string,
-  opts?: { service?: S; mode?: "local" | "remote" },
+  opts?: {
+    service?: S;
+    mode?: "local" | "remote";
+    onLocationChange?: (location: ReportedLocation) => void;
+  },
 ): Promise<RenderConsoleResult<S>> {
   const service = (opts?.service ?? createFakeChargePointService()) as S;
   const mode = opts?.mode ?? "remote";
@@ -154,7 +160,10 @@ export async function renderConsole<
 
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[consolePath(initialPath)]}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        {opts?.onLocationChange && (
+          <LocationReporter onChange={opts.onLocationChange} />
+        )}
         <DarkModeProvider>
           <DataContext.Provider
             value={{
@@ -166,10 +175,7 @@ export async function renderConsole<
             }}
           >
             <Routes>
-              <Route
-                path={`${CONSOLE_BASENAME}/*`}
-                element={<ConsoleRoutes />}
-              />
+              <Route path="/*" element={<ConsoleRoutes />} />
             </Routes>
           </DataContext.Provider>
         </DarkModeProvider>

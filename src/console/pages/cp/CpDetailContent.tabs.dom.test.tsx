@@ -586,6 +586,7 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     ).toEqual([
       "Message log",
       "Transactions",
+      "Operational events",
       "Session analysis",
       "Diagnostics",
       "Expert",
@@ -593,7 +594,7 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     ]);
     expect(
       sectionTabs(document.body).map((t) => t.getAttribute("aria-selected")),
-    ).toEqual(["true", "false", "false", "false", "false", "false"]);
+    ).toEqual(["true", "false", "false", "false", "false", "false", "false"]);
   });
 
   it("the page root has a scroll area with the bottom panel after it", async () => {

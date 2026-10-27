@@ -72,15 +72,25 @@ const StateTransitionViewer = lazy(
   () => import("@/components/state-transition/StateTransitionViewer"),
 );
 const SessionAnalysisPanel = lazy(() => import("./SessionAnalysisPanel"));
+const OperationalTimelinePanel = lazy(
+  () => import("./OperationalTimelinePanel"),
+);
 
 /** What the lower half shows (`?tab=`); `log` is the default and has no param. */
 type Section =
-  "log" | "transactions" | "analysis" | "diagnostics" | "expert" | "network";
+  | "log"
+  | "transactions"
+  | "events"
+  | "analysis"
+  | "diagnostics"
+  | "expert"
+  | "network";
 
 /** The lower half's tabs, in order; `log` is the default. */
 const SECTIONS: ReadonlyArray<{ value: Section; label: string }> = [
   { value: "log", label: "Message log" },
   { value: "transactions", label: "Transactions" },
+  { value: "events", label: "Operational events" },
   { value: "analysis", label: "Session analysis" },
   { value: "diagnostics", label: "Diagnostics" },
   { value: "expert", label: "Expert" },
@@ -823,6 +833,20 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
         {section === "transactions" && (
           <section>
             <TransactionsTab cpId={cpId} />
+          </section>
+        )}
+
+        {section === "events" && (
+          <section>
+            <Suspense
+              fallback={
+                <div className="p-6 text-sm text-cx-muted">
+                  Loading operational events…
+                </div>
+              }
+            >
+              <OperationalTimelinePanel cpId={cpId} />
+            </Suspense>
           </section>
         )}
 

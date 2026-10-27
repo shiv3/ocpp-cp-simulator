@@ -15,7 +15,8 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/vehicle-profiles.md
   - open-ev-directory.md
-updated: 2026-10-11
+  - ../concepts/operational-timeline.md
+updated: 2026-10-27
 ---
 
 # Web console (browser UI)
@@ -295,8 +296,8 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   scrolls in its own area (`data-testid="cp-scroll-area"`); the page itself
   does not scroll, and the panel stays put. Its **header bar** holds an
   underline tab strip (`role="tablist"`, _Charge point sections_): **Message
-  log** (the default), **Transactions**, **Session analysis**,
-  **Diagnostics**, **Expert** and **Network simulation** (only when the
+  log** (the default), **Transactions**, **Operational events**, **Session
+  analysis**, **Diagnostics**, **Expert** and **Network simulation** (only when the
   charge point has network simulation, that is, its snapshot's `networkSim`
   is not `null`); the arrow keys, Home and End move along it, and the strip
   scrolls sideways when it does not fit. At the right end of the bar sit the
@@ -328,7 +329,7 @@ parameters keep the view across the full page and the panel:
 | Parameter        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `?connector=<n>` | The selected connector. Absent, or naming a connector the charge point does not have (for example a removed one), the first connector is selected. In the panel it is the tab shown; on the full page it marks that card (an accent ring, `data-selected`) and scrolls it into view on load; a click anywhere inside a card's frame selects it, except on its own controls (buttons, links, inputs, selects, switches), which act instead. It is also what the run panel (`?run=`) and the Diagnostics select use. Selecting one replaces the history entry. |
-| `?tab=<section>` | The bottom panel's tab: `transactions`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes.                                                                                                                                                                                                                                                                                                                                            |
+| `?tab=<section>` | The bottom panel's tab: `transactions`, `events`, `analysis`, `diagnostics`, `expert` or `network`. Absent (or any other value) is the message log. The panel drops it when another charge point opens or the panel closes.                                                                                                                                                                                                                                                                                                                                  |
 
 On the full page a click on a card's header (the title, status and
 availability, not its **Config** / **Controls** buttons) selects that
@@ -583,6 +584,28 @@ filter.
 The viewer replaced the compact one-line-per-message list the charge point
 page used since the redesign. The run page shows no message log, so a run's
 traffic is read here or on the Message Log page.
+
+#### Operational events tab
+
+The bottom panel's **Operational events** tab (`?tab=events`, #448) renders the
+charge point's [operational timeline](../concepts/operational-timeline.md),
+oldest first: a table of time (local, to the millisecond), the entry's kind as
+a badge (faults and rejections red, recovery green, connection events blue),
+connector and summary, under a `<n> events` count and a **Refresh** button.
+Entries of a network-fault incident carry a red left border, and the
+incident's `recovery_completed` summary gives the recovery time. An entry
+attributed to a scenario run has a **View run** link to the
+[run history](#scenario-runs-panel-and-page)
+(`/scenarios/runs?run=<runId>&runCp=<cpId>`).
+
+The tab reads the timeline when it opens and re-reads it, debounced, whenever
+the charge point reports an event that can add an entry; log lines, meter
+values, SoC and heartbeats do not trigger a read. An entry that comes with no
+console event (an authorization rejection) shows on the next re-read or on
+**Refresh**. A failed read shows the error instead of an empty table. Local
+mode reads the in-browser charge point directly; it has no scenario entries
+and no run links. Not to be confused with **Session analysis**, which rebuilds
+a session from the OCPP message log.
 
 ### Message Log page
 
@@ -1095,6 +1118,9 @@ ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
   [scenario format](../concepts/scenario-format.md); load the built-in
   [scenario templates](scenario-templates.md), including the `cert16-*`
   certification flows.
+- Follow a charge point's [operational timeline](../concepts/operational-timeline.md):
+  connection loss, injected network faults and their recovery time, status
+  changes, transactions, authorization rejections and scenario runs.
 - View the message log and download it as JSON Lines in the shared
   [log format](../concepts/log-format.md) (the same shape the daemon writes
   and the [trace adapter](../concepts/trace-format.md#producing-records) consumes).

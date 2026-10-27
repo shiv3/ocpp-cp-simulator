@@ -8,7 +8,7 @@ related:
   - ../log.md
   - ../analyses/fleet-load-and-observability-roadmap.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # Source: GitHub issues referenced by the wiki
@@ -108,4 +108,5 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #311                                             | A reusable `VehicleProfile` shared by traffic and MeterValues — closed, folded into #327                                                                                      | [Vehicle profiles](../concepts/vehicle-profiles.md)                                                                                                                                                                                                                                         |
 | #327                                             | One resolved operating point per tick from one vehicle profile (open; not part of #458)                                                                                       | [Vehicle profiles](../concepts/vehicle-profiles.md)                                                                                                                                                                                                                                         |
 | #458                                             | Import vehicle profiles from Open EV Directory with per-user API keys; `vehicle_profiles` table, `vehicle_*` RPCs, `rate_limited` / `unavailable`                             | [Vehicle profiles](../concepts/vehicle-profiles.md), [Open EV Directory](../entities/open-ev-directory.md), [Control plane](../concepts/control-plane.md#vehicle-profiles-and-catalog)                                                                                                      |
+| #448                                             | Operational event and fault timeline: per-CP in-memory projection, fault incidents with recovery time, `timeline.get`, `get_timeline`, console tab                            | [Operational timeline](../concepts/operational-timeline.md), [Network simulation](../concepts/network-simulation.md#faults-on-the-operational-timeline), [Web console](../entities/web-console.md#operational-events-tab)                                                                   |
 | juherr/open-ev-directory#10 / #14                | Open EV Directory: individual API keys, `Authorization: Bearer` (shipped) / self-service key page (open: keys are operator-provisioned)                                       | [Open EV Directory](../entities/open-ev-directory.md)                                                                                                                                                                                                                                       |

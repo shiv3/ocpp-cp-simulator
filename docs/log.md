@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # Log
@@ -1629,3 +1629,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Vehicle profiles → Resolution](concepts/vehicle-profiles.md#resolution-to-ev-settings): a DC maximum the user set is a limit — the curve is held at it (`CURVE_CAPPED_AT_DC_MAX`); the peak-wins rule applies to source data only.
 - [Open EV Directory](entities/open-ev-directory.md): answers are checked against the protocol limits in both modes (`invalid_response`), a 404 on the curves of a variant that answered is `invalid_response` rather than a removal, ids are restricted to `[A-Za-z0-9_-]` ([Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog): `invalid_params`), a key is never sent over plain http to another host, and same-origin-only redirects are pinned.
+
+## [2026-10-27] ingest | Operational timeline (#448)
+
+- New [Operational timeline](concepts/operational-timeline.md): the canonical kind table (format `1.0`), entry shape, `seq` ordering, the incident / recovery contract (connected, BootNotification Accepted, every connector back to its pre-fault status), run attribution (daemon only), in-memory retention of 1000 entries per charge point, and limits (no smart-charging entries yet).
+- [Control plane](concepts/control-plane.md#daemon-methods): `timeline.get` row; an unknown `cpId` is `not_found`, unlike `logs.get`.
+- [Network simulation](concepts/network-simulation.md#faults-on-the-operational-timeline): a disconnect rule firing is recorded as `network_fault_injected` and opens an incident; log lines unchanged.
+- [Web console](entities/web-console.md#operational-events-tab): **Operational events** tab (`?tab=events`), added to the tab list, the `?tab=` table and "What the console can do".
+- [MCP endpoint](entities/mcp-endpoint.md): curated `get_timeline` tool (22 curated tools); count also updated in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md).
+- [Index](index.md), [GitHub issues](sources/github-issues.md) (#448).

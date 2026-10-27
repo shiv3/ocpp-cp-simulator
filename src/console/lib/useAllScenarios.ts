@@ -184,3 +184,10 @@ export function buildRunHistoryUrl(
   params.set("scenario", scenarioId);
   return `/scenarios/runs?${params.toString()}`;
 }
+
+/** One recorded run on the run history page (#388): a runId is unique per
+ *  charge point only, so the link names both (`?run=&runCp=`). */
+export function buildRunUrl(cpId: string, runId: string): string {
+  const params = new URLSearchParams({ run: runId, runCp: cpId });
+  return `/scenarios/runs?${params.toString()}`;
+}

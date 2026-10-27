@@ -122,12 +122,9 @@ describe("OperationalTimeline (#448)", () => {
   it("filters by connector, run, incident and kinds, and reports the filtered total", () => {
     const timeline = new OperationalTimeline("CP-1");
     timeline.record({ kind: "connected", summary: "" });
-    timeline.record({
-      kind: "connector_status",
-      connectorId: 1,
-      incidentId: "inc-1",
-      summary: "",
-    });
+    timeline.setActiveIncident("inc-1");
+    timeline.record({ kind: "connector_status", connectorId: 1, summary: "" });
+    timeline.setActiveIncident(null);
     timeline.record({ kind: "connector_status", connectorId: 2, summary: "" });
     timeline.record({
       kind: "scenario_started",
@@ -159,13 +156,13 @@ describe("OperationalTimeline (#448)", () => {
     expect(timeline.query({ limit: 2 }).total).toBe(5);
   });
 
-  it("returns copies, so a caller cannot rewrite history", () => {
+  it("hands out frozen entries, so a caller cannot rewrite history", () => {
     const timeline = new OperationalTimeline("CP-1");
     timeline.record({ kind: "connected", summary: "Connected", data: {} });
 
     const [entry] = timeline.query().entries;
-    (entry!.data as Record<string, unknown>).tampered = true;
 
-    expect(timeline.query().entries[0]?.data).toEqual({});
+    expect(Object.isFrozen(entry)).toBe(true);
+    expect(Object.isFrozen(entry!.data)).toBe(true);
   });
 });

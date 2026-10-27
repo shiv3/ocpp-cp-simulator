@@ -8,8 +8,9 @@ interface Incident {
   readonly startedAt: number;
   /** Status each connector had when the fault fired. */
   readonly expected: ReadonlyMap<number, string>;
-  connected: boolean;
-  bootAccepted: boolean;
+  /** Connection since the fault: socket down, socket up, or up with a
+   *  BootNotification the CSMS accepted on it. */
+  link: "down" | "up" | "booted";
 }
 
 /**
@@ -24,33 +25,25 @@ interface Incident {
  */
 export class OperationalTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
-  private readonly connectorUnsubscribes = new Map<number, () => void>();
   private incident: Incident | null = null;
-  private lastCpStatus: string;
 
   constructor(
     private readonly timeline: OperationalTimeline,
     events: EventEmitter<ChargePointEvents>,
     private readonly connectors: ReadonlyMap<number, Connector>,
-    initialCpStatus: string,
-    private readonly newIncidentId: () => string = () => crypto.randomUUID(),
   ) {
-    this.lastCpStatus = initialCpStatus;
     const on = <K extends keyof ChargePointEvents>(
       event: K,
       listener: (data: ChargePointEvents[K]) => void,
     ) => this.unsubscribes.push(events.on(event, listener));
 
     on("connected", () => {
-      if (this.incident) this.incident.connected = true;
+      if (this.incident) this.incident.link = "up";
       this.timeline.record({ kind: "connected", summary: "Connected" });
       this.checkRecovery();
     });
     on("disconnected", ({ code, reason }) => {
-      if (this.incident) {
-        this.incident.connected = false;
-        this.incident.bootAccepted = false;
-      }
+      if (this.incident) this.incident.link = "down";
       this.timeline.record({
         kind: "disconnected",
         summary: `Disconnected (code ${code}${reason ? `: ${reason}` : ""})`,
@@ -65,8 +58,8 @@ export class OperationalTimelineProjector {
       });
     });
     on("bootNotificationResult", ({ status, interval }) => {
-      if (this.incident?.connected && status === "Accepted") {
-        this.incident.bootAccepted = true;
+      if (this.incident?.link === "up" && status === "Accepted") {
+        this.incident.link = "booted";
       }
       this.timeline.record({
         kind: "boot_notification",
@@ -75,14 +68,12 @@ export class OperationalTimelineProjector {
       });
       this.checkRecovery();
     });
-    on("statusChange", ({ status }) => {
-      if (status === this.lastCpStatus) return;
-      const from = this.lastCpStatus;
-      this.lastCpStatus = status;
+    on("statusChange", ({ status, previousStatus }) => {
+      if (status === previousStatus) return;
       this.timeline.record({
         kind: "status_change",
-        summary: `Charge point ${from} → ${status}`,
-        data: { from, to: status },
+        summary: `Charge point ${previousStatus} → ${status}`,
+        data: { from: previousStatus, to: status },
       });
     });
     on("connectorStatusChange", ({ connectorId, status, previousStatus }) => {
@@ -96,17 +87,15 @@ export class OperationalTimelineProjector {
       this.checkRecovery();
     });
     on("networkFaultInjected", ({ ruleId, ruleType, reconnectDelayMs }) => {
-      const id = this.newIncidentId();
       this.incident = {
         ruleId,
         startedAt: this.timeline.now(),
         expected: new Map(
           [...this.connectors].map(([cid, c]) => [cid, c.status]),
         ),
-        connected: false,
-        bootAccepted: false,
+        link: "down",
       };
-      this.timeline.setActiveIncident(id);
+      this.timeline.setActiveIncident(crypto.randomUUID());
       this.timeline.record({
         kind: "network_fault_injected",
         summary: `Network fault injected by rule ${ruleId} (${ruleType}, reconnect blocked ${formatSeconds(reconnectDelayMs)})`,
@@ -152,38 +141,28 @@ export class OperationalTimelineProjector {
         data: { status, stopped },
       });
     });
-    on("connectorRemoved", ({ connectorId }) => {
-      this.connectorUnsubscribes.get(connectorId)?.();
-      this.connectorUnsubscribes.delete(connectorId);
-    });
 
+    // A removed connector is disposed, which drops this listener with it.
     for (const [connectorId, connector] of connectors) {
-      this.connectorUnsubscribes.set(
-        connectorId,
-        connector.events.on("transactionIdChange", ({ transactionId }) => {
-          this.timeline.record({
-            kind: "transaction_id_assigned",
-            connectorId,
-            summary: `CSMS assigned transaction id ${transactionId}`,
-            data: { transactionId },
-          });
-        }),
-      );
+      connector.events.on("transactionIdChange", ({ transactionId }) => {
+        this.timeline.record({
+          kind: "transaction_id_assigned",
+          connectorId,
+          summary: `CSMS assigned transaction id ${transactionId}`,
+          data: { transactionId },
+        });
+      });
     }
   }
 
   dispose(): void {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
-    for (const unsubscribe of this.connectorUnsubscribes.values()) {
-      unsubscribe();
-    }
     this.unsubscribes.length = 0;
-    this.connectorUnsubscribes.clear();
   }
 
   private checkRecovery(): void {
     const incident = this.incident;
-    if (!incident?.connected || !incident.bootAccepted) return;
+    if (incident?.link !== "booted") return;
     for (const [connectorId, status] of incident.expected) {
       const connector = this.connectors.get(connectorId);
       if (connector && connector.status !== status) return;

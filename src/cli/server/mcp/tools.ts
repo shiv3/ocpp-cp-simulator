@@ -17,10 +17,6 @@ import {
   TRANSACTION_EVENT_TRIGGER_REASONS,
 } from "../../../cp/domain/connector/Transaction";
 import type { RuntimeSocketIoDeps } from "../socketServer";
-import {
-  TIMELINE_DEFAULT_CAPACITY,
-  TIMELINE_KINDS,
-} from "../../../cp/application/services/OperationalTimeline";
 
 function successResult(data: unknown): ToolCallResult {
   return {
@@ -633,6 +629,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  const timeline = METHODS["timeline.get"].params.shape;
   mcp.tool("get_timeline", {
     description:
       "Retrieve a charge point's operational timeline (#448): normalized, " +
@@ -642,43 +639,28 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       "are ordered by `seq`; entries of one fault share an `incidentId` and " +
       "`recovery_completed` reports `durationMs`. Windowed like get_logs: " +
       "`limit` takes the newest N, `offset` pages backwards.",
+    // The method's own fields, so the tool advertises what it enforces.
     inputSchema: z.object({
-      cpId: z.string().describe("Charge point identifier"),
-      connectorId: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe("Only entries about this connector"),
-      runId: z
-        .string()
-        .optional()
-        .describe("Only entries attributed to this scenario run"),
-      incidentId: z
-        .string()
-        .optional()
-        .describe("Only entries of this network-fault incident"),
-      kinds: z
-        .array(z.enum(TIMELINE_KINDS))
-        .optional()
-        .describe("Only these entry kinds"),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(TIMELINE_DEFAULT_CAPACITY)
-        .optional()
-        .describe("Number of most-recent matching entries to return"),
-      offset: z
-        .number()
-        .int()
-        .min(0)
-        .optional()
-        .describe("Skip this many of the newest entries before taking `limit`"),
-      order: z
-        .enum(["asc", "desc"])
-        .optional()
-        .describe("'asc' (oldest first, default) or 'desc' (newest first)"),
+      cpId: timeline.cpId.describe("Charge point identifier"),
+      connectorId: timeline.connectorId.describe(
+        "Only entries about this connector",
+      ),
+      runId: timeline.runId.describe(
+        "Only entries attributed to this scenario run",
+      ),
+      incidentId: timeline.incidentId.describe(
+        "Only entries of this network-fault incident",
+      ),
+      kinds: timeline.kinds.describe("Only these entry kinds"),
+      limit: timeline.limit.describe(
+        "Number of most-recent matching entries to return",
+      ),
+      offset: timeline.offset.describe(
+        "Skip this many of the newest entries before taking `limit`",
+      ),
+      order: timeline.order.describe(
+        "'asc' (oldest first, default) or 'desc' (newest first)",
+      ),
     }),
     handler: async (args) => {
       try {

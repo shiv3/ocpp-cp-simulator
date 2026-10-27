@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { selectLogWindow } from "../logWindow";
+import { selectLogWindow } from "../../../cp/shared/window";
 
 /**
  * `logs.get {limit}` used to answer with the OLDEST N entries, so on a charge

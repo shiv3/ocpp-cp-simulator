@@ -2,10 +2,15 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 
-import type { TimelineKind } from "@/cp/application/services/OperationalTimeline";
+import type {
+  TimelineEntry,
+  TimelineKind,
+} from "@/cp/application/services/OperationalTimeline";
 import { cn } from "@/lib/utils";
 
 import EmptyState from "../../components/EmptyState";
+import { buildRunUrl } from "../../lib/useAllScenarios";
+import { formatLogTime } from "../../lib/useGlobalLogs";
 import { useOperationalTimeline } from "../../lib/useOperationalTimeline";
 
 export interface OperationalTimelinePanelProps {
@@ -33,11 +38,50 @@ const TONE_CLASS: Record<Tone, string> = {
   neutral: "border-cx-border bg-cx-sub text-cx-fg2",
 };
 
-function formatTime(timestamp: string): string {
-  const date = new Date(timestamp);
-  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
-}
+/** An entry never changes for a given `seq`, so a re-read (or a loading
+ *  flag flip) re-renders only the rows it adds. */
+const TimelineRow = React.memo(function TimelineRow({
+  entry,
+}: {
+  entry: TimelineEntry;
+}) {
+  return (
+    <tr
+      data-testid="timeline-row"
+      data-kind={entry.kind}
+      data-incident={entry.incidentId}
+      className={cn(
+        entry.incidentId !== undefined && "border-l-2 border-l-cx-rose/60",
+      )}
+    >
+      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-cx-fg2">
+        {formatLogTime(new Date(entry.timestamp), { milliseconds: true })}
+      </td>
+      <td className="px-3 py-2">
+        <span
+          className={cn(
+            "inline-block rounded-full border px-2 font-mono text-[11px] leading-5",
+            TONE_CLASS[TONE_BY_KIND[entry.kind] ?? "neutral"],
+          )}
+        >
+          {entry.kind}
+        </span>
+      </td>
+      <td className="px-3 py-2 text-cx-fg2">{entry.connectorId ?? "—"}</td>
+      <td className="px-3 py-2 text-cx-fg2">
+        {entry.summary}
+        {entry.runId !== undefined && (
+          <Link
+            to={buildRunUrl(entry.cpId, entry.runId)}
+            className="ml-2 text-xs text-cx-accent hover:underline"
+          >
+            View run
+          </Link>
+        )}
+      </td>
+    </tr>
+  );
+});
 
 /**
  * The charge point's operational timeline (#448): connection loss and
@@ -102,47 +146,7 @@ const OperationalTimelinePanel: React.FC<OperationalTimelinePanelProps> = ({
             </thead>
             <tbody className="divide-y divide-cx-border">
               {page.entries.map((entry) => (
-                <tr
-                  key={entry.seq}
-                  data-testid="timeline-row"
-                  data-kind={entry.kind}
-                  data-incident={entry.incidentId}
-                  className={cn(
-                    entry.incidentId !== undefined &&
-                      "border-l-2 border-l-cx-rose/60",
-                  )}
-                >
-                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-cx-fg2">
-                    {formatTime(entry.timestamp)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={cn(
-                        "inline-block rounded-full border px-2 font-mono text-[11px] leading-5",
-                        TONE_CLASS[TONE_BY_KIND[entry.kind] ?? "neutral"],
-                      )}
-                    >
-                      {entry.kind}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-cx-fg2">
-                    {entry.connectorId ?? "—"}
-                  </td>
-                  <td className="px-3 py-2 text-cx-fg2">
-                    {entry.summary}
-                    {entry.runId !== undefined && (
-                      <Link
-                        to={`/scenarios/runs?${new URLSearchParams({
-                          run: entry.runId,
-                          runCp: entry.cpId,
-                        })}`}
-                        className="ml-2 text-xs text-cx-accent hover:underline"
-                      >
-                        View run
-                      </Link>
-                    )}
-                  </td>
-                </tr>
+                <TimelineRow key={entry.seq} entry={entry} />
               ))}
             </tbody>
           </table>

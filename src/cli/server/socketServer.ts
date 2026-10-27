@@ -101,7 +101,7 @@ import {
 } from "../../utils/blueprints";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
-import { selectLogWindow } from "./logWindow";
+import { selectLogWindow } from "../../cp/shared/window";
 import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
 import {
   parseCreateBody,

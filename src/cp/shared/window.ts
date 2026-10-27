@@ -1,5 +1,5 @@
 /**
- * Windowing for `logs.get`.
+ * Windowing for `logs.get`, shared by `timeline.get` (#448).
  *
  * `listStoredLogs` returns a charge point's whole log buffer in chronological
  * order (`ORDER BY id ASC`). `logs.get` used to answer a `limit` with

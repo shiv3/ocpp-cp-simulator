@@ -9,6 +9,8 @@
  * rules are documented in `docs/concepts/operational-timeline.md`.
  */
 
+import { selectLogWindow, type LogWindowOptions } from "../../shared/window";
+
 /** Bumped by minor for additive changes; consumers ignore unknown kinds. */
 export const TIMELINE_FORMAT_VERSION = "1.0";
 
@@ -57,21 +59,16 @@ export interface TimelineRecord {
   summary: string;
   connectorId?: number;
   runId?: string;
-  incidentId?: string;
   data?: Record<string, unknown>;
 }
 
-export interface TimelineQuery {
+/** Exact-match filters, then the `logs.get` window over the matching
+ *  entries (`limit` = newest N, `offset` pages back, `order`). */
+export interface TimelineQuery extends LogWindowOptions {
   connectorId?: number;
   runId?: string;
   incidentId?: string;
   kinds?: TimelineKind[];
-  /** How many entries to return: the newest N of the filtered set. */
-  limit?: number;
-  /** How many of the newest filtered entries to skip before `limit`. */
-  offset?: number;
-  /** Order of the returned window. Default `"asc"` (oldest first). */
-  order?: "asc" | "desc";
 }
 
 export interface TimelinePage {
@@ -135,8 +132,9 @@ export class OperationalTimeline {
       (record.connectorId !== undefined
         ? this.activeRuns.get(record.connectorId)?.at(-1)
         : undefined);
-    const incidentId = record.incidentId ?? this.activeIncident ?? undefined;
-    const entry: TimelineEntry = {
+    const incidentId = this.activeIncident ?? undefined;
+    // Frozen, so `query` can hand entries out without copying them.
+    const entry: TimelineEntry = Object.freeze({
       seq: this.nextSeq++,
       timestamp: new Date(this.now()).toISOString(),
       kind: record.kind,
@@ -147,8 +145,8 @@ export class OperationalTimeline {
       ...(runId !== undefined && { runId }),
       ...(incidentId !== undefined && { incidentId }),
       summary: record.summary,
-      data: { ...record.data },
-    };
+      data: Object.freeze({ ...record.data }),
+    });
     this.entries.push(entry);
     if (this.entries.length > this.capacity) {
       this.entries.splice(0, this.entries.length - this.capacity);
@@ -166,23 +164,8 @@ export class OperationalTimeline {
         (query.incidentId === undefined || e.incidentId === query.incidentId) &&
         (kinds === null || kinds.has(e.kind)),
     );
-
-    // Same windowing as `logs.get`: drop the newest `offset`, then take the
-    // newest `limit` of what is left.
-    const skipNewest = Math.max(0, Math.floor(query.offset ?? 0));
-    const candidates = matching.slice(
-      0,
-      Math.max(0, matching.length - skipNewest),
-    );
-    const window =
-      query.limit === undefined
-        ? candidates
-        : candidates.slice(
-            Math.max(0, candidates.length - Math.floor(query.limit)),
-          );
-    const copies = window.map((e) => ({ ...e, data: { ...e.data } }));
     return {
-      entries: query.order === "desc" ? copies.reverse() : copies,
+      entries: selectLogWindow(matching, query),
       total: matching.length,
     };
   }

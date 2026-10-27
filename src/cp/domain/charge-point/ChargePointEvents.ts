@@ -36,7 +36,11 @@ export interface NetworkFaultInjected {
  */
 export interface ChargePointEvents {
   // Status events
-  statusChange: { status: OCPPStatus; message?: string };
+  statusChange: {
+    status: OCPPStatus;
+    previousStatus: OCPPStatus;
+    message?: string;
+  };
   error: { error: string };
 
   // Connection events

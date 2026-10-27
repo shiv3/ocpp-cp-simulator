@@ -121,7 +121,7 @@ describe("OperationalTimelinePanel", () => {
     await act(async () => tab!.click());
     await waitFor(() => rows(container).length === 4, "timeline rows");
 
-    expect(getOperationalTimeline).toHaveBeenCalledWith("CP-1", undefined);
+    expect(getOperationalTimeline).toHaveBeenCalledWith("CP-1");
     expect(rows(container).map((r) => r.dataset.kind)).toEqual([
       "connector_status",
       "network_fault_injected",

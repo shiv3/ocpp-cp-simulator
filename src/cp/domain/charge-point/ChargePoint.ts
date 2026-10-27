@@ -375,10 +375,10 @@ export class ChargePoint {
         cpoName,
         tls,
       );
-      this._webSocket.onSimulatedDisconnect((fault) =>
+      this._webSocket.observers.on("simulatedDisconnect", (fault) =>
         this._events.emit("networkFaultInjected", fault),
       );
-      this._webSocket.onReconnectScheduled((info) =>
+      this._webSocket.observers.on("reconnectScheduled", (info) =>
         this._events.emit("reconnecting", info),
       );
       const supervisionUrls = transportOptions.supervisionUrls;
@@ -439,7 +439,6 @@ export class ChargePoint {
       this._timeline,
       this._events,
       this._connectors,
-      this._status,
     );
 
     this._connectors.forEach((connector, connectorId) => {
@@ -1628,6 +1627,7 @@ export class ChargePoint {
   }
 
   set status(newStatus: ChargePointStatus) {
+    const previousStatus = this._status;
     this._status = newStatus;
     if (newStatus === OCPPStatus.Unavailable) {
       // §4.9 note says CP-level (connectorId=0) and individual connector
@@ -1657,7 +1657,7 @@ export class ChargePoint {
         });
       });
     }
-    this._events.emit("statusChange", { status: newStatus });
+    this._events.emit("statusChange", { status: newStatus, previousStatus });
     this._stateManager.transitionChargePointStatus(newStatus, {
       source: "boundary-setter",
       timestamp: new Date(),
@@ -1999,7 +1999,7 @@ export class ChargePoint {
       }
       const previousStatus = this._status;
       this._status = status;
-      this._events.emit("statusChange", { status });
+      this._events.emit("statusChange", { status, previousStatus });
       this._stateManager.transitionChargePointStatus(status, {
         source: "connector-0-update",
         timestamp: new Date(),

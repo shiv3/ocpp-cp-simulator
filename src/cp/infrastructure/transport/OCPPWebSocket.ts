@@ -48,6 +48,17 @@ import {
   type DisconnectRuleType,
 } from "./network-sim";
 import type { NetworkFaultInjected } from "../../domain/charge-point/ChargePointEvents";
+import { EventEmitter } from "../../shared/EventEmitter";
+
+/** #448: what the transport reports to observers (the charge point). A
+ *  throwing listener is caught by the emitter, never by the transport. */
+export interface TransportObserverEvents {
+  /** A network-sim disconnect rule fired; emitted before the close. */
+  simulatedDisconnect: NetworkFaultInjected;
+  /** A reconnect was scheduled; emitted once the close that caused it has
+   *  been handed to the `onclose` callback. */
+  reconnectScheduled: { attempt: number; delayMs: number };
+}
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -173,10 +184,7 @@ export class OCPPWebSocket {
   private _urlPool: SupervisionUrlPool | null = null;
   private _onCloseTransactionCallback:
     ((finalized: GenerationToken) => void) | null = null;
-  private _onSimulatedDisconnectCallback:
-    ((fault: NetworkFaultInjected) => void) | null = null;
-  private _onReconnectScheduledCallback:
-    ((info: { attempt: number; delayMs: number }) => void) | null = null;
+  readonly observers = new EventEmitter<TransportObserverEvents>();
   private _pendingReconnectNotice: { attempt: number; delayMs: number } | null =
     null;
   private _disposed: boolean = false;
@@ -283,8 +291,7 @@ export class OCPPWebSocket {
       // observer sees the disconnect before the reconnect it causes.
       const notice = this._pendingReconnectNotice;
       this._pendingReconnectNotice = null;
-      if (notice)
-        this.notifyObserver(this._onReconnectScheduledCallback, notice);
+      if (notice) this.observers.emit("reconnectScheduled", notice);
     };
 
     // Resolving here, per attempt, is what keeps the URL list out of
@@ -406,21 +413,6 @@ export class OCPPWebSocket {
    */
   public onCloseTransaction(cb: (finalized: GenerationToken) => void): void {
     this._onCloseTransactionCallback = cb;
-  }
-
-  /** #448: observe a network-sim disconnect rule firing, before the close. */
-  public onSimulatedDisconnect(
-    cb: (fault: NetworkFaultInjected) => void,
-  ): void {
-    this._onSimulatedDisconnectCallback = cb;
-  }
-
-  /** #448: observe each reconnect the transport schedules, once the close
-   *  that caused it has been handed to the `onclose` callback. */
-  public onReconnectScheduled(
-    cb: (info: { attempt: number; delayMs: number }) => void,
-  ): void {
-    this._onReconnectScheduledCallback = cb;
   }
 
   public sendAction(
@@ -595,7 +587,7 @@ export class OCPPWebSocket {
 
     // Observers learn of the fault while the socket is still up, so the
     // `disconnected` that follows can be attributed to this rule.
-    this.notifyObserver(this._onSimulatedDisconnectCallback, {
+    this.observers.emit("simulatedDisconnect", {
       ruleId,
       ruleType,
       reconnectDelayMs,
@@ -966,18 +958,5 @@ export class OCPPWebSocket {
       );
       this.connect();
     }, actualDelay);
-  }
-
-  /** An observer that throws must not break the transport. */
-  private notifyObserver<T>(cb: ((value: T) => void) | null, value: T): void {
-    if (!cb) return;
-    try {
-      cb(value);
-    } catch (error) {
-      this._logger.error(
-        `Connection observer threw: ${String(error)}`,
-        LogType.WEBSOCKET,
-      );
-    }
   }
 }

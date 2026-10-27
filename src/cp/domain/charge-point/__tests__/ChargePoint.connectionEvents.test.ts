@@ -53,11 +53,10 @@ describe("ChargePoint connection events (#448)", () => {
     const attempts: unknown[] = [];
     cp.events.on("reconnecting", (info) => attempts.push(info));
 
-    (
-      cp["_webSocket"] as unknown as {
-        _onReconnectScheduledCallback: (info: unknown) => void;
-      }
-    )._onReconnectScheduledCallback({ attempt: 1, delayMs: 1000 });
+    cp["_webSocket"]!.observers.emit("reconnectScheduled", {
+      attempt: 1,
+      delayMs: 1000,
+    });
 
     expect(attempts).toEqual([{ attempt: 1, delayMs: 1000 }]);
   });

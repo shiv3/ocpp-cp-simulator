@@ -2700,57 +2700,40 @@ export class CLIChargePointService {
    *  it. `startRun` attributes the connector's later entries to the run;
    *  `finalizeScenarioRun` ends it. */
   private recordScenarioOnTimeline(evt: CLIEvent): void {
-    const timeline = this._chargePoint.timeline;
+    let detail: { summary: string; data?: Record<string, unknown> };
     switch (evt.event) {
-      case "scenario_started": {
-        const { connectorId, scenarioId, runId } = evt.data;
-        timeline.startRun(connectorId, runId);
-        timeline.record({
-          kind: "scenario_started",
-          connectorId,
-          runId,
-          summary: `Scenario ${scenarioId} started`,
-          data: { scenarioId },
-        });
-        return;
-      }
-      case "scenario_wait_changed": {
-        const { connectorId, scenarioId, runId, nodeId, kind } = evt.data;
-        timeline.record({
-          kind: "scenario_wait_changed",
-          connectorId,
-          runId,
-          summary: `Scenario ${scenarioId}: wait on ${nodeId} ${kind}`,
-          data: { scenarioId, nodeId, kind },
-        });
-        return;
-      }
+      case "scenario_started":
+        this._chargePoint.timeline.startRun(
+          evt.data.connectorId,
+          evt.data.runId,
+        );
+        detail = { summary: "started" };
+        break;
+      case "scenario_wait_changed":
+        detail = {
+          summary: `wait on ${evt.data.nodeId} ${evt.data.kind}`,
+          data: { nodeId: evt.data.nodeId, kind: evt.data.kind },
+        };
+        break;
       case "scenario_error": {
-        const { connectorId, scenarioId, runId, error } = evt.data;
-        const redacted = redactSensitiveText(error);
-        timeline.record({
-          kind: "scenario_error",
-          connectorId,
-          runId,
-          summary: `Scenario ${scenarioId} failed: ${redacted}`,
-          data: { scenarioId, error: redacted },
-        });
-        return;
+        const error = redactSensitiveText(evt.data.error);
+        detail = { summary: `failed: ${error}`, data: { error } };
+        break;
       }
-      case "scenario_completed": {
-        const { connectorId, scenarioId, runId } = evt.data;
-        timeline.record({
-          kind: "scenario_completed",
-          connectorId,
-          runId,
-          summary: `Scenario ${scenarioId} completed`,
-          data: { scenarioId },
-        });
-        return;
-      }
+      case "scenario_completed":
+        detail = { summary: "completed" };
+        break;
       default:
         return;
     }
+    const { connectorId, scenarioId, runId } = evt.data;
+    this._chargePoint.timeline.record({
+      kind: evt.event,
+      connectorId,
+      runId,
+      summary: `Scenario ${scenarioId} ${detail.summary}`,
+      data: { scenarioId, ...detail.data },
+    });
   }
 
   private attachEventForwarders(): void {

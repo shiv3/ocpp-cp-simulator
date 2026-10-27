@@ -851,7 +851,7 @@ describe("OCPPWebSocket Network Simulation", () => {
         rules: { cut: { type: "manual-disconnect", reconnectDelayMs: 750 } },
       });
       const seen: Array<{ fault: unknown; socketOpen: boolean }> = [];
-      ws.onSimulatedDisconnect((fault) => {
+      ws.observers.on("simulatedDisconnect", (fault) => {
         seen.push({ fault, socketOpen: fakeWs.readyState === WebSocket.OPEN });
       });
 
@@ -871,7 +871,7 @@ describe("OCPPWebSocket Network Simulation", () => {
 
     it("reports each scheduled reconnect with its attempt and delay", () => {
       const scheduled: Array<{ attempt: number; delayMs: number }> = [];
-      ws.onReconnectScheduled((info) => scheduled.push(info));
+      ws.observers.on("reconnectScheduled", (info) => scheduled.push(info));
 
       ws.simulateConnectionLoss(5000, "cut", "manual-disconnect");
 
@@ -883,7 +883,9 @@ describe("OCPPWebSocket Network Simulation", () => {
       const observed = new OCPPWebSocket("ws://localhost:8080", "CP-2", logger);
       observed.connect(undefined, () => order.push("close"));
       (observed as unknown as WebSocketTestAccess)._ws.simulateOpen();
-      observed.onReconnectScheduled(() => order.push("reconnect"));
+      observed.observers.on("reconnectScheduled", () =>
+        order.push("reconnect"),
+      );
 
       observed.simulateConnectionLoss(1000, "cut", "manual-disconnect");
 

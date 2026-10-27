@@ -62,12 +62,9 @@ export function useOperationalTimeline(
     }
     setIsLoading(true);
     try {
-      const result = await chargePointService.getOperationalTimeline!(
-        cpId,
-        undefined,
-      );
+      const result = await chargePointService.getOperationalTimeline!(cpId);
       if (requestId !== requestIdRef.current) return;
-      setPage(result ?? EMPTY_PAGE);
+      setPage(result);
       setError(null);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
@@ -84,11 +81,6 @@ export function useOperationalTimeline(
     };
   }, [refresh]);
 
-  const refreshRef = useRef(refresh);
-  useEffect(() => {
-    refreshRef.current = refresh;
-  }, [refresh]);
-
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
@@ -98,11 +90,11 @@ export function useOperationalTimeline(
       if (!REFRESH_EVENTS.has(event.type)) return;
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(
-        () => void refreshRef.current(),
+        () => void refresh(),
         STATUS_REFRESH_DEBOUNCE_MS,
       );
     });
-  }, [chargePointService, cpId, supported]);
+  }, [chargePointService, cpId, refresh, supported]);
 
   return { page, isLoading, error, supported, refresh };
 }

@@ -103,6 +103,22 @@ describe("#448 timeline.get over RPC", () => {
     expect(run.result.total).toBe(2);
   });
 
+  it("starts an empty timeline when cp.update rebuilds the charge point", async () => {
+    const { socket } = await serverWithCp();
+    await runToEnd(socket, "s1");
+    const before = await rpc(socket, "timeline.get", { cpId: "CP-A" });
+    expect(before.result.total).toBeGreaterThan(0);
+
+    const updated = await rpc(socket, "cp.update", {
+      cpId: "CP-A",
+      wsUrl: "ws://127.0.0.1:65534/elsewhere",
+    });
+    expect(updated.ok).toBe(true);
+
+    const after = await rpc(socket, "timeline.get", { cpId: "CP-A" });
+    expect(after.result).toEqual({ version: "1.0", entries: [], total: 0 });
+  });
+
   it("answers not_found for an unknown charge point", async () => {
     const { socket } = await serverWithCp();
 

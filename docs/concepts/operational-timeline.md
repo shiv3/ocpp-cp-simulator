@@ -48,7 +48,10 @@ Every charge point owns its timeline (`ChargePoint.timeline`), fed by a
 projector subscribed to the charge point's domain events. It therefore works
 the same in the [daemon](../entities/daemon.md) and in browser
 [Local mode](local-vs-remote-mode.md), and disappears with the charge point:
-`cp.delete` and `state.reset` (which removes every charge point) drop it.
+`cp.delete` and `state.reset` (which removes every charge point) drop it, and
+so does `cp.update` on the daemon, which rebuilds the charge point from its new
+configuration — the edited charge point starts an empty timeline. Editing a
+charge point in Local mode keeps it.
 
 - **Retention:** in memory only, the newest **1000** entries per charge point;
   older entries are evicted. `--state-db` does not persist it, so a daemon

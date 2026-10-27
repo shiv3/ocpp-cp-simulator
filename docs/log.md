@@ -1638,3 +1638,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console](entities/web-console.md#operational-events-tab): **Operational events** tab (`?tab=events`), added to the tab list, the `?tab=` table and "What the console can do".
 - [MCP endpoint](entities/mcp-endpoint.md): curated `get_timeline` tool (22 curated tools); count also updated in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md).
 - [Index](index.md), [GitHub issues](sources/github-issues.md) (#448).
+- [Overview](overview.md): Observability bullet names the timeline. The concept page records that `cp.update` on the daemon rebuilds the charge point and so starts an empty timeline (Local-mode edits keep it), pinned by `timelineGet.bun.test.ts`.

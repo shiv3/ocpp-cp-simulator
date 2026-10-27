@@ -496,6 +496,9 @@ describe.skipIf(!canBindBunServe())(
       }
     });
 
+    // Explicit timeout: the reconnect is real wall-clock — the socket's 1 s
+    // base backoff outlasts the 200 ms reservation — so the test needs more
+    // than bun's 5 s default under load (#473).
     it("periodic disconnect may fire around boot without crashing", async () => {
       const csms = startMockCsms();
       const cp = new ChargePoint(
@@ -511,9 +514,9 @@ describe.skipIf(!canBindBunServe())(
         "OCPP-1.6J",
         {},
       );
-      let errorFired = false;
-      cp.events.on("error", () => {
-        errorFired = true;
+      const errors: string[] = [];
+      cp.events.on("error", ({ error }) => {
+        errors.push(error);
       });
       cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
 
@@ -537,25 +540,59 @@ describe.skipIf(!canBindBunServe())(
         );
         cp.setNetworkSimConfig(resolved);
 
+        // Lift the rule as soon as the first forced disconnect lands. The
+        // reconnect is at least 1 s away, so the next session opens with no
+        // periodic timer and cannot be cut mid-boot, however loaded the host.
+        const disconnected = new Promise<void>((resolve) => {
+          cp.events.once("disconnected", () => {
+            cp.setNetworkSimConfig(
+              resolveNetworkSimConfig(
+                { enabled: false, rules: {} },
+                null,
+                "CP-PERIODIC-BOOT",
+              ),
+            );
+            resolve();
+          });
+        });
+
         cp.connect();
 
-        // Wait for boot acceptance (CP should reconnect and boot despite periodic disconnects)
-        const boot = await csms.waitForCall("BootNotification", 10000);
-        csms.replyCallResult(boot.messageId, {
+        // Leave the first boot unanswered so the disconnect fires while it is
+        // pending.
+        const firstBoot = await csms.waitForCall("BootNotification", 8000);
+        await disconnected;
+
+        // The received-frame history still holds the first boot, so match
+        // the retry by its fresh message id.
+        const retriedBoot = await csms.waitForFrame(
+          (frame) =>
+            frame[0] === 2 &&
+            frame[2] === "BootNotification" &&
+            frame[1] !== firstBoot.messageId,
+          8000,
+        );
+        csms.replyCallResult(retriedBoot[1] as string, {
           status: "Accepted",
           currentTime: "2026-06-24T00:00:00.000Z",
           interval: 300,
         });
+        // The first boot was never accepted, so these can only come from
+        // the second session.
+        await replyStatusNotificationV16(csms, 0);
+        await replyStatusNotificationV16(csms, 1);
 
-        await acceptBootAndDrainV16(csms);
-
-        // Assert no unhandled error was fired
-        expect(errorFired).toBe(false);
+        expect(csms.connections()).toHaveLength(2);
+        // The forced cut surfaces only as the close status, which the reboot
+        // clears; no other error is raised. A 1000 close counting as an
+        // error at all is tracked in #474.
+        expect(errors).toEqual(["WebSocket closed code: 1000 reason: ", ""]);
+        expect(cp.error).toBe("");
       } finally {
         cp.disconnect();
         await csms.stop();
       }
-    });
+    }, 20_000);
 
     it("upstream latency lower bound on OCPP 2.0.1 charge point", async () => {
       const csms = startMockCsms();

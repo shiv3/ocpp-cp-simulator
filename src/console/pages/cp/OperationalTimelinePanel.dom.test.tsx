@@ -160,26 +160,55 @@ describe("OperationalTimelinePanel", () => {
     );
   });
 
-  it("re-reads the timeline when the charge point reports an event", async () => {
-    const getOperationalTimeline = vi
-      .fn<NonNullable<ChargePointService["getOperationalTimeline"]>>()
-      .mockResolvedValueOnce(page([]))
-      .mockResolvedValue(page([entry("connected", "Connected")]));
+  it("appends a pushed entry without re-reading the timeline", async () => {
+    const first = entry("connected", "Connected");
+    const getOperationalTimeline = vi.fn(async () => page([first]));
     const service = makeService({ getOperationalTimeline });
     const rendered = await renderConsole("/cp/CP-1?tab=events", { service });
     root = rendered.root;
     const { container } = rendered;
-    await waitFor(
-      () => container.textContent?.includes("No operational events") ?? false,
-      "empty state",
-    );
+    await waitFor(() => rows(container).length === 1, "first row");
 
-    await pushEvent(service, "CP-1", { type: "connected" });
-    await waitFor(() => rows(container).length === 1, "refreshed rows");
+    const next = {
+      ...entry("network_fault_injected", "Fault"),
+      seq: first.seq + 1,
+    };
+    await pushEvent(service, "CP-1", { type: "timeline-entry", entry: next });
+    // A repeat (a re-delivered event) is not shown twice.
+    await pushEvent(service, "CP-1", { type: "timeline-entry", entry: next });
+
+    expect(rows(container).map((r) => r.dataset.kind)).toEqual([
+      "connected",
+      "network_fault_injected",
+    ]);
+    expect(container.textContent).toContain("2 events");
+    expect(getOperationalTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads the timeline when a pushed entry skips a seq", async () => {
+    const first = entry("connected", "Connected");
+    const missed = {
+      ...entry("disconnected", "Disconnected"),
+      seq: first.seq + 1,
+    };
+    const next = { ...entry("reconnecting", "Reconnect"), seq: first.seq + 2 };
+    const getOperationalTimeline = vi
+      .fn<NonNullable<ChargePointService["getOperationalTimeline"]>>()
+      .mockResolvedValueOnce(page([first]))
+      .mockResolvedValue(page([first, missed, next]));
+    const service = makeService({ getOperationalTimeline });
+    const rendered = await renderConsole("/cp/CP-1?tab=events", { service });
+    root = rendered.root;
+    const { container } = rendered;
+    await waitFor(() => rows(container).length === 1, "first row");
+
+    await pushEvent(service, "CP-1", { type: "timeline-entry", entry: next });
+
+    await waitFor(() => rows(container).length === 3, "re-read rows");
     expect(getOperationalTimeline).toHaveBeenCalledTimes(2);
   });
 
-  it("does not re-read on events that add no entry", async () => {
+  it("does not re-read on other charge point events", async () => {
     const getOperationalTimeline = vi.fn(async () => page([]));
     const service = makeService({ getOperationalTimeline });
     const rendered = await renderConsole("/cp/CP-1?tab=events", { service });
@@ -198,6 +227,7 @@ describe("OperationalTimelinePanel", () => {
         message: "x",
       },
     });
+    await pushEvent(service, "CP-1", { type: "connected" });
     await pushEvent(service, "CP-1", {
       type: "scenario-node-execute",
       connectorId: 1,

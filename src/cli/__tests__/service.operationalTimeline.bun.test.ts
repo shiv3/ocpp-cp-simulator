@@ -14,7 +14,7 @@ import { testCpInit } from "./testCpInit";
 const settle = (ms = 200) => new Promise((r) => setTimeout(r, ms));
 
 describe("#448: scenario runs on the operational timeline", () => {
-  it("records a run's start and completion with its runId", async () => {
+  it("records a run's start and its outcome with its runId", async () => {
     const svc = new CLIChargePointService(testCpInit({ cpId: "cp-a" }));
     const id = svc.loadScenario(1, completingScenario("timeline-1"));
 
@@ -22,11 +22,11 @@ describe("#448: scenario runs on the operational timeline", () => {
     await settle();
 
     const entries = svc.getOperationalTimeline({
-      kinds: ["scenario_started", "scenario_completed"],
+      kinds: ["scenario_started", "scenario_finished"],
     }).entries;
     expect(entries.map((e) => e.kind)).toEqual([
       "scenario_started",
-      "scenario_completed",
+      "scenario_finished",
     ]);
     const runId = entries[0]!.runId;
     expect(runId).toEqual(expect.stringContaining(`${id}#`));
@@ -35,9 +35,30 @@ describe("#448: scenario runs on the operational timeline", () => {
         cpId: "cp-a",
         connectorId: 1,
         runId,
-        data: { scenarioId: id },
+        data: expect.objectContaining({ scenarioId: id }),
       });
     }
+    expect(entries[1]!.data).toEqual({
+      scenarioId: id,
+      verdict: svc.getScenarioReport(1, id)!.verdict,
+      executionState: "completed",
+      stopped: false,
+    });
+  });
+
+  it("pushes every entry as a timeline_entry event", async () => {
+    const svc = new CLIChargePointService(testCpInit({ cpId: "cp-a" }));
+    const pushed: unknown[] = [];
+    svc.onEvent((ev) => {
+      if (ev.event === "timeline_entry") pushed.push(ev.data);
+    });
+    const id = svc.loadScenario(1, completingScenario("timeline-push"));
+
+    svc.runScenario(1, id);
+    await settle();
+
+    expect(pushed.length).toBeGreaterThan(0);
+    expect(pushed).toEqual(svc.getOperationalTimeline().entries);
   });
 
   it("attributes connector entries to the run until it ends", async () => {
@@ -59,8 +80,13 @@ describe("#448: scenario runs on the operational timeline", () => {
       [OCPPStatus.Preparing, runId],
       [OCPPStatus.Available, undefined],
     ]);
-    expect(svc.getOperationalTimeline({ runId }).entries.at(-1)?.kind).toBe(
-      "scenario_completed",
-    );
+    // A manual stop is reported as one, not as a completed run.
+    expect(svc.getOperationalTimeline({ runId }).entries.at(-1)).toMatchObject({
+      kind: "scenario_finished",
+      data: { stopped: true },
+    });
+    expect(
+      svc.getOperationalTimeline({ kinds: ["scenario_finished"] }).total,
+    ).toBe(1);
   });
 });

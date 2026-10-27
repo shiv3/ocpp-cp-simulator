@@ -101,6 +101,7 @@ import type {
   HistoryOptions,
 } from "../cp/application/services/types/StateSnapshot";
 import type {
+  TimelineEntry,
   TimelinePage,
   TimelineQuery,
 } from "../cp/application/services/OperationalTimeline";
@@ -213,6 +214,11 @@ export type CLIEvent =
         readonly nodeId: string;
         readonly runId: string;
       };
+    }
+  | {
+      // #448: an entry was added to the charge point's operational timeline.
+      readonly event: "timeline_entry";
+      readonly data: TimelineEntry;
     }
   | {
       // #388: a finished run's report is in the run history, so a client
@@ -2395,6 +2401,18 @@ export class CLIChargePointService {
       blocked,
       strict: effectiveStrict,
     });
+    this._chargePoint.timeline.record({
+      kind: "scenario_finished",
+      connectorId,
+      runId,
+      summary: `Scenario ${scenarioId} ${stopped ? "stopped" : "finished"}: ${verdictSummary.verdict}`,
+      data: {
+        scenarioId,
+        verdict: verdictSummary.verdict,
+        executionState,
+        stopped,
+      },
+    });
 
     // #179 Phase 3: flatten + redact the captured transcript before it can
     // reach a client (payloads carry auth material -- redactTranscriptEntry).
@@ -2698,7 +2716,8 @@ export class CLIChargePointService {
   /** #448: scenario runs are minted here, not in the domain, so their
    *  lifecycle reaches the operational timeline from the events announcing
    *  it. `startRun` attributes the connector's later entries to the run;
-   *  `finalizeScenarioRun` ends it. */
+   *  `finalizeScenarioRun` ends it and records its outcome — not the
+   *  `scenario_completed` event, which a manual stop also sends. */
   private recordScenarioOnTimeline(evt: CLIEvent): void {
     let detail: { summary: string; data?: Record<string, unknown> };
     switch (evt.event) {
@@ -2720,9 +2739,6 @@ export class CLIChargePointService {
         detail = { summary: `failed: ${error}`, data: { error } };
         break;
       }
-      case "scenario_completed":
-        detail = { summary: "completed" };
-        break;
       default:
         return;
     }
@@ -2737,6 +2753,11 @@ export class CLIChargePointService {
   }
 
   private attachEventForwarders(): void {
+    this._unsubscribes.push(
+      this._chargePoint.timeline.onRecord((entry) =>
+        this.emit({ event: "timeline_entry", data: entry }),
+      ),
+    );
     this._unsubscribes.push(
       this._chargePoint.events.on("statusChange", ({ status }) => {
         this.emit({ event: "status_change", data: { status } });

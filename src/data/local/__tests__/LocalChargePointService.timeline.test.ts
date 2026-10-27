@@ -46,6 +46,32 @@ describe("LocalChargePointService operational timeline", () => {
     expect(page.total).toBe(page.entries.length);
   });
 
+  it("pushes each new entry to subscribers", async () => {
+    service = new LocalChargePointService(null, createStore());
+    await service.syncLocalChargePoints([
+      {
+        id: "CP-LOCAL",
+        connectorNumber: 1,
+        bootNotification: DefaultBootNotification,
+        wsUrl: "ws://localhost:9000/ocpp/",
+        basicAuth: null,
+        autoMeterValueSetting: null,
+        ocppVersion: "OCPP-1.6J",
+      },
+    ]);
+    const pushed: unknown[] = [];
+    service.subscribe("CP-LOCAL", (event) => {
+      if (event.type === "timeline-entry") pushed.push(event.entry);
+    });
+    const cp = service.getLocalChargePoint("CP-LOCAL") as ChargePoint;
+
+    cp.updateConnectorStatus(1, OCPPStatus.Available);
+
+    expect(pushed).toEqual(
+      (await service.getOperationalTimeline("CP-LOCAL")).entries.slice(-1),
+    );
+  });
+
   it("answers an empty page for an unknown charge point", async () => {
     service = new LocalChargePointService(null, createStore());
 

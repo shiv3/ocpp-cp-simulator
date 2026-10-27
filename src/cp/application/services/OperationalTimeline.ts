@@ -31,7 +31,7 @@ export const TIMELINE_KINDS = [
   "scenario_started",
   "scenario_wait_changed",
   "scenario_error",
-  "scenario_completed",
+  "scenario_finished",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
@@ -88,6 +88,7 @@ export class OperationalTimeline {
   /** Runs in progress per connector, oldest first. */
   private readonly activeRuns = new Map<number, string[]>();
   private activeIncident: string | null = null;
+  private readonly listeners = new Set<(entry: TimelineEntry) => void>();
   private readonly capacity: number;
   private nextSeq = 1;
   readonly now: () => number;
@@ -126,6 +127,13 @@ export class OperationalTimeline {
     this.activeIncident = incidentId;
   }
 
+  /** Called with every entry as it is recorded; returns the unsubscribe.
+   *  The daemon pushes them to clients as `timeline_entry` events. */
+  onRecord(listener: (entry: TimelineEntry) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   record(record: TimelineRecord): TimelineEntry {
     const runId =
       record.runId ??
@@ -151,6 +159,7 @@ export class OperationalTimeline {
     if (this.entries.length > this.capacity) {
       this.entries.splice(0, this.entries.length - this.capacity);
     }
+    for (const listener of this.listeners) listener(entry);
     return entry;
   }
 

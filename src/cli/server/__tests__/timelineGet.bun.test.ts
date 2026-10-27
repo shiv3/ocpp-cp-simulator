@@ -98,7 +98,7 @@ describe("#448 timeline.get over RPC", () => {
       limit: 1,
     });
     expect(run.result.entries.map((e: any) => e.kind)).toEqual([
-      "scenario_completed",
+      "scenario_finished",
     ]);
     expect(run.result.total).toBe(2);
   });

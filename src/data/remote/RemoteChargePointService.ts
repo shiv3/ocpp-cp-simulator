@@ -60,6 +60,7 @@ import type {
   ScenarioRunQuery,
 } from "../../cp/application/verification/ScenarioRunSummary";
 import type {
+  TimelineEntry,
   TimelinePage,
   TimelineQuery,
 } from "../../cp/application/services/OperationalTimeline";
@@ -646,6 +647,22 @@ export function mapServerEventToChargePointEvent(
           scenarioId: data.scenarioId,
           ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
           nodeId: data.nodeId,
+        };
+      }
+      return null;
+    case "timeline_entry":
+      // Consumers ignore kinds they do not know (format 1.x), so the kind
+      // is not checked against this build's list.
+      if (
+        typeof data.seq === "number" &&
+        typeof data.timestamp === "string" &&
+        typeof data.kind === "string" &&
+        typeof data.cpId === "string" &&
+        typeof data.summary === "string"
+      ) {
+        return {
+          type: "timeline-entry",
+          entry: data as unknown as TimelineEntry,
         };
       }
       return null;

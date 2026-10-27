@@ -101,7 +101,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `scenario_started`        | connector | `scenarioId`                             | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`   | connector | `scenarioId`, `nodeId`, `kind`           | (daemon) An operator extends, retries or continues a parked wait.                                                       |
 | `scenario_error`          | connector | `scenarioId`, `error` (redacted)         | (daemon) A scenario run reports an error.                                                                               |
-| `scenario_completed`      | connector | `scenarioId`                             | (daemon) A scenario run completes or is stopped.                                                                        |
+| `scenario_finished`       | connector | `verdict`, `stopped`, `executionState`   | (daemon) A scenario run ends — completed, failed or stopped by an operator — with its run-history verdict.              |
 
 The 1.6 placeholder transaction id (`0` until StartTransaction.conf) is never
 recorded: `transaction_started` has no id on 1.6, and
@@ -130,7 +130,10 @@ stays open, so later entries keep its `incidentId` until the next fault.
 
 **Scenario runs.** Run ids are minted by the daemon service, so scenario
 entries and run attribution exist in the daemon only; Local mode records no
-`scenario_*` entries and no `runId`. Between a run's `scenario_started` and its
+`scenario_*` entries and no `runId`. Every `scenario_*` entry carries
+`scenarioId` in `data`; `scenario_finished` is recorded once per run, when its
+report is computed, so a stopped run reads `stopped: true` rather than as a
+completed one. Between a run's `scenario_started` and its
 end, connector-scoped entries on its connector carry its `runId`. When two
 runs are in progress on one connector (one parked on a trigger, one driven),
 entries go to the most recently started one. The full run report stays in the
@@ -144,6 +147,10 @@ entries go to the most recently started one. The full run report stays in the
   `order` is `"asc"` by default). An unknown `cpId` answers `not_found`; an
   unknown kind `invalid_params`.
 - **MCP:** the curated [`get_timeline`](../entities/mcp-endpoint.md) tool.
+- **Push:** every entry is also pushed to subscribers of the charge point as a
+  [`timeline_entry`](../entities/cli.md#events) event (in Local mode, a
+  `timeline-entry` event of the browser service). `seq` grows by one per entry,
+  so a client that sees a gap missed entries and reads `timeline.get` again.
 - **Console:** the charge point page's
   [Operational events](../entities/web-console.md#operational-events-tab) tab.
 
@@ -152,5 +159,3 @@ entries go to the most recently started one. The full run report stays in the
 - Smart-charging profile changes (applied / cleared / expired) are not
   recorded yet.
 - An injected latency rule is not an incident: only disconnect rules are.
-- Entries that come with no console event (an authorization rejection) appear
-  in the console tab on its next refresh.

@@ -598,14 +598,14 @@ attributed to a scenario run has a **View run** link to the
 [run history](#scenario-runs-panel-and-page)
 (`/scenarios/runs?run=<runId>&runCp=<cpId>`).
 
-The tab reads the timeline when it opens and re-reads it, debounced, on the
-charge point's connection, status, transaction and scenario lifecycle events;
-log lines, meter values and scenario node progress do not trigger a read. An
-entry that comes with no console event (an authorization rejection) shows on
-the next re-read or on **Refresh**. A failed read shows the error instead of
-an empty table. Local mode reads the in-browser charge point directly; it has
-no scenario entries and no run links. Not to be confused with **Session analysis**, which rebuilds
-a session from the OCPP message log.
+The tab reads the timeline when it opens, then appends each entry the charge
+point pushes (`timeline-entry`), without reading it again. A pushed entry that
+skips a `seq` (events missed while the daemon connection was down) makes it
+read the whole timeline again; **Refresh** does the same on demand. A failed
+read shows the error instead of an empty table. Local mode reads the
+in-browser charge point directly; it has no scenario entries and no run links.
+Not to be confused with **Session analysis**, which rebuilds a session from
+the OCPP message log.
 
 ### Message Log page
 

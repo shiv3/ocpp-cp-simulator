@@ -43,6 +43,7 @@ import type {
 } from "../../cp/domain/types/OcppTypes";
 import type { LogEntry } from "../../cp/shared/Logger";
 import type {
+  TimelineEntry,
   TimelinePage,
   TimelineQuery,
 } from "../../cp/application/services/OperationalTimeline";
@@ -293,6 +294,8 @@ export type ChargePointEvent =
   | { type: "connector-removed"; connectorId: number }
   | { type: "log"; entry: LogEntry }
   | { type: "connected" }
+  /** #448: an entry was added to the charge point's operational timeline. */
+  | { type: "timeline-entry"; entry: TimelineEntry }
   | { type: "disconnected"; code: number; reason: string };
 
 export interface ScenarioListItem {

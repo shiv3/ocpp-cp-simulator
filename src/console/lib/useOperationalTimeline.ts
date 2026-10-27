@@ -1,26 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { TimelinePage } from "../../cp/application/services/OperationalTimeline";
-import type { ChargePointEvent } from "../../data/interfaces/ChargePointService";
+import {
+  TIMELINE_DEFAULT_CAPACITY,
+  type TimelineEntry,
+  type TimelinePage,
+} from "../../cp/application/services/OperationalTimeline";
 import { useDataContext } from "../../data/providers/DataProvider";
-import { STATUS_REFRESH_DEBOUNCE_MS } from "./scenarioRunState";
 
 const EMPTY_PAGE: TimelinePage = { entries: [], total: 0 };
 
-/** The console events that accompany a timeline entry. Only these trigger a
- *  re-read: the others (log lines, meter samples, scenario node progress)
- *  can arrive faster than the debounce and would keep postponing it. */
-const REFRESH_EVENTS: ReadonlySet<ChargePointEvent["type"]> = new Set([
-  "connected",
-  "disconnected",
-  "status",
-  "connector-status",
-  "connector-transaction",
-  "scenario-started",
-  "scenario-completed",
-  "scenario-error",
-  "scenario-wait-changed",
-]);
+/** The newest entries, at most what the charge point itself keeps. */
+function pageOf(entries: TimelineEntry[]): TimelinePage {
+  const kept = entries.slice(-TIMELINE_DEFAULT_CAPACITY);
+  return { entries: kept, total: kept.length };
+}
 
 export interface UseOperationalTimelineResult {
   page: TimelinePage;
@@ -33,11 +26,11 @@ export interface UseOperationalTimelineResult {
 }
 
 /**
- * A charge point's operational timeline (#448, `timeline.get`). Reads on
- * mount and when `cpId` changes, then re-reads (debounced) whenever the
- * charge point reports an event that can add an entry. Some entries — an
- * authorization rejection, a fault injected while the socket stays up — come
- * with no console event; `refresh` re-reads on demand.
+ * A charge point's operational timeline (#448, `timeline.get`). Reads it on
+ * mount and when `cpId` changes, then appends each entry the charge point
+ * pushes (`timeline-entry`). `seq` increases by one per entry, so a pushed
+ * entry that skips one (events missed while the connection was down) makes
+ * the hook read the whole timeline again; one it already has is ignored.
  */
 export function useOperationalTimeline(
   cpId: string,
@@ -49,6 +42,12 @@ export function useOperationalTimeline(
   const [page, setPage] = useState<TimelinePage>(EMPTY_PAGE);
   const [isLoading, setIsLoading] = useState(supported);
   const [error, setError] = useState<string | null>(null);
+  // What is on screen, readable synchronously by the push handler.
+  const pageRef = useRef<TimelinePage>(EMPTY_PAGE);
+  const show = useCallback((next: TimelinePage) => {
+    pageRef.current = next;
+    setPage(next);
+  }, []);
   // A slower answer for another charge point (or one landing after unmount)
   // must not overwrite the current one.
   const requestIdRef = useRef(0);
@@ -56,7 +55,7 @@ export function useOperationalTimeline(
   const refresh = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     if (!supported) {
-      setPage(EMPTY_PAGE);
+      show(EMPTY_PAGE);
       setIsLoading(false);
       return;
     }
@@ -64,7 +63,12 @@ export function useOperationalTimeline(
     try {
       const result = await chargePointService.getOperationalTimeline!(cpId);
       if (requestId !== requestIdRef.current) return;
-      setPage(result);
+      // Keep what was pushed while the read was in flight.
+      const lastRead = result.entries.at(-1)?.seq ?? 0;
+      const pushedSince = pageRef.current.entries.filter(
+        (e) => e.cpId === cpId && e.seq > lastRead,
+      );
+      show(pageOf([...result.entries, ...pushedSince]));
       setError(null);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
@@ -72,7 +76,7 @@ export function useOperationalTimeline(
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false);
     }
-  }, [chargePointService, cpId, supported]);
+  }, [chargePointService, cpId, show, supported]);
 
   useEffect(() => {
     void refresh();
@@ -81,20 +85,20 @@ export function useOperationalTimeline(
     };
   }, [refresh]);
 
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timerRef.current), []);
-
   useEffect(() => {
     if (!supported) return undefined;
     return chargePointService.subscribe(cpId, (event) => {
-      if (!REFRESH_EVENTS.has(event.type)) return;
-      clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(
-        () => void refresh(),
-        STATUS_REFRESH_DEBOUNCE_MS,
-      );
+      if (event.type !== "timeline-entry" || event.entry.cpId !== cpId) return;
+      const { entry } = event;
+      const lastSeq = pageRef.current.entries.at(-1)?.seq;
+      if (lastSeq !== undefined && entry.seq <= lastSeq) return;
+      if (lastSeq !== undefined && entry.seq !== lastSeq + 1) {
+        void refresh();
+        return;
+      }
+      show(pageOf([...pageRef.current.entries, entry]));
     });
-  }, [chargePointService, cpId, refresh, supported]);
+  }, [chargePointService, cpId, refresh, show, supported]);
 
   return { page, isLoading, error, supported, refresh };
 }

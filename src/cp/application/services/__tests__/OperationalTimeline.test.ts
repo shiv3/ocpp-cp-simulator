@@ -156,6 +156,19 @@ describe("OperationalTimeline (#448)", () => {
     expect(timeline.query({ limit: 2 }).total).toBe(5);
   });
 
+  it("tells each subscriber about every recorded entry until it unsubscribes", () => {
+    const timeline = new OperationalTimeline("CP-1");
+    const seen: number[] = [];
+    const unsubscribe = timeline.onRecord((entry) => seen.push(entry.seq));
+
+    timeline.record({ kind: "connected", summary: "" });
+    timeline.record({ kind: "disconnected", summary: "" });
+    unsubscribe();
+    timeline.record({ kind: "connected", summary: "" });
+
+    expect(seen).toEqual([1, 2]);
+  });
+
   it("hands out frozen entries, so a caller cannot rewrite history", () => {
     const timeline = new OperationalTimeline("CP-1");
     timeline.record({ kind: "connected", summary: "Connected", data: {} });

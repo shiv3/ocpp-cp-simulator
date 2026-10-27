@@ -1398,6 +1398,12 @@ export class LocalChargePointService implements ChargePointService {
     const unsubscribes: Array<() => void> = [];
 
     unsubscribes.push(
+      chargePoint.timeline.onRecord((entry) => {
+        this.emit(chargePoint.id, { type: "timeline-entry", entry });
+      }),
+    );
+
+    unsubscribes.push(
       chargePoint.events.on("statusChange", ({ status }) => {
         this.emit(chargePoint.id, { type: "status", status });
       }),

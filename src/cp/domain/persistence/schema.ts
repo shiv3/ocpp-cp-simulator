@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -152,7 +152,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   tls_key_path   TEXT,
   basic_auth     TEXT,
   boot_notif     TEXT,
-  created_at     TEXT NOT NULL
+  created_at     TEXT NOT NULL,
+  -- Operator labels as a JSON object of string values (#446), e.g.
+  -- {"site":"oberkirch-01","env":"lab"}. NULL when the charge point has none.
+  labels         TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"
@@ -547,6 +550,15 @@ export function runMigrations(db: Database): void {
 
   // v14 → v15 (#458): the `vehicle_profiles` table, `IF NOT EXISTS` in
   // SCHEMA_SQL like the step above.
+
+  // v15 → v16 (#446): charge-point labels. Guarded like the v13 column so a
+  // database that already has it (re-run, or a pre-release build) is a no-op.
+  if (stored < 16) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("labels")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN labels TEXT");
+    }
+  }
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

@@ -105,3 +105,27 @@ describe("parseCreateBody ocppVersion", () => {
     ).toThrow("soapCallbackUrl is required for OCPP SOAP versions");
   });
 });
+
+describe("parseCreateBody labels (#446)", () => {
+  const body = { cpId: "CP-1", wsUrl: "ws://127.0.0.1:9000/ocpp" };
+
+  it("leaves labels absent when the body has none, so an update keeps them", () => {
+    expect("labels" in parseCreateBody(body)).toBe(false);
+  });
+
+  it("passes a valid map through, the empty one included", () => {
+    expect(parseCreateBody({ ...body, labels: { site: "s1" } }).labels).toEqual(
+      { site: "s1" },
+    );
+    expect(parseCreateBody({ ...body, labels: {} }).labels).toEqual({});
+  });
+
+  it("refuses an invalid map rather than dropping it", () => {
+    expect(() =>
+      parseCreateBody({ ...body, labels: { "bad key": "x" } }),
+    ).toThrow(/labels/);
+    expect(() => parseCreateBody({ ...body, labels: ["site"] })).toThrow(
+      /labels/,
+    );
+  });
+});

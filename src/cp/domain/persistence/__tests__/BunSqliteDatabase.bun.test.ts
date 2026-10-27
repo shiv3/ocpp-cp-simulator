@@ -562,8 +562,56 @@ describe("vehicle profiles schema, v15 (#458)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(Number(version?.value)).toBe(15);
-      expect(SCHEMA_VERSION).toBe(15);
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("charge-point labels schema, v16 (#446)", () => {
+  it("adds the labels column to a database stamped 15 and keeps its rows", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // The v15 shape of `charge_points`: everything but `labels`.
+      db.exec("DROP TABLE charge_points");
+      db.exec(
+        "CREATE TABLE charge_points (" +
+          "cp_id TEXT PRIMARY KEY, ws_url TEXT NOT NULL, " +
+          "supervision_urls TEXT, url_distribution TEXT, " +
+          "id_tags TEXT, id_tag_distribution TEXT, id_tag_file TEXT, " +
+          "connectors INTEGER NOT NULL, vendor TEXT NOT NULL, " +
+          "model TEXT NOT NULL, ocpp_version TEXT, central_system_url TEXT, " +
+          "soap_callback_url TEXT, soap_path TEXT, security_profile INTEGER, " +
+          "authorization_key TEXT, cpo_name TEXT, tls_ca_path TEXT, " +
+          "tls_cert_path TEXT, tls_key_path TEXT, basic_auth TEXT, " +
+          "boot_notif TEXT, created_at TEXT NOT NULL)",
+      );
+      db.run(
+        "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at) " +
+          "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-10-27T00:00:00Z')",
+      );
+      db.run("UPDATE schema_meta SET value = '15' WHERE key = 'version'");
+
+      runMigrations(db);
+
+      const columns = db
+        .all<{ name: string }>("PRAGMA table_info(charge_points)")
+        .map((c) => c.name);
+      expect(columns).toContain("labels");
+      const row = db.get<{ cp_id: string; labels: string | null }>(
+        "SELECT cp_id, labels FROM charge_points",
+      );
+      expect(row).toEqual({ cp_id: "CP1", labels: null });
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(16);
+      expect(SCHEMA_VERSION).toBe(16);
+
+      // Re-running the step on a migrated database is a no-op, not an error.
+      db.run("UPDATE schema_meta SET value = '15' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
     } finally {
       db.close();
     }

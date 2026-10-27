@@ -35,6 +35,7 @@ import {
 } from "./events";
 import { subscribeResultSchema } from "./envelope";
 import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
+import { labelsSchema } from "./labels";
 import {
   METER_READING_CONTEXTS,
   STOP_REASONS,
@@ -251,6 +252,9 @@ const cpParamsBaseSchema = z.object({
     .describe(
       "Connect to the CSMS immediately after the call (cp.update reconnects)",
     ),
+  // #446. On cp.update an omitted map keeps the current labels and a given one
+  // replaces it whole; cp.labels.set changes them without rebuilding the CP.
+  labels: labelsSchema.optional(),
 });
 
 const scenarioTemplateInfoSchema = z.object({
@@ -353,6 +357,32 @@ export function expandIdPattern(pattern: string, index: number): string {
         : String(index).padStart(Number(width), "0"),
   );
 }
+
+/**
+ * `cp.list` selector (#446): when `labels` is given, only the charge points
+ * carrying every one of those `key: value` pairs are returned.
+ */
+export const cpListParamsSchema = z
+  .object({
+    labels: labelsSchema
+      .optional()
+      .describe(
+        "Only return charge points carrying every one of these label pairs (exact, case-sensitive match)",
+      ),
+  })
+  .strict();
+
+/**
+ * `cp.labels.set` (#446): replaces a charge point's labels in place. Unlike
+ * `cp.update` it does not rebuild the charge point, so its connection and any
+ * running transaction survive a relabel.
+ */
+export const cpLabelsSetParamsSchema = z.object({
+  cpId: NON_EMPTY_STR.describe("Charge point identifier"),
+  labels: labelsSchema.describe(
+    "The complete new label map; {} removes every label",
+  ),
+});
 
 /** update CP — redacted snapshots may omit password; server preserves it. */
 const updateParamsSchema = cpParamsBaseSchema.extend({
@@ -851,7 +881,10 @@ export const METHODS = {
   },
 
   // -- explicit non-jsonMode ops (~10) --
-  "cp.list": { params: EMPTY, result: ARRAY_1000(cpListItemSchema) },
+  "cp.list": {
+    params: cpListParamsSchema,
+    result: ARRAY_1000(cpListItemSchema),
+  },
   "cp.create": { params: createParamsSchema, result: ANY },
   // Partial success is the result, not an error: one unreachable CSMS URL must
   // not roll back the charge points that came up fine, so failures are
@@ -878,6 +911,10 @@ export const METHODS = {
   },
   "cp.update": { params: updateParamsSchema, result: ANY },
   "cp.delete": { params: z.object({ cpId: NON_EMPTY_STR }), result: ANY },
+  "cp.labels.set": {
+    params: cpLabelsSetParamsSchema,
+    result: z.object({ cpId: STR_64K }),
+  },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
@@ -1010,6 +1047,7 @@ export const EXPLICIT_METHODS = [
   "blueprint.delete",
   "cp.update",
   "cp.delete",
+  "cp.labels.set",
   "logs.get",
   "logs.clear",
   "state.reset",

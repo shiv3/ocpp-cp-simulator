@@ -78,7 +78,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(42);
+    expect(EXPLICIT_METHODS).toHaveLength(43);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -212,5 +212,51 @@ describe("DoS limits (Sec-4)", () => {
     expect(
       METHODS["cp.list"].result.safeParse(new Array(1001).fill(item)).success,
     ).toBe(false);
+  });
+});
+
+describe("charge-point labels (#446)", () => {
+  const labels = { site: "oberkirch-01", env: "lab" };
+
+  it.each(["cp.create", "cp.update"] as const)(
+    "%s accepts and keeps labels",
+    (method) => {
+      const parsed = METHODS[method].params.parse({
+        cpId: "CP",
+        wsUrl: "ws://h",
+        labels,
+      });
+      expect(parsed.labels).toEqual(labels);
+    },
+  );
+
+  it("cp.create_many and blueprints accept labels", () => {
+    expect(
+      METHODS["cp.create_many"].params.safeParse({
+        wsUrl: "ws://h",
+        count: 2,
+        labels,
+      }).success,
+    ).toBe(true);
+    expect(
+      METHODS["blueprint.save"].params.safeParse({
+        blueprint: { id: "b", name: "B", params: { labels } },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("cp.list accepts no params or a label selector, and refuses a typo", () => {
+    const params = METHODS["cp.list"].params;
+    expect(params.parse({})).toEqual({});
+    expect(params.parse({ labels })).toEqual({ labels });
+    expect(params.safeParse({ label: labels }).success).toBe(false);
+    expect(params.safeParse({ labels: { "a b": "x" } }).success).toBe(false);
+  });
+
+  it("cp.labels.set requires the complete map", () => {
+    const params = METHODS["cp.labels.set"].params;
+    expect(params.safeParse({ cpId: "CP", labels }).success).toBe(true);
+    expect(params.safeParse({ cpId: "CP", labels: {} }).success).toBe(true);
+    expect(params.safeParse({ cpId: "CP" }).success).toBe(false);
   });
 });

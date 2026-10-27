@@ -1629,3 +1629,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Vehicle profiles → Resolution](concepts/vehicle-profiles.md#resolution-to-ev-settings): a DC maximum the user set is a limit — the curve is held at it (`CURVE_CAPPED_AT_DC_MAX`); the peak-wins rule applies to source data only.
 - [Open EV Directory](entities/open-ev-directory.md): answers are checked against the protocol limits in both modes (`invalid_response`), a 404 on the curves of a variant that answered is `invalid_response` rather than a removal, ids are restricted to `[A-Za-z0-9_-]` ([Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog): `invalid_params`), a key is never sent over plain http to another host, and same-origin-only redirects are pinned.
+
+## [2026-10-27] ingest | 2.x handler failure answers InternalError (#399)
+
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): a 2.x inbound CALL whose handler throws is now answered with `CALLERROR InternalError` (description = the error message, capped at 255 characters), like 1.6J, and `csms_call_completed` reports `CallError` / `InternalError`; `NoResponse` is now only reported when an `inboundPolicy` of kind `ignore` withholds the answer. The failure is logged as `Error handling <action>` instead of the socket layer's `Error parsing message`.
+- [GitHub issues](sources/github-issues.md): #399 row.

@@ -21,7 +21,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
   - open-ev-directory.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -786,11 +786,10 @@ the OCPP answer are unchanged.
   scenario reaches its `transaction` (`action: "start"`) node, if at all.
 - **Outcome.** `CallResult` for a response — including one chosen by a
   `responseOverride`; `CallError` for a CALLERROR (an `inboundPolicy`, a 2.x
-  `FormationViolation`, `NotImplemented`, a 1.6J handler failure's
-  `InternalError`), with `errorCode`; `NoResponse` when no answer is sent:
-  an `inboundPolicy` of kind `ignore`, or a 2.x handler that throws — such a
-  CALL has always been left unanswered on 2.x, where 1.6J answers
-  `InternalError` (#399). On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
+  `FormationViolation`, `NotImplemented`, the `InternalError` a handler
+  failure answers on 1.6J and 2.x — on 2.x its description is the error
+  message, capped at 255 characters (#399)), with `errorCode`; `NoResponse`
+  when an `inboundPolicy` of kind `ignore` withholds the answer. On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
 - **Not delivery.** The outcome is the answer chosen, not proof it reached the
   CSMS: a socket that closes, or a [network-simulation](../concepts/network-simulation.md)
   drop, can still lose it.

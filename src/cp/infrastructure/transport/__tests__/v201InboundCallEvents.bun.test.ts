@@ -46,6 +46,26 @@ async function withChargePoint(
   }
 }
 
+/** Makes every handler reading `cp.connectors` throw `message` while `body`
+ *  runs, so a registry handler fails the way a station bug would. */
+async function whileConnectorsThrow<T>(
+  cp: ChargePoint,
+  message: string,
+  body: () => Promise<T>,
+): Promise<T> {
+  Object.defineProperty(cp, "connectors", {
+    configurable: true,
+    get: () => {
+      throw new Error(message);
+    },
+  });
+  try {
+    return await body();
+  } finally {
+    delete (cp as { connectors?: unknown }).connectors;
+  }
+}
+
 describe("OCPP 2.0.1 inbound CSMS CALL events (#396)", () => {
   it("announces a Reset and completes it before the CALLRESULT leaves", async () => {
     await withChargePoint("CP201-396-RESET", async (csms, cp) => {
@@ -121,37 +141,51 @@ describe("OCPP 2.0.1 inbound CSMS CALL events (#396)", () => {
     });
   });
 
-  it("reports NoResponse when a handler throws, which leaves the CALL unanswered", async () => {
-    await withChargePoint("CP201-396-THROW", async (csms, cp) => {
+  it("answers InternalError when a handler throws, like 1.6J (#399)", async () => {
+    await withChargePoint("CP201-399-THROW", async (csms, cp) => {
       const seen = record(cp);
-      Object.defineProperty(cp, "connectors", {
-        configurable: true,
-        get: () => {
-          throw new Error("boom");
-        },
-      });
-      try {
+      const logs: string[] = [];
+      cp.events.on("log", (entry) => logs.push(entry.message));
+      const answer = await whileConnectorsThrow(cp, "boom", () => {
         csms.send([
           2,
           "ca-1",
           "ChangeAvailability",
           { operationalStatus: "Inoperative" },
         ]);
-        await waitUntil(() => seen.completed.length === 1);
-      } finally {
-        delete (cp as { connectors?: unknown }).connectors;
-      }
+        return csms.waitForFrame(answerTo("ca-1"));
+      });
 
+      expect(answer).toEqual([4, "ca-1", "InternalError", "boom", {}]);
       expect(seen.completed).toEqual([
         {
           action: "ChangeAvailability",
           messageId: "ca-1",
-          outcome: "NoResponse",
+          outcome: "CallError",
+          errorCode: "InternalError",
         },
       ]);
-      expect(csms.received.some((frame) => answerTo("ca-1")(frame))).toBe(
-        false,
-      );
+      expect(
+        logs.some((m) => m.includes("Error handling ChangeAvailability")),
+      ).toBe(true);
+      expect(logs.some((m) => m.includes("Error parsing message"))).toBe(false);
+    });
+  });
+
+  it("caps the InternalError description at 255 characters", async () => {
+    await withChargePoint("CP201-399-LONG", async (csms, cp) => {
+      const answer = await whileConnectorsThrow(cp, "x".repeat(300), () => {
+        csms.send([
+          2,
+          "ca-2",
+          "ChangeAvailability",
+          { operationalStatus: "Inoperative" },
+        ]);
+        return csms.waitForFrame(answerTo("ca-2"));
+      });
+
+      expect(answer[2]).toBe("InternalError");
+      expect(answer[3]).toBe("x".repeat(255));
     });
   });
 

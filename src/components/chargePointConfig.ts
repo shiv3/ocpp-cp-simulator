@@ -1,6 +1,12 @@
 import { buildSoapCallbackUrl } from "../cli/soapCallbackUrl";
 import type { ServerInfo } from "../protocol";
 import {
+  LABELS_MAX_ENTRIES,
+  labelKeySchema,
+  labelValueSchema,
+  type Labels,
+} from "../protocol/labels";
+import {
   OCPP_1_2,
   OCPP_1_5,
   OCPP_1_6,
@@ -54,6 +60,55 @@ export interface ChargePointConfig {
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
+  /**
+   * Operator labels (#446). Remote mode only. `undefined` means "not known
+   * here" — an edit then leaves the daemon's labels alone instead of sending
+   * an empty map that would clear them; `{}` is a known empty set.
+   */
+  labels?: Labels;
+}
+
+/** One key/value row of the labels editor; may be incomplete while typed. */
+export interface LabelRow {
+  key: string;
+  value: string;
+}
+
+export function labelRowsFromMap(labels: Labels | undefined): LabelRow[] {
+  return Object.entries(labels ?? {}).map(([key, value]) => ({ key, value }));
+}
+
+/**
+ * The label map the rows describe, or the first reason they do not describe
+ * one. Keys are trimmed and fully blank rows ignored; values are kept as typed
+ * (an empty value is a valid label). Validated against the wire schema's own
+ * key and value rules, so the form cannot accept what `cp.update` refuses.
+ */
+export function labelMapFromRows(
+  rows: readonly LabelRow[],
+): { labels: Record<string, string> } | { error: string } {
+  const labels: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key && !row.value) continue;
+    if (!key) return { error: `Label value “${row.value}” has no key.` };
+    if (!labelKeySchema.safeParse(key).success) {
+      return {
+        error: `Invalid label key “${key}”. ${labelKeySchema.description}.`,
+      };
+    }
+    if (!labelValueSchema.safeParse(row.value).success) {
+      return { error: `Label “${key}” has a value that is too long.` };
+    }
+    if (Object.hasOwn(labels, key)) {
+      return { error: `Label key “${key}” is used twice.` };
+    }
+    labels[key] = row.value;
+  }
+  if (Object.keys(labels).length > LABELS_MAX_ENTRIES) {
+    return { error: `At most ${LABELS_MAX_ENTRIES} labels.` };
+  }
+  return { labels };
 }
 
 /** The transport a charge point speaks; the first of the form's two selectors. */

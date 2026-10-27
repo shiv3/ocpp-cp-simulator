@@ -139,6 +139,9 @@ function buildChargePointConfig(
       meterType: bn?.meterType ?? "",
       iccid: bn?.iccid ?? "",
       imsi: bn?.imsi ?? "",
+      // #446: without a config the labels are unknown, not empty — leave them
+      // undefined so a save keeps the daemon's instead of clearing them.
+      labels: c ? (c.labels ?? {}) : undefined,
     };
   }
 

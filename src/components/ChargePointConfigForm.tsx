@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Save, X } from "lucide-react";
+import { Plus, Save, X } from "lucide-react";
 import { buildFullOcppUrl } from "../utils/ocppUrl";
 import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "../data/interfaces/UnsupportedFeatureError";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
@@ -29,12 +29,15 @@ import {
   OCPP_PROTOCOLS,
   defaultChargePointConfig,
   describeSoapPublicBase,
+  labelMapFromRows,
+  labelRowsFromMap,
   protocolOf,
   previewDerivedSoapCallbackUrl,
   sanitizeChargePointConfigForSave,
   versionForProtocol,
   versionsOfProtocol,
   type ChargePointConfig,
+  type LabelRow,
   type OcppProtocol,
   type SoapPublicBase,
 } from "./chargePointConfig";
@@ -207,6 +210,66 @@ const EffectiveWsUrlRow: React.FC<{ url: string }> = ({ url }) => {
 };
 
 /**
+ * Key/value rows for the charge point's labels (#446). Rows may be incomplete
+ * while typed; the form validates them on Save with `labelMapFromRows`.
+ */
+const LabelsEditor: React.FC<{
+  rows: readonly LabelRow[];
+  onChange: (rows: LabelRow[]) => void;
+}> = ({ rows, onChange }) => {
+  const setRow = (index: number, patch: Partial<LabelRow>) =>
+    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <Input
+            type="text"
+            aria-label={`Label ${index + 1} key`}
+            placeholder="key, e.g. site"
+            value={row.key}
+            onChange={(e) => setRow(index, { key: e.target.value })}
+            className="font-mono"
+            spellCheck={false}
+          />
+          <Input
+            type="text"
+            aria-label={`Label ${index + 1} value`}
+            placeholder="value"
+            value={row.value}
+            onChange={(e) => setRow(index, { value: e.target.value })}
+            spellCheck={false}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            aria-label={`Remove label ${index + 1}`}
+            onClick={() => onChange(rows.filter((_, i) => i !== index))}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => onChange([...rows, { key: "", value: "" }])}
+      >
+        <Plus className="mr-1 h-4 w-4" />
+        Add label
+      </Button>
+      <p className={HINT_CLASS}>
+        Group charge points by site, tenant, environment… The dashboard filter
+        and the cp.list API select on them.
+      </p>
+    </div>
+  );
+};
+
+/**
  * A derived callback URL belongs to the daemon's current base, not to the
  * charge point: editing it as a value would send it back explicit and freeze
  * one run's tunnel origin into the row. The form keeps the field empty and
@@ -239,9 +302,19 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
     withoutDerivedSoapCallbackUrl(initialConfig || defaultChargePointConfig),
   );
 
+  // #446: the labels editor's rows, possibly incomplete while typed. null
+  // until the operator touches them when the labels are not known
+  // (`initialConfig.labels` undefined), so Save leaves them out.
+  const [labelRows, setLabelRows] = useState<LabelRow[] | null>(
+    initialConfig?.labels ? labelRowsFromMap(initialConfig.labels) : null,
+  );
+
   useEffect(() => {
     if (initialConfig) {
       setConfig(withoutDerivedSoapCallbackUrl(initialConfig));
+      setLabelRows(
+        initialConfig.labels ? labelRowsFromMap(initialConfig.labels) : null,
+      );
     }
   }, [initialConfig]);
 
@@ -294,10 +367,19 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       );
       return;
     }
+    let labels = config.labels;
+    if (mode === "remote" && labelRows) {
+      const parsed = labelMapFromRows(labelRows);
+      if ("error" in parsed) {
+        setSaveError(parsed.error);
+        return;
+      }
+      labels = parsed.labels;
+    }
     setSaveError(null);
     // Closing is the caller's call: the inline form stays open when the save
     // fails, the dialog closes right away (ChargePointConfigModal).
-    onSave(sanitizeChargePointConfigForSave(config));
+    onSave(sanitizeChargePointConfigForSave({ ...config, labels }));
   };
 
   const updateConfig = (
@@ -389,6 +471,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
     config.securityProfile,
     config.tls?.cert,
     config.tls?.key,
+    labelRows,
   ]);
 
   // What the CSMS will be told to call: the typed value, else what the
@@ -698,6 +781,12 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               </>
             )}
           </div>
+        </Section>
+      )}
+
+      {mode === "remote" && (
+        <Section title="Labels">
+          <LabelsEditor rows={labelRows ?? []} onChange={setLabelRows} />
         </Section>
       )}
 

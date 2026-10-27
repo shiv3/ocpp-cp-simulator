@@ -3,6 +3,7 @@ import { ChevronRight, PlugZap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
+import LabelChips from "../../components/LabelChips";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
 import StatusPill from "../../components/StatusPill";
 import { statusDotClass, statusTextClass } from "../../components/statusColor";
@@ -93,6 +94,7 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
           waitingExpectation={firstWaitingExpectation(row)}
         />
         <NetworkSimBadge summary={cp.networkSim} />
+        <LabelChips labels={cp.config?.labels} />
         <span className="flex items-center gap-1">
           {row.connectors.map((connector) => (
             <span

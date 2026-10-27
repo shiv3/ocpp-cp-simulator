@@ -252,6 +252,33 @@ describe("useCpConfigActions", () => {
       expect(service.createChargePoint).not.toHaveBeenCalled();
     });
 
+    it("updateCp sends the labels as a complete map (#446)", async () => {
+      const service = createFakeChargePointService();
+      const { root, click } = await mountProbe(service, "remote", {
+        ...fixtureConfig,
+        labels: { site: "s1" },
+      });
+      cleanup = () => unmount(root);
+
+      await click("update");
+
+      expect(service.updateChargePoint).toHaveBeenCalledWith({
+        ...expectedRemoteParams,
+        labels: { site: "s1" },
+      });
+    });
+
+    it("updateCp omits labels the form never knew, so the daemon keeps them (#446)", async () => {
+      const service = createFakeChargePointService();
+      const { root, click } = await mountProbe(service, "remote");
+      cleanup = () => unmount(root);
+
+      await click("update");
+
+      const params = vi.mocked(service.updateChargePoint!).mock.calls[0][0];
+      expect("labels" in params).toBe(false);
+    });
+
     it("removeCp calls removeChargePoint with the cpId", async () => {
       const service = createFakeChargePointService();
       const { root, click } = await mountProbe(service, "remote");

@@ -9,6 +9,7 @@ import { draw, makeRuleRng } from "./SeededRng";
 import { sanitizeForLog } from "./logSanitize";
 import {
   MAX_TIMER_MS,
+  type ManualDisconnectRule,
   type PeriodicDisconnectRule,
   type ResolvedNetworkSimConfig,
 } from "./config";
@@ -16,9 +17,17 @@ import {
 export interface ControllerHost {
   writeUpstream(raw: string): void;
   dispatchDownstream(raw: string): void;
-  requestSimulatedDisconnect(reconnectDelayMs: number, ruleId: string): void;
+  requestSimulatedDisconnect(
+    reconnectDelayMs: number,
+    ruleId: string,
+    ruleType: DisconnectRuleType,
+  ): void;
   log(message: string): void;
 }
+
+/** The rule kinds that can force a disconnect (#448). */
+export type DisconnectRuleType =
+  ManualDisconnectRule["type"] | PeriodicDisconnectRule["type"];
 
 export interface GenerationToken {
   readonly gen: number;
@@ -198,7 +207,11 @@ export class NetworkSimController {
       this.host.log(
         `[RULE:${sanitizedRuleId}] DISCONNECT forced; reconnect blocked ${rule.reconnectDelayMs}ms`,
       );
-      this.host.requestSimulatedDisconnect(rule.reconnectDelayMs, ruleId);
+      this.host.requestSimulatedDisconnect(
+        rule.reconnectDelayMs,
+        ruleId,
+        rule.type,
+      );
     }
     return { ok: true };
   }
@@ -319,7 +332,11 @@ export class NetworkSimController {
       this.host.log(
         `[RULE:${sanitizedRuleId}] DISCONNECT forced; reconnect blocked ${timer.rule.reconnectDelayMs}ms`,
       );
-      this.host.requestSimulatedDisconnect(timer.rule.reconnectDelayMs, ruleId);
+      this.host.requestSimulatedDisconnect(
+        timer.rule.reconnectDelayMs,
+        ruleId,
+        timer.rule.type,
+      );
     }
   }
 

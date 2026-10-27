@@ -371,6 +371,12 @@ export class ChargePoint {
         cpoName,
         tls,
       );
+      this._webSocket.onSimulatedDisconnect((fault) =>
+        this._events.emit("networkFaultInjected", fault),
+      );
+      this._webSocket.onReconnectScheduled((info) =>
+        this._events.emit("reconnecting", info),
+      );
       const supervisionUrls = transportOptions.supervisionUrls;
       if (supervisionUrls && supervisionUrls.length > 1) {
         this._webSocket.setSupervisionUrlPool(
@@ -1808,6 +1814,7 @@ export class ChargePoint {
     this._events.emit("transactionStopped", {
       connectorId: connector.id,
       transactionId: transaction.id,
+      reason: transaction.stoppedReason ?? transaction.stopReason,
     });
 
     // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)

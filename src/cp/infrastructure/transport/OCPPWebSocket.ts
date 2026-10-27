@@ -45,7 +45,9 @@ import {
   type CloseCause,
   type Settlement,
   type ResolvedNetworkSimConfig,
+  type DisconnectRuleType,
 } from "./network-sim";
+import type { NetworkFaultInjected } from "../../domain/charge-point/ChargePointEvents";
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -171,6 +173,10 @@ export class OCPPWebSocket {
   private _urlPool: SupervisionUrlPool | null = null;
   private _onCloseTransactionCallback:
     ((finalized: GenerationToken) => void) | null = null;
+  private _onSimulatedDisconnectCallback:
+    ((fault: NetworkFaultInjected) => void) | null = null;
+  private _onReconnectScheduledCallback:
+    ((info: { attempt: number; delayMs: number }) => void) | null = null;
   private _disposed: boolean = false;
 
   constructor(
@@ -208,8 +214,8 @@ export class OCPPWebSocket {
     const controllerHost: ControllerHost = {
       writeUpstream: (raw: string) => this.writeUpstreamPhysical(raw),
       dispatchDownstream: (raw: string) => this.dispatchIncoming(raw),
-      requestSimulatedDisconnect: (reconnectDelayMs: number, ruleId: string) =>
-        this.simulateConnectionLoss(reconnectDelayMs, ruleId),
+      requestSimulatedDisconnect: (reconnectDelayMs, ruleId, ruleType) =>
+        this.simulateConnectionLoss(reconnectDelayMs, ruleId, ruleType),
       log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
     };
     this._controller = new NetworkSimController(controllerHost, chargePointId);
@@ -394,6 +400,20 @@ export class OCPPWebSocket {
     this._onCloseTransactionCallback = cb;
   }
 
+  /** #448: observe a network-sim disconnect rule firing, before the close. */
+  public onSimulatedDisconnect(
+    cb: (fault: NetworkFaultInjected) => void,
+  ): void {
+    this._onSimulatedDisconnectCallback = cb;
+  }
+
+  /** #448: observe each reconnect the transport schedules. */
+  public onReconnectScheduled(
+    cb: (info: { attempt: number; delayMs: number }) => void,
+  ): void {
+    this._onReconnectScheduledCallback = cb;
+  }
+
   public sendAction(
     messageId: string,
     action: string,
@@ -557,11 +577,20 @@ export class OCPPWebSocket {
    */
   public simulateConnectionLoss(
     reconnectDelayMs: number,
-    _ruleId: string = "",
+    ruleId: string = "",
+    ruleType: DisconnectRuleType = "manual-disconnect",
   ): void {
     if (this._disposed) {
       return;
     }
+
+    // Observers learn of the fault while the socket is still up, so the
+    // `disconnected` that follows can be attributed to this rule.
+    this.notifyObserver(this._onSimulatedDisconnectCallback, {
+      ruleId,
+      ruleType,
+      reconnectDelayMs,
+    });
 
     // FIRST install the reservation BEFORE draining
     this._reconnectNotBefore = Date.now() + reconnectDelayMs;
@@ -911,6 +940,10 @@ export class OCPPWebSocket {
       `Reconnecting in ${actualDelay / 1000}s... (attempt ${this._reconnectAttempts})`,
       LogType.WEBSOCKET,
     );
+    this.notifyObserver(this._onReconnectScheduledCallback, {
+      attempt: this._reconnectAttempts,
+      delayMs: actualDelay,
+    });
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
@@ -924,5 +957,18 @@ export class OCPPWebSocket {
       );
       this.connect();
     }, actualDelay);
+  }
+
+  /** An observer that throws must not break the transport. */
+  private notifyObserver<T>(cb: ((value: T) => void) | null, value: T): void {
+    if (!cb) return;
+    try {
+      cb(value);
+    } catch (error) {
+      this._logger.error(
+        `Connection observer threw: ${String(error)}`,
+        LogType.WEBSOCKET,
+      );
+    }
   }
 }

@@ -24,6 +24,13 @@ export type IncomingCallCompletion =
       errorCode: string;
     };
 
+/** A network-sim rule forcing a disconnect (#448). */
+export interface NetworkFaultInjected {
+  ruleId: string;
+  ruleType: "manual-disconnect" | "periodic-disconnect";
+  reconnectDelayMs: number;
+}
+
 /**
  * ChargePoint event types
  */
@@ -40,7 +47,13 @@ export interface ChargePointEvents {
    *  the socket opened; this is what says the CSMS registered the station. */
   bootNotificationResult: BootNotificationResult;
   disconnected: { code: number; reason: string };
-  reconnecting: { attempt: number; maxAttempts: number };
+  /** Emitted each time the transport schedules a reconnect after an
+   *  unrequested close; `delayMs` is the wait before the next attempt. */
+  reconnecting: { attempt: number; delayMs: number };
+  /** Emitted when a network-sim disconnect rule fires, before the socket is
+   *  closed, so the `disconnected` that follows can be attributed to it
+   *  (#448). */
+  networkFaultInjected: NetworkFaultInjected;
 
   // Connector events
   connectorStatusChange: {

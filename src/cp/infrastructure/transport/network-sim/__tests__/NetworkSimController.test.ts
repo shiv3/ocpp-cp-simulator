@@ -27,7 +27,7 @@ const makeHost = () =>
     writeUpstream: vi.fn<(raw: string) => void>(),
     dispatchDownstream: vi.fn<(raw: string) => void>(),
     requestSimulatedDisconnect:
-      vi.fn<(reconnectDelayMs: number, ruleId: string) => void>(),
+      vi.fn<ControllerHost["requestSimulatedDisconnect"]>(),
     log: vi.fn<(message: string) => void>(),
   }) satisfies ControllerHost;
 
@@ -282,7 +282,9 @@ describe("NetworkSimController", () => {
 
     vi.advanceTimersByTime(100);
 
-    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([[1, "first"]]);
+    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([
+      [1, "first", "periodic-disconnect"],
+    ]);
   });
 
   it("requests one coincident periodic disconnect per session and resets on reopen", () => {
@@ -305,7 +307,9 @@ describe("NetworkSimController", () => {
     controller.onSocketOpen();
 
     vi.advanceTimersByTime(100);
-    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([[1, "first"]]);
+    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([
+      [1, "first", "periodic-disconnect"],
+    ]);
     expect(vi.getTimerCount()).toBe(0);
 
     controller.shutdownPipelines({
@@ -316,8 +320,8 @@ describe("NetworkSimController", () => {
     vi.advanceTimersByTime(100);
 
     expect(host.requestSimulatedDisconnect.mock.calls).toEqual([
-      [1, "first"],
-      [1, "first"],
+      [1, "first", "periodic-disconnect"],
+      [1, "first", "periodic-disconnect"],
     ]);
   });
 
@@ -455,6 +459,7 @@ describe("NetworkSimController", () => {
     expect(host.requestSimulatedDisconnect).toHaveBeenCalledWith(
       3,
       "replacement",
+      "periodic-disconnect",
     );
   });
 
@@ -478,10 +483,14 @@ describe("NetworkSimController", () => {
     controller.onSocketOpen();
     expect(vi.getTimerCount()).toBe(2);
     vi.advanceTimersByTime(100);
-    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([[1, "first"]]);
+    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([
+      [1, "first", "periodic-disconnect"],
+    ]);
     expect(vi.getTimerCount()).toBe(1);
     vi.advanceTimersByTime(100);
-    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([[1, "first"]]);
+    expect(host.requestSimulatedDisconnect.mock.calls).toEqual([
+      [1, "first", "periodic-disconnect"],
+    ]);
     expect(vi.getTimerCount()).toBe(0);
 
     controller.shutdownPipelines({
@@ -493,8 +502,8 @@ describe("NetworkSimController", () => {
     vi.advanceTimersByTime(100);
 
     expect(host.requestSimulatedDisconnect.mock.calls).toEqual([
-      [1, "first"],
-      [1, "first"],
+      [1, "first", "periodic-disconnect"],
+      [1, "first", "periodic-disconnect"],
     ]);
   });
 
@@ -607,7 +616,11 @@ describe("NetworkSimController", () => {
     );
 
     expect(controller.triggerManualDisconnect("manual")).toEqual({ ok: true });
-    expect(host.requestSimulatedDisconnect).toHaveBeenCalledWith(750, "manual");
+    expect(host.requestSimulatedDisconnect).toHaveBeenCalledWith(
+      750,
+      "manual",
+      "manual-disconnect",
+    );
   });
 
   it("treats repeated manual disconnects as successful session no-ops", () => {

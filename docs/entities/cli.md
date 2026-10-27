@@ -21,7 +21,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
   - open-ev-directory.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -736,7 +736,7 @@ Events are emitted in all modes:
 | `boot_notification`     | `status`, `interval`, `currentTime`       | Answer to BootNotification.conf processed: `status` is `Accepted` / `Pending` / `Rejected`, `interval` and `currentTime` the CSMS's. Once per BootNotification.conf, after `connected` and before its status changes (#395)                    |
 | `disconnected`          | `code`, `reason`                          | Disconnected from CSMS                                                                                                                                                                                                                         |
 | `status_change`         | `status`                                  | Charge point status changed                                                                                                                                                                                                                    |
-| `error`                 | `error`                                   | Error occurred                                                                                                                                                                                                                                 |
+| `error`                 | `error`                                   | Error occurred. A WebSocket close raises one only when the CP did not ask for it (not a disconnect, reset or network-sim cut) and its code is neither 1000 nor 1005 (#474); the next boot clears it with `""`                                  |
 | `connector_status`      | `connectorId`, `status`, `previousStatus` | Connector status changed                                                                                                                                                                                                                       |
 | `transaction_started`   | `connectorId`, `transactionId`, `tagId`   | Transaction started. On OCPP 1.6 it is emitted twice: once with the local placeholder id `0`, again with the id `StartTransaction.conf` assigned — whatever integer that is, `0` included (#328). Tell the two apart by order, never by value. |
 | `transaction_stopped`   | `connectorId`, `transactionId`            | Transaction stopped                                                                                                                                                                                                                            |

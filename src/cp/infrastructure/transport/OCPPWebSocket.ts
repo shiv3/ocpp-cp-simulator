@@ -124,7 +124,8 @@ export class OCPPWebSocket {
   private _maxReconnectDelay: number = 30000; // 30 seconds max delay
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _onOpenCallback: (() => void) | null = null;
-  private _onCloseCallback: ((ev: CloseEvent) => void) | null = null;
+  private _onCloseCallback:
+    ((ev: CloseEvent, cause: CloseCause) => void) | null = null;
   private _isManualDisconnect: boolean = false;
   /**
    * Whether the close now in flight was asked for by this charge point.
@@ -233,7 +234,7 @@ export class OCPPWebSocket {
 
   public connect(
     onopen: (() => void) | null = null,
-    onclose: ((ev: CloseEvent) => void) | null = null,
+    onclose: ((ev: CloseEvent, cause: CloseCause) => void) | null = null,
   ): void {
     // Increment generation on new connection
     this._generationCounter++;
@@ -263,13 +264,23 @@ export class OCPPWebSocket {
 
     // Capture the current generation for this socket connection
     const socketGeneration = this._generationCounter;
+    // Kept per socket: a reset's close lands after the next generation is
+    // already open, and must still report its own cause (#474).
+    const socketToken = this._currentGeneration;
     const oncloseHandler = (ev: CloseEvent) => {
+      const closeCause = this.closeCauseOf(socketToken);
+      // Logged for every socket, stale ones included: a reset's close is the
+      // only trace of its disconnect, and the CP logs no error for it.
+      this._logger.info(
+        `WebSocket closed: code=${ev.code}, reason=${ev.reason || "none"}, wasClean=${ev.wasClean}, cause=${closeCause}`,
+        LogType.WEBSOCKET,
+      );
       // Generation guard: only process close if this socket belongs to the current generation
       if (socketGeneration === this._generationCounter) {
-        this.handleClose(ev);
+        this.handleClose(ev, closeCause);
       }
       if (this._onCloseCallback) {
-        this._onCloseCallback(ev);
+        this._onCloseCallback(ev, closeCause);
       }
     };
 
@@ -826,11 +837,17 @@ export class OCPPWebSocket {
       });
   }
 
-  private handleClose(ev: CloseEvent): void {
-    this._logger.info(
-      `WebSocket closed: code=${ev.code}, reason=${ev.reason || "none"}, wasClean=${ev.wasClean}`,
-      LogType.WEBSOCKET,
-    );
+  /**
+   * Who closed a generation's socket: the cause it latched, else what
+   * handleClose would latch now. dispose() latches nothing; a close after it
+   * is the operator tearing the charge point down, so it reads as manual.
+   */
+  private closeCauseOf(token: GenerationToken): CloseCause {
+    if (token.closeCause !== null) return token.closeCause;
+    return this._disposed || this._isManualDisconnect ? "manual" : "network";
+  }
+
+  private handleClose(ev: CloseEvent, closeCause: CloseCause): void {
     this.maybeProbeRefusal(ev);
     this.stopPingInterval();
 
@@ -839,12 +856,8 @@ export class OCPPWebSocket {
       return;
     }
 
-    // Determine the close cause
-    const closeCause: CloseCause = this._isManualDisconnect
-      ? "manual"
-      : "network";
-
-    // Run the close transaction (idempotent per generation)
+    // Run the close transaction (idempotent per generation; a cause the
+    // charge point latched itself is kept)
     this.runCloseTransaction(closeCause);
 
     // Only attempt reconnect if not manually disconnected

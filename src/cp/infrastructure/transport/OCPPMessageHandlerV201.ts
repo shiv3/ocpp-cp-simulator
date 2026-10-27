@@ -441,8 +441,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             action,
             messageId,
             "InternalError" as OCPPErrorCode,
-            // Bounded so an arbitrary exception message cannot overflow the
-            // ErrorDescription field (255 characters in OCPP-J 2.0.1).
+            // OCPP-J 2.0.1 / 2.1 Part 4 §4.2.3: ErrorDescription is
+            // string[255].
             (error instanceof Error ? error.message : String(error)).slice(
               0,
               255,

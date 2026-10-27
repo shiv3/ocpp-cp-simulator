@@ -20,7 +20,10 @@ import type {
 } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
-import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
+import {
+  OCPPWebSocket,
+  type SocketClose,
+} from "../../infrastructure/transport/OCPPWebSocket";
 import type {
   CloseCause,
   ResolvedNetworkSimConfig,
@@ -1063,7 +1066,7 @@ export class ChargePoint {
         // markBootAccepted(); we just need the WebSocket to come up and
         // BootNotification to round-trip first.
       },
-      (ev: CloseEvent, cause: CloseCause) => {
+      (ev: SocketClose, cause: CloseCause) => {
         // Same teardown as an explicit disconnect() — heartbeat, scenario
         // state, connector listeners, etc. — so a CSMS-initiated close
         // doesn't leave background timers firing against a dead socket.

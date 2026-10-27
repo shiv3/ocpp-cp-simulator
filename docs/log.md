@@ -1635,3 +1635,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI → events](entities/cli.md): a WebSocket close raises `error` only when the charge point did not ask for it and its code is neither 1000 nor 1005; an operator disconnect, a reset or a network-sim cut never does.
 - [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): a forced disconnect shows up in the `NETWORK_SIM` and `WEBSOCKET` logs and as `disconnected`, not as `error`.
 - [Log format → WebSocket handshake failures](concepts/log-format.md#websocket-handshake-failures): the `WebSocket closed:` line ends with `cause=` (`network`, `manual`, `internal` or `simulated`) and is logged for a reset's stale socket too.
+
+## [2026-10-27] ingest | A reset's stale socket close no longer tears down the replacement (#478)
+
+- [Log format → WebSocket close lines](concepts/log-format.md#websocket-close-lines): new section. It lists the `cause=` values and covers a socket the charge point closed itself whose close lands after the next connect started: it is reported then with `code` 1005, and the late close only logs.
+- [CLI → events](entities/cli.md): `disconnected` comes once per socket, before the replacement's `connected`; a reset reports `code` 1005.

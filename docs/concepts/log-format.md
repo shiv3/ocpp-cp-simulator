@@ -46,6 +46,22 @@ for an example). The same lines are what the [trace adapter](trace-format.md#pro
 turns into trace records, which is how [`analyze --from-daemon`](../entities/analyze.md#reading-from-a-running-daemon---from-daemon)
 works without a trace file.
 
+## WebSocket close lines
+
+Every socket close logs
+`WebSocket closed: code=…, reason=…, wasClean=…, cause=…` at INFO
+(`WEBSOCKET`). `cause` names who closed it: `network` (the peer or the
+network), `manual` (an operator disconnect or a dispose), `internal` (a reset)
+or `simulated` (a [network-simulation](network-simulation.md) cut) (#474).
+
+The line can come after the next connection is already open. A socket the
+charge point closed itself (a reset, or a `disconnect` followed by `connect`)
+fires its close asynchronously. When the next connect starts before that close
+has landed, the charge point is told then, with `code` 1005: its
+`disconnected` event precedes the replacement's `connected`. The late close
+only logs this line, with the real code, and leaves the new connection alone
+(#478).
+
 ## WebSocket handshake failures
 
 A CSMS that refuses the upgrade produces, in CLI/daemon mode:

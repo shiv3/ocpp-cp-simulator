@@ -33,12 +33,14 @@ import {
   type RpcAck,
   type RpcCall,
   type RpcErrorCode,
+  type Result,
   type ServerInfo,
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
 } from "../../protocol";
 import type { ScenarioRunPage } from "../../cp/application/verification/ScenarioRunSummary";
+import { TIMELINE_FORMAT_VERSION } from "../../cp/application/services/OperationalTimeline";
 import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
@@ -546,6 +548,8 @@ export async function dispatchRpcCore(
       return deps.chargePointService.getScenarioTemplates();
     case "scenario.runs.list":
       return listScenarioRuns(deps, call.params);
+    case "timeline.get":
+      return getTimeline(deps, call.params);
     case "scenario.definitions.list":
       return listScenarioDefinitions(deps, call.params);
     case "scenario.definitions.save":
@@ -1183,6 +1187,18 @@ async function listScenarioRuns(
     ...params,
     limit: params.limit ?? SCENARIO_RUNS_PAGE_DEFAULT,
   });
+}
+
+/** #448: an unknown cpId is `not_found` — the registry throws, unlike the
+ *  stored-logs read behind `logs.get`. */
+async function getTimeline(
+  deps: RuntimeSocketIoDeps,
+  { cpId, ...query }: Params<"timeline.get">,
+): Promise<Result<"timeline.get">> {
+  const page = await runFacadeOperation(() =>
+    deps.chargePointService.getOperationalTimeline(cpId, query),
+  );
+  return { version: TIMELINE_FORMAT_VERSION, ...page };
 }
 
 async function listScenarioDefinitions(

@@ -43,6 +43,10 @@ import type {
 } from "../../cp/domain/types/OcppTypes";
 import type { LogEntry } from "../../cp/shared/Logger";
 import type {
+  TimelinePage,
+  TimelineQuery,
+} from "../../cp/application/services/OperationalTimeline";
+import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
@@ -418,6 +422,14 @@ export interface ChargePointService {
    *  {@link getScenarioReport} returns a run's full report. Remote only:
    *  local mode keeps no run history. */
   listScenarioRuns?(query: ScenarioRunQuery): Promise<ScenarioRunPage>;
+
+  /** #448: a charge point's operational timeline (`timeline.get`), oldest
+   *  first unless `query.order` is `"desc"`. Optional so a test double need
+   *  not implement it. */
+  getOperationalTimeline?(
+    cpId: string,
+    query?: TimelineQuery,
+  ): Promise<TimelinePage>;
 
   // Saved vehicle profiles (#458). Local mode keeps them in the browser's
   // sql.js database, Remote mode on the daemon (`vehicle_profiles.*`). Both

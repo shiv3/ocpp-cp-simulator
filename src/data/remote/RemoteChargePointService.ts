@@ -60,6 +60,10 @@ import type {
   ScenarioRunQuery,
 } from "../../cp/application/verification/ScenarioRunSummary";
 import type {
+  TimelinePage,
+  TimelineQuery,
+} from "../../cp/application/services/OperationalTimeline";
+import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
@@ -1701,6 +1705,13 @@ export class RemoteChargePointService implements ChargePointService {
 
   async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
     return (await this.rpc("scenario.runs.list", query)) as ScenarioRunPage;
+  }
+
+  async getOperationalTimeline(
+    cpId: string,
+    query: TimelineQuery = {},
+  ): Promise<TimelinePage> {
+    return this.rpc("timeline.get", { cpId, ...query });
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

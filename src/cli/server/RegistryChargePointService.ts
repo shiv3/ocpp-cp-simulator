@@ -36,6 +36,10 @@ import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
+import type {
+  TimelinePage,
+  TimelineQuery,
+} from "../../cp/application/services/OperationalTimeline";
 import type { Database } from "../../cp/domain/persistence/Database";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
@@ -537,6 +541,13 @@ export class RegistryChargePointService implements ChargePointService {
     options?: HistoryOptions,
   ): Promise<StateHistoryEntry[]> {
     return [...this.requireService(id).getStateHistory(options)];
+  }
+
+  async getOperationalTimeline(
+    id: string,
+    query?: TimelineQuery,
+  ): Promise<TimelinePage> {
+    return this.requireService(id).getOperationalTimeline(query);
   }
 
   async listScenarioDefinitions(

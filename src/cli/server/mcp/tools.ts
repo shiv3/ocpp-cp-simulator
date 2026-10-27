@@ -17,6 +17,10 @@ import {
   TRANSACTION_EVENT_TRIGGER_REASONS,
 } from "../../../cp/domain/connector/Transaction";
 import type { RuntimeSocketIoDeps } from "../socketServer";
+import {
+  TIMELINE_DEFAULT_CAPACITY,
+  TIMELINE_KINDS,
+} from "../../../cp/application/services/OperationalTimeline";
 
 function successResult(data: unknown): ToolCallResult {
   return {
@@ -621,6 +625,66 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             offset: args.offset,
             order: args.order,
           },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("get_timeline", {
+    description:
+      "Retrieve a charge point's operational timeline (#448): normalized, " +
+      "ordered events — connection loss and reconnect, injected network " +
+      "faults and the recovery they caused, CP/connector status changes, " +
+      "transactions, authorization rejections and scenario runs. Entries " +
+      "are ordered by `seq`; entries of one fault share an `incidentId` and " +
+      "`recovery_completed` reports `durationMs`. Windowed like get_logs: " +
+      "`limit` takes the newest N, `offset` pages backwards.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connectorId: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Only entries about this connector"),
+      runId: z
+        .string()
+        .optional()
+        .describe("Only entries attributed to this scenario run"),
+      incidentId: z
+        .string()
+        .optional()
+        .describe("Only entries of this network-fault incident"),
+      kinds: z
+        .array(z.enum(TIMELINE_KINDS))
+        .optional()
+        .describe("Only these entry kinds"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(TIMELINE_DEFAULT_CAPACITY)
+        .optional()
+        .describe("Number of most-recent matching entries to return"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Skip this many of the newest entries before taking `limit`"),
+      order: z
+        .enum(["asc", "desc"])
+        .optional()
+        .describe("'asc' (oldest first, default) or 'desc' (newest first)"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "timeline.get",
+          params: args,
         });
         return successResult(result);
       } catch (err) {

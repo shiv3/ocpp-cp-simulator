@@ -65,7 +65,7 @@ export interface TimelineQuery {
   connectorId?: number;
   runId?: string;
   incidentId?: string;
-  kinds?: ReadonlyArray<TimelineKind>;
+  kinds?: TimelineKind[];
   /** How many entries to return: the newest N of the filtered set. */
   limit?: number;
   /** How many of the newest filtered entries to skip before `limit`. */

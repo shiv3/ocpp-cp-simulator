@@ -82,6 +82,10 @@ import type {
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
 import type {
+  TimelinePage,
+  TimelineQuery,
+} from "../../cp/application/services/OperationalTimeline";
+import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
 } from "../../cp/infrastructure/transport/network-sim/config";
@@ -757,6 +761,15 @@ export class LocalChargePointService implements ChargePointService {
     const cp = this.chargePoints.get(id);
     if (!cp) return [];
     return cp.stateManager.history.getHistory(options);
+  }
+
+  async getOperationalTimeline(
+    id: string,
+    query?: TimelineQuery,
+  ): Promise<TimelinePage> {
+    const cp = this.chargePoints.get(id);
+    if (!cp) return { entries: [], total: 0 };
+    return cp.timeline.query(query);
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {

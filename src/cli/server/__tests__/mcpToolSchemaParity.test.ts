@@ -316,6 +316,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "run_scenario_template", method: "run_scenario_template" },
     { tool: "scenario_status", method: "scenario_status" },
     { tool: "get_logs", method: "logs.get" },
+    { tool: "get_timeline", method: "timeline.get" },
     {
       tool: "network_sim_trigger_disconnect",
       method: "network_sim.disconnect.trigger",

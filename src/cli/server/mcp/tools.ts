@@ -124,8 +124,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   // #446: relabelling gets a tool, and `cp.update` deliberately does not —
-  // `cp.update` rebuilds the charge point (a reconnect, a dropped session),
-  // which is the wrong price for changing metadata.
+  // `cp.update` rebuilds the charge point (its socket closes and a new
+  // instance takes over), which is the wrong price for changing metadata.
   mcp.tool("cp_labels_set", {
     description:
       "Replace a charge point's labels (generic key/value metadata such as site, tenant or environment) with the given map; {} removes them all. Applied in place: the charge point stays connected and running transactions continue.",

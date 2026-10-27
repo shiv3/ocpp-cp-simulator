@@ -15,7 +15,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/vehicle-profiles.md
   - open-ev-directory.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # Web console (browser UI)
@@ -124,7 +124,7 @@ view is the default and leaves the parameter out.
 | View (`?view=`)               | Shows                                                                                                                                                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Hierarchy** (`hierarchy`)   | One row per charge point in one bordered card, with its connectors as a grid of small cells under it.                                                                                                                    |
-| **Charge points** (`cp`)      | A table, one row per charge point: id, OCPP version, status, **In use** (`busy / total` connectors, busy = Charging, Preparing, SuspendedEV, SuspendedEVSE or Finishing), scenario badge or `—`, and the last Heartbeat. |
+| **Charge points** (`cp`)      | A table, one row per charge point: id, OCPP version, status, **In use** (`busy / total` connectors, busy = Charging, Preparing, SuspendedEV, SuspendedEVSE or Finishing), scenario badge or `—`, last Heartbeat, labels. |
 | **Connectors** (`connectors`) | A flat table, one row per connector: `<cp id> #<n>`, status, meter (kWh), transaction (`#<id>` or `—`), scenario run state or `—`, and the charge point's status.                                                        |
 
 In the Hierarchy view a row's head holds, left to right: a **twist** button
@@ -132,7 +132,8 @@ In the Hierarchy view a row's head holds, left to right: a **twist** button
 connector grid away (kept on the page, not in the URL), a plug icon colored by
 status, the id, the OCPP version as small muted text, the status (dot and text), the
 **Scenario** badge (amber **Waiting: …** while a run is parked), the **Net
-sim** badge, one small dot per connector (tooltip `#<n> <Status>`), and at the
+sim** badge, the [labels](../concepts/control-plane.md#charge-point-labels) as
+`key=value` chips, one small dot per connector (tooltip `#<n> <Status>`), and at the
 right end, only while the charge point is connected, the last Heartbeat as
 muted mono text (`heartbeat 3m ago`, `heartbeat never` before the first). The
 list has no **Connect** / **Disconnect** button, in either view: connecting is
@@ -165,13 +166,14 @@ the side panel), and **Clear** empties the field.
 | **Connector** combobox    | `?conn=`       | A connector number, `3` or `#3` (the URL holds `3`): connectors whose number equals it. Text that is not a number matches nothing; `#` alone does not filter yet. Suggestions: every connector number once, as `#n`.                                           |
 | **Transaction** combobox  | `?tx=`         | A transaction id or part of one, `42` or `#42` (the URL holds `42`): connectors whose transaction id contains it, so `42` also finds `4207`. Text that is not a number matches nothing. Suggestions: every running transaction as `#<id>` with `<cp id> #<n>`. |
 | **Status** select         | `?status=`     | The connector's OCPP status (the nine values, in enum order). An unknown value in the URL is ignored.                                                                                                                                                          |
+| **Label** combobox        | `?label=`      | Comma-separated `key=value` pairs, all of which must match exactly (`site=s1, env=lab`); a bare `key` matches on the key's presence. Suggestions: every `key=value` pair in the list. Local CPs have no labels (#446).                                         |
 | **OCPP version** select   | `?version=`    | The charge point's version (`config.ocppVersion` in Remote mode; in Local mode the shared config's), among the versions present in the list.                                                                                                                   |
 | **Connected** checkbox    | `?connected=1` | Charge points that are connected: transport up, or a status other than Unavailable.                                                                                                                                                                            |
 | **Scenario** checkbox     | `?scenario=1`  | Connectors with an active scenario run.                                                                                                                                                                                                                        |
 
 The **connector-level** filters (Connector, Transaction, Status, Scenario) hide the
 charge points that have no matching connector and, in the Hierarchy view, the
-connectors that do not match; the others (Charge point, OCPP version,
+connectors that do not match; the others (Charge point, Label, OCPP version,
 Connected) hide whole charge points. Filters combine with AND. At the right
 end the counter reads `<n> CPs · <m> connectors` for what is shown. When
 nothing matches, the list says **No charge points match the current
@@ -251,7 +253,19 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   Firmware Version, **Number of Connectors**: what the charge point _is_, sent
   in BootNotification), **Connection** (Charge Point ID, **Protocol**,
   **Version**, the WebSocket URL, or the Central System URL for SOAP, and the
-  **Effective WebSocket URL**), then Security, Optional settings and the rest.
+  **Effective WebSocket URL**), then Security, **Labels** (Remote mode),
+  Optional settings and the rest.
+  **Labels** (#446) edits the charge point's
+  [labels](../concepts/control-plane.md#charge-point-labels) as key / value
+  rows (**Add label**, a **×** per row). Save trims keys, ignores fully blank
+  rows, and refuses with a message a value without a key, an invalid or
+  duplicate key, an over-long value or more than 32 labels — the daemon's own
+  rules. The rows are sent as the complete map, so removing every row clears
+  the labels; a charge point whose snapshot carries no config leaves them out
+  of the update entirely, so the daemon keeps them rather than receiving `{}`.
+  Saving goes through `cp.update`, which reconnects the charge point;
+  `cp.labels.set` relabels without that, from the RPC or MCP only. Local mode
+  has no labels and no section.
   **Protocol** (`JSON` / `SOAP`, derived from the stored version) comes before
   **Version**, which lists only that protocol's versions (JSON: 1.6, 2.0.1,
   2.1; SOAP: 1.2, 1.5, 1.6; the stored `ocppVersion` stays `OCPP-1.6J`,

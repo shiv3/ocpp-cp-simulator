@@ -179,7 +179,7 @@ describe("OperationalTimelinePanel", () => {
     expect(getOperationalTimeline).toHaveBeenCalledTimes(2);
   });
 
-  it("does not re-read on log lines", async () => {
+  it("does not re-read on events that add no entry", async () => {
     const getOperationalTimeline = vi.fn(async () => page([]));
     const service = makeService({ getOperationalTimeline });
     const rendered = await renderConsole("/cp/CP-1?tab=events", { service });
@@ -197,6 +197,12 @@ describe("OperationalTimelinePanel", () => {
         type: LogType.OCPP,
         message: "x",
       },
+    });
+    await pushEvent(service, "CP-1", {
+      type: "scenario-node-execute",
+      connectorId: 1,
+      scenarioId: "s1",
+      nodeId: "n1",
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));

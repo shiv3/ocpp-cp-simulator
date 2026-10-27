@@ -7,21 +7,27 @@ import { STATUS_REFRESH_DEBOUNCE_MS } from "./scenarioRunState";
 
 const EMPTY_PAGE: TimelinePage = { entries: [], total: 0 };
 
-/** Events that never add a timeline entry: re-reading on them (log lines and
- *  meter samples arrive several times a second) would only cost round trips. */
-const IGNORED_EVENTS: ReadonlySet<ChargePointEvent["type"]> = new Set([
-  "log",
-  "heartbeat",
-  "connector-meter",
-  "connector-soc",
-  "state-history-entry",
+/** The console events that accompany a timeline entry. Only these trigger a
+ *  re-read: the others (log lines, meter samples, scenario node progress)
+ *  can arrive faster than the debounce and would keep postponing it. */
+const REFRESH_EVENTS: ReadonlySet<ChargePointEvent["type"]> = new Set([
+  "connected",
+  "disconnected",
+  "status",
+  "connector-status",
+  "connector-transaction",
+  "scenario-started",
+  "scenario-completed",
+  "scenario-error",
+  "scenario-wait-changed",
 ]);
 
 export interface UseOperationalTimelineResult {
   page: TimelinePage;
   isLoading: boolean;
   error: string | null;
-  /** False when the service has no timeline (a test double, an old daemon). */
+  /** False when the service has no timeline method (a test double). Against
+   *  a daemon older than #448 the read fails and `error` says so. */
   supported: boolean;
   refresh: () => Promise<void>;
 }
@@ -89,7 +95,7 @@ export function useOperationalTimeline(
   useEffect(() => {
     if (!supported) return undefined;
     return chargePointService.subscribe(cpId, (event) => {
-      if (IGNORED_EVENTS.has(event.type)) return;
+      if (!REFRESH_EVENTS.has(event.type)) return;
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(
         () => void refreshRef.current(),

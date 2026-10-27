@@ -877,5 +877,18 @@ describe("OCPPWebSocket Network Simulation", () => {
 
       expect(scheduled).toEqual([{ attempt: 1, delayMs: 5000 }]);
     });
+
+    it("reports the reconnect after the onclose callback saw the close", () => {
+      const order: string[] = [];
+      const observed = new OCPPWebSocket("ws://localhost:8080", "CP-2", logger);
+      observed.connect(undefined, () => order.push("close"));
+      (observed as unknown as WebSocketTestAccess)._ws.simulateOpen();
+      observed.onReconnectScheduled(() => order.push("reconnect"));
+
+      observed.simulateConnectionLoss(1000, "cut", "manual-disconnect");
+
+      expect(order).toEqual(["close", "reconnect"]);
+      observed.dispose();
+    });
   });
 });

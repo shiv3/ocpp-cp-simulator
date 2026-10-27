@@ -177,6 +177,8 @@ export class OCPPWebSocket {
     ((fault: NetworkFaultInjected) => void) | null = null;
   private _onReconnectScheduledCallback:
     ((info: { attempt: number; delayMs: number }) => void) | null = null;
+  private _pendingReconnectNotice: { attempt: number; delayMs: number } | null =
+    null;
   private _disposed: boolean = false;
 
   constructor(
@@ -277,6 +279,12 @@ export class OCPPWebSocket {
       if (this._onCloseCallback) {
         this._onCloseCallback(ev);
       }
+      // #448: announced once the charge point has handled the close, so an
+      // observer sees the disconnect before the reconnect it causes.
+      const notice = this._pendingReconnectNotice;
+      this._pendingReconnectNotice = null;
+      if (notice)
+        this.notifyObserver(this._onReconnectScheduledCallback, notice);
     };
 
     // Resolving here, per attempt, is what keeps the URL list out of
@@ -407,7 +415,8 @@ export class OCPPWebSocket {
     this._onSimulatedDisconnectCallback = cb;
   }
 
-  /** #448: observe each reconnect the transport schedules. */
+  /** #448: observe each reconnect the transport schedules, once the close
+   *  that caused it has been handed to the `onclose` callback. */
   public onReconnectScheduled(
     cb: (info: { attempt: number; delayMs: number }) => void,
   ): void {
@@ -940,10 +949,10 @@ export class OCPPWebSocket {
       `Reconnecting in ${actualDelay / 1000}s... (attempt ${this._reconnectAttempts})`,
       LogType.WEBSOCKET,
     );
-    this.notifyObserver(this._onReconnectScheduledCallback, {
+    this._pendingReconnectNotice = {
       attempt: this._reconnectAttempts,
       delayMs: actualDelay,
-    });
+    };
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;

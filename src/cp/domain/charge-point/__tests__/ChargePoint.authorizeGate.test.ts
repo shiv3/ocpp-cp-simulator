@@ -32,6 +32,15 @@ function buildChargePoint(): ChargePoint {
   );
 }
 
+// Long-lived subscribers (the #448 timeline projector) listen too; what
+// matters is that authorizeAndWait leaves no listener of its own behind.
+function listenerCounts(cp: ChargePoint) {
+  return {
+    authorizeResult: cp.events.listenerCount("authorizeResult"),
+    disconnected: cp.events.listenerCount("disconnected"),
+  };
+}
+
 describe("ChargePoint.authorizeAndWait (#181)", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -54,28 +63,30 @@ describe("ChargePoint.authorizeAndWait (#181)", () => {
 
   it("cleans up its listeners once resolved via the event", async () => {
     const cp = buildChargePoint();
+    const baseline = listenerCounts(cp);
     const promise = cp.authorizeAndWait("TAG-A", 5000);
     cp.notifyAuthorizeResult("TAG-A", "Accepted");
     await promise;
-    expect(cp.events.listenerCount("authorizeResult")).toBe(0);
-    expect(cp.events.listenerCount("disconnected")).toBe(0);
+    expect(listenerCounts(cp)).toEqual(baseline);
   });
 
   it("times out and resolves 'Accepted' (warn-and-proceed) when no Authorize.conf arrives", async () => {
     vi.useFakeTimers();
     const cp = buildChargePoint();
+    const baseline = listenerCounts(cp);
     const promise = cp.authorizeAndWait("TAG-A", 1000);
     await vi.advanceTimersByTimeAsync(1000);
     await expect(promise).resolves.toBe("Accepted");
-    expect(cp.events.listenerCount("authorizeResult")).toBe(0);
+    expect(listenerCounts(cp)).toEqual(baseline);
   });
 
   it("resolves 'Accepted' (warn-and-proceed) if disconnected while waiting", async () => {
     const cp = buildChargePoint();
+    const baseline = listenerCounts(cp);
     const promise = cp.authorizeAndWait("TAG-A", 5000);
     cp.events.emit("disconnected", { code: 1006, reason: "test" });
     await expect(promise).resolves.toBe("Accepted");
-    expect(cp.events.listenerCount("authorizeResult")).toBe(0);
+    expect(listenerCounts(cp)).toEqual(baseline);
   });
 });
 

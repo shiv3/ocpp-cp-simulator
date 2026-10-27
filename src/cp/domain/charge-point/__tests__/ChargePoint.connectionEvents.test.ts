@@ -48,18 +48,18 @@ describe("ChargePoint connection events (#448)", () => {
     ]);
   });
 
-  it("emits reconnecting when the transport schedules a reconnect", () => {
-    vi.useFakeTimers();
+  it("re-emits the transport's reconnect notice as reconnecting", () => {
     const cp = buildChargePoint();
     const attempts: unknown[] = [];
     cp.events.on("reconnecting", (info) => attempts.push(info));
 
     (
-      cp["_webSocket"] as unknown as { attemptReconnect: () => void }
-    ).attemptReconnect();
+      cp["_webSocket"] as unknown as {
+        _onReconnectScheduledCallback: (info: unknown) => void;
+      }
+    )._onReconnectScheduledCallback({ attempt: 1, delayMs: 1000 });
 
     expect(attempts).toEqual([{ attempt: 1, delayMs: 1000 }]);
-    cp["_webSocket"]!.disconnect();
   });
 
   it("reports the stop reason on transactionStopped", async () => {

@@ -100,6 +100,10 @@ import type {
   StateHistoryEntry,
   HistoryOptions,
 } from "../cp/application/services/types/StateSnapshot";
+import type {
+  TimelinePage,
+  TimelineQuery,
+} from "../cp/application/services/OperationalTimeline";
 import { scenarioTemplates, getTemplateById } from "../utils/scenarioTemplates";
 import { TranscriptBuffer } from "../cp/application/verification/TranscriptBuffer";
 import {
@@ -1281,6 +1285,11 @@ export class CLIChargePointService {
     return this._chargePoint.stateManager.history.getHistory(options);
   }
 
+  /** #448: this charge point's operational timeline. */
+  getOperationalTimeline(query?: TimelineQuery): TimelinePage {
+    return this._chargePoint.timeline.query(query);
+  }
+
   private requireConnector(connectorId: number) {
     const connector = this._chargePoint.connectors.get(connectorId);
     if (!connector) {
@@ -2351,6 +2360,7 @@ export class CLIChargePointService {
     timeout: { nodeId: string; expectation?: unknown } | null,
     stopped = false,
   ): void {
+    this._chargePoint.timeline.endRun(connectorId, runId);
     const transcript = this._transcriptByScenario.get(scenarioId);
     if (!transcript) return;
     transcript.stop();
@@ -2675,12 +2685,71 @@ export class CLIChargePointService {
   }
 
   private emit(evt: CLIEvent): void {
+    this.recordScenarioOnTimeline(evt);
     for (const handler of this._handlers) {
       try {
         handler(evt);
       } catch (err) {
         process.stderr.write(`[CLI] Event handler error: ${err}\n`);
       }
+    }
+  }
+
+  /** #448: scenario runs are minted here, not in the domain, so their
+   *  lifecycle reaches the operational timeline from the events announcing
+   *  it. `startRun` attributes the connector's later entries to the run;
+   *  `finalizeScenarioRun` ends it. */
+  private recordScenarioOnTimeline(evt: CLIEvent): void {
+    const timeline = this._chargePoint.timeline;
+    switch (evt.event) {
+      case "scenario_started": {
+        const { connectorId, scenarioId, runId } = evt.data;
+        timeline.startRun(connectorId, runId);
+        timeline.record({
+          kind: "scenario_started",
+          connectorId,
+          runId,
+          summary: `Scenario ${scenarioId} started`,
+          data: { scenarioId },
+        });
+        return;
+      }
+      case "scenario_wait_changed": {
+        const { connectorId, scenarioId, runId, nodeId, kind } = evt.data;
+        timeline.record({
+          kind: "scenario_wait_changed",
+          connectorId,
+          runId,
+          summary: `Scenario ${scenarioId}: wait on ${nodeId} ${kind}`,
+          data: { scenarioId, nodeId, kind },
+        });
+        return;
+      }
+      case "scenario_error": {
+        const { connectorId, scenarioId, runId, error } = evt.data;
+        const redacted = redactSensitiveText(error);
+        timeline.record({
+          kind: "scenario_error",
+          connectorId,
+          runId,
+          summary: `Scenario ${scenarioId} failed: ${redacted}`,
+          data: { scenarioId, error: redacted },
+        });
+        return;
+      }
+      case "scenario_completed": {
+        const { connectorId, scenarioId, runId } = evt.data;
+        timeline.record({
+          kind: "scenario_completed",
+          connectorId,
+          runId,
+          summary: `Scenario ${scenarioId} completed`,
+          data: { scenarioId },
+        });
+        return;
+      }
+      default:
+        return;
     }
   }
 

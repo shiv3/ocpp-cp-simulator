@@ -1004,12 +1004,29 @@ describe("OCPPWebSocket superseded socket close (#478)", () => {
     ws.disconnectInternal(); // the fake socket closes synchronously
 
     ws.connect();
+    const replacement = currentSocket();
+    vi.advanceTimersByTime(60_000);
 
+    expect(currentSocket()).toBe(replacement);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledWith(
       expect.objectContaining({ code: 1000 }),
       "internal",
     );
+  });
+
+  it("a connect during the reconnect backoff cancels the pending reconnect", () => {
+    fakeWs.simulateClose(1006); // arms the backoff timer
+
+    ws.connect();
+    const replacement = currentSocket();
+    replacement.simulateOpen();
+    vi.advanceTimersByTime(60_000);
+
+    // The timer would open another socket over the live one, and the
+    // orphan's close would then tear the new one down.
+    expect(currentSocket()).toBe(replacement);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("reports nothing on the first connect", () => {

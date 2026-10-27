@@ -1639,4 +1639,5 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-27] ingest | A reset's stale socket close no longer tears down the replacement (#478)
 
 - [Log format → WebSocket close lines](concepts/log-format.md#websocket-close-lines): new section. It lists the `cause=` values and covers a socket the charge point closed itself whose close lands after the next connect started: it is reported then with `code` 1005, and the late close only logs.
-- [CLI → events](entities/cli.md): `disconnected` comes once per socket, before the replacement's `connected`; a reset reports `code` 1005.
+- [CLI → events](entities/cli.md): `disconnected` comes once per socket, before the replacement's `connected`; a reset of an open socket reports `code` 1005.
+- [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): an operator `connect` or a reset during `reconnectDelayMs` connects right away and cancels the delayed reconnect.

@@ -259,6 +259,12 @@ export class OCPPWebSocket {
     if (this._ws === null && superseded && !superseded.closeReported) {
       this.reportClose(superseded, SUPERSEDED_CLOSE);
     }
+    // A connect during the reconnect backoff supersedes it: left armed, the
+    // timer would open another socket over this one and orphan it.
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
 
     // Increment generation on new connection
     this._generationCounter++;

@@ -55,8 +55,8 @@ network), `manual` (an operator disconnect or a dispose), `internal` (a reset)
 or `simulated` (a [network-simulation](network-simulation.md) cut) (#474).
 
 The line can come after the next connection is already open. A socket the
-charge point closed itself (a reset, or a `disconnect` followed by `connect`)
-fires its close asynchronously. When the next connect starts before that close
+charge point closed itself fires its close asynchronously: a reset, or a
+`disconnect` or network-simulation cut followed by a `connect`. When the next connect starts before that close
 has landed, the charge point is told then, with `code` 1005: its
 `disconnected` event precedes the replacement's `connected`. The late close
 only logs this line, with the real code, and leaves the new connection alone

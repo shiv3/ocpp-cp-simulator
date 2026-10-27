@@ -114,12 +114,16 @@ describe("scenario continuation on a denied transaction start (#181)", () => {
       },
     });
     const executor = new ScenarioExecutor(scenario, callbacks);
+    // The #448 timeline projector listens too: wait for one more.
+    const baseline = cp.events.listenerCount("authorizeResult");
     const execution = executor.start();
 
     try {
       // The tx-start node is awaiting Authorize.conf — deny it via the
       // same event AuthorizeResultHandler emits for a real CALLRESULT.
-      await waitUntil(() => cp.events.listenerCount("authorizeResult") > 0);
+      await waitUntil(
+        () => cp.events.listenerCount("authorizeResult") > baseline,
+      );
       cp.notifyAuthorizeResult(tagId, "Invalid");
 
       await timeout(execution, 2000);
@@ -152,10 +156,14 @@ describe("scenario continuation on a denied transaction start (#181)", () => {
       connector,
     });
     const executor = new ScenarioExecutor(scenario, callbacks);
+    // The #448 timeline projector listens too: wait for one more.
+    const baseline = cp.events.listenerCount("authorizeResult");
     const execution = executor.start();
 
     try {
-      await waitUntil(() => cp.events.listenerCount("authorizeResult") > 0);
+      await waitUntil(
+        () => cp.events.listenerCount("authorizeResult") > baseline,
+      );
       cp.notifyAuthorizeResult(tagId, "Accepted");
 
       await timeout(execution, 2000);

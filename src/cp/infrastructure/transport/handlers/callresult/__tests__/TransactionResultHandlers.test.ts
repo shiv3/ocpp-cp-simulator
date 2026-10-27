@@ -313,7 +313,9 @@ describe("StartTransactionResultHandler (#181) — StopTransactionOnInvalidId", 
     // its normal cascade — the CSMS-assigned id is only observable via the
     // stopTransaction() call itself and the transactionStopped event.
     expect(stopSpy).toHaveBeenCalledWith(connector, "DeAuthorized");
-    expect(stopped).toEqual([{ connectorId: 1, transactionId: 555 }]);
+    expect(stopped).toEqual([
+      { connectorId: 1, transactionId: 555, reason: "DeAuthorized" },
+    ]);
     expect(connector.transaction).toBeNull();
     expect(connector.status).toBe(OCPPStatus.Available);
     expect(notAccepted).toEqual([

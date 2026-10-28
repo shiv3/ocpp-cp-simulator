@@ -17,6 +17,9 @@ import { Connector } from "../connector/Connector";
 import type {
   BootNotificationResult,
   ChargePointEvents,
+  ChargingProfileClearReason,
+  ChargingProfileSource,
+  ClearedChargingProfiles,
   IncomingCallCompletion,
   RegistrationStatus,
 } from "./ChargePointEvents";
@@ -72,7 +75,10 @@ import type {
 import type { ReadingContext } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
-import { ChargingProfileStore } from "./ChargingProfileStore";
+import {
+  ChargingProfileStore,
+  type ProfileRemoveCriteria,
+} from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
@@ -789,10 +795,78 @@ export class ChargePoint {
     return this._localAuthListManager;
   }
 
-  /** Read-only access for handlers and tests. SetChargingProfile /
-   *  ClearChargingProfile mutate this directly. */
+  /** Read access for handlers and tests. Install and remove profiles with
+   *  `applyChargingProfile` / `clearChargingProfiles`, which report the
+   *  change (#469). */
   get stationProfiles(): ChargingProfileStore {
     return this._stationProfiles;
+  }
+
+  /**
+   * Install a profile on the station store (`connectorId` 0) or on its
+   * connector, replacing any profile with the same id in that scope, and
+   * emit `chargingProfileApplied`. Validation is the caller's job.
+   *
+   * @returns `false`, changing nothing, when the connector does not exist.
+   */
+  applyChargingProfile(
+    profile: ActiveChargingProfile,
+    source: ChargingProfileSource,
+  ): boolean {
+    let replaced: boolean;
+    if (profile.connectorId === 0) {
+      replaced = this._stationProfiles.add(profile);
+    } else {
+      const connector = this.getConnector(profile.connectorId);
+      if (!connector) return false;
+      replaced = connector.addChargingProfile(profile);
+    }
+    this._events.emit("chargingProfileApplied", {
+      connectorId: profile.connectorId,
+      profile,
+      replaced,
+      source,
+    });
+    return true;
+  }
+
+  /**
+   * Remove the profiles matching `criteria` (1.6 §5.4 / 2.x K10 targets):
+   * no `connectorId` clears the station store and every connector, `0` the
+   * station store only, `> 0` that connector. Emits one
+   * `chargingProfilesCleared` per scope that lost a profile.
+   *
+   * @returns The non-empty scopes, station store first.
+   */
+  clearChargingProfiles(
+    connectorId: number | undefined,
+    criteria: ProfileRemoveCriteria,
+    reason: ChargingProfileClearReason,
+  ): ClearedChargingProfiles[] {
+    const cleared: ClearedChargingProfiles[] = [];
+    const report = (scope: number, profiles: ActiveChargingProfile[]) => {
+      if (profiles.length === 0) return;
+      cleared.push({ connectorId: scope, profiles });
+      this._events.emit("chargingProfilesCleared", {
+        connectorId: scope,
+        profiles,
+        reason,
+      });
+    };
+    if (connectorId === undefined || connectorId === 0) {
+      report(0, this._stationProfiles.take(criteria));
+    }
+    if (connectorId === 0) return cleared;
+    const targets =
+      connectorId === undefined
+        ? [...this._connectors.values()]
+        : [this.getConnector(connectorId)];
+    for (const connector of targets) {
+      if (connector) {
+        report(connector.id, connector.takeChargingProfiles(criteria));
+      }
+    }
+    return cleared;
   }
 
   /** Convenience: the currently active ChargePointMaxProfile (highest
@@ -1548,7 +1622,7 @@ export class ChargePoint {
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._localAuthListManager.dispose();
-    this._stationProfiles.clear();
+    this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // Cancel any pending firmware-update simulation so its status train
     // doesn't keep firing against a dead WebSocket.
     this._firmwareUpdateTimers.forEach((t) => clearTimeout(t));
@@ -1850,12 +1924,14 @@ export class ChargePoint {
     // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)
     // NOTE: Only TxProfile is cleared. TxDefaultProfile persists for future transactions.
     // ChargePointMaxProfile also persists as it applies to the entire station.
-    const clearedProfiles = connector.removeChargingProfiles({
-      purpose: ChargingProfilePurposeType.TxProfile,
-    });
-    if (clearedProfiles > 0) {
+    const [cleared] = this.clearChargingProfiles(
+      connector.id,
+      { purpose: ChargingProfilePurposeType.TxProfile },
+      "TransactionEnded",
+    );
+    if (cleared) {
       this._logger.info(
-        `Cleared ${clearedProfiles} TxProfile(s) after transaction end on connector ${connector.id}`,
+        `Cleared ${cleared.profiles.length} TxProfile(s) after transaction end on connector ${connector.id}`,
         LogType.TRANSACTION,
       );
     }

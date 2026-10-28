@@ -249,8 +249,13 @@ export class SetChargingProfileHandler implements CallHandler<
       chargingSchedulePeriods: periods,
     };
 
+    if (
+      !context.chargePoint.applyChargingProfile(profile, "SetChargingProfile")
+    ) {
+      context.logger.warn(`Connector ${connectorId} not found`, LogType.OCPP);
+      return { status: "Rejected" };
+    }
     if (connectorId === 0) {
-      context.chargePoint.stationProfiles.add(profile);
       // Status re-eval on every connector — a new station-wide profile
       // may flip a Charging connector to SuspendedEVSE (or vice versa).
       context.chargePoint.connectors.forEach((c: Connector) =>
@@ -262,12 +267,7 @@ export class SetChargingProfileHandler implements CallHandler<
       );
     } else {
       const connector = context.chargePoint.getConnector(connectorId);
-      if (!connector) {
-        context.logger.warn(`Connector ${connectorId} not found`, LogType.OCPP);
-        return { status: "Rejected" };
-      }
-      connector.addChargingProfile(profile);
-      applyProfileStatus(connector, context.chargePoint);
+      if (connector) applyProfileStatus(connector, context.chargePoint);
       context.logger.info(
         `Applied charging profile #${profile.chargingProfileId} to connector ${connectorId}`,
         LogType.OCPP,
@@ -311,20 +311,16 @@ export class ClearChargingProfileHandler implements CallHandler<
         ChargingProfilePurposeType | undefined,
       stackLevel: payload.stackLevel,
     };
-    let totalCleared = 0;
+    const cleared = context.chargePoint.clearChargingProfiles(
+      payload.connectorId ?? undefined,
+      criteria,
+      "ClearChargingProfile",
+    );
 
-    const clearStation =
-      payload.connectorId == null || payload.connectorId === 0;
-    if (clearStation) {
-      const removed = context.chargePoint.stationProfiles.remove({
-        profileId: criteria.profileId,
-        purpose: criteria.purpose,
-        stackLevel: criteria.stackLevel,
-      });
-      totalCleared += removed;
-      if (removed > 0) {
+    for (const { connectorId, profiles } of cleared) {
+      if (connectorId === 0) {
         context.logger.info(
-          `Cleared ${removed} station-level profile(s)`,
+          `Cleared ${profiles.length} station-level profile(s)`,
           LogType.OCPP,
         );
         // A station profile change may flip Charging/SuspendedEVSE on
@@ -332,34 +328,17 @@ export class ClearChargingProfileHandler implements CallHandler<
         context.chargePoint.connectors.forEach((c: Connector) =>
           applyProfileStatus(c, context.chargePoint),
         );
+        continue;
       }
+      context.logger.info(
+        `Cleared ${profiles.length} profile(s) from connector ${connectorId}`,
+        LogType.OCPP,
+      );
+      const connector = context.chargePoint.getConnector(connectorId);
+      if (connector) applyProfileStatus(connector, context.chargePoint);
     }
 
-    const targets: Connector[] = [];
-    if (payload.connectorId == null) {
-      context.chargePoint.connectors.forEach((c: Connector) => targets.push(c));
-    } else if (payload.connectorId > 0) {
-      const c = context.chargePoint.getConnector(payload.connectorId);
-      if (c) targets.push(c);
-    }
-
-    for (const connector of targets) {
-      const cleared = connector.removeChargingProfiles({
-        profileId: criteria.profileId,
-        purpose: criteria.purpose,
-        stackLevel: criteria.stackLevel,
-      });
-      totalCleared += cleared;
-      if (cleared > 0) {
-        context.logger.info(
-          `Cleared ${cleared} profile(s) from connector ${connector.id}`,
-          LogType.OCPP,
-        );
-        applyProfileStatus(connector, context.chargePoint);
-      }
-    }
-
-    if (totalCleared === 0) {
+    if (cleared.length === 0) {
       context.logger.info(
         "No profiles matched the clearing criteria",
         LogType.OCPP,

@@ -25,18 +25,27 @@ export interface ProfileRemoveCriteria {
 export class ChargingProfileStore {
   private profiles: ActiveChargingProfile[] = [];
 
-  add(profile: ActiveChargingProfile): void {
+  /** @returns whether a profile with the same id was replaced. */
+  add(profile: ActiveChargingProfile): boolean {
     // Same-id replacement matches Connector.addChargingProfile semantics
     // (§5.16: SetChargingProfile.req with an existing chargingProfileId
     // is an update, not an insert).
+    const before = this.profiles.length;
     this.profiles = this.profiles.filter(
       (p) => p.chargingProfileId !== profile.chargingProfileId,
     );
+    const replaced = this.profiles.length < before;
     this.profiles.push(profile);
+    return replaced;
   }
 
   remove(criteria: ProfileRemoveCriteria): number {
-    const before = this.profiles.length;
+    return this.take(criteria).length;
+  }
+
+  /** Remove the profiles matching every given criterion and return them. */
+  take(criteria: ProfileRemoveCriteria): ActiveChargingProfile[] {
+    const removed: ActiveChargingProfile[] = [];
     this.profiles = this.profiles.filter((profile) => {
       if (
         criteria.profileId != null &&
@@ -56,9 +65,10 @@ export class ChargingProfileStore {
       ) {
         return true;
       }
+      removed.push(profile);
       return false;
     });
-    return before - this.profiles.length;
+    return removed;
   }
 
   clear(): void {

@@ -42,7 +42,10 @@ import {
   resolveSocForCurve,
   withNormalizedChargingCurve,
 } from "./ChargingCurve";
-import type { ChargingProfileStore } from "../charge-point/ChargingProfileStore";
+import type {
+  ChargingProfileStore,
+  ProfileRemoveCriteria,
+} from "../charge-point/ChargingProfileStore";
 
 export interface ChargingSchedulePeriod {
   startPeriod: number;
@@ -92,6 +95,11 @@ export interface ActiveChargingProfile {
   validTo?: string; // ISO 8601 timestamp
   chargingSchedulePeriods: ChargingSchedulePeriod[];
 }
+
+/** A profile is removed when it matches every criterion given. */
+export type ConnectorProfileRemoveCriteria = ProfileRemoveCriteria & {
+  connectorId?: number;
+};
 
 export interface ConnectorEvents {
   statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
@@ -935,15 +943,19 @@ export class Connector {
 
   /**
    * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
+   * @returns Whether a profile with the same ID was replaced
    */
-  addChargingProfile(profile: ActiveChargingProfile): void {
+  addChargingProfile(profile: ActiveChargingProfile): boolean {
+    const before = this._chargingProfiles.length;
     // Remove existing profile with same ID
     this._chargingProfiles = this._chargingProfiles.filter(
       (p) => p.chargingProfileId !== profile.chargingProfileId,
     );
+    const replaced = this._chargingProfiles.length < before;
     // Add new profile
     this._chargingProfiles.push(profile);
     this.emitProfileChanges();
+    return replaced;
   }
 
   /**
@@ -951,13 +963,18 @@ export class Connector {
    * @param criteria Filter criteria (profileId, connectorId, purpose, stackLevel)
    * @returns Number of profiles removed
    */
-  removeChargingProfiles(criteria: {
-    profileId?: number;
-    connectorId?: number;
-    purpose?: ChargingProfilePurposeType;
-    stackLevel?: number;
-  }): number {
-    const before = this._chargingProfiles.length;
+  removeChargingProfiles(criteria: ConnectorProfileRemoveCriteria): number {
+    return this.takeChargingProfiles(criteria).length;
+  }
+
+  /**
+   * Remove charging profiles matching the given criteria
+   * @returns The removed profiles
+   */
+  takeChargingProfiles(
+    criteria: ConnectorProfileRemoveCriteria,
+  ): ActiveChargingProfile[] {
+    const removed: ActiveChargingProfile[] = [];
     this._chargingProfiles = this._chargingProfiles.filter((profile) => {
       if (
         criteria.profileId != null &&
@@ -983,10 +1000,10 @@ export class Connector {
       ) {
         return true;
       }
+      removed.push(profile);
       return false; // Remove (matches all criteria)
     });
-    const removed = before - this._chargingProfiles.length;
-    if (removed > 0) {
+    if (removed.length > 0) {
       this.emitProfileChanges();
     }
     return removed;

@@ -1,6 +1,9 @@
 import type { EventEmitter } from "../../shared/EventEmitter";
 import type { ChargePointEvents } from "../../domain/charge-point/ChargePointEvents";
-import type { Connector } from "../../domain/connector/Connector";
+import type {
+  ActiveChargingProfile,
+  Connector,
+} from "../../domain/connector/Connector";
 import type { OperationalTimeline } from "./OperationalTimeline";
 
 /**
@@ -8,6 +11,10 @@ import type { OperationalTimeline } from "./OperationalTimeline";
  * BootNotification. Past it the incident closes anyway, as not restored.
  */
 export const RECOVERY_SETTLE_MS = 60_000;
+
+/** setTimeout fires at once past a signed 32-bit delay (~24.8 days), so a
+ *  far-future `validTo` is reached in steps of at most this. */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
 interface UnrestoredConnector {
   connectorId: number;
@@ -36,11 +43,21 @@ interface Incident {
  * off `RECOVERY_SETTLE_MS` after the boot close it with `restored: false`, so
  * an incident never stays open for good. A fault firing while an incident is
  * open replaces it; the replaced incident gets no recovery.
+ *
+ * Profile expiry (#469): the domain only skips a profile past its `validTo`
+ * when it reads it, so the projector arms a timer per installed profile and
+ * records `charging_profile_expired` when it passes. Clearing or replacing
+ * the profile cancels the timer.
  */
 export class OperationalTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
   private incident: Incident | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Keyed by `profileKey`: one per installed profile with a `validTo`. */
+  private readonly expiryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   constructor(
     private readonly timeline: OperationalTimeline,
@@ -166,6 +183,48 @@ export class OperationalTimelineProjector {
         data: { status, stopped },
       });
     });
+    on(
+      "chargingProfileApplied",
+      ({ connectorId, profile, replaced, source }) => {
+        const { chargingProfileId: id, validTo } = profile;
+        this.timeline.record({
+          kind: "charging_profile_applied",
+          ...connectorScope(connectorId),
+          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}`,
+          data: {
+            ...profileFields(connectorId, profile),
+            source,
+            replaced,
+            ...(validTo !== undefined && { validTo }),
+          },
+        });
+        this.armExpiry(connectorId, profile);
+      },
+    );
+    on("chargingProfilesCleared", ({ connectorId, profiles, reason }) => {
+      for (const profile of profiles) {
+        this.cancelExpiry(profileKey(connectorId, profile));
+      }
+      this.timeline.record({
+        kind: "charging_profile_cleared",
+        ...connectorScope(connectorId),
+        summary: `Charging profile ${profiles.map((p) => p.chargingProfileId).join(", ")} cleared ${scopeLabel(connectorId)} (${reason})`,
+        data: {
+          connectorId,
+          reason,
+          profiles: profiles.map((p) => ({
+            profileId: p.chargingProfileId,
+            purpose: p.chargingProfilePurpose,
+            stackLevel: p.stackLevel,
+          })),
+        },
+      });
+    });
+    on("connectorRemoved", ({ connectorId }) => {
+      for (const key of [...this.expiryTimers.keys()]) {
+        if (key.startsWith(`${connectorId}:`)) this.cancelExpiry(key);
+      }
+    });
 
     // A removed connector is disposed, which drops this listener with it.
     for (const [connectorId, connector] of connectors) {
@@ -184,8 +243,44 @@ export class OperationalTimelineProjector {
 
   dispose(): void {
     this.clearSettleTimer();
+    for (const key of [...this.expiryTimers.keys()]) this.cancelExpiry(key);
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
+  }
+
+  /** Records the expiry at once when `validTo` has already passed. */
+  private armExpiry(connectorId: number, profile: ActiveChargingProfile): void {
+    const key = profileKey(connectorId, profile);
+    this.cancelExpiry(key);
+    const { validTo } = profile;
+    if (validTo === undefined) return;
+    const expiresAt = Date.parse(validTo);
+    if (Number.isNaN(expiresAt)) return;
+    const check = () => {
+      const remaining = expiresAt - this.timeline.now();
+      if (remaining > 0) {
+        this.expiryTimers.set(
+          key,
+          setTimeout(check, Math.min(remaining, MAX_TIMER_DELAY_MS)),
+        );
+        return;
+      }
+      this.expiryTimers.delete(key);
+      this.timeline.record({
+        kind: "charging_profile_expired",
+        ...connectorScope(connectorId),
+        summary: `Charging profile ${profile.chargingProfileId} expired ${scopeLabel(connectorId)}`,
+        data: { ...profileFields(connectorId, profile), validTo },
+      });
+    };
+    check();
+  }
+
+  private cancelExpiry(key: string): void {
+    const timer = this.expiryTimers.get(key);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.expiryTimers.delete(key);
   }
 
   private checkRecovery(): void {
@@ -235,6 +330,29 @@ export class OperationalTimelineProjector {
     clearTimeout(this.settleTimer);
     this.settleTimer = null;
   }
+}
+
+/** Station-wide profiles (connector 0) are charge-point-wide entries: the
+ *  entry-level `connectorId` is set for a real connector only. */
+function connectorScope(connectorId: number): { connectorId?: number } {
+  return connectorId > 0 ? { connectorId } : {};
+}
+
+function scopeLabel(connectorId: number): string {
+  return connectorId > 0 ? `on connector ${connectorId}` : "station-wide";
+}
+
+function profileKey(connectorId: number, profile: ActiveChargingProfile) {
+  return `${connectorId}:${profile.chargingProfileId}`;
+}
+
+function profileFields(connectorId: number, profile: ActiveChargingProfile) {
+  return {
+    connectorId,
+    profileId: profile.chargingProfileId,
+    purpose: profile.chargingProfilePurpose,
+    stackLevel: profile.stackLevel,
+  };
 }
 
 function formatSeconds(ms: number): string {

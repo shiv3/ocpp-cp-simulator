@@ -1,4 +1,5 @@
 import { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
+import type { ActiveChargingProfile } from "../connector/Connector";
 
 /** The CSMS's answer to BootNotification.req, as every OCPP version words it. */
 export type RegistrationStatus = "Accepted" | "Pending" | "Rejected";
@@ -29,6 +30,21 @@ export interface NetworkFaultInjected {
   ruleId: string;
   ruleType: "manual-disconnect" | "periodic-disconnect";
   reconnectDelayMs: number;
+}
+
+/** What installed a charging profile (#469). RemoteStart profiles are
+ *  ignored by the simulator, so the CSMS's SetChargingProfile is the only one. */
+export type ChargingProfileSource = "SetChargingProfile";
+
+/** Why charging profiles were removed (#469). */
+export type ChargingProfileClearReason =
+  "ClearChargingProfile" | "TransactionEnded" | "ConnectionClosed";
+
+/** Profiles removed from one scope: a connector, or the station store
+ *  (`connectorId` 0). */
+export interface ClearedChargingProfiles {
+  connectorId: number;
+  profiles: ActiveChargingProfile[];
 }
 
 /**
@@ -83,6 +99,22 @@ export interface ChargePointEvents {
   };
   connectorRemoved: {
     connectorId: number;
+  };
+
+  // Smart-charging events (#469)
+  /** A profile was installed on a connector or, with `connectorId` 0, on the
+   *  station store. `replaced` is true when it updated a profile with the
+   *  same id in that scope. */
+  chargingProfileApplied: {
+    connectorId: number;
+    profile: ActiveChargingProfile;
+    replaced: boolean;
+    source: ChargingProfileSource;
+  };
+  /** At least one profile was removed from one scope. Never emitted for a
+   *  clear that matched nothing, nor for a persistence restore. */
+  chargingProfilesCleared: ClearedChargingProfiles & {
+    reason: ChargingProfileClearReason;
   };
 
   // Transaction events

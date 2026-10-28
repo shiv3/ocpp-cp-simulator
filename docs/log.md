@@ -1672,3 +1672,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | Smart-charging profiles on the operational timeline (#469)
+
+- [Operational timeline](concepts/operational-timeline.md): format `1.1`; new kinds `charging_profile_applied`, `charging_profile_cleared` and `charging_profile_expired`; new [Smart-charging profiles](concepts/operational-timeline.md#smart-charging-profiles) section — station-wide entries carry no entry-level `connectorId` (`data.connectorId` 0), `purpose` uses 1.6 names on 2.x, clear reasons `ClearChargingProfile` / `TransactionEnded` / `ConnectionClosed`, one cleared entry per scope and none for a clear that matched nothing, expiry recorded when `validTo` passes. Limits: RemoteStart profiles are ignored, zero-limit periods are not entries, Local-mode restored profiles are not recorded.
+- [GitHub issues](sources/github-issues.md): #469.

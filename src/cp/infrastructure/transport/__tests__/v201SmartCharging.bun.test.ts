@@ -185,6 +185,69 @@ describe("OCPP 2.0.1 Smart Charging", () => {
   });
 });
 
+describe("OCPP 2.0.1 Smart Charging on the operational timeline (#469)", () => {
+  it("records station-wide and EVSE profiles applied, then cleared", async () => {
+    const csms = startMockCsms();
+    const cp = new ChargePoint(
+      "CP201-SMART-TIMELINE",
+      DefaultBootNotification,
+      1,
+      csms.url,
+      null,
+      null,
+      null,
+      {},
+      [],
+      "OCPP-2.0.1",
+      {},
+    );
+    cp.events.on("error", () => undefined);
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+
+      await sendCall(csms, "scp-station", "SetChargingProfile", {
+        evseId: 0,
+        chargingProfile: {
+          ...txDefaultProfile(10),
+          chargingProfilePurpose: "ChargingStationMaxProfile",
+        },
+      });
+      await sendCall(csms, "scp-evse", "SetChargingProfile", {
+        evseId: 1,
+        chargingProfile: txDefaultProfile(11),
+      });
+      expect(
+        await sendCall(csms, "ccp-none", "ClearChargingProfile", {
+          chargingProfileId: 999,
+        }),
+      ).toEqual([3, "ccp-none", { status: "Unknown" }]);
+      await sendCall(csms, "ccp-all", "ClearChargingProfile", {});
+
+      const entries = cp.timeline.query({
+        kinds: ["charging_profile_applied", "charging_profile_cleared"],
+      }).entries;
+      expect(
+        entries.map((e) => [
+          e.kind,
+          e.connectorId,
+          e.data.connectorId,
+          e.data.purpose ?? e.data.reason,
+        ]),
+      ).toEqual([
+        ["charging_profile_applied", undefined, 0, "ChargePointMaxProfile"],
+        ["charging_profile_applied", 1, 1, "TxDefaultProfile"],
+        ["charging_profile_cleared", undefined, 0, "ClearChargingProfile"],
+        ["charging_profile_cleared", 1, 1, "ClearChargingProfile"],
+      ]);
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+});
+
 describe("OCPP 2.1 shared Smart Charging handler", () => {
   it("rejects v21-only Dynamic profiles at the shared mapper boundary", async () => {
     const csms = startMockCsms();

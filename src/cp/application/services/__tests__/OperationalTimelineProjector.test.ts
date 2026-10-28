@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ActiveChargingProfile } from "../../../domain/connector/Connector";
 import {
+  ChargingProfileKindType,
+  ChargingProfilePurposeType,
+  ChargingRateUnitType,
   DefaultBootNotification,
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
+import type { TimelineKind } from "../OperationalTimeline";
 import { RECOVERY_SETTLE_MS } from "../OperationalTimelineProjector";
 
 /**
@@ -288,5 +293,306 @@ describe("OperationalTimelineProjector (#448)", () => {
       ],
       ["transaction_rejected", 1, { status: "Invalid", stopped: true }],
     ]);
+  });
+});
+
+const PROFILE_KINDS: TimelineKind[] = [
+  "charging_profile_applied",
+  "charging_profile_cleared",
+  "charging_profile_expired",
+];
+
+function txDefault(
+  overrides: Partial<ActiveChargingProfile> = {},
+): ActiveChargingProfile {
+  return {
+    chargingProfileId: 7,
+    connectorId: 1,
+    stackLevel: 2,
+    chargingProfilePurpose: ChargingProfilePurposeType.TxDefaultProfile,
+    chargingProfileKind: ChargingProfileKindType.Absolute,
+    chargingRateUnit: ChargingRateUnitType.W,
+    chargingSchedulePeriods: [{ startPeriod: 0, limit: 11_000 }],
+    ...overrides,
+  };
+}
+
+function profileEntries(cp: ChargePoint) {
+  return cp.timeline
+    .query({ kinds: PROFILE_KINDS })
+    .entries.map((e) => [e.kind, e.connectorId, e.data]);
+}
+
+describe("OperationalTimelineProjector smart-charging profiles (#469)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("records a connector profile set then cleared", () => {
+    const cp = buildChargePoint();
+
+    expect(cp.applyChargingProfile(txDefault(), "SetChargingProfile")).toBe(
+      true,
+    );
+    cp.clearChargingProfiles(1, { profileId: 7 }, "ClearChargingProfile");
+
+    expect(profileEntries(cp)).toEqual([
+      [
+        "charging_profile_applied",
+        1,
+        {
+          connectorId: 1,
+          profileId: 7,
+          purpose: "TxDefaultProfile",
+          stackLevel: 2,
+          source: "SetChargingProfile",
+          replaced: false,
+        },
+      ],
+      [
+        "charging_profile_cleared",
+        1,
+        {
+          connectorId: 1,
+          reason: "ClearChargingProfile",
+          profiles: [
+            { profileId: 7, purpose: "TxDefaultProfile", stackLevel: 2 },
+          ],
+        },
+      ],
+    ]);
+  });
+
+  it("records station-wide profiles without an entry-level connectorId", () => {
+    const cp = buildChargePoint("OCPP-1.6J", 2);
+    cp.applyChargingProfile(
+      txDefault({
+        chargingProfileId: 1,
+        connectorId: 0,
+        stackLevel: 0,
+        chargingProfilePurpose:
+          ChargingProfilePurposeType.ChargePointMaxProfile,
+      }),
+      "SetChargingProfile",
+    );
+    cp.applyChargingProfile(
+      txDefault({ connectorId: 2 }),
+      "SetChargingProfile",
+    );
+
+    // No connectorId: the station store and every connector, one entry per
+    // scope that lost a profile.
+    const cleared = cp.clearChargingProfiles(
+      undefined,
+      {},
+      "ClearChargingProfile",
+    );
+
+    expect(cleared.map((c) => [c.connectorId, c.profiles.length])).toEqual([
+      [0, 1],
+      [2, 1],
+    ]);
+    expect(
+      cp.timeline
+        .query({ kinds: PROFILE_KINDS })
+        .entries.map((e) => [e.kind, e.connectorId, e.data.connectorId]),
+    ).toEqual([
+      ["charging_profile_applied", undefined, 0],
+      ["charging_profile_applied", 2, 2],
+      ["charging_profile_cleared", undefined, 0],
+      ["charging_profile_cleared", 2, 2],
+    ]);
+  });
+
+  it("records a same-id update as one applied entry, and no entry when nothing is cleared", () => {
+    const cp = buildChargePoint();
+    cp.applyChargingProfile(txDefault(), "SetChargingProfile");
+    cp.applyChargingProfile(txDefault({ stackLevel: 3 }), "SetChargingProfile");
+    cp.clearChargingProfiles(1, { profileId: 999 }, "ClearChargingProfile");
+
+    expect(profileEntries(cp).map(([kind, , data]) => [kind, data])).toEqual([
+      [
+        "charging_profile_applied",
+        expect.objectContaining({ replaced: false }),
+      ],
+      [
+        "charging_profile_applied",
+        expect.objectContaining({ replaced: true, stackLevel: 3 }),
+      ],
+    ]);
+    expect(cp.getConnector(1)!.chargingProfiles).toHaveLength(1);
+  });
+
+  it("does not apply a profile to an unknown connector", () => {
+    const cp = buildChargePoint();
+    expect(
+      cp.applyChargingProfile(
+        txDefault({ connectorId: 9 }),
+        "SetChargingProfile",
+      ),
+    ).toBe(false);
+    expect(profileEntries(cp)).toEqual([]);
+  });
+
+  it("records the TxProfile cleared when the transaction ends", async () => {
+    const cp = buildChargePoint();
+    await cp.startTransaction("TAG-1", 1, undefined, undefined, {
+      triggerReason: "RemoteStart",
+    });
+    cp.applyChargingProfile(
+      txDefault({
+        chargingProfileId: 3,
+        chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      }),
+      "SetChargingProfile",
+    );
+    cp.applyChargingProfile(txDefault(), "SetChargingProfile");
+    cp.stopTransaction(1, "Local");
+
+    const entries = cp.timeline.query({
+      kinds: ["transaction_stopped", "charging_profile_cleared"],
+    }).entries;
+    expect(entries.map((e) => [e.kind, e.data.reason])).toEqual([
+      ["transaction_stopped", "Local"],
+      ["charging_profile_cleared", "TransactionEnded"],
+    ]);
+    expect(entries[1]!.data.profiles).toEqual([
+      { profileId: 3, purpose: "TxProfile", stackLevel: 2 },
+    ]);
+    // The TxDefaultProfile outlives the transaction.
+    expect(cp.getConnector(1)!.chargingProfiles).toHaveLength(1);
+  });
+
+  it("records the station profiles dropped when the connection closes", () => {
+    const cp = buildChargePoint();
+    cp.applyChargingProfile(
+      txDefault({ chargingProfileId: 1, connectorId: 0 }),
+      "SetChargingProfile",
+    );
+    cp.disconnect();
+
+    expect(profileEntries(cp).at(-1)).toEqual([
+      "charging_profile_cleared",
+      undefined,
+      {
+        connectorId: 0,
+        reason: "ConnectionClosed",
+        profiles: [
+          { profileId: 1, purpose: "TxDefaultProfile", stackLevel: 2 },
+        ],
+      },
+    ]);
+    expect(cp.stationProfiles.all()).toEqual([]);
+  });
+
+  it("does not record profiles restored from persistence", () => {
+    const cp = buildChargePoint();
+    cp.getConnector(1)!.setChargingProfiles([txDefault()]);
+    expect(profileEntries(cp)).toEqual([]);
+  });
+
+  it("records the expiry when validTo passes", () => {
+    const cp = buildChargePoint();
+    const validTo = new Date(T0 + 60_000).toISOString();
+    cp.applyChargingProfile(txDefault({ validTo }), "SetChargingProfile");
+
+    expect(profileEntries(cp)[0]![2]).toMatchObject({ validTo });
+    vi.advanceTimersByTime(59_999);
+    expect(
+      cp.timeline.query({ kinds: ["charging_profile_expired"] }).total,
+    ).toBe(0);
+    vi.advanceTimersByTime(1);
+
+    const expired = cp.timeline.query({
+      kinds: ["charging_profile_expired"],
+    }).entries;
+    expect(expired.map((e) => [e.connectorId, e.timestamp, e.data])).toEqual([
+      [
+        1,
+        validTo,
+        {
+          connectorId: 1,
+          profileId: 7,
+          purpose: "TxDefaultProfile",
+          stackLevel: 2,
+          validTo,
+        },
+      ],
+    ]);
+    // Expired, not removed: the domain still holds it.
+    expect(cp.getConnector(1)!.chargingProfiles).toHaveLength(1);
+  });
+
+  it("records an already-expired profile right after it is applied", () => {
+    const cp = buildChargePoint();
+    cp.applyChargingProfile(
+      txDefault({ validTo: new Date(T0 - 1_000).toISOString() }),
+      "SetChargingProfile",
+    );
+    expect(profileEntries(cp).map(([kind]) => kind)).toEqual([
+      "charging_profile_applied",
+      "charging_profile_expired",
+    ]);
+  });
+
+  it("cancels the expiry when the profile is cleared or replaced", () => {
+    const cp = buildChargePoint();
+    const soon = new Date(T0 + 60_000).toISOString();
+    cp.applyChargingProfile(txDefault({ validTo: soon }), "SetChargingProfile");
+    cp.applyChargingProfile(
+      txDefault({ chargingProfileId: 8, validTo: soon }),
+      "SetChargingProfile",
+    );
+    cp.clearChargingProfiles(1, { profileId: 8 }, "ClearChargingProfile");
+    // The update moves profile 7's expiry later.
+    cp.applyChargingProfile(
+      txDefault({ validTo: new Date(T0 + 120_000).toISOString() }),
+      "SetChargingProfile",
+    );
+
+    vi.advanceTimersByTime(60_000);
+    expect(
+      cp.timeline.query({ kinds: ["charging_profile_expired"] }).total,
+    ).toBe(0);
+    vi.advanceTimersByTime(60_000);
+    expect(
+      cp.timeline
+        .query({ kinds: ["charging_profile_expired"] })
+        .entries.map((e) => e.data.profileId),
+    ).toEqual([7]);
+  });
+
+  it("does not fire a far-future expiry early", () => {
+    const cp = buildChargePoint();
+    const DAY = 24 * 60 * 60 * 1000;
+    // Past setTimeout's 2^31-1 ms (~24.8 days) ceiling.
+    cp.applyChargingProfile(
+      txDefault({ validTo: new Date(T0 + 30 * DAY).toISOString() }),
+      "SetChargingProfile",
+    );
+
+    vi.advanceTimersByTime(30 * DAY - 1);
+    expect(
+      cp.timeline.query({ kinds: ["charging_profile_expired"] }).total,
+    ).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(
+      cp.timeline.query({ kinds: ["charging_profile_expired"] }).total,
+    ).toBe(1);
+  });
+
+  it("drops pending expiries when the charge point is disposed", () => {
+    const cp = buildChargePoint();
+    cp.applyChargingProfile(
+      txDefault({ validTo: new Date(T0 + 60_000).toISOString() }),
+      "SetChargingProfile",
+    );
+    cp.dispose();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

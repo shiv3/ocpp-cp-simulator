@@ -174,10 +174,15 @@ browser reload (which restores none) leaves it `interrupted`.
 
 - A WebSocket disconnect does not end a transaction, and nothing acts on
   `StopTransactionOnEVSideDisconnect` yet: a session stays `active` across a
-  connection loss.
+  connection loss ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488)).
 - A 1.6 StartTransaction that is never answered keeps `transactionId: null`.
 - A 2.x TransactionEvent that the CSMS answers with a CALLERROR does not mark
-  the session `failed`; only 1.6 StartTransaction does.
-- `sessions.list` takes one charge point; there is no fleet-wide listing yet.
+  the session `failed`; only 1.6 StartTransaction does
+  ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490)).
+- `sessions.list` takes one charge point; there is no fleet-wide listing yet
+  ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
+- After a failed 1.6 start, a Reset or UnlockConnector still sends a
+  StopTransaction.req for it (`transactionId: 0`); the history ignores that
+  second stop ([#491](https://github.com/shiv3/ocpp-cp-simulator/issues/491)).
 - Local mode does not drop a removed charge point's sessions until
   `state.reset`.

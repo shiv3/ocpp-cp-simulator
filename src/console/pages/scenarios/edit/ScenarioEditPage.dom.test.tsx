@@ -828,6 +828,14 @@ describe("ScenarioEditPage", () => {
       meterValue: 5000,
     });
     expect(graphNode(container, "meter-1")?.textContent).toContain("5.00 kWh");
+
+    // Another connector's reading is not this one's.
+    await pushEvent(service, "CP-1", {
+      type: "connector-meter",
+      connectorId: 2,
+      meterValue: 9000,
+    });
+    expect(graphNode(container, "meter-1")?.textContent).toContain("5.00 kWh");
   });
 
   it("stays in the graph view when an edit makes the scenario drawable again", async () => {

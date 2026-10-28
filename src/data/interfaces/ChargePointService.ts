@@ -48,6 +48,11 @@ import type {
   TimelineQuery,
 } from "../../cp/application/services/OperationalTimeline";
 import type {
+  ChargingSessionPage,
+  ChargingSessionQuery,
+} from "../../cp/domain/persistence/ChargingSessionRepository";
+import type { ChargingSession } from "../../cp/domain/session/ChargingSession";
+import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
@@ -301,6 +306,8 @@ export type ChargePointEvent =
   | { type: "connected" }
   /** #448: an entry was added to the charge point's operational timeline. */
   | { type: "timeline-entry"; entry: TimelineEntry }
+  /** #447: a charging session was opened, updated or closed. */
+  | { type: "charging-session"; session: ChargingSession }
   | { type: "disconnected"; code: number; reason: string };
 
 export interface ScenarioListItem {
@@ -438,6 +445,14 @@ export interface ChargePointService {
     cpId: string,
     query?: TimelineQuery,
   ): Promise<TimelinePage>;
+
+  /** #447: a charge point's charging-session history (`sessions.list`),
+   *  newest first unless `query.order` is `"asc"`. Optional so a test double
+   *  need not implement it. */
+  listChargingSessions?(
+    cpId: string,
+    query?: Omit<ChargingSessionQuery, "cpId">,
+  ): Promise<ChargingSessionPage>;
 
   // Saved vehicle profiles (#458). Local mode keeps them in the browser's
   // sql.js database, Remote mode on the daemon (`vehicle_profiles.*`). Both

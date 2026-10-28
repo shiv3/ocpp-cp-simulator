@@ -82,6 +82,14 @@ import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenari
 import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "../cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "../cp/domain/persistence/createScenarioRunRepository";
+import type {
+  ChargingSessionPage,
+  ChargingSessionQuery,
+  ChargingSessionRepository,
+} from "../cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "../cp/domain/persistence/createChargingSessionRepository";
+import type { ChargingSession } from "../cp/domain/session/ChargingSession";
+import { ChargingSessionRecorder } from "../cp/application/services/ChargingSessionRecorder";
 import {
   NoopConnectorRuntimeRepository,
   type ConnectorRuntimeRepository,
@@ -220,6 +228,11 @@ export type CLIEvent =
       // #448: an entry was added to the charge point's operational timeline.
       readonly event: "timeline_entry";
       readonly data: TimelineEntry;
+    }
+  | {
+      // #447: a charging session was opened, updated or closed.
+      readonly event: "charging_session";
+      readonly data: ChargingSession;
     }
   | {
       // #388: a finished run's report is in the run history, so a client
@@ -523,6 +536,9 @@ export class CLIChargePointService {
   // shared store (see CPRegistry), bounded per charge point and persisted with
   // --state-db; scenario_report reads it, scenario.runs.list pages through it.
   private readonly _runs: ScenarioRunRepository;
+  // #447: charging-session history, shared the same way as `_runs`.
+  private readonly _sessions: ChargingSessionRepository;
+  private readonly _sessionRecorder: ChargingSessionRecorder;
   /**
    * Terminal execution context of the last finished run, per scenarioId.
    *
@@ -652,9 +668,12 @@ export class CLIChargePointService {
      *  service's own — on `database` when there is one — for the standalone
      *  REPL / JSON-mode runtime. */
     runs?: ScenarioRunRepository,
+    /** #447: the daemon-wide session history; defaults like `runs`. */
+    sessions?: ChargingSessionRepository,
   ) {
     this._init = { ...init, labels: normalizeLabels(init.labels) };
     this._runs = runs ?? createScenarioRunRepository(database);
+    this._sessions = sessions ?? createChargingSessionRepository(database);
     this._scenarioRepo = new SqliteScenarioRepository(database);
     this._runtimeRepo = database
       ? new SqliteConnectorRuntimeRepository(database)
@@ -745,6 +764,18 @@ export class CLIChargePointService {
       : null;
 
     this.attachEventForwarders();
+    this._sessionRecorder = new ChargingSessionRecorder(
+      this._chargePoint,
+      this._sessions,
+    );
+    this._sessionRecorder.onChange((session) =>
+      this.emit({ event: "charging_session", data: session }),
+    );
+    // Sessions a previous instance under this id left open: a `cp.update`
+    // rebuild, or a restart. A restart reconciles again once the connector
+    // runtime is restored (restoreConnectorRuntimeFromDatabase), which
+    // revives the sessions whose transaction came back.
+    this._sessionRecorder.reconcile();
     this.setupMeterValueCallbacks();
     // --trace-output (#188): a single wiring point covers standalone,
     // daemon create, daemon restore, and daemon update re-create, since
@@ -1305,6 +1336,13 @@ export class CLIChargePointService {
   /** #448: this charge point's operational timeline. */
   getOperationalTimeline(query?: TimelineQuery): TimelinePage {
     return this._chargePoint.timeline.query(query);
+  }
+
+  /** #447: this charge point's charging-session history. */
+  listChargingSessions(
+    query: Omit<ChargingSessionQuery, "cpId"> = {},
+  ): ChargingSessionPage {
+    return this._sessions.list({ ...query, cpId: this._init.cpId });
   }
 
   private requireConnector(connectorId: number) {
@@ -2706,6 +2744,9 @@ export class CLIChargePointService {
     for (const runner of this._autoTraffic.values()) runner.stop();
     this._autoTraffic.clear();
 
+    // #447: detached before the teardown, so a shutdown leaves running
+    // sessions open for the next start to reconcile.
+    this._sessionRecorder.dispose();
     if (permanent) {
       this._chargePoint.dispose();
     } else {
@@ -3049,6 +3090,8 @@ export class CLIChargePointService {
       }
       restored += 1;
     });
+    // #447: the restored transactions take their sessions back.
+    this._sessionRecorder.reconcile();
     return restored;
   }
 

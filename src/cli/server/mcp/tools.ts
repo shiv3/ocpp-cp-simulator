@@ -700,6 +700,40 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  const sessions = METHODS["sessions.list"].params.shape;
+  mcp.tool("list_charging_sessions", {
+    description:
+      "List a charge point's charging sessions (#447): one normalized record " +
+      "per transaction, the same shape for OCPP 1.6 and 2.x — connector, " +
+      "transaction id, idTag, start/end, duration, meter start/stop, energy " +
+      "(Wh), stop reason and an outcome (active, completed, interrupted, " +
+      "failed). Unknown values are null, never guessed. Newest first; no " +
+      "billing or tariff data.",
+    inputSchema: z.object({
+      cpId: sessions.cpId.describe("Charge point identifier"),
+      connectorId: sessions.connectorId.describe(
+        "Only sessions on this connector",
+      ),
+      outcomes: sessions.outcomes.describe("Only sessions with these outcomes"),
+      limit: sessions.limit.describe("Page size (default 50)"),
+      offset: sessions.offset.describe("Skip this many matching sessions"),
+      order: sessions.order.describe(
+        "'desc' (newest first, default) or 'asc' (oldest first), by start time",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "sessions.list",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("network_sim_get", {
     description:
       "Get the network-simulation config: the global layer (omit cpId) or a charge point's layer + resolved config (with cpId).",

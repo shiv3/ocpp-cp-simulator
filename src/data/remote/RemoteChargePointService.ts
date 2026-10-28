@@ -65,6 +65,11 @@ import type {
   TimelineQuery,
 } from "../../cp/application/services/OperationalTimeline";
 import type {
+  ChargingSessionPage,
+  ChargingSessionQuery,
+} from "../../cp/domain/persistence/ChargingSessionRepository";
+import type { ChargingSession } from "../../cp/domain/session/ChargingSession";
+import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
@@ -664,6 +669,20 @@ export function mapServerEventToChargePointEvent(
         return {
           type: "timeline-entry",
           entry: data as unknown as TimelineEntry,
+        };
+      }
+      return null;
+    case "charging_session":
+      if (
+        typeof data.sessionId === "string" &&
+        typeof data.cpId === "string" &&
+        typeof data.connectorId === "number" &&
+        typeof data.startedAt === "string" &&
+        typeof data.outcome === "string"
+      ) {
+        return {
+          type: "charging-session",
+          session: data as unknown as ChargingSession,
         };
       }
       return null;
@@ -1730,6 +1749,18 @@ export class RemoteChargePointService implements ChargePointService {
     query: TimelineQuery = {},
   ): Promise<TimelinePage> {
     return this.rpc("timeline.get", { cpId, ...query });
+  }
+
+  async listChargingSessions(
+    cpId: string,
+    query: Omit<ChargingSessionQuery, "cpId"> = {},
+  ): Promise<ChargingSessionPage> {
+    const { outcomes, ...rest } = query;
+    return this.rpc("sessions.list", {
+      cpId,
+      ...rest,
+      ...(outcomes && { outcomes: [...outcomes] }),
+    });
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

@@ -43,6 +43,7 @@ import {
   TRANSACTION_EVENT_TRIGGER_REASONS,
 } from "../cp/domain/connector/Transaction";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
+import { CHARGING_SESSION_OUTCOMES } from "../cp/domain/session/ChargingSession";
 import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
 import {
   SCENARIO_RUN_EXECUTION_STATES,
@@ -75,6 +76,30 @@ const ANY = z.unknown();
  *  may ask for. */
 export const SCENARIO_RUNS_PAGE_DEFAULT = 50;
 export const SCENARIO_RUNS_PAGE_MAX = 200;
+/** #447: `sessions.list` page size — the default, and the most a page may
+ *  ask for (a charge point's whole retained history). */
+export const CHARGING_SESSIONS_PAGE_DEFAULT = 50;
+export const CHARGING_SESSIONS_PAGE_MAX = 500;
+/** #447: one charging session, the same shape for every OCPP version. */
+const chargingSessionSchema = z.object({
+  sessionId: z.string(),
+  cpId: z.string(),
+  connectorId: z.number().int(),
+  evseId: z.number().int().nullable(),
+  ocppVersion: z.string(),
+  transactionId: z.string().nullable(),
+  idTag: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  durationMs: z.number().nullable(),
+  meterStartWh: z.number(),
+  meterStopWh: z.number().nullable(),
+  energyWh: z.number().nullable(),
+  stopReason: z.string().nullable(),
+  triggerReason: z.string().nullable(),
+  authorizationStatus: z.string().nullable(),
+  outcome: z.enum(CHARGING_SESSION_OUTCOMES),
+});
 /** #448: one operational-timeline entry. `data` is kind-specific. */
 const timelineEntrySchema = z.object({
   seq: z.number().int().positive(),
@@ -1004,6 +1029,24 @@ export const METHODS = {
       total: z.number().int().min(0),
     }),
   },
+  "sessions.list": {
+    params: z.object({
+      cpId: NON_EMPTY_STR,
+      connectorId: CONN_POS.optional(),
+      outcomes: z
+        .array(z.enum(CHARGING_SESSION_OUTCOMES))
+        .min(1)
+        .max(CHARGING_SESSION_OUTCOMES.length)
+        .optional(),
+      limit: z.number().int().min(1).max(CHARGING_SESSIONS_PAGE_MAX).optional(),
+      offset: z.number().int().min(0).optional(),
+      order: z.enum(["asc", "desc"]).optional(),
+    }),
+    result: z.object({
+      sessions: z.array(chargingSessionSchema).max(CHARGING_SESSIONS_PAGE_MAX),
+      total: z.number().int().min(0),
+    }),
+  },
   "scenario.definitions.list": {
     params: z.object({ cpId: STR_64K, connectorId: CONN_DEF }),
     result: ARRAY_1000(SCENARIO_OBJ()),
@@ -1098,6 +1141,7 @@ export const EXPLICIT_METHODS = [
   "scenario.templates",
   "scenario.runs.list",
   "timeline.get",
+  "sessions.list",
   "scenario.definitions.list",
   "scenario.definitions.save",
   "scenario.definitions.replace",

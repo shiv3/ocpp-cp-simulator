@@ -24,6 +24,8 @@ import {
 } from "../../protocol/labels";
 import type { ScenarioRunRepository } from "../../cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "../../cp/domain/persistence/createScenarioRunRepository";
+import type { ChargingSessionRepository } from "../../cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "../../cp/domain/persistence/createChargingSessionRepository";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by
@@ -102,6 +104,9 @@ export class CPRegistry {
   /** #388: one run history for the whole daemon, so `scenario.runs.list` can
    *  span charge points without `--state-db` too. */
   readonly scenarioRuns: ScenarioRunRepository;
+  /** #447: one session history for the whole daemon, so it outlives a
+   *  `cp.update` rebuild without `--state-db` too. */
+  readonly chargingSessions: ChargingSessionRepository;
 
   constructor(
     private readonly bus: EventBus,
@@ -122,6 +127,7 @@ export class CPRegistry {
     },
   ) {
     this.scenarioRuns = createScenarioRunRepository(database);
+    this.chargingSessions = createChargingSessionRepository(database);
   }
 
   /** True when a SOAP charge point may be created without a callback URL. */
@@ -600,6 +606,7 @@ export class CPRegistry {
       this.withDerivedSoapCallback(init),
       this.database,
       this.scenarioRuns,
+      this.chargingSessions,
     );
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
     const unsubSettled = svc.onSessionSettled((info) =>
@@ -859,8 +866,9 @@ export class CPRegistry {
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.
     this.persistRemove(cpId);
-    // The in-memory run history has no table for persistRemove to cascade to.
+    // The in-memory histories have no table for persistRemove to cascade to.
     this.scenarioRuns.deleteForChargePoint(cpId);
+    this.chargingSessions.deleteForChargePoint(cpId);
     this.notifyInitChange();
     return true;
   }

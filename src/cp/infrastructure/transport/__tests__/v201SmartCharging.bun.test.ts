@@ -6,6 +6,7 @@ import type {
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
+import { bootedChargePoint } from "./stationHarness";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
   return (frame) => frame[0] === 3 && frame[1] === messageId;
@@ -188,24 +189,9 @@ describe("OCPP 2.0.1 Smart Charging", () => {
 describe("OCPP 2.0.1 Smart Charging on the operational timeline (#469)", () => {
   it("records station-wide and EVSE profiles applied, then cleared", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
-      "CP201-SMART-TIMELINE",
-      DefaultBootNotification,
-      1,
-      csms.url,
-      null,
-      null,
-      null,
-      {},
-      [],
-      "OCPP-2.0.1",
-      {},
-    );
-    cp.events.on("error", () => undefined);
-
+    let cp: ChargePoint | undefined;
     try {
-      cp.connect();
-      await bootAccepted(csms);
+      cp = await bootedChargePoint(csms, "CP201-SMART-TIMELINE", "OCPP-2.0.1");
 
       await sendCall(csms, "scp-station", "SetChargingProfile", {
         evseId: 0,
@@ -242,7 +228,7 @@ describe("OCPP 2.0.1 Smart Charging on the operational timeline (#469)", () => {
         ["charging_profile_cleared", 1, 1, "ClearChargingProfile"],
       ]);
     } finally {
-      cp.disconnect();
+      cp?.disconnect();
       await csms.stop();
     }
   });

@@ -795,10 +795,9 @@ export class ChargePoint {
     return this._localAuthListManager;
   }
 
-  /** Read access for handlers and tests. Install and remove profiles with
-   *  `applyChargingProfile` / `clearChargingProfiles`, which report the
-   *  change (#469). */
-  get stationProfiles(): ChargingProfileStore {
+  /** Read-only: install and remove profiles with `applyChargingProfile` /
+   *  `clearChargingProfiles`, which report the change (#469). */
+  get stationProfiles(): Pick<ChargingProfileStore, "all" | "getActive"> {
     return this._stationProfiles;
   }
 
@@ -859,7 +858,7 @@ export class ChargePoint {
     if (connectorId === 0) return cleared;
     const targets =
       connectorId === undefined
-        ? [...this._connectors.values()]
+        ? this._connectors.values()
         : [this.getConnector(connectorId)];
     for (const connector of targets) {
       if (connector) {
@@ -2057,6 +2056,7 @@ export class ChargePoint {
     const connector = this._connectors.get(connectorId);
     if (!connector) return false;
 
+    this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
     connector.dispose();
     const removed = this._connectors.delete(connectorId);
     if (removed) {

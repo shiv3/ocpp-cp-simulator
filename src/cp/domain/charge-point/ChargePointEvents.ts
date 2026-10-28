@@ -38,7 +38,10 @@ export type ChargingProfileSource = "SetChargingProfile";
 
 /** Why charging profiles were removed (#469). */
 export type ChargingProfileClearReason =
-  "ClearChargingProfile" | "TransactionEnded" | "ConnectionClosed";
+  | "ClearChargingProfile"
+  | "TransactionEnded"
+  | "ConnectionClosed"
+  | "ConnectorRemoved";
 
 /** Profiles removed from one scope: a connector, or the station store
  *  (`connectorId` 0). */

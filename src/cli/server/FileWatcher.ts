@@ -1,6 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { unrefTimer } from "../../cp/shared/timers";
+
 /**
  * How long to wait after the last filesystem event before calling back.
  *
@@ -411,7 +413,7 @@ export class FileWatcher {
       }
     }, this.debounceMs);
     // A pending debounce must never be the reason the daemon will not exit.
-    (timer as unknown as { unref?: () => void }).unref?.();
+    unrefTimer(timer);
     this.timers.set(absolute, timer);
   }
 

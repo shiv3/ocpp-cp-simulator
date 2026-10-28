@@ -135,16 +135,20 @@ describe("SetChargingProfileHandler", () => {
 
 describe("ClearChargingProfileHandler", () => {
   it("clears station profiles when connectorId is omitted", () => {
-    const { ctx, stationProfiles } = buildContext();
-    stationProfiles.add({
-      chargingProfileId: 9,
-      connectorId: 0,
-      stackLevel: 0,
-      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
-      chargingProfileKind: "Absolute" as never,
-      chargingRateUnit: "W" as never,
-      chargingSchedulePeriods: [{ startPeriod: 0, limit: 1000 }],
-    });
+    const { ctx, chargePoint, stationProfiles } = buildContext();
+    chargePoint.applyChargingProfile(
+      {
+        chargingProfileId: 9,
+        connectorId: 0,
+        stackLevel: 0,
+        chargingProfilePurpose:
+          ChargingProfilePurposeType.ChargePointMaxProfile,
+        chargingProfileKind: "Absolute" as never,
+        chargingRateUnit: "W" as never,
+        chargingSchedulePeriods: [{ startPeriod: 0, limit: 1000 }],
+      },
+      "SetChargingProfile",
+    );
     const res = new ClearChargingProfileHandler().handle({}, ctx);
     expect(res).toEqual({ status: "Accepted" });
     expect(stationProfiles.all()).toEqual([]);
@@ -231,7 +235,7 @@ describe("GetCompositeScheduleHandler", () => {
   });
 
   it("returns the min-merge of tx + station max", () => {
-    const { ctx, connectors, stationProfiles } = buildContext();
+    const { ctx, chargePoint, connectors } = buildContext();
     // Connector 1 has a tx profile capped at 10kW for 30min then 8kW
     connectors.get(1)!.setChargingProfiles([
       {
@@ -248,15 +252,19 @@ describe("GetCompositeScheduleHandler", () => {
       },
     ]);
     // Station-wide max capped at 5kW
-    stationProfiles.add({
-      chargingProfileId: 99,
-      connectorId: 0,
-      stackLevel: 0,
-      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
-      chargingProfileKind: "Absolute" as never,
-      chargingRateUnit: "W" as never,
-      chargingSchedulePeriods: [{ startPeriod: 0, limit: 5_000 }],
-    });
+    chargePoint.applyChargingProfile(
+      {
+        chargingProfileId: 99,
+        connectorId: 0,
+        stackLevel: 0,
+        chargingProfilePurpose:
+          ChargingProfilePurposeType.ChargePointMaxProfile,
+        chargingProfileKind: "Absolute" as never,
+        chargingRateUnit: "W" as never,
+        chargingSchedulePeriods: [{ startPeriod: 0, limit: 5_000 }],
+      },
+      "SetChargingProfile",
+    );
 
     const res = new GetCompositeScheduleHandler().handle(
       { connectorId: 1, duration: 3600 },

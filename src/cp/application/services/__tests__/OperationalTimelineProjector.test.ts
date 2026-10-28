@@ -588,6 +588,34 @@ describe("OperationalTimelineProjector smart-charging profiles (#469)", () => {
     ).toBe(1);
   });
 
+  it("records the profiles of a removed connector as cleared, and drops their expiry", () => {
+    const cp = buildChargePoint("OCPP-1.6J", 2);
+    cp.applyChargingProfile(
+      txDefault({
+        connectorId: 2,
+        validTo: new Date(T0 + 60_000).toISOString(),
+      }),
+      "SetChargingProfile",
+    );
+    cp.removeConnector(2);
+
+    expect(profileEntries(cp).at(-1)).toEqual([
+      "charging_profile_cleared",
+      2,
+      {
+        connectorId: 2,
+        reason: "ConnectorRemoved",
+        profiles: [
+          { profileId: 7, purpose: "TxDefaultProfile", stackLevel: 2 },
+        ],
+      },
+    ]);
+    vi.advanceTimersByTime(60_000);
+    expect(
+      cp.timeline.query({ kinds: ["charging_profile_expired"] }).total,
+    ).toBe(0);
+  });
+
   it("drops pending expiries when the charge point is disposed", () => {
     const cp = buildChargePoint();
     cp.applyChargingProfile(

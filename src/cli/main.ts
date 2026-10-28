@@ -770,6 +770,17 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
   const labels = normalizeLabels(parsedLabels.data);
+  if (labels && isClientMode) {
+    // First, because it is the reason that holds whatever else is given:
+    // `--stop` needs no --cp-id, and `--http-port` beside `--send` names the
+    // daemon to talk to — the server-mode guard below would pass, as it did
+    // for --watch (#314), and the client path then ignore the flag.
+    process.stderr.write(
+      "Error: --label cannot be combined with a client mode (--send, --stop or --events); " +
+        "it labels the charge points a daemon bootstraps\n",
+    );
+    process.exit(1);
+  }
   if (labels && !cpId) {
     // Same reasoning as --cp-count: without a cpId nothing is bootstrapped,
     // so the labels would have no charge point to land on.
@@ -888,16 +899,6 @@ export function parseArgs(argv: string[]): CLIOptions {
     // single CP and say nothing about the other nineteen.
     process.stderr.write(
       "Error: --cp-count needs a server mode (--daemon, --http-port or --web-console)\n",
-    );
-    process.exit(1);
-  }
-  if (labels && isClientMode) {
-    // Checked before the server-mode test for the reason --watch is below:
-    // `--http-port` beside `--send` names the daemon to talk to, so the
-    // server-mode guard passes and the client path then ignores the flag.
-    process.stderr.write(
-      "Error: --label cannot be combined with a client mode (--send, --stop or --events); " +
-        "it labels the charge points a daemon bootstraps\n",
     );
     process.exit(1);
   }

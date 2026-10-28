@@ -1033,18 +1033,29 @@ describe("parseArgs --label (#472)", () => {
   });
 
   it.each([
-    ["a key with a space", "bad key=x"],
-    ["a key starting with a separator", "-x=1"],
+    ["a key with a space", "bad key=x", "--label key 'bad key' is invalid"],
+    ["a key starting with a separator", "-x=1", "--label key '-x' is invalid"],
     // The record schema strips this key without an issue, so a check on the
     // whole map alone would let it vanish instead of refusing it.
-    ["the __proto__ key", "__proto__=x"],
-    ["a key longer than 63 characters", `${"k".repeat(64)}=x`],
-    ["a value longer than 256 characters", `k=${"v".repeat(257)}`],
-  ])("refuses %s with the schema's reason", (_case, pair) => {
+    ["the __proto__ key", "__proto__=x", "--label key '__proto__' is invalid"],
+    [
+      "a key longer than 63 characters",
+      `${"k".repeat(64)}=x`,
+      `--label key '${"k".repeat(64)}' is invalid`,
+    ],
+    [
+      "a value longer than 256 characters",
+      `k=${"v".repeat(257)}`,
+      "--label value for 'k' is invalid",
+    ],
+  ])("refuses %s with the schema's reason", (_case, pair, message) => {
+    // The per-pair message, not just the `--label` prefix: the whole-map
+    // check would also refuse most of these, and would hide a lost per-pair
+    // check behind a vaguer reason.
     const result = runParseArgs([...DAEMON, "--label", pair]);
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Error: --label");
+    expect(result.stderr).toContain(`Error: ${message}`);
   });
 
   it("refuses more than 32 labels", () => {
@@ -1101,4 +1112,18 @@ describe("parseArgs --label (#472)", () => {
       "--label cannot be combined with a client mode",
     );
   });
+
+  it.each([[["--stop"]], [["--events", "--all"]]])(
+    "gives the client-mode reason for %j without --cp-id",
+    (mode) => {
+      // Those modes need no --cp-id, so "requires --cp-id" would send the
+      // operator after the wrong fix.
+      const result = runParseArgs([...mode, "--label", "site=a"]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "--label cannot be combined with a client mode",
+      );
+    },
+  );
 });

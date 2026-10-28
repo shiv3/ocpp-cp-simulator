@@ -379,7 +379,8 @@ The schema is [`src/protocol/labels.ts`](../../src/protocol/labels.ts).
   schema, but refused at startup rather than with `invalid_params`. A charge
   point restored from `--state-db` keeps its stored labels: like every other
   bootstrap option, the flag only reaches the charge points this start-up
-  creates (#472).
+  creates, and the `reusing` line of the startup log adds
+  `--label not applied` with the stored map when the two differ (#472).
 
 **Read and select.** `cp.list`, `status` (`config.labels`) and every registry
 push return the labels. `cp.list { labels: { … } }` returns only the charge

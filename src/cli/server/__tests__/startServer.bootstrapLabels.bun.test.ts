@@ -1,5 +1,5 @@
 // Runs under `bun test`: startServer pulls in the `bun:sqlite` built-in.
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -147,6 +147,8 @@ describe("startServer: --label on the bootstrapped fleet (#472)", () => {
       db.close();
     }
 
+    const stderr = spyOn(process.stderr, "write");
+    cleanups.push(() => stderr.mockRestore());
     let running: RunningServer | null = null;
     running = await startServer({
       ...BASE_OPTIONS,
@@ -165,5 +167,46 @@ describe("startServer: --label on the bootstrapped fleet (#472)", () => {
       CP001: { site: "relabelled" },
       CP002: { site: "lab", env: "ci" },
     });
+
+    // Not silent: an operator who adds --label to an existing deployment is
+    // told why the restored charge point did not take it.
+    const reuse = stderr.mock.calls
+      .map(([chunk]) => String(chunk))
+      .find((line) => line.includes('restored CP "CP001"'));
+    expect(reuse).toContain("--label not applied");
+    expect(reuse).toContain('{"site":"relabelled"}');
+  });
+
+  it("does not warn when the restored charge point already carries the flag's labels", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ocpp-cp-sim-472-same-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const stateDb = join(dir, "state.sqlite");
+    {
+      const db = BunSqliteDatabase.open(stateDb);
+      const seed = new CPRegistry(new EventBus(), db, {});
+      // Same pairs, other key order: still the same labels.
+      seed.create(
+        { ...BOOTSTRAP, labels: { env: "ci", site: "lab" } },
+        { seedDefault: false },
+      );
+      seed.shutdownAll();
+      db.close();
+    }
+
+    const stderr = spyOn(process.stderr, "write");
+    cleanups.push(() => stderr.mockRestore());
+    let running: RunningServer | null = null;
+    running = await startServer({
+      ...BASE_OPTIONS,
+      stateDb,
+      bootstrap: BOOTSTRAP,
+    });
+    cleanups.push(() => running?.stop());
+
+    const reuse = stderr.mock.calls
+      .map(([chunk]) => String(chunk))
+      .find((line) => line.includes('restored CP "CP"'));
+    expect(reuse).toBeDefined();
+    expect(reuse).not.toContain("--label not applied");
   });
 });

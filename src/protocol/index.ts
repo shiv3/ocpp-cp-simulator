@@ -10,10 +10,13 @@ export * from "./errors";
 export * from "./events";
 export * from "./envelope";
 export * from "./vehicle";
+export * from "./labels";
 export {
   METHODS,
   EXPLICIT_METHODS,
   createParamsSchema,
+  cpListParamsSchema,
+  cpLabelsSetParamsSchema,
   createManyParamsSchema,
   expandIdPattern,
   hasIdPatternPlaceholder,

@@ -43,12 +43,26 @@ function row(
   id: string,
   connectors: RowConnector[],
   overrides: Partial<Omit<CpListRow, "cp" | "connectors">> = {},
+  labels?: Record<string, string>,
 ): CpListRow {
   const cp: ChargePointSnapshot = {
     id,
     status: OCPPStatus.Available,
     error: "",
     connectors,
+    ...(labels
+      ? {
+          config: {
+            wsUrl: "ws://h",
+            connectors: connectors.length,
+            vendor: "V",
+            model: "M",
+            basicAuth: null,
+            bootNotification: null,
+            labels,
+          },
+        }
+      : {}),
   };
   return { cp, connected: true, ocppVersion: "1.6J", connectors, ...overrides };
 }
@@ -81,12 +95,13 @@ describe("parseCpListFilters", () => {
       tx: "",
       status: "",
       version: "",
+      label: "",
       connected: false,
       scenario: false,
     });
     const parsed = parseCpListFilters(
       new URLSearchParams(
-        "q=alp&conn=2&tx=42&status=Charging&version=2.0.1&connected=1&scenario=1",
+        "q=alp&conn=2&tx=42&status=Charging&version=2.0.1&label=site%3Ds1&connected=1&scenario=1",
       ),
     );
     expect(parsed).toEqual({
@@ -95,6 +110,7 @@ describe("parseCpListFilters", () => {
       tx: "42",
       status: OCPPStatus.Charging,
       version: "2.0.1",
+      label: "site=s1",
       connected: true,
       scenario: true,
     });
@@ -230,5 +246,43 @@ describe("filterChargePoints", () => {
     const before = JSON.stringify(rows);
     apply({ status: OCPPStatus.Charging });
     expect(JSON.stringify(rows)).toBe(before);
+  });
+});
+
+describe("label filter (#446)", () => {
+  const labelled = [
+    row("A", [connector(1)], {}, { site: "s1", env: "lab" }),
+    row("B", [connector(1)], {}, { site: "s1", env: "prod" }),
+    row("C", [connector(1)], {}, { site: "s2", env: "" }),
+    row("D", [connector(1)]),
+  ];
+  const ids = (label: string) =>
+    filterChargePoints(labelled, { ...NONE, label }).map((r) => r.cp.id);
+
+  it("keeps every row when empty or blank", () => {
+    expect(ids("")).toEqual(["A", "B", "C", "D"]);
+    expect(ids(" , ")).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("matches key=value exactly and ANDs comma-separated pairs", () => {
+    expect(ids("site=s1")).toEqual(["A", "B"]);
+    expect(ids("site=s1, env=lab")).toEqual(["A"]);
+    expect(ids("site=S1")).toEqual([]);
+    expect(ids("env=")).toEqual(["C"]);
+    expect(ids("site=s1, site=s1")).toEqual(["A", "B"]);
+    expect(ids("site=s1, site=s2")).toEqual([]);
+  });
+
+  it("matches a bare key on its presence, whatever the value", () => {
+    expect(ids("env")).toEqual(["A", "B", "C"]);
+  });
+
+  it("splits on the first =, so a value may contain one", () => {
+    const withEquals = [row("E", [connector(1)], {}, { q: "a=b" })];
+    expect(
+      filterChargePoints(withEquals, { ...NONE, label: "q=a=b" }).map(
+        (r) => r.cp.id,
+      ),
+    ).toEqual(["E"]);
   });
 });

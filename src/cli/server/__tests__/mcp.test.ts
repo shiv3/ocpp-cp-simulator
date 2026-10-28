@@ -160,6 +160,7 @@ describe("MCP server", () => {
       "cp_list",
       "cp_create",
       "cp_delete",
+      "cp_labels_set",
       "cp_connect",
       "cp_disconnect",
       "cp_status",

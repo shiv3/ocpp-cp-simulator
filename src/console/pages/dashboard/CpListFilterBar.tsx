@@ -4,7 +4,11 @@ import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import Combobox, { type ComboboxOption } from "../../components/Combobox";
 import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import { statusDotClass } from "../../components/statusColor";
-import type { CpListFilters, CpListRow } from "./cpListFilters";
+import {
+  formatLabelTerm,
+  type CpListFilters,
+  type CpListRow,
+} from "./cpListFilters";
 import { cpStatus } from "./cpRowFormat";
 
 export interface CpListFilterBarProps {
@@ -24,7 +28,7 @@ const CHECKBOX_LABEL_CLASS =
  *  box can still be typed into. */
 const withoutHash = (text: string) => text.replace(/^#(?=\d)/, "");
 
-/** The filter row above the list: three comboboxes, two selects, two checkboxes
+/** The filter row above the list: four comboboxes, two selects, two checkboxes
  *  and the match counter. The values live in the URL (see `useCpListParams`). */
 const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
   filters,
@@ -68,6 +72,18 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
     [rows],
   );
 
+  // #446: every `key=value` pair some charge point carries, once, that the
+  // filter can express (see `formatLabelTerm`).
+  const labelOptions = useMemo<ComboboxOption[]>(() => {
+    const pairs = new Set<string>();
+    for (const row of rows)
+      for (const [key, value] of Object.entries(row.cp.config?.labels ?? {})) {
+        const term = formatLabelTerm(key, value);
+        if (term) pairs.add(term);
+      }
+    return [...pairs].sort().map((value) => ({ value }));
+  }, [rows]);
+
   const versions = useMemo(() => {
     const found = new Set<string>();
     for (const row of rows) if (row.ocppVersion) found.add(row.ocppVersion);
@@ -104,6 +120,15 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
         onChange={(tx) => onChange({ tx: withoutHash(tx) })}
         options={txOptions}
         className="w-36"
+      />
+      <Combobox
+        id="cp-filter-label"
+        aria-label="Label"
+        placeholder="Label: site=s1, env"
+        value={filters.label}
+        onChange={(label) => onChange({ label })}
+        options={labelOptions}
+        className="w-48"
       />
       <select
         aria-label="Status"

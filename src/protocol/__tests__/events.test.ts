@@ -160,6 +160,23 @@ describe("redaction (Sec-2)", () => {
     expect(withPw.success).toBe(false);
   });
 
+  it("carries labels through redactCp, the list item and the status (#446)", () => {
+    const labels = { site: "oberkirch-01", env: "lab" };
+    const config = { ...fullConfig, labels };
+    expect(redactCp(config).labels).toEqual(labels);
+    const item = registryCpToWire({ id: "CP1", status: "Available", config });
+    expect(cpListItemSchema.parse(item).labels).toEqual(labels);
+    expect(statusToWire({ ...fullStatus, config }).config?.labels).toEqual(
+      labels,
+    );
+    expect(
+      wireCpConfigSchema.safeParse({
+        ...redactCp(fullConfig),
+        labels: { "bad key": "x" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("statusToWire redacts the embedded config", () => {
     const s = statusToWire(fullStatus);
     expectNoSecrets(s);

@@ -14,6 +14,7 @@ import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointSe
 import type { ChargePointEvent } from "../../../data/interfaces/ChargePointService";
 import type { StateHistoryEntry } from "../../../cp/application/services/types/StateSnapshot";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
+import type { ChargePointConfig } from "../../../components/chargePointConfig";
 
 // `handleSaveConfig`'s catch is only reachable if `updateCp` itself rejects.
 // The real `useCpConfigActions.updateCp` never does (both its local/remote
@@ -485,6 +486,61 @@ describe("CpDetailPage", () => {
     );
 
     consoleErrorSpy.mockRestore();
+  });
+
+  // #446: the edit form sends labels as a full replace, so a gap in the
+  // snapshot → form mapping would make "open Config, Save untouched" erase
+  // them. A charge point whose config is unknown must not send `{}` either.
+  it.each([
+    {
+      label: "a labelled charge point sends its labels back unchanged",
+      config: {
+        wsUrl: "ws://csms.example.test/ocpp",
+        connectors: 1,
+        vendor: "V",
+        model: "M",
+        basicAuth: null,
+        bootNotification: null,
+        labels: { site: "s1", env: "lab" },
+      },
+      expected: { site: "s1", env: "lab" },
+    },
+    {
+      label: "a charge point without a config leaves its labels unknown",
+      config: undefined,
+      expected: undefined,
+    },
+  ])("Config Save untouched: $label", async ({ config, expected }) => {
+    const service = createFakeChargePointService({
+      snapshots: [
+        snapshot({ id: "CP-1", connectors: [connector({ id: 1 })], config }),
+      ],
+      getStateHistory: vi.fn(async () => []),
+    });
+    const updateCp = vi.fn<(config: ChargePointConfig) => Promise<void>>(
+      async () => {},
+    );
+    vi.mocked(useCpConfigActions).mockReturnValue({
+      addCp: vi.fn(async () => {}),
+      updateCp,
+      removeCp: vi.fn(async () => true),
+    });
+
+    const { container, root } = await renderConsole("/cp/CP-1", { service });
+    cleanup = () => unmount(root);
+    await flush();
+    await openConfig(container);
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent?.trim() === "Save");
+    await act(async () => {
+      saveButton!.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(updateCp).toHaveBeenCalledTimes(1);
+    expect(updateCp.mock.calls[0][0].labels).toEqual(expected);
   });
 
   it("the message log shows entries logged before navigating to the CP (from global ring buffer)", async () => {

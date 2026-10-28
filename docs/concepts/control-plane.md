@@ -18,7 +18,7 @@ related:
   - expert-ocpp-calls.md
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # Socket.IO control plane
@@ -185,6 +185,7 @@ one rather than restating a subset.
 | `tlsCaPath`, `tlsCertPath`, `tlsKeyPath`          | string                           | Paths to PEM material. `tlsCaPath` **replaces** the system trust store.                                                                                                                                                                     |
 | `tls`                                             | object                           | The same material inline: `ca`, `cert`, `key`, `rejectUnauthorized`, `serverName`.                                                                                                                                                          |
 | `autoConnect`                                     | boolean                          | Connect immediately after the call.                                                                                                                                                                                                         |
+| `labels`                                          | object of string values          | Generic grouping metadata (`{ "site": "lyon-01", "env": "lab" }`) — see [Charge-point labels](#charge-point-labels).                                                                                                                        |
 
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.
@@ -340,6 +341,61 @@ The list and the policy are **persisted** (`charge_points.supervision_urls` /
 failover configuration: a restart that brought the charge point back on
 `ws_url` alone would silently disable the one thing the list exists to provide.
 See [State persistence](state-persistence.md).
+
+##### Charge-point labels
+
+`labels` is free-form `key → value` metadata for grouping charge points — by
+site, tenant, environment, lab, hardware family, or anything else an operator
+needs — without the simulator modelling any of those concepts (#446). Nothing
+in the charge point reads them: they exist for the control and query surfaces.
+The schema is [`src/protocol/labels.ts`](../../src/protocol/labels.ts).
+
+| Rule  | Contract                                                                                                                             |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Key   | 1–63 ASCII characters: letters, digits, `.`, `_`, `-`, `/`, starting and ending with a letter or digit (`site`, `example.com/tier`). |
+| Value | Any string up to 256 characters, the empty one included.                                                                             |
+| Map   | At most 32 entries. An invalid map refuses the whole call with `invalid_params`; nothing is created or changed.                      |
+| Empty | `{}` and an absent map mean the same thing: no labels. `cp.list` and `status` omit the field.                                        |
+
+**Write semantics.**
+
+- `cp.create`, `cp.create_many` and a [blueprint](#blueprints)'s `params`
+  accept `labels`. In `cp.create_many { blueprintId }`, a request's `labels`
+  **replaces** the blueprint's whole map, like every other field — the two are
+  not merged key by key.
+- `cp.update` **keeps** the current labels when it omits `labels`, and
+  **replaces** the whole map when it gives one; `{}` clears them. But
+  `cp.update` rebuilds the charge point — its WebSocket closes and a new
+  instance takes over — and requires `wsUrl`, resetting most omitted fields to
+  their defaults: the wrong price for changing metadata.
+- `cp.labels.set { cpId, labels }` replaces the map **in place**: no rebuild,
+  the connection and transactions are untouched. It is persisted before the
+  live charge point changes, and pushes a registry `updated` event carrying the
+  new list item. `{}` clears; an unknown `cpId` answers `not_found`.
+
+**Read and select.** `cp.list`, `status` (`config.labels`) and every registry
+push return the labels. `cp.list { labels: { … } }` returns only the charge
+points carrying **every** given pair, compared exactly and case-sensitively; a
+charge point without labels matches only an absent or empty selector. Unlike
+the create parameters, `cp.list`'s params are **strict**: a misspelled
+`label` is refused with `invalid_params` rather than ignored, because ignoring
+it would silently list the whole fleet. The MCP `cp_list` and `cp_labels_set`
+tools take the same schemas ([MCP endpoint](../entities/mcp-endpoint.md)), and
+the web console edits, shows and filters labels
+([Web console](../entities/web-console.md)).
+
+**Persistence.** Stored as JSON in `charge_points.labels` (schema v16) and
+restored with the charge point. A stored map that no longer passes the schema
+is dropped with a warning on restore rather than breaking every `cp.list`
+([State persistence](state-persistence.md)).
+
+**Never a metric label.** Labels are operator-chosen and unbounded, so they are
+**never** used as Prometheus label values — for the same reason metrics carry
+no `cpId` ([Daemon → Metrics](../entities/daemon.md#metrics)). Select with
+`cp.list` and aggregate client-side instead.
+
+`--cp-count` has no flag for labels yet; label a bootstrapped fleet with
+`cp.labels.set` after start-up.
 
 ##### Blueprints
 
@@ -516,11 +572,12 @@ Guarantees a conformance driver can rely on:
 
 | Method                                                         | Params                                                                                              | Result / purpose                                                                                                                                                                                                 |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cp.list`                                                      | `{}`                                                                                                | Array of redacted CP registry items.                                                                                                                                                                             |
+| `cp.list`                                                      | `{ "labels"?: object }`                                                                             | Array of redacted CP registry items; `labels` keeps only the CPs carrying every pair ([Charge-point labels](#charge-point-labels)).                                                                              |
 | `cp.create`                                                    | See [cp.create parameters](#cpcreate-parameters) below                                              | Create a CP; `autoConnect: true` connects it after creation.                                                                                                                                                     |
 | `cp.create_many`                                               | See [cp.create_many](#cpcreate_many--the-batch-fields) below                                        | Create N CPs sharing every parameter but the generated id. Partial success is a normal result.                                                                                                                   |
 | `blueprint.list` / `.save` / `.delete`                         | See [Blueprints](#blueprints) below                                                                 | Named, reusable CP hardware descriptions; instantiate with `cp.create_many { blueprintId }`.                                                                                                                     |
-| `cp.update`                                                    | Same as `cp.create`                                                                                 | Replace an existing CP config; `autoConnect: true` reconnects it after update.                                                                                                                                   |
+| `cp.update`                                                    | Same as `cp.create`                                                                                 | Replace an existing CP config and **rebuild** the CP (its socket closes); `autoConnect: true` reconnects it after update. Omitted `labels` are kept.                                                             |
+| `cp.labels.set`                                                | `{ "cpId": string, "labels": object }`                                                              | Replace a CP's labels in place, without the rebuild `cp.update` does ([Charge-point labels](#charge-point-labels)).                                                                                              |
 | `cp.delete`                                                    | `{ "cpId": string }`                                                                                | Remove a CP from the registry and delete its rows from every `cp_id`-keyed table, stored logs included ([State persistence](state-persistence.md)).                                                              |
 | `logs.get`                                                     | `{ "cpId": string, "limit"?: number, "offset"?: number, "order"?: "asc" \| "desc" }`                | Return persisted logs, or the in-memory log buffer when no state DB is configured. `limit` takes the **most recent** N; see [Log format → Log windowing](log-format.md#log-windowing).                           |
 | `logs.clear`                                                   | `{ "cpId": string }`                                                                                | Delete persisted logs for the CP.                                                                                                                                                                                |

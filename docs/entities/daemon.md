@@ -20,7 +20,7 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # Daemon (server mode)
@@ -173,6 +173,12 @@ first and would leave the metrics endpoint unreachable.
 **No `cpId` label, deliberately.** It is unbounded by construction once a
 daemon holds a fleet, and a Prometheus server pays for every series it has ever
 seen. Per-charge-point detail stays in `cp.list` and the event stream.
+
+**No charge-point labels either, never.** [Labels](../concepts/control-plane.md#charge-point-labels)
+(#446) are operator-chosen keys and values, so they are exactly as unbounded
+as `cpId`: no metric uses a label key or value as a Prometheus label, and none
+will. To look at a group, select it with `cp.list { labels }` and aggregate on
+the client side.
 
 **`/metrics` is behind the Basic Auth gate by default**, unlike
 [`/v1/healthz`](#health). The health probe is exempt because container probes

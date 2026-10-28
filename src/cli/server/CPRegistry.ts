@@ -17,10 +17,21 @@ import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { perChargePointTables } from "../../cp/domain/persistence/schema";
+import {
+  labelsSchema,
+  normalizeLabels,
+  type Labels,
+} from "../../protocol/labels";
 import type { ScenarioRunRepository } from "../../cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "../../cp/domain/persistence/createScenarioRunRepository";
 
-export type RegistryMembershipChange = "added" | "removed";
+/**
+ * `updated`: a registered charge point's config changed — rebuilt by
+ * `update()`, or relabelled in place by `setLabels` (#446). Without it a
+ * subscriber only learnt of a config change when the status happened to move,
+ * so a list kept showing the old labels of a charge point that stayed offline.
+ */
+export type RegistryMembershipChange = "added" | "removed" | "updated";
 
 export interface RegistryMembershipEvent {
   readonly change: RegistryMembershipChange;
@@ -61,6 +72,7 @@ interface ChargePointRow {
   basic_auth: string | null;
   boot_notif: string | null;
   created_at: string;
+  labels: string | null;
 }
 
 interface CPRegistryOptions {
@@ -171,7 +183,7 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at " +
+        "basic_auth, boot_notif, created_at, labels " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -229,6 +241,7 @@ export class CPRegistry {
           safeJsonParse<ChargePointInitOptions["bootNotification"]>(
             row.boot_notif,
           ) ?? undefined,
+        labels: restoreLabels(row),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -354,11 +367,11 @@ export class CPRegistry {
   /**
    * Subscribe to "the init options of some charge point changed" (#314).
    *
-   * Deliberately separate from {@link onRegistryMembership}, which only ever
-   * reports `added` / `removed`: `update()` replaces a charge point's whole
-   * init block — including `idTagFile` — without a membership change, so a
-   * watcher driven by membership alone would keep watching the old file and
-   * report success. The handler takes no argument; it is a "re-read me" ping,
+   * Deliberately separate from {@link onRegistryMembership}: that channel
+   * carries the new service to wire subscribers, while this one only says
+   * "re-read the inits". `update()` replaces a charge point's whole init block —
+   * including `idTagFile` — and a watcher that missed it would keep watching
+   * the old file and report success. The handler takes no argument; it is a "re-read me" ping,
    * and the subscriber walks the registry itself.
    */
   onInitChange(handler: () => void): () => void {
@@ -430,6 +443,25 @@ export class CPRegistry {
       cpId,
     ]);
     return svc.replaceIdTags(tags);
+  }
+
+  /**
+   * Replace a charge point's labels in place (#446) — the relabel path that
+   * does not rebuild it, unlike {@link update}: the connection, transactions
+   * and scenarios are untouched. Persisted before the live service changes,
+   * like `applyIdTagReload`, so a failed write leaves the daemon as it was.
+   * Returns `false` when no such charge point is registered.
+   */
+  setLabels(cpId: string, labels: Labels): boolean {
+    const svc = this.services.get(cpId);
+    if (!svc) return false;
+    this.database?.run("UPDATE charge_points SET labels = ? WHERE cp_id = ?", [
+      labelsColumn(labels),
+      cpId,
+    ]);
+    svc.setLabels(labels);
+    this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
+    return true;
   }
 
   /**
@@ -513,7 +545,7 @@ export class CPRegistry {
     if (!existing) {
       throw new Error(`cpId not found: ${init.cpId}`);
     }
-    const mergedInit = mergeSecuritySensitiveInit(existing.getInit(), init);
+    const mergedInit = preserveOmittedInit(existing.getInit(), init);
     const preparedInit = this.prepareInit(mergedInit);
     // Snapshot the existing in-memory scenarios BEFORE cleanup wipes
     // them. Without --state-db there's no `scenarios` table to rehydrate
@@ -552,6 +584,11 @@ export class CPRegistry {
     // charge point with none. Ping again now the rebuild is actually complete;
     // `syncFromRegistry` is idempotent, so the extra ping costs nothing.
     this.notifyInitChange();
+    this.notifyRegistryMembership({
+      change: "updated",
+      cpId: preparedInit.cpId,
+      service: svc,
+    });
     return svc;
   }
 
@@ -661,8 +698,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -682,7 +719,8 @@ export class CPRegistry {
         "tls_ca_path = excluded.tls_ca_path, " +
         "tls_cert_path = excluded.tls_cert_path, " +
         "tls_key_path = excluded.tls_key_path, " +
-        "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif",
+        "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
+        "labels = excluded.labels",
       [
         init.cpId,
         init.wsUrl,
@@ -707,6 +745,7 @@ export class CPRegistry {
         init.basicAuth ? JSON.stringify(init.basicAuth) : null,
         init.bootNotification ? JSON.stringify(init.bootNotification) : null,
         new Date().toISOString(),
+        labelsColumn(init.labels),
       ],
     );
   }
@@ -863,6 +902,30 @@ export class CPRegistry {
   }
 }
 
+/** NULL for "no labels", the empty map included (see `normalizeLabels`). */
+function labelsColumn(labels: Labels | undefined): string | null {
+  const normalized = normalizeLabels(labels);
+  return normalized ? JSON.stringify(normalized) : null;
+}
+
+/**
+ * Read back through the wire schema rather than trusted: every list item and
+ * registry push is validated against it, so one hand-edited or corrupted row
+ * would otherwise fail every `cp.list` instead of losing its own labels.
+ */
+function restoreLabels(row: ChargePointRow): Labels | undefined {
+  const raw = safeJsonParse<unknown>(row.labels);
+  if (raw === null) return undefined;
+  const parsed = labelsSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.warn(
+      `[CPRegistry] ignoring invalid stored labels for ${row.cp_id}`,
+    );
+    return undefined;
+  }
+  return parsed.data;
+}
+
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
@@ -902,7 +965,12 @@ function readRestoredPem(cpId: string, flag: string, filePath: string): string {
   }
 }
 
-function mergeSecuritySensitiveInit(
+/**
+ * The fields an update keeps when it omits them: the security-sensitive ones a
+ * redacted snapshot cannot send back, and the labels (#446) — an update that
+ * does not mention them keeps them, `{}` clears them.
+ */
+function preserveOmittedInit(
   existing: ChargePointInitOptions,
   next: ChargePointInitOptions,
 ): ChargePointInitOptions {
@@ -918,6 +986,7 @@ function mergeSecuritySensitiveInit(
     tlsCaPath: next.tlsCaPath ?? existing.tlsCaPath,
     tlsCertPath: next.tlsCertPath ?? existing.tlsCertPath,
     tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
+    labels: next.labels ?? existing.labels,
   };
 }
 

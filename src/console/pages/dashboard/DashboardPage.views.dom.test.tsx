@@ -674,9 +674,81 @@ describe("DashboardPage views and filters", () => {
       "In use",
       "Scenario",
       "Heartbeat",
+      "Labels",
     ]);
     expect(container.querySelector('[aria-label^="Connect "]')).toBeNull();
     expect(container.querySelector('[aria-label^="Disconnect "]')).toBeNull();
+  });
+
+  describe("labels (#446)", () => {
+    const labelled = [
+      snapshot({
+        ...cpA,
+        config: {
+          ...cpA.config!,
+          labels: { site: "s1", env: "lab" },
+        },
+      }),
+      snapshot({
+        ...cpB,
+        config: { ...cpB.config!, labels: { site: "s2" } },
+      }),
+      cpC,
+    ];
+
+    it("shows each charge point's labels as chips", async () => {
+      const { container } = await mount("/", labelled);
+      const chips = (id: string) =>
+        Array.from(
+          headOf(container, id).querySelectorAll<HTMLElement>("[data-label]"),
+        ).map((chip) => chip.textContent);
+      expect(chips("CP-A")).toEqual(["site=s1", "env=lab"]);
+      expect(chips("CP-B")).toEqual(["site=s2"]);
+      expect(chips("CP-C")).toEqual([]);
+    });
+
+    it("suggests every pair the filter can express, and only those", async () => {
+      const odd = snapshot({
+        ...cpC,
+        config: { ...cpC.config!, labels: { zone: "a,b", pad: " x" } },
+      });
+      const { container } = await mount("/", [labelled[0], labelled[1], odd]);
+      const input = container.querySelector<HTMLInputElement>(
+        'input[aria-label="Label"]',
+      )!;
+      await act(async () => {
+        input.focus();
+      });
+      expect(optionsOf(container)).toEqual(["env=lab", "site=s1", "site=s2"]);
+    });
+
+    it("?label= keeps only the charge points carrying every pair", async () => {
+      const { container } = await mount("/?label=site%3Ds1", labelled);
+      expect(headOf(container, "CP-A")).toBeTruthy();
+      expect(container.querySelector('[data-cp-id="CP-B"]')).toBeNull();
+      expect(container.querySelector('[data-cp-id="CP-C"]')).toBeNull();
+      expect(
+        container.querySelector<HTMLInputElement>('input[aria-label="Label"]')!
+          .value,
+      ).toBe("site=s1");
+    });
+
+    it("typing in the label box sets ?label=", async () => {
+      const { container } = await mount("/", labelled);
+      const input = container.querySelector<HTMLInputElement>(
+        'input[aria-label="Label"]',
+      )!;
+      await act(async () => {
+        input.focus();
+      });
+      await setValue(input, "site", "input");
+      await flush();
+
+      expect(location?.search).toBe("?label=site");
+      expect(headOf(container, "CP-A")).toBeTruthy();
+      expect(headOf(container, "CP-B")).toBeTruthy();
+      expect(container.querySelector('[data-cp-id="CP-C"]')).toBeNull();
+    });
   });
 
   it("keeps today's empty state when there are no charge points at all", async () => {

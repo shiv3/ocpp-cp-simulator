@@ -4,6 +4,7 @@ import type {
 } from "../cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "../cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "../cp/domain/auth/IdTagPool";
+import type { Labels } from "../protocol/labels";
 
 export interface SoapTunnelConfig {
   readonly provider: "ngrok";
@@ -265,6 +266,11 @@ export interface ChargePointInitOptions {
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
   readonly tlsKeyPath?: string;
+  /**
+   * Operator labels (#446). Metadata only: nothing in the charge point reads
+   * them, which is why `cp.labels.set` can replace them without a rebuild.
+   */
+  readonly labels?: Labels;
 }
 
 export interface JsonCommand {
@@ -358,5 +364,6 @@ export interface ChargePointStatus {
       readonly iccid?: string;
       readonly imsi?: string;
     } | null;
+    readonly labels?: Labels;
   };
 }

@@ -1,33 +1,48 @@
-import React, { useMemo } from "react";
-import { CheckCircle2, XCircle } from "lucide-react";
+import React from "react";
 
-import { useStateHistory } from "@/data/hooks/useStateHistory";
-import type { HistoryOptions } from "@/cp/application/services/types/StateSnapshot";
+import { cn } from "@/lib/utils";
+import type { ChargingSessionOutcome } from "@/cp/domain/session/ChargingSession";
 
 import EmptyState from "../../components/EmptyState";
+import { formatElapsed } from "../../lib/scenarioExpectation";
+import { useChargingSessions } from "../../lib/useChargingSessions";
 
 export interface TransactionsTabProps {
   cpId: string;
 }
 
+const OUTCOME_DOT: Record<ChargingSessionOutcome, string> = {
+  active: "bg-cx-blue",
+  completed: "bg-cx-emerald",
+  interrupted: "bg-cx-amber",
+  failed: "bg-cx-rose",
+};
+
+const DASH = "—";
+
+function formatEnergy(wh: number | null): string {
+  return wh === null ? DASH : `${(wh / 1000).toFixed(2)} kWh`;
+}
+
 /**
- * Transaction history table for a CP: every `transitionType: "transaction"`
- * entry from `useStateHistory`, across all connectors. `historyOptions` is
- * memoized (mirrors `StateTransitionViewer`'s own usage of the hook) — the
- * hook's effect depends on it by reference, so a fresh object every render
- * would refetch in a loop.
+ * Charging-session history of a CP (#447): one row per transaction, newest
+ * first, the same columns for every OCPP version. A value the simulator does
+ * not know (an active session's end, a 1.6 id the CSMS never assigned) shows
+ * as a dash, never a guess.
  */
 const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
-  const historyOptions = useMemo<HistoryOptions>(
-    () => ({ transitionType: "transaction" }),
-    [],
-  );
-  const { history, isLoading } = useStateHistory(cpId, { historyOptions });
+  const { page, isLoading, error } = useChargingSessions(cpId);
 
-  if (!isLoading && history.length === 0) {
+  if (error) {
+    return (
+      <EmptyState title="Could not load the charging sessions" hint={error} />
+    );
+  }
+
+  if (!isLoading && page.sessions.length === 0) {
     return (
       <EmptyState
-        title="No transaction history"
+        title="No charging session yet"
         hint="Start a transaction on a connector to see it recorded here."
       />
     );
@@ -38,34 +53,68 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
       <table className="w-full text-left text-sm">
         <thead className="bg-cx-sub text-xs uppercase tracking-wide text-cx-muted">
           <tr>
-            <th className="px-3 py-2 font-medium">Time</th>
+            <th className="px-3 py-2 font-medium">Started</th>
             <th className="px-3 py-2 font-medium">Connector</th>
-            <th className="px-3 py-2 font-medium">Transition</th>
-            <th className="px-3 py-2 font-medium">Result</th>
+            <th className="px-3 py-2 font-medium">Transaction</th>
+            <th className="px-3 py-2 font-medium">idTag</th>
+            <th className="px-3 py-2 font-medium">Duration</th>
+            <th className="px-3 py-2 font-medium">Energy</th>
+            <th className="px-3 py-2 font-medium">Stop reason</th>
+            <th className="px-3 py-2 font-medium">Outcome</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-cx-border">
-          {history.map((entry) => (
-            <tr key={entry.id}>
+          {page.sessions.map((session) => (
+            <tr
+              key={session.sessionId}
+              data-testid="session-row"
+              data-outcome={session.outcome}
+            >
               <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
-                {entry.timestamp.toLocaleString()}
+                {new Date(session.startedAt).toLocaleString()}
               </td>
-              <td className="px-3 py-2 text-cx-fg2">{entry.entityId ?? "—"}</td>
-              <td className="px-3 py-2 text-cx-fg2">
-                {entry.fromState} → {entry.toState}
+              <td className="px-3 py-2 text-cx-fg2">{session.connectorId}</td>
+              <td
+                className="max-w-[12rem] truncate px-3 py-2 font-mono text-xs text-cx-fg2"
+                title={session.transactionId ?? undefined}
+              >
+                {session.transactionId ?? DASH}
+              </td>
+              <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
+                {session.idTag ?? DASH}
+              </td>
+              <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
+                {session.durationMs === null
+                  ? DASH
+                  : formatElapsed(session.durationMs)}
+              </td>
+              <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
+                {formatEnergy(session.energyWh)}
+              </td>
+              <td
+                className="px-3 py-2 text-cx-fg2"
+                title={session.triggerReason ?? undefined}
+              >
+                {session.stopReason ?? DASH}
               </td>
               <td className="px-3 py-2">
-                {entry.success ? (
-                  <CheckCircle2
-                    className="h-4 w-4 text-cx-emerald"
-                    aria-label="success"
+                <span
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-medium text-cx-fg2"
+                  title={
+                    session.authorizationStatus
+                      ? `CSMS answered ${session.authorizationStatus}`
+                      : undefined
+                  }
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "h-[7px] w-[7px] rounded-full",
+                      OUTCOME_DOT[session.outcome],
+                    )}
                   />
-                ) : (
-                  <XCircle
-                    className="h-4 w-4 text-cx-rose"
-                    aria-label="failed"
-                  />
-                )}
+                  {session.outcome}
+                </span>
               </td>
             </tr>
           ))}

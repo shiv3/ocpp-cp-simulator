@@ -358,7 +358,7 @@ describe.skipIf(!canBindBunServe(getAvailablePort()))(
               }, 2_000);
               ws.connect(null, (event) => {
                 clearTimeout(timer);
-                resolve(event);
+                resolve(event as CloseEvent);
               });
             }),
         );

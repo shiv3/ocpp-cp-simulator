@@ -128,6 +128,9 @@ treated as absent (graceful degradation).
   `WebSocket closed: … cause=simulated` (`WEBSOCKET`), and emits
   `disconnected`. It does not set the charge point's `error` field or emit an
   `error` event (#474).
+- **A connect cuts the reconnect delay short**: an operator `connect` (or a
+  reset) during `reconnectDelayMs` connects right away and cancels the
+  delayed reconnect, so no second socket opens over the new one (#478).
 - **Heartbeat idle tracking**: Heartbeat timeout tracking anchors to the
   moment the frame is **physically written** to the socket (after all latency
   delays). A 30-second heartbeat interval becomes (30s + applied latency), so

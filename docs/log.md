@@ -1636,6 +1636,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): a forced disconnect shows up in the `NETWORK_SIM` and `WEBSOCKET` logs and as `disconnected`, not as `error`.
 - [Log format → WebSocket handshake failures](concepts/log-format.md#websocket-handshake-failures): the `WebSocket closed:` line ends with `cause=` (`network`, `manual`, `internal` or `simulated`) and is logged for a reset's stale socket too.
 
+## [2026-10-27] ingest | A reset's stale socket close no longer tears down the replacement (#478)
+
+- [Log format → WebSocket close lines](concepts/log-format.md#websocket-close-lines): new section. It lists the `cause=` values and covers a socket the charge point closed itself whose close lands after the next connect started: it is reported then with `code` 1005, and the late close only logs.
+- [CLI → events](entities/cli.md): `disconnected` comes once per socket, before the replacement's `connected`; a reset of an open socket reports `code` 1005.
+- [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): an operator `connect` or a reset during `reconnectDelayMs` connects right away and cancels the delayed reconnect.
+
 ## [2026-10-27] ingest | Connector 0 fault error codes (#441)
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.

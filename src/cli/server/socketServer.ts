@@ -1634,6 +1634,12 @@ async function dispatchFacadeCpCommand(
       await runFacadeOperation(() => chargePointService.disconnect(id));
       return handled(undefined);
     }
+    case "reset": {
+      // Declared in METHODS but never routed: it fell through to JSON Lines,
+      // which has no `reset` command, and answered `internal`.
+      await runFacadeOperation(() => chargePointService.reset(id));
+      return handled(undefined);
+    }
     case "status": {
       const snapshot = await requireChargePointSnapshot(chargePointService, id);
       return handled(snapshotToWireStatus(snapshot));

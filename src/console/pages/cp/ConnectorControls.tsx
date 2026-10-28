@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { EVSettings } from "@/cp/domain/connector/EVSettings";
 import {
-  ALL_CHARGE_POINT_ERROR_CODES,
+  FAULT_ERROR_CODES,
   OCPPStatus,
   type OCPPAvailability,
 } from "@/cp/domain/types/OcppTypes";
@@ -49,11 +49,6 @@ const STATUS_OPTIONS: OCPPStatus[] = [
   OCPPStatus.Unavailable,
   OCPPStatus.Faulted,
 ];
-
-// A fault has an error to report (§7.6), as in the classic side panel (#434).
-const FAULT_ERROR_CODES = ALL_CHARGE_POINT_ERROR_CODES.filter(
-  (code) => code !== "NoError",
-);
 
 type GroupId = "readings" | "status" | "connector";
 

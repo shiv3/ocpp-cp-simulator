@@ -751,34 +751,27 @@ describe("validateLayerConfig", () => {
     expectInvalid({ rules: {}, unknown: nodes }, ["snapshot", "nodes"]);
   });
 
-  it(
-    "rejects a very wide object before scanning its property descriptors",
-    { timeout: 2_000 },
-    () => {
-      const wide = Object.fromEntries(
-        Array.from({ length: 200_000 }, (_, index) => [
-          index.toString(36),
-          null,
-        ]),
-      );
-      let descriptorReads = 0;
-      const observedWide = new Proxy(wide, {
-        getOwnPropertyDescriptor(target, key) {
-          descriptorReads += 1;
-          return Reflect.getOwnPropertyDescriptor(target, key);
-        },
-      });
-      const startedAt = performance.now();
+  it("rejects a very wide object before scanning its property descriptors", () => {
+    // One key past the cap is enough: the proof is that no descriptor is
+    // read, not how long the rejection takes (#473).
+    const wide = Object.fromEntries(
+      Array.from(
+        { length: NETWORK_SIM_LIMITS.maxSnapshotNodes + 1 },
+        (_, index) => [index.toString(36), null],
+      ),
+    );
+    let descriptorReads = 0;
+    const observedWide = new Proxy(wide, {
+      getOwnPropertyDescriptor(target, key) {
+        descriptorReads += 1;
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
 
-      expectInvalid({ rules: {}, unknown: observedWide }, [
-        "snapshot",
-        "nodes",
-      ]);
+    expectInvalid({ rules: {}, unknown: observedWide }, ["snapshot", "nodes"]);
 
-      expect(descriptorReads).toBe(0);
-      expect(performance.now() - startedAt).toBeLessThan(1_000);
-    },
-  );
+    expect(descriptorReads).toBe(0);
+  });
 
   it("measures the serialized cap in UTF-8 bytes near the boundary", () => {
     const rules = Object.fromEntries(

@@ -550,7 +550,9 @@ describe("parseArgs --ocpp-version", () => {
       });
     });
 
-    it("accepts --soap-tunnel-port and requires it in attach mode", () => {
+    // One case per test: each runParseArgs spawns a bun process, and several
+    // in a row outlast the 5 s timeout under a loaded full run (#473).
+    it("accepts --soap-tunnel-port", () => {
       const withPort = runParseArgs([
         ...soapDaemon,
         "--soap-tunnel",
@@ -562,7 +564,9 @@ describe("parseArgs --ocpp-version", () => {
       expect(JSON.parse(withPort.stdout)).toMatchObject({
         soapTunnel: { localPort: 9702 },
       });
+    });
 
+    it("requires --soap-tunnel-port in attach mode", () => {
       const attachWithout = runParseArgs([
         ...soapDaemon,
         "--soap-tunnel",
@@ -574,37 +578,32 @@ describe("parseArgs --ocpp-version", () => {
       expect(attachWithout.stderr).toContain(
         "--ngrok-api-url requires --soap-tunnel-port",
       );
+    });
 
+    it("rejects --soap-tunnel-port without --soap-tunnel ngrok", () => {
       const stray = runParseArgs([...soapDaemon, "--soap-tunnel-port", "9702"]);
       expect(stray.status).toBe(1);
       expect(stray.stderr).toContain(
         "--soap-tunnel-port requires --soap-tunnel ngrok",
       );
+    });
 
-      const bad = runParseArgs([
-        ...soapDaemon,
-        "--soap-tunnel",
-        "ngrok",
-        "--soap-tunnel-port",
-        "70000",
-      ]);
-      expect(bad.status).toBe(1);
-      expect(bad.stderr).toContain("--soap-tunnel-port must be a port number");
-
-      for (const value of ["9702abc", "1e3", "-1"]) {
-        const partial = runParseArgs([
+    it.each(["70000", "9702abc", "1e3", "-1"])(
+      "rejects --soap-tunnel-port %s",
+      (value) => {
+        const bad = runParseArgs([
           ...soapDaemon,
           "--soap-tunnel",
           "ngrok",
           "--soap-tunnel-port",
           value,
         ]);
-        expect(partial.status, value).toBe(1);
-        expect(partial.stderr, value).toContain(
+        expect(bad.status).toBe(1);
+        expect(bad.stderr).toContain(
           "--soap-tunnel-port must be a port number",
         );
-      }
-    });
+      },
+    );
 
     it("defaults to no tunnel", () => {
       const result = runParseArgs(soapDaemon);

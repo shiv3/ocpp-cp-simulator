@@ -430,11 +430,26 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         try {
           handled = entry.handle(payload, ctx);
         } catch (error) {
-          // A throwing handler has always left the CALL unanswered (the
-          // socket layer logs the error); say so, so the announced call
-          // does not wait for an answer forever (#396).
-          this.ignoreCall(action, messageId);
-          throw error;
+          // Same answer as the 1.6J handler: a failing handler is the
+          // station's fault, so the CSMS gets InternalError instead of
+          // waiting for its timeout (#399).
+          this._logger.error(
+            `[v2.0.1] Error handling ${action}: ${error}`,
+            LogType.OCPP,
+          );
+          this.rejectCall(
+            action,
+            messageId,
+            "InternalError" as OCPPErrorCode,
+            // OCPP-J 2.0.1 / 2.1 Part 4 §4.2.3: ErrorDescription is
+            // string[255].
+            (error instanceof Error ? error.message : String(error)).slice(
+              0,
+              255,
+            ),
+            gen,
+          );
+          return;
         }
         const { response, afterResult } = handled;
         // Register effect with queue if present, get settlement callback

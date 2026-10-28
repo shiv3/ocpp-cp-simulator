@@ -21,7 +21,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
   - open-ev-directory.md
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -734,9 +734,9 @@ Events are emitted in all modes:
 | ----------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `connected`             | -                                         | WebSocket to the CSMS opened — transport only, not registration: see `boot_notification`                                                                                                                                                       |
 | `boot_notification`     | `status`, `interval`, `currentTime`       | Answer to BootNotification.conf processed: `status` is `Accepted` / `Pending` / `Rejected`, `interval` and `currentTime` the CSMS's. Once per BootNotification.conf, after `connected` and before its status changes (#395)                    |
-| `disconnected`          | `code`, `reason`                          | Disconnected from CSMS                                                                                                                                                                                                                         |
+| `disconnected`          | `code`, `reason`                          | Disconnected from CSMS. Once per socket, before the `connected` of the socket that replaces it; a reset of an open socket reports `code` 1005 (see [Log format](../concepts/log-format.md#websocket-close-lines), #478)                        |
 | `status_change`         | `status`                                  | Charge point status changed                                                                                                                                                                                                                    |
-| `error`                 | `error`                                   | Error occurred                                                                                                                                                                                                                                 |
+| `error`                 | `error`                                   | Error occurred. A WebSocket close raises one only when the CP did not ask for it (not a disconnect, reset or network-sim cut) and its code is neither 1000 nor 1005 (#474); the next boot clears it with `""`                                  |
 | `connector_status`      | `connectorId`, `status`, `previousStatus` | Connector status changed                                                                                                                                                                                                                       |
 | `transaction_started`   | `connectorId`, `transactionId`, `tagId`   | Transaction started. On OCPP 1.6 it is emitted twice: once with the local placeholder id `0`, again with the id `StartTransaction.conf` assigned — whatever integer that is, `0` included (#328). Tell the two apart by order, never by value. |
 | `transaction_stopped`   | `connectorId`, `transactionId`            | Transaction stopped                                                                                                                                                                                                                            |
@@ -786,11 +786,10 @@ the OCPP answer are unchanged.
   scenario reaches its `transaction` (`action: "start"`) node, if at all.
 - **Outcome.** `CallResult` for a response — including one chosen by a
   `responseOverride`; `CallError` for a CALLERROR (an `inboundPolicy`, a 2.x
-  `FormationViolation`, `NotImplemented`, a 1.6J handler failure's
-  `InternalError`), with `errorCode`; `NoResponse` when no answer is sent:
-  an `inboundPolicy` of kind `ignore`, or a 2.x handler that throws — such a
-  CALL has always been left unanswered on 2.x, where 1.6J answers
-  `InternalError` (#399). On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
+  `FormationViolation`, `NotImplemented`, the `InternalError` a handler
+  failure answers on 1.6J and 2.x — on 2.x its description is the error
+  message, capped at 255 characters (#399)), with `errorCode`; `NoResponse`
+  when an `inboundPolicy` of kind `ignore` withholds the answer. On SOAP a Fault answering a dispatched call is a `CallError` whose `errorCode` is the Fault code (`Sender` / `Receiver`).
 - **Not delivery.** The outcome is the answer chosen, not proof it reached the
   CSMS: a socket that closes, or a [network-simulation](../concepts/network-simulation.md)
   drop, can still lose it.

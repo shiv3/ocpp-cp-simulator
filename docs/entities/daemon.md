@@ -20,7 +20,7 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Daemon (server mode)
@@ -178,7 +178,9 @@ seen. Per-charge-point detail stays in `cp.list` and the event stream.
 (#446) are operator-chosen keys and values, so they are exactly as unbounded
 as `cpId`: no metric uses a label key or value as a Prometheus label, and none
 will. To look at a group, select it with `cp.list { labels }` and aggregate on
-the client side.
+the client side; to act on one, `cp.bulk { labels, action }` (#470) carries no
+label into a metric either: it counts as one `cp.bulk` call in
+`ocppcp_rpc_requests_total`.
 
 **`/metrics` is behind the Basic Auth gate by default**, unlike
 [`/v1/healthz`](#health). The health probe is exempt because container probes

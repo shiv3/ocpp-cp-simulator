@@ -3,6 +3,7 @@ import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
   createManyToolSchema,
+  cpBulkParamsSchema,
   cpLabelsSetParamsSchema,
   cpListParamsSchema,
   createParamsSchema,
@@ -136,6 +137,22 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           method: "cp.labels.set",
           params: args,
         });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #470: a group operation is what an agent driving a fleet reaches for, and
+  // `call_method` alone would hide it; schema derived from `cp.bulk`'s.
+  mcp.tool("cp_bulk", {
+    description:
+      "Run connect, disconnect or reset on every charge point carrying all the given label pairs (exact match; at least one pair, {} is refused). Returns the matched ids, the ones that succeeded and the ones that failed with the reason -- a partial result is normal, not an error. Each charge point is waited for at most 10 s; a connect still pending then is reported as failed and keeps trying.",
+    inputSchema: cpBulkParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, { method: "cp.bulk", params: args });
         return successResult(result);
       } catch (err) {
         return errorResult(err);

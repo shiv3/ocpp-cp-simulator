@@ -1672,3 +1672,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | Label-selector group operations (#470) and the per-CP `reset` RPC
+
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): new **Group operations** paragraph — `cp.bulk { labels, action }` runs `connect` / `disconnect` / `reset` on every matching charge point; a non-empty selector is required; `{ matched, succeeded, failed }` with partial success as the result; every charge point at once, each waited for at most 10 s (`CP_BULK_WAIT_MS`); over 1,000 matches refused before acting; selection reads labels without building snapshots, and `cp.list { labels }` now does the same. `cp.bulk` row in the daemon methods. The per-CP `reset` row is now true: the method was declared but routed neither by the daemon nor by JSON Lines, and answered `internal` / `Unknown command: reset`.
+- [MCP endpoint](entities/mcp-endpoint.md): new `cp_bulk` tool with a derived schema; 24 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)).
+- [Daemon → Metrics](entities/daemon.md#metrics): `cp.bulk` puts no label in a metric; it counts as one call.
+- [GitHub issues](sources/github-issues.md): #470.

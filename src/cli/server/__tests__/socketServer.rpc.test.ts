@@ -12,7 +12,11 @@ import { EventBus } from "../eventBus";
 import { createRegistryEventBridge } from "../registryEvents";
 import { registerSocketHandlers } from "../socketServer";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
-import { STR_64K_MAX, type SimulatorConfigInput } from "../../../protocol";
+import {
+  ARRAY_MAX_ITEMS,
+  STR_64K_MAX,
+  type SimulatorConfigInput,
+} from "../../../protocol";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 
 type Handler = (...args: unknown[]) => void;
@@ -144,6 +148,7 @@ describe("socket.io rpc dispatch", () => {
     const snapshot = secretChargePointSnapshot();
     const facade = {
       listChargePoints: vi.fn().mockResolvedValue([snapshot]),
+      listChargePointsByLabels: vi.fn().mockResolvedValue([snapshot]),
       getChargePoint: vi.fn().mockResolvedValue(snapshot),
     };
     const io = new FakeIo();
@@ -183,7 +188,10 @@ describe("socket.io rpc dispatch", () => {
       expectNoWireSecrets(ack.result);
     }
 
-    expect(facade.listChargePoints).toHaveBeenCalledTimes(3);
+    // cp.list selects before snapshotting (#470); the two subscribe
+    // snapshots still list every charge point.
+    expect(facade.listChargePointsByLabels).toHaveBeenCalledTimes(1);
+    expect(facade.listChargePoints).toHaveBeenCalledTimes(2);
     expect(facade.getChargePoint).toHaveBeenCalledWith("cp-redact");
   });
 
@@ -337,6 +345,7 @@ describe("socket.io rpc dispatch", () => {
     const snapshot = chargePointSnapshot();
     const facade = {
       listChargePoints: vi.fn().mockResolvedValue([snapshot]),
+      listChargePointsByLabels: vi.fn().mockResolvedValue([snapshot]),
       getChargePoint: vi.fn().mockResolvedValue(snapshot),
     };
     const io = new FakeIo();
@@ -362,7 +371,7 @@ describe("socket.io rpc dispatch", () => {
 
     expect(listAck.ok).toBe(true);
     expect(statusAck.ok).toBe(true);
-    expect(facade.listChargePoints).toHaveBeenCalledTimes(1);
+    expect(facade.listChargePointsByLabels).toHaveBeenCalledTimes(1);
     expect(facade.getChargePoint).toHaveBeenCalledWith("cp-redact");
     if (!listAck.ok || !statusAck.ok) return;
     expect(listAck.result).toEqual([
@@ -514,7 +523,9 @@ describe("socket.io rpc dispatch", () => {
       config: undefined,
     };
     const facade = {
-      listChargePoints: vi.fn().mockResolvedValue([snapshotWithoutConfig]),
+      listChargePointsByLabels: vi
+        .fn()
+        .mockResolvedValue([snapshotWithoutConfig]),
     };
     const io = new FakeIo();
     const socket = new FakeSocket();
@@ -608,6 +619,54 @@ describe("socket.io rpc dispatch", () => {
       undefined,
       data,
     );
+  });
+
+  it("cp.bulk refuses a match past the result cap before acting (#470)", async () => {
+    const facade = {
+      selectChargePointIds: vi.fn(() =>
+        Array.from({ length: ARRAY_MAX_ITEMS + 1 }, (_, i) => `CP${i}`),
+      ),
+      reset: vi.fn(),
+    };
+    const socket = connectFacade(facade);
+
+    const ack = await socket.emitRpc({
+      method: "cp.bulk",
+      params: { labels: { site: "s1" }, action: "reset" },
+    });
+
+    expect(ack.ok).toBe(false);
+    if (ack.ok) return;
+    expect(ack.error).toMatchObject({ code: "invalid_params" });
+    expect(facade.reset).not.toHaveBeenCalled();
+  });
+
+  it("cp.bulk reports a charge point removed between selection and action (#470)", async () => {
+    const facade = {
+      selectChargePointIds: vi.fn(() => ["KEPT", "GONE"]),
+      reset: vi.fn(async (cpId: string) => {
+        if (cpId === "GONE") throw new Error(`cpId not found: ${cpId}`);
+      }),
+    };
+    const socket = connectFacade(facade);
+
+    const ack = await socket.emitRpc({
+      method: "cp.bulk",
+      params: { labels: { site: "s1" }, action: "reset" },
+    });
+
+    expect(ack.ok).toBe(true);
+    if (!ack.ok) return;
+    const result = ack.result as {
+      matched: string[];
+      succeeded: string[];
+      failed: Array<{ cpId: string; reason: string }>;
+    };
+    expect(result.matched).toEqual(["KEPT", "GONE"]);
+    expect(result.succeeded).toEqual(["KEPT"]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].cpId).toBe("GONE");
+    expect(result.failed[0].reason).not.toBe("");
   });
 
   it("data_transfer refuses a string past the cap with invalid_params (#382)", async () => {

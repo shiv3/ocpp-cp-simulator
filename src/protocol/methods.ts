@@ -401,6 +401,37 @@ export const cpLabelsSetParamsSchema = z.object({
   ),
 });
 
+/** The lifecycle actions `cp.bulk` can run on a label selector (#470). */
+export const CP_BULK_ACTIONS = ["connect", "disconnect", "reset"] as const;
+
+/**
+ * `cp.bulk` (#470): one lifecycle action on every charge point carrying every
+ * pair of `labels`. Unlike `cp.list`, the selector is required and must not be
+ * empty: `{}` matches every charge point, and a mutating call that reaches the
+ * whole fleet by leaving out a field is too easy to send by mistake.
+ */
+export const cpBulkParamsSchema = z
+  .object({
+    labels: labelsSchema
+      .refine((labels) => Object.keys(labels).length > 0, {
+        message: "at least one label pair is required",
+      })
+      .describe(
+        "Act on the charge points carrying every one of these label pairs (exact, case-sensitive match). At least one pair; {} is refused",
+      ),
+    action: z
+      .enum(CP_BULK_ACTIONS)
+      .describe("Lifecycle action to run on each selected charge point"),
+  })
+  .strict();
+
+export const cpBulkResultSchema = z.object({
+  matched: ARRAY_1000(STR_64K),
+  succeeded: ARRAY_1000(STR_64K),
+  failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+});
+export type CpBulkResult = z.infer<typeof cpBulkResultSchema>;
+
 /** update CP — redacted snapshots may omit password; server preserves it. */
 const updateParamsSchema = cpParamsBaseSchema.extend({
   basicAuth: z
@@ -932,6 +963,9 @@ export const METHODS = {
     params: cpLabelsSetParamsSchema,
     result: z.object({ cpId: STR_64K }),
   },
+  // #470: partial success is the result, like `cp.create_many`: every
+  // selected id is in `matched`, then in exactly one of the other two.
+  "cp.bulk": { params: cpBulkParamsSchema, result: cpBulkResultSchema },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
@@ -1090,6 +1124,7 @@ export const EXPLICIT_METHODS = [
   "cp.update",
   "cp.delete",
   "cp.labels.set",
+  "cp.bulk",
   "logs.get",
   "logs.clear",
   "state.reset",

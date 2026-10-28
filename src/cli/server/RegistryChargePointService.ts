@@ -152,6 +152,20 @@ export class RegistryChargePointService implements ChargePointService {
     return this.registry.setLabels(id, labels);
   }
 
+  /** Daemon-only (#470): the ids a label selector matches, without building
+   *  any status snapshot. An absent or empty selector matches every one. */
+  selectChargePointIds(selector: Labels | undefined): string[] {
+    return this.registry.selectByLabels(selector);
+  }
+
+  /** Daemon-only (#470): `listChargePoints`, building snapshots only for the
+   *  charge points `selector` matches. */
+  async listChargePointsByLabels(
+    selector: Labels | undefined,
+  ): Promise<ChargePointSnapshot[]> {
+    return this.snapshotsOf(this.registry.selectByLabels(selector));
+  }
+
   async ping(): Promise<{ ok: boolean; cps: number }> {
     return { ok: true, cps: this.registry.list().length };
   }
@@ -921,8 +935,11 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   private listChargePointSnapshots(): ChargePointSnapshot[] {
-    return this.registry
-      .list()
+    return this.snapshotsOf(this.registry.list());
+  }
+
+  private snapshotsOf(cpIds: ReadonlyArray<string>): ChargePointSnapshot[] {
+    return cpIds
       .map((cpId) => this.registry.get(cpId)?.getStatus())
       .filter((status): status is ChargePointStatus => Boolean(status))
       .map(toChargePointSnapshot);

@@ -8,6 +8,7 @@ import {
   type LabelRow,
 } from "@/components/chargePointConfig";
 import type { Labels } from "@/protocol";
+import { describeError } from "./connectorActions";
 
 export interface CpLabelsCardProps {
   id: string;
@@ -51,9 +52,7 @@ const CpLabelsCard: React.FC<CpLabelsCardProps> = ({
     try {
       await onSave(parsed.labels);
     } catch (err) {
-      setError(
-        `Failed to save labels: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      setError(`Failed to save labels: ${describeError(err)}`);
       setIsSaving(false);
       return;
     }

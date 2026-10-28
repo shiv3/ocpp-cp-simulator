@@ -308,10 +308,9 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       );
       return;
     }
-    // #471: an edit leaves labels out — cp.update would rebuild the charge
-    // point to change them, and the copy this form opened with may be stale;
-    // the page header relabels in place instead.
-    let labels = isNewChargePoint ? config.labels : undefined;
+    // #471: only the Add form edits labels; an update never sends them
+    // (useCpConfigActions), the page header relabels in place instead.
+    let labels = config.labels;
     if (mode === "remote" && isNewChargePoint && labelRows) {
       const parsed = labelMapFromRows(labelRows);
       if ("error" in parsed) {

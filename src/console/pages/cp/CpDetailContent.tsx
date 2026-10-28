@@ -245,9 +245,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   const [isLabelsOpen, setIsLabelsOpen] = useState(false);
   // #471: relabel in place (cp.labels.set) — Remote only; local charge points
   // have no labels. `undefined` labels are unknown, not empty.
-  const { labels, markSaved: markLabelsSaved } = useChargePointLabels(cpId);
-  const setChargePointLabels =
-    mode === "remote" ? chargePointService.setChargePointLabels : undefined;
+  const { labels, markSaved: markLabelsSaved } = useChargePointLabels(
+    cpId,
+    snapshot,
+  );
+  const canSetLabels =
+    mode === "remote" && chargePointService.setChargePointLabels !== undefined;
   const [isConnectPending, setIsConnectPending] = useState(false);
   const [isDeletePending, setIsDeletePending] = useState(false);
   const [networkSimGlobalConfig, setNetworkSimGlobalConfig] = useState<
@@ -563,7 +566,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           titleAs={isPanel ? "h2" : "h1"}
           actions={
             <>
-              {setChargePointLabels && (
+              {canSetLabels && (
                 <Button
                   type="button"
                   variant="outline"
@@ -685,7 +688,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 : ""}
             </span>
           )}
-          {mode === "remote" && <LabelChips labels={labels} />}
+          <LabelChips labels={labels} />
         </PageHeader>
 
         {resolvedWsUrl && (
@@ -694,13 +697,13 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           </div>
         )}
 
-        {isLabelsOpen && setChargePointLabels && labels !== undefined && (
+        {isLabelsOpen && canSetLabels && labels !== undefined && (
           <CpLabelsCard
             key={cpId}
             id={labelsCardId}
             labels={labels}
             onSave={async (next) => {
-              await setChargePointLabels.call(chargePointService, cpId, next);
+              await chargePointService.setChargePointLabels!(cpId, next);
               markLabelsSaved(next);
             }}
             onDone={() => setIsLabelsOpen(false)}

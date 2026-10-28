@@ -437,12 +437,11 @@ describe("ChargePointConfigForm", () => {
       expect(button("Add label")).toBeUndefined();
     });
 
-    // #471: an edit saves through cp.update, which rebuilds the charge point;
-    // the page header relabels in place instead, so the edit form neither
-    // offers labels nor sends the ones it was opened with — a stale copy
-    // would otherwise undo a relabel made since.
-    it("is not offered when editing, and the edit Save sends no labels", async () => {
-      const { onSave } = await render({
+    // #471: an edit saves through cp.update, which rebuilds the charge point
+    // (and never carries labels, see useCpConfigActions); the page header
+    // relabels in place instead, so the edit form does not offer them.
+    it("is not offered when editing", async () => {
+      await render({
         initialConfig: {
           ...defaultChargePointConfig,
           cpId: "CP-1",
@@ -450,11 +449,6 @@ describe("ChargePointConfigForm", () => {
         },
       });
       expect(button("Add label")).toBeUndefined();
-
-      await act(async () => button("Save")!.click());
-
-      expect(onSave).toHaveBeenCalledTimes(1);
-      expect(onSave.mock.calls[0][0].labels).toBeUndefined();
     });
   });
 });

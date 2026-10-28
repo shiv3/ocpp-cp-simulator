@@ -156,6 +156,26 @@ describe.skipIf(!canBindBunServe())("ChargingSessionRecorder (#447)", () => {
       }
     });
 
+    it("does not reopen a failed start that a later reset stops again", async () => {
+      const s = await station("CP16-ERROR-RESET", "OCPP-1.6J", [
+        "StartTransaction",
+      ]);
+      try {
+        void s.cp.startTransaction("TAG-16", 1);
+        const start = await s.csms.waitForCall("StartTransaction");
+        s.csms.send([4, start.messageId, "InternalError", "boom", {}]);
+        await until(() => s.sessions()[0]?.outcome === "failed", "failed");
+
+        // The closed transaction stays on the connector until the next
+        // start; a reset path that only checks for its presence stops it.
+        s.cp.stopTransaction(1, "HardReset");
+
+        expect(s.sessions()).toMatchObject([{ outcome: "failed" }]);
+      } finally {
+        await s.stop();
+      }
+    });
+
     it("records an id the CSMS rejected, and stopped on, as failed", async () => {
       const s = await station("CP16-INVALID", "OCPP-1.6J", [
         "StartTransaction",
@@ -377,6 +397,23 @@ describe("ChargingSessionRecorder.reconcile (#447)", () => {
 
     expect(repo.list({ cpId: "CP-RESTORE" }).sessions).toEqual([
       unendedSession({ sessionId: "s-new", connectorId: 2 }),
+    ]);
+    recorder.dispose();
+    cp.dispose();
+  });
+
+  it("marks the session of a removed connector interrupted", () => {
+    const repo = new InMemoryChargingSessionRepository();
+    repo.upsert(unendedSession({ connectorId: 2 }));
+    const cp = offlineChargePoint("CP-RESTORE");
+    restoreTransaction(cp, 2);
+    const recorder = new ChargingSessionRecorder(cp, repo);
+    recorder.reconcile();
+
+    cp.removeConnector(2);
+
+    expect(repo.list({ cpId: "CP-RESTORE" }).sessions).toEqual([
+      unendedSession({ connectorId: 2, outcome: "interrupted" }),
     ]);
     recorder.dispose();
     cp.dispose();

@@ -14,8 +14,9 @@ import type {
  *
  * Retention is per charge point: past {@link MAX_SESSIONS_PER_CP} sessions
  * that have ended, storing one evicts that charge point's oldest ended
- * session (by record order). A session that is still active is never
- * evicted. Deleting a charge point, or `state.reset`, drops its sessions.
+ * session (by end time, or start time when the end is unknown). A session
+ * that is still active is never evicted. Deleting a charge point, or
+ * `state.reset`, drops its sessions.
  */
 export const MAX_SESSIONS_PER_CP = 500;
 
@@ -69,16 +70,17 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
     sessions.set(session.sessionId, { seq, session });
     // Only an ended session can take the charge point past the cap.
     if (session.outcome === "active") return;
-    let ended = 0;
-    for (const stored of sessions.values()) {
-      if (stored.session.outcome !== "active") ended++;
-    }
-    for (const [sessionId, stored] of sessions) {
-      if (ended <= MAX_SESSIONS_PER_CP) break;
-      if (stored.session.outcome === "active") continue;
-      sessions.delete(sessionId);
-      ended--;
-    }
+    const ended = [...sessions.values()].filter(
+      (stored) => stored.session.outcome !== "active",
+    );
+    if (ended.length <= MAX_SESSIONS_PER_CP) return;
+    // Oldest end first (a session whose end is unknown by its start), so a
+    // long session that just ended is not the one evicted.
+    const endOf = ({ session: s }: StoredSession) => s.endedAt ?? s.startedAt;
+    ended
+      .sort((a, b) => endOf(b).localeCompare(endOf(a)) || b.seq - a.seq)
+      .slice(MAX_SESSIONS_PER_CP)
+      .forEach((stored) => sessions.delete(stored.session.sessionId));
   }
 
   list(query: ChargingSessionQuery): ChargingSessionPage {

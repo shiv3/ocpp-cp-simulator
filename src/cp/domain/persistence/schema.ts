@@ -243,8 +243,9 @@ CREATE INDEX IF NOT EXISTS scenario_runs_cp_scenario
 -- ran, normalized across OCPP versions; the listing \`sessions.list\` pages
 -- through. \`session_json\` is the whole ChargingSession; the columns are
 -- what the listing filters and sorts on, and \`ended_at IS NULL\` finds the
--- sessions a restart has to reconcile. \`seq\` is record order: retention
--- evicts a charge point's lowest ended ones
+-- sessions a restart has to reconcile. \`seq\` is record order, the
+-- tie-break. Retention evicts a charge point's ended sessions with the
+-- oldest end (\`ended_at\`, else \`started_at\`)
 -- (ChargingSessionRepository.MAX_SESSIONS_PER_CP).
 CREATE TABLE IF NOT EXISTS charging_sessions (
   seq           INTEGER PRIMARY KEY AUTOINCREMENT,

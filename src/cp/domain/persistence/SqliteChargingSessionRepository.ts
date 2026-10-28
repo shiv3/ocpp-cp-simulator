@@ -29,14 +29,16 @@ export class SqliteChargingSessionRepository implements ChargingSessionRepositor
     this.db.exec("BEGIN IMMEDIATE TRANSACTION");
     try {
       this.write(session);
-      // Every ended session at or below the charge point's (cap+1)-th newest
-      // ended `seq`. Active ones are not counted and never deleted.
+      // The charge point's ended sessions past the cap, oldest end first (a
+      // session whose end is unknown by its start), so a long session that
+      // just ended is not the one evicted. Active ones are never counted.
       this.db.run(
-        "DELETE FROM charging_sessions WHERE cp_id = ? AND outcome != 'active' " +
-          "AND seq <= (SELECT seq FROM charging_sessions " +
+        "DELETE FROM charging_sessions WHERE seq IN (" +
+          "SELECT seq FROM charging_sessions " +
           "WHERE cp_id = ? AND outcome != 'active' " +
-          "ORDER BY seq DESC LIMIT 1 OFFSET ?)",
-        [session.cpId, session.cpId, MAX_SESSIONS_PER_CP],
+          "ORDER BY COALESCE(ended_at, started_at) DESC, seq DESC " +
+          "LIMIT -1 OFFSET ?)",
+        [session.cpId, MAX_SESSIONS_PER_CP],
       );
       this.db.exec("COMMIT");
     } catch (error) {

@@ -112,7 +112,10 @@ connector's `Transaction` when the event fires, never parsed from frames.
 Every stored change is also pushed (below).
 
 A session still open when the same connector starts another transaction lost
-its end; it is closed as `interrupted`.
+its end; it is closed as `interrupted`, and so is the running session of a
+connector that is removed (removal does not stop the transaction). A stop
+with no running session on its connector is ignored: the transaction already
+ended, e.g. a failed start that a reset stops again.
 
 ## Persistence and restarts
 
@@ -127,13 +130,14 @@ There is one history per process, shared by every charge point:
   IndexedDB like the other tables.
 
 Retention: past 500 **ended** sessions per charge point, storing one evicts
-that charge point's oldest ended session. An active session is never evicted.
-Deleting a charge point, or `state.reset`, drops its sessions.
+that charge point's ended session with the oldest end (its start when the end
+is unknown), so a long session that just ended is kept. An active session is
+never evicted. Deleting a charge point, or `state.reset`, drops its sessions.
 
 **Reconciliation.** Sessions stored without an end (`endedAt === null`) are
-settled against the connectors whenever a charge point is (re)built — on
-`cp.update`, on a daemon restart, on a browser reload — and again once the
-daemon has restored the connector runtime:
+settled against the connectors once per charge point (re)build — on create,
+on `cp.update`, on a browser reload, and on a daemon restart once the
+connector runtime has been restored:
 
 - a connector still running the transaction a session started (same start
   time) keeps it, `active` again, under the same `sessionId`;

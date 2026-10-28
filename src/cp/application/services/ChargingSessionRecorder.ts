@@ -73,6 +73,10 @@ export class ChargingSessionRecorder {
       events.on("transactionStartFailed", ({ connectorId }) =>
         this.onStartFailed(connectorId),
       ),
+      // Removing a connector does not stop its transaction.
+      events.on("connectorRemoved", ({ connectorId }) =>
+        this.interrupt(connectorId),
+      ),
     );
     // A removed connector is disposed, which drops this listener with it.
     for (const [connectorId, connector] of cp.connectors) {
@@ -151,9 +155,17 @@ export class ChargingSessionRecorder {
     const transaction = this.cp.connectors.get(connectorId)?.transaction;
     if (!transaction) return;
     // A session still open here lost its end (no stop event reached us).
-    const dangling = this.active.get(connectorId);
-    if (dangling) this.store({ ...dangling, outcome: "interrupted" });
+    this.interrupt(connectorId);
     this.update(connectorId, this.newSession(connectorId, transaction));
+  }
+
+  /** The running session of `connectorId`, if any, ends with its end
+   *  unknown: interrupted, `endedAt` null. */
+  private interrupt(connectorId: number): void {
+    const session = this.active.get(connectorId);
+    if (!session) return;
+    this.active.delete(connectorId);
+    this.store({ ...session, outcome: "interrupted" });
   }
 
   private onTransactionIdChange(
@@ -172,9 +184,11 @@ export class ChargingSessionRecorder {
 
   private onStopped(connectorId: number, reason: string | undefined): void {
     const transaction = this.cp.connectors.get(connectorId)?.transaction;
-    if (!transaction) return;
-    const open =
-      this.active.get(connectorId) ?? this.newSession(connectorId, transaction);
+    const open = this.active.get(connectorId);
+    // No running session: the transaction already ended, e.g. a failed
+    // start that a reset path stops again (it stays on the connector until
+    // the next start). A restored one was taken back by `reconcile`.
+    if (!transaction || !open) return;
     // The handlers that stop on a rejected id record the verdict on the
     // transaction first, so it is here before `startTransactionNotAccepted`.
     const authorizationStatus =

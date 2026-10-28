@@ -155,6 +155,34 @@ describe.each(implementations)(
       expect(page.sessions[1]).toEqual(ended[2]);
     });
 
+    it("evicts by end, so a long session that just ended is kept", () => {
+      const repo = create();
+      const long = active();
+      repo.upsert(long);
+      for (let i = 0; i < MAX_SESSIONS_PER_CP; i++) repo.upsert(session());
+      // Recorded first, ended last.
+      const ended = {
+        ...long,
+        endedAt: new Date(clock + 3_600_000).toISOString(),
+        outcome: "completed" as const,
+      };
+      repo.upsert(ended);
+
+      const { sessions, total } = repo.list({ cpId: "CP-A", order: "asc" });
+      expect(total).toBe(MAX_SESSIONS_PER_CP);
+      expect(sessions[0]).toEqual(ended);
+    });
+
+    it("evicts a session whose end is unknown by its start", () => {
+      const repo = create();
+      const lost = session({ ...UNENDED, outcome: "interrupted" });
+      repo.upsert(lost);
+      for (let i = 0; i < MAX_SESSIONS_PER_CP; i++) repo.upsert(session());
+
+      expect(repo.unended("CP-A")).toEqual([]);
+      expect(repo.list({ cpId: "CP-A" }).total).toBe(MAX_SESSIONS_PER_CP);
+    });
+
     it("does not let one charge point's history evict another's", () => {
       const repo = create();
       const kept = session({ cpId: "CP-B" });

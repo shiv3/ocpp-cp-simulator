@@ -363,7 +363,9 @@ has three groups: **Heartbeat** (the interval, when the last one was sent, and
 **Send Heartbeat**), **Authorize** (a TagID from **Settings**, with a hint
 when there is none) and **Status and faults** (a StatusNotification for
 connector 0: `Available`, `Unavailable` or `Faulted`, the last with an error
-code, §7.6). Every call is disabled while the charge point is disconnected.
+code, §7.6). The error codes are the connector card's: any code but
+`NoError`, `InternalError` by default (#441). Every call is disabled while the
+charge point is disconnected.
 Each group shows its own failure; a failed **Send Heartbeat** from the header
 also shows under the header while the block is folded, so it is never
 invisible. `Figure`, `Group`, `Row` and `Hint` are shared with the connector

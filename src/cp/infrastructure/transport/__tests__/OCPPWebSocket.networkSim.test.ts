@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { OCPPWebSocket, type OcppMessageErrorPayload } from "../OCPPWebSocket";
+import {
+  OCPPWebSocket,
+  type OcppMessageErrorPayload,
+  type SocketClose,
+} from "../OCPPWebSocket";
 import { Logger } from "../../../shared/Logger";
 import type {
   Settlement,
   ResolvedNetworkSimConfig,
   GenerationToken,
+  CloseCause,
 } from "../network-sim";
 
 // Fake WebSocket implementation for testing
@@ -892,5 +897,190 @@ describe("OCPPWebSocket Network Simulation", () => {
       expect(order).toEqual(["close", "reconnect"]);
       observed.dispose();
     });
+  });
+});
+
+describe("OCPPWebSocket close callback cause (#474)", () => {
+  let logger: Logger;
+  let ws: OCPPWebSocket;
+  let fakeWs: FakeWebSocket;
+  let onClose: ReturnType<
+    typeof vi.fn<(ev: SocketClose, cause: CloseCause) => void>
+  >;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    logger = createMockLogger();
+    ws = new OCPPWebSocket("ws://localhost:8080", "CP-001", logger);
+    onClose = vi.fn();
+    ws.connect(null, onClose);
+    fakeWs = (ws as unknown as WebSocketTestAccess)._ws;
+    fakeWs.simulateOpen();
+  });
+
+  afterEach(() => {
+    ws.dispose();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it("reports 'network' for a close the charge point did not ask for", () => {
+    fakeWs.simulateClose(1000);
+
+    expect(onClose).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 1000 }),
+      "network",
+    );
+  });
+
+  it("reports 'manual' for an operator disconnect", () => {
+    ws.disconnect();
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "manual");
+  });
+
+  it("reports 'internal' for a reset close", () => {
+    ws.disconnectInternal();
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "internal");
+  });
+
+  it("reports 'simulated' for a network-sim cut", () => {
+    ws.simulateConnectionLoss(5000);
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "simulated");
+  });
+
+  it("reports 'manual' for a close that lands after dispose", () => {
+    ws.dispose();
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "manual");
+  });
+
+  it("reports the old socket's cause when its close lands after a reconnect", () => {
+    // A real socket fires close asynchronously: hold it until the next
+    // generation is already open, as after ChargePoint.reset().
+    const oldSocket = fakeWs;
+    oldSocket.close = () => undefined;
+    ws.disconnectInternal();
+    ws.connect();
+
+    oldSocket.simulateClose(1000);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "internal");
+    // The charge point logs no error for it, and only the transport's line
+    // carries the real close code.
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(/^WebSocket closed: code=1000, .*cause=internal$/),
+      expect.anything(),
+    );
+  });
+});
+
+describe("OCPPWebSocket superseded socket close (#478)", () => {
+  let ws: OCPPWebSocket;
+  let fakeWs: FakeWebSocket;
+  let onClose: ReturnType<
+    typeof vi.fn<(ev: SocketClose, cause: CloseCause) => void>
+  >;
+
+  const currentSocket = () => (ws as unknown as WebSocketTestAccess)._ws;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ws = new OCPPWebSocket("ws://localhost:8080", "CP-001", createMockLogger());
+    onClose = vi.fn();
+    ws.connect(null, onClose);
+    fakeWs = currentSocket();
+    fakeWs.simulateOpen();
+  });
+
+  afterEach(() => {
+    ws.dispose();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it.each<[string, (ws: OCPPWebSocket) => void, CloseCause]>([
+    ["a reset", (ws) => ws.disconnectInternal(), "internal"],
+    ["an operator disconnect", (ws) => ws.disconnect(), "manual"],
+  ])(
+    "reports %s's close inside the next connect, before the new socket opens",
+    (_label, close, cause) => {
+      const oldSocket = fakeWs;
+      oldSocket.close = () => undefined; // the close event is still in flight
+      close(ws);
+      expect(onClose).not.toHaveBeenCalled();
+
+      const onOpen = vi.fn();
+      ws.connect(onOpen);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledWith({ code: 1005, reason: "" }, cause);
+      expect(onOpen).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not report the superseded socket's late close again", () => {
+    const oldSocket = fakeWs;
+    oldSocket.close = () => undefined;
+    ws.disconnectInternal();
+    ws.connect();
+    currentSocket().simulateOpen();
+
+    oldSocket.simulateClose(1005);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reports the replacement's own close", () => {
+    const oldSocket = fakeWs;
+    oldSocket.close = () => undefined;
+    ws.disconnectInternal();
+    ws.connect();
+    currentSocket().simulateOpen();
+    oldSocket.simulateClose(1005);
+
+    currentSocket().simulateClose(1006);
+
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenLastCalledWith(
+      expect.objectContaining({ code: 1006 }),
+      "network",
+    );
+  });
+
+  it("reports nothing extra when the close landed before the next connect", () => {
+    ws.disconnectInternal(); // the fake socket closes synchronously
+
+    ws.connect();
+    const replacement = currentSocket();
+    vi.advanceTimersByTime(60_000);
+
+    expect(currentSocket()).toBe(replacement);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 1000 }),
+      "internal",
+    );
+  });
+
+  it("a connect during the reconnect backoff cancels the pending reconnect", () => {
+    fakeWs.simulateClose(1006); // arms the backoff timer
+
+    ws.connect();
+    const replacement = currentSocket();
+    replacement.simulateOpen();
+    vi.advanceTimersByTime(60_000);
+
+    // The timer would open another socket over the live one, and the
+    // orphan's close would then tear the new one down.
+    expect(currentSocket()).toBe(replacement);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports nothing on the first connect", () => {
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

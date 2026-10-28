@@ -1640,3 +1640,20 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Index](index.md), [GitHub issues](sources/github-issues.md) (#448).
 - [Overview](overview.md): Observability bullet names the timeline. The concept page records that `cp.update` on the daemon rebuilds the charge point and so starts an empty timeline (Local-mode edits keep it), pinned by `timelineGet.bun.test.ts`.
 - Review follow-up: entries are pushed as a `timeline_entry` event ([CLI → Events](entities/cli.md#events)); the console tab appends them and re-reads only on a `seq` gap ([Web console](entities/web-console.md#operational-events-tab)). `scenario_completed` is replaced by `scenario_finished` (`verdict`, `stopped`, `executionState`), recorded once per run when its report is computed, so a stopped run no longer reads as completed ([Operational timeline](concepts/operational-timeline.md#kinds)).
+
+## [2026-10-27] ingest | Normal and self-requested WebSocket closes no longer set `error` (#474)
+
+- [CLI → events](entities/cli.md): a WebSocket close raises `error` only when the charge point did not ask for it and its code is neither 1000 nor 1005; an operator disconnect, a reset or a network-sim cut never does.
+- [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): a forced disconnect shows up in the `NETWORK_SIM` and `WEBSOCKET` logs and as `disconnected`, not as `error`.
+- [Log format → WebSocket handshake failures](concepts/log-format.md#websocket-handshake-failures): the `WebSocket closed:` line ends with `cause=` (`network`, `manual`, `internal` or `simulated`) and is logged for a reset's stale socket too.
+
+## [2026-10-27] ingest | A reset's stale socket close no longer tears down the replacement (#478)
+
+- [Log format → WebSocket close lines](concepts/log-format.md#websocket-close-lines): new section. It lists the `cause=` values and covers a socket the charge point closed itself whose close lands after the next connect started: it is reported then with `code` 1005, and the late close only logs.
+- [CLI → events](entities/cli.md): `disconnected` comes once per socket, before the replacement's `connected`; a reset of an open socket reports `code` 1005.
+- [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): an operator `connect` or a reset during `reconnectDelayMs` connects right away and cancels the delayed reconnect.
+
+## [2026-10-27] ingest | Connector 0 fault error codes (#441)
+
+- [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
+- [GitHub issues](sources/github-issues.md): #441.

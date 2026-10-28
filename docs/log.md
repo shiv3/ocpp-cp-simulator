@@ -1641,3 +1641,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Log format → WebSocket close lines](concepts/log-format.md#websocket-close-lines): new section. It lists the `cause=` values and covers a socket the charge point closed itself whose close lands after the next connect started: it is reported then with `code` 1005, and the late close only logs.
 - [CLI → events](entities/cli.md): `disconnected` comes once per socket, before the replacement's `connected`; a reset of an open socket reports `code` 1005.
 - [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): an operator `connect` or a reset during `reconnectDelayMs` connects right away and cancels the delayed reconnect.
+
+## [2026-10-27] ingest | Connector 0 fault error codes (#441)
+
+- [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
+- [GitHub issues](sources/github-issues.md): #441.

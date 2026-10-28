@@ -36,10 +36,10 @@ export function createRegistryEventBridge(
 
   const unsubscribeRegistry = deps.registry.onRegistryMembership((event) => {
     const cp = cpForWire(event.cpId, event.service);
-    if (event.change === "added") {
-      lastSummaryByCp.set(event.cpId, summaryJson(event.service.getStatus()));
-    } else {
+    if (event.change === "removed") {
       lastSummaryByCp.delete(event.cpId);
+    } else {
+      lastSummaryByCp.set(event.cpId, summaryJson(event.service.getStatus()));
     }
     emitRegistry(io, event.change, cp);
   });
@@ -175,6 +175,7 @@ function cpForWire(cpId: string, service: CLIChargePointService): FullCp {
       basicAuth: init.basicAuth,
       ocppVersion: init.ocppVersion,
       bootNotification: init.bootNotification ?? null,
+      labels: init.labels,
     },
   };
 }

@@ -21,6 +21,7 @@ import {
   createManyParamsSchema,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
+  matchesLabelSelector,
   isRpcMethod,
   redactSimulatorConfig,
   registryCpToWire,
@@ -507,7 +508,7 @@ export async function dispatchRpcCore(
   // result validation all sit outside this function.
   switch (call.method) {
     case "cp.list":
-      return listCps(deps.chargePointService);
+      return listCps(deps.chargePointService, call.params);
     case "cp.create":
       return createCp(deps, call.params);
     case "cp.create_many":
@@ -524,6 +525,8 @@ export async function dispatchRpcCore(
       return updateCp(deps, call.params);
     case "cp.delete":
       return deleteCp(deps, call.params);
+    case "cp.labels.set":
+      return setCpLabels(deps, call.params);
     case "logs.get":
       return getLogs(deps, call.params);
     case "logs.clear":
@@ -672,9 +675,12 @@ export async function runRpc(
 
 async function listCps(
   chargePointService: RegistryChargePointService,
+  params: Params<"cp.list">,
 ): Promise<CpListItem[]> {
   return runFacadeOperation(async () =>
-    (await chargePointService.listChargePoints()).map(snapshotToRegistryCpWire),
+    (await chargePointService.listChargePoints())
+      .filter((cp) => matchesLabelSelector(cp.config?.labels, params.labels))
+      .map(snapshotToRegistryCpWire),
   );
 }
 
@@ -1035,6 +1041,18 @@ async function updateCp(
     });
   }
   return { cpId: init.cpId };
+}
+
+/** #446: relabel in place — no rebuild, so the connection survives. */
+async function setCpLabels(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"cp.labels.set">,
+): Promise<{ cpId: string }> {
+  const found = await runFacadeOperation(() =>
+    deps.chargePointService.setChargePointLabels(params.cpId, params.labels),
+  );
+  if (!found) throw new RpcFailure("not_found", "");
+  return { cpId: params.cpId };
 }
 
 async function deleteCp(

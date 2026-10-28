@@ -1636,11 +1636,20 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane](concepts/control-plane.md#daemon-methods): `timeline.get` row; an unknown `cpId` is `not_found`, unlike `logs.get`.
 - [Network simulation](concepts/network-simulation.md#faults-on-the-operational-timeline): a disconnect rule firing is recorded as `network_fault_injected` and opens an incident; log lines unchanged.
 - [Web console](entities/web-console.md#operational-events-tab): **Operational events** tab (`?tab=events`), added to the tab list, the `?tab=` table and "What the console can do".
-- [MCP endpoint](entities/mcp-endpoint.md): curated `get_timeline` tool (22 curated tools); count also updated in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md).
+- [MCP endpoint](entities/mcp-endpoint.md): curated `get_timeline` tool (23 curated tools with `cp_labels_set` from #446); count also updated in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md).
 - [Index](index.md), [GitHub issues](sources/github-issues.md) (#448).
 - [Overview](overview.md): Observability bullet names the timeline. The concept page records that `cp.update` on the daemon rebuilds the charge point and so starts an empty timeline (Local-mode edits keep it), pinned by `timelineGet.bun.test.ts`.
 - Review follow-up: entries are pushed as a `timeline_entry` event ([CLI → Events](entities/cli.md#events)); the console tab appends them and re-reads only on a `seq` gap ([Web console](entities/web-console.md#operational-events-tab)). The timeline records `scenario_finished` (`verdict`, `stopped`, `executionState`) instead of a `scenario_completed` kind, once per run when its report is computed, so a stopped run no longer reads as completed; the CLI `scenario_completed` event is unchanged ([Operational timeline](concepts/operational-timeline.md#kinds)).
 - Maintainer review: an incident whose connector statuses do not come back closes 60 s after the boot with `restored: false` and `unrestored` instead of staying open ([Operational timeline → Correlation](concepts/operational-timeline.md#correlation)); a discarded scenario run ends its `runId` attribution; the console tab re-reads when `cp.update` restarts `seq`, and is keyed by charge point.
+
+## [2026-10-27] ingest | Charge-point labels (#446)
+
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): new canonical section — key and value rules, `cp.update` keeps omitted labels and replaces a given map, `cp.labels.set` relabels in place without the rebuild, `cp.list { labels }` selects with an exact AND match and refuses unknown params, blueprint labels are replaced by a request's, never Prometheus labels. `labels` row in the `cp.create` parameters; `cp.list`, `cp.update` and `cp.labels.set` rows in the daemon methods.
+- [State persistence](concepts/state-persistence.md): schema v16, `charge_points.labels`.
+- [MCP endpoint](entities/mcp-endpoint.md): `cp_list` takes the selector from `cp.list`'s schema, new `cp_labels_set` tool; 22 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)).
+- [Daemon → Metrics](entities/daemon.md#metrics): labels are never Prometheus label values.
+- [Web console](entities/web-console.md): Labels section of the charge point Config form, label chips in the Hierarchy view and the Charge points table, **Label** filter (`?label=`).
+- [GitHub issues](sources/github-issues.md): #446.
 
 ## [2026-10-27] ingest | 2.x handler failure answers InternalError (#399)
 

@@ -350,4 +350,88 @@ describe("ChargePointConfigForm", () => {
       ).toBe(false);
     });
   });
+
+  describe("labels (#446)", () => {
+    const type = async (input: HTMLInputElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      await act(async () => {
+        setter.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    const labelInput = (name: string) =>
+      document.body.querySelector<HTMLInputElement>(
+        `input[aria-label="${name}"]`,
+      )!;
+
+    it("shows the current labels and saves them untouched", async () => {
+      const labels = { site: "s1", env: "lab" };
+      const { onSave } = await render({
+        initialConfig: { ...defaultChargePointConfig, cpId: "CP-1", labels },
+      });
+      expect(labelInput("Label 1 key").value).toBe("site");
+      expect(labelInput("Label 2 value").value).toBe("lab");
+
+      await act(async () => button("Save")!.click());
+
+      expect(onSave.mock.calls[0][0].labels).toEqual(labels);
+    });
+
+    it("adds, edits and removes rows", async () => {
+      const { onSave } = await render({
+        initialConfig: {
+          ...defaultChargePointConfig,
+          cpId: "CP-1",
+          labels: { old: "x" },
+        },
+      });
+      await act(async () => button("Add label")!.click());
+      await type(labelInput("Label 2 key"), "site");
+      await type(labelInput("Label 2 value"), "s1");
+      await act(async () =>
+        document.body
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label="Remove label 1"]',
+          )!
+          .click(),
+      );
+
+      await act(async () => button("Save")!.click());
+
+      expect(onSave.mock.calls[0][0].labels).toEqual({ site: "s1" });
+    });
+
+    it("refuses an invalid key with a message instead of saving", async () => {
+      const { onSave } = await render({
+        initialConfig: {
+          ...defaultChargePointConfig,
+          cpId: "CP-1",
+          labels: {},
+        },
+      });
+      await act(async () => button("Add label")!.click());
+      await type(labelInput("Label 1 key"), "bad key");
+
+      await act(async () => button("Save")!.click());
+
+      expect(onSave).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain(
+        "Invalid label key “bad key”",
+      );
+    });
+
+    it("leaves unknown labels undefined so the daemon keeps them", async () => {
+      const { onSave } = await render();
+      await act(async () => button("Save")!.click());
+      expect(onSave.mock.calls[0][0].labels).toBeUndefined();
+    });
+
+    it("is not offered in local mode", async () => {
+      await render({ mode: "local" });
+      expect(button("Add label")).toBeUndefined();
+    });
+  });
 });

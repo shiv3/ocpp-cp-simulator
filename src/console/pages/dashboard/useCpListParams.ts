@@ -55,6 +55,7 @@ export function useCpListParams(): CpListParams {
       if (patch.tx !== undefined) changes.tx = patch.tx;
       if (patch.status !== undefined) changes.status = patch.status;
       if (patch.version !== undefined) changes.version = patch.version;
+      if (patch.label !== undefined) changes.label = patch.label;
       if (patch.connected !== undefined)
         changes.connected = patch.connected ? "1" : null;
       if (patch.scenario !== undefined)

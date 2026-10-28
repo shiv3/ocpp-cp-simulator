@@ -62,6 +62,7 @@ import type {
 } from "./types";
 import { ScenarioExecutor } from "../cp/application/scenario/ScenarioExecutor";
 import { ScenarioRunStateError } from "../cp/domain/errors/ScenarioRunStateError";
+import { normalizeLabels } from "../protocol/labels";
 import type { ScenarioEvents } from "../cp/application/scenario/ScenarioTypes";
 import { createScenarioExecutorCallbacks } from "../cp/application/scenario/ScenarioRuntime";
 import { EventEmitter } from "../cp/shared/EventEmitter";
@@ -652,7 +653,7 @@ export class CLIChargePointService {
      *  REPL / JSON-mode runtime. */
     runs?: ScenarioRunRepository,
   ) {
-    this._init = init;
+    this._init = { ...init, labels: normalizeLabels(init.labels) };
     this._runs = runs ?? createScenarioRunRepository(database);
     this._scenarioRepo = new SqliteScenarioRepository(database);
     this._runtimeRepo = database
@@ -949,8 +950,18 @@ export class CLIChargePointService {
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,
         bootNotification: this._init.bootNotification ?? null,
+        labels: this._init.labels,
       },
     };
+  }
+
+  /**
+   * Replace this charge point's labels in place (#446). Labels are metadata
+   * the charge point itself never reads, so unlike `CPRegistry.update` this
+   * keeps the connection, the transport and every running session.
+   */
+  setLabels(labels: ChargePointInitOptions["labels"]): void {
+    this._init = { ...this._init, labels: normalizeLabels(labels) };
   }
 
   /** Original init the CP was constructed from. Used by socket.io control

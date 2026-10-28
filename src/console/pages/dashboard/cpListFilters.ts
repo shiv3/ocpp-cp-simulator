@@ -4,6 +4,7 @@ import type {
   ConnectorSnapshot,
 } from "../../../data/interfaces/ChargePointService";
 import type { LiveRunState } from "../../lib/scenarioRunState";
+import { matchesLabelSelector } from "../../../protocol/labels";
 
 /** One charge point of the list with everything the three views and the
  *  filters read: the live snapshot (status, heartbeat, connectors) plus what
@@ -40,6 +41,9 @@ export interface CpListFilters {
   status: OCPPStatus | "";
   /** An OCPP version, or "" for any. */
   version: string;
+  /** Label selector as typed (`?label=`, #446): comma-separated `key=value`
+   *  pairs, all of which must match; a bare `key` asks for the key only. */
+  label: string;
   connected: boolean;
   /** Only connectors with an active scenario run. */
   scenario: boolean;
@@ -68,6 +72,7 @@ export function parseCpListFilters(params: URLSearchParams): CpListFilters {
     tx: params.get("tx") ?? "",
     status: Object.values(OCPPStatus).find((value) => value === status) ?? "",
     version: params.get("version") ?? "",
+    label: params.get("label") ?? "",
     connected: params.get("connected") === "1",
     scenario: params.get("scenario") === "1",
   };
@@ -83,8 +88,49 @@ function parseDigits(text: string): string | null {
 }
 
 /**
+ * The label filter as typed: comma-separated items, each split on its first
+ * `=` (so a value may hold one) into an exact pair, or kept as a bare key that
+ * asks for the key only. Blank items are dropped, which keeps the list whole
+ * while a `,` is typed.
+ */
+function parseLabelFilter(text: string): {
+  selector: Record<string, string>;
+  keys: string[];
+  /** One key asked with two different values: nothing can match both. */
+  contradictory: boolean;
+} {
+  const selector: Record<string, string> = {};
+  const keys: string[] = [];
+  let contradictory = false;
+  for (const item of text.split(",").map((part) => part.trim())) {
+    if (!item) continue;
+    const eq = item.indexOf("=");
+    if (eq === -1) {
+      keys.push(item);
+      continue;
+    }
+    const key = item.slice(0, eq).trim();
+    const value = item.slice(eq + 1).trim();
+    if (Object.hasOwn(selector, key) && selector[key] !== value)
+      contradictory = true;
+    selector[key] = value;
+  }
+  return { selector, keys, contradictory };
+}
+
+/**
+ * The filter text for one label, or null when the syntax above cannot say it
+ * (a comma, or blanks it would trim): a suggestion built from such a pair
+ * would match nothing, its own charge point included.
+ */
+export function formatLabelTerm(key: string, value: string): string | null {
+  if (value.includes(",") || value !== value.trim()) return null;
+  return `${key}=${value}`;
+}
+
+/**
  * Applies the filters to the list. Charge-point-level filters (q, version,
- * connected) drop whole rows. Connector-level filters (conn, tx, status,
+ * label, connected) drop whole rows. Connector-level filters (conn, tx, status,
  * scenario)
  * narrow each row's connectors to the matching ones and drop the rows left
  * with none, so a status filter hides the charge points without a connector in
@@ -97,6 +143,7 @@ export function filterChargePoints(
   filters: CpListFilters,
 ): CpListRow[] {
   const q = filters.q.trim().toLowerCase();
+  const label = parseLabelFilter(filters.label);
   const conn = parseDigits(filters.conn);
   const tx = parseDigits(filters.tx);
   const connectorLevel =
@@ -106,6 +153,13 @@ export function filterChargePoints(
   for (const row of rows) {
     if (q && !row.cp.id.toLowerCase().includes(q)) continue;
     if (filters.version && row.ocppVersion !== filters.version) continue;
+    // Exact pairs through the daemon's own `cp.list` matcher; the bare-key
+    // form is the console's addition.
+    const labels = row.cp.config?.labels;
+    if (label.contradictory) continue;
+    if (!matchesLabelSelector(labels, label.selector)) continue;
+    if (!label.keys.every((key) => labels && Object.hasOwn(labels, key)))
+      continue;
     if (filters.connected && !row.connected) continue;
     if (!connectorLevel) {
       result.push(row);

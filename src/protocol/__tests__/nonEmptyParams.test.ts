@@ -141,6 +141,11 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
     field: "cpId",
   },
   { method: "cp.delete", valid: { cpId: "CP" }, field: "cpId" },
+  {
+    method: "cp.labels.set",
+    valid: { cpId: "CP", labels: {} },
+    field: "cpId",
+  },
   { method: "logs.get", valid: { cpId: "CP" }, field: "cpId" },
   { method: "logs.clear", valid: { cpId: "CP" }, field: "cpId" },
   { method: "timeline.get", valid: { cpId: "CP" }, field: "cpId" },

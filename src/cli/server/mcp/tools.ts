@@ -3,6 +3,8 @@ import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
   createManyToolSchema,
+  cpLabelsSetParamsSchema,
+  cpListParamsSchema,
   createParamsSchema,
   EXPLICIT_METHODS,
   METHODS,
@@ -52,14 +54,17 @@ export function registerTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 }
 
 function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
+  // #446: the selector is `cp.list`'s own schema, so the tool cannot drift
+  // from the method it wraps.
   mcp.tool("cp_list", {
-    description: "List all registered charge points",
-    inputSchema: z.object({}),
-    handler: async () => {
+    description:
+      'List the registered charge points with their labels. Pass labels (e.g. {"site": "lab-1"}) to return only the charge points carrying every one of those key/value pairs.',
+    inputSchema: cpListParamsSchema,
+    handler: async (args) => {
       try {
         const result = await runRpc(deps, {
           method: "cp.list",
-          params: {},
+          params: args,
         });
         return successResult(result);
       } catch (err) {
@@ -109,6 +114,26 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       try {
         const result = await runRpc(deps, {
           method: "cp.create_many",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #446: relabelling gets a tool, and `cp.update` deliberately does not —
+  // `cp.update` rebuilds the charge point (its socket closes and a new
+  // instance takes over), which is the wrong price for changing metadata.
+  mcp.tool("cp_labels_set", {
+    description:
+      "Replace a charge point's labels (generic key/value metadata such as site, tenant or environment) with the given map; {} removes them all. Applied in place: the charge point stays connected and running transactions continue.",
+    inputSchema: cpLabelsSetParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.labels.set",
           params: args,
         });
         return successResult(result);

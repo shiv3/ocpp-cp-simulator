@@ -252,6 +252,7 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
+    labels: config.labels,
   };
 }
 

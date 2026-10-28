@@ -53,6 +53,7 @@ import type {
 } from "../../cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "../../cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "../../cp/domain/auth/IdTagPool";
+import type { Labels } from "../../protocol/labels";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
@@ -133,6 +134,8 @@ export interface ChargePointSnapshot {
       iccid?: string;
       imsi?: string;
     } | null;
+    /** Operator labels (#446); absent when the charge point has none. */
+    labels?: Labels;
   };
 }
 
@@ -183,6 +186,8 @@ export interface CreateChargePointParams {
     imsi?: string;
   };
   autoConnect?: boolean;
+  /** Operator labels (#446). On update, omitted keeps the current ones. */
+  labels?: Labels;
 }
 
 export type ChargePointEvent =

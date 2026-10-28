@@ -78,6 +78,7 @@ import { redactSensitiveText } from "../../cp/shared/redaction";
 import { scenarioTemplates } from "../../utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
+import type { Labels } from "../../protocol/labels";
 import type {
   CPRegistry,
   RegistryMembershipChange,
@@ -143,6 +144,12 @@ export class RegistryChargePointService implements ChargePointService {
 
   async removeChargePoint(id: string): Promise<void> {
     if (!this.registry.remove(id)) throw new Error(`cpId not found: ${id}`);
+  }
+
+  /** Daemon-only (#446): relabel without the rebuild `updateChargePoint`
+   *  does. `false` when no such charge point is registered. */
+  setChargePointLabels(id: string, labels: Labels): boolean {
+    return this.registry.setLabels(id, labels);
   }
 
   async ping(): Promise<{ ok: boolean; cps: number }> {
@@ -978,6 +985,9 @@ function toInitOptions(
     tlsKeyPath: params.tlsKeyPath ?? existing?.tlsKeyPath,
     bootNotification:
       params.bootNotification ?? existing?.bootNotification ?? undefined,
+    // #446: no `existing` fallback here — `CPRegistry.update` is the one place
+    // that keeps the current labels when an update omits them.
+    labels: params.labels,
   };
 }
 
@@ -1034,6 +1044,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,
           bootNotification: status.config.bootNotification,
+          labels: status.config.labels,
         }
       : undefined,
   };

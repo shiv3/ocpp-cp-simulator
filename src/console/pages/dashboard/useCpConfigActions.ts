@@ -28,6 +28,17 @@ export interface UseCpConfigActionsResult {
  * independently — each mounts its own `useConfig`/`useChargePoints`
  * instance.
  */
+/**
+ * `labels` for cp.create / cp.update (#446): omitted when the form never knew
+ * them, so the update keeps the daemon's; otherwise the complete map, which
+ * replaces them.
+ */
+function remoteLabels(
+  cpConfig: ChargePointConfig,
+): Pick<CreateChargePointParams, "labels"> {
+  return cpConfig.labels ? { labels: cpConfig.labels } : {};
+}
+
 export function useCpConfigActions(): UseCpConfigActionsResult {
   const { mode, chargePointService } = useDataContext();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
@@ -68,6 +79,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         imsi: cpConfig.imsi,
       },
       autoConnect: true,
+      ...remoteLabels(cpConfig),
     }),
     [],
   );

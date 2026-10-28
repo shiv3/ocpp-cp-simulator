@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { normalizeKeyName, redactSensitiveValue } from "../cp/shared/redaction";
 import { OBJ_MAX_BYTES, STR_64K, boundedObject } from "./limits";
+import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "../cp/infrastructure/transport/wsUrlWithBasic";
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,7 @@ interface FullCpConfig {
   tlsCertPath?: string;
   tlsKeyPath?: string;
   bootNotification: FullBootNotification | null;
+  labels?: Labels;
 }
 
 /**
@@ -86,6 +88,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
+    labels: config.labels,
   };
 }
 
@@ -126,6 +129,7 @@ export const wireCpConfigSchema = z
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),
     bootNotification: bootNotificationWireSchema,
+    labels: labelsSchema.optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;

@@ -17,6 +17,7 @@ import {
   normalizeSoapPath,
 } from "../soapPath";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "../../protocol/limits";
+import { labelsSchema } from "../../protocol/labels";
 import { appVersion } from "../appVersion";
 import { MAX_ID_TAGS, readIdTagsFile } from "./idTagFile";
 
@@ -1030,6 +1031,14 @@ export function parseCreateBody(
         ...(typeof bn.imsi === "string" ? { imsi: bn.imsi } : {}),
       }
     : undefined;
+  // #446. Absent stays absent so `cp.update` keeps the current labels; a
+  // given map (`{}` included) replaces them.
+  let labels: ChargePointInitOptions["labels"];
+  if (body.labels !== undefined) {
+    const parsed = labelsSchema.safeParse(body.labels);
+    if (!parsed.success) throw new Error("labels must be a valid label map");
+    labels = parsed.data;
+  }
   return {
     cpId,
     wsUrl,
@@ -1056,5 +1065,6 @@ export function parseCreateBody(
     tlsCertPath,
     tlsKeyPath,
     ...(bootNotification ? { bootNotification } : {}),
+    ...(labels !== undefined ? { labels } : {}),
   };
 }

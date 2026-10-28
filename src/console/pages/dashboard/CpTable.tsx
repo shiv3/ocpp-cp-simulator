@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
+import LabelChips from "../../components/LabelChips";
 import StatusPill from "../../components/StatusPill";
 import { formatRelativeTime } from "../../lib/formatRelativeTime";
 import { usePanelParams } from "../../lib/usePanelParams";
@@ -36,6 +37,7 @@ const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
           <TableHead className="text-right">In use</TableHead>
           <TableHead>Scenario</TableHead>
           <TableHead>Heartbeat</TableHead>
+          <TableHead>Labels</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -87,6 +89,9 @@ const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
               </TableCell>
               <TableCell className="text-xs text-cx-muted">
                 {formatRelativeTime(lastHeartbeat(row))}
+              </TableCell>
+              <TableCell>
+                <LabelChips labels={cp.config?.labels} />
               </TableCell>
             </TableRow>
           );

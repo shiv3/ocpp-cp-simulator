@@ -379,6 +379,18 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [{ cpId: "cp-1" }],
       },
       {
+        name: "setChargePointLabels",
+        invoke: (service) =>
+          service.setChargePointLabels("cp-1", { site: "s1", env: "" }),
+        expected: [
+          {
+            method: "cp.labels.set",
+            params: { cpId: "cp-1", labels: { site: "s1", env: "" } },
+          },
+        ],
+        results: [{ cpId: "cp-1" }],
+      },
+      {
         name: "removeChargePoint",
         invoke: (service) => service.removeChargePoint("cp-1"),
         expected: [{ method: "cp.delete", params: { cpId: "cp-1" } }],

@@ -19,7 +19,7 @@ related:
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
   - operational-timeline.md
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Socket.IO control plane
@@ -382,8 +382,9 @@ the create parameters, `cp.list`'s params are **strict**: a misspelled
 `label` is refused with `invalid_params` rather than ignored, because ignoring
 it would silently list the whole fleet. The MCP `cp_list` and `cp_labels_set`
 tools take the same schemas ([MCP endpoint](../entities/mcp-endpoint.md)), and
-the web console edits, shows and filters labels
-([Web console](../entities/web-console.md)).
+the web console shows and filters labels, sets them in the Add form and
+relabels a charge point in place with `cp.labels.set` from its page header
+(#471; [Web console](../entities/web-console.md#charge-point-page)).
 
 **Persistence.** Stored as JSON in `charge_points.labels` (schema v16) and
 restored with the charge point. A stored map that no longer passes the schema

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Log
@@ -1672,3 +1672,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | Console relabel without reconnect (#471)
+
+- [Web console → Charge point page](entities/web-console.md#charge-point-page): the header shows the labels as chips and gains a **Labels** card (Remote mode) that relabels in place with `cp.labels.set`, so the charge point stays connected; it follows the registry push, keeps typed rows on a push or a failed save, and is disabled while the labels are unknown. The edit Config form drops its Labels section and its `cp.update` no longer carries `labels`; the Add form keeps it.
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): the console now relabels in place.
+- [GitHub issues](sources/github-issues.md): #471 row.

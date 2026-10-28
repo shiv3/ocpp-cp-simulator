@@ -488,12 +488,12 @@ describe("CpDetailPage", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  // #446: the edit form sends labels as a full replace, so a gap in the
-  // snapshot → form mapping would make "open Config, Save untouched" erase
-  // them. A charge point whose config is unknown must not send `{}` either.
+  // #471: the header's Labels card relabels in place; a Config save goes
+  // through cp.update, which keeps the daemon's labels only when it carries
+  // none. Sending the copy the page loaded would undo a relabel made since.
   it.each([
     {
-      label: "a labelled charge point sends its labels back unchanged",
+      label: "a labelled charge point sends no labels",
       config: {
         wsUrl: "ws://csms.example.test/ocpp",
         connectors: 1,
@@ -503,14 +503,12 @@ describe("CpDetailPage", () => {
         bootNotification: null,
         labels: { site: "s1", env: "lab" },
       },
-      expected: { site: "s1", env: "lab" },
     },
     {
-      label: "a charge point without a config leaves its labels unknown",
+      label: "a charge point without a config sends no labels",
       config: undefined,
-      expected: undefined,
     },
-  ])("Config Save untouched: $label", async ({ config, expected }) => {
+  ])("Config Save untouched: $label", async ({ config }) => {
     const service = createFakeChargePointService({
       snapshots: [
         snapshot({ id: "CP-1", connectors: [connector({ id: 1 })], config }),
@@ -540,7 +538,7 @@ describe("CpDetailPage", () => {
     await flush();
 
     expect(updateCp).toHaveBeenCalledTimes(1);
-    expect(updateCp.mock.calls[0][0].labels).toEqual(expected);
+    expect(updateCp.mock.calls[0][0].labels).toBeUndefined();
   });
 
   it("the message log shows entries logged before navigating to the CP (from global ring buffer)", async () => {

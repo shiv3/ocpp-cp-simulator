@@ -763,6 +763,7 @@ describe("ScenarioEditPage", () => {
         title,
       ).toBeNull();
     }
+    expect(container.querySelector('input[type="file"]')).toBeNull();
   });
 
   it("a Meter Value node of the full graph editor shows the connector's live reading", async () => {

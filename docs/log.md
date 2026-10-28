@@ -1635,3 +1635,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI → events](entities/cli.md): a WebSocket close raises `error` only when the charge point did not ask for it and its code is neither 1000 nor 1005; an operator disconnect, a reset or a network-sim cut never does.
 - [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): a forced disconnect shows up in the `NETWORK_SIM` and `WEBSOCKET` logs and as `disconnected`, not as `error`.
 - [Log format → WebSocket handshake failures](concepts/log-format.md#websocket-handshake-failures): the `WebSocket closed:` line ends with `cause=` (`network`, `manual`, `internal` or `simulated`) and is logged for a reset's stale socket too.
+
+## [2026-10-27] ingest | Connector 0 fault error codes (#441)
+
+- [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
+- [GitHub issues](sources/github-issues.md): #441.

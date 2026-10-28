@@ -193,6 +193,11 @@ describe("CpDetailPage: connector 0 status, Heartbeat and Authorize (#420)", () 
     expect(select("Error code").disabled).toBe(true);
     await choose(select("Charge point status"), OCPPStatus.Faulted);
     expect(select("Error code").disabled).toBe(false);
+    // A fault has an error to report (§7.6), as on the connector card (#441).
+    expect(select("Error code").value).toBe("InternalError");
+    const codes = Array.from(select("Error code").options).map((o) => o.value);
+    expect(codes).toContain("GroundFailure");
+    expect(codes).not.toContain("NoError");
     await choose(select("Error code"), "GroundFailure");
     await click(button("Send status"));
     expect(sendStatusNotification).toHaveBeenLastCalledWith(

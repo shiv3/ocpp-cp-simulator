@@ -11,7 +11,7 @@ related:
   - state-persistence.md
   - trace-format.md
   - ../entities/analyze.md
-updated: 2026-10-01
+updated: 2026-10-27
 ---
 
 # Log format
@@ -52,7 +52,7 @@ A CSMS that refuses the upgrade produces, in CLI/daemon mode:
 
 ```
 [ERROR] [WebSocket] WebSocket error: WebSocket connection to 'ws://…' failed: Expected 101 status code
-[INFO]  [WebSocket] WebSocket closed: code=1002, reason=Expected 101 status code, wasClean=false
+[INFO]  [WebSocket] WebSocket closed: code=1002, reason=Expected 101 status code, wasClean=false, cause=network
 [ERROR] [WebSocket] WebSocket upgrade refused: HTTP 401 — credentials refused, or the CSMS considers the connection insecure for its security profile (diagnostic GET after the handshake failed)
 ```
 

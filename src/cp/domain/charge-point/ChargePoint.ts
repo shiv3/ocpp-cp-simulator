@@ -21,7 +21,10 @@ import type {
 import { ConfigurationStore } from "./ConfigurationStore";
 import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
 import { OCPPWebSocket } from "../../infrastructure/transport/OCPPWebSocket";
-import type { ResolvedNetworkSimConfig } from "../../infrastructure/transport/network-sim";
+import type {
+  CloseCause,
+  ResolvedNetworkSimConfig,
+} from "../../infrastructure/transport/network-sim";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -76,6 +79,9 @@ import {
   SupervisionUrlPool,
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
+
+/** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
+const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
 
 interface BasicAuthSettings {
   username: string;
@@ -1057,19 +1063,21 @@ export class ChargePoint {
         // markBootAccepted(); we just need the WebSocket to come up and
         // BootNotification to round-trip first.
       },
-      (ev: CloseEvent) => {
+      (ev: CloseEvent, cause: CloseCause) => {
         // Same teardown as an explicit disconnect() — heartbeat, scenario
         // state, connector listeners, etc. — so a CSMS-initiated close
         // doesn't leave background timers firing against a dead socket.
         this.teardownAfterClose();
-        this._logger.error(
-          `WebSocket closed code: ${ev.code} reason: ${ev.reason}`,
-          LogType.WEBSOCKET,
-        );
+        // #474: a close the charge point asked for (operator disconnect,
+        // reset, network-sim cut, dispose) or a normal closure is not a
+        // failure; the transport already logged it at INFO with its cause.
+        const failure =
+          cause === "network" && !NORMAL_CLOSE_CODES.has(ev.code)
+            ? `WebSocket closed code: ${ev.code} reason: ${ev.reason}`
+            : null;
+        if (failure) this._logger.error(failure, LogType.WEBSOCKET);
         this._events.emit("disconnected", { code: ev.code, reason: ev.reason });
-        if (ev.code !== 1005) {
-          this.error = `WebSocket closed code: ${ev.code} reason: ${ev.reason}`;
-        }
+        if (failure) this.error = failure;
       },
     );
   }

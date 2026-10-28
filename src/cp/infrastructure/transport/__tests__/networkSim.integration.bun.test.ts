@@ -583,10 +583,8 @@ describe.skipIf(!canBindBunServe())(
         await replyStatusNotificationV16(csms, 1);
 
         expect(csms.connections()).toHaveLength(2);
-        // The forced cut surfaces only as the close status, which the reboot
-        // clears; no other error is raised. A 1000 close counting as an
-        // error at all is tracked in #474.
-        expect(errors).toEqual(["WebSocket closed code: 1000 reason: ", ""]);
+        // A forced cut is the charge point's own doing, not an error (#474).
+        expect(errors).toEqual([]);
         expect(cp.error).toBe("");
       } finally {
         cp.disconnect();

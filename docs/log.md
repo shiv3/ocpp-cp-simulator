@@ -1630,6 +1630,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Vehicle profiles → Resolution](concepts/vehicle-profiles.md#resolution-to-ev-settings): a DC maximum the user set is a limit — the curve is held at it (`CURVE_CAPPED_AT_DC_MAX`); the peak-wins rule applies to source data only.
 - [Open EV Directory](entities/open-ev-directory.md): answers are checked against the protocol limits in both modes (`invalid_response`), a 404 on the curves of a variant that answered is `invalid_response` rather than a removal, ids are restricted to `[A-Za-z0-9_-]` ([Control plane](concepts/control-plane.md#vehicle-profiles-and-catalog): `invalid_params`), a key is never sent over plain http to another host, and same-origin-only redirects are pinned.
 
+## [2026-10-27] ingest | Normal and self-requested WebSocket closes no longer set `error` (#474)
+
+- [CLI → events](entities/cli.md): a WebSocket close raises `error` only when the charge point did not ask for it and its code is neither 1000 nor 1005; an operator disconnect, a reset or a network-sim cut never does.
+- [Network simulation → Protocol timer behaviors](concepts/network-simulation.md#protocol-timer-behaviors): a forced disconnect shows up in the `NETWORK_SIM` and `WEBSOCKET` logs and as `disconnected`, not as `error`.
+- [Log format → WebSocket handshake failures](concepts/log-format.md#websocket-handshake-failures): the `WebSocket closed:` line ends with `cause=` (`network`, `manual`, `internal` or `simulated`) and is logged for a reset's stale socket too.
+
 ## [2026-10-27] ingest | Connector 0 fault error codes (#441)
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.

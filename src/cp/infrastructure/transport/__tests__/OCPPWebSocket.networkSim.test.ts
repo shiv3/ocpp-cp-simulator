@@ -5,6 +5,7 @@ import type {
   Settlement,
   ResolvedNetworkSimConfig,
   GenerationToken,
+  CloseCause,
 } from "../network-sim";
 
 // Fake WebSocket implementation for testing
@@ -841,5 +842,83 @@ describe("OCPPWebSocket Network Simulation", () => {
       // So we just verify it's not a false return
       expect(result).toBe(true);
     });
+  });
+});
+
+describe("OCPPWebSocket close callback cause (#474)", () => {
+  let logger: Logger;
+  let ws: OCPPWebSocket;
+  let fakeWs: FakeWebSocket;
+  let onClose: ReturnType<
+    typeof vi.fn<(ev: CloseEvent, cause: CloseCause) => void>
+  >;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    logger = createMockLogger();
+    ws = new OCPPWebSocket("ws://localhost:8080", "CP-001", logger);
+    onClose = vi.fn();
+    ws.connect(null, onClose);
+    fakeWs = (ws as unknown as WebSocketTestAccess)._ws;
+    fakeWs.simulateOpen();
+  });
+
+  afterEach(() => {
+    ws.dispose();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it("reports 'network' for a close the charge point did not ask for", () => {
+    fakeWs.simulateClose(1000);
+
+    expect(onClose).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 1000 }),
+      "network",
+    );
+  });
+
+  it("reports 'manual' for an operator disconnect", () => {
+    ws.disconnect();
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "manual");
+  });
+
+  it("reports 'internal' for a reset close", () => {
+    ws.disconnectInternal();
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "internal");
+  });
+
+  it("reports 'simulated' for a network-sim cut", () => {
+    ws.simulateConnectionLoss(5000);
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "simulated");
+  });
+
+  it("reports 'manual' for a close that lands after dispose", () => {
+    ws.dispose();
+
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "manual");
+  });
+
+  it("reports the old socket's cause when its close lands after a reconnect", () => {
+    // A real socket fires close asynchronously: hold it until the next
+    // generation is already open, as after ChargePoint.reset().
+    const oldSocket = fakeWs;
+    oldSocket.close = () => undefined;
+    ws.disconnectInternal();
+    ws.connect();
+
+    oldSocket.simulateClose(1000);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(expect.anything(), "internal");
+    // The charge point logs no error for it, so the transport's line is the
+    // only trace of the disconnect.
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(/^WebSocket closed: code=1000, .*cause=internal$/),
+      expect.anything(),
+    );
   });
 });

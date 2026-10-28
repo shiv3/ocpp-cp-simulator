@@ -10,11 +10,14 @@ tag-template: "v$RESOLVED_VERSION"
 # right after v0.8.0 produced a draft "v0.4.1" (compare cli-v0.4.0...v0.4.1).
 tag-prefix: "v"
 
+# The repository triages with `type:*` labels; the bare names are kept for
+# Dependabot (`dependencies`) and for PRs labeled before the taxonomy.
 categories:
   - title: "Features"
-    labels: ["feature", "enhancement", "feat"]
+    labels:
+      ["feature", "enhancement", "feat", "type:feature", "type:enhancement"]
   - title: "Bug Fixes"
-    labels: ["fix", "bugfix", "bug"]
+    labels: ["fix", "bugfix", "bug", "type:bug"]
   - title: "Maintenance"
     labels:
       [
@@ -25,6 +28,9 @@ categories:
         "dependencies",
         "refactor",
         "test",
+        "type:documentation",
+        "type:refactor",
+        "type:testing",
       ]
 
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
@@ -36,7 +42,15 @@ version-resolver:
   major:
     labels: ["major", "breaking"]
   minor:
-    labels: ["minor", "feature", "enhancement", "feat"]
+    labels:
+      [
+        "minor",
+        "feature",
+        "enhancement",
+        "feat",
+        "type:feature",
+        "type:enhancement",
+      ]
   patch:
     labels:
       [
@@ -51,6 +65,10 @@ version-resolver:
         "dependencies",
         "refactor",
         "test",
+        "type:bug",
+        "type:documentation",
+        "type:refactor",
+        "type:testing",
       ]
   default: patch
 

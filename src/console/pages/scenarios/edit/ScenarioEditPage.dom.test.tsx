@@ -12,8 +12,10 @@ import {
 } from "../../../../cp/application/scenario/ScenarioTypes";
 import {
   createFakeChargePointService,
+  pushEvent,
   renderConsole,
 } from "../../../test/harness";
+import type { ChargePointSnapshot } from "../../../../data/interfaces/ChargePointService";
 import multiStatusMonitor from "../../../../utils/scenarios/multi-status-monitor.json";
 import statusTriggeredActions from "../../../../utils/scenarios/status-triggered-actions.json";
 
@@ -732,6 +734,99 @@ describe("ScenarioEditPage", () => {
       "This scenario has joins or loops; the full graph editor is used",
     );
     expect(container.querySelector("[data-node-id]")).toBeNull();
+  });
+
+  it("the full graph editor's toolbar has undo / redo only: the page saves, runs and edits the metadata", async () => {
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [loopFixture]),
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await waitForGraph(container);
+
+    expect(container.querySelector('button[title*="Undo"]')).not.toBeNull();
+    expect(container.querySelector('button[title*="Redo"]')).not.toBeNull();
+    for (const title of [
+      "Stop running scenario",
+      "Save scenario",
+      "Scenario settings",
+      "Import JSON",
+      "Export JSON",
+    ]) {
+      expect(
+        container.querySelector(`button[title="${title}"]`),
+        title,
+      ).toBeNull();
+    }
+  });
+
+  it("a Meter Value node of the full graph editor shows the connector's live reading", async () => {
+    // An unreachable node keeps the loop scenario in the full graph editor.
+    const withMeter: ScenarioDefinition = {
+      ...loopFixture,
+      nodes: [
+        ...loopFixture.nodes,
+        {
+          id: "meter-1",
+          type: ScenarioNodeType.METER_VALUE,
+          position: { x: 0, y: 900 },
+          data: { label: "Meter", value: 10, sendMessage: true },
+        },
+      ],
+    };
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [withMeter]),
+      snapshots: [
+        {
+          id: "CP-1",
+          status: "Available" as ChargePointSnapshot["status"],
+          error: "",
+          connectors: [
+            {
+              id: 1,
+              status:
+                "Available" as ChargePointSnapshot["connectors"][number]["status"],
+              availability: "Operative",
+              meterValue: 4242,
+              transactionId: null,
+              soc: null,
+              mode: "manual",
+              autoResetToAvailable: false,
+              autoMeterValueConfig: null,
+              evSettings: null,
+              chargingProfile: null,
+              chargingProfiles: [],
+              transactionStartTime: null,
+              transactionTagId: null,
+              transactionBatteryCapacityKwh: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await waitForGraph(container);
+    await settleGraph();
+
+    expect(graphNode(container, "meter-1")?.textContent).toContain("4.24 kWh");
+
+    await pushEvent(service, "CP-1", {
+      type: "connector-meter",
+      connectorId: 1,
+      meterValue: 5000,
+    });
+    expect(graphNode(container, "meter-1")?.textContent).toContain("5.00 kWh");
   });
 
   it("stays in the graph view when an edit makes the scenario drawable again", async () => {

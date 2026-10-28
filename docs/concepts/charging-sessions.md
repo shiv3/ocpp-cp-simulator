@@ -91,8 +91,9 @@ A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
 Two domain gaps were closed so these outcomes can be told apart:
 
 - **1.6 StartTransaction CALLERROR.** The station already closed the
-  transaction and went back to Available; it now also emits
-  `transactionStartFailed` first. No StopTransaction.req follows.
+  transaction (stop time and meter stamped) and went back to Available; it
+  now also emits `transactionStartFailed`, once the transaction is closed and
+  before Available. No StopTransaction.req follows.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
@@ -100,13 +101,18 @@ Two domain gaps were closed so these outcomes can be told apart:
   `stoppedReason: DeAuthorized`; with it false the transaction keeps running.
   Either way `startTransactionNotAccepted` reports it.
 
+In both versions the CSMS's answer is written to the transaction
+(`Transaction.authorizationStatus`, persisted with it) before the station
+stops on it, so the stop already carries its cause.
+
 ## Recording
 
 `ChargingSessionRecorder` subscribes to the charge point's domain events, the
 same way the [timeline projector](operational-timeline.md) does:
 `transactionStarted` opens a session, the connector's `transactionIdChange`
-fills in the 1.6 id, `transactionStopped` closes it,
-`startTransactionNotAccepted` sets `authorizationStatus`, and
+fills in the 1.6 id, `transactionStopped` closes it (taking
+`authorizationStatus` from the transaction), `startTransactionNotAccepted`
+sets `authorizationStatus` on a session that keeps charging, and
 `transactionStartFailed` marks it `failed`. Each field is read from the
 connector's `Transaction` when the event fires, never parsed from frames.
 Every stored change is also pushed (below).

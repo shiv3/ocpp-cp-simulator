@@ -403,9 +403,6 @@ is dropped with a warning on restore rather than breaking every `cp.list`
 no `cpId` ([Daemon → Metrics](../entities/daemon.md#metrics)). Select with
 `cp.list` and aggregate client-side instead.
 
-`--cp-count` has no flag for labels yet; label a bootstrapped fleet with
-`cp.labels.set` after start-up.
-
 ##### Blueprints
 
 A **blueprint** is a named, reusable _hardware_ description — what a charge

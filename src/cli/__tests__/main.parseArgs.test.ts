@@ -5,6 +5,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { labelKeySchema, labelValueSchema } from "../../protocol/labels";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function runParseArgs(args: string[]) {
@@ -1056,6 +1058,12 @@ describe("parseArgs --label (#472)", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`Error: ${message}`);
+    // …and the rule it broke, taken from the schema the wire uses.
+    const schema = message.startsWith("--label key")
+      ? labelKeySchema
+      : labelValueSchema;
+    expect(schema.description).toBeTruthy();
+    expect(result.stderr).toContain(`(${schema.description})`);
   });
 
   it("refuses more than 32 labels", () => {

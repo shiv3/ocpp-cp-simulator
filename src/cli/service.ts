@@ -1589,6 +1589,13 @@ export class CLIChargePointService {
     if (!executor) return;
     executor.stop();
     this._executors.delete(scenarioId);
+    // #448: a discarded run never reaches finalizeScenarioRun, so end it on
+    // the timeline here, or the connector's later entries keep its runId.
+    const runId = this._runIdByScenario.get(scenarioId);
+    const connectorId = this._scenarios.get(scenarioId)?.connectorId;
+    if (runId !== undefined && connectorId !== undefined) {
+      this._chargePoint.timeline.endRun(connectorId, runId);
+    }
     this._runIdByScenario.delete(scenarioId);
     const transcript = this._transcriptByScenario.get(scenarioId);
     if (transcript) {

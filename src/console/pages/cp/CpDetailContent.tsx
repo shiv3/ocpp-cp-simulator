@@ -845,7 +845,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 </div>
               }
             >
-              <OperationalTimelinePanel cpId={cpId} />
+              <OperationalTimelinePanel key={cpId} cpId={cpId} />
             </Suspense>
           </section>
         )}

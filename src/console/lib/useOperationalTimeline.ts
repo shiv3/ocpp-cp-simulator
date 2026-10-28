@@ -91,7 +91,16 @@ export function useOperationalTimeline(
       if (event.type !== "timeline-entry" || event.entry.cpId !== cpId) return;
       const { entry } = event;
       const lastSeq = pageRef.current.entries.at(-1)?.seq;
-      if (lastSeq !== undefined && entry.seq <= lastSeq) return;
+      if (lastSeq !== undefined && entry.seq <= lastSeq) {
+        // Already shown — unless `cp.update` rebuilt the charge point and its
+        // timeline restarted at seq 1: then drop the old one and read again.
+        const shown = pageRef.current.entries.find((e) => e.seq === entry.seq);
+        if (shown?.timestamp !== entry.timestamp) {
+          show(EMPTY_PAGE);
+          void refresh();
+        }
+        return;
+      }
       if (lastSeq !== undefined && entry.seq !== lastSeq + 1) {
         void refresh();
         return;

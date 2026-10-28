@@ -3,6 +3,18 @@ import type { ChargePointEvents } from "../../domain/charge-point/ChargePointEve
 import type { Connector } from "../../domain/connector/Connector";
 import type { OperationalTimeline } from "./OperationalTimeline";
 
+/**
+ * How long connector statuses get to come back once the CSMS has accepted a
+ * BootNotification. Past it the incident closes anyway, as not restored.
+ */
+export const RECOVERY_SETTLE_MS = 60_000;
+
+interface UnrestoredConnector {
+  connectorId: number;
+  expected: string;
+  actual: string;
+}
+
 interface Incident {
   readonly ruleId: string;
   readonly startedAt: number;
@@ -20,12 +32,15 @@ interface Incident {
  * entry recorded while it is open carries its id. The incident closes with
  * `recovery_completed` once the socket is connected again, the CSMS has
  * accepted a BootNotification on that connection, and every connector is
- * back to the status it had when the fault fired. A fault firing while an
- * incident is open replaces it; the replaced incident gets no recovery.
+ * back to the status it had when the fault fired. Statuses that are still
+ * off `RECOVERY_SETTLE_MS` after the boot close it with `restored: false`, so
+ * an incident never stays open for good. A fault firing while an incident is
+ * open replaces it; the replaced incident gets no recovery.
  */
 export class OperationalTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
   private incident: Incident | null = null;
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly timeline: OperationalTimeline,
@@ -44,6 +59,7 @@ export class OperationalTimelineProjector {
     });
     on("disconnected", ({ code, reason }) => {
       if (this.incident) this.incident.link = "down";
+      this.clearSettleTimer();
       this.timeline.record({
         kind: "disconnected",
         summary: `Disconnected (code ${code}${reason ? `: ${reason}` : ""})`,
@@ -67,6 +83,12 @@ export class OperationalTimelineProjector {
         data: { status, interval },
       });
       this.checkRecovery();
+      if (this.incident?.link === "booted" && this.settleTimer === null) {
+        this.settleTimer = setTimeout(() => {
+          this.settleTimer = null;
+          this.closeIncident(this.unrestoredConnectors().length === 0);
+        }, RECOVERY_SETTLE_MS);
+      }
     });
     on("statusChange", ({ status, previousStatus }) => {
       if (status === previousStatus) return;
@@ -87,6 +109,9 @@ export class OperationalTimelineProjector {
       this.checkRecovery();
     });
     on("networkFaultInjected", ({ ruleId, ruleType, reconnectDelayMs }) => {
+      // Minted first, so a throw cannot leave a half-opened incident behind.
+      const incidentId = crypto.randomUUID();
+      this.clearSettleTimer();
       this.incident = {
         ruleId,
         startedAt: this.timeline.now(),
@@ -95,7 +120,7 @@ export class OperationalTimelineProjector {
         ),
         link: "down",
       };
-      this.timeline.setActiveIncident(crypto.randomUUID());
+      this.timeline.setActiveIncident(incidentId);
       this.timeline.record({
         kind: "network_fault_injected",
         summary: `Network fault injected by rule ${ruleId} (${ruleType}, reconnect blocked ${formatSeconds(reconnectDelayMs)})`,
@@ -144,37 +169,71 @@ export class OperationalTimelineProjector {
 
     // A removed connector is disposed, which drops this listener with it.
     for (const [connectorId, connector] of connectors) {
-      connector.events.on("transactionIdChange", ({ transactionId }) => {
-        this.timeline.record({
-          kind: "transaction_id_assigned",
-          connectorId,
-          summary: `CSMS assigned transaction id ${transactionId}`,
-          data: { transactionId },
-        });
-      });
+      this.unsubscribes.push(
+        connector.events.on("transactionIdChange", ({ transactionId }) => {
+          this.timeline.record({
+            kind: "transaction_id_assigned",
+            connectorId,
+            summary: `CSMS assigned transaction id ${transactionId}`,
+            data: { transactionId },
+          });
+        }),
+      );
     }
   }
 
   dispose(): void {
+    this.clearSettleTimer();
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
   }
 
   private checkRecovery(): void {
-    const incident = this.incident;
-    if (incident?.link !== "booted") return;
-    for (const [connectorId, status] of incident.expected) {
-      const connector = this.connectors.get(connectorId);
-      if (connector && connector.status !== status) return;
+    if (this.incident?.link !== "booted") return;
+    if (this.unrestoredConnectors().length > 0) return;
+    this.closeIncident(true);
+  }
+
+  /** Connectors (still present) whose status differs from the pre-fault one. */
+  private unrestoredConnectors(): UnrestoredConnector[] {
+    const unrestored: UnrestoredConnector[] = [];
+    for (const [connectorId, expected] of this.incident?.expected ?? []) {
+      const actual = this.connectors.get(connectorId)?.status;
+      if (actual !== undefined && actual !== expected) {
+        unrestored.push({ connectorId, expected, actual });
+      }
     }
+    return unrestored;
+  }
+
+  private closeIncident(restored: boolean): void {
+    const incident = this.incident;
+    if (!incident) return;
+    this.clearSettleTimer();
     const durationMs = this.timeline.now() - incident.startedAt;
+    const unrestored = this.unrestoredConnectors();
     this.timeline.record({
       kind: "recovery_completed",
-      summary: `Recovered in ${formatSeconds(durationMs)} after rule ${incident.ruleId}`,
-      data: { durationMs, ruleId: incident.ruleId },
+      summary: restored
+        ? `Recovered in ${formatSeconds(durationMs)} after rule ${incident.ruleId}`
+        : `Reconnected after rule ${incident.ruleId}, but connector ${unrestored
+            .map((c) => `${c.connectorId} ${c.expected} → ${c.actual}`)
+            .join(", ")} not restored after ${formatSeconds(durationMs)}`,
+      data: {
+        durationMs,
+        ruleId: incident.ruleId,
+        restored,
+        ...(!restored && { unrestored }),
+      },
     });
     this.incident = null;
     this.timeline.setActiveIncident(null);
+  }
+
+  private clearSettleTimer(): void {
+    if (this.settleTimer === null) return;
+    clearTimeout(this.settleTimer);
+    this.settleTimer = null;
   }
 }
 

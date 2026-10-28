@@ -4,6 +4,7 @@ import {
   DefaultBootNotification,
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
+import { RECOVERY_SETTLE_MS } from "../OperationalTimelineProjector";
 
 /**
  * #448: the projector turns ChargePoint domain events into timeline entries
@@ -129,6 +130,61 @@ describe("OperationalTimelineProjector (#448)", () => {
 
     cp.events.emit("connected", undefined);
     bootAccepted(cp);
+    expect(cp.timeline.query({ kinds: ["recovery_completed"] }).total).toBe(1);
+  });
+
+  it("closes an incident whose statuses never come back once the boot settles", () => {
+    const cp = buildChargePoint();
+    cp.updateConnectorStatus(1, OCPPStatus.Preparing);
+    armManualRule(cp);
+
+    cp.triggerNetworkSimDisconnect("cut");
+    cp.events.emit("disconnected", { code: 1006, reason: "" });
+    cp.updateConnectorStatus(1, OCPPStatus.Unavailable);
+    cp.events.emit("connected", undefined);
+    bootAccepted(cp);
+    cp.updateConnectorStatus(1, OCPPStatus.Available);
+
+    vi.advanceTimersByTime(RECOVERY_SETTLE_MS - 1);
+    expect(cp.timeline.query({ kinds: ["recovery_completed"] }).total).toBe(0);
+    vi.advanceTimersByTime(1);
+
+    const recovery = cp.timeline.query({ kinds: ["recovery_completed"] })
+      .entries[0];
+    expect(recovery?.data).toEqual({
+      durationMs: RECOVERY_SETTLE_MS,
+      ruleId: "cut",
+      restored: false,
+      unrestored: [
+        { connectorId: 1, expected: "Preparing", actual: "Available" },
+      ],
+    });
+    cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    expect(cp.timeline.query().entries.at(-1)?.incidentId).toBeUndefined();
+  });
+
+  it("restarts the settle window when the connection drops again", () => {
+    const cp = buildChargePoint();
+    cp.updateConnectorStatus(1, OCPPStatus.Preparing);
+    armManualRule(cp);
+
+    cp.triggerNetworkSimDisconnect("cut");
+    cp.events.emit("disconnected", { code: 1006, reason: "" });
+    cp.events.emit("connected", undefined);
+    bootAccepted(cp);
+    cp.updateConnectorStatus(1, OCPPStatus.Available);
+    vi.advanceTimersByTime(RECOVERY_SETTLE_MS / 2);
+    cp.events.emit("disconnected", { code: 1006, reason: "" });
+    vi.advanceTimersByTime(RECOVERY_SETTLE_MS);
+    expect(cp.timeline.query({ kinds: ["recovery_completed"] }).total).toBe(0);
+
+    cp.events.emit("connected", undefined);
+    bootAccepted(cp);
+    cp.updateConnectorStatus(1, OCPPStatus.Preparing);
+    expect(
+      cp.timeline.query({ kinds: ["recovery_completed"] }).entries[0]?.data,
+    ).toMatchObject({ restored: true });
+    vi.advanceTimersByTime(RECOVERY_SETTLE_MS);
     expect(cp.timeline.query({ kinds: ["recovery_completed"] }).total).toBe(1);
   });
 

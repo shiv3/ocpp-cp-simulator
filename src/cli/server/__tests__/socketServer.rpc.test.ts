@@ -148,7 +148,6 @@ describe("socket.io rpc dispatch", () => {
     const snapshot = secretChargePointSnapshot();
     const facade = {
       listChargePoints: vi.fn().mockResolvedValue([snapshot]),
-      listChargePointsByLabels: vi.fn().mockResolvedValue([snapshot]),
       getChargePoint: vi.fn().mockResolvedValue(snapshot),
     };
     const io = new FakeIo();
@@ -188,10 +187,7 @@ describe("socket.io rpc dispatch", () => {
       expectNoWireSecrets(ack.result);
     }
 
-    // cp.list selects before snapshotting (#470); the two subscribe
-    // snapshots still list every charge point.
-    expect(facade.listChargePointsByLabels).toHaveBeenCalledTimes(1);
-    expect(facade.listChargePoints).toHaveBeenCalledTimes(2);
+    expect(facade.listChargePoints).toHaveBeenCalledTimes(3);
     expect(facade.getChargePoint).toHaveBeenCalledWith("cp-redact");
   });
 
@@ -345,7 +341,6 @@ describe("socket.io rpc dispatch", () => {
     const snapshot = chargePointSnapshot();
     const facade = {
       listChargePoints: vi.fn().mockResolvedValue([snapshot]),
-      listChargePointsByLabels: vi.fn().mockResolvedValue([snapshot]),
       getChargePoint: vi.fn().mockResolvedValue(snapshot),
     };
     const io = new FakeIo();
@@ -371,7 +366,7 @@ describe("socket.io rpc dispatch", () => {
 
     expect(listAck.ok).toBe(true);
     expect(statusAck.ok).toBe(true);
-    expect(facade.listChargePointsByLabels).toHaveBeenCalledTimes(1);
+    expect(facade.listChargePoints).toHaveBeenCalledTimes(1);
     expect(facade.getChargePoint).toHaveBeenCalledWith("cp-redact");
     if (!listAck.ok || !statusAck.ok) return;
     expect(listAck.result).toEqual([
@@ -523,9 +518,7 @@ describe("socket.io rpc dispatch", () => {
       config: undefined,
     };
     const facade = {
-      listChargePointsByLabels: vi
-        .fn()
-        .mockResolvedValue([snapshotWithoutConfig]),
+      listChargePoints: vi.fn().mockResolvedValue([snapshotWithoutConfig]),
     };
     const io = new FakeIo();
     const socket = new FakeSocket();

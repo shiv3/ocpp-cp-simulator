@@ -684,7 +684,7 @@ async function listCps(
 ): Promise<CpListItem[]> {
   // #470: the selector is applied before any status snapshot is built.
   return runFacadeOperation(async () =>
-    (await chargePointService.listChargePointsByLabels(params.labels)).map(
+    (await chargePointService.listChargePoints(params.labels)).map(
       snapshotToRegistryCpWire,
     ),
   );
@@ -709,15 +709,12 @@ async function bulkCps(
       `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
     );
   }
-  const act = {
-    connect: (cpId: string) => service.connect(cpId),
-    disconnect: (cpId: string) => service.disconnect(cpId),
-    reset: (cpId: string) => service.reset(cpId),
-  }[action];
-  return runCpBulk(cpIds, (cpId) => runFacadeOperation(() => act(cpId)), {
-    waitMs: CP_BULK_WAIT_MS,
-    failureReason: batchFailureReason,
-  });
+  // Each action is named after the facade method that runs it.
+  return runCpBulk(
+    cpIds,
+    (cpId) => runFacadeOperation(() => service[action](cpId)),
+    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+  );
 }
 
 /**

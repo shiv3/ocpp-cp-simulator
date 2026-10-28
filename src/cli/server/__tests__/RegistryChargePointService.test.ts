@@ -789,7 +789,7 @@ describe("RegistryChargePointService label selection (#470)", () => {
   it("builds a status snapshot only for the charge points that match", async () => {
     const { service, statusSpies } = labelledFleet();
 
-    const listed = await service.listChargePointsByLabels({ env: "lab" });
+    const listed = await service.listChargePoints({ env: "lab" });
 
     expect(listed.map((cp) => cp.id)).toEqual(["A", "C"]);
     expect(statusSpies.get("A")).toHaveBeenCalled();

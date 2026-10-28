@@ -20,9 +20,23 @@ export async function runCpBulk(
     readonly failureReason: (err: unknown) => string;
   },
 ): Promise<CpBulkResult> {
+  // One cap for the whole batch: every action starts in the same tick, so a
+  // timer per charge point would only be up to 1,000 timers due together.
+  // `Promise.race` keeps a handler on each action, so a rejection landing
+  // after the cap is not left unhandled.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(`no outcome within ${options.waitMs} ms; still running`),
+        ),
+      options.waitMs,
+    );
+  });
   const outcomes = await Promise.allSettled(
-    cpIds.map((cpId) => withinWait(act(cpId), options.waitMs)),
-  );
+    cpIds.map((cpId) => Promise.race([act(cpId), cap])),
+  ).finally(() => clearTimeout(timer));
   const succeeded: string[] = [];
   const failed: Array<{ cpId: string; reason: string }> = [];
   outcomes.forEach((outcome, index) => {
@@ -31,17 +45,4 @@ export async function runCpBulk(
     else failed.push({ cpId, reason: options.failureReason(outcome.reason) });
   });
   return { matched: [...cpIds], succeeded, failed };
-}
-
-/** Rejects when `waitMs` passes first. `Promise.race` keeps a handler on
- *  `action`, so a rejection landing after the cap is not left unhandled. */
-function withinWait(action: Promise<void>, waitMs: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const cap = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`no outcome within ${waitMs} ms; still running`)),
-      waitMs,
-    );
-  });
-  return Promise.race([action, cap]).finally(() => clearTimeout(timer));
 }

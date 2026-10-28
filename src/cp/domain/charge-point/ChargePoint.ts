@@ -10,7 +10,7 @@ import type {
 } from "../types/DataTransfer";
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
-import { ClockAlignedMeterScheduler } from "../../application/services/ClockAlignedMeterScheduler";
+import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
 import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
@@ -48,7 +48,7 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { isSoapVersion } from "../types/OcppVersion";
+import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
 import {
   SOAP_OPERATION_NAMES,
   soapDialectForVersion,
@@ -196,9 +196,6 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
-  /** Whether the clock-aligned scheduler may run: BootNotification is
-   *  Accepted and the connection it was accepted on is still up (#454). */
-  private _clockAlignedArmed = false;
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -413,9 +410,9 @@ export class ChargePoint {
 
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
-    this._clockAligned = new ClockAlignedMeterScheduler({
-      onBoundary: (boundary) => this.emitClockAlignedSamples(boundary),
-    });
+    this._clockAligned = new ClockAlignedMeterScheduler((boundary) =>
+      this.emitClockAlignedSamples(boundary),
+    );
 
     // #299: a charge point that draws from a pool when a call names no tag.
     // An explicit tagId always wins, so this only ever fills a gap.
@@ -487,6 +484,11 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    // A persisted override never fires onChange; the scheduler only runs
+    // once a boot is Accepted (#454).
+    this._clockAligned.setIntervalSeconds(
+      this._configuration.clockAlignedDataInterval(),
+    );
     // A value persisted with --state-db is in force from the first open.
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
@@ -580,13 +582,16 @@ export class ChargePoint {
           }
           break;
         case "ClockAlignedDataInterval":
-          // #454: takes effect at once on the new grid; before an accepted
-          // boot the value is simply read when the boot is accepted.
-          if (this._clockAlignedArmed && typeof value === "number") {
-            this._clockAligned.start(value);
+          // #454: takes effect at once on the new grid while boot is Accepted.
+          if (typeof value === "number") {
+            this._clockAligned.setIntervalSeconds(value);
           }
           this._logger.info(
-            `ClockAlignedDataInterval=${String(value)}`,
+            `ClockAlignedDataInterval=${String(value)}${
+              this._configuration.meterValuesAlignedData().length === 0
+                ? " (MeterValuesAlignedData is empty: nothing will be sent)"
+                : ""
+            }`,
             LogType.CONFIGURATION,
           );
           break;
@@ -1477,7 +1482,7 @@ export class ChargePoint {
       this.applyBootAccepted(interval);
     } else {
       this.stopHeartbeat();
-      this.stopClockAlignedMetering();
+      this._clockAligned.disable();
     }
   }
 
@@ -1513,15 +1518,7 @@ export class ChargePoint {
       this.stopHeartbeat();
     }
 
-    // Read here rather than relying on onChange: a persisted override is
-    // loaded at construction and never fires it (#454).
-    this._clockAlignedArmed = true;
-    this._clockAligned.start(this._configuration.clockAlignedDataInterval());
-  }
-
-  private stopClockAlignedMetering(): void {
-    this._clockAlignedArmed = false;
-    this._clockAligned.stop();
+    this._clockAligned.enable();
   }
 
   /**
@@ -1533,19 +1530,13 @@ export class ChargePoint {
    * transaction's id rides along once the CSMS has assigned one.
    */
   private emitClockAlignedSamples(boundaryMs: number): void {
+    // Empty by default; the interval change already logged that it is.
     const measurands = this._configuration.meterValuesAlignedData();
-    if (measurands.length === 0) {
-      this._logger.debug(
-        "Clock-aligned boundary reached but MeterValuesAlignedData is empty; nothing sent",
-        LogType.METER_VALUE,
-      );
-      return;
-    }
+    if (measurands.length === 0) return;
     const timestamp = new Date(boundaryMs);
-    const isV2 = this._ocppVersion.startsWith("OCPP-2.");
+    const isV2 = isOcpp2Version(this._ocppVersion);
     this._connectors.forEach((connector) => {
-      const transaction = connector.transaction;
-      const live = transaction !== null && transaction.stopTime === null;
+      const live = connector.hasRunningTransaction;
       if (live && isV2) {
         this._outbox.sendTransactionUpdate(connector.id, {
           triggerReason: "MeterValueClock",
@@ -1556,8 +1547,9 @@ export class ChargePoint {
         });
         return;
       }
-      const transactionId =
-        live && transaction.id !== 0 ? transaction.id : undefined;
+      // `0` until StartTransaction.conf assigns the id.
+      const id = connector.transaction?.id;
+      const transactionId = live && id ? id : undefined;
       this._outbox.sendMeterValue(transactionId, connector.id, "Sample.Clock", {
         measurands,
         timestamp,
@@ -1614,7 +1606,7 @@ export class ChargePoint {
     });
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
-    this.stopClockAlignedMetering();
+    this._clockAligned.disable();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._localAuthListManager.dispose();

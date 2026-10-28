@@ -48,18 +48,23 @@ describe("ClockAlignedMeterScheduler (#454)", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: at("2026-10-28T12:00:17Z") });
     fired = [];
-    scheduler = new ClockAlignedMeterScheduler({
-      onBoundary: (boundary) => fired.push(iso(boundary)),
-    });
+    scheduler = new ClockAlignedMeterScheduler((boundary) =>
+      fired.push(iso(boundary)),
+    );
   });
 
   afterEach(() => {
-    scheduler.stop();
+    scheduler.disable();
     vi.useRealTimers();
   });
 
+  /** Moves the wall clock without moving pending timers, so the next timer
+   *  fires `skewMs` late (positive) or early (negative) by the clock. */
+  const skewClock = (skewMs: number) => vi.setSystemTime(Date.now() + skewMs);
+
   it("fires on true clock boundaries from a non-boundary start", () => {
-    scheduler.start(60);
+    scheduler.setIntervalSeconds(60);
+    scheduler.enable();
     vi.advanceTimersByTime(42_999);
     expect(fired).toEqual([]);
     vi.advanceTimersByTime(1);
@@ -72,17 +77,26 @@ describe("ClockAlignedMeterScheduler (#454)", () => {
     ]);
   });
 
-  it("interval 0 disables emissions", () => {
-    scheduler.start(0);
+  it("interval 0 sends nothing, even when enabled", () => {
+    scheduler.enable();
     vi.advanceTimersByTime(3_600_000);
     expect(fired).toEqual([]);
-    expect(scheduler.intervalSeconds).toBe(0);
+  });
+
+  it("does not fire until enabled, then uses the interval set before", () => {
+    scheduler.setIntervalSeconds(60);
+    vi.advanceTimersByTime(120_000); // 12:02:17
+    expect(fired).toEqual([]);
+    scheduler.enable();
+    vi.advanceTimersByTime(43_000); // 12:03:00
+    expect(fired).toEqual(["2026-10-28T12:03:00.000Z"]);
   });
 
   it("changing the interval mid-wait reschedules on the new grid", () => {
-    scheduler.start(60);
+    scheduler.setIntervalSeconds(60);
+    scheduler.enable();
     vi.advanceTimersByTime(43_000); // 12:01:00
-    scheduler.start(900);
+    scheduler.setIntervalSeconds(900);
     vi.advanceTimersByTime(13 * 60_000); // 12:14:00
     expect(fired).toEqual(["2026-10-28T12:01:00.000Z"]);
     vi.advanceTimersByTime(60_000); // 12:15:00
@@ -93,64 +107,49 @@ describe("ClockAlignedMeterScheduler (#454)", () => {
   });
 
   it("changing the interval to 0 stops emissions", () => {
-    scheduler.start(60);
+    scheduler.setIntervalSeconds(60);
+    scheduler.enable();
     vi.advanceTimersByTime(43_000);
-    scheduler.start(0);
+    scheduler.setIntervalSeconds(0);
     vi.advanceTimersByTime(600_000);
     expect(fired).toEqual(["2026-10-28T12:01:00.000Z"]);
   });
 
-  it("stop() halts emissions", () => {
-    scheduler.start(60);
-    scheduler.stop();
+  it("disable() halts emissions", () => {
+    scheduler.setIntervalSeconds(60);
+    scheduler.enable();
+    scheduler.disable();
     vi.advanceTimersByTime(600_000);
     expect(fired).toEqual([]);
   });
 
-  it("never emits the same boundary twice across a stop/restart", () => {
-    const early = new ClockAlignedMeterScheduler({
-      onBoundary: (boundary) => fired.push(iso(boundary)),
-      setTimer: (fn, ms) => setTimeout(fn, Math.max(0, ms - 1)),
-    });
-    early.start(60);
-    vi.advanceTimersByTime(42_999); // 12:00:59.999 — reports 12:01:00
-    // A reconnect right now re-arms on 12:01:00, the boundary just reported.
-    early.stop();
-    early.start(60);
+  it("stamps the boundary it was armed for when the timer fires early, and never emits it twice across a disable/enable", () => {
+    scheduler.setIntervalSeconds(60);
+    scheduler.enable();
+    skewClock(-1);
+    vi.advanceTimersByTime(43_000); // clock 12:00:59.999
+    expect(fired).toEqual(["2026-10-28T12:01:00.000Z"]);
+    // A reconnect right now would re-arm on 12:01:00, the boundary just
+    // reported, if arming went by the clock alone.
+    scheduler.disable();
+    scheduler.enable();
     vi.advanceTimersByTime(60_001);
     expect(fired).toEqual([
       "2026-10-28T12:01:00.000Z",
       "2026-10-28T12:02:00.000Z",
     ]);
-    early.stop();
-  });
-
-  it("stamps the boundary it was armed for, even when the timer fires early or late", () => {
-    const early = new ClockAlignedMeterScheduler({
-      onBoundary: (boundary) => fired.push(iso(boundary)),
-      // A timer that fires one millisecond before its deadline.
-      setTimer: (fn, ms) => setTimeout(fn, Math.max(0, ms - 1)),
-    });
-    early.start(60);
-    vi.advanceTimersByTime(42_999); // 12:00:59.999
-    expect(fired).toEqual(["2026-10-28T12:01:00.000Z"]);
-    vi.advanceTimersByTime(60_000);
-    expect(fired).toEqual([
-      "2026-10-28T12:01:00.000Z",
-      "2026-10-28T12:02:00.000Z",
-    ]);
-    early.stop();
   });
 
   it("re-arms on the next boundary after a late fire instead of replaying missed ones", () => {
-    const late = new ClockAlignedMeterScheduler({
-      onBoundary: (boundary) => fired.push(iso(boundary)),
-      // The event loop was blocked for 2.5 minutes past the deadline.
-      setTimer: (fn, ms) => setTimeout(fn, ms + 150_000),
-    });
-    late.start(60);
-    vi.advanceTimersByTime(193_000); // 12:03:30
+    scheduler.setIntervalSeconds(60);
+    scheduler.enable();
+    skewClock(150_000); // the event loop was blocked for 2.5 minutes
+    vi.advanceTimersByTime(43_000); // clock 12:03:30
     expect(fired).toEqual(["2026-10-28T12:01:00.000Z"]);
-    late.stop();
+    vi.advanceTimersByTime(30_000); // clock 12:04:00
+    expect(fired).toEqual([
+      "2026-10-28T12:01:00.000Z",
+      "2026-10-28T12:04:00.000Z",
+    ]);
   });
 });

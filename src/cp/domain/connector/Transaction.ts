@@ -1,3 +1,5 @@
+import type { MeterSampleOverrides } from "./MeterValueBuilder";
+
 /**
  * StopTransaction.req `reason` enumeration (OCPP 1.6 §7.36).
  *
@@ -180,13 +182,11 @@ export interface StopTransactionCommandOptions {
  * `MeterValuesSampledData` and "now" for a clock-aligned sample (#454); the
  * control plane does not expose them.
  */
-export interface TransactionUpdateOptions {
+export interface TransactionUpdateOptions extends MeterSampleOverrides {
   triggerReason: TransactionEventTriggerReason;
   chargingState?: TransactionChargingState;
   meterValues?: boolean;
   context?: MeterReadingContext;
-  measurands?: string[];
-  timestamp?: Date;
 }
 
 export const METER_READING_CONTEXTS = [

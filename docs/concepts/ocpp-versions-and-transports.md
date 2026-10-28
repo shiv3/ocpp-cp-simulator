@@ -9,7 +9,7 @@ sources:
   - src/cli/soapCallbackUrl.ts
   - src/cli/soapTunnel.ts
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
-  - src/cp/application/services/ClockAlignedMeterScheduler.ts (clock-aligned metering)
+  - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md

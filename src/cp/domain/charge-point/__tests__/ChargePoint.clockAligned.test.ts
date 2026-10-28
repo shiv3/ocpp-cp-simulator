@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
-import { DefaultBootNotification } from "../../types/OcppTypes";
-import type { Database, SqlParam, SqlRow } from "../../persistence/Database";
+import type { ChargePoint } from "../ChargePoint";
+import type { Database } from "../../persistence/Database";
 import type { Transaction } from "../../connector/Transaction";
+import { makeChargePoint, OverrideDatabase } from "./chargePointFixtures";
 
 // #454: ClockAlignedDataInterval / MeterValuesAlignedData drive a
 // clock-aligned scheduler — Sample.Clock samples on wall-clock boundaries.
@@ -15,37 +15,12 @@ function makeCp(
   database: Database | null = null,
   connectorCount = 2,
 ): ChargePoint {
-  return new ChargePoint(
-    "cp-clock",
-    DefaultBootNotification,
-    connectorCount,
-    "ws://localhost:8080",
-    null,
-    null,
-    database,
-    {},
-    [],
+  return makeChargePoint({
+    id: "cp-clock",
     ocppVersion,
-    {},
-  );
-}
-
-/** Answers the configuration-override query and nothing else. */
-class OverrideDatabase implements Database {
-  constructor(private readonly overrides: Record<string, string>) {}
-  exec(): void {}
-  run(): void {}
-  all<T = SqlRow>(sql: string, _params: SqlParam[] = []): T[] {
-    if (!sql.includes("FROM configuration")) return [];
-    return Object.entries(this.overrides).map(([key, value]) => ({
-      key,
-      value,
-    })) as T[];
-  }
-  get<T = SqlRow>(): T | null {
-    return null;
-  }
-  close(): void {}
+    database,
+    connectorCount,
+  });
 }
 
 function spyOutbox(cp: ChargePoint) {
@@ -274,7 +249,7 @@ describe("ChargePoint clock-aligned meter values (#454)", () => {
     expect(sent.meterValue).toHaveBeenCalledTimes(1);
   });
 
-  it("stops on disconnect and resumes after the next accepted boot without duplicating a boundary", () => {
+  it("stops on disconnect and resumes on the next boundary after an accepted boot, without replaying missed ones", () => {
     const cp = makeCp("OCPP-1.6J", null, 1);
     const sent = spyOutbox(cp);
     configure(cp, "60");
@@ -292,7 +267,7 @@ describe("ChargePoint clock-aligned meter values (#454)", () => {
     ]);
   });
 
-  it("a second accepted boot does not emit the same boundary twice", () => {
+  it("a re-boot landing on a boundary resumes on the next one", () => {
     const cp = makeCp("OCPP-1.6J", null, 1);
     const sent = spyOutbox(cp);
     configure(cp, "60");

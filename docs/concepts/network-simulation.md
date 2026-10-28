@@ -11,7 +11,7 @@ related:
   - ../entities/web-console.md
   - state-persistence.md
   - scenario-format.md
-updated: 2026-10-02
+updated: 2026-10-27
 ---
 
 # Network simulation
@@ -123,6 +123,14 @@ treated as absent (graceful degradation).
 - **Periodic disconnects**: Periodic rules may fire before boot acceptance
   completes. This is **tolerated** — not a protocol violation, merely a fault
   condition that CSMS must handle.
+- **Forced disconnects are not errors**: a disconnect a rule forces is logged
+  as `[RULE:<id>] DISCONNECT forced; …` (`NETWORK_SIM`) and
+  `WebSocket closed: … cause=simulated` (`WEBSOCKET`), and emits
+  `disconnected`. It does not set the charge point's `error` field or emit an
+  `error` event (#474).
+- **A connect cuts the reconnect delay short**: an operator `connect` (or a
+  reset) during `reconnectDelayMs` connects right away and cancels the
+  delayed reconnect, so no second socket opens over the new one (#478).
 - **Heartbeat idle tracking**: Heartbeat timeout tracking anchors to the
   moment the frame is **physically written** to the socket (after all latency
   delays). A 30-second heartbeat interval becomes (30s + applied latency), so

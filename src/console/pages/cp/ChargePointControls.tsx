@@ -3,10 +3,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  ALL_CHARGE_POINT_ERROR_CODES,
-  OCPPStatus,
-} from "@/cp/domain/types/OcppTypes";
+import { FAULT_ERROR_CODES, OCPPStatus } from "@/cp/domain/types/OcppTypes";
 import type { HeartbeatView } from "@/data/hooks/useChargePointView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
@@ -260,7 +257,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
               title="errorCode sent with Faulted"
               className={cn(SELECT_CLASS, "disabled:opacity-60")}
             >
-              {ALL_CHARGE_POINT_ERROR_CODES.map((code) => (
+              {FAULT_ERROR_CODES.map((code) => (
                 <option key={code} value={code}>
                   {code}
                 </option>

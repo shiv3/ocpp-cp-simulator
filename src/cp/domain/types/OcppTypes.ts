@@ -125,6 +125,10 @@ export const ALL_CHARGE_POINT_ERROR_CODES: ChargePointErrorCode[] = [
   "WeakSignal",
 ];
 
+/** Codes a Faulted status can carry: a fault has an error to report (§7.6). */
+export const FAULT_ERROR_CODES: ChargePointErrorCode[] =
+  ALL_CHARGE_POINT_ERROR_CODES.filter((code) => code !== "NoError");
+
 export enum OCPPAction {
   // Core actions
   Authorize = "Authorize",

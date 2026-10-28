@@ -12,7 +12,8 @@ related:
   - ../entities/daemon.md
   - ../concepts/log-format.md
   - ../sources/testcontainers-java-readme.md
-updated: 2026-10-27
+  - ../concepts/charging-sessions.md
+updated: 2026-10-28
 ---
 
 # Driving the simulator from an AI agent or test harness
@@ -72,7 +73,7 @@ await rpc({
 1. **MCP** — `claude mcp add --transport http ocpp-sim http://127.0.0.1:5172/mcp`
    (the port is whatever the daemon listens on — `5172` in the setup above,
    `9700` for a bare `--daemon`);
-   the agent gets 23 curated tools, 3 network-sim tools and `list_methods` /
+   the agent gets 24 curated tools, 3 network-sim tools and `list_methods` /
    `call_method` for everything else. Best for LLM agents; no code to write.
 2. **Bundled CLI as client** — `ocpp-cp-sim --cp-id CP001 --send '{"command":"status"}'`,
    `--events [--all]`, `--stop`, `analyze --from-daemon`. Best for shell
@@ -93,6 +94,12 @@ authenticates as described in
   snapshot, then process pushes.
 - Prefer scenario `assertions` + `scenario_report` over parsing logs — they
   return `frameRefs` pointing at the exact transcript frames.
+- To check how a transaction ended, read its
+  [charging session](../concepts/charging-sessions.md) (`sessions.list`, or
+  the `list_charging_sessions` MCP tool): duration, energy, stop reason and
+  an outcome (`completed`, `interrupted`, `failed`), the same shape for
+  OCPP 1.6 and 2.x, instead of matching StartTransaction / TransactionEvent
+  frames (#447).
 - For post-hoc diagnosis, run [`analyze --from-daemon`](../entities/analyze.md#reading-from-a-running-daemon---from-daemon)
   or keep a `--trace-output` file.
 - `scenario_status` keeps the terminal state (`completed` / `error`) after a

@@ -16,7 +16,8 @@ related:
   - ../concepts/vehicle-profiles.md
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
-updated: 2026-10-27
+  - ../concepts/charging-sessions.md
+updated: 2026-10-28
 ---
 
 # Web console (browser UI)
@@ -601,6 +602,28 @@ The viewer replaced the compact one-line-per-message list the charge point
 page used since the redesign. The run page shows no message log, so a run's
 traffic is read here or on the Message Log page.
 
+#### Transactions tab
+
+The bottom panel's **Transactions** tab (`?tab=transactions`) lists the charge
+point's [charging sessions](../concepts/charging-sessions.md) (#447), newest
+first: one row per transaction, the same columns for every OCPP version —
+**Started** (local time), **Connector**, **Transaction** (the id, truncated
+with the full value in its tooltip), **idTag**, **Duration**, **Energy**
+(in kWh, two decimals), **Stop reason** (the 2.x `triggerReason` in its
+tooltip) and **Outcome**, a coloured dot (active blue, completed green,
+interrupted amber, failed red) with, when the CSMS refused the id, `CSMS
+answered <status>` in its tooltip. A value the simulator does not know (an
+active session's end, a 1.6 id the CSMS never assigned) shows as `—`, never a
+guess.
+
+The tab reads the newest 50 sessions (`sessions.list` in Remote mode, the
+in-browser charge point in Local mode) when it opens, then applies each
+session the charge point pushes (`charging-session`): a known one is replaced
+in place, a new one is added at the top. It has no paging and no **Refresh**
+button. A failed read — against a daemon older than #447, for one — shows the
+error instead of an empty table. Before #447 the tab listed the
+transaction-type entries of the charge point's state history.
+
 #### Operational events tab
 
 The bottom panel's **Operational events** tab (`?tab=events`, #448) renders the
@@ -1137,6 +1160,9 @@ ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
 - Follow a charge point's [operational timeline](../concepts/operational-timeline.md):
   connection loss, injected network faults and their recovery time, status
   changes, transactions, authorization rejections and scenario runs.
+- Review a charge point's [charging sessions](../concepts/charging-sessions.md)
+  (duration, energy, stop reason, outcome) on its
+  [Transactions tab](#transactions-tab).
 - View the message log and download it as JSON Lines in the shared
   [log format](../concepts/log-format.md) (the same shape the daemon writes
   and the [trace adapter](../concepts/trace-format.md#producing-records) consumes).

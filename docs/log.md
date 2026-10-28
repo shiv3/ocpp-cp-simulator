@@ -1672,3 +1672,16 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | Charging session history (#447)
+
+- New [Charging sessions](concepts/charging-sessions.md): the version-independent `ChargingSession` model, outcomes (`active`, `completed`, `interrupted`, `failed`), recording from domain events, persistence, retention (500 ended sessions per charge point, active ones never evicted), restart reconciliation and limits.
+- [Control plane](concepts/control-plane.md#daemon-methods): `sessions.list` row — `cpId` required, `limit` 1–500 (default 50), newest first by default; an unknown `cpId` is `not_found`.
+- [MCP endpoint](entities/mcp-endpoint.md#curated-tools): curated `list_charging_sessions` tool; 24 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md), which now points agents at the session outcome for transaction assertions). Lint: the schema-drift paragraph now says `get_timeline` (#448) and `list_charging_sessions` take each field's schema from their method but list the fields by hand.
+- [CLI → Events](entities/cli.md#events): `charging_session` event carrying the whole session.
+- [State persistence](concepts/state-persistence.md#tables): `charging_sessions` table, schema v17, `cp.delete` list and `.tables` listing; the stale `.tables` listing of [Docker image](entities/docker-image.md#persistent-state) refreshed to the full table set.
+- [Web console → Transactions tab](entities/web-console.md#transactions-tab): new section — the tab lists charging sessions instead of the state history's transaction transitions; added to "What the console can do".
+- [Operational timeline](concepts/operational-timeline.md): points to the session history; `transaction_rejected` is now also recorded for a non-Accepted 2.x TransactionEvent.conf `idTokenInfo`, which ends the transaction when `TxCtrlr/StopTxOnInvalidId` (default true) and was ignored before.
+- [Local vs Remote mode](concepts/local-vs-remote-mode.md): the session history works in both modes; Local mode keeps a removed charge point's sessions until the next reset.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md): `related:` back-link to the new page.
+- [Overview](overview.md) (Observability bullet), [Index](index.md), [GitHub issues](sources/github-issues.md) (#447).

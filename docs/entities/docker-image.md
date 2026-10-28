@@ -15,7 +15,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-10-02
+updated: 2026-10-28
 ---
 
 # Docker image
@@ -101,9 +101,10 @@ docker run --rm -p 9700:9700 \
 
 # Inspect the persisted state
 sqlite3 ./.state/state.db ".tables"
-# charge_point_state  charging_profiles   connector_settings  kv
-# charge_points       configuration       logs                pending_messages
-# scenarios           schema_meta
+# blueprints           charge_point_state   charge_points        charging_profiles
+# charging_sessions    configuration        connector_runtime    connector_settings
+# kv                   logs                 pending_messages     scenario_runs
+# scenarios            schema_meta          vehicle_profiles     watched_scenario_files
 ```
 
 Or use a named volume for cross-machine portability:

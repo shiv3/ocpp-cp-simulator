@@ -20,7 +20,8 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-10-04
+  - charging-sessions.md
+updated: 2026-10-28
 ---
 
 # OCPP versions and transports

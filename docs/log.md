@@ -1642,6 +1642,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Review follow-up: entries are pushed as a `timeline_entry` event ([CLI → Events](entities/cli.md#events)); the console tab appends them and re-reads only on a `seq` gap ([Web console](entities/web-console.md#operational-events-tab)). The timeline records `scenario_finished` (`verdict`, `stopped`, `executionState`) instead of a `scenario_completed` kind, once per run when its report is computed, so a stopped run no longer reads as completed; the CLI `scenario_completed` event is unchanged ([Operational timeline](concepts/operational-timeline.md#kinds)).
 - Maintainer review: an incident whose connector statuses do not come back closes 60 s after the boot with `restored: false` and `unrestored` instead of staying open ([Operational timeline → Correlation](concepts/operational-timeline.md#correlation)); a discarded scenario run ends its `runId` attribution; the console tab re-reads when `cp.update` restarts `seq`, and is keyed by charge point.
 
+## [2026-10-27] ingest | 2.x handler failure answers InternalError (#399)
+
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): a 2.x inbound CALL whose handler throws is now answered with `CALLERROR InternalError` (description = the error message, capped at 255 characters), like 1.6J, and `csms_call_completed` reports `CallError` / `InternalError`; `NoResponse` is now only reported when an `inboundPolicy` of kind `ignore` withholds the answer. The failure is logged as `Error handling <action>` instead of the socket layer's `Error parsing message`.
+- [GitHub issues](sources/github-issues.md): #399 row.
+
 ## [2026-10-27] ingest | Normal and self-requested WebSocket closes no longer set `error` (#474)
 
 - [CLI → events](entities/cli.md): a WebSocket close raises `error` only when the charge point did not ask for it and its code is neither 1000 nor 1005; an operator disconnect, a reset or a network-sim cut never does.

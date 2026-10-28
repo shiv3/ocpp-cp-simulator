@@ -1672,3 +1672,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | Labels on the startup-bootstrapped fleet (#472)
+
+- [CLI → CLI Options](entities/cli.md#cli-options) and [Daemon](entities/daemon.md) flag tables: new `--label <key=value>`, repeatable, server mode only (refused beside `--send` / `--stop` / `--events`), requires `--cp-id`; validated against `src/protocol/labels.ts` at startup (bad key or value, duplicate key, more than 32 labels refused). The fleet example mentions it.
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): the startup bootstrap as a fourth write path; a charge point restored from `--state-db` keeps its stored labels.
+- [GitHub issues](sources/github-issues.md): #472.

@@ -812,7 +812,7 @@ async function forEachBounded<T>(
  *
  * One without a count, N with one — sequential, so the log and the registry
  * events read in id order. Everything but `cpId` is shared, exactly as
- * `cp.create_many` shares it.
+ * `cp.create_many` shares it — `--label` labels included (#472).
  */
 function expandBootstrap(
   opts: ServerOptions,

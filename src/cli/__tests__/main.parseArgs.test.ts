@@ -9,7 +9,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function runParseArgs(args: string[]) {
   const script = [
-    'import { parseArgs } from "./src/cli/main.ts";',
+    'import { buildBootstrap, parseArgs } from "./src/cli/main.ts";',
     'import { buildOcppWebSocketConnectOptions } from "./src/cp/infrastructure/transport/wsUrlWithBasic.ts";',
     `const options = parseArgs(["bun", "src/cli/main.ts", ...${JSON.stringify(
       args,
@@ -49,6 +49,8 @@ function runParseArgs(args: string[]) {
     "  watch: options.watch,",
     "  oedBaseUrl: options.oedBaseUrl,",
     "  oedApiKeyFile: options.oedApiKeyFile,",
+    "  labels: options.labels ?? null,",
+    "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
     "}));",
   ].join("\n");
 
@@ -948,5 +950,155 @@ describe("parseArgs Open EV Directory flags (#458)", () => {
   it("has no flag that takes the key itself", () => {
     const result = runParseArgs(["--daemon", "--oed-api-key", "evd_live_x"]);
     expect(result.status).not.toBe(0);
+  });
+});
+
+describe("parseArgs --label (#472)", () => {
+  const DAEMON = [
+    "--daemon",
+    "--cp-id",
+    "CP",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
+  it("has no labels unless asked for", () => {
+    const result = runParseArgs(DAEMON);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).labels).toBeNull();
+  });
+
+  it("collects every repeated --label into one map", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--label",
+      "site=a",
+      "--label",
+      "env=lab",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).labels).toEqual({
+      site: "a",
+      env: "lab",
+    });
+  });
+
+  it("puts the labels on the bootstrap the daemon expands into its fleet", () => {
+    // `expandBootstrap` copies the bootstrap onto every `--cp-count` charge
+    // point, so this is the one hand-off the flag needs to reach the fleet.
+    const result = runParseArgs([
+      ...DAEMON,
+      "--cp-count",
+      "3",
+      "--label",
+      "site=a",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).bootstrapLabels).toEqual({ site: "a" });
+  });
+
+  it("splits on the first '=' only, so a value keeps its '=' and ','", () => {
+    // `=` cannot appear in a key, so the first one is the separator and
+    // everything after it is the value, verbatim.
+    const result = runParseArgs([...DAEMON, "--label", "note=a=b,c"]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).labels).toEqual({ note: "a=b,c" });
+  });
+
+  it("accepts an empty value", () => {
+    const result = runParseArgs([...DAEMON, "--label", "flag="]);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).labels).toEqual({ flag: "" });
+  });
+
+  it.each([
+    [["--label"], "--label requires KEY=VALUE"],
+    [["--label", "--watch"], "--label requires KEY=VALUE"],
+    [["--label", "site"], "--label value must be KEY=VALUE, got 'site'"],
+    [["--label", "=a"], "--label value must be KEY=VALUE, got '=a'"],
+    [
+      ["--label", "site=a", "--label", "site=b"],
+      "--label key 'site' given twice",
+    ],
+  ])("refuses %j", (args, message) => {
+    const result = runParseArgs([...DAEMON, ...args]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`Error: ${message}`);
+  });
+
+  it.each([
+    ["a key with a space", "bad key=x"],
+    ["a key starting with a separator", "-x=1"],
+    // The record schema strips this key without an issue, so a check on the
+    // whole map alone would let it vanish instead of refusing it.
+    ["the __proto__ key", "__proto__=x"],
+    ["a key longer than 63 characters", `${"k".repeat(64)}=x`],
+    ["a value longer than 256 characters", `k=${"v".repeat(257)}`],
+  ])("refuses %s with the schema's reason", (_case, pair) => {
+    const result = runParseArgs([...DAEMON, "--label", pair]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Error: --label");
+  });
+
+  it("refuses more than 32 labels", () => {
+    const args = Array.from({ length: 33 }, (_, i) => [
+      "--label",
+      `k${i}=v`,
+    ]).flat();
+    const result = runParseArgs([...DAEMON, ...args]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("at most 32 labels");
+  });
+
+  it("refuses --label without --cp-id instead of ignoring it", () => {
+    // Without a cpId nothing is bootstrapped, so the labels would have no
+    // charge point to land on — the silent no-op #295 rejected for --cp-count.
+    const result = runParseArgs(["--daemon", "--label", "site=a"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("--label requires --cp-id");
+  });
+
+  it("refuses --label outside a server mode instead of ignoring it", () => {
+    const result = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--label",
+      "site=a",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("--label needs a server mode");
+  });
+
+  it("refuses --label alongside a client mode even when a server flag is present", () => {
+    // `--http-port` makes the server-mode guard pass, but `--send` returns
+    // through the client path before any charge point is bootstrapped — the
+    // hole #314 closed for --watch.
+    const result = runParseArgs([
+      "--send",
+      "status",
+      "--cp-id",
+      "CP",
+      "--http-port",
+      "9000",
+      "--label",
+      "site=a",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "--label cannot be combined with a client mode",
+    );
   });
 });

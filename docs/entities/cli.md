@@ -21,7 +21,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
   - open-ev-directory.md
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -501,7 +501,10 @@ ocpp-cp-sim --http-port 5172 --cp-id CP --cp-count 20 \
 ```
 
 `--cp-id-pattern` overrides the generated ids (`--cp-id-pattern "site-a-{n:04}"`).
-A startup scenario, if given, is loaded onto every charge point in the fleet.
+A startup scenario, if given, is loaded onto every charge point in the fleet,
+and so are the labels of a repeated `--label key=value` (`--label site=lab
+--label env=ci`), so the fleet comes up already selectable with
+`cp.list { labels }` (#472).
 
 The whole fleet is registered before anything dials the CSMS, so `cp.list`
 answers immediately even against an unreachable one; connecting then proceeds
@@ -812,6 +815,7 @@ the OCPP answer are unchanged.
 | `--connectors <n>`                  | No       | `1`                                     | Number of connectors                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--cp-count <n>`                    | No       | `1`                                     | Server mode: bootstrap N charge points instead of one, sharing every option but the id (#295)                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `--cp-id-pattern <tpl>`             | No       | `<cp-id>{n:03}`                         | Id template used with `--cp-count`. `{n}` is the index, `{n:03}` zero-pads it                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `--label <key=value>`               | No       | none                                    | Server mode, repeatable: [label](../concepts/control-plane.md#charge-point-labels) every bootstrapped charge point. Split on the first `=`; a bad key or value, a key given twice or more than 32 labels is refused at startup, and so is the flag without `--cp-id`, outside a server mode or beside `--send` / `--stop` / `--events`. A charge point restored from `--state-db` keeps its stored labels (#472)                                                                              |
 | `--ocpp-version <ver>`              | No       | `OCPP-1.6J`                             | `OCPP-1.6J`, `OCPP-2.0.1`, `OCPP-2.1`, or the SOAP versions `OCPP-1.2`, `OCPP-1.5`, `OCPP-1.6S`, for a directly started or bootstrapped CP                                                                                                                                                                                                                                                                                                                                                    |
 | `--soap-callback-url <url>`         | No       | -                                       | SOAP versions: full callback URL the CSMS reaches the CP on (used verbatim)                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `--soap-public-base-url <url>`      | No       | -                                       | SOAP versions: public base the callback URL is derived from (`<base><soap-path>/<cp-id>/ChargePointService`)                                                                                                                                                                                                                                                                                                                                                                                  |

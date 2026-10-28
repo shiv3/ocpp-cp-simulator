@@ -552,6 +552,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
+    if (pending?.action === "TransactionEvent") {
+      this.applyTransactionEventResult(
+        pending.payload as TransactionEventRequestV201,
+        payload as TransactionEventResponseV201,
+      );
+      return;
+    }
+
     const bootResult = payload as BootNotificationResponseV201;
     if (
       bootResult.status !== undefined &&
@@ -568,6 +576,47 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         currentTime: bootResult.currentTime,
       });
     }
+  }
+
+  /**
+   * #447: the 2.x twin of 1.6's non-Accepted StartTransaction.conf (#181).
+   * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
+   * in `idTokenInfo`. When it is not Accepted and the transaction is still
+   * running, `TxCtrlr/StopTxOnInvalidId` (default true) ends it as
+   * Deauthorized / DeAuthorized; false leaves it running. Either way the
+   * rejection is reported like the 1.6 one.
+   */
+  private applyTransactionEventResult(
+    request: TransactionEventRequestV201,
+    response: TransactionEventResponseV201,
+  ): void {
+    const status = response.idTokenInfo?.status;
+    if (status === undefined || status === "Accepted") return;
+    if (request.eventType === "Ended") return;
+    const transactionId = request.transactionInfo.transactionId;
+    const connector = [...this._chargePoint.connectors.values()].find(
+      (c) =>
+        c.transaction?.cpTransactionId === transactionId &&
+        c.transaction.stopTime === null,
+    );
+    if (!connector) return;
+    const stopOnInvalid =
+      this._chargePoint.configuration.stopTransactionOnInvalidId();
+    this._logger.warn(
+      `[v2.0.1] TransactionEvent idTokenInfo ${status} for transaction ${transactionId}; StopTxOnInvalidId=${stopOnInvalid}`,
+      LogType.TRANSACTION,
+    );
+    if (stopOnInvalid) {
+      this._chargePoint.stopTransaction(connector, "DeAuthorized", {
+        triggerReason: "Deauthorized",
+        stoppedReason: "DeAuthorized",
+      });
+    }
+    this._chargePoint.notifyStartTransactionNotAccepted(
+      connector.id,
+      status,
+      stopOnInvalid,
+    );
   }
 
   public sendBootNotification(bootPayload: BootNotification): void {

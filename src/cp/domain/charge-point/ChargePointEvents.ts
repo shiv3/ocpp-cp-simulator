@@ -154,6 +154,13 @@ export interface ChargePointEvents {
     status: string;
     stopped: boolean;
   };
+  /** Emitted when the CSMS answers StartTransaction.req with a CALLERROR
+   *  (#447), just before the connector's transaction is dropped: it never
+   *  started on the CSMS side, and no StopTransaction.req follows. */
+  transactionStartFailed: {
+    connectorId: number;
+    errorCode: string;
+  };
 
   // Message events
   messageSent: {

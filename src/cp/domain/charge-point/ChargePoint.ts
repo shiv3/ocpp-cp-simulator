@@ -922,6 +922,12 @@ export class ChargePoint {
     });
   }
 
+  /** Called by the 1.6 handler when StartTransaction.req is answered with a
+   *  CALLERROR (#447), before it drops the connector's transaction. */
+  notifyTransactionStartFailed(connectorId: number, errorCode: string): void {
+    this._events.emit("transactionStartFailed", { connectorId, errorCode });
+  }
+
   /** Called by AuthorizeResultHandler when Authorize.conf arrives
    *  (issue #181). Fans out to any in-flight `authorizeAndWait` callers
    *  tagId-matched via the `authorizeResult` event. */

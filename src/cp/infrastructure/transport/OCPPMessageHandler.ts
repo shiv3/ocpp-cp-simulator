@@ -1294,6 +1294,10 @@ export class OCPPMessageHandler {
         `Recovering connector ${connectorId} after StartTransaction CALLERROR`,
         LogType.TRANSACTION,
       );
+      this._chargePoint.notifyTransactionStartFailed(
+        connectorId,
+        error.errorCode,
+      );
       this._chargePoint.cleanTransaction(connectorId);
       this._chargePoint.updateConnectorStatus(
         connectorId,

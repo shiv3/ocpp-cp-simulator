@@ -158,6 +158,38 @@ export function splitStopReason(reason: StopReason | undefined): {
   };
 }
 
+/**
+ * The 2.0.1 `stoppedReason` for a 1.6-shaped `stopReason`, when the stop
+ * named no 2.0.1 reason of its own. 2.0.1 has no reset or unlock reasons of
+ * the 1.6 kind, so `HardReset` / `SoftReset` / `UnlockCommand` map onto the
+ * closest ones.
+ */
+export function toV201StoppedReason(
+  reason: StopTransactionReason | undefined,
+): TransactionStoppedReason {
+  switch (reason) {
+    case undefined:
+      return "Local";
+    case "DeAuthorized":
+    case "EmergencyStop":
+    case "EVDisconnected":
+    case "Local":
+    case "Other":
+    case "PowerLoss":
+    case "Reboot":
+    case "Remote":
+      return reason;
+    case "HardReset":
+      return "ImmediateReset";
+    case "SoftReset":
+      return "Reboot";
+    case "UnlockCommand":
+      return "Other";
+    default:
+      return "Other";
+  }
+}
+
 /** `start_transaction` options a control-plane caller may name (#335). */
 export interface StartTransactionCommandOptions {
   triggerReason?: TransactionEventTriggerReason;

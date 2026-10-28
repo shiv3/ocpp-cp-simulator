@@ -47,11 +47,11 @@ import {
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-import type {
-  StopTransactionReason,
-  Transaction,
-  TransactionChargingState,
-  TransactionUpdateOptions,
+import {
+  toV201StoppedReason,
+  type Transaction,
+  type TransactionChargingState,
+  type TransactionUpdateOptions,
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
@@ -88,37 +88,8 @@ type V201ResponsePayload =
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
 
-type V201StoppedReason = NonNullable<
-  TransactionEventRequestV201["transactionInfo"]["stoppedReason"]
->;
 type V201MeterValuesSampledValue =
   MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
-
-function toV201StoppedReason(
-  reason: StopTransactionReason | undefined,
-): V201StoppedReason {
-  switch (reason) {
-    case undefined:
-      return "Local";
-    case "DeAuthorized":
-    case "EmergencyStop":
-    case "EVDisconnected":
-    case "Local":
-    case "Other":
-    case "PowerLoss":
-    case "Reboot":
-    case "Remote":
-      return reason;
-    case "HardReset":
-      return "ImmediateReset";
-    case "SoftReset":
-      return "Reboot";
-    case "UnlockCommand":
-      return "Other";
-    default:
-      return "Other";
-  }
-}
 
 function ocppStatusToV201(
   status: OCPPStatus,

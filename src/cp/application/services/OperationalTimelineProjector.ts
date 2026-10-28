@@ -259,10 +259,14 @@ export class OperationalTimelineProjector {
     const check = () => {
       const remaining = expiresAt - this.timeline.now();
       if (remaining > 0) {
-        this.expiryTimers.set(
-          key,
-          setTimeout(check, Math.min(remaining, MAX_TIMER_DELAY_MS)),
+        const timer = setTimeout(
+          check,
+          Math.min(remaining, MAX_TIMER_DELAY_MS),
         );
+        // A pending expiry must never be the reason the process will not
+        // exit: it can be weeks away.
+        (timer as unknown as { unref?: () => void }).unref?.();
+        this.expiryTimers.set(key, timer);
         return;
       }
       this.expiryTimers.delete(key);

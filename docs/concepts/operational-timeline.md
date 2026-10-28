@@ -212,4 +212,6 @@ entries go to the most recently started one. The full run report stays in the
 - Profiles that Local mode restores from its database when it recreates a
   charge point are not recorded, and their expiry is not either: restoring
   state is not a change.
+- Removing a connector drops its profiles without a
+  `charging_profile_cleared` entry.
 - An injected latency rule is not an incident: only disconnect rules are.

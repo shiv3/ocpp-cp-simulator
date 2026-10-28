@@ -464,6 +464,8 @@ describe("OperationalTimelineProjector smart-charging profiles (#469)", () => {
     expect(entries[1]!.data.profiles).toEqual([
       { profileId: 3, purpose: "TxProfile", stackLevel: 2 },
     ]);
+    // Right after it: nothing is recorded in between.
+    expect(entries[1]!.seq).toBe(entries[0]!.seq + 1);
     // The TxDefaultProfile outlives the transaction.
     expect(cp.getConnector(1)!.chargingProfiles).toHaveLength(1);
   });

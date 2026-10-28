@@ -48,6 +48,11 @@ import {
   SCENARIO_RUN_EXECUTION_STATES,
   SCENARIO_VERDICTS,
 } from "../cp/application/verification/ScenarioRunSummary";
+import {
+  TIMELINE_DEFAULT_CAPACITY,
+  TIMELINE_FORMAT_VERSION,
+  TIMELINE_KINDS,
+} from "../cp/application/services/OperationalTimeline";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);
@@ -70,6 +75,18 @@ const ANY = z.unknown();
  *  may ask for. */
 export const SCENARIO_RUNS_PAGE_DEFAULT = 50;
 export const SCENARIO_RUNS_PAGE_MAX = 200;
+/** #448: one operational-timeline entry. `data` is kind-specific. */
+const timelineEntrySchema = z.object({
+  seq: z.number().int().positive(),
+  timestamp: z.string(),
+  kind: z.enum(TIMELINE_KINDS),
+  cpId: z.string(),
+  connectorId: z.number().int().optional(),
+  runId: z.string().optional(),
+  incidentId: z.string().optional(),
+  summary: z.string(),
+  data: z.record(z.string(), z.unknown()),
+});
 /** A bounded free-form object param (settings/config/options): ≤ 64 KB. */
 const OBJ = () => boundedObject(OBJ_MAX_BYTES);
 /** A bounded scenario-definition object param: ≤ 256 KB. */
@@ -962,6 +979,31 @@ export const METHODS = {
       total: z.number().int().min(0),
     }),
   },
+  // #448: a charge point's operational timeline, windowed like `logs.get`
+  // (`limit` = newest N, `offset` pages back, `order` of the window). Every
+  // filter is an exact match; `total` counts the filtered entries before
+  // windowing. Kinds and correlation rules: docs/concepts/operational-timeline.md.
+  "timeline.get": {
+    params: z.object({
+      cpId: NON_EMPTY_STR,
+      connectorId: CONN_POS.optional(),
+      runId: NON_EMPTY_STR.optional(),
+      incidentId: NON_EMPTY_STR.optional(),
+      kinds: z
+        .array(z.enum(TIMELINE_KINDS))
+        .min(1)
+        .max(TIMELINE_KINDS.length)
+        .optional(),
+      limit: z.number().int().min(1).max(TIMELINE_DEFAULT_CAPACITY).optional(),
+      offset: z.number().int().min(0).optional(),
+      order: z.enum(["asc", "desc"]).optional(),
+    }),
+    result: z.object({
+      version: z.literal(TIMELINE_FORMAT_VERSION),
+      entries: z.array(timelineEntrySchema).max(TIMELINE_DEFAULT_CAPACITY),
+      total: z.number().int().min(0),
+    }),
+  },
   "scenario.definitions.list": {
     params: z.object({ cpId: STR_64K, connectorId: CONN_DEF }),
     result: ARRAY_1000(SCENARIO_OBJ()),
@@ -1055,6 +1097,7 @@ export const EXPLICIT_METHODS = [
   "config.save",
   "scenario.templates",
   "scenario.runs.list",
+  "timeline.get",
   "scenario.definitions.list",
   "scenario.definitions.save",
   "scenario.definitions.replace",

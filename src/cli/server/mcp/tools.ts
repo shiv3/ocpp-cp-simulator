@@ -654,6 +654,52 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  const timeline = METHODS["timeline.get"].params.shape;
+  mcp.tool("get_timeline", {
+    description:
+      "Retrieve a charge point's operational timeline (#448): normalized, " +
+      "ordered events — connection loss and reconnect, injected network " +
+      "faults and the recovery they caused, CP/connector status changes, " +
+      "transactions, authorization rejections and scenario runs. Entries " +
+      "are ordered by `seq`; entries of one fault share an `incidentId` and " +
+      "`recovery_completed` reports `durationMs`. Windowed like get_logs: " +
+      "`limit` takes the newest N, `offset` pages backwards.",
+    // The method's own fields, so the tool advertises what it enforces.
+    inputSchema: z.object({
+      cpId: timeline.cpId.describe("Charge point identifier"),
+      connectorId: timeline.connectorId.describe(
+        "Only entries about this connector",
+      ),
+      runId: timeline.runId.describe(
+        "Only entries attributed to this scenario run",
+      ),
+      incidentId: timeline.incidentId.describe(
+        "Only entries of this network-fault incident",
+      ),
+      kinds: timeline.kinds.describe("Only these entry kinds"),
+      limit: timeline.limit.describe(
+        "Number of most-recent matching entries to return",
+      ),
+      offset: timeline.offset.describe(
+        "Skip this many of the newest entries before taking `limit`",
+      ),
+      order: timeline.order.describe(
+        "'asc' (oldest first, default) or 'desc' (newest first)",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "timeline.get",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("network_sim_get", {
     description:
       "Get the network-simulation config: the global layer (omit cpId) or a charge point's layer + resolved config (with cpId).",

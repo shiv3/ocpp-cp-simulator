@@ -18,6 +18,7 @@ related:
   - expert-ocpp-calls.md
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
+  - operational-timeline.md
 updated: 2026-10-27
 ---
 
@@ -591,6 +592,7 @@ Guarantees a conformance driver can rely on:
 | `scenario.templates`                                           | `{}`                                                                                                | Built-in template catalogue (`id`, `name`, `description`, `targetType`) — the daemon-level twin of the CP-scoped `list_scenario_templates`; what the MCP `scenario_templates` tool calls.                        |
 | `scenario.definitions.list` / `.save` / `.replace` / `.delete` | `{ "cpId", "connectorId", … }` plus `definition` / `definitions[]` / `definitionId`                 | CRUD over persisted scenario definitions for one connector — the web console's scenario library; `list_scenarios` / `load_scenario` are the run-time view of the same rows.                                      |
 | `scenario.runs.list`                                           | `{ "runId"?, "cpId"?, "connectorId"?, "scenarioId"?, "verdict"?, "executionState"?, … }`            | Finished scenario runs across charge points, newest first, filtered and paged — see [Scenario run history](#scenario-run-history) (#388).                                                                        |
+| `timeline.get`                                                 | `{ "cpId": string, "connectorId"?, "runId"?, "incidentId"?, "kinds"?, … }`                          | A charge point's [operational timeline](operational-timeline.md) as `{ version, entries, total }`, filtered and windowed like `logs.get`; an unknown `cpId` is `not_found` (#448).                               |
 | `connector_settings.auto_meter.get` / `.save`                  | `{ "cpId", "connectorId" }` (+ `config` on save)                                                    | Persisted automatic-meter-value config per connector (`connector_settings` table); `set_auto_meter_config` is the CP-scoped live equivalent.                                                                     |
 | `connector_settings.auto_traffic.get` / `.save`                | `{ "cpId", "connectorId" }` (+ `config` on save)                                                    | Persisted [background-traffic](#background-traffic) config per connector (`connector_settings` table, schema v10); `set_auto_traffic_config` is the CP-scoped live equivalent.                                   |
 | `connector_settings.soc_meter_sync.get` / `.save`              | `{ "cpId", "connectorId" }` (+ `enabled` on save)                                                   | Persisted SoC↔meter sync flag: one simulator-wide value in `kv`; `cpId` / `connectorId` are accepted but not used.                                                                                               |

@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 22 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 23 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -15,6 +15,7 @@ related:
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/vehicle-profiles.md
   - open-ev-directory.md
+  - ../concepts/operational-timeline.md
 updated: 2026-10-27
 ---
 
@@ -39,7 +40,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 22 curated tools wrapping the daemon's
+The endpoint exposes 23 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                    | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -66,6 +67,7 @@ The endpoint exposes 22 curated tools wrapping the daemon's
 | `scenario_status`       | `scenario_status`         | `cpId`, `connector`, `scenarioId`                                                                                                                                                                                                                                             |
 | `control_scenario_wait` | `<action>_scenario_wait`  | `cpId`, `connector`, `scenarioId`, `action` (`extend` / `retry` / `continue`), `seconds?` — required by `extend` (#240)                                                                                                                                                       |
 | `get_logs`              | `logs.get`                | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                                                                            |
+| `get_timeline`          | `timeline.get`            | `cpId`, `connectorId?`, `runId?`, `incidentId?`, `kinds?`, `limit?`, `offset?`, `order?` — the [operational timeline](../concepts/operational-timeline.md), windowed like `get_logs` (#448)                                                                                   |
 
 Most of these tools hand-declare a copy of their method's fields rather than
 deriving it (`cp_create` / `cp_create_many`, `cp_list` and `cp_labels_set`

@@ -120,9 +120,11 @@ describe("connectionTrigger node (issue #240)", () => {
       connectionScenario("connected"),
       createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
     );
+    // The #448 timeline projector listens too: wait for one more.
+    const baseline = cp.events.listenerCount("connected");
     const execution = executor.start();
     try {
-      await waitUntil(() => cp.events.listenerCount("connected") > 0);
+      await waitUntil(() => cp.events.listenerCount("connected") > baseline);
 
       // The wait must NOT be killed by a disconnect — that is its point.
       cp.events.emit("disconnected", { code: 1006, reason: "test" });
@@ -154,9 +156,11 @@ describe("connectionTrigger node (issue #240)", () => {
       connectionScenario("disconnected"),
       createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
     );
+    // The #448 timeline projector listens too: wait for one more.
+    const baseline = cp.events.listenerCount("disconnected");
     const execution = executor.start();
     try {
-      await waitUntil(() => cp.events.listenerCount("disconnected") > 0);
+      await waitUntil(() => cp.events.listenerCount("disconnected") > baseline);
       cp.events.emit("disconnected", { code: 1000, reason: "bye" });
       await timeout(execution, 1000);
     } finally {

@@ -148,6 +148,17 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
   },
   { method: "logs.get", valid: { cpId: "CP" }, field: "cpId" },
   { method: "logs.clear", valid: { cpId: "CP" }, field: "cpId" },
+  { method: "timeline.get", valid: { cpId: "CP" }, field: "cpId" },
+  {
+    method: "timeline.get",
+    valid: { cpId: "CP", runId: "r" },
+    field: "runId",
+  },
+  {
+    method: "timeline.get",
+    valid: { cpId: "CP", incidentId: "i" },
+    field: "incidentId",
+  },
   { method: "blueprint.delete", valid: { id: "b" }, field: "id" },
 ];
 

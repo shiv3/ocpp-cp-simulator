@@ -45,7 +45,20 @@ import {
   type CloseCause,
   type Settlement,
   type ResolvedNetworkSimConfig,
+  type DisconnectRuleType,
 } from "./network-sim";
+import type { NetworkFaultInjected } from "../../domain/charge-point/ChargePointEvents";
+import { EventEmitter } from "../../shared/EventEmitter";
+
+/** #448: what the transport reports to observers (the charge point). A
+ *  throwing listener is caught by the emitter, never by the transport. */
+export interface TransportObserverEvents {
+  /** A network-sim disconnect rule fired; emitted before the close. */
+  simulatedDisconnect: NetworkFaultInjected;
+  /** A reconnect was scheduled; emitted once the close that caused it has
+   *  been handed to the `onclose` callback. */
+  reconnectScheduled: { attempt: number; delayMs: number };
+}
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -187,6 +200,9 @@ export class OCPPWebSocket {
   private _urlPool: SupervisionUrlPool | null = null;
   private _onCloseTransactionCallback:
     ((finalized: GenerationToken) => void) | null = null;
+  readonly observers = new EventEmitter<TransportObserverEvents>();
+  private _pendingReconnectNotice: { attempt: number; delayMs: number } | null =
+    null;
   private _disposed: boolean = false;
 
   constructor(
@@ -224,8 +240,8 @@ export class OCPPWebSocket {
     const controllerHost: ControllerHost = {
       writeUpstream: (raw: string) => this.writeUpstreamPhysical(raw),
       dispatchDownstream: (raw: string) => this.dispatchIncoming(raw),
-      requestSimulatedDisconnect: (reconnectDelayMs: number, ruleId: string) =>
-        this.simulateConnectionLoss(reconnectDelayMs, ruleId),
+      requestSimulatedDisconnect: (reconnectDelayMs, ruleId, ruleType) =>
+        this.simulateConnectionLoss(reconnectDelayMs, ruleId, ruleType),
       log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
     };
     this._controller = new NetworkSimController(controllerHost, chargePointId);
@@ -311,6 +327,11 @@ export class OCPPWebSocket {
         this.handleClose(ev, closeCause);
       }
       this.reportClose(socketToken, ev);
+      // #448: announced once the charge point has handled the close, so an
+      // observer sees the disconnect before the reconnect it causes.
+      const notice = this._pendingReconnectNotice;
+      this._pendingReconnectNotice = null;
+      if (notice) this.observers.emit("reconnectScheduled", notice);
     };
 
     // Resolving here, per attempt, is what keeps the URL list out of
@@ -598,11 +619,20 @@ export class OCPPWebSocket {
    */
   public simulateConnectionLoss(
     reconnectDelayMs: number,
-    _ruleId: string = "",
+    ruleId: string = "",
+    ruleType: DisconnectRuleType = "manual-disconnect",
   ): void {
     if (this._disposed) {
       return;
     }
+
+    // Observers learn of the fault while the socket is still up, so the
+    // `disconnected` that follows can be attributed to this rule.
+    this.observers.emit("simulatedDisconnect", {
+      ruleId,
+      ruleType,
+      reconnectDelayMs,
+    });
 
     // FIRST install the reservation BEFORE draining
     this._reconnectNotBefore = Date.now() + reconnectDelayMs;
@@ -961,6 +991,10 @@ export class OCPPWebSocket {
       `Reconnecting in ${actualDelay / 1000}s... (attempt ${this._reconnectAttempts})`,
       LogType.WEBSOCKET,
     );
+    this._pendingReconnectNotice = {
+      attempt: this._reconnectAttempts,
+      delayMs: actualDelay,
+    };
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;

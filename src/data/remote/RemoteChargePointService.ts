@@ -60,6 +60,11 @@ import type {
   ScenarioRunQuery,
 } from "../../cp/application/verification/ScenarioRunSummary";
 import type {
+  TimelineEntry,
+  TimelinePage,
+  TimelineQuery,
+} from "../../cp/application/services/OperationalTimeline";
+import type {
   HistoryOptions,
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
@@ -643,6 +648,22 @@ export function mapServerEventToChargePointEvent(
           scenarioId: data.scenarioId,
           ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
           nodeId: data.nodeId,
+        };
+      }
+      return null;
+    case "timeline_entry":
+      // Consumers ignore kinds they do not know (format 1.x), so the kind
+      // is not checked against this build's list.
+      if (
+        typeof data.seq === "number" &&
+        typeof data.timestamp === "string" &&
+        typeof data.kind === "string" &&
+        typeof data.cpId === "string" &&
+        typeof data.summary === "string"
+      ) {
+        return {
+          type: "timeline-entry",
+          entry: data as unknown as TimelineEntry,
         };
       }
       return null;
@@ -1702,6 +1723,13 @@ export class RemoteChargePointService implements ChargePointService {
 
   async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
     return (await this.rpc("scenario.runs.list", query)) as ScenarioRunPage;
+  }
+
+  async getOperationalTimeline(
+    cpId: string,
+    query: TimelineQuery = {},
+  ): Promise<TimelinePage> {
+    return this.rpc("timeline.get", { cpId, ...query });
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

@@ -11,6 +11,7 @@ related:
   - ../entities/web-console.md
   - state-persistence.md
   - scenario-format.md
+  - operational-timeline.md
 updated: 2026-10-27
 ---
 
@@ -114,6 +115,18 @@ Configs are stored in the [state database](state-persistence.md) (if
 `networkSim:cp:<cpId>`. Configs survive daemon restart and are automatically
 applied before a restored CP reconnects. A corrupt stored value is logged and
 treated as absent (graceful degradation).
+
+## Faults on the operational timeline
+
+A firing `manual-disconnect` or `periodic-disconnect` rule is recorded on the
+charge point's [operational timeline](operational-timeline.md) as
+`network_fault_injected` (`ruleId`, `ruleType`, `reconnectDelayMs`), before the
+socket closes. It opens an incident: the `disconnected`, `reconnecting`,
+`connected`, `boot_notification` and status entries that follow share its
+`incidentId`, and `recovery_completed` reports how long the charge point took
+to be connected, booted and back to its pre-fault connector statuses (#448).
+The `[RULE:<id>] DISCONNECT forced` log line is unchanged. Latency rules are
+not recorded.
 
 ## Protocol timer behaviors
 

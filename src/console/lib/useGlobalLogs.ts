@@ -5,14 +5,18 @@ import type { UseGlobalLogsResult } from "./globalLogsContext";
 
 export type { GlobalLogEntry, UseGlobalLogsResult } from "./globalLogsContext";
 
-/** HH:mm:ss in local time — the charge point page's compact log renders
- *  timestamps with it (it was shared with the Dashboard's "Recent activity"
- *  box, since removed).
+/** HH:mm:ss in local time (HH:mm:ss.SSS with `milliseconds`) — the charge
+ *  point page's compact log and its Operational events tab render timestamps
+ *  with it.
  *  Deliberately hand-rolled instead of `toLocaleTimeString` so output
  *  doesn't depend on the runtime's ICU/locale data (dom tests included). */
-export function formatLogTime(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+export function formatLogTime(
+  date: Date,
+  { milliseconds = false }: { milliseconds?: boolean } = {},
+): string {
+  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return milliseconds ? `${time}.${pad(date.getMilliseconds(), 3)}` : time;
 }
 
 /**

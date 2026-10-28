@@ -435,6 +435,29 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [{ runs: [], total: 0 }],
       },
       {
+        name: "getOperationalTimeline",
+        invoke: (service) =>
+          service.getOperationalTimeline("cp-1", {
+            connectorId: 1,
+            kinds: ["connected"],
+            limit: 5,
+            order: "desc",
+          }),
+        expected: [
+          {
+            method: "timeline.get",
+            params: {
+              cpId: "cp-1",
+              connectorId: 1,
+              kinds: ["connected"],
+              limit: 5,
+              order: "desc",
+            },
+          },
+        ],
+        results: [{ version: "1.0", entries: [], total: 0 }],
+      },
+      {
         name: "loadConfig",
         invoke: (service) => service.loadConfig(),
         expected: [{ method: "config.get", params: {} }],

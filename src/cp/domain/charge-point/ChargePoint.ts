@@ -11,6 +11,8 @@ import type {
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { StateManager } from "../../application/services/StateManager";
+import { OperationalTimeline } from "../../application/services/OperationalTimeline";
+import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
 import { Connector } from "../connector/Connector";
 import type {
   BootNotificationResult,
@@ -193,6 +195,8 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _stateManager: StateManager;
+  private readonly _timeline: OperationalTimeline;
+  private readonly _timelineProjector: OperationalTimelineProjector;
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
   private readonly _localAuthListManager: LocalAuthListManager;
@@ -380,6 +384,12 @@ export class ChargePoint {
         cpoName,
         tls,
       );
+      this._webSocket.observers.on("simulatedDisconnect", (fault) =>
+        this._events.emit("networkFaultInjected", fault),
+      );
+      this._webSocket.observers.on("reconnectScheduled", (info) =>
+        this._events.emit("reconnecting", info),
+      );
       const supervisionUrls = transportOptions.supervisionUrls;
       if (supervisionUrls && supervisionUrls.length > 1) {
         this._webSocket.setSupervisionUrlPool(
@@ -430,6 +440,14 @@ export class ChargePoint {
           meterValue: connector.meterValue,
         };
       },
+    );
+
+    // #448: subscribed before any connection or status event can fire.
+    this._timeline = new OperationalTimeline(this._id);
+    this._timelineProjector = new OperationalTimelineProjector(
+      this._timeline,
+      this._events,
+      this._connectors,
     );
 
     this._connectors.forEach((connector, connectorId) => {
@@ -738,6 +756,11 @@ export class ChargePoint {
 
   get stateManager(): StateManager {
     return this._stateManager;
+  }
+
+  /** #448: operational timeline of this charge point. */
+  get timeline(): OperationalTimeline {
+    return this._timeline;
   }
 
   get logger(): Logger {
@@ -1575,6 +1598,7 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its
     // handler logs "WebSocket closed" through this repository. Closing it
     // here (not in teardownAfterClose, which a plain disconnect shares)
@@ -1614,6 +1638,7 @@ export class ChargePoint {
   }
 
   set status(newStatus: ChargePointStatus) {
+    const previousStatus = this._status;
     this._status = newStatus;
     if (newStatus === OCPPStatus.Unavailable) {
       // §4.9 note says CP-level (connectorId=0) and individual connector
@@ -1643,7 +1668,7 @@ export class ChargePoint {
         });
       });
     }
-    this._events.emit("statusChange", { status: newStatus });
+    this._events.emit("statusChange", { status: newStatus, previousStatus });
     this._stateManager.transitionChargePointStatus(newStatus, {
       source: "boundary-setter",
       timestamp: new Date(),
@@ -1819,6 +1844,7 @@ export class ChargePoint {
     this._events.emit("transactionStopped", {
       connectorId: connector.id,
       transactionId: transaction.id,
+      reason: transaction.stoppedReason ?? transaction.stopReason,
     });
 
     // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)
@@ -1984,7 +2010,7 @@ export class ChargePoint {
       }
       const previousStatus = this._status;
       this._status = status;
-      this._events.emit("statusChange", { status });
+      this._events.emit("statusChange", { status, previousStatus });
       this._stateManager.transitionChargePointStatus(status, {
         source: "connector-0-update",
         timestamp: new Date(),

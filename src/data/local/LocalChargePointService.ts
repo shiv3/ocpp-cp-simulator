@@ -82,6 +82,10 @@ import type {
   StateHistoryEntry,
 } from "../../cp/application/services/types/StateSnapshot";
 import type {
+  TimelinePage,
+  TimelineQuery,
+} from "../../cp/application/services/OperationalTimeline";
+import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
 } from "../../cp/infrastructure/transport/network-sim/config";
@@ -759,6 +763,15 @@ export class LocalChargePointService implements ChargePointService {
     return cp.stateManager.history.getHistory(options);
   }
 
+  async getOperationalTimeline(
+    id: string,
+    query?: TimelineQuery,
+  ): Promise<TimelinePage> {
+    const cp = this.chargePoints.get(id);
+    if (!cp) return { entries: [], total: 0 };
+    return cp.timeline.query(query);
+  }
+
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
     return scenarioTemplates.map((t) => ({
       id: t.id,
@@ -1383,6 +1396,12 @@ export class LocalChargePointService implements ChargePointService {
 
   private attachEventForwarders(chargePoint: ChargePoint): void {
     const unsubscribes: Array<() => void> = [];
+
+    unsubscribes.push(
+      chargePoint.timeline.onRecord((entry) => {
+        this.emit(chargePoint.id, { type: "timeline-entry", entry });
+      }),
+    );
 
     unsubscribes.push(
       chargePoint.events.on("statusChange", ({ status }) => {

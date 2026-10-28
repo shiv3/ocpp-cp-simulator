@@ -2,7 +2,7 @@
 title: Overview
 type: overview
 summary: Master summary of the OCPP CP Simulator — what it is, how the pieces fit together, and where to read next.
-updated: 2026-10-11
+updated: 2026-10-27
 ---
 
 # OCPP CP Simulator — overview
@@ -56,7 +56,9 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
   scenario's EV settings, so simulations never depend on the catalog.
 - **Observability** — one [log line shape](concepts/log-format.md) everywhere;
   wire frames can be streamed as a versioned [trace](concepts/trace-format.md)
-  and analyzed with [`analyze`](entities/analyze.md) (OCPP DebugKit).
+  and analyzed with [`analyze`](entities/analyze.md) (OCPP DebugKit); each
+  charge point keeps an [operational timeline](concepts/operational-timeline.md)
+  that correlates injected network faults with the recovery they cause.
 - **Operations** — [state persistence](concepts/state-persistence.md)
   (SQLite in the daemon, sql.js in the browser),
   [access control](concepts/access-control.md) (bind gate, Basic Auth, CORS,

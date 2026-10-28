@@ -847,6 +847,57 @@ describe("OCPPWebSocket Network Simulation", () => {
       expect(result).toBe(true);
     });
   });
+
+  describe("connection observers (#448)", () => {
+    it("reports an injected disconnect with its rule before the socket closes", () => {
+      ws.setNetworkSimConfig({
+        enabled: true,
+        seed: 1,
+        rules: { cut: { type: "manual-disconnect", reconnectDelayMs: 750 } },
+      });
+      const seen: Array<{ fault: unknown; socketOpen: boolean }> = [];
+      ws.observers.on("simulatedDisconnect", (fault) => {
+        seen.push({ fault, socketOpen: fakeWs.readyState === WebSocket.OPEN });
+      });
+
+      expect(ws.triggerNetworkSimDisconnect("cut")).toEqual({ ok: true });
+
+      expect(seen).toEqual([
+        {
+          fault: {
+            ruleId: "cut",
+            ruleType: "manual-disconnect",
+            reconnectDelayMs: 750,
+          },
+          socketOpen: true,
+        },
+      ]);
+    });
+
+    it("reports each scheduled reconnect with its attempt and delay", () => {
+      const scheduled: Array<{ attempt: number; delayMs: number }> = [];
+      ws.observers.on("reconnectScheduled", (info) => scheduled.push(info));
+
+      ws.simulateConnectionLoss(5000, "cut", "manual-disconnect");
+
+      expect(scheduled).toEqual([{ attempt: 1, delayMs: 5000 }]);
+    });
+
+    it("reports the reconnect after the onclose callback saw the close", () => {
+      const order: string[] = [];
+      const observed = new OCPPWebSocket("ws://localhost:8080", "CP-2", logger);
+      observed.connect(undefined, () => order.push("close"));
+      (observed as unknown as WebSocketTestAccess)._ws.simulateOpen();
+      observed.observers.on("reconnectScheduled", () =>
+        order.push("reconnect"),
+      );
+
+      observed.simulateConnectionLoss(1000, "cut", "manual-disconnect");
+
+      expect(order).toEqual(["close", "reconnect"]);
+      observed.dispose();
+    });
+  });
 });
 
 describe("OCPPWebSocket close callback cause (#474)", () => {

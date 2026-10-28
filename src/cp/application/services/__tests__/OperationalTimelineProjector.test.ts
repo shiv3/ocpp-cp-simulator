@@ -170,9 +170,9 @@ describe("OperationalTimelineProjector (#448)", () => {
 
     cp.triggerNetworkSimDisconnect("cut");
     cp.events.emit("disconnected", { code: 1006, reason: "" });
+    cp.updateConnectorStatus(1, OCPPStatus.Available);
     cp.events.emit("connected", undefined);
     bootAccepted(cp);
-    cp.updateConnectorStatus(1, OCPPStatus.Available);
     vi.advanceTimersByTime(RECOVERY_SETTLE_MS / 2);
     cp.events.emit("disconnected", { code: 1006, reason: "" });
     vi.advanceTimersByTime(RECOVERY_SETTLE_MS);

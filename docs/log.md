@@ -1672,3 +1672,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | Clock-aligned meter values (#454)
+
+- [OCPP versions & transports → Clock-aligned meter values](concepts/ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval): new section. `ClockAlignedDataInterval` / `AlignedDataCtrlr.Interval` now send one `Sample.Clock` sample per connector on UTC-midnight boundaries, with `MeterValuesAlignedData` / `AlignedDataCtrlr.Measurands` (now writable) as measurands; 2.x uses `TransactionEvent(Updated, MeterValueClock)` during a transaction; the interval is bounded to `0`–`86400`. SOAP 1.5 / 1.2 narrow the measurands as for any `MeterValues` (1.2 carries no `context`).
+- [GitHub issues](sources/github-issues.md): #454.

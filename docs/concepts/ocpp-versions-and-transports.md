@@ -9,6 +9,7 @@ sources:
   - src/cli/soapCallbackUrl.ts
   - src/cli/soapTunnel.ts
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
+  - src/cp/application/services/ClockAlignedMeterScheduler.ts (clock-aligned metering)
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -20,7 +21,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
-updated: 2026-10-04
+updated: 2026-10-28
 ---
 
 # OCPP versions and transports
@@ -94,6 +95,53 @@ WebSockets, at the cost of a control frame instead of a Heartbeat round trip.
   answers `NotSupported`, `GetConfiguration` lists the key as unknown, and
   2.x `SetVariables` answers `Rejected`. The CLI and daemon (Bun's client, or
   `ws` under Node) always send them.
+
+## Clock-aligned meter values (`ClockAlignedDataInterval`)
+
+Every `ClockAlignedDataInterval` seconds a charge point sends one
+clock-aligned sample per connector (#454) — the 1.6 keys
+`ClockAlignedDataInterval` / `MeterValuesAlignedData`, or
+`AlignedDataCtrlr.Interval` / `AlignedDataCtrlr.Measurands` through
+`SetVariables` on 2.0.1 / 2.1. It is independent of the transaction meter
+scheduler (`MeterValueSampleInterval`, auto-meter curves): it reads the
+register and never advances it.
+
+- **Boundaries are wall-clock instants counted from UTC midnight**, not
+  "every N seconds since start": with `900` samples go out at `12:00:00`,
+  `12:15:00`, `12:30:00`… whenever the station booted. An interval that does
+  not divide a day shortens the day's last slot; midnight is always a
+  boundary. Each sample carries the boundary instant as its `timestamp` and,
+  except on 1.2 (which has no `context`), `context` `Sample.Clock`.
+- **`0` (the default) sends nothing.** Valid values are `0`–`86400`; anything
+  else is answered `Rejected`.
+- **`MeterValuesAlignedData` picks the measurands**, not
+  `MeterValuesSampledData`. It is empty by default, and an empty list sends
+  nothing even with a positive interval. The SOAP dialects narrow it the way
+  they narrow every `MeterValues`: 1.5 drops the measurands it does not
+  define and sends nothing for a connector when none is left (with a
+  warning); 1.2 only ever reports the energy register, `"0"` when the list
+  does not name `Energy.Active.Import.Register`.
+- **What carries the sample:**
+
+  | Version         | Live transaction on the connector                                           | Otherwise                                   |
+  | --------------- | --------------------------------------------------------------------------- | ------------------------------------------- |
+  | 1.6J, 1.5, 1.6S | `MeterValues` with the transaction's `transactionId` (none while it is `0`) | `MeterValues` without `transactionId`       |
+  | 1.2             | `MeterValues` (1.2 has no `transactionId`)                                  | `MeterValues`                               |
+  | 2.0.1, 2.1      | `TransactionEvent(Updated)`, `triggerReason` `MeterValueClock`              | `MeterValues` with the connector's `evseId` |
+
+  The 2.x clock trigger is never `MeterValuePeriodic`, which stays reserved to
+  periodic in-transaction samples (#347).
+
+- **It runs while BootNotification is Accepted** and stops when the
+  connection closes or a boot is answered Pending / Rejected; it restarts on
+  the next accepted boot. Samples are not taken while offline. A change takes
+  effect at once on the new grid; a value persisted with `--state-db`
+  applies from the first accepted boot.
+- **A boundary is reported once per process**, even when a reconnect, a
+  re-boot or an interval change lands on it again.
+- Not implemented: connector 0 / `evseId` 0 (main meter), `StopTxnAlignedData`
+  in `StopTransaction`, `AlignedDataCtrlr.SendDuringIdle` and the `TxEnded*`
+  variables, and per-period aggregation of `*.Interval` measurands.
 
 ## SOAP versions (1.2, 1.5, 1.6S)
 

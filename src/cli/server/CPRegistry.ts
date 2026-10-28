@@ -273,7 +273,7 @@ export class CPRegistry {
       }
       // Use the internal create path WITHOUT re-inserting into the DB —
       // these rows already exist.
-      const svc = this.instantiate(init);
+      const svc = this.instantiate(init, { reconcileSessions: false });
       // Restore per-connector runtime state (OCPP status, in-flight
       // transaction, meter, soc) BEFORE wiring the WebSocket so the
       // first StatusNotification we send carries the resumed status
@@ -518,7 +518,6 @@ export class CPRegistry {
     const preparedInit = this.prepareInit(init);
     this.persistCreate(preparedInit);
     const svc = this.instantiate(preparedInit);
-    svc.reconcileChargingSessions();
     // Attach network simulation config before seeding so scenarios
     // run with faults applied.
     if (this.networkSimManager) {
@@ -570,9 +569,6 @@ export class CPRegistry {
     this.services.delete(init.cpId);
     this.persistCreate(preparedInit); // ON CONFLICT UPDATE — leaves scenarios intact
     const svc = this.instantiate(preparedInit);
-    // #447: the rebuild drops the in-memory transactions, so the sessions
-    // the previous instance left running end up interrupted.
-    svc.reconcileChargingSessions();
     // Attach network simulation config so the re-created CP gets its faults.
     if (this.networkSimManager) {
       this.networkSimManager.onCpCreated(preparedInit.cpId);
@@ -606,8 +602,17 @@ export class CPRegistry {
 
   /** Construct + register the in-memory CLIChargePointService without
    *  touching the DB. Used by both create() (after DB insert) and
-   *  restoreFromDatabase() (DB row already exists). */
-  private instantiate(init: ChargePointInitOptions): CLIChargePointService {
+   *  restoreFromDatabase() (DB row already exists).
+   *
+   *  #447: the charging sessions a previous instance under this id left open
+   *  are reconciled here, before anyone hears of the service — a `cp.update`
+   *  rebuild drops the in-memory transactions, so they end up interrupted.
+   *  The restore path opts out and reconciles once the connector runtime is
+   *  back, so a restored transaction keeps its session. */
+  private instantiate(
+    init: ChargePointInitOptions,
+    { reconcileSessions = true }: { reconcileSessions?: boolean } = {},
+  ): CLIChargePointService {
     const svc = new CLIChargePointService(
       this.withDerivedSoapCallback(init),
       this.database,
@@ -623,6 +628,7 @@ export class CPRegistry {
       unsub();
       unsubSettled();
     });
+    if (reconcileSessions) svc.reconcileChargingSessions();
     // The single choke point for "a service now exists under this init" —
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();

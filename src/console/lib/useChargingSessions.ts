@@ -25,23 +25,19 @@ function withSession(
   };
 }
 
-export interface UseChargingSessionsResult {
-  page: ChargingSessionPage;
-  isLoading: boolean;
-  error: string | null;
-  /** False when the service has no session method (a test double). Against
-   *  a daemon older than #447 the read fails and `error` says so. */
-  supported: boolean;
-  refresh: () => Promise<void>;
-}
-
 /**
  * A charge point's newest charging sessions (#447, `sessions.list`). Reads
  * one page on mount and when `cpId` changes, then applies each session the
  * charge point pushes (`charging-session`): a known one is replaced in place,
- * a new one is added at the top.
+ * a new one is added at the top. A service without the method (a test
+ * double) shows no session; against a daemon older than #447 the read fails
+ * and `error` says so.
  */
-export function useChargingSessions(cpId: string): UseChargingSessionsResult {
+export function useChargingSessions(cpId: string): {
+  page: ChargingSessionPage;
+  isLoading: boolean;
+  error: string | null;
+} {
   const { chargePointService } = useDataContext();
   const supported =
     typeof chargePointService.listChargingSessions === "function";
@@ -105,5 +101,5 @@ export function useChargingSessions(cpId: string): UseChargingSessionsResult {
     });
   }, [chargePointService, cpId, supported]);
 
-  return { page, isLoading, error, supported, refresh };
+  return { page, isLoading, error };
 }

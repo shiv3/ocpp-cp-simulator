@@ -48,7 +48,8 @@ import {
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
 import {
-  toV201StoppedReason,
+  endedStoppedReason,
+  endedTriggerReason,
   type Transaction,
   type TransactionChargingState,
   type TransactionUpdateOptions,
@@ -577,6 +578,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       `[v2.0.1] TransactionEvent idTokenInfo ${status} for transaction ${transactionId}; StopTxOnInvalidId=${stopOnInvalid}`,
       LogType.TRANSACTION,
     );
+    connector.transaction!.authorizationStatus = status;
     if (stopOnInvalid) {
       this._chargePoint.stopTransaction(connector, "DeAuthorized", {
         triggerReason: "Deauthorized",
@@ -750,15 +752,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
       timestamp,
-      triggerReason: transaction.stopTriggerReason ?? "StopAuthorized",
+      triggerReason: endedTriggerReason(transaction),
       seqNo,
       transactionInfo: {
         transactionId,
         // #335: an explicitly named 2.0.1 reason is sent verbatim; only an
         // unnamed one is derived from the 1.6-shaped `stopReason`.
-        stoppedReason:
-          transaction.stoppedReason ??
-          toV201StoppedReason(transaction.stopReason),
+        stoppedReason: endedStoppedReason(transaction),
       },
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }

@@ -11,6 +11,7 @@ import {
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ChargingSession } from "../../../cp/domain/session/ChargingSession";
+import { chargingSession } from "../../../test/chargingSessionFixtures";
 import type { ChargingSessionPage } from "../../../cp/domain/persistence/ChargingSessionRepository";
 import type { ChargePointService } from "../../../data/interfaces/ChargePointService";
 
@@ -27,28 +28,7 @@ function makeService(
   });
 }
 
-function session(overrides: Partial<ChargingSession> = {}): ChargingSession {
-  return {
-    sessionId: "s-1",
-    cpId: "CP-1",
-    connectorId: 1,
-    evseId: null,
-    ocppVersion: "OCPP-1.6J",
-    transactionId: "42",
-    idTag: "TAG-1",
-    startedAt: "2026-10-28T10:00:00.000Z",
-    endedAt: "2026-10-28T10:25:30.000Z",
-    durationMs: 1_530_000,
-    meterStartWh: 1000,
-    meterStopWh: 13_345,
-    energyWh: 12_345,
-    stopReason: "Local",
-    triggerReason: null,
-    authorizationStatus: null,
-    outcome: "completed",
-    ...overrides,
-  };
-}
+const session = chargingSession;
 
 const page = (sessions: ChargingSession[]): ChargingSessionPage => ({
   sessions,
@@ -126,7 +106,7 @@ describe("TransactionsTab", () => {
       "1",
       "42",
       "TAG-1",
-      "25:30",
+      "25 m 30 s",
       "12.35 kWh",
       "Local",
       "completed",

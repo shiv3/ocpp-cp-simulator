@@ -1755,12 +1755,7 @@ export class RemoteChargePointService implements ChargePointService {
     cpId: string,
     query: Omit<ChargingSessionQuery, "cpId"> = {},
   ): Promise<ChargingSessionPage> {
-    const { outcomes, ...rest } = query;
-    return this.rpc("sessions.list", {
-      cpId,
-      ...rest,
-      ...(outcomes && { outcomes: [...outcomes] }),
-    });
+    return this.rpc("sessions.list", { cpId, ...query });
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

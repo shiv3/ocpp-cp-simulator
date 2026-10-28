@@ -44,6 +44,7 @@ import {
 } from "../cp/domain/connector/Transaction";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { CHARGING_SESSION_OUTCOMES } from "../cp/domain/session/ChargingSession";
+import { MAX_SESSIONS_PER_CP } from "../cp/domain/persistence/ChargingSessionRepository";
 import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
 import {
   SCENARIO_RUN_EXECUTION_STATES,
@@ -79,7 +80,7 @@ export const SCENARIO_RUNS_PAGE_MAX = 200;
 /** #447: `sessions.list` page size — the default, and the most a page may
  *  ask for (a charge point's whole retained history). */
 export const CHARGING_SESSIONS_PAGE_DEFAULT = 50;
-export const CHARGING_SESSIONS_PAGE_MAX = 500;
+export const CHARGING_SESSIONS_PAGE_MAX = MAX_SESSIONS_PER_CP;
 /** #447: one charging session, the same shape for every OCPP version. */
 const chargingSessionSchema = z.object({
   sessionId: z.string(),

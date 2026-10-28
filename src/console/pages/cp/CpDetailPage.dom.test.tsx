@@ -12,7 +12,7 @@ import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import { LogLevel, LogType } from "../../../cp/shared/Logger";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 import type { ChargePointEvent } from "../../../data/interfaces/ChargePointService";
-import type { ChargingSession } from "../../../cp/domain/session/ChargingSession";
+import { activeChargingSession } from "../../../test/chargingSessionFixtures";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
 import type { ChargePointConfig } from "../../../components/chargePointConfig";
 
@@ -131,25 +131,11 @@ function snapshot(
   };
 }
 
-const txSessionFixture: ChargingSession = {
-  sessionId: "s-7",
-  cpId: "CP-1",
+const txSessionFixture = activeChargingSession({
   connectorId: 2,
-  evseId: null,
-  ocppVersion: "OCPP-1.6J",
   transactionId: "7",
   idTag: "TAG-7",
-  startedAt: "2024-01-01T00:00:00.000Z",
-  endedAt: null,
-  durationMs: null,
-  meterStartWh: 0,
-  meterStopWh: null,
-  energyWh: null,
-  stopReason: null,
-  triggerReason: null,
-  authorizationStatus: null,
-  outcome: "active",
-};
+});
 
 describe("CpDetailPage", () => {
   let cleanup: (() => Promise<void>) | null = null;

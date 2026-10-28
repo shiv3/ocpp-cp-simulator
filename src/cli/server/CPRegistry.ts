@@ -282,6 +282,8 @@ export class CPRegistry {
       // without emitting statusChange — so the listeners on the new
       // service won't trigger a duplicate persist or notification.
       const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
+      // #447: after the restore, so a restored transaction keeps its session.
+      svc.reconcileChargingSessions();
       if (restoredConnectors > 0) {
         console.log(
           `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
@@ -516,6 +518,7 @@ export class CPRegistry {
     const preparedInit = this.prepareInit(init);
     this.persistCreate(preparedInit);
     const svc = this.instantiate(preparedInit);
+    svc.reconcileChargingSessions();
     // Attach network simulation config before seeding so scenarios
     // run with faults applied.
     if (this.networkSimManager) {
@@ -567,6 +570,9 @@ export class CPRegistry {
     this.services.delete(init.cpId);
     this.persistCreate(preparedInit); // ON CONFLICT UPDATE — leaves scenarios intact
     const svc = this.instantiate(preparedInit);
+    // #447: the rebuild drops the in-memory transactions, so the sessions
+    // the previous instance left running end up interrupted.
+    svc.reconcileChargingSessions();
     // Attach network simulation config so the re-created CP gets its faults.
     if (this.networkSimManager) {
       this.networkSimManager.onCpCreated(preparedInit.cpId);

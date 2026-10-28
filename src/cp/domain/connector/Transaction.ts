@@ -190,6 +190,24 @@ export function toV201StoppedReason(
   }
 }
 
+/** The 2.x Ended event's `stoppedReason`: the one the stop named, else the
+ *  1.6-shaped `stopReason` mapped. */
+export function endedStoppedReason(
+  transaction: Pick<Transaction, "stoppedReason" | "stopReason">,
+): TransactionStoppedReason {
+  return (
+    transaction.stoppedReason ?? toV201StoppedReason(transaction.stopReason)
+  );
+}
+
+/** The 2.x Ended event's `triggerReason`; the local StopAuthorized path when
+ *  the stop named none. */
+export function endedTriggerReason(
+  transaction: Pick<Transaction, "stopTriggerReason">,
+): TransactionStopTriggerReason {
+  return transaction.stopTriggerReason ?? "StopAuthorized";
+}
+
 /** `start_transaction` options a control-plane caller may name (#335). */
 export interface StartTransactionCommandOptions {
   triggerReason?: TransactionEventTriggerReason;
@@ -277,6 +295,10 @@ export interface Transaction {
   /** OCPP 2.x TransactionEvent stoppedReason named explicitly by the stop
    *  (#335). When absent the encoder maps `stopReason` instead. */
   stoppedReason?: TransactionStoppedReason;
+  /** The id status the CSMS answered other than `Accepted` (StartTransaction
+   *  .conf `idTagInfo`, 2.x TransactionEvent.conf `idTokenInfo`), recorded
+   *  before the station stops on it (#447). */
+  authorizationStatus?: string;
   batteryCapacityKwh?: number; // EV battery capacity in kWh
   initialSoc?: number; // Initial State of Charge percentage (0-100)
 }

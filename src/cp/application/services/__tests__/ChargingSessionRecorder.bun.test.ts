@@ -14,6 +14,7 @@ import {
   bootedChargePoint,
 } from "../../../infrastructure/transport/__tests__/stationHarness";
 import { canBindBunServe } from "../../../../test/bunServe";
+import { activeChargingSession } from "../../../../test/chargingSessionFixtures";
 import { ChargingSessionRecorder } from "../ChargingSessionRecorder";
 
 /**
@@ -301,26 +302,13 @@ describe("ChargingSessionRecorder.reconcile (#447)", () => {
   function unendedSession(
     overrides: Partial<ChargingSession> = {},
   ): ChargingSession {
-    return {
-      sessionId: "s-1",
+    return activeChargingSession({
       cpId: "CP-RESTORE",
-      connectorId: 1,
-      evseId: null,
-      ocppVersion: "OCPP-1.6J",
-      transactionId: "42",
       idTag: "TAG",
       startedAt: startTime.toISOString(),
-      endedAt: null,
-      durationMs: null,
       meterStartWh: 100,
-      meterStopWh: null,
-      energyWh: null,
-      stopReason: null,
-      triggerReason: null,
-      authorizationStatus: null,
-      outcome: "active",
       ...overrides,
-    };
+    });
   }
 
   it("keeps a session whose transaction was restored active, under its own id", () => {

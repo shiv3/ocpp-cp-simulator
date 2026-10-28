@@ -771,11 +771,6 @@ export class CLIChargePointService {
     this._sessionRecorder.onChange((session) =>
       this.emit({ event: "charging_session", data: session }),
     );
-    // Sessions a previous instance under this id left open: a `cp.update`
-    // rebuild, or a restart. A restart reconciles again once the connector
-    // runtime is restored (restoreConnectorRuntimeFromDatabase), which
-    // revives the sessions whose transaction came back.
-    this._sessionRecorder.reconcile();
     this.setupMeterValueCallbacks();
     // --trace-output (#188): a single wiring point covers standalone,
     // daemon create, daemon restore, and daemon update re-create, since
@@ -814,7 +809,7 @@ export class CLIChargePointService {
     if (!options.cpId) {
       throw new Error("cpId is required");
     }
-    return new CLIChargePointService(
+    const service = new CLIChargePointService(
       {
         cpId: options.cpId,
         wsUrl: options.wsUrl,
@@ -842,6 +837,9 @@ export class CLIChargePointService {
       },
       database,
     );
+    // The standalone runtime restores no connector runtime: settle now.
+    service.reconcileChargingSessions();
+    return service;
   }
 
   onEvent(handler: EventHandler): () => void {
@@ -3090,9 +3088,17 @@ export class CLIChargePointService {
       }
       restored += 1;
     });
-    // #447: the restored transactions take their sessions back.
-    this._sessionRecorder.reconcile();
     return restored;
+  }
+
+  /**
+   * #447: settle the sessions a previous instance under this id left open (a
+   * `cp.update` rebuild, a restart) against the connectors as they are now.
+   * Call it once, after the connector runtime is restored, so a restored
+   * transaction keeps its session instead of it being marked interrupted.
+   */
+  reconcileChargingSessions(): void {
+    this._sessionRecorder.reconcile();
   }
 
   private attachConnectorEventForwarders(): void {

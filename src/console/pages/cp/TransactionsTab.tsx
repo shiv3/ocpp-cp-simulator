@@ -1,10 +1,10 @@
 import React from "react";
 
 import { cn } from "@/lib/utils";
+import { formatEnergyKwh, formatSessionDuration } from "@/lib/connectorFormat";
 import type { ChargingSessionOutcome } from "@/cp/domain/session/ChargingSession";
 
 import EmptyState from "../../components/EmptyState";
-import { formatElapsed } from "../../lib/scenarioExpectation";
 import { useChargingSessions } from "../../lib/useChargingSessions";
 
 export interface TransactionsTabProps {
@@ -19,10 +19,6 @@ const OUTCOME_DOT: Record<ChargingSessionOutcome, string> = {
 };
 
 const DASH = "—";
-
-function formatEnergy(wh: number | null): string {
-  return wh === null ? DASH : `${(wh / 1000).toFixed(2)} kWh`;
-}
 
 /**
  * Charging-session history of a CP (#447): one row per transaction, newest
@@ -86,10 +82,12 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
               <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
                 {session.durationMs === null
                   ? DASH
-                  : formatElapsed(session.durationMs)}
+                  : formatSessionDuration(session.durationMs)}
               </td>
               <td className="px-3 py-2 font-mono text-xs text-cx-fg2">
-                {formatEnergy(session.energyWh)}
+                {session.energyWh === null
+                  ? DASH
+                  : formatEnergyKwh(session.energyWh)}
               </td>
               <td
                 className="px-3 py-2 text-cx-fg2"

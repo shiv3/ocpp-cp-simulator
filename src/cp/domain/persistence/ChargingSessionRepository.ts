@@ -22,7 +22,7 @@ export const MAX_SESSIONS_PER_CP = 500;
 export interface ChargingSessionQuery {
   cpId: string;
   connectorId?: number;
-  outcomes?: readonly ChargingSessionOutcome[];
+  outcomes?: ChargingSessionOutcome[];
   limit?: number;
   offset?: number;
   /** By start time; `desc` (newest first) by default. */
@@ -46,19 +46,6 @@ export interface ChargingSessionRepository {
   clear(): void;
 }
 
-/** True when `session` passes the query's filters (not its paging). */
-export function matchesSessionQuery(
-  session: ChargingSession,
-  query: ChargingSessionQuery,
-): boolean {
-  return (
-    session.cpId === query.cpId &&
-    (query.connectorId === undefined ||
-      session.connectorId === query.connectorId) &&
-    (query.outcomes === undefined || query.outcomes.includes(session.outcome))
-  );
-}
-
 interface StoredSession {
   /** Record order: the tie-break for equal start times, and eviction order. */
   seq: number;
@@ -80,6 +67,8 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
     }
     const seq = sessions.get(session.sessionId)?.seq ?? this.nextSeq++;
     sessions.set(session.sessionId, { seq, session });
+    // Only an ended session can take the charge point past the cap.
+    if (session.outcome === "active") return;
     let ended = 0;
     for (const stored of sessions.values()) {
       if (stored.session.outcome !== "active") ended++;
@@ -94,8 +83,13 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
 
   list(query: ChargingSessionQuery): ChargingSessionPage {
     const direction = query.order === "asc" ? 1 : -1;
+    const { connectorId, outcomes } = query;
     const matching = [...(this.byCp.get(query.cpId)?.values() ?? [])]
-      .filter(({ session }) => matchesSessionQuery(session, query))
+      .filter(
+        ({ session }) =>
+          (connectorId === undefined || session.connectorId === connectorId) &&
+          (outcomes === undefined || outcomes.includes(session.outcome)),
+      )
       .sort(
         (a, b) =>
           direction *

@@ -9,6 +9,10 @@ import {
 } from "../ChargingSessionRepository";
 import { SqliteChargingSessionRepository } from "../SqliteChargingSessionRepository";
 import type { ChargingSession } from "../../session/ChargingSession";
+import {
+  chargingSession,
+  UNENDED,
+} from "../../../../test/chargingSessionFixtures";
 
 /**
  * #447: the session history contract, run against both implementations — the
@@ -20,38 +24,18 @@ let clock = Date.parse("2026-10-28T08:00:00.000Z");
 
 function session(overrides: Partial<ChargingSession> = {}): ChargingSession {
   clock += 60_000;
-  return {
+  return chargingSession({
     sessionId: `s-${clock}`,
     cpId: "CP-A",
-    connectorId: 1,
-    evseId: null,
-    ocppVersion: "OCPP-1.6J",
-    transactionId: "42",
-    idTag: "TAG",
     startedAt: new Date(clock).toISOString(),
     endedAt: new Date(clock + 30_000).toISOString(),
     durationMs: 30_000,
-    meterStartWh: 0,
-    meterStopWh: 500,
-    energyWh: 500,
-    stopReason: "Local",
-    triggerReason: null,
-    authorizationStatus: null,
-    outcome: "completed",
     ...overrides,
-  };
+  });
 }
 
 function active(overrides: Partial<ChargingSession> = {}): ChargingSession {
-  return session({
-    endedAt: null,
-    durationMs: null,
-    meterStopWh: null,
-    energyWh: null,
-    stopReason: null,
-    outcome: "active",
-    ...overrides,
-  });
+  return session({ ...UNENDED, ...overrides });
 }
 
 const opened: BunSqliteDatabase[] = [];

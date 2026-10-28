@@ -57,6 +57,11 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
         // §4.8 guarantees it's present even on rejection, and the
         // DeAuthorized StopTransaction.req below needs it to correlate.
         connector.transactionId = transactionId;
+        // #447: the verdict rides on the transaction, so whoever reads the
+        // stop below already sees why it happened.
+        if (connector.transaction) {
+          connector.transaction.authorizationStatus = status;
+        }
         if (stopOnInvalid) {
           context.chargePoint.stopTransaction(connector, "DeAuthorized");
         } else if (connector.status !== OCPPStatus.Charging) {

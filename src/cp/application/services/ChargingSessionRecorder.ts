@@ -1,7 +1,8 @@
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
 import {
-  toV201StoppedReason,
+  endedStoppedReason,
+  endedTriggerReason,
   type Transaction,
 } from "../../domain/connector/Transaction";
 import type { ChargingSessionRepository } from "../../domain/persistence/ChargingSessionRepository";
@@ -45,12 +46,6 @@ export class ChargingSessionRecorder {
   private readonly listeners = new Set<(session: ChargingSession) => void>();
   /** The running session of each connector. */
   private readonly active = new Map<number, ChargingSession>();
-  /** The session each connector ended last, and the domain reason it ended
-   *  with: 1.6 reports a rejected id only after its DeAuthorized stop. */
-  private readonly lastEnded = new Map<
-    number,
-    { session: ChargingSession; reason: string | undefined }
-  >();
   private readonly now: () => Date;
   private readonly newSessionId: () => string;
   private readonly isV2: boolean;
@@ -105,8 +100,8 @@ export class ChargingSessionRecorder {
    *   restored from before this history existed.
    * - Every other unended session is `interrupted`, its end unknown.
    *
-   * Idempotent: a session marked interrupted by an earlier call comes back
-   * as active once its transaction is restored.
+   * A session marked interrupted by an earlier call comes back as active if
+   * its transaction does. A session already settled is not stored again.
    */
   reconcile(): void {
     const unended = this.repository.unended(this.cp.id);
@@ -121,17 +116,23 @@ export class ChargingSessionRecorder {
           s.startedAt === startedAt &&
           !claimed.has(s.sessionId),
       );
-      if (match) claimed.add(match.sessionId);
-      const session: ChargingSession = match
-        ? {
-            ...match,
-            transactionId:
-              this.transactionIdOf(transaction) ?? match.transactionId,
-            outcome: "active",
-          }
-        : this.newSession(connectorId, transaction);
+      if (!match) {
+        this.update(connectorId, this.newSession(connectorId, transaction));
+        continue;
+      }
+      claimed.add(match.sessionId);
+      const session: ChargingSession = {
+        ...match,
+        transactionId: this.transactionIdOf(transaction) ?? match.transactionId,
+        outcome: "active",
+      };
       this.active.set(connectorId, session);
-      this.store(session);
+      if (
+        session.transactionId !== match.transactionId ||
+        match.outcome !== "active"
+      ) {
+        this.store(session);
+      }
     }
     for (const session of unended) {
       if (claimed.has(session.sessionId)) continue;
@@ -152,10 +153,7 @@ export class ChargingSessionRecorder {
     // A session still open here lost its end (no stop event reached us).
     const dangling = this.active.get(connectorId);
     if (dangling) this.store({ ...dangling, outcome: "interrupted" });
-    const session = this.newSession(connectorId, transaction);
-    this.active.set(connectorId, session);
-    this.lastEnded.delete(connectorId);
-    this.store(session);
+    this.update(connectorId, this.newSession(connectorId, transaction));
   }
 
   private onTransactionIdChange(
@@ -177,67 +175,56 @@ export class ChargingSessionRecorder {
     if (!transaction) return;
     const open =
       this.active.get(connectorId) ?? this.newSession(connectorId, transaction);
+    // The handlers that stop on a rejected id record the verdict on the
+    // transaction first, so it is here before `startTransactionNotAccepted`.
+    const authorizationStatus =
+      transaction.authorizationStatus ?? open.authorizationStatus;
+    this.store({
+      ...this.ended(connectorId, open, transaction),
+      stopReason: this.isV2
+        ? endedStoppedReason(transaction)
+        : (transaction.stopReason ?? "Local"),
+      triggerReason: this.isV2 ? endedTriggerReason(transaction) : null,
+      authorizationStatus,
+      outcome: classifyEndedSession({ reason, authorizationStatus }),
+    });
+  }
+
+  /** A rejected id the station keeps charging on (no stop follows). */
+  private onNotAccepted(connectorId: number, status: string): void {
+    const running = this.active.get(connectorId);
+    if (running) {
+      this.update(connectorId, { ...running, authorizationStatus: status });
+    }
+  }
+
+  private onStartFailed(connectorId: number): void {
+    const session = this.active.get(connectorId);
+    const transaction = this.cp.connectors.get(connectorId)?.transaction;
+    if (!session || !transaction) return;
+    this.store({
+      ...this.ended(connectorId, session, transaction),
+      outcome: "failed",
+    });
+  }
+
+  /** `open` closed with `transaction`'s end, and no longer running. */
+  private ended(
+    connectorId: number,
+    open: ChargingSession,
+    transaction: Transaction,
+  ): ChargingSession {
     this.active.delete(connectorId);
     const endedAt = (transaction.stopTime ?? this.now()).toISOString();
     const meterStopWh = transaction.meterStop;
-    const session: ChargingSession = {
+    return {
       ...open,
       transactionId: this.transactionIdOf(transaction) ?? open.transactionId,
       endedAt,
       durationMs: deriveDurationMs(open.startedAt, endedAt),
       meterStopWh,
       energyWh: deriveEnergyWh(open.meterStartWh, meterStopWh),
-      stopReason: this.isV2
-        ? (transaction.stoppedReason ??
-          toV201StoppedReason(transaction.stopReason))
-        : (transaction.stopReason ?? "Local"),
-      triggerReason: this.isV2
-        ? (transaction.stopTriggerReason ?? "StopAuthorized")
-        : null,
-      outcome: classifyEndedSession({
-        reason,
-        authorizationStatus: open.authorizationStatus,
-      }),
     };
-    this.lastEnded.set(connectorId, { session, reason });
-    this.store(session);
-  }
-
-  private onNotAccepted(connectorId: number, status: string): void {
-    const running = this.active.get(connectorId);
-    if (running) {
-      this.update(connectorId, { ...running, authorizationStatus: status });
-      return;
-    }
-    // 1.6 and 2.x both stop on the rejection before reporting it.
-    const ended = this.lastEnded.get(connectorId);
-    if (!ended) return;
-    const session: ChargingSession = {
-      ...ended.session,
-      authorizationStatus: status,
-      outcome: classifyEndedSession({
-        reason: ended.reason,
-        authorizationStatus: status,
-      }),
-    };
-    this.lastEnded.set(connectorId, { ...ended, session });
-    this.store(session);
-  }
-
-  private onStartFailed(connectorId: number): void {
-    const session = this.active.get(connectorId);
-    if (!session) return;
-    this.active.delete(connectorId);
-    const endedAt = this.now().toISOString();
-    const meterStopWh = this.cp.connectors.get(connectorId)?.meterValue ?? null;
-    this.store({
-      ...session,
-      endedAt,
-      durationMs: deriveDurationMs(session.startedAt, endedAt),
-      meterStopWh,
-      energyWh: deriveEnergyWh(session.meterStartWh, meterStopWh),
-      outcome: "failed",
-    });
   }
 
   private newSession(

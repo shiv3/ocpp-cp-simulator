@@ -11,19 +11,20 @@ import { answerEverythingElse, bootedChargePoint } from "./stationHarness";
  * no StopTransaction.req follows, so no `transactionStopped` either.
  */
 describe("OCPP 1.6 StartTransaction CALLERROR (#447)", () => {
-  it("emits transactionStartFailed before closing the transaction", async () => {
+  it("emits transactionStartFailed once the transaction is closed", async () => {
     const csms = startMockCsms();
     const cp = await bootedChargePoint(csms, "CP16-CALLERROR", "OCPP-1.6J");
     cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
     const stopAnswering = answerEverythingElse(csms, ["StartTransaction"]);
     const failures: Array<{
       event: ChargePointEvents["transactionStartFailed"];
-      hadTransaction: boolean;
+      closed: boolean;
     }> = [];
     cp.events.on("transactionStartFailed", (event) =>
       failures.push({
         event,
-        hadTransaction: cp.getConnector(1)?.transaction != null,
+        // Closed but still on the connector: its stop time is readable.
+        closed: cp.getConnector(1)?.transaction?.stopTime instanceof Date,
       }),
     );
     const stops: unknown[] = [];
@@ -40,12 +41,10 @@ describe("OCPP 1.6 StartTransaction CALLERROR (#447)", () => {
       expect(failures).toEqual([
         {
           event: { connectorId: 1, errorCode: "InternalError" },
-          hadTransaction: true,
+          closed: true,
         },
       ]);
       expect(stops).toEqual([]);
-      // cleanTransaction stamps the stop; the object stays until the next start.
-      expect(cp.getConnector(1)?.transaction?.stopTime).not.toBeNull();
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
     } finally {
       stopAnswering();

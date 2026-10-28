@@ -76,6 +76,10 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
       "INSERT INTO scenario_runs (cp_id, run_id, connector_id, scenario_id, started_at, ended_at, execution_state, verdict, summary_json, report_json) VALUES (?, 'r1', 1, 's', ?, ?, 'completed', 'PASS', '{}', '{}')",
       [cp, t, t],
     );
+    db.run(
+      "INSERT INTO charging_sessions (cp_id, session_id, connector_id, started_at, outcome, session_json) VALUES (?, 's1', 1, ?, 'active', '{}')",
+      [cp, t],
+    );
   }
   db.run("INSERT OR REPLACE INTO kv (key, value) VALUES ('pref', '1')");
   db.run(

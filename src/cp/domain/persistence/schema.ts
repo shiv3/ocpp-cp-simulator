@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -239,6 +239,27 @@ CREATE INDEX IF NOT EXISTS scenario_runs_cp_started
 CREATE INDEX IF NOT EXISTS scenario_runs_cp_scenario
   ON scenario_runs (cp_id, scenario_id);
 
+-- Charging-session history (#447): one row per transaction the charge point
+-- ran, normalized across OCPP versions; the listing \`sessions.list\` pages
+-- through. \`session_json\` is the whole ChargingSession; the columns are
+-- what the listing filters and sorts on, and \`ended_at IS NULL\` finds the
+-- sessions a restart has to reconcile. \`seq\` is record order: retention
+-- evicts a charge point's lowest ended ones
+-- (ChargingSessionRepository.MAX_SESSIONS_PER_CP).
+CREATE TABLE IF NOT EXISTS charging_sessions (
+  seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+  cp_id         TEXT NOT NULL,
+  session_id    TEXT NOT NULL,
+  connector_id  INTEGER NOT NULL,
+  started_at    TEXT NOT NULL,
+  ended_at      TEXT,
+  outcome       TEXT NOT NULL,
+  session_json  TEXT NOT NULL,
+  UNIQUE (cp_id, session_id)
+);
+CREATE INDEX IF NOT EXISTS charging_sessions_cp_started
+  ON charging_sessions (cp_id, started_at);
+
 -- Saved vehicle profiles (#458): reusable vehicles, hand-made or imported
 -- from a catalog, that a connector, the default EV settings or a scenario
 -- take a copy of. \`body\` is the whole profile (specs, curve, the user's
@@ -289,6 +310,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
   { name: "scenario_runs", perCp: true, resetOnStateReset: true },
+  { name: "charging_sessions", perCp: true, resetOnStateReset: true },
   { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
 ];
 
@@ -559,6 +581,9 @@ export function runMigrations(db: Database): void {
       db.exec("ALTER TABLE charge_points ADD COLUMN labels TEXT");
     }
   }
+
+  // v16 → v17 (#447): the `charging_sessions` history table and its index,
+  // `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

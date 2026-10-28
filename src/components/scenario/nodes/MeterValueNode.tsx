@@ -1,13 +1,13 @@
-import React, { memo } from "react";
+import React, { memo, useContext } from "react";
 import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
 import { MeterValueNodeData } from "../../../cp/application/scenario/ScenarioTypes";
+import { LiveMeterReadingContext } from "./liveMeterReading";
 
 type ExtendedMeterValueNodeData = MeterValueNodeData & {
   progress?: {
     remaining: number;
     total: number;
   };
-  currentValue?: number;
 };
 
 function formatMeterReading(valueWh: number): string {
@@ -25,8 +25,7 @@ const MeterValueNode: React.FC<NodeProps<Node<ExtendedMeterValueNodeData>>> = ({
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100
     : 0;
-  const displayValue =
-    data.currentValue !== undefined ? data.currentValue : data.value;
+  const displayValue = useContext(LiveMeterReadingContext) ?? data.value;
 
   return (
     <div

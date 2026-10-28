@@ -67,6 +67,7 @@ import ConfigSetNode from "./nodes/ConfigSetNode";
 import DataTransferNode from "./nodes/DataTransferNode";
 import OcppCallNode from "./nodes/OcppCallNode";
 import ConnectionTriggerNode from "./nodes/ConnectionTriggerNode";
+import { LiveMeterReadingContext } from "./nodes/liveMeterReading";
 
 import { useDataContext } from "../../data/providers/DataProvider";
 import { useDarkMode } from "../../contexts/DarkModeContext";
@@ -189,8 +190,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState(scenario.edges);
   const [selectedNode, setSelectedNode] = useState<ScenarioNode | null>(null);
   const [formData, setFormData] = useState<NodeFormData>({});
-  // The connector's live meter reading, shown on every Meter Value node.
-  const [liveMeterValueWh, setMeterValue] = useState<number>(0);
+  // The connector's live meter reading, shown on every Meter Value node
+  // (`LiveMeterReadingContext`); null until the connector reports one.
+  const [liveMeterValueWh, setMeterValue] = useState<number | null>(null);
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
   // Captured from `<ReactFlow onInit>` so handleAutoLayout can call
@@ -230,28 +232,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     },
     [],
   );
-
-  // Push the connector's live meter reading into every MeterValue node's
-  // `data.currentValue` so the node face renders the running total instead
-  // of the static `data.value` from the scenario JSON. We don't mutate
-  // `data.value` (that's the configured starting value); MeterValueNode
-  // already prefers `currentValue` when present.
-  useEffect(() => {
-    setNodes((nds) => {
-      let changed = false;
-      const next = nds.map((node) => {
-        if (node.type !== "meterValue") return node;
-        const cur = (node.data as { currentValue?: number }).currentValue;
-        if (cur === liveMeterValueWh) return node;
-        changed = true;
-        return {
-          ...node,
-          data: { ...node.data, currentValue: liveMeterValueWh },
-        };
-      });
-      return changed ? next : nds;
-    });
-  }, [liveMeterValueWh, setNodes]);
 
   // Re-fit the ReactFlow viewport once the scenario's nodes have flushed, so
   // the whole graph is in frame from the first paint (the editor remounts per
@@ -827,74 +807,79 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             ref={flowContainerRef}
             className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden min-h-0"
           >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodesDelete={onNodesDelete}
-              onConnect={onConnect}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              onNodeDoubleClick={handleNodeDoubleClick}
-              nodeTypes={nodeTypes}
-              deleteKeyCode={["Backspace", "Delete"]}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              colorMode={isDark ? "dark" : "light"}
-              onInit={(instance) => {
-                rfInstanceRef.current = instance;
-                // Fire one more fit on init — `fitView` prop fits before
-                // the instance is captured, so any subsequent
-                // node-set hydration that landed before this callback
-                // already had a fresh frame to land in.
-                try {
-                  instance.fitView({ padding: 0.2, duration: 0 });
-                } catch {
-                  // best effort
-                }
-              }}
-            >
-              <Background />
-              <Controls>
-                <ControlButton
-                  onClick={handleAutoLayout}
-                  title="Auto-arrange nodes top-to-bottom"
-                  aria-label="Auto-arrange nodes"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="7" height="5" rx="1" />
-                    <rect x="14" y="3" width="7" height="5" rx="1" />
-                    <rect x="3" y="11" width="18" height="5" rx="1" />
-                    <rect x="8" y="19" width="8" height="3" rx="1" />
-                  </svg>
-                </ControlButton>
-              </Controls>
-              <MiniMap
-                pannable
-                zoomable
-                nodeColor={(node) =>
-                  MINIMAP_NODE_COLORS[node.type ?? ""] ?? MINIMAP_NODE_FALLBACK
-                }
-                nodeStrokeColor={isDark ? "#0f172a" : "#cbd5e1"}
-                nodeStrokeWidth={2}
-                maskColor={
-                  isDark ? "rgba(15, 23, 42, 0.6)" : "rgba(240, 240, 240, 0.6)"
-                }
-                style={{
-                  backgroundColor: isDark ? "#1f2937" : "#ffffff",
+            <LiveMeterReadingContext.Provider value={liveMeterValueWh}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onNodesDelete={onNodesDelete}
+                onConnect={onConnect}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onNodeDoubleClick={handleNodeDoubleClick}
+                nodeTypes={nodeTypes}
+                deleteKeyCode={["Backspace", "Delete"]}
+                fitView
+                fitViewOptions={{ padding: 0.2 }}
+                colorMode={isDark ? "dark" : "light"}
+                onInit={(instance) => {
+                  rfInstanceRef.current = instance;
+                  // Fire one more fit on init — `fitView` prop fits before
+                  // the instance is captured, so any subsequent
+                  // node-set hydration that landed before this callback
+                  // already had a fresh frame to land in.
+                  try {
+                    instance.fitView({ padding: 0.2, duration: 0 });
+                  } catch {
+                    // best effort
+                  }
                 }}
-              />
-            </ReactFlow>
+              >
+                <Background />
+                <Controls>
+                  <ControlButton
+                    onClick={handleAutoLayout}
+                    title="Auto-arrange nodes top-to-bottom"
+                    aria-label="Auto-arrange nodes"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="7" height="5" rx="1" />
+                      <rect x="14" y="3" width="7" height="5" rx="1" />
+                      <rect x="3" y="11" width="18" height="5" rx="1" />
+                      <rect x="8" y="19" width="8" height="3" rx="1" />
+                    </svg>
+                  </ControlButton>
+                </Controls>
+                <MiniMap
+                  pannable
+                  zoomable
+                  nodeColor={(node) =>
+                    MINIMAP_NODE_COLORS[node.type ?? ""] ??
+                    MINIMAP_NODE_FALLBACK
+                  }
+                  nodeStrokeColor={isDark ? "#0f172a" : "#cbd5e1"}
+                  nodeStrokeWidth={2}
+                  maskColor={
+                    isDark
+                      ? "rgba(15, 23, 42, 0.6)"
+                      : "rgba(240, 240, 240, 0.6)"
+                  }
+                  style={{
+                    backgroundColor: isDark ? "#1f2937" : "#ffffff",
+                  }}
+                />
+              </ReactFlow>
+            </LiveMeterReadingContext.Provider>
           </div>
         </div>
 

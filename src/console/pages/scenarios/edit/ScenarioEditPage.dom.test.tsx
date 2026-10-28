@@ -45,6 +45,50 @@ function linearFixture(): ScenarioDefinition {
 const fanOutFixture = multiStatusMonitor as unknown as ScenarioDefinition;
 const loopFixture = statusTriggeredActions as unknown as ScenarioDefinition;
 
+/** The loop fixture plus a Meter Value node configured at 10 Wh; the node is
+ *  unreachable, which keeps the scenario in the full graph editor anyway. */
+const loopWithMeter: ScenarioDefinition = {
+  ...loopFixture,
+  nodes: [
+    ...loopFixture.nodes,
+    {
+      id: "meter-1",
+      type: ScenarioNodeType.METER_VALUE,
+      position: { x: 0, y: 900 },
+      data: { label: "Meter", value: 10, sendMessage: true },
+    },
+  ],
+};
+
+/** CP-1 with connector 1 reading `meterValue` Wh. */
+function snapshotWithMeter(meterValue: number): ChargePointSnapshot {
+  return {
+    id: "CP-1",
+    status: "Available" as ChargePointSnapshot["status"],
+    error: "",
+    connectors: [
+      {
+        id: 1,
+        status:
+          "Available" as ChargePointSnapshot["connectors"][number]["status"],
+        availability: "Operative",
+        meterValue,
+        transactionId: null,
+        soc: null,
+        mode: "manual",
+        autoResetToAvailable: false,
+        autoMeterValueConfig: null,
+        evSettings: null,
+        chargingProfile: null,
+        chargingProfiles: [],
+        transactionStartTime: null,
+        transactionTagId: null,
+        transactionBatteryCapacityKwh: null,
+      },
+    ],
+  };
+}
+
 function graphNode(container: HTMLElement, id: string): HTMLElement | null {
   return container.querySelector<HTMLElement>(
     `.react-flow__node[data-id="${id}"]`,
@@ -767,48 +811,9 @@ describe("ScenarioEditPage", () => {
   });
 
   it("a Meter Value node of the full graph editor shows the connector's live reading", async () => {
-    // An unreachable node keeps the loop scenario in the full graph editor.
-    const withMeter: ScenarioDefinition = {
-      ...loopFixture,
-      nodes: [
-        ...loopFixture.nodes,
-        {
-          id: "meter-1",
-          type: ScenarioNodeType.METER_VALUE,
-          position: { x: 0, y: 900 },
-          data: { label: "Meter", value: 10, sendMessage: true },
-        },
-      ],
-    };
     const service = createFakeChargePointService({
-      listScenarioDefinitions: vi.fn(async () => [withMeter]),
-      snapshots: [
-        {
-          id: "CP-1",
-          status: "Available" as ChargePointSnapshot["status"],
-          error: "",
-          connectors: [
-            {
-              id: 1,
-              status:
-                "Available" as ChargePointSnapshot["connectors"][number]["status"],
-              availability: "Operative",
-              meterValue: 4242,
-              transactionId: null,
-              soc: null,
-              mode: "manual",
-              autoResetToAvailable: false,
-              autoMeterValueConfig: null,
-              evSettings: null,
-              chargingProfile: null,
-              chargingProfiles: [],
-              transactionStartTime: null,
-              transactionTagId: null,
-              transactionBatteryCapacityKwh: null,
-            },
-          ],
-        },
-      ],
+      listScenarioDefinitions: vi.fn(async () => [loopWithMeter]),
+      snapshots: [snapshotWithMeter(4242)],
     });
 
     const { container, root } = await renderConsole(
@@ -836,6 +841,79 @@ describe("ScenarioEditPage", () => {
       meterValue: 9000,
     });
     expect(graphNode(container, "meter-1")?.textContent).toContain("5.00 kWh");
+  });
+
+  it("a Meter Value node shows its configured value until the connector reports a reading", async () => {
+    // No snapshot: the connector has not reported a reading yet.
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [loopWithMeter]),
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await waitForGraph(container);
+    await settleGraph();
+
+    expect(graphNode(container, "meter-1")?.textContent).toContain("10 Wh");
+
+    await pushEvent(service, "CP-1", {
+      type: "connector-meter",
+      connectorId: 1,
+      meterValue: 5000,
+    });
+    expect(graphNode(container, "meter-1")?.textContent).toContain("5.00 kWh");
+  });
+
+  it("a meter reading is not a graph edit: it neither enables Undo nor clears Redo", async () => {
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [loopWithMeter]),
+      snapshots: [snapshotWithMeter(4242)],
+    });
+
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await waitForGraph(container);
+    await settleGraph();
+    const undo = () =>
+      container.querySelector<HTMLButtonElement>('button[title*="Undo"]')!;
+    const redo = () =>
+      container.querySelector<HTMLButtonElement>('button[title*="Redo"]')!;
+    const tick = (meterValue: number) =>
+      pushEvent(service, "CP-1", {
+        type: "connector-meter",
+        connectorId: 1,
+        meterValue,
+      });
+
+    expect(graphNode(container, "meter-1")?.textContent).toContain("4.24 kWh");
+    expect(undo().disabled).toBe(true);
+    await tick(5000);
+    expect(undo().disabled).toBe(true);
+    expect(hasUnsavedChanges(container)).toBe(false);
+
+    await renameGraphNode(
+      container,
+      "notification-heartbeat",
+      "Send Heartbeat",
+      "Beat",
+    );
+    await act(async () => {
+      undo().click();
+    });
+    await flush();
+    expect(redo().disabled).toBe(false);
+    await tick(6000);
+    expect(redo().disabled).toBe(false);
+    expect(graphNode(container, "meter-1")?.textContent).toContain("6.00 kWh");
+    expect(hasUnsavedChanges(container)).toBe(false);
   });
 
   it("stays in the graph view when an edit makes the scenario drawable again", async () => {

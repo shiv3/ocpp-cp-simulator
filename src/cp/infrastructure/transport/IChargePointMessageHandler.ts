@@ -16,7 +16,10 @@ import type {
   ChargePointErrorCode,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-import type { ReadingContext } from "../../domain/connector/MeterValueBuilder";
+import type {
+  MeterSampleOverrides,
+  ReadingContext,
+} from "../../domain/connector/MeterValueBuilder";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { TransactionUpdateOptions } from "../../domain/connector/Transaction";
 import type { DataTransferHandler } from "./handlers";
@@ -48,6 +51,7 @@ export interface IChargePointMessageHandler {
     transactionId: number | undefined,
     connectorId: number,
     context?: ReadingContext,
+    overrides?: MeterSampleOverrides,
   ): void;
   /**
    * Station-initiated DataTransfer.req (#348). Resolves with the CSMS's

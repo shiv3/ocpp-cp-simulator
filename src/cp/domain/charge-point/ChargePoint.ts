@@ -10,6 +10,7 @@ import type {
 } from "../types/DataTransfer";
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
+import { ClockAlignedMeterScheduler } from "../../application/services/ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
 import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
@@ -194,6 +195,10 @@ export class ChargePoint {
   private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
+  private readonly _clockAligned: ClockAlignedMeterScheduler;
+  /** Whether the clock-aligned scheduler may run: BootNotification is
+   *  Accepted and the connection it was accepted on is still up (#454). */
+  private _clockAlignedArmed = false;
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -408,6 +413,9 @@ export class ChargePoint {
 
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
+    this._clockAligned = new ClockAlignedMeterScheduler({
+      onBoundary: (boundary) => this.emitClockAlignedSamples(boundary),
+    });
 
     // #299: a charge point that draws from a pool when a call names no tag.
     // An explicit tagId always wins, so this only ever fills a gap.
@@ -571,8 +579,17 @@ export class ChargePoint {
             this._webSocket?.setPingInterval(value);
           }
           break;
-        // Other keys (ClockAlignedDataInterval etc.) are wired in subsequent
-        // phases as the dependent subsystems are extended.
+        case "ClockAlignedDataInterval":
+          // #454: takes effect at once on the new grid; before an accepted
+          // boot the value is simply read when the boot is accepted.
+          if (this._clockAlignedArmed && typeof value === "number") {
+            this._clockAligned.start(value);
+          }
+          this._logger.info(
+            `ClockAlignedDataInterval=${String(value)}`,
+            LogType.CONFIGURATION,
+          );
+          break;
         default:
           break;
       }
@@ -1460,6 +1477,7 @@ export class ChargePoint {
       this.applyBootAccepted(interval);
     } else {
       this.stopHeartbeat();
+      this.stopClockAlignedMetering();
     }
   }
 
@@ -1494,6 +1512,57 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
     }
+
+    // Read here rather than relying on onChange: a persisted override is
+    // loaded at construction and never fires it (#454).
+    this._clockAlignedArmed = true;
+    this._clockAligned.start(this._configuration.clockAlignedDataInterval());
+  }
+
+  private stopClockAlignedMetering(): void {
+    this._clockAlignedArmed = false;
+    this._clockAligned.stop();
+  }
+
+  /**
+   * One clock-aligned sample per connector for `boundaryMs` (#454), carrying
+   * `MeterValuesAlignedData` with `Sample.Clock` and the boundary instant.
+   * OCPP 2.x puts a sample for an EVSE with a live transaction into
+   * TransactionEvent(Updated, MeterValueClock) — never the MeterValuePeriodic
+   * trigger of #347 — and every other sample into MeterValues. On 1.x a live
+   * transaction's id rides along once the CSMS has assigned one.
+   */
+  private emitClockAlignedSamples(boundaryMs: number): void {
+    const measurands = this._configuration.meterValuesAlignedData();
+    if (measurands.length === 0) {
+      this._logger.debug(
+        "Clock-aligned boundary reached but MeterValuesAlignedData is empty; nothing sent",
+        LogType.METER_VALUE,
+      );
+      return;
+    }
+    const timestamp = new Date(boundaryMs);
+    const isV2 = this._ocppVersion.startsWith("OCPP-2.");
+    this._connectors.forEach((connector) => {
+      const transaction = connector.transaction;
+      const live = transaction !== null && transaction.stopTime === null;
+      if (live && isV2) {
+        this._outbox.sendTransactionUpdate(connector.id, {
+          triggerReason: "MeterValueClock",
+          meterValues: true,
+          context: "Sample.Clock",
+          measurands,
+          timestamp,
+        });
+        return;
+      }
+      const transactionId =
+        live && transaction.id !== 0 ? transaction.id : undefined;
+      this._outbox.sendMeterValue(transactionId, connector.id, "Sample.Clock", {
+        measurands,
+        timestamp,
+      });
+    });
   }
 
   boot(): void {
@@ -1545,6 +1614,7 @@ export class ChargePoint {
     });
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
+    this.stopClockAlignedMetering();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._localAuthListManager.dispose();

@@ -90,6 +90,7 @@ import {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
@@ -711,6 +712,7 @@ export class OCPPMessageHandler {
     transactionId: number | undefined,
     connectorId: number,
     context: ReadingContext = "Sample.Periodic",
+    overrides: MeterSampleOverrides = {},
   ): void {
     const messageId = this.generateMessageId();
     const connector = this._chargePoint.getConnector(connectorId);
@@ -722,7 +724,9 @@ export class OCPPMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.meterValuesSampledData();
+    const measurands =
+      overrides.measurands ??
+      this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
 
     const payload: MeterValuesRequestV16 = {
@@ -730,7 +734,7 @@ export class OCPPMessageHandler {
       connectorId,
       meterValue: [
         {
-          timestamp: new Date().toISOString(),
+          timestamp: (overrides.timestamp ?? new Date()).toISOString(),
           // The builder produces a structurally-compatible SampledValue
           // shape, but its `unit` is a plain `string` whereas ts-ocpp's
           // generated type is a strict union. Cast at this boundary

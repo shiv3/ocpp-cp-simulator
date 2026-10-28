@@ -30,6 +30,7 @@ import {
 } from "../../../domain/types/OcppCall";
 import { OcppCallRejectedError } from "../../../domain/errors/OcppCallErrors";
 import type {
+  MeterSampleOverrides,
   ReadingContext,
   SampledValue,
 } from "../../../domain/connector/MeterValueBuilder";
@@ -239,6 +240,7 @@ interface ClientWireProfile {
     connectorId: number,
     transactionId: number | undefined,
     sampledValues: SampledValue[],
+    timestamp: Date,
   ): SoapPayload | null;
 
   toStartTransactionRequest(
@@ -595,7 +597,7 @@ const OCPP15_WIRE_PROFILE: ClientWireProfile = {
     return soapPayload(payload);
   },
 
-  toMeterValuesRequest(connectorId, transactionId, sampledValues) {
+  toMeterValuesRequest(connectorId, transactionId, sampledValues, timestamp) {
     const value = sampledValues
       .map(toOcpp15MeterSample)
       .filter((sample): sample is Ocpp15MeterSample => sample !== null);
@@ -607,7 +609,7 @@ const OCPP15_WIRE_PROFILE: ClientWireProfile = {
     const payload: Ocpp15MeterValuesRequest = {
       connectorId,
       ...(transactionId !== undefined ? { transactionId } : {}),
-      values: [{ timestamp: new Date().toISOString(), value }],
+      values: [{ timestamp: timestamp.toISOString(), value }],
     };
     return soapPayload(payload);
   },
@@ -644,7 +646,7 @@ const OCPP12_WIRE_PROFILE: ClientWireProfile = {
     return soapPayload(payload);
   },
 
-  toMeterValuesRequest(connectorId, _transactionId, sampledValues) {
+  toMeterValuesRequest(connectorId, _transactionId, sampledValues, timestamp) {
     // OCPP 1.2: flat shape. values[] of {timestamp, value:int} (Wh implied, no transactionId).
     // Per wire-facts: Energy.Active.Import.Register sample only; pick the Wh value.
     const wattHourValue = sampledValues.find(
@@ -654,7 +656,7 @@ const OCPP12_WIRE_PROFILE: ClientWireProfile = {
       connectorId,
       values: [
         {
-          timestamp: new Date().toISOString(),
+          timestamp: timestamp.toISOString(),
           value: wattHourValue?.value ?? "0",
         },
       ],
@@ -699,7 +701,7 @@ const OCPP16_WIRE_PROFILE: ClientWireProfile = {
     return soapPayload(payload);
   },
 
-  toMeterValuesRequest(connectorId, transactionId, sampledValues) {
+  toMeterValuesRequest(connectorId, transactionId, sampledValues, timestamp) {
     // OCPP 1.6 SOAP: meterValue[] with sampledValue[] as child elements (not attributes).
     // Field order: connectorId, transactionId?, meterValue[]
     // Within meterValue: timestamp, sampledValue[]
@@ -709,7 +711,7 @@ const OCPP16_WIRE_PROFILE: ClientWireProfile = {
       ...(transactionId !== undefined ? { transactionId } : {}),
       meterValue: [
         {
-          timestamp: new Date().toISOString(),
+          timestamp: timestamp.toISOString(),
           sampledValue: sampledValues.map(toOcpp16SampledValue),
         },
       ],
@@ -839,6 +841,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     transactionId: number | undefined,
     connectorId: number,
     context: ReadingContext = "Sample.Periodic",
+    overrides: MeterSampleOverrides = {},
   ): void {
     const connector = this._chargePoint.getConnector(connectorId);
     if (!connector) {
@@ -849,12 +852,15 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.meterValuesSampledData();
+    const measurands =
+      overrides.measurands ??
+      this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
     const payload = this._wireProfile.toMeterValuesRequest(
       connectorId,
       transactionId,
       sampledValue,
+      overrides.timestamp ?? new Date(),
     );
     if (!payload) {
       // The dialect defines none of the configured measurands, so the request

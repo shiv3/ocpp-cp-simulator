@@ -49,6 +49,19 @@ describe("LocalChargePointService charging sessions", () => {
     expect(pushed.at(-1)).toEqual(page.sessions[0]);
   });
 
+  it("drops the history on resetAllState", async () => {
+    service = new LocalChargePointService(null, createStore());
+    await service.syncLocalChargePoints([DEFINITION]);
+    const cp = service.getLocalChargePoint("CP-LOCAL") as ChargePoint;
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+    await cp.startTransaction("TAG-LOCAL", 1);
+    expect((await service.listChargingSessions("CP-LOCAL")).total).toBe(1);
+
+    await service.resetAllState();
+
+    expect((await service.listChargingSessions("CP-LOCAL")).total).toBe(0);
+  });
+
   it("answers an empty page for an unknown charge point", async () => {
     service = new LocalChargePointService(null, createStore());
 

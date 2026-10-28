@@ -316,8 +316,9 @@ export class LocalChargePointService implements ChargePointService {
     // will rebuild them from the (now empty) Config + scenario tables.
     const ids = Array.from(this.chargePoints.keys());
     for (const id of ids) this.unregisterChargePoint(id);
-    // Also reaches the in-memory store a service without a database keeps.
+    // Also reaches the in-memory stores a service without a database keeps.
     this.vehicleProfiles.clear();
+    this.chargingSessions.clear();
     if (this.database) {
       resetSimulatorState(this.database);
       await this.database.flush?.();

@@ -15,7 +15,6 @@ import type {
   SendLocalListRequestV201,
   SendLocalListResponseV201,
   SetDisplayMessageResponseV201,
-  SetMonitoringBaseResponseV201,
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
   UpdateFirmwareResponseV201,
@@ -70,12 +69,6 @@ function toV201SendLocalListStatus(
       return "Failed";
   }
 }
-
-export const handleSetMonitoringBaseAckV201 = (() => ({
-  response: {
-    status: "NotSupported",
-  } satisfies SetMonitoringBaseResponseV201,
-})) satisfies V201AckHandler;
 
 export const handleSetNetworkProfileAckV201 = (() => ({
   response: {

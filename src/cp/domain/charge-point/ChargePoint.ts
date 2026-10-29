@@ -83,6 +83,10 @@ import {
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import { MonitoringStore } from "../monitoring/MonitoringStore";
+import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
+import type { MonitoredReading } from "../monitoring/evaluateMonitor";
+import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
+import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
@@ -493,6 +497,7 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    if (isOcpp2Version(this._ocppVersion)) this.wireVariableMonitoring();
     // A persisted override never fires onChange; the scheduler only runs
     // once a boot is Accepted (#454).
     this._clockAligned.setIntervalSeconds(
@@ -561,6 +566,49 @@ export class ChargePoint {
    *  running without --state-db (no SQLite to read from). */
   getInMemoryLogs(): import("../../shared/Logger").LogEntry[] {
     return this._logger.getLogEntries();
+  }
+
+  /**
+   * OCPP 2.x variable monitoring (#457): restore the persisted monitors
+   * (N07.FR.13), keep the table in step with the store, and evaluate the
+   * monitors whenever SetVariables / ChangeConfiguration changes the value
+   * they watch (N07). Events go out after the answer that caused them.
+   */
+  private wireVariableMonitoring(): void {
+    const repository = new VariableMonitorRepository(this._id, this._database);
+    const persisted = repository.load();
+    this._monitoring.restore(persisted.map((p) => p.monitor));
+    // Registered before the evaluation's own listener, so a new row exists
+    // when its triggered flag is first written.
+    this._monitoring.onChange((event) => {
+      if (event.kind === "installed") repository.save(event.monitor);
+      else if (event.kind === "cleared") repository.delete(event.monitor.id);
+    });
+    const evaluation = new MonitorEvaluation(
+      {
+        store: this._monitoring,
+        read: (key) => this.readMonitoredValue(key),
+        emit: (events) =>
+          queueMicrotask(() => this._outbox.sendNotifyEvent(events)),
+        transactionActive: () =>
+          [...this._connectors.values()].some((c) => c.hasRunningTransaction),
+        onTriggeredChange: (id, triggered) =>
+          repository.setTriggered(id, triggered),
+      },
+      new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
+    );
+    this._configuration.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /** A configuration value as a monitor sees it: GetVariables' rendering
+   *  (empty when write-only, N07.FR.10) and its number, if it is one. */
+  private readMonitoredValue(key: string): MonitoredReading | undefined {
+    const entry = this._configuration.get(key);
+    if (entry === undefined) return undefined;
+    const text = renderConfigValue(entry);
+    return typeof entry.value === "number"
+      ? { numeric: entry.value, text }
+      : { text };
   }
 
   /** Hook up subsystems that react to live Configuration changes. */

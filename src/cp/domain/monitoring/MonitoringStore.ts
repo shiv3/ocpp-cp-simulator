@@ -149,6 +149,33 @@ export class MonitoringStore {
     return "Accepted";
   }
 
+  /**
+   * N03 SetMonitoringBase. No preconfigured or hardwired monitor is
+   * modelled, so activating them is a no-op: `All` keeps the custom
+   * monitors (N03.FR.03), `FactoryDefault` and `HardWiredOnly` delete
+   * them (N03.FR.04, FR.05). Each deletion is reported as `cleared`.
+   */
+  applyMonitoringBase(base: string): "Accepted" | "NotSupported" {
+    if (!MONITORING_BASES.has(base)) return "NotSupported"; // N03.FR.02
+    if (base !== "All") {
+      for (const monitor of this.list()) {
+        if (monitor.origin !== "HardWiredMonitor") this.clear(monitor.id);
+      }
+    }
+    return "Accepted"; // N03.FR.01
+  }
+
+  /**
+   * Put back monitors read from persistence (N07.FR.13), without telling
+   * listeners. New ids resume after the highest restored one (N04.FR.19).
+   */
+  restore(monitors: readonly VariableMonitor[]): void {
+    for (const monitor of monitors) {
+      this.monitors.set(monitor.id, monitor);
+      this.nextId = Math.max(this.nextId, monitor.id + 1);
+    }
+  }
+
   get(id: number): VariableMonitor | undefined {
     return this.monitors.get(id);
   }
@@ -188,6 +215,13 @@ export class MonitoringStore {
     for (const listener of this.listeners) listener(event);
   }
 }
+
+/** `MonitoringBaseEnumType`, the same in 2.0.1 and 2.1. */
+const MONITORING_BASES: ReadonlySet<string> = new Set([
+  "All",
+  "FactoryDefault",
+  "HardWiredOnly",
+]);
 
 function rejected(reason: InstallRejectionReason): InstallOutcome {
   return { status: "Rejected", reason };

@@ -1849,3 +1849,15 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new page.
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md): link to it.
 - [Index](index.md), [GitHub issues](sources/github-issues.md): #457.
+
+## [2026-10-29] ingest | OCPP 2.x variable monitoring: NotifyEvent, SetMonitoringBase, persistence (#457)
+
+- Monitors are evaluated when `SetVariables` or a scenario `configSet` changes the value they watch, and when they are installed or replaced: thresholds fire above / below
+  (not on) the value and send `cleared` on return (N07.FR.02, FR.16, FR.17), Delta fires past its step from the last notice (FR.18, FR.19). One `NotifyEvent` per change,
+  after the answer that caused it; 2.1 adds `severity`. The monitoring level filters what is sent (N05.FR.03), not the monitor state.
+- `SetMonitoringBase` answers `Accepted`: `All` keeps the custom monitors, `FactoryDefault` / `HardWiredOnly` delete them (N03.FR.03-05). It used to answer `NotSupported`.
+- Monitors and their triggered flag persist in the new `variable_monitors` table (schema v18, N07.FR.13, FR.14); the level does not. Offline events are dropped (N07.FR.04
+  needs the unmodelled `OfflineQueuingSeverity`).
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): evaluation, NotifyEvent, SetMonitoringBase, persistence, limits.
+- [State persistence](concepts/state-persistence.md): `variable_monitors` row, schema v18.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [Index](index.md), [GitHub issues](sources/github-issues.md): #457.

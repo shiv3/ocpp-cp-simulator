@@ -1,10 +1,12 @@
 ---
 title: OCPP 2.x variable monitoring
 type: concept
-summary: How a 2.0.1 / 2.1 station stores custom variable monitors (SetVariableMonitoring, ClearVariableMonitoring), reports them (GetMonitoringReport → NotifyMonitoringReport) and keeps the monitoring level, with the per-item statuses and their N-use-case requirement ids.
+summary: How a 2.0.1 / 2.1 station stores custom variable monitors (SetVariableMonitoring, ClearVariableMonitoring), reports them (GetMonitoringReport → NotifyMonitoringReport), evaluates them into NotifyEvent filtered by the monitoring level, applies SetMonitoringBase and persists them, with the statuses and their N-use-case requirement ids.
 sources:
   - src/cp/domain/monitoring/
   - src/cp/infrastructure/transport/v201/variableMonitoringV201.ts
+  - src/cp/infrastructure/transport/v201/notifyEventV201.ts
+  - src/cp/domain/persistence/schema.ts
   - src/cp/infrastructure/transport/v201/deviceModelMap.ts
   - src/cp/infrastructure/transport/v201/baseReportV201.ts
   - src/cp/infrastructure/transport/v21/inboundRegistryV21.ts
@@ -12,6 +14,7 @@ sources:
   - OCPP 2.0.1 Part 2 §N02–N07; OCPP 2.1 Part 2 §N02–N07
 related:
   - ocpp-versions-and-transports.md
+  - state-persistence.md
 updated: 2026-10-29
 ---
 
@@ -20,10 +23,10 @@ updated: 2026-10-29
 An OCPP 2.0.1 or 2.1 station keeps a catalog of **variable monitors**: rules
 the CSMS installs on a device-model variable so that the station reports
 when the value crosses a threshold or moves by a step. This page covers what
-the simulator stores and answers (#457). Monitor **evaluation** (sending
-`NotifyEvent`), monitoring-level filtering and persistence across a restart
-are not implemented yet; until then no monitor ever produces an event. 1.6
-has no monitoring and is unchanged. See
+the simulator stores, answers and reports (#457): the monitor catalog, its
+evaluation into `NotifyEvent`, the monitoring level, `SetMonitoringBase` and
+persistence. 1.6 has no monitoring and is unchanged: a `ChangeConfiguration`
+on a 1.6 station never sends a `NotifyEvent`. See
 [OCPP versions and transports](ocpp-versions-and-transports.md) for the
 version surface.
 
@@ -116,11 +119,102 @@ reserved for hardwired monitors, which do not exist yet.
 A severity from 0 to 9 answers `Accepted` and becomes the station's
 monitoring level (N05.FR.01); anything else answers `Rejected` and keeps the
 previous level (N05.FR.02). The level starts at 9, since the spec gives no
-default. It will restrict `NotifyEvent` to monitors with a severity number
-at or below it (N05.FR.03) once evaluation exists; it is not persisted yet.
+default, and restricts `NotifyEvent` to monitors with a severity number at
+or below it (N05.FR.03, N07.FR.15). The spec does not say the level survives
+a reboot, so it is not persisted: a restarted station is back at 9.
+
+## Evaluation and NotifyEvent
+
+A monitor watches the configuration value behind its variable, the value
+`GetVariables` reads. It is evaluated when that value changes through
+`SetVariables` or a scenario `configSet` node (a value restored from
+`--state-db` at start-up is not a change), and when the monitor is installed
+or replaced.
+The other device-model values (meter readings, connector state) are not
+variables of the map, so they never trigger a monitor.
+
+| Type             | Fires when                                                                                      | `trigger`  | Requirement |
+| ---------------- | ----------------------------------------------------------------------------------------------- | ---------- | ----------- |
+| `UpperThreshold` | The value goes above the threshold (not on it); `cleared: true` when it comes back at or below  | `Alerting` | N07.FR.16   |
+| `LowerThreshold` | The value goes below the threshold (not on it); `cleared: true` when it comes back at or above  | `Alerting` | N07.FR.17   |
+| `Delta`, numeric | The value moved more than the step (strictly) from the baseline; the baseline becomes the value | `Delta`    | N07.FR.18   |
+| `Delta`, other   | The value changed from the baseline, whatever the step (booleans, strings, lists)               | `Delta`    | N07.FR.19   |
+
+- A threshold fires once per crossing: the station remembers that it is
+  triggered, sends `cleared: true` when the value returns within range
+  (N07.FR.02) and nothing while it stays beyond. A monitor installed on a
+  value already beyond its threshold fires at once.
+- A Delta baseline is the value when the monitor was set (or replaced) or
+  last fired, whichever was last (N07.FR.18).
+- Replacing a threshold monitor by `id` re-checks it against the current
+  value: a new threshold that clears the old one sends `cleared: true`, one
+  the value exceeds sends the trigger (N07.FR.11).
+- Removing a monitor (ClearVariableMonitoring, SetMonitoringBase) sends
+  nothing, even if it was triggered (N07.FR.12).
+- The monitoring level and the `transaction` flag only decide whether an
+  event is **sent**; the monitor's state moves either way. A filtered
+  threshold trigger is followed later by its `cleared` event once the level
+  allows it, and a filtered Delta still moves its baseline. A monitor with
+  `transaction: true` reports only while a transaction runs on the station.
+
+The events of one value change (or one install) go out as **one**
+`NotifyEvent`, after the answer to the message that caused them, with
+`generatedAt`, `seqNo` 0 and `tbc` false (N07.FR.07), and one `eventData`
+per monitor, by increasing monitor id:
+
+- `eventId` (increasing per station from 1, restarting at 1 after a
+  restart), `timestamp`, `trigger`, `actualValue` as `GetVariables` renders
+  it (empty for a write-only value, N07.FR.10), `cleared` only when true;
+- `component`, `variable` and `variableMonitoringId` of the monitor
+  (N07.FR.06), and `eventNotificationType` `CustomMonitor`;
+- on 2.1 only, the monitor's `severity` (2.1 N07.FR.20); the 2.0.1 schema
+  does not allow the field.
 
 ## SetMonitoringBase
 
-Still answers `NotSupported` (N03.FR.02): the preconfigured and hardwired
-monitor catalogs that `All`, `FactoryDefault` and `HardWiredOnly` act on are
-not modelled.
+No preconfigured or hardwired monitor is modelled, so the three bases are
+all correct with an empty catalog of both, and all answer `Accepted`
+(N03.FR.01). `NotSupported` (N03.FR.02) never happens: the schema admits no
+other value.
+
+| `monitoringBase` | Effect on the custom monitors          | Requirement |
+| ---------------- | -------------------------------------- | ----------- |
+| `All`            | Kept                                   | N03.FR.03   |
+| `FactoryDefault` | Deleted (no factory default to enable) | N03.FR.04   |
+| `HardWiredOnly`  | Deleted                                | N03.FR.05   |
+
+Deleted monitors send no `NotifyEvent` (N07.FR.12) and their rows leave the
+state database.
+
+## Persistence
+
+With `--state-db` (or the browser's database), the installed monitors are
+stored in the `variable_monitors` table (schema v18, see
+[State persistence](state-persistence.md)) and restored when the station is
+created again: monitors survive a reboot (N04 remarks, N07.FR.13). Ids
+resume after the highest restored one, so a CSMS that sends
+`GetMonitoringReport` after the reboot (N04.FR.19) sees the same ids. The
+triggered flag of a threshold monitor is stored too, so a value that returns
+within range after the reboot still sends `cleared: true` (N07.FR.14). A
+Delta baseline restarts at the restored value. The monitoring level is not
+stored (above).
+
+## Limits
+
+- **Offline.** A `NotifyEvent` raised while the station is offline is
+  dropped, like any other 2.x CALL. N07.FR.04 queues events at or below
+  `MonitoringCtrlr.OfflineQueuingSeverity`, an optional variable the
+  simulator does not model, so its precondition never holds.
+- **Boot.** Events are not held back while BootNotification is `Pending`;
+  they follow a CSMS `SetVariables` / `SetVariableMonitoring` or a scenario
+  `configSet` node.
+- **Catalogs.** No hardwired or preconfigured monitors, no `Periodic` /
+  `PeriodicClockAligned` monitors (N08), no 2.1 `TargetDelta` /
+  `TargetDeltaRelative`.
+- **MonitoringCtrlr.** None of its variables is mapped. The required
+  `ItemsPerMessage` / `BytesPerMessage` (instance `SetVariableMonitoring`)
+  need variable instances, which the device-model map does not have; the
+  others (`Enabled`, `Available`, `OfflineQueuingSeverity`,
+  `ActiveMonitoringBase`, `ActiveMonitoringLevel`) are optional.
+- **Reports in parts.** A `NotifyEvent` is never split (`tbc` is always
+  false), and no `cause`, `techCode`, `techInfo` or `transactionId` is set.

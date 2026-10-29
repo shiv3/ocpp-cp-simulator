@@ -95,6 +95,7 @@ import {
 } from "../../domain/connector/MeterValueBuilder";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
+import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -698,6 +699,15 @@ export class OCPPMessageHandler {
       OCPPAction.SignedFirmwareStatusNotification,
       messageId,
       payload,
+    );
+  }
+
+  /** OCPP 1.6 has no NotifyEvent; 2.x variable monitoring never runs on
+   *  1.6, so nothing reaches this (#457). */
+  public sendNotifyEvent(_events: readonly MonitoringEvent[]): void {
+    this._logger.debug(
+      "NotifyEvent is OCPP 2.x only; ignoring it on OCPP 1.6",
+      LogType.OCPP,
     );
   }
 

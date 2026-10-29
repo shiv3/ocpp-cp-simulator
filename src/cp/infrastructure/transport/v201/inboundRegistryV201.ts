@@ -16,6 +16,8 @@ import type {
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
   ClearVariableMonitoringRequestV201,
+  SetMonitoringBaseRequestV201,
+  SetMonitoringBaseResponseV201,
   SetMonitoringLevelRequestV201,
   SetVariableMonitoringRequestV201,
   SetVariablesRequestV201,
@@ -82,7 +84,6 @@ import {
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
   handleSetDisplayMessageAckV201,
-  handleSetMonitoringBaseAckV201,
   handleSetNetworkProfileAckV201,
   handleUnpublishFirmwareAckV201,
   handleUpdateFirmwareAckV201,
@@ -105,6 +106,7 @@ import {
   handleSetVariableMonitoringV201,
   type NotifyMonitoringReportPayload,
 } from "./variableMonitoringV201";
+import type { NotifyEventPayload } from "./notifyEventV201";
 import {
   handleGetTransactionStatusV201,
   handleRequestStartTransactionV201,
@@ -128,6 +130,8 @@ export type V201Action =
   | "NotifyReport"
   // #457: N02 report answering GetMonitoringReport.
   | "NotifyMonitoringReport"
+  // #457: N07 variable-monitor events.
+  | "NotifyEvent"
   | "ReportChargingProfiles"
   // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
   | "FirmwareStatusNotification"
@@ -143,6 +147,7 @@ export type V201RequestPayload =
   | DataTransferRequestV201
   | NotifyReportRequestV201
   | NotifyMonitoringReportPayload
+  | NotifyEventPayload
   | ReportChargingProfilesRequestV201
   | FirmwareStatusNotificationRequestV201
   | LogStatusNotificationRequestV201;
@@ -388,7 +393,13 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "SetMonitoringBase",
       {
         validate: isValidSetMonitoringBaseRequestV201,
-        handle: handleSetMonitoringBaseAckV201,
+        handle: (p, ctx) => ({
+          response: {
+            status: ctx.chargePoint.monitoring.applyMonitoringBase(
+              (p as SetMonitoringBaseRequestV201).monitoringBase,
+            ),
+          } satisfies SetMonitoringBaseResponseV201,
+        }),
       },
     ],
     [

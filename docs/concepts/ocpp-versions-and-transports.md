@@ -10,6 +10,7 @@ sources:
   - src/cli/soapTunnel.ts
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
+  - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -22,7 +23,7 @@ related:
   - trace-format.md
   - scenario-format.md
   - charging-sessions.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # OCPP versions and transports
@@ -143,6 +144,59 @@ register and never advances it.
 - Not implemented: connector 0 / `evseId` 0 (main meter), `StopTxnAlignedData`
   in `StopTransaction`, `AlignedDataCtrlr.SendDuringIdle` and the `TxEnded*`
   variables, and per-period aggregation of `*.Interval` measurands.
+
+## Signed meter values (OCMF, #315)
+
+A charge point can sign its energy register in the Open Charge Metering
+Format (OCMF 1.4, from S.A.F.E. e.V.), the format German calibration-law
+(Eichrecht) charge points use, so a CSMS's signed-data path (parse the OCMF
+document, check the signature against the station's key, reject on mismatch)
+has something to test against. **It simulates the wire format, not a
+calibrated meter**: nothing it produces is legally valid metering data.
+
+- **Off by default, and free while off**: no record is built and no key is
+  made until `SampledDataSignReadings` is `true` (on 2.0.1 / 2.1 through
+  `SetVariables` on `SampledDataCtrlr.SignReadings`).
+- **One ephemeral key per connector**: ECDSA P-256
+  (`ECDSA-secp256r1-SHA256`), made on first use and held in memory only. There
+  is no key store, import or rotation; a restart makes new keys.
+- **Signing is synchronous** (`@noble/curves`), so turning it on never
+  reorders the messages a station sends.
+
+| Key (1.6 name)            | 2.x variable                    | Access | Default | Meaning                                                                                      |
+| ------------------------- | ------------------------------- | ------ | ------- | -------------------------------------------------------------------------------------------- |
+| `SampledDataSignReadings` | `SampledDataCtrlr.SignReadings` | RW     | `false` | Sign the energy register (custom key on 1.6; the name the ecosystem's vendors use)           |
+| `SignedMeterDataMode`     | —                               | RW     | `valid` | `valid`, `tampered_payload`, `wrong_key` or `invalid_signature`; anything else is `Rejected` |
+| `MeterPublicKey<id>`      | —                               | R      | —       | Connector `<id>`'s public key, hex DER SubjectPublicKeyInfo; appears once that key exists    |
+
+**What carries the record:**
+
+| Version    | Begin (`TX` `B`)                                                                              | During the transaction (`TX` `C`)                                                                              | End (`TX` `E`)                                        |
+| ---------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 1.6J       | Signed at `StartTransaction`, sent in `StopTransaction.transactionData` (`Transaction.Begin`) | An extra `format: "SignedData"` sample in every `MeterValues` with a `transactionId`                           | `StopTransaction.transactionData` (`Transaction.End`) |
+| 2.0.1, 2.1 | `signedMeterValue` on the energy sample of `TransactionEvent(Started)`                        | `signedMeterValue` on the energy sample of `TransactionEvent(Updated)` with meter values, and of `MeterValues` | `signedMeterValue` on `TransactionEvent(Ended)`       |
+
+The 2.x `signedMeterValue` always carries all four fields (`signedMeterData`
+base64 of the OCMF document, `signingMethod`, `encodingMethod` `OCMF`,
+`publicKey` base64 DER): 2.0.1 requires them and 2.1, where two became
+optional, accepts them. Records are signed in time order, so the OCMF
+transaction page counter (`PG` `T1`, `T2`…) runs begin, samples, end, and a
+CSMS that collects every record of a session sees no gap.
+
+**Test modes** (`SignedMeterDataMode`) apply to every record signed while
+set; the advertised key is always the connector's own:
+
+| Mode                | Record                                                   | A conforming CSMS |
+| ------------------- | -------------------------------------------------------- | ----------------- |
+| `valid`             | Signed with the connector's key                          | accepts           |
+| `tampered_payload`  | A reading changed after signing                          | rejects           |
+| `wrong_key`         | Validly signed, but with a different key than advertised | rejects           |
+| `invalid_signature` | The signature block is garbage                           | rejects           |
+
+- Not implemented: SOAP versions, clock-aligned (`AlignedData*`) and fiscal
+  (`PG` `F…`) records, other OCMF curves, a stable or imported key, and
+  scenario nodes to switch the mode mid-session (set the key with a
+  `configSet` node or `ChangeConfiguration` instead).
 
 ## SOAP versions (1.2, 1.5, 1.6S)
 

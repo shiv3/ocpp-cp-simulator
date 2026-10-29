@@ -1839,3 +1839,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
+
+## [2026-10-29] ingest | OCMF signed meter values (#315)
+
+- New `src/cp/domain/connector/SignedMeterData.ts`: an OCMF 1.4 generator (ECDSA-secp256r1-SHA256 via `@noble/curves`, synchronous so signing never reorders messages) with no OCPP knowledge, mapped to 1.6 `format: "SignedData"` samples and 2.x `signedMeterValue`. Off by default (`SampledDataSignReadings`, 2.x `SampledDataCtrlr.SignReadings`); one ephemeral key per connector, made on first use and published read-only as `MeterPublicKey<id>`; `SignedMeterDataMode` picks `valid`, `tampered_payload`, `wrong_key` or `invalid_signature`. 1.6 signs the begin reading at StartTransaction and sends it with the end reading in `StopTransaction.transactionData`, so page numbers stay in time order. String configuration keys can now list `allowed` values.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): new section (keys, carriers per version, test modes, what is not implemented).
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md#4b-signed-meter-values-optional): 4b shipped under #315.
+- [GitHub issues](sources/github-issues.md): #315.

@@ -68,6 +68,7 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@noble/curves": "2.4.0",
     "@ocpp-debugkit/toolkit": "0.4.8",
     "@peculiar/x509": "^2.2.0",
     "@radix-ui/react-checkbox": "^1.4.1",

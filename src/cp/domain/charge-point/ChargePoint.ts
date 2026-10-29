@@ -82,6 +82,7 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
@@ -215,6 +216,8 @@ export class ChargePoint {
     new ChargingProfileStore();
   private readonly _certificateStore = new CertificateStore();
   private readonly _configuration: ConfigurationStore;
+  // #315: one simulated signing meter per connector, made on first use.
+  private readonly _signedMeters = new Map<number, OcmfMeter>();
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
   // The narrower type stops the rest of the code from accidentally setting
@@ -638,6 +641,31 @@ export class ChargePoint {
   /** Standard OCPP Configuration Keys store. */
   get configuration(): ConfigurationStore {
     return this._configuration;
+  }
+
+  /**
+   * The connector's simulated OCMF signing meter while `SampledDataSignReadings`
+   * is true, else `null` (#315). The ephemeral key is made on first use, held
+   * in memory only, and published read-only as `MeterPublicKey<connectorId>`
+   * so a CSMS can validate against it (2.x stations also send it in every
+   * `signedMeterValue`).
+   */
+  signedMeterFor(connectorId: number): OcmfMeter | null {
+    if (!this._configuration.signReadings()) return null;
+    let meter = this._signedMeters.get(connectorId);
+    if (!meter) {
+      meter = new OcmfMeter({
+        meterSerial: `${this._id}-${connectorId}`,
+        gatewayId: "ocpp-cp-simulator",
+        gatewaySerial: this._id,
+      });
+      this._signedMeters.set(connectorId, meter);
+      this._configuration.defineRuntimeKey(
+        `MeterPublicKey${connectorId}`,
+        meter.publicKeyHex,
+      );
+    }
+    return meter;
   }
 
   get certificateStore(): CertificateStore {

@@ -60,6 +60,11 @@ import {
   type ReadingContext,
   type SampledValue,
 } from "../../domain/connector/MeterValueBuilder";
+import {
+  signReading,
+  toOcpp2SignedMeterValue,
+  type OcmfReading,
+} from "../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
@@ -690,13 +695,22 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       meterValue: [
         {
           timestamp: transaction.startTime.toISOString(),
-          sampledValue: [
+          sampledValue: this.withSignedEnergy(
+            [
+              {
+                value: transaction.meterStart / 1000,
+                measurand: "Energy.Active.Import.Register",
+                unitOfMeasure: { unit: "kWh" },
+              },
+            ],
+            connectorId,
+            transaction.tagId,
             {
-              value: transaction.meterStart / 1000,
-              measurand: "Energy.Active.Import.Register",
-              unitOfMeasure: { unit: "kWh" },
+              reason: "B",
+              energyWh: transaction.meterStart,
+              at: transaction.startTime,
             },
-          ],
+          ),
         },
       ],
     };
@@ -775,13 +789,22 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           ? [
               {
                 timestamp,
-                sampledValue: [
+                sampledValue: this.withSignedEnergy(
+                  [
+                    {
+                      value: transaction.meterStop / 1000,
+                      measurand: "Energy.Active.Import.Register",
+                      unitOfMeasure: { unit: "kWh" },
+                    },
+                  ],
+                  connectorId,
+                  transaction.tagId,
                   {
-                    value: transaction.meterStop / 1000,
-                    measurand: "Energy.Active.Import.Register",
-                    unitOfMeasure: { unit: "kWh" },
+                    reason: "E",
+                    energyWh: transaction.meterStop,
+                    at: transaction.stopTime ?? new Date(timestamp),
                   },
-                ],
+                ),
               },
             ]
           : undefined,
@@ -834,12 +857,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const measurands =
         options.measurands ??
         this._chargePoint.configuration.meterValuesSampledData();
-      const sampledValue = this.toV201SampledValues(
-        buildSampledValues(
-          connector,
-          measurands,
-          options.context ?? "Sample.Periodic",
+      const sampledValue = this.withSignedEnergy(
+        this.toV201SampledValues(
+          buildSampledValues(
+            connector,
+            measurands,
+            options.context ?? "Sample.Periodic",
+          ),
         ),
+        connectorId,
+        transaction.tagId,
+        {
+          reason: "C",
+          energyWh: connector.meterValue,
+          at: new Date(timestamp),
+        },
       );
       if (sampledValue.length > 0) {
         meterValue = [
@@ -877,6 +909,45 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       ...(meterValue ? { meterValue } : {}),
     };
     this.send("TransactionEvent", messageId, payload);
+  }
+
+  /**
+   * #315: while `SampledDataSignReadings` is on, sign `reading` and attach it
+   * as `signedMeterValue` to the energy register sample (adding one if the
+   * measurand list has none). Unchanged when signing is off.
+   */
+  private withSignedEnergy(
+    sampledValue: V201MeterValuesSampledValue[],
+    connectorId: number,
+    idTag: string,
+    reading: OcmfReading,
+  ): [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]] {
+    const signed = signReading(this._chargePoint, connectorId, idTag, reading);
+    const list = sampledValue as [
+      V201MeterValuesSampledValue,
+      ...V201MeterValuesSampledValue[],
+    ];
+    if (!signed) return list;
+    const signedMeterValue = toOcpp2SignedMeterValue(signed);
+    const energy = list.findIndex(
+      (sv) =>
+        (sv.measurand ?? "Energy.Active.Import.Register") ===
+          "Energy.Active.Import.Register" && !sv.phase,
+    );
+    if (energy >= 0) {
+      return list.map((sv, i) =>
+        i === energy ? { ...sv, signedMeterValue } : sv,
+      ) as typeof list;
+    }
+    return [
+      ...list,
+      {
+        value: reading.energyWh / 1000,
+        measurand: "Energy.Active.Import.Register",
+        unitOfMeasure: { unit: "kWh" },
+        signedMeterValue,
+      },
+    ];
   }
 
   /** 1.6-shaped builder output → 2.0.1 SampledValueType. `context` is
@@ -928,16 +999,27 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
-    const sampledValue = this.toV201SampledValues(sampledValues) as [
+    const timestamp = overrides.timestamp ?? new Date();
+    let sampledValue = this.toV201SampledValues(sampledValues) as [
       V201MeterValuesSampledValue,
       ...V201MeterValuesSampledValue[],
     ];
+    // #315: during a transaction, sign the energy register too.
+    const transaction = connector.transaction;
+    if (transaction && !transaction.stopTime) {
+      sampledValue = this.withSignedEnergy(
+        sampledValue,
+        connectorId,
+        transaction.tagId,
+        { reason: "C", energyWh: connector.meterValue, at: timestamp },
+      );
+    }
 
     const payload: MeterValuesRequestV201 = {
       evseId: v201MeterEvseId(connectorId),
       meterValue: [
         {
-          timestamp: (overrides.timestamp ?? new Date()).toISOString(),
+          timestamp: timestamp.toISOString(),
           sampledValue,
         },
       ],

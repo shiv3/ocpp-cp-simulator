@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Index
@@ -42,7 +42,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Charging sessions](concepts/charging-sessions.md)                       | One normalized record per transaction (1.6 and 2.x): duration, energy, stop reason, outcome; persisted; `sessions.list` (#447)                    |
 | [Access control](concepts/access-control.md)                             | Bind gate, Basic Auth gate, CORS policy table, reverse-proxy 403 fix (`--cors-origin` / `--trust-forwarded-headers`)                              |
 | [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) | 1.6J / 2.0.1 / 2.1 over WebSocket and 1.2 / 1.5 / 1.6S over SOAP; callback URL precedence; per-surface support                                    |
-| [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security extension messages and keys                                                                     |
+| [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security extension messages and keys, certificate store and use mapping                                  |
 | [Local vs Remote mode](concepts/local-vs-remote-mode.md)                 | How the browser picks in-tab vs daemon operation via the health probe, and what differs                                                           |
 | [File hot-reload (`--watch`)](concepts/file-hot-reload.md)               | Why each `--watch` reload rule is shaped as it is, and how a watched file's origin survives a restart — the contract itself is on the daemon page |
 | [Vehicle profiles](concepts/vehicle-profiles.md)                         | Saved vehicles imported from Open EV Directory; resolution to EV settings, refresh, storage, offline copy, open points                            |

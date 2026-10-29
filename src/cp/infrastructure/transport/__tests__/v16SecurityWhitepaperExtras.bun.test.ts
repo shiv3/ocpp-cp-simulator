@@ -175,7 +175,7 @@ describe.skipIf(!canBindBunServe())(
           status: "Accepted",
         });
 
-        expect(cp.certificateStore.listRootCerts()).toEqual([]);
+        expect(cp.certificateStore.listRootCertificates()).toEqual([]);
       } finally {
         cp.disconnect();
         await csms.stop();

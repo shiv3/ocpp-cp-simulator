@@ -1839,3 +1839,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
+
+## [2026-10-29] ingest | Certificate store shared by 1.6 and 2.x, persisted (#456)
+
+- The certificate store speaks version-neutral uses (`src/cp/domain/security/certificateUse.ts`); 1.6, 2.0.1 and 2.1 map onto them explicitly in `certificateUseMapping.ts` and refuse what a version does not define (`OEMRootCertificate` and `V2G20Certificate` are 2.1-only). Hash data is computed at install time; chain members are hashed against their issuer. Pending CSRs are tracked per signing use and matched to a returned chain by public key; the private key is never kept.
+- Trust anchors and signed chains persist in the new `certificates` table (schema v18); pending CSRs stay in memory. The 1.6 handlers run on the new store with no wire change; the 2.x handlers are unchanged so far.
+- [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): new section, use mapping table, 1.6 behaviour, persistence.
+- [State persistence → Tables](concepts/state-persistence.md#tables): `certificates` row, schema version 18, `cp.delete` list.
+- [Index](index.md): security profiles summary. [GitHub issues](sources/github-issues.md): #456.

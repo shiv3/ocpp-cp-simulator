@@ -213,7 +213,7 @@ export class ChargePoint {
   // onto every connector. Connectors consult this store at composite time.
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
-  private readonly _certificateStore = new CertificateStore();
+  private readonly _certificateStore: CertificateStore;
   private readonly _configuration: ConfigurationStore;
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
@@ -279,7 +279,7 @@ export class ChargePoint {
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
     /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
-     *  and per-connector availability. `null` keeps everything in-memory —
+     *  CertificateStore and per-connector availability. `null` keeps everything in-memory —
      *  used by the daemon's `:memory:` mode and by tests. */
     private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
@@ -298,6 +298,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
+    // #456: installed certificates survive a restart when state persists.
+    this._certificateStore = new CertificateStore(this._id, this._database);
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
     this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;

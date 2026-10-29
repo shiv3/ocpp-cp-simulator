@@ -5,6 +5,8 @@ summary: CLI / server-mode support for the OCPP 1.6 Security Whitepaper transpor
 sources:
   - README.md (Security Profiles section, PR #97 / issue #94)
   - src/cli/
+  - src/cp/domain/security/CertificateStore.ts (certificate store, issue #456)
+  - src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
   - src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
   - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:
@@ -12,7 +14,8 @@ related:
   - ../entities/csms-peers.md
   - access-control.md
   - scenario-format.md
-updated: 2026-09-12
+  - state-persistence.md
+updated: 2026-10-29
 ---
 
 # OCPP 1.6 security profiles
@@ -194,3 +197,72 @@ Certificate-handling quirks (RSA vs EC CSR keys, PEM line endings, accepted
 signature algorithms, hidden `CpoName`) can be armed from a scenario with the
 `certQuirks` node and its `octt` preset — see
 [Scenario format → certificate quirks](scenario-format.md#inboundpolicy-and-certificate-quirks-notes).
+
+## Certificate store
+
+Each charge point keeps one certificate store
+(`src/cp/domain/security/CertificateStore.ts`), shared by every OCPP version.
+It holds three things:
+
+- **Trust anchors** installed by `InstallCertificate`, each with its
+  `certificateHashData` (SHA-256), computed once at install time.
+- **Signed chains** received by `CertificateSigned`, leaf first. Each member
+  is hashed against its issuer: the next member of the chain, else an
+  installed root with that subject, else the member itself.
+- **Pending CSRs**, one per signing use. They are kept in memory only.
+
+The store never retains a private key. `SignCertificate` discards the key it
+generates for the CSR (the simulator does not use it), so the key cannot leave
+the station (whitepaper and 2.x A02.FR.05). A returned chain is matched to its
+CSR by public key.
+
+### Certificate uses
+
+The store speaks a version-neutral set of uses. Each version maps onto it
+explicitly (`src/cp/infrastructure/transport/certificateUseMapping.ts`), and a
+value that a version does not define is refused, not coerced.
+
+| Domain use                    | 1.6 Security Whitepaper        | 2.0.1                         | 2.1                           |
+| ----------------------------- | ------------------------------ | ----------------------------- | ----------------------------- |
+| `CsmsRootCertificate`         | `CentralSystemRootCertificate` | `CSMSRootCertificate`         | `CSMSRootCertificate`         |
+| `ManufacturerRootCertificate` | `ManufacturerRootCertificate`  | `ManufacturerRootCertificate` | `ManufacturerRootCertificate` |
+| `V2GRootCertificate`          | —                              | `V2GRootCertificate`          | `V2GRootCertificate`          |
+| `MORootCertificate`           | —                              | `MORootCertificate`           | `MORootCertificate`           |
+| `OEMRootCertificate`          | —                              | —                             | `OEMRootCertificate`          |
+| `ChargingStationCertificate`  | implicit (single use)          | `ChargingStationCertificate`  | `ChargingStationCertificate`  |
+| `V2GCertificate`              | —                              | `V2GCertificate`              | `V2GCertificate`              |
+| `V2G20Certificate`            | —                              | —                             | `V2G20Certificate`            |
+
+`V2GCertificateChain` (2.x) is a `GetInstalledCertificateIds` query over the
+stored `V2GCertificate` chains: each chain is reported as its leaf, with the
+sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
+
+### OCPP 1.6 behaviour
+
+- `InstallCertificate` answers `Accepted`, or `Rejected` for a malformed
+  certificate (whitepaper M05.FR.06) or when the store already holds
+  `CertificateStoreMaxLength` trust anchors (M05.FR.03). Signed chains do
+  not count toward that limit, and installing the same certificate twice
+  keeps two entries.
+- `GetInstalledCertificateIds` answers `Accepted` with the hash data of every
+  trust anchor of the requested type, in install order, or `NotFound`.
+- `DeleteCertificate` removes the first trust anchor whose hash data matches
+  (hex compared case-insensitively) and answers `Accepted`. Otherwise it
+  answers `NotFound`. Signed chains are not searched, so the hash of the
+  Charge Point certificate answers `NotFound` and that certificate cannot be
+  deleted (whitepaper M04.FR.05).
+- `CertificateSigned` stores a well-formed chain that passes the certificate
+  quirks without checking it against the pending CSR, and leaves that CSR
+  pending.
+
+The OCPP 2.0.1 and 2.1 certificate handlers still answer schema-valid
+negative acknowledgements; their stateful behaviour on this store is the rest
+of #456.
+
+### Persistence
+
+With [state persistence](state-persistence.md) on, trust anchors and signed
+chains survive a restart (`certificates` table, schema v18). Pending CSRs do
+not: the key pair behind a CSR is gone after a restart, and 2.x A02.FR.17
+already has the station send a new CSR when no `CertificateSigned` arrives.
+`cp.delete` and `state.reset` remove the rows.

@@ -1742,6 +1742,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
 
+## [2026-10-29] ingest | Unplug without charging
+
+- After **Plug in**, the connector card's session stepper only offered **Start charging**: a plugged connector could not go back to `Available` without a session. On `Preparing` (or a charging status without a transaction), **Unplug** is now also pressable, as an outlined secondary button, even when Start is disabled for lack of a TagID; it still sends StatusNotification `Available`. Faulted, Unavailable and a pending step keep it disabled ([Web console → Connector card](entities/web-console.md#connector-card)).
+- Code: `src/console/pages/cp/SessionFlow.tsx` (the next step is now a step id, `nextStep()`, with the steps that can be taken instead of it in `ALTERNATIVES`); test `SessionFlow.dom.test.tsx`.
+
 ## [2026-10-29] ingest | No StopTransaction after a failed 1.6 StartTransaction (#491)
 
 - A CALLERROR answering a 1.6 StartTransaction.req closed the transaction but left it on the connector, so every path that asks "is there a transaction?" took it for a running one: Reset and UnlockConnector sent a StopTransaction.req with the placeholder `transactionId: 0`, a RemoteStopTransaction for id `0` matched it, ChangeAvailability answered `Scheduled`. `ChargePoint.notifyTransactionStartFailed` now detaches it once `transactionStartFailed` listeners (the charging-session history, #447) have read it, and `ChargePoint.stopTransaction` ignores a transaction whose stop time is set ([Charging sessions → Rejections and failed starts](concepts/charging-sessions.md#rejections-and-failed-starts-447); its known-gap entry is removed).

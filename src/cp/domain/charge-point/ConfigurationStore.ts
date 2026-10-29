@@ -230,6 +230,14 @@ export class ConfigurationStore {
     return this.getBoolean("AllowOfflineTxForUnknownId") ?? false;
   }
 
+  /** Custom key `AuthCacheLifeTime` (2.x `AuthCacheCtrlr.LifeTime`,
+   *  C10.FR.08), in seconds; `null` when the key is absent (1.6) or 0,
+   *  which both mean no lifetime. */
+  authCacheLifeTimeSeconds(): number | null {
+    const seconds = this.getInteger("AuthCacheLifeTime") ?? 0;
+    return seconds > 0 ? seconds : null;
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;

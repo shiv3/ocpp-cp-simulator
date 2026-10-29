@@ -40,7 +40,8 @@ export interface LocalAuthorizationPolicy {
    *  `AuthCtrlr.OfflineTxForUnknownIdEnabled`. */
   allowOfflineTxForUnknownId: boolean;
   /** 2.x `AuthCacheCtrlr.LifeTime` in seconds, counted from the entry's
-   *  last update; `null` means no lifetime (1.6 has no such key). */
+   *  last update, for entries without an expiry of their own (C10.FR.08,
+   *  C10.FR.13); `null` means no lifetime (1.6 has no such key). */
   cacheLifetimeSeconds: number | null;
   /** Whether local-list expiry dates are honoured. 1.6: `true` (§3.5.4);
    *  2.x: `LocalAuthListCtrlr.SupportsExpiryDateTime` (C13.FR.02/.05). */
@@ -167,5 +168,9 @@ function withinLifetime(
 ): boolean {
   const lifetime = input.policy.cacheLifetimeSeconds;
   if (lifetime === null) return true;
+  // An entry with its own expiry (2.x cacheExpiryDateTime) is not subject
+  // to the lifetime: C10.FR.13 over C10.FR.08. Its expiry is applied by
+  // effectiveStatus instead.
+  if (entry.expiresAt !== undefined) return true;
   return input.now < entry.updatedAt + lifetime * 1000;
 }

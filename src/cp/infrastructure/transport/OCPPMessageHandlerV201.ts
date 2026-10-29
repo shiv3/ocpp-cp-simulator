@@ -70,6 +70,10 @@ import {
   v201TransactionEvse,
 } from "./v201/topologyWireV201";
 import {
+  authorizationResultFromIdTokenInfo,
+  cacheableIdToken,
+} from "./v201/authorizationCacheV201";
+import {
   buildV201InboundRegistry,
   type V201Action,
   type V201InboundContext,
@@ -512,6 +516,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const authorizeResult = payload as AuthorizeResponseV201;
       const authorizeRequest = pending.payload as AuthorizeRequestV201;
       const status = authorizeResult.idTokenInfo?.status;
+      this.recordIdTokenInfo(
+        authorizeRequest.idToken,
+        authorizeResult.idTokenInfo,
+      );
       if (status !== undefined) {
         this._logger.info(
           `[v2.0.1] Authorize response: ${status}`,
@@ -552,6 +560,24 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   /**
+   * #452: feed the CSMS's idTokenInfo on `idToken` to the Authorization
+   * Cache (C10.FR.04 AuthorizeResponse, C10.FR.05 TransactionEventResponse).
+   * Only real answers come here: the "Invalid" synthesized from a CALLERROR
+   * is not a verdict and is never cached.
+   */
+  private recordIdTokenInfo(
+    idToken: TransactionEventRequestV201["idToken"],
+    idTokenInfo: TransactionEventResponseV201["idTokenInfo"],
+  ): void {
+    const key = cacheableIdToken(idToken);
+    if (key === undefined || idTokenInfo === undefined) return;
+    this._chargePoint.recordAuthorizationResult(
+      key,
+      authorizationResultFromIdTokenInfo(idTokenInfo),
+    );
+  }
+
+  /**
    * #447: the 2.x twin of 1.6's non-Accepted StartTransaction.conf (#181).
    * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
    * in `idTokenInfo`. When it is not Accepted and the transaction is still
@@ -563,6 +589,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     request: TransactionEventRequestV201,
     response: TransactionEventResponseV201,
   ): void {
+    this.recordIdTokenInfo(request.idToken, response.idTokenInfo);
     const status = response.idTokenInfo?.status;
     if (status === undefined || status === "Accepted") return;
     if (request.eventType === "Ended") return;

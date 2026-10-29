@@ -220,6 +220,101 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "AuthCtrlr",
+          },
+          "variable": {
+            "name": "LocalPreAuthorize",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "AuthCtrlr",
+          },
+          "variable": {
+            "name": "LocalAuthorizeOffline",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "true",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "AuthCtrlr",
+          },
+          "variable": {
+            "name": "OfflineTxForUnknownIdEnabled",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "AuthCacheCtrlr",
+          },
+          "variable": {
+            "name": "Enabled",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "AuthCacheCtrlr",
+          },
+          "variable": {
+            "name": "LifeTime",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
             "name": "TxCtrlr",
           },
           "variable": {

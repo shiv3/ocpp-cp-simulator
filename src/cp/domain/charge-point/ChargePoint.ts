@@ -456,7 +456,8 @@ export class ChargePoint {
         localAuthorizeOffline: this._configuration.localAuthorizeOffline(),
         allowOfflineTxForUnknownId:
           this._configuration.allowOfflineTxForUnknownId(),
-        cacheLifetimeSeconds: null,
+        // 2.x AuthCacheCtrlr.LifeTime; a 1.6 store has no such key → null.
+        cacheLifetimeSeconds: this._configuration.authCacheLifeTimeSeconds(),
         localListChecksExpiry: true,
       }),
     });

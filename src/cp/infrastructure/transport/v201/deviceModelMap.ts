@@ -12,6 +12,12 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["LocalAuthListCtrlr/Enabled", "LocalAuthListEnabled"],
   ["LocalAuthListCtrlr/ItemsPerMessage", "SendLocalListMaxLength"],
   ["AuthCtrlr/AuthorizeRemoteStart", "AuthorizeRemoteTxRequests"],
+  // #452: local authorization (2.0.1 Part 2 §2.3-§2.4, C10-C15).
+  ["AuthCtrlr/LocalPreAuthorize", "LocalPreAuthorize"],
+  ["AuthCtrlr/LocalAuthorizeOffline", "LocalAuthorizeOffline"],
+  ["AuthCtrlr/OfflineTxForUnknownIdEnabled", "AllowOfflineTxForUnknownId"],
+  ["AuthCacheCtrlr/Enabled", "AuthorizationCacheEnabled"],
+  ["AuthCacheCtrlr/LifeTime", "AuthCacheLifeTime"],
   ["TxCtrlr/StopTxOnInvalidId", "StopTransactionOnInvalidId"],
   ["TxCtrlr/StopTxOnEVSideDisconnect", "StopTransactionOnEVSideDisconnect"],
 ]);

@@ -346,5 +346,28 @@ describe("resolveLocalAuthorization — offline", () => {
         }),
       ).toEqual({ kind: "accept", source: "cache" });
     });
+
+    it("lets an entry's own expiry override the lifetime (C10.FR.13)", () => {
+      expect(
+        resolveLocalAuthorization({
+          online: false,
+          // Updated 10 s ago, lifetime 5 s, but cacheExpiryDateTime ahead.
+          policy: policy({ cacheEnabled: true, cacheLifetimeSeconds: 5 }),
+          cacheEntry: cached("Accepted", { expiresAt: FUTURE }),
+          now: NOW,
+        }),
+      ).toEqual({ kind: "accept", source: "cache" });
+    });
+
+    it("expires an entry at its own expiry even within the lifetime", () => {
+      expect(
+        resolveLocalAuthorization({
+          online: false,
+          policy: policy({ cacheEnabled: true, cacheLifetimeSeconds: 3600 }),
+          cacheEntry: cached("Accepted", { expiresAt: PAST }),
+          now: NOW,
+        }),
+      ).toEqual({ kind: "reject", source: "cache", status: "Expired" });
+    });
   });
 });

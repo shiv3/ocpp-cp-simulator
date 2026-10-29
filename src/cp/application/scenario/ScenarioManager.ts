@@ -26,6 +26,20 @@ export class ScenarioManager {
     ScenarioExecutorCallbacks | (() => ScenarioExecutorCallbacks);
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private readonly unsubscribeStatusChange: () => void;
+  /**
+   * #333: the run that owns the connector's EV settings override — the
+   * executor that last *applied* its `evSettings`, compared by reference.
+   *
+   * Written only once a run's `onSetEVSettings` has returned (see
+   * {@link executeScenario}), never from what a definition declares: a
+   * definition installed under a running id may never run, and one whose
+   * settings are refused claimed nothing. Cleared by {@link
+   * disownEvSettingsOverride} when an operator takes the override over, and
+   * when the owning run releases it. The browser twin of the daemon's
+   * `_evSettingsOwnerByConnector`; deliberately not on the `Connector`, whose
+   * other override writers have no run to name.
+   */
+  private evSettingsOwner: ScenarioExecutor | null = null;
 
   constructor(
     connector: Connector,
@@ -299,9 +313,14 @@ export class ScenarioManager {
     console.log(`[ScenarioManager] Executing scenario: ${scenario.name}`);
 
     // Create executor with event emitter
-    const executor = new ScenarioExecutor(
+    const executor: ScenarioExecutor = new ScenarioExecutor(
       scenario,
-      typeof this.callbacks === "function" ? this.callbacks() : this.callbacks,
+      this.recordingEvSettingsClaim(
+        typeof this.callbacks === "function"
+          ? this.callbacks()
+          : this.callbacks,
+        () => executor,
+      ),
       this.eventEmitter,
     );
     this.executors.set(scenarioId, executor);
@@ -311,17 +330,75 @@ export class ScenarioManager {
     } catch (error) {
       console.error(`[ScenarioManager] Scenario execution error:`, error);
     } finally {
-      // Clean up when completed
-      this.executors.delete(scenarioId);
-      // Release the EV settings override (#105) — but only if THIS scenario
-      // declared evSettings and therefore owns the override (ScenarioExecutor
-      // only calls onSetEVSettings for declared evSettings). A scenario that
-      // never touched EV settings must not release an explicit override that
-      // was set on the same connector.
-      if (scenario.evSettings) {
-        this.connector.clearEvSettingsOverride();
+      // Clean up when completed — but only our own slot: a re-run under the
+      // same id stops this run and installs its executor before this
+      // `finally` runs, and must stay stoppable.
+      if (this.executors.get(scenarioId) === executor) {
+        this.executors.delete(scenarioId);
       }
+      this.releaseEvSettingsOverride(executor);
     }
+  }
+
+  /**
+   * `callbacks` with `onSetEVSettings` recording the run as the owner of the
+   * EV settings override (#333) once the write has returned — never before,
+   * and never if it throws. Without that callback there is nothing to claim.
+   *
+   * In the same tick when the write is synchronous (the connector's, as
+   * `createScenarioExecutorCallbacks` makes it): the override is marked from
+   * that moment, so a stop in the same tick must already find its owner.
+   */
+  private recordingEvSettingsClaim(
+    callbacks: ScenarioExecutorCallbacks,
+    run: () => ScenarioExecutor,
+  ): ScenarioExecutorCallbacks {
+    const apply = callbacks.onSetEVSettings;
+    if (!apply) return callbacks;
+    return {
+      ...callbacks,
+      onSetEVSettings: (settings) => {
+        const applied = apply(settings);
+        // A claim that lands after its run was stopped is released by that
+        // run's own `finally`, which the executor reaches only after this.
+        if (applied instanceof Promise) {
+          return applied.then(() => {
+            this.evSettingsOwner = run();
+          });
+        }
+        this.evSettingsOwner = run();
+      },
+    };
+  }
+
+  /**
+   * Release the EV settings override if `ending` is the run that owns it
+   * (#105, #333) — the one comparison the daemon's
+   * `shouldReleaseEvSettingsOverride` makes:
+   *
+   * 1. **Release only what this run set.** A run that declared no
+   *    `evSettings`, or whose settings were refused, never claimed, and an
+   *    operator set during the run disowned it: an override nobody's run set
+   *    survives.
+   * 2. **Do not release what someone else claimed since.** A concurrent or
+   *    replacement run that applied its own settings owns the override.
+   * 3. **Do release on ordinary completion and on stop.** Nothing but a later
+   *    claim or an operator set moves the owner, so on either end it is still
+   *    this run's — whatever definition is installed under its id by then.
+   */
+  private releaseEvSettingsOverride(ending: ScenarioExecutor): void {
+    if (this.evSettingsOwner !== ending) return;
+    this.evSettingsOwner = null;
+    this.connector.clearEvSettingsOverride();
+  }
+
+  /**
+   * An operator set the connector's EV settings outside any run (#105): the
+   * override is theirs now, so the run that claimed it earlier no longer
+   * releases it when it ends. Call after `applyEvSettingsOverride`.
+   */
+  disownEvSettingsOverride(): void {
+    this.evSettingsOwner = null;
   }
 
   /**
@@ -333,12 +410,9 @@ export class ScenarioManager {
       console.log(`[ScenarioManager] Stopping scenario: ${scenarioId}`);
       executor.stop();
       this.executors.delete(scenarioId);
-      // Release the EV settings override (#105) only for the owning
-      // (evSettings-declaring) scenario, same as executeScenario's
-      // natural-completion path above.
-      if (this.scenarios.get(scenarioId)?.evSettings) {
-        this.connector.clearEvSettingsOverride();
-      }
+      // Asked of the run being stopped, not of the definition now installed
+      // under its id (#333): that one may never have run.
+      this.releaseEvSettingsOverride(executor);
     }
   }
 

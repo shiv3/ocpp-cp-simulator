@@ -1218,7 +1218,7 @@ export class CLIChargePointService {
    * this CP, but only takes effect on connectors that don't currently have
    * an explicit/scenario override active (see Connector.applyDefaultEvSettings).
    */
-  applyDefaultEVSettings(settings: EVSettings): void {
+  applyDefaultEVSettings(settings: EVSettingsPatch): void {
     this._chargePoint.connectors.forEach((connector) => {
       connector.applyDefaultEvSettings(settings);
     });

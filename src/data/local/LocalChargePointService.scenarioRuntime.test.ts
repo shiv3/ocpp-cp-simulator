@@ -433,3 +433,39 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
     expect(connector.scenarioManager).toBeUndefined();
   });
 });
+
+describe("LocalChargePointService EV settings override ownership (#333)", () => {
+  async function runParkedEvScenario() {
+    const ctx = await setup();
+    const connector = ctx.chargePoint.getConnector(1)!;
+    await ctx.service.loadScenario(CP_ID, 1, {
+      ...parkingScenario("s-ev"),
+      evSettings: { targetSoc: 55 },
+    });
+    void ctx.service.runScenario(CP_ID, 1, "s-ev");
+    await settle();
+    expect(connector.evSettings.targetSoc).toBe(55);
+    return { service: ctx.service, connector };
+  }
+
+  it("an operator's setEVSettings during a run survives that run (#105)", async () => {
+    const { service, connector } = await runParkedEvScenario();
+
+    // The operator takes the override over while the run is in flight: the
+    // run's end must not release it.
+    await service.setEVSettings(CP_ID, 1, { targetSoc: 66 });
+    await service.stopScenario(CP_ID, 1, "s-ev");
+    await service.applyDefaultEVSettings({ targetSoc: 99 });
+
+    expect(connector.evSettings.targetSoc).toBe(66);
+  });
+
+  it("a run that claimed the override releases it when stopped", async () => {
+    const { service, connector } = await runParkedEvScenario();
+
+    await service.stopScenario(CP_ID, 1, "s-ev");
+    await service.applyDefaultEVSettings({ targetSoc: 99 });
+
+    expect(connector.evSettings.targetSoc).toBe(99);
+  });
+});

@@ -195,3 +195,239 @@ describe("ScenarioManager EV settings override (#105)", () => {
     expect(connector.evSettings.targetSoc).toBe(80);
   });
 });
+
+// Start -> wait for a status the test never reaches -> End, under any id:
+// stays running until stopped. Carries `evSettings` only when given.
+function parkedScenario(
+  id: string,
+  evSettings?: ScenarioDefinition["evSettings"],
+): ScenarioDefinition {
+  const { evSettings: _declared, ...parked } = scenarioWithEvSettingsOverride(
+    {},
+  );
+  void _declared;
+  return {
+    ...parked,
+    id,
+    name: `parked ${id}`,
+    ...(evSettings ? { evSettings } : {}),
+  };
+}
+
+/** Whether a Default EV Settings propagation takes effect, i.e. no override is
+ *  marked. Leaves the connector on `targetSoc` when it does. */
+function defaultPropagationLands(connector: Connector, targetSoc: number) {
+  connector.applyDefaultEvSettings({ ...defaultEVSettings, targetSoc });
+  return connector.evSettings.targetSoc === targetSoc;
+}
+
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
+
+/**
+ * The browser twin of the daemon's `service.evSettingsOwnership.bun.test.ts`
+ * (#314): the override is released by the run that actually applied it and by
+ * no one else. Each row fails under one of the rules that read a definition's
+ * declaration instead of the run's claim. The manager gets a callbacks
+ * *factory*, as `LocalScenarioRuntime` gives it in production.
+ */
+describe("ScenarioManager EV settings override ownership (#333)", () => {
+  function newManager() {
+    const connector = makeConnector();
+    const chargePoint = makeChargePointStub();
+    const manager = new ScenarioManager(connector, chargePoint, () =>
+      createScenarioExecutorCallbacks({ chargePoint, connector }),
+    );
+    return { connector, manager };
+  }
+
+  it("a run that claimed the override releases it when it completes", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([completingScenario("solo", { targetSoc: 55 })]);
+
+    await manager.executeScenario("solo");
+
+    expect(connector.evSettings.targetSoc).toBe(55);
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+  });
+
+  it("a manually stopped run releases what it claimed", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([parkedScenario("stopped", { targetSoc: 55 })]);
+    void manager.executeScenario("stopped");
+    await settle();
+    expect(connector.evSettings.targetSoc).toBe(55);
+
+    manager.stopScenario("stopped");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+  });
+
+  it("a run stopped in the tick it applied its settings releases them", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([parkedScenario("quick", { targetSoc: 55 })]);
+    // The executor applies declared evSettings before its first `await`, so
+    // the claim exists as soon as executeScenario returns its promise; a stop
+    // in the same tick (two status transitions, say) must find it.
+    void manager.executeScenario("quick");
+    expect(connector.evSettings.targetSoc).toBe(55);
+    manager.stopScenario("quick");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+    await settle();
+    expect(defaultPropagationLands(connector, 98)).toBe(true);
+  });
+
+  it("an asynchronous write that lands after its run was stopped is released", async () => {
+    const connector = makeConnector();
+    const chargePoint = makeChargePointStub();
+    const manager = new ScenarioManager(connector, chargePoint, () => {
+      const callbacks = createScenarioExecutorCallbacks({
+        chargePoint,
+        connector,
+      });
+      return {
+        ...callbacks,
+        onSetEVSettings: async (settings) => {
+          await Promise.resolve();
+          await callbacks.onSetEVSettings?.(settings);
+        },
+      };
+    });
+    manager.loadScenarios([parkedScenario("late", { targetSoc: 55 })]);
+    void manager.executeScenario("late");
+    manager.stopScenario("late");
+    await settle();
+
+    expect(connector.evSettings.targetSoc).toBe(55);
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+  });
+
+  it("a replacement that is installed but has not run does not preserve the outgoing run's override", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([parkedScenario("hot", { targetSoc: 55 })]);
+    void manager.executeScenario("hot");
+    await settle();
+
+    // Installed under the running id, never run, declaring no evSettings: it
+    // says nothing about who holds the override.
+    manager.setScenario(parkedScenario("hot"));
+    manager.stopScenario("hot");
+
+    expect(connector.evSettings.targetSoc).toBe(55);
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+  });
+
+  it("a replacement that declares evSettings but has not run does not release an operator's override (#105)", async () => {
+    const { connector, manager } = newManager();
+    connector.applyEvSettingsOverride({ targetSoc: 66 });
+    manager.loadScenarios([parkedScenario("plain")]);
+    void manager.executeScenario("plain");
+    await settle();
+
+    manager.setScenario(parkedScenario("plain", { targetSoc: 77 }));
+    manager.stopScenario("plain");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(66);
+  });
+
+  it("a run that declared no evSettings never releases an operator's override (#105)", async () => {
+    const { connector, manager } = newManager();
+    connector.applyEvSettingsOverride({ targetSoc: 66 });
+    manager.loadScenarios([completingScenario("plain")]);
+
+    await manager.executeScenario("plain");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(66);
+  });
+
+  it("a declaration that fails to apply claims nothing", async () => {
+    const { connector, manager } = newManager();
+    connector.applyEvSettingsOverride({ targetSoc: 66 });
+    // Declares evSettings, but the write is refused (a required field set to
+    // null), so the run never takes the override.
+    manager.loadScenarios([
+      completingScenario("refused", {
+        batteryCapacityKwh: null,
+      } as unknown as Partial<EVSettings>),
+    ]);
+
+    await manager.executeScenario("refused");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(66);
+  });
+
+  it("a run that actually claimed since keeps its override when the earlier run ends", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([
+      completingScenario("first", { targetSoc: 55 }),
+      parkedScenario("second", { targetSoc: 77 }),
+    ]);
+    const first = manager.manualExecute("first");
+    void manager.manualExecute("second");
+
+    await first;
+    await settle();
+
+    expect(manager.isScenarioActive("second")).toBe(true);
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(77);
+    manager.stopScenario("second");
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+  });
+
+  it("a stopped run does not release what a concurrent run claimed since", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([
+      parkedScenario("a", { targetSoc: 55 }),
+      parkedScenario("b", { targetSoc: 77 }),
+    ]);
+    void manager.manualExecute("a");
+    void manager.manualExecute("b");
+    await settle();
+
+    manager.stopScenario("a");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(77);
+    manager.stopScenario("b");
+  });
+
+  it("re-running a scenario under its id leaves the new run's override and slot alone", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([parkedScenario("again", { targetSoc: 55 })]);
+    void manager.executeScenario("again");
+    await settle();
+
+    manager.setScenario(parkedScenario("again", { targetSoc: 77 }));
+    void manager.executeScenario("again");
+    await settle();
+
+    // The outgoing run's teardown must take neither the new run's override
+    // nor its executor slot: the new run is still stoppable.
+    expect(connector.evSettings.targetSoc).toBe(77);
+    expect(manager.isScenarioActive("again")).toBe(true);
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    manager.stopScenario("again");
+    expect(defaultPropagationLands(connector, 99)).toBe(true);
+  });
+
+  it("an operator's set during a run survives that run (#105)", async () => {
+    const { connector, manager } = newManager();
+    manager.loadScenarios([parkedScenario("mid", { targetSoc: 55 })]);
+    void manager.executeScenario("mid");
+    await settle();
+
+    // The operator takes the override over: the last claim wins.
+    connector.applyEvSettingsOverride({ targetSoc: 66 });
+    manager.disownEvSettingsOverride();
+    manager.stopScenario("mid");
+
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(66);
+  });
+});

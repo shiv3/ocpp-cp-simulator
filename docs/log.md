@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Log
@@ -1747,3 +1747,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `ScenarioManager.executeScenario` returned without a word while the charge point was not `Available`, so in Local mode the console's **Run** (and a template run) showed a running scenario that never progressed; the daemon's `runScenario` has no such gate. The gate now applies only to the automatic `statusChange` trigger (`ScenarioManager.handleStatusChange`), checked before it stops the running scenarios, as the daemon does: a matching transition on a charge point that is not `Available` no longer ends a manual run and then starts nothing. On an `Available` charge point a matching trigger still replaces the running scenario. The connect / status auto-start keeps its own gate in `LocalScenarioRuntime`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): explicit runs start whatever the charge point's status in both modes; only the automatic starts wait for `Available`.
 - [GitHub issues](sources/github-issues.md): #425.
+
+## [2026-10-29] ingest | EV settings override records its provenance (#333)
+
+- `ev_settings.apply_default` replaced a connector's EV settings wholesale while `set_ev_settings` merged, so a partial payload left a required field such as `initialSoc` absent behind a type that says `number`. `Connector.applyDefaultEvSettings` now merges onto the built-in `defaultEVSettings` (option (a) of the issue); both the daemon and Local mode reach it, and the RPC handler no longer casts the payload to a complete `EVSettings`. The #310 sink guard for an absent `initialSoc` stays, for settings cast past the type.
+- Local mode's `ScenarioManager` released the override from what the definition installed under the id _declared_ — the third proxy the daemon dropped in #314. It now records the executor that applied the settings (after `onSetEVSettings` returns) and releases on one comparison, on completion and on stop; `LocalChargePointService.setEVSettings` disowns the run, and a re-run under the same id no longer loses its executor slot to the outgoing run's cleanup.
+- [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
+- [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
+- [GitHub issues](sources/github-issues.md): #333.

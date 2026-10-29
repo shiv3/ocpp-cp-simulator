@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AuthorizationCache } from "../AuthorizationCache";
 import {
   AUTHORIZATION_CACHE_SEED_MAX,
+  idTokenMaxLength,
   InvalidAuthorizationCacheSeedError,
   type AuthorizationCacheSeedEntry,
 } from "../AuthorizationCacheSeed";
@@ -11,7 +12,7 @@ import { Logger } from "../../../shared/Logger";
 
 const NOW = Date.parse("2026-10-29T12:00:00Z");
 
-function build(cacheEnabled = false) {
+function build(cacheEnabled = false, maxIdTokenLength = 20) {
   const cache = new AuthorizationCache("CP", null, { now: () => NOW });
   const auth = new StationAuthorization({
     cache,
@@ -26,6 +27,7 @@ function build(cacheEnabled = false) {
       localListChecksExpiry: true,
     }),
     now: () => NOW,
+    idTokenMaxLength: maxIdTokenLength,
   });
   return { auth, cache };
 }
@@ -100,6 +102,43 @@ describe("StationAuthorization.seedCache (#452 control seam)", () => {
       InvalidAuthorizationCacheSeedError,
     );
   });
+});
+
+describe("idTokenMaxLength (#452)", () => {
+  it.each([
+    // 1.6 Part 2 §7.28 IdToken: CiString20Type (1.2, 1.5 and 1.6S alike).
+    ["OCPP-1.2", 20],
+    ["OCPP-1.5", 20],
+    ["OCPP-1.6J", 20],
+    ["OCPP-1.6S", 20],
+    // IdTokenType.idToken: identifierString[0..36] in 2.0.1, [0..255] in 2.1.
+    ["OCPP-2.0.1", 36],
+    ["OCPP-2.1", 255],
+  ])("%s → %i", (version, max) => {
+    expect(idTokenMaxLength(version)).toBe(max);
+  });
+});
+
+describe("StationAuthorization.seedCache — per-version length", () => {
+  it.each([20, 36, 255])(
+    "admits an idToken and a parentId of %i characters, refuses one more",
+    (max) => {
+      const { auth, cache } = build(true, max);
+      const at = "x".repeat(max);
+      expect(
+        auth.seedCache([{ idToken: at, status: "Accepted", parentId: at }]),
+      ).toBe(1);
+      expect(() =>
+        auth.seedCache([{ idToken: at + "y", status: "Accepted" }]),
+      ).toThrow(InvalidAuthorizationCacheSeedError);
+      expect(() =>
+        auth.seedCache([
+          { idToken: "OK", status: "Accepted", parentId: at + "y" },
+        ]),
+      ).toThrow(InvalidAuthorizationCacheSeedError);
+      expect(cache.size()).toBe(1);
+    },
+  );
 });
 
 describe("StationAuthorization.cacheView", () => {

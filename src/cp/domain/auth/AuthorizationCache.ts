@@ -1,4 +1,5 @@
 import type { Database } from "../persistence/Database";
+import { idTokenKey } from "./idTokenKey";
 import { effectiveStatus } from "./LocalAuthorizationResolver";
 
 /**
@@ -55,8 +56,12 @@ interface CacheRow {
  * power outages" (1.6 §3.5.1 with errata 3.4, C10.FR.02) — and in memory
  * otherwise, like {@link PendingMessageQueue}: loaded in the constructor,
  * written through on every change.
+ *
+ * Identifiers are case insensitive ({@link idTokenKey}): one entry, and
+ * one row, per folded identifier, under the spelling last received.
  */
 export class AuthorizationCache {
+  /** Keyed by {@link idTokenKey}. */
   private readonly entries = new Map<string, AuthorizationCacheEntry>();
   private readonly maxEntries: number;
   private readonly now: () => number;
@@ -75,7 +80,7 @@ export class AuthorizationCache {
   }
 
   get(idToken: string): AuthorizationCacheEntry | undefined {
-    const entry = this.entries.get(idToken);
+    const entry = this.entries.get(idTokenKey(idToken));
     return entry ? { ...entry } : undefined;
   }
 
@@ -96,8 +101,14 @@ export class AuthorizationCache {
    */
   upsert(record: AuthorizationCacheRecord): void {
     const now = this.now();
-    const previous = this.entries.get(record.idToken);
+    const key = idTokenKey(record.idToken);
+    const previous = this.entries.get(key);
     if (!previous) this.makeRoom(now);
+    // A new spelling of a known identifier replaces its row: the table
+    // key compares exactly.
+    if (previous && previous.idToken !== record.idToken) {
+      this.deleteRow(previous.idToken);
+    }
     const entry: AuthorizationCacheEntry = {
       idToken: record.idToken,
       status: record.status,
@@ -108,13 +119,16 @@ export class AuthorizationCache {
       insertedAt: previous?.insertedAt ?? now,
       updatedAt: now,
     };
-    this.entries.set(entry.idToken, entry);
+    this.entries.set(key, entry);
     this.writeRow(entry);
   }
 
   remove(idToken: string): boolean {
-    if (!this.entries.delete(idToken)) return false;
-    this.deleteRow(idToken);
+    const key = idTokenKey(idToken);
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    this.entries.delete(key);
+    this.deleteRow(entry.idToken);
     return true;
   }
 
@@ -166,18 +180,30 @@ export class AuthorizationCache {
           "FROM authorization_cache WHERE cp_id = ?",
         [this.chargePointId],
       );
+      const shadowed: string[] = [];
       for (const row of rows) {
         const expiresAt =
           row.expires_at !== null ? Date.parse(row.expires_at) : NaN;
-        this.entries.set(row.id_token, {
+        const entry: AuthorizationCacheEntry = {
           idToken: row.id_token,
           status: row.status,
           ...(Number.isFinite(expiresAt) ? { expiresAt } : {}),
           ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
           insertedAt: Date.parse(row.inserted_at) || 0,
           updatedAt: Date.parse(row.updated_at) || 0,
-        });
+        };
+        // Rows spelt differently are one identifier: the newest wins and
+        // the others are dropped, so the table holds one row per key.
+        const key = idTokenKey(entry.idToken);
+        const other = this.entries.get(key);
+        if (other && other.updatedAt >= entry.updatedAt) {
+          shadowed.push(entry.idToken);
+          continue;
+        }
+        if (other) shadowed.push(other.idToken);
+        this.entries.set(key, entry);
       }
+      for (const idToken of shadowed) this.deleteRow(idToken);
     } catch (err) {
       console.error("Failed to load the authorization cache:", err);
     }

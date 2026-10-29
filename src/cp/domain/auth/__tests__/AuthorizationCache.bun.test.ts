@@ -104,6 +104,60 @@ describe("AuthorizationCache persistence (1.6 §3.5.1, errata 3.4, C10.FR.02)", 
   });
 });
 
+describe("AuthorizationCache — case-insensitive identifiers (#452)", () => {
+  const rows = (db: Database) =>
+    db.all<{ id_token: string; status: string }>(
+      "SELECT id_token, status FROM authorization_cache WHERE cp_id = ? ORDER BY id_token",
+      ["CP1"],
+    );
+
+  it("an update under another spelling replaces the row", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const cache = new AuthorizationCache("CP1", db, { now: () => T0 });
+      cache.upsert({ idToken: "ABC", status: "Accepted" });
+      cache.upsert({ idToken: "abc", status: "Blocked" });
+      expect(rows(db)).toEqual([{ id_token: "abc", status: "Blocked" }]);
+      expect(cache.remove("ABC")).toBe(true);
+      expect(rows(db)).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("restore folds rows spelt differently: the newest wins, the others go", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const insert = (idToken: string, status: string, at: number) =>
+        db.run(
+          "INSERT INTO authorization_cache " +
+            "(cp_id, id_token, status, expires_at, parent_id, inserted_at, updated_at) " +
+            "VALUES (?, ?, ?, NULL, NULL, ?, ?)",
+          [
+            "CP1",
+            idToken,
+            status,
+            new Date(at).toISOString(),
+            new Date(at).toISOString(),
+          ],
+        );
+      insert("ABC", "Accepted", T0);
+      insert("abc", "Blocked", T0 + 1000);
+      insert("Abc", "Invalid", T0 + 500);
+
+      const cache = new AuthorizationCache("CP1", db, { now: () => T0 + 2000 });
+      expect(cache.size()).toBe(1);
+      expect(cache.get("ABC")).toMatchObject({
+        idToken: "abc",
+        status: "Blocked",
+      });
+      expect(rows(db)).toEqual([{ id_token: "abc", status: "Blocked" }]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("ChargePoint restart with --state-db (issue test 8)", () => {
   it("a restarted charge point authorizes offline from the cache it had before", async () => {
     const db = BunSqliteDatabase.open(":memory:");

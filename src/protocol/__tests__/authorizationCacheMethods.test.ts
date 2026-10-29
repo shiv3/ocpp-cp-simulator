@@ -42,6 +42,22 @@ describe("authorization cache methods (#452)", () => {
     ).toBe(true);
   });
 
+  it("seed admits a 255-character idToken (2.1 IdTokenType) and an offset expiry", () => {
+    // The per-version bound (20 / 36 / 255) is the charge point's to apply.
+    expect(
+      seed.safeParse({
+        entries: [
+          {
+            ...entry,
+            idToken: "x".repeat(255),
+            parentId: "y".repeat(255),
+            expiresAt: "2026-10-30T02:00:00+02:00",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
   it("seed admits __proto__ as an ordinary identifier", () => {
     const parsed = seed.safeParse({
       entries: [{ idToken: "__proto__", status: "Blocked" }],
@@ -56,11 +72,30 @@ describe("authorization cache methods (#452)", () => {
     ["an unknown status", { entries: [{ ...entry, status: "Maybe" }] }],
     ["an empty idToken", { entries: [{ ...entry, idToken: "" }] }],
     [
-      "an idToken over 36 chars",
-      { entries: [{ ...entry, idToken: "x".repeat(37) }] },
+      "an idToken over 255 chars",
+      { entries: [{ ...entry, idToken: "x".repeat(256) }] },
+    ],
+    [
+      "a parentId over 255 chars",
+      { entries: [{ ...entry, parentId: "x".repeat(256) }] },
     ],
     ["an empty parentId", { entries: [{ ...entry, parentId: "" }] }],
     ["an unparseable expiry", { entries: [{ ...entry, expiresAt: "soon" }] }],
+    // Date.parse reads these as dates on V8; they are not ISO date-times.
+    ["a bare year as expiry", { entries: [{ ...entry, expiresAt: "2026" }] }],
+    [
+      "a word-and-digit expiry",
+      { entries: [{ ...entry, expiresAt: "soon 1" }] },
+    ],
+    ["a bare number as expiry", { entries: [{ ...entry, expiresAt: "0" }] }],
+    [
+      "an expiry without an offset",
+      { entries: [{ ...entry, expiresAt: "2026-10-30T00:00:00" }] },
+    ],
+    [
+      "one idToken in two cases",
+      { entries: [entry, { ...entry, idToken: "tag-1" }] },
+    ],
     [
       "a duplicate idToken",
       { entries: [entry, { ...entry, status: "Blocked" }] },

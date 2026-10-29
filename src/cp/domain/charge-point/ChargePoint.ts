@@ -76,6 +76,7 @@ import type {
 import type { ReadingContext } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
+import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
 import { AuthorizationCache } from "../auth/AuthorizationCache";
 import {
   StationAuthorization,
@@ -460,6 +461,7 @@ export class ChargePoint {
         cacheLifetimeSeconds: this._configuration.authCacheLifeTimeSeconds(),
         localListChecksExpiry: true,
       }),
+      idTokenMaxLength: idTokenMaxLength(this._ocppVersion),
     });
 
     this._stateManager = new StateManager(
@@ -1120,9 +1122,10 @@ export class ChargePoint {
    *   for different tags don't cross streams.
    *
    * While waiting, a disconnect hands the decision to the offline rules.
-   * A timeout while still connected warns and resolves "Accepted"
-   * (warn-and-proceed, unchanged since #181); a timeout once the socket is
-   * gone applies the offline rules too.
+   * A timeout while still connected falls back to what the station knows:
+   * a NOT-valid local-list or cache entry resolves its status (#452);
+   * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
+   * A timeout once the socket is gone applies the offline rules.
    */
   authorizeAndWait(tagId: string, timeoutMs = 10000): Promise<string> {
     const decision = this._authorization.decide(tagId, this.isOnline());
@@ -1174,6 +1177,15 @@ export class ChargePoint {
         cleanup();
         if (!this.isOnline()) {
           decideOffline(`Timeout (${timeoutMs}ms) and offline`);
+          return;
+        }
+        const refusal = this._authorization.decideUnanswered(tagId);
+        if (refusal) {
+          this._logger.warn(
+            `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; falling back to the local decision`,
+            LogType.TRANSACTION,
+          );
+          resolve(this.localAuthorizationStatus(tagId, refusal));
           return;
         }
         this._logger.warn(

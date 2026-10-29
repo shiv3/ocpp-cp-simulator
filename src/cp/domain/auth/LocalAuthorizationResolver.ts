@@ -17,7 +17,10 @@
  *   trip only when `localPreAuthorize` is set (1.6 §9.1.13, C12.FR.02,
  *   C14.FR.02). Anything else asks the CSMS: an unknown identifier (1.6
  *   §4.1 SHALL), a NOT-valid cache entry (1.6 §3.5.1, C10.FR.03,
- *   C12.FR.05), a NOT-valid list entry (C14.FR.03, C14.FR.05).
+ *   C12.FR.05), a NOT-valid list entry (C14.FR.03, C14.FR.05). When the
+ *   CSMS does not answer in time, a known NOT-valid identifier is refused
+ *   with its status; anything else is accepted
+ *   ({@link resolveUnansweredAuthorization}).
  * - Offline: a known NOT-valid identifier is rejected with its status (1.6
  *   §3.5.4 MUST, C13.FR.02/.05). A known valid identifier is accepted when
  *   `localAuthorizeOffline` is set (1.6 §9.1.12); otherwise it is not
@@ -123,6 +126,24 @@ export function resolveOfflineAuthorization(
   input: Omit<LocalAuthorizationInput, "online">,
 ): LocalOnlyDecision {
   return offlineDecision(input.policy, knownEntry(input));
+}
+
+/**
+ * Online, but the CSMS never answered Authorize.req: an identifier the
+ * station knows as NOT valid (an enabled local list or cache entry whose
+ * effective status is not `Accepted`) is refused with that status, as the
+ * offline rules would. Anything else returns `null`: the caller keeps the
+ * #181 warn-and-proceed `Accepted`, so an unknown identifier and a known
+ * valid one still start.
+ */
+export function resolveUnansweredAuthorization(
+  input: Omit<LocalAuthorizationInput, "online">,
+): Extract<LocalOnlyDecision, { kind: "reject" }> | null {
+  const known = knownEntry(input);
+  if (known && known.status !== ACCEPTED) {
+    return { kind: "reject", source: known.source, status: known.status };
+  }
+  return null;
 }
 
 function offlineDecision(

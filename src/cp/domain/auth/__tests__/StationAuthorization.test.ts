@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AuthorizationCache } from "../AuthorizationCache";
 import { LocalAuthListManager } from "../LocalAuthList";
 import type { LocalAuthorizationPolicy } from "../LocalAuthorizationResolver";
+import { InvalidAuthorizationCacheSeedError } from "../AuthorizationCacheSeed";
 import { StationAuthorization } from "../StationAuthorization";
 import { Logger } from "../../../shared/Logger";
 
@@ -26,6 +27,7 @@ function build(overrides: Partial<LocalAuthorizationPolicy> = {}) {
     localList,
     policy: () => policy,
     now: () => NOW,
+    idTokenMaxLength: 20,
   });
   return { auth, cache, localList, policy };
 }
@@ -123,5 +125,95 @@ describe("StationAuthorization.decide", () => {
       kind: "askCsms",
       source: "none",
     });
+  });
+});
+
+/**
+ * #452: an idTag / idToken is case insensitive (1.6 Part 2 §7.28 IdToken
+ * "CiString20Type ... IdToken is case insensitive"; 2.0.1/2.1 IdTokenType
+ * "IdToken is case insensitive"). Both stores fold the lookup key; the
+ * spelling last received stays for display and the wire.
+ */
+describe("StationAuthorization — identifiers are case insensitive", () => {
+  type Built = ReturnType<typeof build>;
+  const listAs = (b: Built, idTag: string, status: "Accepted" | "Blocked") =>
+    b.localList.applyFull(1, [{ idTag, idTagInfo: { status } }], LIMITS);
+
+  it.each<[string, (b: Built) => unknown, unknown]>([
+    [
+      "a cached tag is found under another case",
+      (b) => {
+        b.auth.recordCsmsResult("ABC", { status: "Blocked" });
+        return b.auth.decide("abc", false);
+      },
+      { kind: "reject", source: "cache", status: "Blocked" },
+    ],
+    [
+      "a listed tag is found under another case",
+      (b) => {
+        listAs(b, "ABC", "Blocked");
+        return b.auth.decide("abc", false);
+      },
+      { kind: "reject", source: "localList", status: "Blocked" },
+    ],
+    [
+      "a listed tag is not cached under another case (§3.5.3)",
+      (b) => {
+        listAs(b, "abc", "Accepted");
+        return [
+          b.auth.recordCsmsResult("ABC", { status: "Accepted" }),
+          b.cache.size(),
+        ];
+      },
+      [false, 0],
+    ],
+    [
+      "a listed Blocked tag beats a cached Accepted one spelt differently",
+      (b) => {
+        b.auth.recordCsmsResult("ABC", { status: "Accepted" });
+        listAs(b, "abc", "Blocked");
+        return b.auth.decide("ABC", false);
+      },
+      { kind: "reject", source: "localList", status: "Blocked" },
+    ],
+    [
+      "a second spelling updates the one cache entry and keeps the new spelling",
+      (b) => {
+        b.auth.recordCsmsResult("ABC", { status: "Accepted" });
+        b.auth.recordCsmsResult("abc", { status: "Invalid" });
+        return b.auth.cacheView().entries.map((e) => [e.idToken, e.status]);
+      },
+      [["abc", "Invalid"]],
+    ],
+    [
+      "a differential update removes a listed tag under another case",
+      (b) => {
+        listAs(b, "ABC", "Blocked");
+        b.localList.applyDifferential(2, [{ idTag: "abc" }], LIMITS);
+        return b.localList.size();
+      },
+      0,
+    ],
+    [
+      "only ASCII letters fold",
+      (b) => {
+        b.auth.recordCsmsResult("É-1", { status: "Blocked" });
+        return b.auth.decide("é-1", false);
+      },
+      { kind: "reject", source: "unknownOffline", status: "Invalid" },
+    ],
+  ])("%s", (_label, act, expected) => {
+    expect(act(build())).toEqual(expected);
+  });
+
+  it("a seed with one identifier in two cases is refused", () => {
+    const { auth, cache } = build();
+    expect(() =>
+      auth.seedCache([
+        { idToken: "ABC", status: "Accepted" },
+        { idToken: "abc", status: "Blocked" },
+      ]),
+    ).toThrow(InvalidAuthorizationCacheSeedError);
+    expect(cache.size()).toBe(0);
   });
 });

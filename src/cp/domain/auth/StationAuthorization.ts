@@ -12,6 +12,7 @@ import type { LocalAuthListManager } from "./LocalAuthList";
 import {
   resolveLocalAuthorization,
   resolveOfflineAuthorization,
+  resolveUnansweredAuthorization,
   type KnownAuthorization,
   type LocalAuthorizationDecision,
   type LocalAuthorizationInput,
@@ -28,6 +29,9 @@ export interface StationAuthorizationDeps {
   /** Read on every call, so configuration changes apply at once. */
   policy: () => LocalAuthorizationPolicy;
   now?: () => number;
+  /** Longest `idToken` / `parentId` a seed may carry, per the charge
+   *  point's OCPP version (`idTokenMaxLength` of AuthorizationCacheSeed). */
+  idTokenMaxLength: number;
 }
 
 /**
@@ -58,6 +62,14 @@ export class StationAuthorization {
   /** The offline rules alone, e.g. when the connection drops mid-wait. */
   decideOffline(idToken: string): LocalOnlyDecision {
     return resolveOfflineAuthorization(this.inputFor(idToken));
+  }
+
+  /** Online with no Authorize answer in time: the refusal a known NOT-valid
+   *  entry gives, or `null` to keep the warn-and-proceed `Accepted`. */
+  decideUnanswered(
+    idToken: string,
+  ): Extract<LocalOnlyDecision, { kind: "reject" }> | null {
+    return resolveUnansweredAuthorization(this.inputFor(idToken));
   }
 
   private inputFor(idToken: string): Omit<LocalAuthorizationInput, "online"> {
@@ -103,7 +115,10 @@ export class StationAuthorization {
    * Returns the number written.
    */
   seedCache(entries: readonly AuthorizationCacheSeedEntry[]): number {
-    const records = parseAuthorizationCacheSeed(entries);
+    const records = parseAuthorizationCacheSeed(
+      entries,
+      this.deps.idTokenMaxLength,
+    );
     for (const record of records) this.deps.cache.upsert(record);
     return records.length;
   }

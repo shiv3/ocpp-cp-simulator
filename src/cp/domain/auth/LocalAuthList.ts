@@ -1,4 +1,5 @@
 import { Logger, LogType } from "../../shared/Logger";
+import { idTokenKey } from "./idTokenKey";
 
 /**
  * idTagInfo stored in the local authorization list. Matches ts-ocpp's
@@ -51,6 +52,7 @@ export interface LocalAuthListLimits {
  * calling `getVersion()`.
  */
 export class LocalAuthListManager {
+  /** Keyed by {@link idTokenKey}: an idTag is case insensitive (#452). */
   private list: Map<string, LocalAuthorizationEntry> = new Map();
   private version = 0;
   private readonly logger: Logger;
@@ -68,7 +70,7 @@ export class LocalAuthListManager {
   }
 
   getEntry(idTag: string): LocalAuthorizationEntry | undefined {
-    return this.list.get(idTag);
+    return this.list.get(idTokenKey(idTag));
   }
 
   /**
@@ -99,7 +101,7 @@ export class LocalAuthListManager {
     const fresh = new Map<string, LocalAuthorizationEntry>();
     for (const item of next) {
       if (item.idTagInfo) {
-        fresh.set(item.idTag, toEntry(item.idTagInfo));
+        fresh.set(idTokenKey(item.idTag), toEntry(item.idTagInfo));
       }
       // §9.2: in a Full update, entries without idTagInfo are simply not
       // included in the resulting list — same semantics as omitting them.
@@ -143,9 +145,9 @@ export class LocalAuthListManager {
     const draft = new Map(this.list);
     for (const item of updates) {
       if (item.idTagInfo) {
-        draft.set(item.idTag, toEntry(item.idTagInfo));
+        draft.set(idTokenKey(item.idTag), toEntry(item.idTagInfo));
       } else {
-        draft.delete(item.idTag);
+        draft.delete(idTokenKey(item.idTag));
       }
     }
     if (draft.size > limits.localAuthListMaxLength) {

@@ -48,6 +48,7 @@ import {
   AUTHORIZATION_CACHE_SEED_MAX,
   AUTHORIZATION_STATUSES,
 } from "../cp/domain/auth/AuthorizationCacheSeed";
+import { idTokenKey } from "../cp/domain/auth/idTokenKey";
 import { MAX_SESSIONS_PER_CP } from "../cp/domain/persistence/ChargingSessionRepository";
 import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
 import {
@@ -127,13 +128,17 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
  * schema rather than a copy of its bounds (#382).
  */
 export const dataTransferDataSchema = z.union([STR_64K, OBJ()]);
-/** An identifier as both versions carry it: 2.x IdTokenType.idToken is at
- *  most 36 characters, 1.6 IdToken 20. */
-const ID_TOKEN = NON_EMPTY_STR.max(36);
+/** An identifier, at the widest any version carries it: 2.1
+ *  IdTokenType.idToken is at most 255 characters (2.0.1: 36, 1.6 IdToken:
+ *  20). The charge point refuses one longer than its own version allows
+ *  (`idTokenMaxLength`, InvalidAuthorizationCacheSeedError →
+ *  invalid_params). */
+const ID_TOKEN = NON_EMPTY_STR.max(255);
 /**
  * `seed_auth_cache`'s entries (#452): an array, not a record keyed
  * by idToken, so an identifier never lands on a prototype key. Bounded by
- * the cache capacity; one entry per idToken. Exported so JSON-Lines mode
+ * the cache capacity; one entry per idToken, compared case-insensitively
+ * like the cache does (`idTokenKey`). Exported so JSON-Lines mode
  * validates against the same schema (#382).
  */
 export const authorizationCacheSeedSchema = z
@@ -141,16 +146,18 @@ export const authorizationCacheSeedSchema = z
     z.object({
       idToken: ID_TOKEN,
       status: z.enum(AUTHORIZATION_STATUSES),
-      expiresAt: STR_64K.refine((v) => !Number.isNaN(Date.parse(v)), {
-        message: "expiresAt must be a date string",
-      }).optional(),
+      // An ISO 8601 date-time with `Z` or an offset: Date.parse would also
+      // take "2026" or "soon 1", depending on the engine.
+      expiresAt: z.iso.datetime({ offset: true }).optional(),
       parentId: ID_TOKEN.optional(),
     }),
   )
   .min(1)
   .max(AUTHORIZATION_CACHE_SEED_MAX)
   .refine(
-    (entries) => new Set(entries.map((e) => e.idToken)).size === entries.length,
+    (entries) =>
+      new Set(entries.map((e) => idTokenKey(e.idToken))).size ===
+      entries.length,
     { message: "each idToken may appear once" },
   );
 const authorizationCacheViewSchema = z.object({

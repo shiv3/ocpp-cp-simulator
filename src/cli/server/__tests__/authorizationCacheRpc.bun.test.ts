@@ -196,6 +196,33 @@ describe("authorization cache RPC (#452)", () => {
     },
   );
 
+  // The schema admits up to 255 (2.1); the charge point enforces its own
+  // version's bound (1.6 IdToken CiString20Type, 2.0.1 identifierString 36).
+  it.each([
+    ["OCPP-1.6J", 20],
+    ["OCPP-2.0.1", 36],
+    ["OCPP-2.1", 255],
+  ])(
+    "%s: admits a %i-character idToken, refuses one more with invalid_params",
+    async (ocppVersion, max) => {
+      const { rpc } = await daemonWithOneCp(ocppVersion);
+      const longest = "x".repeat(max);
+      const refused = await rpc(
+        "seed_auth_cache",
+        { entries: [{ idToken: longest + "y", status: "Accepted" }] },
+        CP,
+      );
+      expect(refused.ok).toBe(false);
+      expect(refused.error.code).toBe("invalid_params");
+      const seeded = await rpc(
+        "seed_auth_cache",
+        { entries: [{ idToken: longest, status: "Accepted" }] },
+        CP,
+      );
+      expect(seeded.result).toEqual({ seeded: 1 });
+    },
+  );
+
   it("answers not_found for an unknown charge point", async () => {
     const { rpc } = await daemonWithOneCp();
     const ack = await rpc("get_auth_cache", {}, "CP-NOPE");

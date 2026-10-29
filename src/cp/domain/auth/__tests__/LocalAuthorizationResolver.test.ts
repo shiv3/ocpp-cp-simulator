@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveLocalAuthorization,
+  resolveUnansweredAuthorization,
   type LocalAuthorizationPolicy,
 } from "../LocalAuthorizationResolver";
 
@@ -369,5 +370,68 @@ describe("resolveLocalAuthorization — offline", () => {
         }),
       ).toEqual({ kind: "reject", source: "cache", status: "Expired" });
     });
+  });
+});
+
+describe("resolveUnansweredAuthorization — online, Authorize.conf never came", () => {
+  const listed = (status: string, extra: { expiresAt?: number } = {}) => ({
+    status,
+    ...extra,
+  });
+
+  it.each([
+    ["an unknown identifier, default policy", policy(), {}, null],
+    [
+      "a cached Blocked entry while the cache is disabled",
+      policy(),
+      { cacheEntry: cached("Blocked") },
+      null,
+    ],
+    [
+      "a listed Blocked entry while the list is disabled",
+      policy({ localListEnabled: false }),
+      { localListEntry: listed("Blocked") },
+      null,
+    ],
+    [
+      "a cached Accepted entry",
+      policy({ cacheEnabled: true }),
+      { cacheEntry: cached("Accepted") },
+      null,
+    ],
+    [
+      "a listed Accepted entry",
+      policy(),
+      { localListEntry: listed("Accepted") },
+      null,
+    ],
+    [
+      "a cached Blocked entry",
+      policy({ cacheEnabled: true }),
+      { cacheEntry: cached("Blocked") },
+      { kind: "reject", source: "cache", status: "Blocked" },
+    ],
+    [
+      "a cached Accepted entry past its expiry",
+      policy({ cacheEnabled: true }),
+      { cacheEntry: cached("Accepted", { expiresAt: PAST }) },
+      { kind: "reject", source: "cache", status: "Expired" },
+    ],
+    [
+      "a listed Invalid entry",
+      policy(),
+      { localListEntry: listed("Invalid") },
+      { kind: "reject", source: "localList", status: "Invalid" },
+    ],
+    [
+      "a listed Accepted entry past its expiry",
+      policy(),
+      { localListEntry: listed("Accepted", { expiresAt: PAST }) },
+      { kind: "reject", source: "localList", status: "Expired" },
+    ],
+  ])("%s", (_label, p, entries, expected) => {
+    expect(
+      resolveUnansweredAuthorization({ policy: p, now: NOW, ...entries }),
+    ).toEqual(expected);
   });
 });

@@ -1137,7 +1137,9 @@ export const METHODS = {
   // Daemon-wide (not per-CP): pushes Default EV Settings onto every
   // connector of every registered CP, unless a connector currently has an
   // explicit/scenario override active (#105). Distinct from the per-CP
-  // `set_ev_settings`, which always marks an override.
+  // `set_ev_settings`, which always marks an override. `settings` may be
+  // partial: it is merged onto the built-in defaults, so an omitted field
+  // reads back as its default (#333).
   "ev_settings.apply_default": {
     params: z.object({ settings: OBJ() }),
     result: ANY,

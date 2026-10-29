@@ -5,12 +5,15 @@ summary: One log-line shape (`timestamp` / `level` / `type` / `message` / `cpId`
 sources:
   - src/cli/server/ (logs.get / logs.clear)
   - src/trace/logEntryToTrace.ts
+  - src/cp/shared/Logger.ts
+  - src/cp/shared/redaction.ts
 related:
   - ../entities/daemon.md
   - ../entities/docker-image.md
   - state-persistence.md
   - trace-format.md
   - ../entities/analyze.md
+  - ../entities/cli.md
 updated: 2026-10-29
 ---
 
@@ -45,6 +48,62 @@ downloaded log file (see [Docker image → Structured logs](../entities/docker-i
 for an example). The same lines are what the [trace adapter](trace-format.md#producing-records)
 turns into trace records, which is how [`analyze --from-daemon`](../entities/analyze.md#reading-from-a-running-daemon---from-daemon)
 works without a trace file.
+
+## Redaction
+
+The charge point's `Logger` runs each message through the shared text
+redactor ([`redaction.ts`](../../src/cp/shared/redaction.ts)) before it
+reaches the console, the `logs` table or a log listener (the CLI `log` event,
+the Socket.IO log push). In an OCPP-J frame logged as `Sent:` / `Received:`
+it replaces with `[redacted]`:
+
+- the `value` of a 1.6 `{ "key", "value" }` entry whose key is
+  `AuthorizationKey` (or another sensitive key name: `ApiKey`, `ApnPassword`,
+  `BasicAuthPassword`, `Password`, `PrivateKey`, `SimPin`, `TlsKey`) — a
+  `ChangeConfiguration`, a `GetConfiguration` answer;
+- the `attributeValue` of a 2.0.1 `{ "variable": { "name" }, "attributeValue" }`
+  entry whose variable is `BasicAuthPassword` or `AuthorizationKey` (or
+  another of those key names) — a `SetVariables` request, a `GetVariables`
+  answer (#400);
+- in a 2.0.1 / 2.1 `SetNetworkProfile`, the `apnPassword` and the integer
+  `simPin` (SIM card PIN) of `connectionData.apn`, the `key` (VPN shared
+  secret) of
+  `connectionData.vpn` and, in 2.1, `connectionData.basicAuthPassword`
+  (#401). `vpn.password` was already caught as a `password` field;
+  `connectionData.identity` stays readable. A `key` field outside a `vpn`
+  object stays readable too: it names a 1.6 configuration entry.
+
+This is the rule the structured redactor applies to the `csms_call_received`
+payload and to scenario reports ([CLI → CSMS call events](../entities/cli.md#csms-call-events)),
+with one predicate for the variable names, so for the fields above a frame's
+log line and its event hide the same values. They differ in form: where the
+log line shows `[redacted]` for a field named after a secret (`password`,
+`apnPassword`, `basicAuthPassword`, `simPin`, `apiKey`, …), the structured redactor
+drops the field. Both ignore case, `-` and `_` in a field name (`Password`,
+`tls_key`, `authorization_key=…`), but the text redactor is stricter: it
+also hides a name that ends in a secret name (`api_password`, `OED_API_KEY`,
+`oedApiKey`, `tlsPrivateKey`), where the structured redactor drops only an
+exact secret name and keeps such a field (#515). The match is on JSON
+object shapes: a SOAP (XML) body does not get it. A duplicated key does not hide a secret — `JSON.parse`
+keeps the last copy, so any copy of `key` / `variable` makes the entry
+sensitive and every copy of `value` / `attributeValue`, and of the `key` in
+every `vpn` member, is redacted. A redacted scalar inside a JSON member
+(string, number such as `simPin`, boolean, `null`) becomes the quoted string
+`"[redacted]"`, so the frame stays valid JSON: the [trace adapter](trace-format.md#producing-records)
+gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
+object or array held by a secret-named member is replaced whole by the same
+`"[redacted]"`, so `{"password":{"a":"b"}}` logs `{"password":"[redacted]"}`
+(#515). Outside a complete JSON object (non-JSON text, a truncated frame), a
+quoted value stays on its line: it ends at the first unescaped closing quote
+on that line (an escaped quote, `"ab\"cd"`, does not end it), or at the end
+of the line when none comes (a truncated message), so an assignment on the
+next line is still matched on its own. Only a value starting with
+`-----BEGIN` (a PEM in non-JSON text, after optional whitespace) spans lines,
+up to its closing quote, or to the end of the message without one (#401). In
+log text, a non-PEM quoted value with a raw newline (or a backslash before
+the line end) is redacted only to the end of its first line, and a PEM value
+that lacks its closing quote ends at the next quote, so an assignment after
+it can be read — limits tracked in #519.
 
 ## WebSocket close lines
 

@@ -20,7 +20,7 @@ related:
   - ../entities/open-ev-directory.md
   - operational-timeline.md
   - charging-sessions.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Socket.IO control plane
@@ -645,6 +645,18 @@ Guarantees a conformance driver can rely on:
 `server.info` also reports `vehicleCatalog: { provider: "open-ev-directory",
 configured, authenticated }` (#458): whether the daemon has a catalog URL and
 an API key — never the key. A daemon older than #458 omits it.
+
+`ev_settings.apply_default` merges its `settings` onto the built-in default EV
+settings (#333), as `set_ev_settings` merges its patch onto the connector's
+current settings. After a partial payload, `get_ev_settings` reads an omitted
+required field (`modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`,
+`initialSoc`, `targetSoc`) back as its built-in value, and an omitted optional
+field (`chargingCurve`, the electrical model) back as absent — nothing of an
+earlier default or override carries over. Before #333 the payload replaced the
+settings wholesale, so an omitted required field disappeared from the
+connector. A connector with an explicit or scenario override still ignores the
+call, and a `null` for a required field is still refused with `invalid_params`
+and changes nothing.
 
 ### Scenario run history
 

@@ -619,6 +619,9 @@ export class LocalChargePointService implements ChargePointService {
     // Default EV Settings propagation doesn't clobber it.
     const connector = this.requireConnector(id, connectorId);
     connector.applyEvSettingsOverride(settings);
+    // The operator now owns the override, so no run does — a run in flight
+    // that claimed it earlier must not release this set when it ends (#333).
+    connector.scenarioManager?.disownEvSettingsOverride();
   }
 
   async getEVSettings(
@@ -628,7 +631,7 @@ export class LocalChargePointService implements ChargePointService {
     return this.requireConnector(id, connectorId).evSettings ?? null;
   }
 
-  async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
+  async applyDefaultEVSettings(settings: EVSettingsPatch): Promise<void> {
     // Connectors freeze getDefaultEVSettings() at construction, so a mid-session
     // change to the Default EV Settings wouldn't reach the ones already live.
     // Push it onto every connector (per-connector EV settings aren't a

@@ -53,7 +53,6 @@ import type {
 } from "../../data/interfaces/ChargePointService";
 import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
 import type { Database } from "../../cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
 import {
   isScenarioDefinitionShape,
@@ -86,6 +85,7 @@ import {
 } from "../../cp/domain/errors/OcppCallErrors";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
+import { createScenarioRepository } from "../../cp/domain/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
@@ -367,7 +367,10 @@ export function createRuntimeDeps(
         database,
         configRepository,
         scenarioRepository:
-          deps.scenarioRepository ?? new SqliteScenarioRepository(database),
+          deps.scenarioRepository ??
+          // A registry test double may not carry one.
+          deps.registry.scenarioDefinitions ??
+          createScenarioRepository(database),
         connectorSettingsRepository:
           deps.connectorSettingsRepository ??
           new SqliteConnectorSettingsRepository(database),

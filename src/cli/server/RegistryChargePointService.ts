@@ -194,6 +194,8 @@ export class RegistryChargePointService implements ChargePointService {
     if (this.deps.database) {
       resetSimulatorState(this.deps.database);
       await this.deps.database.flush?.();
+    } else {
+      this.registry.clearScenarioDefinitions();
     }
     this.deps.onReset?.();
   }

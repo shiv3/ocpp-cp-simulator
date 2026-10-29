@@ -1724,3 +1724,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): the "Scenario EV Settings" panel now lives only in the web console's scenario editor.
 - [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
 - [GitHub issues](sources/github-issues.md): #443.
+
+## [2026-10-29] ingest | Scenario definitions without `--state-db` (#495)
+
+- A daemon without `--state-db` built its scenario repositories on a `null` database, the browser's Remote-mode no-op: a definition saved over RPC (the web console's Library) was dropped and `scenario.definitions.list` never returned it, and a charge point's own scenarios (the seeded default) never reached a store the RPC layer reads. The Library editor and a run's panel showed "Scenario not found".
+- `CPRegistry` now owns one scenario repository for the daemon, like the run and session histories: the `scenarios` table with `--state-db`, an in-memory store (`InMemoryScenarioRepository`) without. The RPC layer and every charge point use it; deleting a charge point drops its scenarios and `state.reset` drops all of them, Library included ([State persistence](concepts/state-persistence.md)).

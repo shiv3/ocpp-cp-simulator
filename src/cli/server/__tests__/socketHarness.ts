@@ -8,7 +8,6 @@ import {
 } from "socket.io-client";
 
 import type { Database } from "../../../cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "../../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../../data/sqlite/SqliteConnectorSettingsRepository";
 import { CPRegistry } from "../CPRegistry";
 import { FileReloadManager } from "../FileReloadManager";
@@ -84,7 +83,8 @@ export async function startTestServer(
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms ?? false,
   });
   const configRepository = createSocketConfigRepository(database);
-  const scenarioRepository = new SqliteScenarioRepository(database);
+  // #495: the registry's, as in `startServer`.
+  const scenarioRepository = registry.scenarioDefinitions;
   const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
     database,
   );

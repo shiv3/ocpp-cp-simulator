@@ -53,9 +53,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Only tag-triggered semver releases get stamped; branch builds stay
-      # 0.0.0 (web console footer hides the version). The build context is
-      # the checkout, so the Dockerfile's UI stage picks up the stamped
-      # package.json and Vite bakes the version into the bundle (issue #93).
+      # 0.0.0 and report `<sha7>-dev` from the APP_COMMIT build arg below
+      # instead. The build context is the checkout, so the Dockerfile's UI
+      # stage picks up the stamped package.json and Vite bakes the version
+      # into the bundle (issue #93).
       - name: Setup Node (for version stamping)
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -111,6 +112,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Identifies a branch image: the UI label and the daemon version read
+          # `<sha7>-dev`. Harmless on a tag build, where the stamped semver wins.
+          build-args: |
+            APP_COMMIT=${{ github.sha }}
           # Speed up rebuilds by sharing layers across runs. GitHub Actions
           # cache is local to the repo so it's safe to write back.
           cache-from: type=gha

@@ -15,7 +15,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Docker image
@@ -49,10 +49,34 @@ docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
 
 > **Why `X.Y.Z` and `sha-<short>`/`latest` digests differ for the same commit:**
 > a release-tag build stamps the semver into `package.json` before building so
-> the CLI and the web console's sidebar report the real version, then rebuilds the
+> the CLI and the web console's footer report the real version, then rebuilds the
 > image. The stamped bytes make it a different image (different digest) from
 > the `main` build of the same commit — expected, not a packaging error.
 > `sha-<short>` always refers to the un-stamped branch build.
+
+### Version reported by a build
+
+The web console's footer label and the daemon's version (`/v1/healthz`,
+`server.info`, MCP, `scenario_report`) follow one rule
+(`src/protocol/buildVersion.ts`):
+
+| Build                                                      | Reports      |
+| ---------------------------------------------------------- | ------------ |
+| `vX.Y.Z` tag (stamped `package.json`)                      | `X.Y.Z`      |
+| Branch image (`main`, `latest`, `sha-<short>`)             | `<sha7>-dev` |
+| Built from source with `APP_COMMIT=<sha>` (arg or compose) | `<sha7>-dev` |
+| Built from source without it                               | `local-dev`  |
+
+`docker-publish.yml` passes `APP_COMMIT=${{ github.sha }}` on every build; the
+stamped semver wins on a tag build. The Dockerfile feeds the build arg to the UI
+stage (Vite bakes it into the bundle) and re-exports it as a runtime env for the
+daemon, which runs from source without `.git`. A deployment that builds its own
+image must pass the build arg: a runtime `-e APP_COMMIT=…` alone changes the
+daemon but not the UI bundle, which is fixed at build time.
+
+```sh
+docker build --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .
+```
 
 A tag build ends by asking the registry for every tag it just pushed and
 comparing each one's manifest digest against the digest that build produced
@@ -148,6 +172,7 @@ Variables read by the compose file (all optional):
 | `WS_URL`      | `wss://example.invalid/chargepoint/` | CSMS WebSocket URL                                                                                                                                                                                                                                                                             |
 | `STATE_DB`    | `/data/state.db`                     | SQLite path inside container                                                                                                                                                                                                                                                                   |
 | `HEALTH_PATH` | `/v1/healthz`                        | Daemon health endpoint path. Compose passes it both as `--build-arg` (baked into the UI bundle as `VITE_HEALTH_PATH`) and as a runtime env (forwarded to `--health-path`). Set both sides when a fronting proxy reserves the default — e.g. Cloud Run / GFE returning 404 on the default path. |
+| `APP_COMMIT`  | _(empty)_                            | Build arg only: the commit being built, so the UI and daemon report `<sha7>-dev` instead of `local-dev` (see [Version reported by a build](#version-reported-by-a-build)).                                                                                                                     |
 
 The compose file also includes a commented `--cors-origin ${CORS_ORIGIN}` block.
 Uncomment it when the console is reached from another origin or behind a

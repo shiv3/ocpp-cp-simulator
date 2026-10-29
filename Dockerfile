@@ -32,6 +32,12 @@ ARG BUN_VERSION=1
 # behind a proxy that reserves the default (e.g. Google Front End in
 # front of Cloud Run returning 404 on certain reserved paths).
 ARG HEALTH_PATH=/v1/healthz
+# Commit the image is built from. A tag build stamps package.json with the
+# release semver, which wins; a branch build (docker-publish.yml passes
+# `github.sha`) reports `<sha7>-dev` in both the UI label and the daemon
+# version, and a build without it reports `local-dev`. Pass it when building
+# from source: `docker build --build-arg APP_COMMIT=$(git rev-parse HEAD) .`
+ARG APP_COMMIT=""
 
 
 # ----- Stage 1: build the browser UI (Vite -> dist/) -----------------
@@ -90,6 +96,10 @@ COPY schema ./schema
 # inlined into the bundle so the static UI knows which path to probe for
 # Remote-mode auto-detect (and for the Navbar's health poll).
 ENV VITE_HEALTH_PATH=$HEALTH_PATH
+# Declared after the install layers so a new commit only rebuilds from here.
+# vite.config.ts reads APP_COMMIT into the bundle's build label.
+ARG APP_COMMIT
+ENV APP_COMMIT=$APP_COMMIT
 RUN bun run build
 
 
@@ -200,6 +210,11 @@ ENV STATE_DB=/data/state.db
 # value — they must match for the browser's auto-detect probe to land.
 ARG HEALTH_PATH
 ENV HEALTH_PATH=$HEALTH_PATH
+# The daemon runs from source with no .git, so the commit must reach it as a
+# runtime env too — otherwise the UI says `<sha7>-dev` next to a daemon that
+# says `local-dev` (src/cli/appVersion.ts).
+ARG APP_COMMIT
+ENV APP_COMMIT=$APP_COMMIT
 EXPOSE 9700
 
 # Entrypoint:

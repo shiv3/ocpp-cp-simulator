@@ -6,8 +6,13 @@ describe("resolveBuildLabel", () => {
   it.each([
     ["a stamped release", "1.2.3", "", "v1.2.3"],
     ["a stamped release over the commit", "1.2.3", "abcdef1", "v1.2.3"],
-    ["the commit for an unstamped Pages build", "0.0.0", "abcdef1", "abcdef1"],
-    ["nothing for an unstamped dev build", "0.0.0", "", null],
+    [
+      "the short commit for an unstamped deployed build",
+      "0.0.0",
+      "abcdef1234567890",
+      "abcdef1-dev",
+    ],
+    ["local-dev for an unstamped local build", "0.0.0", "", "local-dev"],
   ])("shows %s", (_case, version, commit, expected) => {
     expect(resolveBuildLabel(version, commit)).toBe(expected);
   });

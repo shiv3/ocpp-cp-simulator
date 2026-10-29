@@ -19,6 +19,10 @@ services:
         # behind a proxy that reserves the default path — e.g. Google
         # Front End in front of Cloud Run.
         HEALTH_PATH: "${HEALTH_PATH:-/v1/healthz}"
+        # Optional: the commit being built, so the UI and daemon report
+        # `<sha7>-dev` instead of `local-dev`, e.g.
+        # `APP_COMMIT=$(git rev-parse HEAD) docker compose build`.
+        APP_COMMIT: "${APP_COMMIT:-}"
     image: ocpp-cp-sim
     container_name: ocpp-cp-sim
     restart: unless-stopped

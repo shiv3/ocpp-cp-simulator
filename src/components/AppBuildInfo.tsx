@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { appBuildLabel } from "@/lib/appBuildLabel";
+import { formatVersionLabel } from "@/protocol/buildVersion";
 
 const REPO_URL = "https://github.com/shiv3/ocpp-cp-simulator";
 
@@ -18,9 +19,11 @@ const GithubMark: React.FC<{ className?: string }> = ({ className }) => (
 );
 
 /**
- * "ocpp-cp-simulator vX.Y.Z · GitHub" — the build identifier plus a discovery
- * link (issue #93), shown in the web console sidebar (issue #364).
- * The version is omitted for an unstamped dev build (see appBuildLabel).
+ * "ocpp-cp-simulator · ui vX.Y.Z · daemon vX.Y.Z · GitHub" — the build
+ * identifiers plus a discovery link (issue #93), shown in the web console
+ * footer (issue #364). Each version is labelled with its side: a dev build
+ * reads `ui 1a2b3c4-dev` or `ui local-dev` (see appBuildLabel), so the two
+ * must not be confused.
  *
  * `daemonVersion` is the connected daemon's own version (`server.info`),
  * shown after the UI's since the two can be different releases — e.g. the
@@ -41,12 +44,13 @@ const AppBuildInfo: React.FC<{
       )}
     >
       <span className="font-medium">ocpp-cp-simulator</span>
-      {version ? <span>{version}</span> : null}
+      <span aria-hidden="true">·</span>
+      <span title="Version of this web console">ui {version}</span>
       {daemonVersion ? (
         <>
           <span aria-hidden="true">·</span>
           <span title="Version of the connected daemon">
-            daemon v{daemonVersion}
+            daemon {formatVersionLabel(daemonVersion)}
           </span>
         </>
       ) : null}

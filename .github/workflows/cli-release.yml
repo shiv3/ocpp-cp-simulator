@@ -83,11 +83,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build web console (vite)
-        run: bun run build
-
+      # Stamp before the vite build: the bundle bakes package.json's version
+      # into the web console label, which reads `local-dev` when unstamped.
       - name: Stamp package version
         run: npm version --no-git-tag-version --allow-same-version "${{ steps.version.outputs.version }}"
+
+      - name: Build web console (vite)
+        run: bun run build
 
       - name: Pack tarball
         id: pack

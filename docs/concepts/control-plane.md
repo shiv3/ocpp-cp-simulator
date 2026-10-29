@@ -19,7 +19,7 @@ related:
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
   - operational-timeline.md
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Socket.IO control plane
@@ -373,6 +373,14 @@ The schema is [`src/protocol/labels.ts`](../../src/protocol/labels.ts).
   the connection and transactions are untouched. It is persisted before the
   live charge point changes, and pushes a registry `updated` event carrying the
   new list item. `{}` clears; an unknown `cpId` answers `not_found`.
+- The daemon's startup bootstrap takes them from a repeated
+  `--label key=value` and gives them to every charge point of the
+  `--cp-count` fleet ([CLI](../entities/cli.md)) — validated with the same
+  schema, but refused at startup rather than with `invalid_params`. A charge
+  point restored from `--state-db` keeps its stored labels: like every other
+  bootstrap option, the flag only reaches the charge points this start-up
+  creates, and the `reusing` line of the startup log adds
+  `--label not applied` with the stored map when the two differ (#472).
 
 **Read and select.** `cp.list`, `status` (`config.labels`) and every registry
 push return the labels. `cp.list { labels: { … } }` returns only the charge
@@ -394,9 +402,6 @@ is dropped with a warning on restore rather than breaking every `cp.list`
 **never** used as Prometheus label values — for the same reason metrics carry
 no `cpId` ([Daemon → Metrics](../entities/daemon.md#metrics)). Select with
 `cp.list` and aggregate client-side instead.
-
-`--cp-count` has no flag for labels yet; label a bootstrapped fleet with
-`cp.labels.set` after start-up.
 
 ##### Blueprints
 

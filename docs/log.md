@@ -1673,6 +1673,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
 
+## [2026-10-28] ingest | Labels on the startup-bootstrapped fleet (#472)
+
+- [CLI → CLI Options](entities/cli.md#cli-options) and [Daemon](entities/daemon.md) flag tables: new `--label <key=value>`, repeatable, server mode only (refused beside `--send` / `--stop` / `--events`), requires `--cp-id`; validated against `src/protocol/labels.ts` at startup (bad key or value, duplicate key, more than 32 labels refused). The fleet example mentions it.
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): the startup bootstrap as a fourth write path; a charge point restored from `--state-db` keeps its stored labels.
+- [GitHub issues](sources/github-issues.md): #472.
+- Review follow-up: `--label` beside a client mode is refused with the client-mode reason even without `--cp-id`; a restored charge point whose stored labels differ from the flag's gets `--label not applied` on its `reusing` startup line ([Control plane](concepts/control-plane.md#charge-point-labels), [CLI](entities/cli.md#cli-options), [Daemon](entities/daemon.md)).
+
 ## [2026-10-28] ingest | Smart-charging profiles on the operational timeline (#469)
 
 - [Operational timeline](concepts/operational-timeline.md): format `1.1`; new kinds `charging_profile_applied`, `charging_profile_cleared` and `charging_profile_expired`; new [Smart-charging profiles](concepts/operational-timeline.md#smart-charging-profiles) section — station-wide entries carry no entry-level `connectorId` (`data.connectorId` 0), `purpose` uses 1.6 names on 2.x, clear reasons `ClearChargingProfile` / `TransactionEnded` / `ConnectionClosed` / `ConnectorRemoved`, one cleared entry per scope and none for a clear that matched nothing, expiry recorded when `validTo` passes. Limits: RemoteStart profiles are ignored, zero-limit periods are not entries, Local-mode restored profiles are not recorded.

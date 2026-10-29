@@ -4,6 +4,7 @@ import { CLIChargePointService } from "../service";
 
 type AnyServer = Server<unknown>;
 import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";
+import { matchesLabelSelector, type Labels } from "../../protocol/labels";
 import type { ScenarioDefinition } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { CPRegistry } from "./CPRegistry";
@@ -655,7 +656,10 @@ export async function startServer(
     const existing = registry.get(init.cpId);
     const svc = existing ?? registry.create(init, { seedDefault });
     if (existing) {
-      serverLog(`Bootstrap matches restored CP "${init.cpId}"; reusing`);
+      serverLog(
+        `Bootstrap matches restored CP "${init.cpId}"; reusing` +
+          labelsNotAppliedNote(init.labels, existing.getInit().labels),
+      );
     } else {
       serverLog(`Bootstrapped CP "${init.cpId}"`);
     }
@@ -808,11 +812,30 @@ async function forEachBounded<T>(
 }
 
 /**
+ * Suffix for the "reusing" log line when `--label` asked for labels a
+ * restored charge point does not carry (#472). The restored labels win, like
+ * every other bootstrap option; saying so keeps the flag from looking broken
+ * to an operator who added it to an existing deployment.
+ */
+function labelsNotAppliedNote(
+  requested: Labels | undefined,
+  restored: Labels | undefined,
+): string {
+  if (!requested) return "";
+  const same =
+    restored !== undefined &&
+    Object.keys(requested).length === Object.keys(restored).length &&
+    matchesLabelSelector(restored, requested);
+  if (same) return "";
+  return ` (--label not applied; it keeps its stored labels ${JSON.stringify(restored ?? {})})`;
+}
+
+/**
  * The charge points `--cp-id` (plus `--cp-count` / `--cp-id-pattern`) asks for.
  *
  * One without a count, N with one — sequential, so the log and the registry
  * events read in id order. Everything but `cpId` is shared, exactly as
- * `cp.create_many` shares it.
+ * `cp.create_many` shares it — `--label` labels included (#472).
  */
 function expandBootstrap(
   opts: ServerOptions,

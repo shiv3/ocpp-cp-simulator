@@ -1741,3 +1741,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
+
+## [2026-10-29] ingest | Unplug without charging
+
+- After **Plug in**, the connector card's session stepper only offered **Start charging**: a plugged connector could not go back to `Available` without a session. On `Preparing` (or a charging status without a transaction), **Unplug** is now also pressable, as an outlined secondary button, even when Start is disabled for lack of a TagID; it still sends StatusNotification `Available`. Faulted, Unavailable and a pending step keep it disabled ([Web console → Connector card](entities/web-console.md#connector-card)).
+- Code: `src/console/pages/cp/SessionFlow.tsx` (the next step is now a step id, `nextStep()`, with the steps that can be taken instead of it in `ALTERNATIVES`); test `SessionFlow.dom.test.tsx`.

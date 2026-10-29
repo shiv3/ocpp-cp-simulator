@@ -15,7 +15,7 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-09-29
+updated: 2026-10-29
 ---
 
 # Testing strategy
@@ -44,6 +44,15 @@ daemon goes into `tsconfig.cli.json`.
 - **Bun test** (`bun run test:bun`, `*.bun.test.ts`) is for behavior that
   needs the real Bun runtime: the CLI entry point, the Bun HTTP/socket
   server, `bun:sqlite`, and subprocess-spawning integration tests.
+- **Bench slow path** (`bun run test:bench-slow`) is one Bun file named to
+  match _neither_ filter, `scripts/bench/fleetBench.slowpath.test-bun.ts`
+  (#330): it drives the real benchmark against a deliberately slow mock CSMS,
+  costs about 32s by construction, and so runs only in its own CI job
+  (`bench-slow`) instead of lengthening `test:bun`. A new file meant to stay
+  out of `test:bun` must avoid the `bun.test` substring and Vitest's
+  `*.test.ts` pattern alike; `bun test` still runs it when given its path
+  with a leading `./` or `/` — a bare path is taken as a name filter, and
+  this name matches none of Bun's test-file patterns.
 
 Coverage (`bun run test:coverage` / `test:coverage:bun`, uploaded to Codecov
 in CI) merges both reports — `coverage/lcov.info` (Vitest) and

@@ -255,6 +255,37 @@ describe("OCPP 2.0.1 SetVariables secrets in logged frames (#400)", () => {
   });
 });
 
+describe("duplicate JSON keys in logged frames (#400 review)", () => {
+  // JSON.parse keeps the last duplicate, so the station uses the value the
+  // first-match lookup used to leave in clear.
+  it.each([
+    [
+      "a second value",
+      '{"key":"AuthorizationKey","value":"x","value":"S3CRET"}',
+    ],
+    [
+      "a second key",
+      '{"key":"HeartbeatInterval","key":"AuthorizationKey","value":"S3CRET"}',
+    ],
+    [
+      "a second variable",
+      '{"variable":{"name":"Foo"},"variable":{"name":"BasicAuthPassword"},"attributeValue":"S3CRET"}',
+    ],
+    [
+      "a second variable name",
+      '{"variable":{"name":"Foo","name":"BasicAuthPassword"},"attributeValue":"S3CRET"}',
+    ],
+    [
+      "a second attributeValue",
+      '{"variable":{"name":"BasicAuthPassword"},"attributeValue":"a","attributeValue":"S3CRET"}',
+    ],
+  ])("redacts the secret behind %s", (_case, text) => {
+    const redacted = redactSensitiveText(text);
+    expect(redacted).not.toContain("S3CRET");
+    expect(redacted).toContain(REDACTED_VALUE);
+  });
+});
+
 describe("vehicle catalog API keys (#458)", () => {
   it("redacts a bearer token", () => {
     expect(redactSensitiveText("Authorization: Bearer abc.def-123")).toBe(

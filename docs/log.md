@@ -1745,6 +1745,6 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | Redact 2.0.1 SetVariables secrets in logged frames (#400)
 
 - The text redactor the `Logger` applies to every message knew the 1.6 `{ key, value }` shape but not the 2.0.1 `{ variable: { name }, attributeValue }` one, so the `Received:` line of a `SetVariables` of `BasicAuthPassword` / `AuthorizationKey` logged the secret in clear while its `csms_call_received` payload was redacted (#396). The text redactor now replaces that `attributeValue` too, with the variable-name predicate shared with the structured redactor.
-- [Log format](concepts/log-format.md): new Redaction section (what the `Logger` redacts in OCPP-J frames; not SOAP bodies).
+- [Log format](concepts/log-format.md): new Redaction section (what the `Logger` redacts in OCPP-J frames; not SOAP bodies). Review: a frame with duplicate keys no longer bypasses the text redactor (it used the first `value` / `variable` / `attributeValue`, while `JSON.parse` keeps the last; the `value` case predates #400).
 - [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet links the matching log-line rule.
 - [GitHub issues](sources/github-issues.md): #400 row.

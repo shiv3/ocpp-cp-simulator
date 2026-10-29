@@ -69,7 +69,9 @@ This is the rule the structured redactor applies to the `csms_call_received`
 payload and to scenario reports ([CLI → CSMS call events](../entities/cli.md#csms-call-events)),
 with one predicate for the variable names, so a frame's log line and its
 event agree. The match is on JSON object shapes: a SOAP (XML) body does not
-get it.
+get it. A duplicated key does not hide a secret — `JSON.parse` keeps the last
+copy, so any copy of `key` / `variable` makes the entry sensitive and every
+copy of `value` / `attributeValue` is redacted.
 
 ## WebSocket close lines
 

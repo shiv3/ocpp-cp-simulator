@@ -141,22 +141,25 @@ function redactOcppKeyValueText(text: string): string {
         field.stringValue !== undefined &&
         isSensitiveKeyName(field.stringValue),
     );
-    const valueField = fields.find((field) => field.name === "value");
-
-    if (sensitiveKey && valueField) {
-      replacements.push(redactField(valueField));
+    // A duplicate key is not a way around this: JSON.parse keeps the last
+    // one, so any `key` / `variable` may decide and every value is redacted.
+    if (sensitiveKey) {
+      for (const field of fields) {
+        if (field.name === "value") replacements.push(redactField(field));
+      }
     }
 
-    const variableField = fields.find((field) => field.name === "variable");
-    const attributeValueField = fields.find(
-      (field) => field.name === "attributeValue",
+    const sensitiveVariable = fields.some(
+      (field) =>
+        field.name === "variable" &&
+        isSensitiveVariableText(text, field, objectEndByStart),
     );
-    if (
-      variableField &&
-      attributeValueField &&
-      isSensitiveVariableText(text, variableField, objectEndByStart)
-    ) {
-      replacements.push(redactField(attributeValueField));
+    if (sensitiveVariable) {
+      for (const field of fields) {
+        if (field.name === "attributeValue") {
+          replacements.push(redactField(field));
+        }
+      }
     }
   }
 

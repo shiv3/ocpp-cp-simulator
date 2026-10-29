@@ -23,11 +23,13 @@ const SENSITIVE_ASSIGNMENT_NAMES =
  * A quoted value is confined to its line: it ends at the first unescaped
  * closing quote on that line (`"ab\"cd"` is one value), or, when none comes
  * (a truncated message), at the end of the line, so the next line's own
- * assignment is still seen. Only a PEM (`-----BEGIN`) value, which keeps raw
- * newlines in non-JSON text, spans lines: up to its closing quote, else to
- * the end of the text. Both fail closed.
+ * assignment is still seen. Only a PEM value (`-----BEGIN`, after optional
+ * whitespace), which keeps raw newlines in non-JSON text, spans lines: up to
+ * its closing quote, else to the end of the text. Both fail closed. Limit
+ * (#515): any other value with a raw newline is redacted only to the end of
+ * its first line.
  */
-const QUOTED_PEM_VALUE = `(?=-----BEGIN)(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\])*\\2|[\\s\\S]*)`;
+const QUOTED_PEM_VALUE = `(?=\\s*-----BEGIN)(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\])*\\2|[\\s\\S]*)`;
 const QUOTED_LINE_VALUE = `(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n])*\\2|[^\\n]*`;
 const SENSITIVE_ASSIGNMENT = new RegExp(
   `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])` +

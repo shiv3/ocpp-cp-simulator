@@ -95,12 +95,12 @@ quoted value stays on its line: it ends at the first unescaped closing quote
 on that line (an escaped quote, `"ab\"cd"`, does not end it), or at the end
 of the line when none comes (a truncated message), so an assignment on the
 next line is still matched on its own. Only a value starting with
-`-----BEGIN` (a PEM in non-JSON text) spans lines, up to its closing quote,
-or to the end of the message without one (#401). Two limits remain, tracked
-with the other text-redactor gaps in #515: a backslash at the end of a line
-does not carry a value onto the next line, so a continuation line stays
-readable; and a PEM value that lacks its closing quote ends at the next
-quote, so an assignment after it can be read.
+`-----BEGIN` (a PEM in non-JSON text, after optional whitespace) spans lines,
+up to its closing quote, or to the end of the message without one (#401). In
+log text, a non-PEM quoted value with a raw newline (or a backslash before
+the line end) is redacted only to the end of its first line, and a PEM value
+that lacks its closing quote ends at the next quote, so an assignment after
+it can be read — limits tracked with the other text-redactor gaps in #515.
 
 ## WebSocket close lines
 

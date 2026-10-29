@@ -1791,3 +1791,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - With the closed-quote match spanning lines, `password="a` followed on the next line by `privateKey="SECRET"` closed on the quote opening `SECRET` and logged it. A quoted secret now ends at its closing quote on the same line, or at the end of the line; only a `-----BEGIN` (PEM) value spans lines, up to its closing quote or the end of the message. The cases of this review round are one table-driven test in `redaction.test.ts`.
 - [Log format](concepts/log-format.md): Redaction section states the line rule, the PEM exception, and two remaining limits (backslash line continuation, an unterminated PEM followed by an assignment), tracked in #515.
 - [GitHub issues](sources/github-issues.md): #515 row.
+
+## [2026-10-29] ingest | PEM after leading whitespace; pin the line-rule limits (#401 review)
+
+- A PEM value may now start after whitespace or newlines (`privateKey="\n-----BEGIN…"`) and still spans lines up to its closing quote.
+- The exact outputs dropped when this round's tests became a table are restored as a second table, with the line-rule limits pinned: a non-PEM quoted value with a raw newline, or a backslash before the line end, is redacted only to the end of its first line (#515).
+- [Log format](concepts/log-format.md): Redaction section states those limits in one sentence pointing to #515.

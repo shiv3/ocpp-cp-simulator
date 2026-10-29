@@ -523,6 +523,58 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     expect(redacted).toContain(REDACTED_VALUE);
   });
 
+  // Exact outputs, including the limits the line rule leaves (#515): a
+  // non-PEM value with a raw newline, or a backslash before the line end, is
+  // redacted only to the end of its first line.
+  it.each([
+    [
+      String.raw`{"apn":{"apnPassword":"ab\"cd","apn":"x"}}`,
+      `{"apn":{"apnPassword":"${REDACTED_VALUE}","apn":"x"}}`,
+    ],
+    [
+      String.raw`{"password":"ab\"cd\\","user":"u"}`,
+      `{"password":"${REDACTED_VALUE}","user":"u"}`,
+    ],
+    [
+      String.raw`password='ab\'cd' user=u`,
+      `password='${REDACTED_VALUE}' user=u`,
+    ],
+    [
+      'first {"password":"ab\\"cd\nsecond line',
+      `first {"password":"${REDACTED_VALUE}"\nsecond line`,
+    ],
+    [
+      'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END PRIVATE KEY-----" next=1',
+      `privateKey="${REDACTED_VALUE}" next=1`,
+    ],
+    [
+      'privateKey="\n-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END PRIVATE KEY-----\n" next=1',
+      `privateKey="${REDACTED_VALUE}" next=1`,
+    ],
+    [
+      'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END',
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      'password="a" x privateKey="b"',
+      `password="${REDACTED_VALUE}" x privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      'password="a"\nx\nprivateKey="b" y',
+      `password="${REDACTED_VALUE}"\nx\nprivateKey="${REDACTED_VALUE}" y`,
+    ],
+    // Limit (#515): the continuation line after a backslash stays readable.
+    ['password="ab\\\ncd" user=u', `password="${REDACTED_VALUE}"\ncd" user=u`],
+    // Limit (#515): a non-PEM value with a raw newline keeps its later lines.
+    ['password="line1\nline2" x', `password="${REDACTED_VALUE}"\nline2" x`],
+    [
+      "simPin=9731 api_key=s3cret",
+      `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,
+    ],
+  ])("text redactor output of %j", (text, expected) => {
+    expect(redactSensitiveText(text)).toBe(expected);
+  });
+
   it("keeps a redacted JSON frame valid JSON", () => {
     for (const payload of [{ apnPassword: 'ab"cd', n: 1 }, { simPin: 9731 }]) {
       expect(() =>

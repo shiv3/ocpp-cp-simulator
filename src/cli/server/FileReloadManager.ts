@@ -1025,11 +1025,12 @@ export class FileReloadManager {
     // drain. And a connector being removed, via the settle announced from
     // `connectorRemoved` — which lands on the branch above, not here.
     //
-    // **What never closes it.** A `StartTransaction` that was rejected or
-    // answered with a CALLERROR leaves a stopped transaction object attached to
-    // the connector (#301, deliberate). No `transactionChange(null)` follows,
-    // because nothing stopped a session that never ran — so a gate keyed on
-    // "an object is attached" would close with nothing able to reopen it.
+    // **What never closes it.** A stopped transaction object still attached to
+    // the connector: `cleanTransaction` stamps `stopTime` without detaching it,
+    // and a `connector_runtime` snapshot persisted before #491 (when a
+    // CALLERROR start stayed attached) restores one. No `transactionChange(null)`
+    // follows — so a gate keyed on "an object is attached" would close with
+    // nothing able to reopen it.
     // `hasOpenTransaction` therefore asks whether a session is *running*, which
     // is the definition the rest of the codebase already uses.
     //

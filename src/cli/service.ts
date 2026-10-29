@@ -1034,14 +1034,14 @@ export class CLIChargePointService {
    * Whether connector `connectorId` has a session **running right now**.
    *
    * Deliberately `hasRunningTransaction`, not "a transaction object is
-   * attached". The two differ after a `StartTransaction` that was rejected or
-   * answered with a CALLERROR: `ChargePoint.cleanTransaction` stamps `stopTime`
-   * and leaves the object on the connector on purpose (#301), so the connector
-   * is logically idle with a transaction still hanging off it — and no further
-   * `transactionChange(null)` is ever emitted for it, because nothing stops a
-   * transaction that never ran. Asking the attached-object question made
-   * `--watch` hold a reload behind a session that had already failed, with
-   * nothing left that could release it (#314).
+   * attached". The two differ when a closed transaction is still attached:
+   * `ChargePoint.cleanTransaction` stamps `stopTime` without detaching it, and
+   * until #491 a `StartTransaction` answered with a CALLERROR left it there —
+   * as does a `connector_runtime` snapshot persisted then. The connector is
+   * logically idle with a transaction still hanging off it, and no further
+   * `transactionChange(null)` is emitted for it. Asking the attached-object
+   * question made `--watch` hold a reload behind a session that had already
+   * failed, with nothing left that could release it (#314).
    *
    * `Connector.hasRunningTransaction` is the codebase's existing definition of
    * the question — `ChargePoint.startTransaction` asks it the same way before
@@ -1218,7 +1218,7 @@ export class CLIChargePointService {
    * this CP, but only takes effect on connectors that don't currently have
    * an explicit/scenario override active (see Connector.applyDefaultEvSettings).
    */
-  applyDefaultEVSettings(settings: EVSettings): void {
+  applyDefaultEVSettings(settings: EVSettingsPatch): void {
     this._chargePoint.connectors.forEach((connector) => {
       connector.applyDefaultEvSettings(settings);
     });
@@ -3384,7 +3384,8 @@ export class CLIChargePointService {
    * loaded scenario whose `statusChange` trigger matches the transition
    * and runs it via runScenario(). Skips scenarios that are disabled,
    * already running, or whose ChargePoint isn't `Available` (matches the
-   * browser-side guard in ScenarioManager.executeScenario).
+   * browser-side guard in ScenarioManager.handleStatusChange; an explicit
+   * runScenario has no such guard in either runtime, #425).
    */
   private handleStatusChangeAutoTrigger(
     connectorId: number,

@@ -1017,10 +1017,24 @@ export class ChargePoint {
     });
   }
 
-  /** Called by the 1.6 handler when StartTransaction.req is answered with a
-   *  CALLERROR (#447), once it has closed the connector's transaction. */
+  /**
+   * Called by the 1.6 handler when StartTransaction.req is answered with a
+   * CALLERROR (#447), once `cleanTransaction` has closed the connector's
+   * transaction. Listeners still find the closed transaction on the
+   * connector (its stop time and meter), then it is detached: the CSMS never
+   * accepted it, so nothing may stop it again. Left attached, every path that
+   * asks "is there a transaction?" — Reset, UnlockConnector, RemoteStop,
+   * ChangeAvailability — took it for a running one, and the stop paths sent
+   * a StopTransaction.req with the `0` placeholder id (#491). A transaction
+   * a listener began in the meantime is a new one and stays.
+   */
   notifyTransactionStartFailed(connectorId: number, errorCode: string): void {
+    const connector = this.getConnector(connectorId);
+    const failed = connector?.transaction ?? null;
     this._events.emit("transactionStartFailed", { connectorId, errorCode });
+    if (connector && failed && connector.transaction === failed) {
+      connector.stopTransaction();
+    }
   }
 
   /** Called by AuthorizeResultHandler when Authorize.conf arrives
@@ -1833,9 +1847,9 @@ export class ChargePoint {
     }
 
     if (connector.transaction && connector.transaction.stopTime === null) {
-      // Only a NOT-yet-stopped transaction blocks a new start. A cleaned/
-      // rejected transaction (cleanTransaction sets stopTime but leaves the
-      // object on the connector) must NOT block a legitimate retry.
+      // Only a NOT-yet-stopped transaction blocks a new start. A closed one
+      // still attached (cleanTransaction sets stopTime without detaching; a
+      // snapshot persisted before #491 restores one) must NOT block a retry.
       this._logger.warn(
         `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
         LogType.TRANSACTION,
@@ -1962,7 +1976,9 @@ export class ChargePoint {
     }
 
     const transaction = connector.transaction;
-    if (!transaction) {
+    // A closed transaction (`stopTime` set) is no transaction: stopping it
+    // again would send a second StopTransaction.req for it (#491).
+    if (!transaction || !connector.hasRunningTransaction) {
       this._logger.warn(
         `No active transaction for connector ${connector.id} when stopping`,
         LogType.TRANSACTION,

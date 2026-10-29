@@ -433,7 +433,9 @@ bottom:
   else without a transaction) → **Plug in**; `Preparing`, or a charging status
   without a transaction → **Start charging**, with a TagID select beside it
   (the TagIDs from **Settings**; with none it reads _No TagIDs configured_ and
-  Start is disabled); a transaction → **Stop charging**, with `Tx #<id> · <tag>`
+  Start is disabled), and **Unplug** stays pressable as a secondary button
+  (outlined) to unplug without charging, even when Start is disabled; a
+  transaction → **Stop charging**, with `Tx #<id> · <tag>`
   at the right; `Finishing` → **Unplug**. `Faulted` marks the step it was at
   (**Charging (faulted)** with a transaction) with nothing to press;
   `Unavailable` disables every step and says _Unavailable: send Available in

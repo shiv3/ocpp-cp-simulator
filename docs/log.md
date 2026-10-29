@@ -1741,3 +1741,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
+
+## [2026-10-29] ingest | Collapsible console sidebar
+
+- [Web console → Layout](entities/web-console.md#layout-route-prefixes): the sidebar folds into an icon rail (navigation icons with tooltips, mode dot, theme toggle) with a **Collapse sidebar** / **Expand sidebar** button beside the logo; the server URL and version line are hidden while collapsed. The state is kept in `localStorage` (`ocpp-cp.console.sidebar.collapsed`).
+- Tests: `AppShell.sidebar.dom.test.tsx` (expanded by default without a write, collapse keeps link names and `aria-current`, restore from storage, storage unavailable).

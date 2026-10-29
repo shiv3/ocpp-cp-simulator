@@ -17,7 +17,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Web console (browser UI)
@@ -110,6 +110,14 @@ the pill's dot follows the connection to the daemon (#423): amber while
 connecting, green once connected, red when the daemon cannot be reached, with
 the reason in its tooltip, as the classic navbar's badge did. Before #423 it
 was always green. Local mode has no daemon, so its dot carries no status.
+
+The button beside the logo (**Collapse sidebar** / **Expand sidebar**)
+folds the sidebar into a 52 px icon rail: the logo, the navigation icons
+(each label becomes the link's tooltip and accessible name), the mode dot
+and the theme toggle. The server URL and the version line are hidden while
+it is collapsed. The sidebar starts expanded; the collapsed state is kept in
+`localStorage` (`ocpp-cp.console.sidebar.collapsed`), so it survives a
+reload, and a browser without storage just does not keep it.
 
 ### Dashboard
 

@@ -12,10 +12,10 @@
  *   connector composite, not the sum across simultaneous transactions.
  *   The simulator typically drives one connector at a time, so summing
  *   would mostly produce the same result as the per-connector view.
- * - GetCompositeSchedule restates each winning period in its own unit and
- *   `numberPhases`; a request for the other unit converts W↔A at 230 V on
- *   that period's phase count (3 when it states none), not on the
- *   connector's electrical model (#323).
+ * - GetCompositeSchedule restates each winning period in its own unit, with
+ *   the joint phase count as `numberPhases`; a request for the other unit
+ *   converts W↔A at 230 V on that joint count (3 when no profile restricts
+ *   it), not on the connector's electrical model (#323).
  */
 
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";

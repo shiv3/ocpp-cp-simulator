@@ -307,7 +307,11 @@ export function resolveEffectivePhaseLimit(
 export interface CompositeSource {
   limit: number;
   unit: ChargingRateUnitType;
-  /** The period's `numberPhases`, when it states a restriction. */
+  /**
+   * The joint phase count in force ({@link resolveEffectivePhaseLimit}),
+   * when any profile restricts it; for a single profile, its period's own
+   * `numberPhases`.
+   */
   numberPhases?: number;
 }
 
@@ -323,17 +327,18 @@ export interface CompositePeriod {
 
 /**
  * A composite slice's limit in the unit a GetCompositeSchedule.req asked
- * for, with the winning period's `numberPhases` (#323).
+ * for, with the joint phase count as `numberPhases` (#323).
  *
  * - Same unit as the winning profile: its limit, verbatim — no A → W → A
- *   float drift.
- * - The other unit: converted on the 230 V reference and the winning
- *   period's phase count (3 when it states none), the same count
- *   `limitToWatts` used to compare it, so a W profile on 1 phase reads
- *   back as `W / 230` amperes, not `W / 690`.
+ *   float drift. An ampere limit is per phase, so it holds on whatever
+ *   phase count is in force.
+ * - The other unit: converted on the 230 V reference and the joint phase
+ *   count (3 when no profile restricts it), the same count `limitToWatts`
+ *   used to compare it, so a W profile on 1 phase reads back as `W / 230`
+ *   amperes, not `W / 690`.
  *
- * `numberPhases` is emitted only when the winning period stated a
- * restriction; none is invented.
+ * `numberPhases` is emitted only when a profile restricts the phase count;
+ * none is invented.
  */
 export function compositeLimitInUnit(
   period: CompositePeriod,
@@ -396,11 +401,13 @@ export interface CompositeInput {
  *
  * Deliberately converts `ChargingRateUnit=A` against the 230 V reference
  * rather than the connector's electrical model: a composite is a
- * restatement of the CSMS's own profiles, not a metering claim. Each slice
- * carries the winning period as `source`, so the response restates it in
- * its own unit and phase count ({@link compositeLimitInUnit}); the watts
- * only pick the winner and serve a request for the other unit (#323).
- * Consecutive slices merge only when they restate the same period values.
+ * restatement of the CSMS's own profiles, not a metering claim. Every
+ * profile converts on the joint phase count, as `resolveEffectiveLimitWatts`
+ * does, so the winner and its watts are the cap metering applies at the
+ * 230 V reference. Each slice carries the winning period as `source`, so the
+ * response restates it in its own unit ({@link compositeLimitInUnit}); the
+ * watts pick the winner and serve a request for the other unit (#323).
+ * Consecutive slices merge only when they restate the same values.
  */
 export function buildCompositeWattsSchedule(
   inputs: CompositeInput,
@@ -428,17 +435,31 @@ export function buildCompositeWattsSchedule(
   for (const startPeriod of sorted) {
     const at = new Date(anchor.getTime() + startPeriod * 1000);
     let slice: CompositePeriod = { startPeriod, watts: Infinity };
+    // Every profile converts on the joint phase count, exactly as metering
+    // does (`resolveEffectiveLimitWatts`): an ampere limit is per phase and
+    // delivery happens only on the phases every profile permits, so the
+    // composite restates the cap that is actually applied (#323).
+    const jointPhases = resolveEffectivePhaseLimit(
+      inputs.txProfile,
+      inputs.chargePointMaxProfile,
+      anchor,
+      at,
+    );
+    const numberPhases =
+      jointPhases === null ? {} : { numberPhases: jointPhases };
     for (const profile of profiles) {
       // For Recurring/Absolute kinds the resolver walks elapsed time from
       // the profile's reference; for Relative it's elapsed from the
       // anchor (we treat the composite anchor as the transaction start).
-      // Each profile converts on its own `numberPhases`; the tx side wins
-      // a tie.
-      const r = resolveScheduleLimitWatts(profile, anchor, at);
+      // The tx side wins a tie.
+      const r = resolveScheduleLimitWatts(
+        profile,
+        anchor,
+        at,
+        undefined,
+        jointPhases,
+      );
       if (r.watts < slice.watts && r.rawLimit !== null && r.unit !== null) {
-        const numberPhases = isPhaseRestriction(r.limitNumberPhases)
-          ? { numberPhases: r.limitNumberPhases }
-          : {};
         slice = {
           startPeriod,
           watts: r.watts,

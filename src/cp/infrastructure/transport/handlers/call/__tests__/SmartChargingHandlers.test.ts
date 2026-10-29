@@ -434,11 +434,11 @@ describe("GetCompositeScheduleHandler round trip (#323)", () => {
     ]);
   });
 
-  it("restates the winning profile of a mixed stack on that profile's phases", () => {
-    // Each profile converts on its own numberPhases for the min: 10 A on
-    // 3 phases is 6900 W, so the 3000 W / 1-phase station profile wins and
-    // is restated as 3000 / 230 A on its one phase. (The live cap for the
-    // same stack converts on the joint phase count instead — 2300 W.)
+  // A stack is restated on the joint phase count, as metering caps it: an
+  // ampere limit is per phase, and delivery happens only on the phases every
+  // profile permits.
+  it("restates a mixed stack on the joint phase count, as metering caps it", () => {
+    // Joint count 1: 10 A on 1 phase is 2300 W, under the 3000 W station cap.
     const profiles = {
       tx: {
         unit: "A" as const,
@@ -450,12 +450,44 @@ describe("GetCompositeScheduleHandler round trip (#323)", () => {
       },
     };
     expect(compositeFor(profiles, "W").chargingSchedulePeriod).toStrictEqual([
-      { startPeriod: 0, limit: 3000, numberPhases: 1 },
+      { startPeriod: 0, limit: 2300, numberPhases: 1 },
+    ]);
+    expect(compositeFor(profiles, "A").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 10, numberPhases: 1 },
+    ]);
+  });
+
+  it("restates a 16 A / 1-phase tx under a 10 A station cap as 10 A on 1 phase", () => {
+    const profiles = {
+      tx: {
+        unit: "A" as const,
+        periods: [{ startPeriod: 0, limit: 16, numberPhases: 1 }],
+      },
+      max: { unit: "A" as const, periods: [{ startPeriod: 0, limit: 10 }] },
+    };
+    expect(compositeFor(profiles, "A").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 10, numberPhases: 1 },
+    ]);
+    expect(compositeFor(profiles, "W").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 2300, numberPhases: 1 },
+    ]);
+  });
+
+  it("restates a 1000 W tx under a 6 A / 1-phase station cap on 1 phase", () => {
+    const profiles = {
+      tx: { unit: "W" as const, periods: [{ startPeriod: 0, limit: 1000 }] },
+      max: {
+        unit: "A" as const,
+        periods: [{ startPeriod: 0, limit: 6, numberPhases: 1 }],
+      },
+    };
+    expect(compositeFor(profiles, "W").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 1000, numberPhases: 1 },
     ]);
     const amps = compositeFor(profiles, "A").chargingSchedulePeriod;
     expect(amps).toHaveLength(1);
     expect(amps[0].numberPhases).toBe(1);
-    expect(amps[0].limit).toBeCloseTo(3000 / 230, 10);
+    expect(amps[0].limit).toBeCloseTo(1000 / 230, 10);
   });
 
   it("keeps two periods apart when equal watts come from different phase counts", () => {

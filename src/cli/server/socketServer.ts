@@ -63,6 +63,7 @@ import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueC
 import {
   InvalidEvSettingsPatchError,
   type EVSettings,
+  type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
 import {
@@ -1227,9 +1228,11 @@ async function applyDefaultEVSettingsRpc(
   deps: RuntimeSocketIoDeps,
   params: Params<"ev_settings.apply_default">,
 ): Promise<undefined> {
+  // Possibly partial (#333): the connector merges it onto
+  // `defaultEVSettings`, so nothing here asserts a complete `EVSettings`.
   await runFacadeOperation(() =>
     deps.chargePointService.applyDefaultEVSettings(
-      params.settings as unknown as EVSettings,
+      params.settings as unknown as EVSettingsPatch,
     ),
   );
   return undefined;

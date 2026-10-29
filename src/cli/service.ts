@@ -1218,7 +1218,7 @@ export class CLIChargePointService {
    * this CP, but only takes effect on connectors that don't currently have
    * an explicit/scenario override active (see Connector.applyDefaultEvSettings).
    */
-  applyDefaultEVSettings(settings: EVSettings): void {
+  applyDefaultEVSettings(settings: EVSettingsPatch): void {
     this._chargePoint.connectors.forEach((connector) => {
       connector.applyDefaultEvSettings(settings);
     });
@@ -3384,7 +3384,8 @@ export class CLIChargePointService {
    * loaded scenario whose `statusChange` trigger matches the transition
    * and runs it via runScenario(). Skips scenarios that are disabled,
    * already running, or whose ChargePoint isn't `Available` (matches the
-   * browser-side guard in ScenarioManager.executeScenario).
+   * browser-side guard in ScenarioManager.handleStatusChange; an explicit
+   * runScenario has no such guard in either runtime, #425).
    */
   private handleStatusChangeAutoTrigger(
     connectorId: number,

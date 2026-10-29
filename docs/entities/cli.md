@@ -802,9 +802,11 @@ the OCPP answer are unchanged.
   drop, can still lose it.
 - **Redaction.** `payload` is redacted before either channel sees it: a
   `ChangeConfiguration` of `AuthorizationKey` and a 2.x `SetVariables` of
-  `BasicAuthPassword` / `AuthorizationKey` carry `[redacted]` as the value.
-  The `Received:` log line of the same OCPP-J frame is redacted by the same
-  rule ([Log format → Redaction](../concepts/log-format.md#redaction), #400).
+  `BasicAuthPassword` / `AuthorizationKey` carry `[redacted]` as the value;
+  a 2.x `SetNetworkProfile` carries `[redacted]` as `vpn.key` and has no
+  `apn.apnPassword` / `vpn.password` field (#401).
+  The `Received:` log line of the same OCPP-J frame hides those values too
+  ([Log format → Redaction](../concepts/log-format.md#redaction), #400).
 
 ```json
 {"event":"csms_call_received","data":{"action":"Reset","messageId":"b7e1…","payload":{"type":"Soft"}},"timestamp":"…"}

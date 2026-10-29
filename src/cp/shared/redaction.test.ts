@@ -286,6 +286,90 @@ describe("duplicate JSON keys in logged frames (#400 review)", () => {
   });
 });
 
+describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
+  const setNetworkProfile = () => ({
+    configurationSlot: 1,
+    connectionData: {
+      ocppVersion: "OCPP20",
+      ocppTransport: "JSON",
+      ocppCsmsUrl: "wss://csms.example/ocpp",
+      messageTimeout: 30,
+      securityProfile: 1,
+      ocppInterface: "Wireless0",
+      apn: {
+        apn: "internet.example",
+        apnUserName: "apnUSER",
+        apnPassword: "apnSECRET",
+        apnAuthentication: "PAP",
+      },
+      vpn: {
+        server: "vpn.example",
+        user: "vpnUSER",
+        group: "vpnGROUP",
+        password: "vpnPASSWORD",
+        key: "vpnSHAREDKEY",
+        type: "IPSec",
+      },
+    },
+  });
+  const secrets = ["apnSECRET", "vpnPASSWORD", "vpnSHAREDKEY"];
+  const readable = ["apnUSER", "vpn.example", "vpnUSER", "vpnGROUP"];
+
+  it("removes the APN password and the VPN key from a parsed payload", () => {
+    const redacted = redactSensitiveValue(setNetworkProfile()) as ReturnType<
+      typeof setNetworkProfile
+    >;
+    const serialized = JSON.stringify(redacted);
+
+    for (const secret of secrets) expect(serialized).not.toContain(secret);
+    // A context-dependent secret is replaced, like the 1.6 `value`; a
+    // sensitive key name (apnPassword, password) is dropped.
+    expect(redacted.connectionData.vpn.key).toBe(REDACTED_VALUE);
+    expect(redacted.connectionData.apn).not.toHaveProperty("apnPassword");
+    expect(redacted.connectionData.apn.apnUserName).toBe("apnUSER");
+    expect(redacted.connectionData.vpn.server).toBe("vpn.example");
+    expect(redacted.connectionData.vpn.user).toBe("vpnUSER");
+  });
+
+  it("redacts both in the Received: log line of the frame", () => {
+    const redacted = redactSensitiveText(
+      `Received: [2,"m1","SetNetworkProfile",${JSON.stringify(setNetworkProfile())}]`,
+    );
+
+    for (const secret of secrets) expect(redacted).not.toContain(secret);
+    for (const value of readable) expect(redacted).toContain(value);
+    expect(redacted).toContain(`"apnPassword":"${REDACTED_VALUE}"`);
+    expect(redacted).toContain(`"key":"${REDACTED_VALUE}"`);
+  });
+
+  it("redacts the VPN key whatever the field order and whitespace", () => {
+    const redacted = redactSensitiveText(
+      '{ "vpn" : { "key" : "vpnSHAREDKEY", "server": "vpn.example" } }',
+    );
+
+    expect(redacted).toBe(
+      `{ "vpn" : { "key" : "${REDACTED_VALUE}", "server": "vpn.example" } }`,
+    );
+  });
+
+  it("leaves a key outside a vpn object readable", () => {
+    for (const text of [
+      '{"key":"HeartbeatInterval","value":"30"}',
+      '{"apn":{"key":"notASecret"}}',
+      '{"vpn":"notAnObject","key":"x"}',
+    ]) {
+      expect(redactSensitiveText(text)).toBe(text);
+    }
+    expect(redactSensitiveValue({ apn: { key: "notASecret" } })).toEqual({
+      apn: { key: "notASecret" },
+    });
+    expect(redactSensitiveValue({ vpn: "notAnObject", key: "x" })).toEqual({
+      vpn: "notAnObject",
+      key: "x",
+    });
+  });
+});
+
 describe("vehicle catalog API keys (#458)", () => {
   it("redacts a bearer token", () => {
     expect(redactSensitiveText("Authorization: Bearer abc.def-123")).toBe(

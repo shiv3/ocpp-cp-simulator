@@ -2,16 +2,25 @@ export const REDACTED_VALUE = "[redacted]";
 
 const SENSITIVE_KEY_NAMES = new Set([
   "apikey",
+  // 2.0.1 / 2.1 SetNetworkProfile `connectionData.apn.apnPassword` (#401).
+  "apnpassword",
   "authorizationkey",
   "password",
   "privatekey",
   "tlskey",
 ]);
 
-const SENSITIVE_ASSIGNMENT =
-  /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY)"?)\s*[:=]\s*)(["'])(.*?)\2/g;
-const SENSITIVE_BARE_ASSIGNMENT =
-  /((?:"?(?:AuthorizationKey|authorizationKey|password|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY)"?)\s*[:=]\s*)(?!["'])([^\s,}\]]+)/g;
+/** The names the text redactor matches in `name: value` / `name=value`. */
+const SENSITIVE_ASSIGNMENT_NAMES =
+  "AuthorizationKey|authorizationKey|password|apnPassword|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
+const SENSITIVE_ASSIGNMENT = new RegExp(
+  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])(.*?)\\2`,
+  "g",
+);
+const SENSITIVE_BARE_ASSIGNMENT = new RegExp(
+  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(?!["'])([^\\s,}\\]]+)`,
+  "g",
+);
 
 /** #458: an `Authorization: Bearer …` value. */
 const BEARER_TOKEN = /(\bBearer\s+)[A-Za-z0-9\-._~+/]+=*/g;
@@ -117,16 +126,33 @@ export function redactSensitiveValue(value: unknown): unknown {
       out[key] = REDACTED_VALUE;
       continue;
     }
-    out[key] = redactSensitiveValue(nested);
+    out[key] = key === "vpn" ? redactVpn(nested) : redactSensitiveValue(nested);
   }
   return out;
 }
 
 /**
+ * 2.0.1 / 2.1 SetNetworkProfile `connectionData.vpn.key`, the VPN shared
+ * secret (#401). `key` is only a secret under `vpn` — elsewhere it is the
+ * name of a 1.6 `{ key, value }` configuration entry — so, like the 1.6
+ * `value`, it is replaced rather than dropped.
+ */
+function redactVpn(value: unknown): unknown {
+  const redacted = redactSensitiveValue(value);
+  if (!isPlainObject(redacted) || !("key" in redacted)) return redacted;
+  return { ...redacted, key: REDACTED_VALUE };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
  * Redacts, in serialized text, the value of a 1.6 `{ key, value }` entry
- * whose key is sensitive and the `attributeValue` of a 2.0.1
- * `{ variable: { name }, attributeValue }` entry whose variable is (#400) —
- * the same two shapes `redactSensitiveValue` handles on parsed payloads.
+ * whose key is sensitive, the `attributeValue` of a 2.0.1
+ * `{ variable: { name }, attributeValue }` entry whose variable is (#400)
+ * and the `key` of an object held under `vpn` (#401) — the same shapes
+ * `redactSensitiveValue` handles on parsed payloads.
  */
 function redactOcppKeyValueText(text: string): string {
   const replacements: Replacement[] = [];
@@ -161,6 +187,15 @@ function redactOcppKeyValueText(text: string): string {
         }
       }
     }
+
+    // 2.0.1 / 2.1 SetNetworkProfile `vpn.key` (#401), as in `redactVpn`.
+    const vpnField = fields.find((field) => field.name === "vpn");
+    const vpnKeyField =
+      vpnField &&
+      nestedObjectFields(text, vpnField, objectEndByStart).find(
+        (field) => field.name === "key",
+      );
+    if (vpnKeyField) replacements.push(redactField(vpnKeyField));
   }
 
   return applyReplacements(text, replacements);
@@ -182,14 +217,23 @@ function isSensitiveVariableText(
   variableField: ObjectField,
   objectEndByStart: Map<number, number>,
 ): boolean {
-  const objectEnd = objectEndByStart.get(variableField.valueStart);
-  if (objectEnd === undefined) return false;
-  return readObjectFields(text, variableField.valueStart, objectEnd).some(
+  return nestedObjectFields(text, variableField, objectEndByStart).some(
     (field) =>
       field.name === "name" &&
       field.stringValue !== undefined &&
       isSensitiveVariableName(field.stringValue),
   );
+}
+
+/** The fields of the object a field holds; none when it holds no object. */
+function nestedObjectFields(
+  text: string,
+  field: ObjectField,
+  objectEndByStart: Map<number, number>,
+): ObjectField[] {
+  const objectEnd = objectEndByStart.get(field.valueStart);
+  if (objectEnd === undefined) return [];
+  return readObjectFields(text, field.valueStart, objectEnd);
 }
 
 function findObjectRanges(text: string): Array<[number, number]> {

@@ -58,18 +58,29 @@ the Socket.IO log push). In an OCPP-J frame logged as `Sent:` / `Received:`
 it replaces with `[redacted]`:
 
 - the `value` of a 1.6 `{ "key", "value" }` entry whose key is
-  `AuthorizationKey` (or another sensitive key name: `ApiKey`, `Password`,
-  `PrivateKey`, `TlsKey`) — a `ChangeConfiguration`, a `GetConfiguration`
-  answer;
+  `AuthorizationKey` (or another sensitive key name: `ApiKey`, `ApnPassword`,
+  `Password`, `PrivateKey`, `TlsKey`) — a `ChangeConfiguration`, a
+  `GetConfiguration` answer;
 - the `attributeValue` of a 2.0.1 `{ "variable": { "name" }, "attributeValue" }`
   entry whose variable is `BasicAuthPassword` or `AuthorizationKey` — a
-  `SetVariables` request, a `GetVariables` answer (#400).
+  `SetVariables` request, a `GetVariables` answer (#400);
+- in a 2.0.1 / 2.1 `SetNetworkProfile`, the `apnPassword` of
+  `connectionData.apn` and the `key` (VPN shared secret) of
+  `connectionData.vpn` (#401). `vpn.password` was already caught as a
+  `password` field. A `key` field outside a `vpn` object stays readable: it
+  names a 1.6 configuration entry.
 
 This is the rule the structured redactor applies to the `csms_call_received`
 payload and to scenario reports ([CLI → CSMS call events](../entities/cli.md#csms-call-events)),
-with one predicate for the variable names, so a frame's log line and its
-event agree. The match is on JSON object shapes: a SOAP (XML) body does not
-get it. A duplicated key does not hide a secret — `JSON.parse` keeps the last
+with one predicate for the variable names, so for the fields above a frame's
+log line and its event hide the same values. They differ in form: where the
+log line shows `[redacted]` for a field named after a secret (`password`,
+`apnPassword`, `apiKey`, …), the structured redactor drops the field. Field
+names do not match alike either: the text redactor knows only the spellings
+listed in `redaction.ts`, so a `Password` or `tls_key` field stays readable in
+a log line, while the structured redactor ignores case, `-` and `_`. The
+match is on JSON object shapes: a SOAP (XML) body does not get it.
+A duplicated key does not hide a secret — `JSON.parse` keeps the last
 copy, so any copy of `key` / `variable` makes the entry sensitive and every
 copy of `value` / `attributeValue` is redacted.
 

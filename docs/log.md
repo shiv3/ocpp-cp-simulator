@@ -1748,3 +1748,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Log format](concepts/log-format.md): new Redaction section (what the `Logger` redacts in OCPP-J frames; not SOAP bodies). Review: a frame with duplicate keys no longer bypasses the text redactor (it used the first `value` / `variable` / `attributeValue`, while `JSON.parse` keeps the last; the `value` case predates #400).
 - [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet links the matching log-line rule.
 - [GitHub issues](sources/github-issues.md): #400 row.
+
+## [2026-10-29] ingest | Redact SetNetworkProfile APN password and VPN key (#401)
+
+- A 2.x `SetNetworkProfile` logged `connectionData.apn.apnPassword` and `connectionData.vpn.key` in clear, in the `Received:` line and in the `csms_call_received` payload. `apnPassword` is now a sensitive key name (dropped from structured payloads, `[redacted]` in text); `key` is redacted only inside a `vpn` object, since a bare `key` names a 1.6 configuration entry.
+- [Log format](concepts/log-format.md): Redaction section lists the SetNetworkProfile fields and says the structured redactor drops a field named after a secret where the log line shows `[redacted]`, and that the text redactor matches field names only in the spellings `redaction.ts` lists.
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet covers `SetNetworkProfile`.
+- [GitHub issues](sources/github-issues.md): #401 row.

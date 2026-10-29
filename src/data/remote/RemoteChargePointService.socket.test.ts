@@ -1284,6 +1284,43 @@ describe("RemoteChargePointService socket.io rpc", () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
+  it("forwards the authorization cache seam and unwraps its results (#452)", async () => {
+    const service = new RemoteChargePointService("http://127.0.0.1:9700");
+    const entries = [{ idToken: "T", status: "Accepted" as const }];
+
+    const seeded = service.seedAuthorizationCache("cp-1", entries);
+    const seedAck = nextAck();
+    expect(seedAck.request).toEqual({
+      cpId: "cp-1",
+      method: "seed_auth_cache",
+      params: { entries },
+    });
+    seedAck.resolve({ ok: true, result: { seeded: 1 } });
+    await expect(seeded).resolves.toBe(1);
+
+    const view = { enabled: false, entries: [] };
+    const read = service.getAuthorizationCache("cp-1");
+    const getAck = nextAck();
+    expect(getAck.request).toEqual({
+      cpId: "cp-1",
+      method: "get_auth_cache",
+      params: {},
+    });
+    getAck.resolve({ ok: true, result: view });
+    await expect(read).resolves.toEqual(view);
+
+    const cleared = service.clearAuthorizationCache("cp-1");
+    const clearAck = nextAck();
+    expect(clearAck.request).toEqual({
+      cpId: "cp-1",
+      method: "clear_auth_cache",
+      params: {},
+    });
+    clearAck.resolve({ ok: true, result: { cleared: true } });
+    await expect(cleared).resolves.toBe(true);
+    service.dispose();
+  });
+
   it("uses explicit handshake auth when supplied by the CLI client", () => {
     const service = new RemoteChargePointService("http://127.0.0.1:9700", {
       basicAuth: { username: "admin", password: "secret" },

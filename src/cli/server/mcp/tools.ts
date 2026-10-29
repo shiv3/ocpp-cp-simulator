@@ -395,6 +395,67 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  // #452: the Authorization Cache test seam, one tool per method.
+  mcp.tool("auth_cache_get", {
+    description:
+      "Read a charge point's Authorization Cache: whether it is enabled (1.6 AuthorizationCacheEnabled / 2.x AuthCacheCtrlr.Enabled) and every entry (idToken, status, expiresAt, parentId, insertedAt, updatedAt).",
+    inputSchema: METHODS.get_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "get_auth_cache",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("auth_cache_seed", {
+    description:
+      "Write entries into a charge point's Authorization Cache as if the CSMS had answered them, whether or not the cache is enabled; nothing is sent to the CSMS. One entry per idToken; an invalid entry refuses the whole seed.",
+    inputSchema: METHODS.seed_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "seed_auth_cache",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("auth_cache_clear", {
+    description:
+      "Empty a charge point's Authorization Cache, whether or not it is enabled; nothing is sent to the CSMS (the CSMS's ClearCache follows the OCPP rules instead).",
+    inputSchema: METHODS.clear_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "clear_auth_cache",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("set_connector_status", {
     description: "Update the status of a connector",
     inputSchema: z.object({

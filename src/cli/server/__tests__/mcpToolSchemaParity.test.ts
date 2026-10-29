@@ -311,6 +311,12 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "stop_transaction", method: "stop_transaction" },
     { tool: "authorize", method: "authorize" },
     { tool: "send_ocpp_call", method: "send_ocpp_call" },
+    { tool: "auth_cache_get", method: "get_auth_cache" },
+    { tool: "auth_cache_seed", method: "seed_auth_cache" },
+    {
+      tool: "auth_cache_clear",
+      method: "clear_auth_cache",
+    },
     { tool: "set_connector_status", method: "update_connector_status" },
     { tool: "set_meter_value", method: "set_meter_value" },
     { tool: "send_meter_value", method: "send_meter_value" },

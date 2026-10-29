@@ -1849,3 +1849,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [State persistence](concepts/state-persistence.md#tables): `authorization_cache` row, `.tables` listing, `cp.delete` list.
 - [src/utils/scenarios/README.md](sources/cert16-templates-readme.md): TC_007 no longer blocked by a missing cache; TC_061 description.
 - [Index](index.md), [GitHub issues](sources/github-issues.md): new page, #452 row.
+
+## [2026-10-29] ingest | Authorization cache on OCPP 2.x and its control seam (#452)
+
+- 2.0.1 / 2.1 device model: `AuthCtrlr.LocalPreAuthorize`, `LocalAuthorizeOffline`, `OfflineTxForUnknownIdEnabled`, `AuthCacheCtrlr.Enabled` and `AuthCacheCtrlr.LifeTime` map onto the 1.6 keys and the new 2.x-only `AuthCacheLifeTime` (0 = no lifetime); GetBaseReport lists them. `AuthCacheCtrlr` becomes a known component, so its unmapped variables answer `UnknownVariable`.
+- AuthorizeResponse and TransactionEventResponse `idTokenInfo` fill the cache (C10.FR.04/.05); `cacheExpiryDateTime` overrides `LifeTime` (C10.FR.13).
+- Behaviour change (2.x wire): ClearCache answers `Rejected` while `AuthCacheCtrlr.Enabled=false`, the default, and keeps the content (C11.FR.04); enabled, it clears and answers `Accepted`. 1.6 is unchanged.
+- New CP command methods `get_auth_cache`, `seed_auth_cache`, `clear_auth_cache` (JSON Lines too) and MCP tools `auth_cache_get` / `auth_cache_seed` / `auth_cache_clear`: 28 curated tools.
+- [Local authorization](concepts/local-authorization.md): OCPP 2.x and control-plane seam sections, limits.
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): three rows.
+- [MCP endpoint](entities/mcp-endpoint.md#curated-tools), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool rows and count.

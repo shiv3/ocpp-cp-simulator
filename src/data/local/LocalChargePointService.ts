@@ -1,4 +1,8 @@
 import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../../cp/domain/auth/AuthorizationCacheSeed";
 import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import {
   DIAGNOSTICS_STATUSES,
@@ -479,6 +483,23 @@ export class LocalChargePointService implements ChargePointService {
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
     return this.getExistingChargePointOrThrow(id).sendOcppCall(request);
+  }
+
+  async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
+    return this.getExistingChargePointOrThrow(id).authorization.cacheView();
+  }
+
+  async seedAuthorizationCache(
+    id: string,
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number> {
+    return this.getExistingChargePointOrThrow(id).authorization.seedCache(
+      entries,
+    );
+  }
+
+  async clearAuthorizationCache(id: string): Promise<boolean> {
+    return this.getExistingChargePointOrThrow(id).clearAuthorizationCache();
   }
 
   async startTransaction(

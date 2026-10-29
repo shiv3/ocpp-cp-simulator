@@ -44,6 +44,10 @@ import {
 } from "../cp/domain/connector/Transaction";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { CHARGING_SESSION_OUTCOMES } from "../cp/domain/session/ChargingSession";
+import {
+  AUTHORIZATION_CACHE_SEED_MAX,
+  AUTHORIZATION_STATUSES,
+} from "../cp/domain/auth/AuthorizationCacheSeed";
 import { MAX_SESSIONS_PER_CP } from "../cp/domain/persistence/ChargingSessionRepository";
 import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
 import {
@@ -123,6 +127,45 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
  * schema rather than a copy of its bounds (#382).
  */
 export const dataTransferDataSchema = z.union([STR_64K, OBJ()]);
+/** An identifier as both versions carry it: 2.x IdTokenType.idToken is at
+ *  most 36 characters, 1.6 IdToken 20. */
+const ID_TOKEN = NON_EMPTY_STR.max(36);
+/**
+ * `seed_auth_cache`'s entries (#452): an array, not a record keyed
+ * by idToken, so an identifier never lands on a prototype key. Bounded by
+ * the cache capacity; one entry per idToken. Exported so JSON-Lines mode
+ * validates against the same schema (#382).
+ */
+export const authorizationCacheSeedSchema = z
+  .array(
+    z.object({
+      idToken: ID_TOKEN,
+      status: z.enum(AUTHORIZATION_STATUSES),
+      expiresAt: STR_64K.refine((v) => !Number.isNaN(Date.parse(v)), {
+        message: "expiresAt must be a date string",
+      }).optional(),
+      parentId: ID_TOKEN.optional(),
+    }),
+  )
+  .min(1)
+  .max(AUTHORIZATION_CACHE_SEED_MAX)
+  .refine(
+    (entries) => new Set(entries.map((e) => e.idToken)).size === entries.length,
+    { message: "each idToken may appear once" },
+  );
+const authorizationCacheViewSchema = z.object({
+  enabled: z.boolean(),
+  entries: z.array(
+    z.object({
+      idToken: z.string(),
+      status: z.string(),
+      expiresAt: z.string().optional(),
+      parentId: z.string().optional(),
+      insertedAt: z.string(),
+      updatedAt: z.string(),
+    }),
+  ),
+});
 /** `send_ocpp_call`'s result (#389): the CSMS's CALLRESULT or CALLERROR,
  *  with the frame exactly as it was written. */
 const ocppCallOutcomeSchema = z.discriminatedUnion("kind", [
@@ -687,6 +730,21 @@ export const METHODS = {
         ),
     }),
     result: ocppCallOutcomeSchema,
+  },
+  // #452: the charge point's Authorization Cache, a test seam. Seed and
+  // clear act whatever AuthorizationCacheEnabled / AuthCacheCtrlr.Enabled
+  // says (get reports the switch); nothing goes on the wire.
+  get_auth_cache: {
+    params: EMPTY,
+    result: authorizationCacheViewSchema,
+  },
+  seed_auth_cache: {
+    params: z.object({ entries: authorizationCacheSeedSchema }),
+    result: z.object({ seeded: z.number().int() }),
+  },
+  clear_auth_cache: {
+    params: EMPTY,
+    result: z.object({ cleared: z.boolean() }),
   },
 
   // -- status notifications --

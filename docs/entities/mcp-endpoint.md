@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 25 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 28 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -17,7 +17,8 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-28
+  - ../concepts/local-authorization.md
+updated: 2026-10-29
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -41,7 +42,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 25 curated tools wrapping the daemon's
+The endpoint exposes 28 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                     | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -61,6 +62,9 @@ The endpoint exposes 25 curated tools wrapping the daemon's
 | `stop_transaction`       | `stop_transaction`        | `cpId`, `connector`, `reason?`, `triggerReason?` — 1.6 reason / 2.0.1 stoppedReason and the 2.x Ended-event trigger (#335)                                                                                                                                                    |
 | `authorize`              | `authorize`               | `cpId`, `tagId?` — same idTag pool fallback as `start_transaction` (#299)                                                                                                                                                                                                     |
 | `send_ocpp_call`         | `send_ocpp_call`          | `cpId`, `action`, `payload`, `skipValidation?`, `applyResponse?` — [Expert OCPP calls](../concepts/expert-ocpp-calls.md) (#389)                                                                                                                                               |
+| `auth_cache_get`         | `get_auth_cache`          | `cpId` — cache switch and entries ([Local authorization](../concepts/local-authorization.md#control-plane-seam), #452)                                                                                                                                                        |
+| `auth_cache_seed`        | `seed_auth_cache`         | `cpId`, `entries` — schema taken from the method; writes whatever the cache switch says (#452)                                                                                                                                                                                |
+| `auth_cache_clear`       | `clear_auth_cache`        | `cpId` — empties the cache whatever its switch says; nothing goes on the wire (#452)                                                                                                                                                                                          |
 | `set_connector_status`   | `update_connector_status` | `cpId`, `connector`, `status` (a connector status, as `update_connector_status` enforces), `errorCode?`, `info?`, `vendorErrorCode?`, `vendorId?`, `timestamp?`, `suppressChargingStateTransactionEvent?`                                                                     |
 | `set_meter_value`        | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                                                                                                                                                                  |
 | `send_meter_value`       | `send_meter_value`        | `cpId`, `connector`, `context?` — `ReadingContext` the readings carry (#335)                                                                                                                                                                                                  |

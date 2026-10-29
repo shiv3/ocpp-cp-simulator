@@ -2,6 +2,12 @@ import type {
   AuthorizationCache,
   AuthorizationCacheRecord,
 } from "./AuthorizationCache";
+import {
+  authorizationCacheEntryView,
+  parseAuthorizationCacheSeed,
+  type AuthorizationCacheSeedEntry,
+  type AuthorizationCacheView,
+} from "./AuthorizationCacheSeed";
 import type { LocalAuthListManager } from "./LocalAuthList";
 import {
   resolveLocalAuthorization,
@@ -27,7 +33,8 @@ export interface StationAuthorizationDeps {
 /**
  * The charge point's local authorization (issue #452): the Authorization
  * Cache and the Local Authorization List, read through
- * {@link resolveLocalAuthorization} and written from CSMS answers only.
+ * {@link resolveLocalAuthorization} and written from CSMS answers (plus
+ * the {@link StationAuthorization.seedCache} test seam).
  */
 export class StationAuthorization {
   private readonly now: () => number;
@@ -86,6 +93,27 @@ export class StationAuthorization {
   /** Empty the cache (1.6 §5.4, C11.FR.01). False when it could not be. */
   clearCache(): boolean {
     return this.deps.cache.clear();
+  }
+
+  /**
+   * Control seam (#452): write `entries` as if the CSMS had answered them,
+   * whatever the cache switch says, so a test can prepare the cache before
+   * enabling it. All entries are checked first; an
+   * {@link InvalidAuthorizationCacheSeedError} leaves the cache untouched.
+   * Returns the number written.
+   */
+  seedCache(entries: readonly AuthorizationCacheSeedEntry[]): number {
+    const records = parseAuthorizationCacheSeed(entries);
+    for (const record of records) this.deps.cache.upsert(record);
+    return records.length;
+  }
+
+  /** Control seam (#452): the switch and every stored entry. */
+  cacheView(): AuthorizationCacheView {
+    return {
+      enabled: this.deps.policy().cacheEnabled,
+      entries: this.deps.cache.all().map(authorizationCacheEntryView),
+    };
   }
 }
 

@@ -1,5 +1,9 @@
 import * as fs from "fs";
 import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../../cp/domain/auth/AuthorizationCacheSeed";
+import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
@@ -307,6 +311,21 @@ export class RegistryChargePointService implements ChargePointService {
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
     return this.requireService(id).sendOcppCall(request);
+  }
+
+  async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
+    return this.requireService(id).getAuthorizationCache();
+  }
+
+  async seedAuthorizationCache(
+    id: string,
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number> {
+    return this.requireService(id).seedAuthorizationCache(entries);
+  }
+
+  async clearAuthorizationCache(id: string): Promise<boolean> {
+    return this.requireService(id).clearAuthorizationCache();
   }
 
   async startTransaction(

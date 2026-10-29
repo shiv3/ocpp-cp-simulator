@@ -128,4 +128,59 @@ describe("ScenarioManager availability gate (#425)", () => {
 
     expect(updateConnectorStatus).toHaveBeenCalledWith(1, OCPPStatus.Preparing);
   });
+
+  // Start -> wait for a status these tests never reach -> End.
+  function parkingScenario(): ScenarioDefinition {
+    const base = preparingScenario({ type: "manual" });
+    return {
+      ...base,
+      id: "sc-parked",
+      nodes: [
+        base.nodes[0],
+        {
+          id: "wait",
+          type: ScenarioNodeType.STATUS_TRIGGER,
+          position: { x: 0, y: 100 },
+          data: { label: "Wait", targetStatus: OCPPStatus.Faulted, timeout: 0 },
+        },
+        base.nodes[2],
+      ],
+      edges: [
+        { id: "e-start", source: "start", target: "wait" },
+        { id: "e-wait", source: "wait", target: "end" },
+      ],
+    };
+  }
+
+  it("a statusChange trigger that cannot start leaves a manual run going", async () => {
+    const { manager } = newManager(OCPPStatus.Unavailable);
+    manager.loadScenarios([
+      parkingScenario(),
+      preparingScenario(statusChangeTrigger),
+    ]);
+    void manager.executeScenario("sc-parked");
+    await settle();
+
+    manager.evaluateStatus(OCPPStatus.Available, OCPPStatus.Charging);
+    await settle();
+
+    expect(manager.getActiveScenarioIds()).toEqual(["sc-parked"]);
+    manager.stopAllScenarios();
+  });
+
+  it("a statusChange trigger on an Available charge point replaces a manual run", async () => {
+    const { manager, updateConnectorStatus } = newManager(OCPPStatus.Available);
+    manager.loadScenarios([
+      parkingScenario(),
+      preparingScenario(statusChangeTrigger),
+    ]);
+    void manager.executeScenario("sc-parked");
+    await settle();
+
+    manager.evaluateStatus(OCPPStatus.Available, OCPPStatus.Charging);
+    await settle();
+
+    expect(manager.isScenarioActive("sc-parked")).toBe(false);
+    expect(updateConnectorStatus).toHaveBeenCalledWith(1, OCPPStatus.Preparing);
+  });
 });

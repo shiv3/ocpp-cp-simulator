@@ -154,6 +154,17 @@ export class ScenarioManager {
       return;
     }
 
+    // Only the automatic trigger waits for an Available charge point, like
+    // the daemon's handleStatusChangeAutoTrigger. It checks before stopping
+    // anything: a trigger that cannot start must not end a manual run, which
+    // starts whatever the status (executeScenario / manualExecute, #425).
+    if (this.chargePoint.status !== OCPPStatus.Available) {
+      console.warn(
+        `[ScenarioManager] ChargePoint status is ${this.chargePoint.status}. Status-triggered scenario skipped.`,
+      );
+      return;
+    }
+
     console.log(
       `[ScenarioManager] Status changed: ${fromStatus} → ${toStatus}. Found ${matchingScenarios.length} matching scenario(s).`,
     );
@@ -163,15 +174,6 @@ export class ScenarioManager {
 
     // Execute only the first matching scenario (one scenario per connector)
     if (matchingScenarios.length > 0) {
-      // Only the automatic trigger waits for an Available charge point,
-      // like the daemon's handleStatusChangeAutoTrigger. An explicit run
-      // (executeScenario / manualExecute) starts whatever the status (#425).
-      if (this.chargePoint.status !== OCPPStatus.Available) {
-        console.warn(
-          `[ScenarioManager] ChargePoint status is ${this.chargePoint.status}. Status-triggered scenario skipped.`,
-        );
-        return;
-      }
       const scenario = matchingScenarios[0];
       this.executeScenario(scenario.id);
 

@@ -81,9 +81,10 @@ overridden.
   `statusChange` trigger and the connect / status auto-start, in both modes.
   An explicit run (the console's **Run**, `runScenario`, a template run)
   starts whatever the charge point's status, as `run_scenario` does on the
-  daemon. Before #425, Local mode skipped an explicit run on a charge point
-  that was not `Available` without an error: the run page showed a running
-  scenario that never progressed.
+  daemon; a `statusChange` trigger that matches while the charge point is
+  not `Available` leaves that run going. Before #425, Local mode skipped an
+  explicit run on a charge point that was not `Available` without an error:
+  the run page showed a running scenario that never progressed.
 - The scenario wait controls (extend / retry / continue, #240) work in both
   modes and refuse an idle scenario the same way. The run report that records
   them (`interventions`) exists only on the daemon — Local mode has no run

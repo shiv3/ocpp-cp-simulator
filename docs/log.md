@@ -1839,3 +1839,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
+
+## [2026-10-29] ingest | Retire the manual desktop release workflow (#516)
+
+- `.github/workflows/manual-release.yml` created a draft `v<version>` release and built the desktop bundles without `npm version`, so the bundle, the web console and the sidecar daemon reported the `0.0.0` placeholder. It never ran, and publishing its draft would have fired `release.yml` on the new tag and uploaded the bundles a second time. It is removed rather than stamped: publishing the release-drafter draft is the only release path.
+- [Desktop app → Download](entities/desktop-app.md#download): the tag path stamps the version; the manual workflow is gone; a branch dispatch of `release.yml` uploads nothing.
+- [GitHub issues](sources/github-issues.md): #516.

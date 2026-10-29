@@ -66,7 +66,7 @@ Each rule must have a type:
       "direction": "both",
       "delayMs": 500,
       "jitterMs": 100,
-      "messageType": "CALL"
+      "match": { "actions": ["MeterValues", "StatusNotification"] }
     },
     "disconnect-rule": {
       "type": "manual-disconnect",
@@ -81,6 +81,12 @@ Each rule must have a type:
   }
 }
 ```
+
+A rule accepts only its own fields; anything else is `invalid_params`
+(`config.rules.<id>.<field>: unknown field`). A `latency` rule takes
+`direction` (`upstream`, `downstream` or `both`), `delayMs`, `jitterMs` and
+`match`: with `match.actions`, it delays only frames of those OCPP actions,
+without it every frame (#497).
 
 All bounds come from the spec: `delayMs`, `jitterMs`, `reconnectDelayMs` ∈
 [0, 120000] ms; `intervalMs` ∈ [1, 2000000] ms; `intervalJitterMs` ∈

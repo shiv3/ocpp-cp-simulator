@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/cli.md
   - vehicle-profiles.md
-updated: 2026-10-11
+updated: 2026-10-29
 ---
 
 # Scenario File Format (v1.4)
@@ -562,8 +562,21 @@ way: a `voltageV` that is not positive and finite reads as 230, and a
 `powerFactor` outside `(0, 1]` reads as unity, so no divisor in the electrical
 model can reach zero from an accepted input. This guarantee is about connectors that describe their electrics.
 `GetCompositeSchedule` is deliberately outside it: that response restates the
-CSMS's own profiles rather than metering a connector, so both directions there
-stay on the 230 V reference and remain each other's inverse.
+CSMS's own profiles rather than metering a connector, so it never reads the
+connector's electrical fields. On 1.6 (JSON and SOAP), 2.0.1 and 2.1 it
+restates the cap metering applies at the 230 V reference (#323). Every
+profile converts on the joint phase count — the tightest `numberPhases`
+across the Tx-layer profile and the `ChargePointMaxProfile`, 3 when neither
+states a positive integer — and the lower wattage wins each period. Asked in
+the winning profile's own unit, the limit comes back verbatim (a negative
+limit reads 0); asked in the other unit, it converts at 230 V on the joint
+count. `numberPhases` is the joint count, emitted only when a profile states
+one (none is invented). So a single 6 A profile on `numberPhases: 1` reads
+6 A or 1380 W on one phase, and a 10 A / 3-phase `TxProfile` under a
+3000 W / 1-phase `ChargePointMaxProfile` reads 10 A or 2300 W on one phase,
+the cap the meter enforces. Consecutive periods merge only when they restate
+the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
+18 A / 1 phase stays two periods though both are 4140 W.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with

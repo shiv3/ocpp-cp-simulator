@@ -1741,3 +1741,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
+
+## [2026-10-29] ingest | Redact 2.0.1 SetVariables secrets in logged frames (#400)
+
+- The text redactor the `Logger` applies to every message knew the 1.6 `{ key, value }` shape but not the 2.0.1 `{ variable: { name }, attributeValue }` one, so the `Received:` line of a `SetVariables` of `BasicAuthPassword` / `AuthorizationKey` logged the secret in clear while its `csms_call_received` payload was redacted (#396). The text redactor now replaces that `attributeValue` too, with the variable-name predicate shared with the structured redactor.
+- [Log format](concepts/log-format.md): new Redaction section (what the `Logger` redacts in OCPP-J frames; not SOAP bodies).
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet links the matching log-line rule.
+- [GitHub issues](sources/github-issues.md): #400 row.

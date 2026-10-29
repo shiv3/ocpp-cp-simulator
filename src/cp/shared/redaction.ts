@@ -48,15 +48,19 @@ export function isSensitiveKeyName(key: string): boolean {
 /**
  * OCPP 2.0.1 variables whose `attributeValue` is a secret (#396): the key
  * names above plus `BasicAuthPassword`, which is not one of them because it
- * is also a config field name that must survive redaction.
+ * is also a config field name that must survive redaction. The structured
+ * and the text redactors both use this rule (#400).
  */
+function isSensitiveVariableName(name: string): boolean {
+  return (
+    isSensitiveKeyName(name) || normalizeKeyName(name) === "basicauthpassword"
+  );
+}
+
 function isSensitiveVariable(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const name = (value as { name?: unknown }).name;
-  return (
-    typeof name === "string" &&
-    (isSensitiveKeyName(name) || normalizeKeyName(name) === "basicauthpassword")
-  );
+  return typeof name === "string" && isSensitiveVariableName(name);
 }
 
 /**
@@ -118,10 +122,18 @@ export function redactSensitiveValue(value: unknown): unknown {
   return out;
 }
 
+/**
+ * Redacts, in serialized text, the value of a 1.6 `{ key, value }` entry
+ * whose key is sensitive and the `attributeValue` of a 2.0.1
+ * `{ variable: { name }, attributeValue }` entry whose variable is (#400) —
+ * the same two shapes `redactSensitiveValue` handles on parsed payloads.
+ */
 function redactOcppKeyValueText(text: string): string {
   const replacements: Replacement[] = [];
+  const objectRanges = findObjectRanges(text);
+  const objectEndByStart = new Map(objectRanges);
 
-  for (const [start, end] of findObjectRanges(text)) {
+  for (const [start, end] of objectRanges) {
     const fields = readObjectFields(text, start, end);
     const sensitiveKey = fields.some(
       (field) =>
@@ -132,19 +144,49 @@ function redactOcppKeyValueText(text: string): string {
     const valueField = fields.find((field) => field.name === "value");
 
     if (sensitiveKey && valueField) {
-      const redactedValue = valueField.quote
-        ? `${valueField.quote}${REDACTED_VALUE}${valueField.quote}`
-        : `"${REDACTED_VALUE}"`;
+      replacements.push(redactField(valueField));
+    }
 
-      replacements.push({
-        start: valueField.valueStart,
-        end: valueField.valueEnd,
-        value: redactedValue,
-      });
+    const variableField = fields.find((field) => field.name === "variable");
+    const attributeValueField = fields.find(
+      (field) => field.name === "attributeValue",
+    );
+    if (
+      variableField &&
+      attributeValueField &&
+      isSensitiveVariableText(text, variableField, objectEndByStart)
+    ) {
+      replacements.push(redactField(attributeValueField));
     }
   }
 
   return applyReplacements(text, replacements);
+}
+
+function redactField(field: ObjectField): Replacement {
+  return {
+    start: field.valueStart,
+    end: field.valueEnd,
+    value: field.quote
+      ? `${field.quote}${REDACTED_VALUE}${field.quote}`
+      : `"${REDACTED_VALUE}"`,
+  };
+}
+
+/** A `variable` field whose value is an object naming a sensitive variable. */
+function isSensitiveVariableText(
+  text: string,
+  variableField: ObjectField,
+  objectEndByStart: Map<number, number>,
+): boolean {
+  const objectEnd = objectEndByStart.get(variableField.valueStart);
+  if (objectEnd === undefined) return false;
+  return readObjectFields(text, variableField.valueStart, objectEnd).some(
+    (field) =>
+      field.name === "name" &&
+      field.stringValue !== undefined &&
+      isSensitiveVariableName(field.stringValue),
+  );
 }
 
 function findObjectRanges(text: string): Array<[number, number]> {

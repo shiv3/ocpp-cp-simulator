@@ -191,6 +191,70 @@ describe("OCPP 2.0.1 SetVariables secrets (#396)", () => {
   });
 });
 
+describe("OCPP 2.0.1 SetVariables secrets in logged frames (#400)", () => {
+  // The WebSocket layer logs every inbound frame as `Received: ${raw}`, and
+  // the Logger only runs the text redactor over it.
+  const setVariablesPayload = (name: string, attributeValue: string) => ({
+    setVariableData: [
+      {
+        component: { name: "SecurityCtrlr" },
+        variable: { name },
+        attributeValue,
+      },
+    ],
+  });
+  const frame = (name: string, attributeValue: string) =>
+    `Received: [2,"m1","SetVariables",${JSON.stringify(setVariablesPayload(name, attributeValue))}]`;
+
+  it("redacts the attributeValue of BasicAuthPassword and AuthorizationKey", () => {
+    for (const name of ["BasicAuthPassword", "AuthorizationKey"]) {
+      expect(redactSensitiveText(frame(name, "s3cretPW"))).toBe(
+        frame(name, REDACTED_VALUE),
+      );
+    }
+  });
+
+  it("redacts it whatever the field order and whitespace", () => {
+    const redacted = redactSensitiveText(
+      '{ "attributeValue" : "s3cretPW", "component": {"name":"SecurityCtrlr"}, "variable" : { "instance": "x", "name" : "BasicAuthPassword" } }',
+    );
+
+    expect(redacted).not.toContain("s3cretPW");
+    expect(redacted).toContain(`"attributeValue" : "${REDACTED_VALUE}"`);
+    expect(redacted).toContain('"name" : "BasicAuthPassword"');
+  });
+
+  it("redacts every sensitive entry of a multi-variable frame and only those", () => {
+    const redacted = redactSensitiveText(
+      JSON.stringify({
+        setVariableData: [
+          { variable: { name: "HeartbeatInterval" }, attributeValue: "60" },
+          { variable: { name: "BasicAuthPassword" }, attributeValue: "pw1" },
+          { variable: { name: "AuthorizationKey" }, attributeValue: "key2" },
+        ],
+      }),
+    );
+
+    expect(redacted).not.toContain("pw1");
+    expect(redacted).not.toContain("key2");
+    expect(redacted).toContain('"attributeValue":"60"');
+  });
+
+  it("leaves a SetVariables of another variable untouched", () => {
+    const text = frame("HeartbeatInterval", "60");
+    expect(redactSensitiveText(text)).toBe(text);
+  });
+
+  it("agrees with the structured redactor on the same payload", () => {
+    for (const name of ["BasicAuthPassword", "AuthorizationKey", "Other"]) {
+      const payload = setVariablesPayload(name, "s3cretPW");
+      expect(JSON.parse(redactSensitiveText(JSON.stringify(payload)))).toEqual(
+        redactSensitiveValue(payload),
+      );
+    }
+  });
+});
+
 describe("vehicle catalog API keys (#458)", () => {
   it("redacts a bearer token", () => {
     expect(redactSensitiveText("Authorization: Bearer abc.def-123")).toBe(

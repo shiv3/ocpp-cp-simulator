@@ -22,7 +22,8 @@ related:
   - ../concepts/trace-format.md
   - open-ev-directory.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-28
+  - ../concepts/log-format.md
+updated: 2026-10-29
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -802,6 +803,8 @@ the OCPP answer are unchanged.
 - **Redaction.** `payload` is redacted before either channel sees it: a
   `ChangeConfiguration` of `AuthorizationKey` and a 2.x `SetVariables` of
   `BasicAuthPassword` / `AuthorizationKey` carry `[redacted]` as the value.
+  The `Received:` log line of the same OCPP-J frame is redacted by the same
+  rule ([Log format → Redaction](../concepts/log-format.md#redaction), #400).
 
 ```json
 {"event":"csms_call_received","data":{"action":"Reset","messageId":"b7e1…","payload":{"type":"Soft"}},"timestamp":"…"}

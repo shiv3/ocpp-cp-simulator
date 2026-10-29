@@ -5,13 +5,16 @@ summary: One log-line shape (`timestamp` / `level` / `type` / `message` / `cpId`
 sources:
   - src/cli/server/ (logs.get / logs.clear)
   - src/trace/logEntryToTrace.ts
+  - src/cp/shared/Logger.ts
+  - src/cp/shared/redaction.ts
 related:
   - ../entities/daemon.md
   - ../entities/docker-image.md
   - state-persistence.md
   - trace-format.md
   - ../entities/analyze.md
-updated: 2026-10-27
+  - ../entities/cli.md
+updated: 2026-10-29
 ---
 
 # Log format
@@ -45,6 +48,28 @@ downloaded log file (see [Docker image → Structured logs](../entities/docker-i
 for an example). The same lines are what the [trace adapter](trace-format.md#producing-records)
 turns into trace records, which is how [`analyze --from-daemon`](../entities/analyze.md#reading-from-a-running-daemon---from-daemon)
 works without a trace file.
+
+## Redaction
+
+The charge point's `Logger` runs each message through the shared text
+redactor ([`redaction.ts`](../../src/cp/shared/redaction.ts)) before it
+reaches the console, the `logs` table or a log listener (the CLI `log` event,
+the Socket.IO log push). In an OCPP-J frame logged as `Sent:` / `Received:`
+it replaces with `[redacted]`:
+
+- the `value` of a 1.6 `{ "key", "value" }` entry whose key is
+  `AuthorizationKey` (or another sensitive key name: `ApiKey`, `Password`,
+  `PrivateKey`, `TlsKey`) — a `ChangeConfiguration`, a `GetConfiguration`
+  answer;
+- the `attributeValue` of a 2.0.1 `{ "variable": { "name" }, "attributeValue" }`
+  entry whose variable is `BasicAuthPassword` or `AuthorizationKey` — a
+  `SetVariables` request, a `GetVariables` answer (#400).
+
+This is the rule the structured redactor applies to the `csms_call_received`
+payload and to scenario reports ([CLI → CSMS call events](../entities/cli.md#csms-call-events)),
+with one predicate for the variable names, so a frame's log line and its
+event agree. The match is on JSON object shapes: a SOAP (XML) body does not
+get it.
 
 ## WebSocket close lines
 

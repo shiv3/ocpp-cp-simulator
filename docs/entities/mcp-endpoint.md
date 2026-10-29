@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 25 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 26 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -17,7 +17,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -41,7 +41,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 25 curated tools wrapping the daemon's
+The endpoint exposes 26 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                     | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -62,6 +62,7 @@ The endpoint exposes 25 curated tools wrapping the daemon's
 | `authorize`              | `authorize`               | `cpId`, `tagId?` — same idTag pool fallback as `start_transaction` (#299)                                                                                                                                                                                                     |
 | `send_ocpp_call`         | `send_ocpp_call`          | `cpId`, `action`, `payload`, `skipValidation?`, `applyResponse?` — [Expert OCPP calls](../concepts/expert-ocpp-calls.md) (#389)                                                                                                                                               |
 | `set_connector_status`   | `update_connector_status` | `cpId`, `connector`, `status` (a connector status, as `update_connector_status` enforces), `errorCode?`, `info?`, `vendorErrorCode?`, `vendorId?`, `timestamp?`, `suppressChargingStateTransactionEvent?`                                                                     |
+| `ev_disconnected`        | `ev_disconnected`         | `cpId`, `connector` — an EV-side unplug; `StopTransactionOnEVSideDisconnect` stops or suspends a running transaction (#488)                                                                                                                                                   |
 | `set_meter_value`        | `set_meter_value`         | `cpId`, `connector`, `value`                                                                                                                                                                                                                                                  |
 | `send_meter_value`       | `send_meter_value`        | `cpId`, `connector`, `context?` — `ReadingContext` the readings carry (#335)                                                                                                                                                                                                  |
 | `scenario_templates`     | `scenario.templates`      | —                                                                                                                                                                                                                                                                             |

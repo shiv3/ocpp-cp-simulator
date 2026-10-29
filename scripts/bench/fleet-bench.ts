@@ -61,8 +61,7 @@ import {
   sleep,
   socketPoolSize,
   staggerOffsetsMs,
-  ASSIGNED_ID_TIMEOUT_MS,
-  LOCAL_START_TIMEOUT_MS,
+  parseTestTimingOverrides,
   TransactionStarts,
   STEP_COLUMNS,
   sustainableRpcPerSec,
@@ -89,7 +88,12 @@ const PENDING_EVICTIONS_METRIC = "ocppcp_ocpp_pending_calls_evicted_total";
 // live in lib.ts, where `validateOptions` can refuse a run the pool cannot
 // sustain (see the README's "Why a socket pool" section).
 const INFLIGHT_PER_SOCKET = 48;
-const RPC_TIMEOUT_MS = 35_000;
+
+/** The defaults in lib.ts, unless a test-only `FLEET_BENCH_TEST_*` variable
+ *  shortens one (#330). Read once, at load: an invalid value throws here, so
+ *  a slow-path test can never run silently at the real deadlines. */
+const TEST_TIMINGS = parseTestTimingOverrides(process.env);
+const RPC_TIMEOUT_MS = TEST_TIMINGS.timings.rpcDeadlineMs;
 
 /** Deadline for every HTTP request this script makes (health, `/metrics`).
  *
@@ -851,12 +855,15 @@ function armLoad(
    *  whose ack never came may still have opened a transaction at the CSMS, and
    *  a redundant stop is a no-op while a missing one is a dangling session. */
   const openTransactions = new Set<string>();
-  /** Charge points whose `stop_transaction` was acked but whose
-   *  `StopTransaction` is not yet known to have reached the wire. Teardown
-   *  resolves these against the daemon's sent counter rather than assuming
-   *  the ack settled them. */
+  /** Charge points whose `stop_transaction` was acked, so whose
+   *  `StopTransaction` was queued but is not known to have reached the wire.
+   *  Teardown re-stops them with the rest rather than assuming the ack
+   *  settled them; nothing here can tell whether the frame left (see the
+   *  comment above `CLOSE_TX_BUDGET_MS`), and a re-stop of one is a no-op at
+   *  the daemon once the first stop has closed the connector's transaction. */
   const stopsAwaitingWire = new Set<string>();
-  /** How many stops this handle has had acked, for that comparison. */
+  /** How many stops this handle has had acked. Exposed for diagnostics;
+   *  teardown no longer compares it against anything. */
   let stopsAcked = 0;
   /** Global index per charge point, for its idTag. */
   const idTagOf = new Map<string, string>(
@@ -877,8 +884,10 @@ function armLoad(
   // is restarted by the local-start event, so what the first overspends does
   // not come out of the second. See `LOCAL_START_TIMEOUT_MS`.
   const startBudget: StartWaitBudget = {
-    localStartMs: LOCAL_START_TIMEOUT_MS,
-    assignedIdMs: awaitAssignedId ? ASSIGNED_ID_TIMEOUT_MS : null,
+    localStartMs: TEST_TIMINGS.timings.localStartTimeoutMs,
+    assignedIdMs: awaitAssignedId
+      ? TEST_TIMINGS.timings.assignedIdTimeoutMs
+      : null,
   };
   // Only *live* timers, and each one removes itself as it fires. A plain
   // array that every cycle appended to grew by two handles per transaction
@@ -1058,15 +1067,11 @@ function armLoad(
     // charge point stays in `openTransactions`, and teardown closes it. That is
     // the point — see `dispositionAfterStart`.
     //
-    // **Verified by reading, not by test.** `dispositionAfterStart` is unit
-    // tested and mutation-checked, but this line is not: `cycle` lives inside
-    // `armLoad`, neither is exported, and `fleet-bench.ts` calls `main()` on
-    // import, so `lib.bun.test.ts` cannot drive it. The smoke test cannot
-    // reach it either — retirement needs the assigned-id budget to expire,
-    // which is 95s from the local start, well past any smoke budget, and there
-    // is no way to inject a shorter one. So a mutation that sends the stop
-    // anyway would pass every test in this repository. Treat this `if` as
-    // load-bearing and unguarded.
+    // Pinned by `fleetBench.slowpath.test-bun.ts` (#330), which shortens the
+    // assigned-id budget through the test-only
+    // `FLEET_BENCH_TEST_ASSIGNED_ID_TIMEOUT_MS` and holds StartTransaction.conf
+    // past it: a mutation that sends the stop here anyway leaves the CSMS's
+    // session open and fails that test.
     if (!disposition.stop) return;
 
     // The awaits above can span a `stop()`; without this check the callback
@@ -1098,12 +1103,13 @@ function armLoad(
       try {
         await pool.rpc("stop_transaction", { connector: 1 }, cpId);
         // Moved, not dropped. The ack says the local service *queued*
-        // `StopTransaction`, not that it reached the CSMS — the same
-        // distinction the teardown wait already makes by watching the sent
-        // counter. Dropping the charge point here made the bookkeeping say
-        // "stopped" while the wait said "queued", so under the backlog this
-        // tool exists to create teardown could delete the charge point, and
-        // its serialized queue, before the CSMS ever saw the stop.
+        // `StopTransaction`, not that it reached the CSMS, so the charge
+        // point stays on teardown's re-stop list. That re-stop sends nothing
+        // more once this stop has closed the connector's transaction, and
+        // teardown does not wait for the queued frame to leave: under the
+        // backlog this tool exists to create, deleting the charge point can
+        // still discard it with its serialized queue. See "Known
+        // limitations" in the README.
         openTransactions.delete(cpId);
         stopsAwaitingWire.add(cpId);
         stopsAcked++;
@@ -1143,7 +1149,7 @@ function armLoad(
     /** The bound this handle's cycles work to, enumerated stage by stage in
      *  `cycleBoundMs`. Teardown asks for it rather than choosing a number, so
      *  the bound cannot drift from the operation it describes. */
-    cycleBoundMs: () => cycleBoundMs(startBudget, holdMs),
+    cycleBoundMs: () => cycleBoundMs(startBudget, holdMs, RPC_TIMEOUT_MS),
     settle: async (budgetMs: number): Promise<void> => {
       if (inFlight.size === 0) return;
       // Bounded: a cycle blocked on a confirmation that will never arrive must
@@ -1450,6 +1456,14 @@ async function main(): Promise<void> {
   // deleted something it did not create" unrepresentable rather than merely
   // guarded against.
   const runId = newRunId(Date.now());
+  if (TEST_TIMINGS.overridden.length > 0) {
+    // Said up front: these shorten deadlines the daemon's own timers define,
+    // so a run under them is a test, not a measurement.
+    process.stderr.write(
+      `[bench] TEST-ONLY timing overrides in effect, results are not a ` +
+        `measurement: ${TEST_TIMINGS.overridden.join(", ")}\n`,
+    );
+  }
   process.stderr.write(
     `[bench] preflight: health + /metrics on ${redactUrlUserinfo(opts.daemonUrl)}\n`,
   );
@@ -1668,9 +1682,17 @@ async function main(): Promise<void> {
       // transaction, whether or not its stop was acked. There is no way to
       // attribute a wire frame to a charge point — the message counter has no
       // `cpId` label by design — so teardown does not try to reason about
-      // which ones still need it. It re-stops them all and then verifies each
-      // one individually, which costs at most one fleet's worth of RPCs and
-      // does not depend on attribution.
+      // which ones still need it. It re-stops them all, which costs at most
+      // one fleet's worth of RPCs and does not depend on attribution. It
+      // counts the acks and verifies nothing per charge point: an ack means
+      // queued, not sent, and `closeOpenTransactions` says so on stderr.
+      //
+      // Settling *before* this, and for each cycle's own bound, is pinned by
+      // `fleetBench.slowpath.test-bun.ts` (#330): closing first, or settling
+      // for less than the assigned-id stage, sends a placeholder stop the
+      // CSMS cannot match. The RPC stages of that bound are pinned only as
+      // arithmetic, in `lib.bun.test.ts`: a mock CSMS cannot make a
+      // control-plane RPC slow, so no run-level test shows they are needed.
       const needClosing = loads.flatMap((l) => [
         ...l.openTransactions(),
         ...l.stopsAwaitingWire(),
@@ -1757,8 +1779,8 @@ async function main(): Promise<void> {
       // leaked its entire fleet still exited 0.
       //
       // Verified by reading, not by test: `cleanup` is a closure inside
-      // `main()` and `fleet-bench.ts` calls `main()` on import, so nothing in
-      // `lib.bun.test.ts` can drive this wiring. `undeletedIdsReport` is unit
+      // `main()`, which nothing exports, so nothing in `lib.bun.test.ts` can
+      // drive this wiring. `undeletedIdsReport` is unit
       // tested; `deleteFleet`'s subtraction and this call site's pairing with
       // `process.exitCode = 1` are not — every smoke test runs against a
       // daemon that answers every delete, so `undeleted` is empty in all of

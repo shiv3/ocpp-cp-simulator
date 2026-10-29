@@ -39,6 +39,8 @@ import {
   cleanupIdsAfterBatch,
   createFailureHint,
   cycleBoundMs,
+  DEFAULT_BENCH_TIMINGS,
+  parseTestTimingOverrides,
   cyclePeriodSec,
   dispositionAfterStart,
   daemonIsLocal,
@@ -2384,6 +2386,96 @@ describe("the complete cycle bound (#302)", () => {
     expect(cycleBoundMs(v2, holdSec(2) * 1000)).toBe(
       RPC_DEADLINE_MS + START_CONFIRM_TIMEOUT_MS + 1_000 + RPC_DEADLINE_MS,
     );
+  });
+
+  it("takes the RPC deadline the run actually uses, defaulting to the pool's", () => {
+    // A test-only override shortens the pool's deadline (#330); the bound
+    // must shrink with it, or teardown would wait for a stage the run no
+    // longer allows.
+    expect(cycleBoundMs(v16, 1_000)).toBe(
+      cycleBoundMs(v16, 1_000, RPC_DEADLINE_MS),
+    );
+    expect(cycleBoundMs(v16, 1_000, 5_000)).toBe(
+      LOCAL_START_TIMEOUT_MS + ASSIGNED_ID_TIMEOUT_MS + 1_000 + 5_000,
+    );
+  });
+});
+
+describe("test-only timing overrides (#330)", () => {
+  it("leaves every default untouched when nothing is set", () => {
+    // Pinned as literals, not as the constants: the overrides exist so the
+    // slow-path tests can shorten these, and a refactor that moved a default
+    // while wiring them would otherwise pass unnoticed.
+    const { timings, overridden } = parseTestTimingOverrides({});
+    expect(timings).toEqual({
+      rpcDeadlineMs: 35_000,
+      localStartTimeoutMs: 50_000,
+      assignedIdTimeoutMs: 95_000,
+    });
+    expect(timings).toEqual(DEFAULT_BENCH_TIMINGS);
+    expect(overridden).toEqual([]);
+  });
+
+  it("ignores variables outside its prefix", () => {
+    const { timings, overridden } = parseTestTimingOverrides({
+      PATH: "/usr/bin",
+      RPC_TIMEOUT_MS: "1",
+      FLEET_BENCH_RPC_TIMEOUT_MS: "1",
+    });
+    expect(timings).toEqual(DEFAULT_BENCH_TIMINGS);
+    expect(overridden).toEqual([]);
+  });
+
+  it("applies each override independently and names what it applied", () => {
+    const { timings, overridden } = parseTestTimingOverrides({
+      FLEET_BENCH_TEST_RPC_DEADLINE_MS: "5000",
+      FLEET_BENCH_TEST_ASSIGNED_ID_TIMEOUT_MS: "3000",
+    });
+    expect(timings).toEqual({
+      rpcDeadlineMs: 5_000,
+      // Not re-derived from the shortened RPC deadline: each override is
+      // exactly what it says, so a test controls every stage separately.
+      localStartTimeoutMs: 50_000,
+      assignedIdTimeoutMs: 3_000,
+    });
+    expect(overridden).toEqual([
+      "FLEET_BENCH_TEST_RPC_DEADLINE_MS=5000",
+      "FLEET_BENCH_TEST_ASSIGNED_ID_TIMEOUT_MS=3000",
+    ]);
+    expect(
+      parseTestTimingOverrides({
+        FLEET_BENCH_TEST_LOCAL_START_TIMEOUT_MS: "1",
+      }).timings.localStartTimeoutMs,
+    ).toBe(1);
+  });
+
+  it.each([
+    ["zero", "0"],
+    ["negative", "-1"],
+    ["fractional", "1.5"],
+    ["exponent", "1e3"],
+    ["not a number", "abc"],
+    ["empty", ""],
+    ["padded", " 5"],
+    ["hex", "0x10"],
+    ["leading zero", "05"],
+    ["past the safe integer range", "9007199254740993"],
+  ])("refuses a %s value", (_label, value) => {
+    expect(() =>
+      parseTestTimingOverrides({ FLEET_BENCH_TEST_RPC_DEADLINE_MS: value }),
+    ).toThrow(BenchValidationError);
+    expect(() =>
+      parseTestTimingOverrides({ FLEET_BENCH_TEST_RPC_DEADLINE_MS: value }),
+    ).toThrow(/FLEET_BENCH_TEST_RPC_DEADLINE_MS must be a positive integer/);
+  });
+
+  it("refuses an unknown name under its prefix rather than ignoring a typo", () => {
+    // The same rule `parseArgv` applies to flags: a misspelt override that
+    // was silently ignored would run the slow-path test at the defaults and
+    // turn its discriminating case into a vacuous one.
+    expect(() =>
+      parseTestTimingOverrides({ FLEET_BENCH_TEST_RPC_TIMEOUT_MS: "5000" }),
+    ).toThrow(/unknown test-only override FLEET_BENCH_TEST_RPC_TIMEOUT_MS/);
   });
 });
 

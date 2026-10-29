@@ -1859,3 +1859,14 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local authorization](concepts/local-authorization.md): OCPP 2.x and control-plane seam sections, limits.
 - [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): three rows.
 - [MCP endpoint](entities/mcp-endpoint.md#curated-tools), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool rows and count.
+
+## [2026-10-29] ingest | Local authorization review fixes (#452)
+
+- Online, a timeout waiting for Authorize.conf now refuses an identifier the station knows as not valid (enabled list or cache entry) with its status; an unknown or valid identifier still proceeds as `Accepted`, so the default configuration is unchanged.
+- Identifiers are case insensitive (1.6 §7.28 IdToken, 2.x `IdTokenType.idToken`): the cache, its rows and the Local Authorization List fold ASCII letters for lookups and keep the spelling last received; a restore folds rows spelt differently.
+- `seed_auth_cache`: `idToken` / `parentId` bounded per version (20 on 1.x, 36 on 2.0.1, 255 on 2.1; the schema admits 255), duplicates compared case-insensitively, `expiresAt` an ISO date-time with `Z` or an offset.
+- [Local authorization](concepts/local-authorization.md): timeout fallback, case folding, seam prose linking the canonical tables instead of repeating them, Limits (2.1 C10.FR.10 / C10.FR.14, `SupportsExpiryDateTime`, local refusals absent from the timeline).
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): `seed_auth_cache` bounds.
+- Behaviour changes: with the list enabled by default, a listed `Blocked` tag is now refused on an online timeout; SendLocalList entries differing only by case merge, and a differential delete matches any case.
+- [State persistence](concepts/state-persistence.md#tables): one `authorization_cache` row per case-folded identifier.
+- [GitHub issues](sources/github-issues.md): #452 row covers 2.x and the seam. `related:` back-links on [CLI](entities/cli.md), [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md).

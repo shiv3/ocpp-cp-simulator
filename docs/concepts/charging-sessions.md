@@ -19,6 +19,7 @@ related:
   - ../entities/web-console.md
   - ../entities/cli.md
   - local-vs-remote-mode.md
+  - local-authorization.md
 updated: 2026-10-29
 ---
 

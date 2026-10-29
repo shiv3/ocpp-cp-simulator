@@ -17,7 +17,8 @@ related:
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
   - charging-sessions.md
-updated: 2026-10-28
+  - local-authorization.md
+updated: 2026-10-29
 ---
 
 # Operational timeline

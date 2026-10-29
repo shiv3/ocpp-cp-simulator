@@ -277,18 +277,10 @@ export function handleSetChargingProfileV201(
     };
   }
 
-  if (req.evseId === 0) {
-    ctx.chargePoint.stationProfiles.add(domain);
-  } else {
-    const connector = ctx.chargePoint.getConnector(req.evseId);
-    if (!connector) {
-      return {
-        response: {
-          status: "Rejected",
-        } satisfies SetChargingProfileResponseV201,
-      };
-    }
-    connector.addChargingProfile(domain);
+  if (!ctx.chargePoint.applyChargingProfile(domain, "SetChargingProfile")) {
+    return {
+      response: { status: "Rejected" } satisfies SetChargingProfileResponseV201,
+    };
   }
 
   return {
@@ -326,24 +318,13 @@ export function handleClearChargingProfileV201(
     stackLevel: criteria?.stackLevel,
   };
   const evseId = criteria?.evseId;
-  let removed = 0;
+  const cleared = ctx.chargePoint.clearChargingProfiles(
+    evseId,
+    removeCriteria,
+    "ClearChargingProfile",
+  );
 
-  if (evseId === undefined || evseId === 0) {
-    removed += ctx.chargePoint.stationProfiles.remove(removeCriteria);
-  }
-
-  if (evseId === undefined) {
-    for (const connector of ctx.chargePoint.connectors.values()) {
-      removed += connector.removeChargingProfiles(removeCriteria);
-    }
-  } else if (evseId > 0) {
-    const connector = ctx.chargePoint.getConnector(evseId);
-    if (connector) {
-      removed += connector.removeChargingProfiles(removeCriteria);
-    }
-  }
-
-  if (removed === 0) {
+  if (cleared.length === 0) {
     return {
       response: {
         status: "Unknown",

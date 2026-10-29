@@ -374,6 +374,14 @@ The schema is [`src/protocol/labels.ts`](../../src/protocol/labels.ts).
   the connection and transactions are untouched. It is persisted before the
   live charge point changes, and pushes a registry `updated` event carrying the
   new list item. `{}` clears; an unknown `cpId` answers `not_found`.
+- The daemon's startup bootstrap takes them from a repeated
+  `--label key=value` and gives them to every charge point of the
+  `--cp-count` fleet ([CLI](../entities/cli.md)) — validated with the same
+  schema, but refused at startup rather than with `invalid_params`. A charge
+  point restored from `--state-db` keeps its stored labels: like every other
+  bootstrap option, the flag only reaches the charge points this start-up
+  creates, and the `reusing` line of the startup log adds
+  `--label not applied` with the stored map when the two differ (#472).
 
 **Read and select.** `cp.list`, `status` (`config.labels`) and every registry
 push return the labels. `cp.list { labels: { … } }` returns only the charge
@@ -383,8 +391,41 @@ the create parameters, `cp.list`'s params are **strict**: a misspelled
 `label` is refused with `invalid_params` rather than ignored, because ignoring
 it would silently list the whole fleet. The MCP `cp_list` and `cp_labels_set`
 tools take the same schemas ([MCP endpoint](../entities/mcp-endpoint.md)), and
-the web console edits, shows and filters labels
-([Web console](../entities/web-console.md)).
+the web console shows and filters labels, sets them in the Add form and
+relabels a charge point in place with `cp.labels.set` from its page header
+(#471; [Web console](../entities/web-console.md#charge-point-page)).
+
+**Group operations.** `cp.bulk { labels, action }` runs one lifecycle action —
+`connect`, `disconnect` or `reset` — on every charge point the selector
+matches, with the same matching rules as `cp.list` (#470). Each charge point
+goes through the same call as the per-CP method of that name.
+
+- The selector is **required and must not be empty**: `{}`, a missing
+  `labels`, an unknown `action` or any extra field (a `cpId` included) answers
+  `invalid_params` before anything runs. `cp.list` treats `{}` as "every
+  charge point"; a mutating call does not.
+- The targets are picked from each charge point's own labels, without building
+  the status snapshot of the ones that do not match. `cp.list { labels }`
+  resolves its selector the same way and only builds snapshots for the matches.
+- Partial success is the **result**, not an error, like `cp.create_many`:
+  `{ matched, succeeded, failed: [{ cpId, reason }] }`. Every matched id is in
+  exactly one of the other two lists, in the same order. A selector that
+  matches nothing answers `{ matched: [], succeeded: [], failed: [] }`, not
+  `not_found`.
+- Every charge point runs at once, and each is waited for **at most 10 s**
+  (`CP_BULK_WAIT_MS`), well under the 30 s RPC deadline. A per-CP `connect`
+  can take the full 30 s. A `connect` still pending at 10 s is reported as
+  failed (`no outcome within 10000 ms; still running`) and keeps trying. A
+  refused connection fails right away, with the reason the per-CP `connect`
+  would have given.
+- A selector matching more than 1,000 charge points (the result arrays' cap) is
+  refused with `invalid_params` before acting. Narrow it.
+- No other method takes a selector yet. To run a scenario or apply
+  network-simulation settings to a group, list it with `cp.list { labels }`
+  and call the per-CP method on each id.
+
+The MCP `cp_bulk` tool takes the same schema
+([MCP endpoint](../entities/mcp-endpoint.md)).
 
 **Persistence.** Stored as JSON in `charge_points.labels` (schema v16) and
 restored with the charge point. A stored map that no longer passes the schema
@@ -395,9 +436,6 @@ is dropped with a warning on restore rather than breaking every `cp.list`
 **never** used as Prometheus label values — for the same reason metrics carry
 no `cpId` ([Daemon → Metrics](../entities/daemon.md#metrics)). Select with
 `cp.list` and aggregate client-side instead.
-
-`--cp-count` has no flag for labels yet; label a bootstrapped fleet with
-`cp.labels.set` after start-up.
 
 ##### Blueprints
 
@@ -580,6 +618,7 @@ Guarantees a conformance driver can rely on:
 | `blueprint.list` / `.save` / `.delete`                         | See [Blueprints](#blueprints) below                                                                 | Named, reusable CP hardware descriptions; instantiate with `cp.create_many { blueprintId }`.                                                                                                                     |
 | `cp.update`                                                    | Same as `cp.create`                                                                                 | Replace an existing CP config and **rebuild** the CP (its socket closes); `autoConnect: true` reconnects it after update. Omitted `labels` are kept.                                                             |
 | `cp.labels.set`                                                | `{ "cpId": string, "labels": object }`                                                              | Replace a CP's labels in place, without the rebuild `cp.update` does ([Charge-point labels](#charge-point-labels)).                                                                                              |
+| `cp.bulk`                                                      | `{ "labels": object, "action": "connect" \| "disconnect" \| "reset" }`                              | `{ matched, succeeded, failed }`: run the action on every CP carrying every pair; a non-empty selector is required ([Charge-point labels](#charge-point-labels)).                                                |
 | `cp.delete`                                                    | `{ "cpId": string }`                                                                                | Remove a CP from the registry and delete its rows from every `cp_id`-keyed table, stored logs included ([State persistence](state-persistence.md)).                                                              |
 | `logs.get`                                                     | `{ "cpId": string, "limit"?: number, "offset"?: number, "order"?: "asc" \| "desc" }`                | Return persisted logs, or the in-memory log buffer when no state DB is configured. `limit` takes the **most recent** N; see [Log format → Log windowing](log-format.md#log-windowing).                           |
 | `logs.clear`                                                   | `{ "cpId": string }`                                                                                | Delete persisted logs for the CP.                                                                                                                                                                                |

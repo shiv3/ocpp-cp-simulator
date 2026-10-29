@@ -14,7 +14,14 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
-import { Maximize2, MoreHorizontal, Settings, Trash2, X } from "lucide-react";
+import {
+  Maximize2,
+  MoreHorizontal,
+  Settings,
+  Tag,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -54,6 +61,7 @@ import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 
 import BottomPanel from "../../components/BottomPanel";
 import EmptyState from "../../components/EmptyState";
+import LabelChips from "../../components/LabelChips";
 import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import ExpertCallPanel from "./ExpertCallPanel";
 import PageHeader from "../../components/PageHeader";
@@ -63,9 +71,11 @@ import ManualDisconnectButtons from "../../components/network-sim/ManualDisconne
 import ChargePointControls from "./ChargePointControls";
 import ConnectorCard from "./ConnectorCard";
 import ConnectorTabs from "./ConnectorTabs";
+import CpLabelsCard from "./CpLabelsCard";
 import ScenarioCard from "./ScenarioCard";
 import TransactionsTab from "./TransactionsTab";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
+import { useChargePointLabels } from "./useChargePointLabels";
 import { NetworkSimEditor } from "../../components/network-sim/NetworkSimEditor";
 
 const StateTransitionViewer = lazy(
@@ -149,9 +159,8 @@ function buildChargePointConfig(
       meterType: bn?.meterType ?? "",
       iccid: bn?.iccid ?? "",
       imsi: bn?.imsi ?? "",
-      // #446: without a config the labels are unknown, not empty — leave them
-      // undefined so a save keeps the daemon's instead of clearing them.
-      labels: c ? (c.labels ?? {}) : undefined,
+      // No `labels` (#471): the header's Labels card owns them, and leaving
+      // them out of cp.update keeps the daemon's.
     };
   }
 
@@ -224,6 +233,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   const { updateCp, removeCp } = useCpConfigActions();
   const navigate = useNavigate();
   const configCardId = useId();
+  const labelsCardId = useId();
   const connectorPanelId = useId();
   const connectorGridRef = useRef<HTMLDivElement>(null);
   const scrolledToConnectorRef = useRef(false);
@@ -232,6 +242,15 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   const { entries: globalLogEntries } = useGlobalLogs();
   const [snapshot, setSnapshot] = useState<ChargePointSnapshot | undefined>();
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isLabelsOpen, setIsLabelsOpen] = useState(false);
+  // #471: relabel in place (cp.labels.set) — Remote only; local charge points
+  // have no labels. `undefined` labels are unknown, not empty.
+  const { labels, markSaved: markLabelsSaved } = useChargePointLabels(
+    cpId,
+    snapshot,
+  );
+  const canSetLabels =
+    mode === "remote" && chargePointService.setChargePointLabels !== undefined;
   const [isConnectPending, setIsConnectPending] = useState(false);
   const [isDeletePending, setIsDeletePending] = useState(false);
   const [networkSimGlobalConfig, setNetworkSimGlobalConfig] = useState<
@@ -547,6 +566,29 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           titleAs={isPanel ? "h2" : "h1"}
           actions={
             <>
+              {canSetLabels && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={labels === undefined}
+                  title={
+                    labels === undefined
+                      ? "Labels unknown: the charge point's config could not be read"
+                      : "Edit labels without reconnecting"
+                  }
+                  aria-expanded={isLabelsOpen}
+                  aria-controls={isLabelsOpen ? labelsCardId : undefined}
+                  onClick={() => setIsLabelsOpen((open) => !open)}
+                  className={cn(
+                    isLabelsOpen &&
+                      "border-cx-accent bg-cx-sel text-cx-accent hover:bg-cx-sel hover:text-cx-accent",
+                  )}
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  Labels
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -646,12 +688,26 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 : ""}
             </span>
           )}
+          <LabelChips labels={labels} />
         </PageHeader>
 
         {resolvedWsUrl && (
           <div className="-mt-2 mb-4 font-mono text-xs text-cx-muted">
             {resolvedWsUrl}
           </div>
+        )}
+
+        {isLabelsOpen && canSetLabels && labels !== undefined && (
+          <CpLabelsCard
+            key={cpId}
+            id={labelsCardId}
+            labels={labels}
+            onSave={async (next) => {
+              await chargePointService.setChargePointLabels!(cpId, next);
+              markLabelsSaved(next);
+            }}
+            onDone={() => setIsLabelsOpen(false)}
+          />
         )}
 
         {isConfigOpen && (

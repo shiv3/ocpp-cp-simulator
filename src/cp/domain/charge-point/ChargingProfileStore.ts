@@ -8,6 +8,45 @@ export interface ProfileRemoveCriteria {
 }
 
 /**
+ * `profiles` with `profile` in place of any profile with the same id
+ * (§5.16: SetChargingProfile.req with an existing chargingProfileId is an
+ * update, not an insert), and whether one was replaced. Shared by the
+ * station store and `Connector`.
+ */
+export function upsertProfile(
+  profiles: readonly ActiveChargingProfile[],
+  profile: ActiveChargingProfile,
+): { profiles: ActiveChargingProfile[]; replaced: boolean } {
+  const others = profiles.filter(
+    (p) => p.chargingProfileId !== profile.chargingProfileId,
+  );
+  return {
+    profiles: [...others, profile],
+    replaced: others.length < profiles.length,
+  };
+}
+
+/** Split `profiles` into those matching every given criterion and the rest. */
+export function partitionProfiles(
+  profiles: readonly ActiveChargingProfile[],
+  criteria: ProfileRemoveCriteria,
+): { kept: ActiveChargingProfile[]; removed: ActiveChargingProfile[] } {
+  const kept: ActiveChargingProfile[] = [];
+  const removed: ActiveChargingProfile[] = [];
+  for (const profile of profiles) {
+    const matches =
+      (criteria.profileId == null ||
+        profile.chargingProfileId === criteria.profileId) &&
+      (criteria.purpose == null ||
+        profile.chargingProfilePurpose === criteria.purpose) &&
+      (criteria.stackLevel == null ||
+        profile.stackLevel === criteria.stackLevel);
+    (matches ? removed : kept).push(profile);
+  }
+  return { kept, removed };
+}
+
+/**
  * Holds charging profiles that apply at the charge-point (station) level
  * rather than to a specific connector. Per OCPP 1.6 §3.13.3 these are the
  * profiles a CSMS installs by sending `SetChargingProfile.req` with
@@ -25,44 +64,18 @@ export interface ProfileRemoveCriteria {
 export class ChargingProfileStore {
   private profiles: ActiveChargingProfile[] = [];
 
-  add(profile: ActiveChargingProfile): void {
-    // Same-id replacement matches Connector.addChargingProfile semantics
-    // (§5.16: SetChargingProfile.req with an existing chargingProfileId
-    // is an update, not an insert).
-    this.profiles = this.profiles.filter(
-      (p) => p.chargingProfileId !== profile.chargingProfileId,
-    );
-    this.profiles.push(profile);
+  /** @returns whether a profile with the same id was replaced. */
+  add(profile: ActiveChargingProfile): boolean {
+    const { profiles, replaced } = upsertProfile(this.profiles, profile);
+    this.profiles = profiles;
+    return replaced;
   }
 
-  remove(criteria: ProfileRemoveCriteria): number {
-    const before = this.profiles.length;
-    this.profiles = this.profiles.filter((profile) => {
-      if (
-        criteria.profileId != null &&
-        profile.chargingProfileId !== criteria.profileId
-      ) {
-        return true;
-      }
-      if (
-        criteria.purpose != null &&
-        profile.chargingProfilePurpose !== criteria.purpose
-      ) {
-        return true;
-      }
-      if (
-        criteria.stackLevel != null &&
-        profile.stackLevel !== criteria.stackLevel
-      ) {
-        return true;
-      }
-      return false;
-    });
-    return before - this.profiles.length;
-  }
-
-  clear(): void {
-    this.profiles = [];
+  /** Remove the profiles matching every given criterion and return them. */
+  take(criteria: ProfileRemoveCriteria): ActiveChargingProfile[] {
+    const { kept, removed } = partitionProfiles(this.profiles, criteria);
+    this.profiles = kept;
+    return removed;
   }
 
   all(): ActiveChargingProfile[] {

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Log
@@ -1685,3 +1685,41 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode](concepts/local-vs-remote-mode.md): the session history works in both modes; Local mode keeps a removed charge point's sessions until the next reset.
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md): `related:` back-link to the new page.
 - [Overview](overview.md) (Observability bullet), [Index](index.md), [GitHub issues](sources/github-issues.md) (#447).
+
+## [2026-10-28] ingest | Label-selector group operations (#470) and the per-CP `reset` RPC
+
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): new **Group operations** paragraph — `cp.bulk { labels, action }` runs `connect` / `disconnect` / `reset` on every matching charge point; a non-empty selector is required; `{ matched, succeeded, failed }` with partial success as the result; every charge point at once, each waited for at most 10 s (`CP_BULK_WAIT_MS`); over 1,000 matches refused before acting; selection reads labels without building snapshots, and `cp.list { labels }` now does the same. `cp.bulk` row in the daemon methods. The per-CP `reset` row is now true: the method was declared but routed neither by the daemon nor by JSON Lines, and answered `internal` / `Unknown command: reset`.
+- [MCP endpoint](entities/mcp-endpoint.md): new `cp_bulk` tool with a derived schema; 24 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)).
+- [Daemon → Metrics](entities/daemon.md#metrics): `cp.bulk` puts no label in a metric; it counts as one call.
+- [GitHub issues](sources/github-issues.md): #470.
+
+## [2026-10-28] ingest | Console relabel without reconnect (#471)
+
+- [Web console → Charge point page](entities/web-console.md#charge-point-page): the header shows the labels as chips and gains a **Labels** card (Remote mode) that relabels in place with `cp.labels.set`, so the charge point stays connected; it follows the registry push, keeps typed rows on a push or a failed save, and is disabled while the labels are unknown. The edit Config form drops its Labels section and its `cp.update` no longer carries `labels`; the Add form keeps it.
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): the console now relabels in place.
+- [GitHub issues](sources/github-issues.md): #471 row.
+
+## [2026-10-28] ingest | Labels on the startup-bootstrapped fleet (#472)
+
+- [CLI → CLI Options](entities/cli.md#cli-options) and [Daemon](entities/daemon.md) flag tables: new `--label <key=value>`, repeatable, server mode only (refused beside `--send` / `--stop` / `--events`), requires `--cp-id`; validated against `src/protocol/labels.ts` at startup (bad key or value, duplicate key, more than 32 labels refused). The fleet example mentions it.
+- [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): the startup bootstrap as a fourth write path; a charge point restored from `--state-db` keeps its stored labels.
+- [GitHub issues](sources/github-issues.md): #472.
+- Review follow-up: `--label` beside a client mode is refused with the client-mode reason even without `--cp-id`; a restored charge point whose stored labels differ from the flag's gets `--label not applied` on its `reusing` startup line ([Control plane](concepts/control-plane.md#charge-point-labels), [CLI](entities/cli.md#cli-options), [Daemon](entities/daemon.md)).
+
+## [2026-10-28] ingest | Smart-charging profiles on the operational timeline (#469)
+
+- [Operational timeline](concepts/operational-timeline.md): format `1.1`; new kinds `charging_profile_applied`, `charging_profile_cleared` and `charging_profile_expired`; new [Smart-charging profiles](concepts/operational-timeline.md#smart-charging-profiles) section — station-wide entries carry no entry-level `connectorId` (`data.connectorId` 0), `purpose` uses 1.6 names on 2.x, clear reasons `ClearChargingProfile` / `TransactionEnded` / `ConnectionClosed` / `ConnectorRemoved`, one cleared entry per scope and none for a clear that matched nothing, expiry recorded when `validTo` passes. Limits: RemoteStart profiles are ignored, zero-limit periods are not entries, Local-mode restored profiles are not recorded.
+- [Index](index.md): the timeline row mentions profiles.
+- [GitHub issues](sources/github-issues.md): #469.
+
+## [2026-10-28] ingest | Clock-aligned meter values (#454)
+
+- [OCPP versions & transports → Clock-aligned meter values](concepts/ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval): new section. `ClockAlignedDataInterval` / `AlignedDataCtrlr.Interval` now send one `Sample.Clock` sample per connector on UTC-midnight boundaries, with `MeterValuesAlignedData` / `AlignedDataCtrlr.Measurands` (now writable) as measurands; 2.x uses `TransactionEvent(Updated, MeterValueClock)` during a transaction; the interval is bounded to `0`–`86400`. SOAP 1.5 / 1.2 narrow the measurands as for any `MeterValues` (1.2 carries no `context`).
+- [GitHub issues](sources/github-issues.md): #454.
+
+## [2026-10-28] ingest | ScenarioEditor standalone mode removed (#443)
+
+- Removing the standalone mode changes no behaviour: the Graph view's full graph editor (ReactFlow, `src/components/scenario/ScenarioEditor.tsx`) was always opened in its embedded mode since the classic UI was retired (#426). Its unreachable standalone mode is gone — prop re-hydration, the debounced autosave and its Status Trigger → trigger rewrite, the run state and Stop, its own Save, the settings dialog with the template picker, import / export — with the `scenarioPersistence` helpers only it used (`persistEditorScenario`, `createLatestWinsSaver`, the applied-scenario autosave suppression). The editor takes `scenario` and reports graph edits through `onGraphChange`; the Meter Value nodes still show the connector's live reading.
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): the "Scenario EV Settings" panel now lives only in the web console's scenario editor.
+- [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
+- [GitHub issues](sources/github-issues.md): #443.

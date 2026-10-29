@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-10-01
+updated: 2026-10-28
 ---
 
 # Fleet, load and observability roadmap
@@ -400,9 +400,10 @@ front: **the k6 export ignores the curve in v1** and keeps its flat rate,
 rather than porting the model into the k6 runtime.
 
 (As shipped: the browser EV settings UI landed too —
-`src/components/Settings.tsx`'s "Default EV Settings" panel and
-`src/components/scenario/ScenarioEditor.tsx`'s "Scenario EV Settings" panel
-both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
+`src/components/Settings.tsx`'s "Default EV Settings" panel and the
+"Scenario EV Settings" panel (then in `ScenarioEditor.tsx`'s settings
+dialog; since #443 only the web console's scenario editor,
+`src/components/scenario/ScenarioEvSettingsFields.tsx`) both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
 editable `chargingCurve` point list, not just the five pre-1.2 fields.
 `powerFactor` shipped as `(0, 1]`, not `[0, 1]`: cos φ = 0 makes the AC
 current derivation infinite, so 0 is invalid per the schema — which warns,

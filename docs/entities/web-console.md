@@ -238,10 +238,31 @@ points. Failed: CP-2 (not connected).` The TagIDs come from **Settings**.
 The charge point page (`/cp/:id`) is one column, top to bottom:
 
 - **Header.** The charge point id, its status, a network-simulation badge when
-  it is on, and the OCPP version with the security profile (`OCPP-1.6J · SP2`);
-  the WebSocket URL under it. The actions, in order: **Config**, **Connect** /
-  **Disconnect**, and **More** (a `…` button), then **Open as full page** and
-  **Close** in the side panel.
+  it is on, the OCPP version with the security profile (`OCPP-1.6J · SP2`)
+  and, in Remote mode, the charge point's
+  [labels](../concepts/control-plane.md#charge-point-labels) as `key=value`
+  chips; the WebSocket URL under it. The actions, in order: **Labels** (Remote
+  mode), **Config**, **Connect** / **Disconnect**, and **More** (a `…` button),
+  then **Open as full page** and **Close** in the side panel.
+- **Labels** (#471), when on (`aria-expanded`, highlighted), opens a card
+  under the header that relabels the charge point **in place**
+  (`cp.labels.set`): no rebuild, so it stays connected and its transactions
+  and scenarios are untouched. The rows (**Add label**, a **×** per row) are
+  filled once, when the card opens; a registry push while the operator types
+  updates the chips but not the rows. **Save labels** checks them with the
+  same rules as the Add form below (trimmed keys, blank rows ignored, a
+  message for a value without a key, an invalid or duplicate key, an
+  over-long value or more than 32 labels), sends the complete map — removing
+  every row clears the labels — and, once the daemon acknowledges it, shows
+  that map in the chips and closes the card. If the daemon refuses,
+  the card stays open with the rows as typed and shows the error; opening
+  then **Cancel** sends nothing. The button is disabled while the labels are
+  unknown (the charge point could not be read, or its snapshot carries no
+  config), so an unknown map is never replaced by an empty one. The chips
+  follow the registry's `updated` push, so a relabel from another tab, the
+  RPC or MCP shows without a refresh. Local mode has no labels: no chips and
+  no button (`LocalChargePointService.setChargePointLabels` rejects with
+  `UnsupportedFeatureError` `browser_labels_unsupported`).
 - **Config**, when on (`aria-expanded`, highlighted), opens an inline form in
   a card under the header: the same fields and checks as the Add / Configure
   dialog (both are `ChargePointConfigForm`), with the charge point id locked.
@@ -255,19 +276,18 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   Firmware Version, **Number of Connectors**: what the charge point _is_, sent
   in BootNotification), **Connection** (Charge Point ID, **Protocol**,
   **Version**, the WebSocket URL, or the Central System URL for SOAP, and the
-  **Effective WebSocket URL**), then Security, **Labels** (Remote mode),
-  Optional settings and the rest.
-  **Labels** (#446) edits the charge point's
+  **Effective WebSocket URL**), then Security, **Labels** (Remote mode, Add
+  form only), Optional settings and the rest.
+  **Labels** (#446) sets a new charge point's
   [labels](../concepts/control-plane.md#charge-point-labels) as key / value
   rows (**Add label**, a **×** per row). Save trims keys, ignores fully blank
   rows, and refuses with a message a value without a key, an invalid or
   duplicate key, an over-long value or more than 32 labels — the daemon's own
-  rules. The rows are sent as the complete map, so removing every row clears
-  the labels; a charge point whose snapshot carries no config leaves them out
-  of the update entirely, so the daemon keeps them rather than receiving `{}`.
-  Saving goes through `cp.update`, which reconnects the charge point;
-  `cp.labels.set` relabels without that, from the RPC or MCP only. Local mode
-  has no labels and no section.
+  rules. The edit form has no Labels section (#471) and its `cp.update` never
+  carries `labels`, so the daemon keeps the current ones: `cp.update`
+  reconnects the charge point, and the copy the form opened with could undo a
+  relabel made since. Relabel from the header's **Labels** card instead.
+  Local mode has no labels and no section.
   **Protocol** (`JSON` / `SOAP`, derived from the stored version) comes before
   **Version**, which lists only that protocol's versions (JSON: 1.6, 2.0.1,
   2.1; SOAP: 1.2, 1.5, 1.6; the stored `ocppVersion` stays `OCPP-1.6J`,
@@ -947,7 +967,10 @@ scenario or a copy of one (`libraryId`). All use the same content
   **Save**) under the line "This scenario has joins or loops; the full graph
   editor is used", with **Steps** disabled. Once open, that editor stays for
   the visit even when an edit makes the scenario drawable again (picking
-  **Steps** leaves it).
+  **Steps** leaves it). A **Meter Value** node there shows the connector's
+  live meter reading once the connector reports one, and its configured
+  value until then (always in the Library editor, which has no connector);
+  a reading is not an edit — no unsaved change, no undo step.
 
 The two views share the drag
 ([`useLaneDrag`](../../src/console/lib/useLaneDrag.ts), pointer events, no

@@ -117,6 +117,11 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "reset": {
+      await ops.reset();
+      return undefined;
+    }
+
     case "status": {
       return ops.getStatus();
     }

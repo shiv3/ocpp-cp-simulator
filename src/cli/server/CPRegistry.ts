@@ -19,6 +19,7 @@ import { isSoapVersion } from "../../cp/domain/types/OcppVersion";
 import { perChargePointTables } from "../../cp/domain/persistence/schema";
 import {
   labelsSchema,
+  matchesLabelSelector,
   normalizeLabels,
   type Labels,
 } from "../../protocol/labels";
@@ -363,6 +364,14 @@ export class CPRegistry {
 
   list(): ReadonlyArray<string> {
     return [...this.services.keys()];
+  }
+
+  /** #470: the ids whose labels match `selector`, read from each charge
+   *  point's init so picking a group builds no status snapshot. */
+  selectByLabels(selector: Labels | undefined): string[] {
+    return [...this.services]
+      .filter(([, svc]) => matchesLabelSelector(svc.getInit().labels, selector))
+      .map(([cpId]) => cpId);
   }
 
   onRegistryMembership(handler: RegistryMembershipSink): () => void {

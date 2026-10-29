@@ -107,3 +107,85 @@ describe("OCPPMessageHandlerV201.sendMeterValue phase passthrough (#301)", () =>
     expect(samples.some((s) => s.phase === undefined)).toBe(true);
   });
 });
+
+// #454: a clock-aligned sample reports the aligned measurands at the
+// boundary instant, not MeterValuesSampledData at "now".
+describe("OCPPMessageHandlerV201 clock-aligned overrides (#454)", () => {
+  const boundary = new Date("2026-10-28T12:15:00Z");
+
+  function makeHandler(connector: unknown) {
+    const fakeSocket = new FakeSocket();
+    const handler = new OCPPMessageHandlerV201(
+      createMockChargePoint(connector),
+      fakeSocket as unknown as OCPPWebSocket,
+      createMockLogger(),
+      new Map() as never,
+    );
+    return { fakeSocket, handler };
+  }
+
+  it("MeterValuesRequest honours measurand and timestamp overrides", () => {
+    const { fakeSocket, handler } = makeHandler(threePhaseConnectorStub());
+
+    handler.sendMeterValue(undefined, 1, "Sample.Clock", {
+      measurands: ["Energy.Active.Import.Register"],
+      timestamp: boundary,
+    });
+
+    const payload = fakeSocket.sentCalls.find(
+      (c) => c.action === "MeterValues",
+    )!.payload as MeterValuesRequestV201;
+    expect(payload.meterValue).toEqual([
+      {
+        timestamp: "2026-10-28T12:15:00.000Z",
+        sampledValue: [
+          expect.objectContaining({
+            measurand: "Energy.Active.Import.Register",
+            context: "Sample.Clock",
+          }),
+        ],
+      },
+    ]);
+  });
+
+  it("TransactionEvent(Updated) honours measurand and timestamp overrides", () => {
+    const connector = {
+      ...(threePhaseConnectorStub() as object),
+      transaction: { stopTime: null, cpTransactionId: "tx-1", cpNextSeqNo: 3 },
+      markTransactionChanged: vi.fn(),
+    };
+    const { fakeSocket, handler } = makeHandler(connector);
+
+    handler.sendTransactionUpdate(1, {
+      triggerReason: "MeterValueClock",
+      meterValues: true,
+      context: "Sample.Clock",
+      measurands: ["Energy.Active.Import.Register"],
+      timestamp: boundary,
+    });
+
+    const payload = fakeSocket.sentCalls.find(
+      (c) => c.action === "TransactionEvent",
+    )!.payload as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      eventType: "Updated",
+      triggerReason: "MeterValueClock",
+      timestamp: "2026-10-28T12:15:00.000Z",
+      seqNo: 3,
+      meterValue: [
+        {
+          timestamp: "2026-10-28T12:15:00.000Z",
+          sampledValue: [
+            expect.objectContaining({
+              measurand: "Energy.Active.Import.Register",
+              context: "Sample.Clock",
+            }),
+          ],
+        },
+      ],
+    });
+    expect(
+      (payload.meterValue as { sampledValue: unknown[] }[])[0]!.sampledValue,
+    ).toHaveLength(1);
+  });
+});

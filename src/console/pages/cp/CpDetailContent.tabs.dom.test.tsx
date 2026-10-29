@@ -284,14 +284,14 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
     ).toBeNull();
   });
 
-  it("the header keeps Config, Connect/Disconnect and More; Scenarios, Edit config and Delete left it", async () => {
+  it("the header keeps Labels (#471), Config, Connect/Disconnect and More; Scenarios, Edit config and Delete left it", async () => {
     const { container } = await mount("/cp/CP-A");
 
     const header = container.querySelector("h1")!.parentElement!.parentElement!;
     const labels = Array.from(header.querySelectorAll("button")).map(
       (b) => b.getAttribute("aria-label") ?? b.textContent?.trim(),
     );
-    expect(labels).toEqual(["Config", "Disconnect", "More"]);
+    expect(labels).toEqual(["Labels", "Config", "Disconnect", "More"]);
     expect(buttonByText(container, "Edit config")).toBeUndefined();
     expect(buttonByText(container, "Delete")).toBeUndefined();
     expect(

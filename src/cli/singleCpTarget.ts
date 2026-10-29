@@ -70,6 +70,7 @@ export type SingleCpProcessTarget =
 export interface SingleCpCommandOps {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  reset(): Promise<void>;
   getStatus(): Promise<ChargePointStatus>;
   startTransaction(
     connectorId: number,
@@ -250,6 +251,9 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     disconnect: async () => {
       service.disconnect();
     },
+    reset: async () => {
+      service.reset();
+    },
     getStatus: async () => service.getStatus(),
     startTransaction: async (connectorId, tagId, options) => {
       service.startTransaction(connectorId, tagId, options);
@@ -407,6 +411,7 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
   return {
     connect: () => service.connect(cpId),
     disconnect: () => service.disconnect(cpId),
+    reset: () => service.reset(cpId),
     getStatus: async () => {
       const snapshot = await service.getChargePoint(cpId);
       if (!snapshot) throw new Error(`cpId not found: ${cpId}`);

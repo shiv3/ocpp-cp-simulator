@@ -78,6 +78,13 @@ export const CP_CREATE_MANY_MAX = 200;
 /** Client-side rpc ack timeout (ms). Also the server-side handler deadline. */
 export const RPC_TIMEOUT_MS = 30_000;
 
+/**
+ * How long `cp.bulk` (#470) waits for each charge point's action. Well under
+ * {@link RPC_TIMEOUT_MS}: a per-CP `connect` may wait the full 30 s, and a
+ * bulk call that hit the deadline would lose its per-charge-point report.
+ */
+export const CP_BULK_WAIT_MS = 10_000;
+
 /** socket.io / Engine.IO `maxHttpBufferSize` (bytes). */
 export const MAX_HTTP_BUFFER = 1_000_000;
 

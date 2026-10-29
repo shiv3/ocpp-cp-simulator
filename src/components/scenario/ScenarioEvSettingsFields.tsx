@@ -27,8 +27,7 @@ export interface ScenarioEvSettingsFieldsProps {
 /**
  * A scenario's EV settings, applied to the target connector when the
  * scenario starts. Partial: an empty field keeps the connector's current
- * value. Shared by the classic graph editor's settings dialog and the web
- * console's scenario editor.
+ * value. Edited in the web console's scenario editor.
  */
 const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
   value,

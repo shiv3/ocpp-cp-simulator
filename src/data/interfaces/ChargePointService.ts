@@ -405,6 +405,11 @@ export interface ChargePointService {
    *  local-mode store edits its config directly without needing this
    *  method, so the interface keeps it optional. */
   updateChargePoint?(params: CreateChargePointParams): Promise<void>;
+  /** #471: replace a CP's labels (#446) in place (`cp.labels.set`) — no
+   *  rebuild, so unlike {@link updateChargePoint} the connection survives.
+   *  Remote only: local charge points have no labels and the local service
+   *  rejects with `UnsupportedFeatureError`. */
+  setChargePointLabels?(cpId: string, labels: Labels): Promise<void>;
   removeChargePoint?(id: string): Promise<void>;
   ping?(): Promise<{ ok: boolean; cps: number }>;
   /** Daemon-wide facts (`server.info`): version and the SOAP public base a

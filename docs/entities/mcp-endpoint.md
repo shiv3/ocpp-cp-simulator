@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 24 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 25 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -41,7 +41,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 24 curated tools wrapping the daemon's
+The endpoint exposes 25 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                     | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -53,6 +53,7 @@ The endpoint exposes 24 curated tools wrapping the daemon's
 | `blueprint_save`         | `blueprint.save`          | `blueprint` — schema derived from `blueprintSchema` ([Blueprints](../concepts/control-plane.md#blueprints))                                                                                                                                                                   |
 | `cp_delete`              | `cp.delete`               | `cpId`                                                                                                                                                                                                                                                                        |
 | `cp_labels_set`          | `cp.labels.set`           | `cpId`, `labels` — replaces the CP's labels in place, no reconnect; schema derived from the method's (#446)                                                                                                                                                                   |
+| `cp_bulk`                | `cp.bulk`                 | `labels`, `action` (`connect` / `disconnect` / `reset`) — every CP carrying every pair; `{}` refused; partial success is the result; schema derived from the method's (#470)                                                                                                  |
 | `cp_connect`             | `connect`                 | `cpId`                                                                                                                                                                                                                                                                        |
 | `cp_disconnect`          | `disconnect`              | `cpId`                                                                                                                                                                                                                                                                        |
 | `cp_status`              | `status`                  | `cpId`                                                                                                                                                                                                                                                                        |
@@ -72,8 +73,8 @@ The endpoint exposes 24 curated tools wrapping the daemon's
 | `list_charging_sessions` | `sessions.list`           | `cpId`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                   |
 
 Most of these tools hand-declare a copy of their method's fields rather than
-deriving it (`cp_create` / `cp_create_many`, `cp_list` and `cp_labels_set`
-are the exception — see
+deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set` and
+`cp_bulk` are the exception — see
 [cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)), so
 a field the method later gains, or an optional field the tool over-tightened
 to required, could silently drift out of reach of an MCP agent (#284, #299).

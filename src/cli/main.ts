@@ -23,6 +23,12 @@ import {
 } from "./vehicleCatalogConfig";
 import { isSoapVersion } from "../cp/domain/types/OcppVersion";
 import { hasIdPatternPlaceholder } from "../protocol";
+import {
+  labelKeySchema,
+  labelsSchema,
+  labelValueSchema,
+  normalizeLabels,
+} from "../protocol/labels";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
@@ -175,6 +181,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpId: string | null = null;
   let cpCount = 1;
   let cpIdPattern: string | null = null;
+  const labelEntries: Array<[string, string]> = [];
   let metrics = false;
   let metricsNoAuth = false;
   let watch = false;
@@ -275,6 +282,49 @@ export function parseArgs(argv: string[]): CLIOptions {
         cpIdPattern = next ?? null;
         i++;
         break;
+      case "--label": {
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --label requires KEY=VALUE (use multiple --label flags for several labels)\n",
+          );
+          process.exit(1);
+        }
+        // `=` cannot appear in a key, so the first one is the separator and
+        // the value keeps any later `=` or `,` verbatim.
+        const idx = next.indexOf("=");
+        if (idx <= 0) {
+          process.stderr.write(
+            `Error: --label value must be KEY=VALUE, got '${next}'\n`,
+          );
+          process.exit(1);
+        }
+        const key = next.slice(0, idx);
+        const value = next.slice(idx + 1);
+        // Checked one by one rather than left to `labelsSchema` on the whole
+        // map: the record schema drops a `__proto__` key without an issue, so
+        // `--label __proto__=x` would vanish instead of being refused.
+        if (!labelKeySchema.safeParse(key).success) {
+          process.stderr.write(
+            `Error: --label key '${key}' is invalid (${labelKeySchema.description})\n`,
+          );
+          process.exit(1);
+        }
+        if (!labelValueSchema.safeParse(value).success) {
+          process.stderr.write(
+            `Error: --label value for '${key}' is invalid (${labelValueSchema.description})\n`,
+          );
+          process.exit(1);
+        }
+        if (labelEntries.some(([k]) => k === key)) {
+          // Last-wins would silently drop one of two values the operator
+          // typed; refuse instead, like every other ambiguous startup flag.
+          process.stderr.write(`Error: --label key '${key}' given twice\n`);
+          process.exit(1);
+        }
+        labelEntries.push([key, value]);
+        i++;
+        break;
+      }
       case "--metrics":
         metrics = true;
         break;
@@ -710,6 +760,35 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  // Each pair was checked as it was parsed; this adds the one rule that only
+  // the whole map can break (the entry count).
+  const parsedLabels = labelsSchema.safeParse(Object.fromEntries(labelEntries));
+  if (!parsedLabels.success) {
+    process.stderr.write(
+      `Error: --label: ${parsedLabels.error.issues[0]?.message ?? "invalid labels"}\n`,
+    );
+    process.exit(1);
+  }
+  const labels = normalizeLabels(parsedLabels.data);
+  if (labels && isClientMode) {
+    // First, because it is the reason that holds whatever else is given:
+    // `--stop` needs no --cp-id, and `--http-port` beside `--send` names the
+    // daemon to talk to — the server-mode guard below would pass, as it did
+    // for --watch (#314), and the client path then ignore the flag.
+    process.stderr.write(
+      "Error: --label cannot be combined with a client mode (--send, --stop or --events); " +
+        "it labels the charge points a daemon bootstraps\n",
+    );
+    process.exit(1);
+  }
+  if (labels && !cpId) {
+    // Same reasoning as --cp-count: without a cpId nothing is bootstrapped,
+    // so the labels would have no charge point to land on.
+    process.stderr.write(
+      "Error: --label requires --cp-id (it labels the bootstrapped charge points)\n",
+    );
+    process.exit(1);
+  }
   if (cpCount > 1 && cpIdPattern && !hasIdPatternPlaceholder(cpIdPattern)) {
     // Without a placeholder every charge point is asked for under the same id,
     // so the second create throws "already exists" and takes the daemon down
@@ -820,6 +899,14 @@ export function parseArgs(argv: string[]): CLIOptions {
     // single CP and say nothing about the other nineteen.
     process.stderr.write(
       "Error: --cp-count needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
+  if (labels && !isServerMode) {
+    // Labels are read by `cp.list` and the console only; the standalone REPL
+    // / JSON paths have neither, so the flag would be accepted and ignored.
+    process.stderr.write(
+      "Error: --label needs a server mode (--daemon, --http-port or --web-console)\n",
     );
     process.exit(1);
   }
@@ -998,6 +1085,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    labels,
     metrics,
     metricsNoAuth,
     watch,
@@ -1087,6 +1175,7 @@ Local modes (single CP, no server):
 Server modes (HTTP/WebSocket, multi-CP):
   --daemon [--cp-id X --ws-url Y]                  Background TCP server (127.0.0.1:${DEFAULT_HTTP_PORT})
   --cp-count N [--cp-id-pattern CP{n:03}]          Bootstrap N charge points instead of one
+  --label KEY=VALUE                                Label every bootstrapped charge point (repeatable)
   --metrics [--metrics-no-auth]                    Serve Prometheus text exposition at GET /metrics
   --watch                                          Re-read loaded idTag and scenario files when they change
   --daemon --http-port P [--cp-id ...]             Background TCP server on port P
@@ -1110,6 +1199,10 @@ Options:
   --cp-id-pattern <tpl>    Id template used with --cp-count (default:
                            <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
                            it.
+  --label <key=value>      Server mode: label every bootstrapped charge point.
+                           Repeatable; split on the first '='. Requires
+                           --cp-id. A charge point restored from --state-db
+                           keeps its stored labels.
   --security-profile <0|1|2|3>
                            OCPP 1.6 security profile. 0 leaves transport/auth
                            as configured; 1 adds AuthorizationKey Basic Auth
@@ -1366,7 +1459,13 @@ function resolveCorsPolicy(
   };
 }
 
-function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
+/**
+ * The charge point `--cp-id` and its companion flags describe; the daemon's
+ * `expandBootstrap` turns it into the `--cp-count` fleet. Exported for tests.
+ */
+export function buildBootstrap(
+  options: CLIOptions,
+): ChargePointInitOptions | null {
   if (!options.cpId) return null;
   return {
     cpId: options.cpId,
@@ -1391,6 +1490,7 @@ function buildBootstrap(options: CLIOptions): ChargePointInitOptions | null {
     tlsCaPath: options.tlsCaPath,
     tlsCertPath: options.tlsCertPath,
     tlsKeyPath: options.tlsKeyPath,
+    labels: options.labels,
   };
 }
 

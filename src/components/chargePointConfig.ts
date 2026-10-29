@@ -61,9 +61,8 @@ export interface ChargePointConfig {
   tlsCertPath?: string;
   tlsKeyPath?: string;
   /**
-   * Operator labels (#446). Remote mode only. `undefined` means "not known
-   * here" — an edit then leaves the daemon's labels alone instead of sending
-   * an empty map that would clear them; `{}` is a known empty set.
+   * Operator labels (#446). Remote mode only, set when the charge point is
+   * created; an edit never sends them (#471). `undefined` means none given.
    */
   labels?: Labels;
 }

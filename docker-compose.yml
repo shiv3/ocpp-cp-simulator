@@ -53,6 +53,11 @@ services:
       - "${CONNECTORS:-1}"
       - --ws-url
       - "${WS_URL:-wss://example.invalid/chargepoint/}"
+      # Labels (#472): repeat to group the bootstrapped charge points for
+      # `cp.list { labels }`. A charge point already in the state DB keeps
+      # the labels stored there.
+      # - --label
+      # - "site=lab"
       # CORS: the image binds 0.0.0.0, so with no flag the daemon applies
       # the safe `same-origin` policy (not open CORS). When the web console
       # is reached from a different origin — a separate UI host, or this

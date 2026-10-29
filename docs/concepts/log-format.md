@@ -90,7 +90,9 @@ every `vpn` member, is redacted. A redacted scalar inside a JSON member
 (string, number such as `simPin`, boolean, `null`) becomes the quoted string
 `"[redacted]"`, so the frame stays valid JSON: the [trace adapter](trace-format.md#producing-records)
 gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
-object or array held by a secret-named member does not get that guarantee.
+object or array held by a secret-named member does not get that guarantee. A
+quoted value is redacted whole: an escaped quote inside it (`"ab\"cd"`) does
+not end the match early (#401).
 
 ## WebSocket close lines
 

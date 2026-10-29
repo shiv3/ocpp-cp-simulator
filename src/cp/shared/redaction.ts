@@ -19,8 +19,12 @@ const SENSITIVE_KEY_NAMES = new Set([
 /** The names the text redactor matches in `name: value` / `name=value`. */
 const SENSITIVE_ASSIGNMENT_NAMES =
   "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|simPin|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
+/**
+ * The quoted value consumes escape sequences, so an escaped quote inside it
+ * (`"ab\"cd"`) does not end the match and leave the suffix in clear.
+ */
 const SENSITIVE_ASSIGNMENT = new RegExp(
-  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])(.*?)\\2`,
+  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])((?:\\\\.|(?!\\2)[^\\\\])*)\\2`,
   "g",
 );
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(

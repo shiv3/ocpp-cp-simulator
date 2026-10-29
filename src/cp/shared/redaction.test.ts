@@ -421,6 +421,33 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     ).not.toThrow();
   });
 
+  it("redacts a quoted secret past an escaped quote", () => {
+    // A lazy `(.*?)` stopped at the escaped quote and logged the suffix.
+    for (const [text, expected] of [
+      [
+        String.raw`{"apn":{"apnPassword":"ab\"cd","apn":"x"}}`,
+        `{"apn":{"apnPassword":"${REDACTED_VALUE}","apn":"x"}}`,
+      ],
+      [
+        String.raw`{"password":"ab\"cd\\","user":"u"}`,
+        `{"password":"${REDACTED_VALUE}","user":"u"}`,
+      ],
+      [
+        String.raw`password='ab\'cd' user=u`,
+        `password='${REDACTED_VALUE}' user=u`,
+      ],
+    ]) {
+      const redacted = redactSensitiveText(text);
+      expect(redacted).not.toContain("cd");
+      expect(redacted).toBe(expected);
+    }
+    expect(
+      JSON.parse(
+        redactSensitiveText(JSON.stringify({ apnPassword: 'ab"cd', n: 1 })),
+      ),
+    ).toEqual({ apnPassword: REDACTED_VALUE, n: 1 });
+  });
+
   it("keeps a bare value bare outside a JSON member", () => {
     expect(redactSensitiveText("simPin=9731 api_key=s3cret")).toBe(
       `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,

@@ -1770,3 +1770,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Log format](concepts/log-format.md): Redaction section names `simPin`.
 - [CLI → CSMS call events](entities/cli.md#csms-call-events): Redaction bullet names `apn.simPin`.
 - [GitHub issues](sources/github-issues.md): #401 row.
+
+## [2026-10-29] ingest | Redact a quoted secret past an escaped quote (#401 review)
+
+- The text redactor's quoted-value pattern stopped at the first matching quote, escaped or not, so `"apnPassword":"ab\"cd"` (or any secret-named field, `password` included, which predates #401) logged `cd` in clear. The value pattern now consumes escape sequences; single-quoted values and the quoted JSON number replacement keep working.
+- [Log format](concepts/log-format.md): Redaction section says a quoted value is redacted whole.

@@ -12,6 +12,9 @@ import {
 } from "./stationHarness";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
+import { getTemplateById } from "../../../../utils/scenarioTemplates";
+import { ScenarioExecutor } from "../../../application/scenario/ScenarioExecutor";
+import { createScenarioExecutorCallbacks } from "../../../application/scenario/ScenarioRuntime";
 
 /**
  * #488 — an EV-side disconnect (`ChargePoint.evDisconnected`) during a
@@ -305,5 +308,69 @@ describe("EV-side disconnect on OCPP 2.0.1 (#488)", () => {
         await csms.stop();
       }
     });
+  }
+});
+
+describe("TC_005 template over the wire (#488)", () => {
+  // The template's bounded auto-meter block is shortened so the run takes
+  // seconds; every other node is the shipped one.
+  function tc005Scenario() {
+    const scenario = getTemplateById(
+      "cert16-tc005-ev-side-disconnect",
+    )!.createScenario("CP16-TC005", 1);
+    const meter = scenario.nodes.find((node) => node.id === "meter-auto")!;
+    Object.assign(meter.data, { incrementInterval: 1, maxTime: 2 });
+    return scenario;
+  }
+
+  for (const key of [true, false]) {
+    it(`completes with one StopTransaction EVDisconnected (key=${key})`, async () => {
+      const csms = startMockCsms();
+      const { cp, stopAnswering } = await v16ChargingStation(
+        csms,
+        `CP16-TC005-${key}`,
+        key,
+      );
+      // The template's StartTransaction is answered like the others.
+      const answeredStarts = new Set<string>();
+      const answerStart = setInterval(() => {
+        for (const frame of csms.received.filter(callOf("StartTransaction"))) {
+          if (answeredStarts.has(frame[1] as string)) continue;
+          answeredStarts.add(frame[1] as string);
+          csms.replyCallResult(frame[1] as string, {
+            transactionId: 5005,
+            idTagInfo: { status: "Accepted" },
+          });
+        }
+      }, 5);
+      try {
+        const executor = new ScenarioExecutor(
+          tc005Scenario(),
+          createScenarioExecutorCallbacks({
+            chargePoint: cp,
+            connector: cp.getConnector(1)!,
+          }),
+        );
+
+        await executor.start();
+        await sentinel(cp, csms);
+
+        expect(executor.getContext().state).toBe("completed");
+        const stops = callsOf(csms, "StopTransaction").map(
+          (frame) => frame[3] as StopTransactionRequestV16,
+        );
+        expect(stops).toHaveLength(1);
+        expect(stops[0]?.reason).toBe("EVDisconnected");
+        expect(stops[0]?.transactionId).toBe(5005);
+        expect(csms.received.filter(statusOf("SuspendedEV"))).toHaveLength(
+          key ? 0 : 1,
+        );
+      } finally {
+        clearInterval(answerStart);
+        stopAnswering();
+        cp.disconnect();
+        await csms.stop();
+      }
+    }, 20_000);
   }
 });

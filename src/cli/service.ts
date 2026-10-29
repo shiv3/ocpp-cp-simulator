@@ -1117,6 +1117,11 @@ export class CLIChargePointService {
     this._chargePoint.sendTransactionUpdate(connectorId, options);
   }
 
+  /** #488: an EV-side disconnect on `connectorId`. */
+  evDisconnected(connectorId: number): void {
+    this._chargePoint.evDisconnected(connectorId);
+  }
+
   setMeterValue(connectorId: number, value: number): void {
     this._chargePoint.setMeterValue(connectorId, value);
   }

@@ -29,6 +29,7 @@ describe("ConfigurationStore semantic accessors", () => {
     expect(store.localAuthListMaxLength()).toBe(1000);
     expect(store.sendLocalListMaxLength()).toBe(100);
     expect(store.connectionTimeOut()).toBe(60);
+    expect(store.stopTransactionOnEVSideDisconnect()).toBe(true);
   });
 
   it("returns configured values when keys are present", () => {
@@ -62,6 +63,10 @@ describe("ConfigurationStore semantic accessors", () => {
         key: ConfigurationKeys.Core.ConnectionTimeOut,
         value: 9,
       },
+      {
+        key: ConfigurationKeys.Core.StopTransactionOnEVSideDisconnect,
+        value: false,
+      },
     );
 
     expect(store.meterValuesSampledData()).toBe(sampledData);
@@ -71,5 +76,6 @@ describe("ConfigurationStore semantic accessors", () => {
     expect(store.localAuthListMaxLength()).toBe(42);
     expect(store.sendLocalListMaxLength()).toBe(24);
     expect(store.connectionTimeOut()).toBe(9);
+    expect(store.stopTransactionOnEVSideDisconnect()).toBe(false);
   });
 });

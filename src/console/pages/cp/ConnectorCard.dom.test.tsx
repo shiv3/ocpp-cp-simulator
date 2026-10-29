@@ -183,6 +183,21 @@ describe("ConnectorCard: the connector as a charging session", () => {
     );
   });
 
+  it("Unplug on the stepper is an EV-side disconnect (#488)", async () => {
+    const { root, service } = await renderCard({
+      status: OCPPStatus.Finishing,
+    });
+    unmount = () => act(() => root.unmount());
+
+    const next = card().querySelector<HTMLButtonElement>(
+      '[data-state="next"]',
+    )!;
+    expect(next.textContent).toContain("Unplug");
+    await click(next);
+    expect(service.evDisconnected).toHaveBeenCalledWith("CP-1", 1);
+    expect(service.sendStatusNotification).not.toHaveBeenCalled();
+  });
+
   it("while charging: Stop on the stepper, the figures, the tag and the power line", async () => {
     const start = Date.now() - 12 * 60_000 - 40_000;
     const { root, service } = await renderCard({

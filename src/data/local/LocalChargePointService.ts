@@ -520,6 +520,10 @@ export class LocalChargePointService implements ChargePointService {
     );
   }
 
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    this.getExistingChargePointOrThrow(id).evDisconnected(connectorId);
+  }
+
   async sendStatusNotification(
     id: string,
     connectorId: number,

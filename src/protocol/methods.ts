@@ -748,6 +748,12 @@ export const METHODS = {
     }),
     result: ANY,
   },
+  // #488: the EV side of the cable was unplugged. With a running
+  // transaction StopTransactionOnEVSideDisconnect stops or suspends it.
+  ev_disconnected: {
+    params: z.object({ connector: CONN_POS }),
+    result: ANY,
+  },
   set_meter_value: {
     params: z.object({ connector: CONN_POS, value: z.number().int().min(0) }),
     result: ANY,

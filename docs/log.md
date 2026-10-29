@@ -1746,3 +1746,86 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A CALLERROR answering a 1.6 StartTransaction.req closed the transaction but left it on the connector, so every path that asks "is there a transaction?" took it for a running one: Reset and UnlockConnector sent a StopTransaction.req with the placeholder `transactionId: 0`, a RemoteStopTransaction for id `0` matched it, ChangeAvailability answered `Scheduled`. `ChargePoint.notifyTransactionStartFailed` now detaches it once `transactionStartFailed` listeners (the charging-session history, #447) have read it, and `ChargePoint.stopTransaction` ignores a transaction whose stop time is set ([Charging sessions → Rejections and failed starts](concepts/charging-sessions.md#rejections-and-failed-starts-447); its known-gap entry is removed).
 - [GitHub issues](sources/github-issues.md): #491.
+
+## [2026-10-29] ingest | SignCertificate.conf result handler on 1.6J (#410)
+
+- `SignCertificate.conf` had no result handler on 1.6J, so `Accepted` and `Rejected` both logged `No handler for action result: SignCertificate` at WARN and the status itself was never logged. A `SignCertificateResultHandler` now logs `Accepted` at INFO (the CSMS is expected to follow up with CertificateSigned.req) and any other status at WARN, naming it. The status is only logged; `sign_certificate` callers still do not receive it. 2.0.1 and SOAP are unchanged ([Log format → "No handler for action result"](concepts/log-format.md#no-handler-for-action-result)).
+- [GitHub issues](sources/github-issues.md): #410.
+
+## [2026-10-29] ingest | Redact 2.0.1 SetVariables secrets in logged frames (#400)
+
+- The text redactor the `Logger` applies to every message knew the 1.6 `{ key, value }` shape but not the 2.0.1 `{ variable: { name }, attributeValue }` one, so the `Received:` line of a `SetVariables` of `BasicAuthPassword` / `AuthorizationKey` logged the secret in clear while its `csms_call_received` payload was redacted (#396). The text redactor now replaces that `attributeValue` too, with the variable-name predicate shared with the structured redactor.
+- [Log format](concepts/log-format.md): new Redaction section (what the `Logger` redacts in OCPP-J frames; not SOAP bodies). Review: a frame with duplicate keys no longer bypasses the text redactor (it used the first `value` / `variable` / `attributeValue`, while `JSON.parse` keeps the last; the `value` case predates #400).
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet links the matching log-line rule.
+- [GitHub issues](sources/github-issues.md): #400 row.
+
+## [2026-10-29] ingest | Redact SetNetworkProfile APN password and VPN key (#401)
+
+- A 2.x `SetNetworkProfile` logged `connectionData.apn.apnPassword` and `connectionData.vpn.key` in clear, in the `Received:` line and in the `csms_call_received` payload. `apnPassword` is now a sensitive key name (dropped from structured payloads, `[redacted]` in text); `key` is redacted only inside a `vpn` object, since a bare `key` names a 1.6 configuration entry.
+- [Log format](concepts/log-format.md): Redaction section lists the SetNetworkProfile fields and says the structured redactor drops a field named after a secret where the log line shows `[redacted]`, and that the text redactor matches field names only in the spellings `redaction.ts` lists.
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet covers `SetNetworkProfile`.
+- [GitHub issues](sources/github-issues.md): #401 row.
+
+## [2026-10-29] ingest | Redact the 2.1 SetNetworkProfile basicAuthPassword and duplicate VPN keys (#401)
+
+- 2.1 `SetNetworkProfile` also carries `connectionData.basicAuthPassword`, which leaked in both redactors: `basicAuthPassword` was only a sensitive _variable_ name. It is now a sensitive key name (no redaction path needs that field readable; the config form never goes through the redactor). `connectionData.identity` stays readable.
+- The text redactor redacted only the first `vpn` member and the first `key` in it; a frame with duplicate members logged the last one, which is what `JSON.parse` keeps. Every copy is now redacted.
+- [Log format](concepts/log-format.md): Redaction section names `basicAuthPassword` and the duplicate-member rule.
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): Redaction bullet names the 2.1 field.
+- [GitHub issues](sources/github-issues.md): #401 row.
+
+## [2026-10-29] ingest | Redact the SetNetworkProfile SIM PIN (#401)
+
+- `connectionData.apn.simPin` (an integer, 2.0.1 and 2.1) is the SIM card PIN; it is now a sensitive key name, dropped from structured payloads and `"[redacted]"` in a logged frame. A number held by a secret-named JSON member is now replaced with a quoted string, not a bare `[redacted]`, so the frame still parses: the trace adapter (`--trace`, `analyze --from-daemon`) drops a `Sent:` / `Received:` line it cannot parse. Outside JSON (`api_key=…`) the replacement stays bare.
+- [Log format](concepts/log-format.md): Redaction section names `simPin`.
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): Redaction bullet names `apn.simPin`.
+- [GitHub issues](sources/github-issues.md): #401 row.
+
+## [2026-10-29] ingest | Redact a quoted secret past an escaped quote (#401 review)
+
+- The text redactor's quoted-value pattern stopped at the first matching quote, escaped or not, so `"apnPassword":"ab\"cd"` (or any secret-named field, `password` included, which predates #401) logged `cd` in clear. The value pattern now consumes escape sequences; single-quoted values and the quoted JSON number replacement keep working.
+- [Log format](concepts/log-format.md): Redaction section says a quoted value is redacted whole.
+
+## [2026-10-29] ingest | Fail closed on an unterminated quoted secret (#401 review)
+
+- The escape-aware pattern needed a closing quote, so a truncated value (`"password":"ab\"cd` or `password="abc` at the end of a message) was no longer matched at all and leaked whole. A quoted secret without a closing quote on its line is now redacted to the end of that line; a backslash-newline is consumed as an escape.
+- [Log format](concepts/log-format.md): Redaction section states the end-of-line rule.
+
+## [2026-10-29] ingest | Redact multi-line quoted secrets to their closing quote (#401 review)
+
+- The quoted-value pattern stopped at a raw newline, so a multi-line `privateKey="-----BEGIN…"` in non-JSON text had its later PEM lines logged in clear (on `main` the whole value leaked). A quoted secret now runs to its first unescaped closing quote across lines; with no closing quote at all, the rest of the message is redacted. Separate assignments still stop at their own closing quotes.
+- [Log format](concepts/log-format.md): Redaction section states the multi-line and end-of-message rules.
+
+## [2026-10-29] ingest | Confine quoted secrets to their line, PEM excepted (#401 review)
+
+- With the closed-quote match spanning lines, `password="a` followed on the next line by `privateKey="SECRET"` closed on the quote opening `SECRET` and logged it. A quoted secret now ends at its closing quote on the same line, or at the end of the line; only a `-----BEGIN` (PEM) value spans lines, up to its closing quote or the end of the message. The cases of this review round are one table-driven test in `redaction.test.ts`.
+- [Log format](concepts/log-format.md): Redaction section states the line rule, the PEM exception, and two remaining limits (backslash line continuation, an unterminated PEM followed by an assignment), tracked in #515.
+- [GitHub issues](sources/github-issues.md): #515 row.
+
+## [2026-10-29] ingest | PEM after leading whitespace; pin the line-rule limits (#401 review)
+
+- A PEM value may now start after whitespace or newlines (`privateKey="\n-----BEGIN…"`) and still spans lines up to its closing quote.
+- The exact outputs dropped when this round's tests became a table are restored as a second table, with the line-rule limits pinned: a non-PEM quoted value with a raw newline, or a backslash before the line end, is redacted only to the end of its first line (#515).
+- [Log format](concepts/log-format.md): Redaction section states those limits in one sentence pointing to #515.
+
+## [2026-10-29] ingest | Text redactor key-name parity and JSON-safe object values (#515)
+
+- The text redactor matched a fixed list of spellings, so `"Password":"…"`, `"tls_key":"…"` or `authorization_key=…` stayed readable in a log line while the structured redactor hid them. Its name pattern is now built from the same key-name set, ignoring case, `-` and `_`. It still matches a name ending in a secret name, as the list did (`api_password`, `OED_API_KEY`, `tlsPrivateKey`), so the text redactor stays stricter than the structured one, which drops exact secret names only.
+- A secret-named JSON member holding an object or array was cut at its first `}` / `]`, leaving invalid JSON that the trace adapter dropped. Inside a complete JSON object the whole member value is now replaced by `"[redacted]"`; a nested secret inside it no longer corrupts the replacement offsets.
+- The line-rule limits (multi-line non-PEM value, backslash line end, unterminated PEM) move to #519.
+- [Log format](concepts/log-format.md): Redaction section states the name rule and the object/array guarantee; the limits sentence points to #519.
+- [GitHub issues](sources/github-issues.md): #515 row rewritten, #519 row.
+
+## [2026-10-29] ingest | Local mode runs a scenario on a charge point that is not Available (#425)
+
+- `ScenarioManager.executeScenario` returned without a word while the charge point was not `Available`, so in Local mode the console's **Run** (and a template run) showed a running scenario that never progressed; the daemon's `runScenario` has no such gate. The gate now applies only to the automatic `statusChange` trigger (`ScenarioManager.handleStatusChange`), checked before it stops the running scenarios, as the daemon does: a matching transition on a charge point that is not `Available` no longer ends a manual run and then starts nothing. On an `Available` charge point a matching trigger still replaces the running scenario. The connect / status auto-start keeps its own gate in `LocalScenarioRuntime`.
+- [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): explicit runs start whatever the charge point's status in both modes; only the automatic starts wait for `Available`.
+- [GitHub issues](sources/github-issues.md): #425.
+
+## [2026-10-29] ingest | EV settings override records its provenance (#333)
+
+- `ev_settings.apply_default` replaced a connector's EV settings wholesale while `set_ev_settings` merged, so a partial payload left a required field such as `initialSoc` absent behind a type that says `number`. `Connector.applyDefaultEvSettings` now merges onto the built-in `defaultEVSettings` (option (a) of the issue); both the daemon and Local mode reach it, and the RPC handler no longer casts the payload to a complete `EVSettings`. The #310 sink guard for an absent `initialSoc` stays, for settings cast past the type.
+- Local mode's `ScenarioManager` released the override from what the definition installed under the id _declared_ — the third proxy the daemon dropped in #314. It now records the executor that applied the settings (after `onSetEVSettings` returns) and releases on one comparison, on completion and on stop; `LocalChargePointService.setEVSettings` disowns the run, and a re-run under the same id no longer loses its executor slot to the outgoing run's cleanup.
+- [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
+- [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
+- [GitHub issues](sources/github-issues.md): #333.

@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { Connector } from "../Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";
-import { defaultEVSettings, type EVSettings } from "../EVSettings";
+import {
+  defaultEVSettings,
+  InvalidEvSettingsPatchError,
+  type EVSettings,
+} from "../EVSettings";
 
 function makeConnector(): Connector {
   // ERROR-level logger so tests stay quiet without overriding stdout.
@@ -51,11 +55,64 @@ describe("Connector EV settings override tracking (#105)", () => {
     expect(connector.evSettings.targetSoc).toBe(80);
   });
 
-  it("applyDefaultEvSettings replaces settings wholesale when there is no override", () => {
+  it("applyDefaultEvSettings sets a complete default as given when there is no override", () => {
     const connector = makeConnector();
 
     connector.applyDefaultEvSettings(nextDefault);
 
     expect(connector.evSettings).toEqual(nextDefault);
+  });
+});
+
+describe("applyDefaultEvSettings merges onto the built-in defaults (#333)", () => {
+  it("reads an omitted required field back as the built-in default", () => {
+    const connector = makeConnector();
+    connector.applyDefaultEvSettings({
+      ...defaultEVSettings,
+      initialSoc: 35,
+      targetSoc: 90,
+    });
+
+    // A partial default: `initialSoc` is not named. It used to vanish from
+    // the connector, so `EVSettings.initialSoc: number` held nothing.
+    connector.applyDefaultEvSettings({
+      modelName: "Partial EV",
+      targetSoc: 70,
+    });
+
+    expect(connector.evSettings).toEqual({
+      ...defaultEVSettings,
+      modelName: "Partial EV",
+      targetSoc: 70,
+    });
+    expect(connector.evSettings.initialSoc).toBe(defaultEVSettings.initialSoc);
+  });
+
+  it("merges onto the constant, not onto the current settings", () => {
+    const connector = makeConnector();
+    connector.applyDefaultEvSettings({
+      ...defaultEVSettings,
+      chargingCurve: [{ socPercent: 0, powerFraction: 0.5 }],
+      phases: 3,
+    });
+    expect(connector.evSettings.chargingCurve).toBeDefined();
+
+    // A default that does not name the curve or the phases describes a car
+    // without them: nothing of the previous default carries over.
+    connector.applyDefaultEvSettings({ targetSoc: 60 });
+
+    expect("chargingCurve" in connector.evSettings).toBe(false);
+    expect("phases" in connector.evSettings).toBe(false);
+    expect(connector.evSettings.targetSoc).toBe(60);
+  });
+
+  it("still refuses a null required field, and changes nothing", () => {
+    const connector = makeConnector();
+    const before = { ...connector.evSettings };
+
+    expect(() =>
+      connector.applyDefaultEvSettings({ initialSoc: null } as never),
+    ).toThrow(InvalidEvSettingsPatchError);
+    expect(connector.evSettings).toEqual(before);
   });
 });

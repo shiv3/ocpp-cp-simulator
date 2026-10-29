@@ -537,12 +537,13 @@ that is answering but has not finished creating.
 Teardown's ordering is tested against a **slow** mock CSMS by
 `scripts/bench/fleetBench.slowpath.test-bun.ts` (#330), run by
 `bun run test:bench-slow` in its own CI job (`bench-slow`, beside `test`; about
-32s locally) rather than inside `test:bun`. It pins settling in-flight cycles
+36s locally) rather than inside `test:bun`. It pins settling in-flight cycles
 before closing transactions, for each cycle's own bound, the retirement branch
-and the re-stop of a cancelled hold; two cases shorten deadlines through
+the re-stop of a cancelled hold and the re-stop list keeping an acked stop;
+two cases shorten deadlines through
 test-only `FLEET_BENCH_TEST_*` variables that are not flags. The RPC stages of
 the cycle bound (pinned only as arithmetic, by the unit tests) and a
-`cp.create_many` past its 35s deadline have no run-level test — see [Source: bench README](../sources/bench-readme.md).
+`cp.create_many` past its 35s deadline (#523) have no run-level test — see [Source: bench README](../sources/bench-readme.md).
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review

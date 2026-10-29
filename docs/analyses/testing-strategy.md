@@ -47,7 +47,7 @@ daemon goes into `tsconfig.cli.json`.
 - **Bench slow path** (`bun run test:bench-slow`) is one Bun file named to
   match _neither_ filter, `scripts/bench/fleetBench.slowpath.test-bun.ts`
   (#330): it drives the real benchmark against a deliberately slow mock CSMS,
-  costs about 32s by construction, and so runs only in its own CI job
+  costs about 36s by construction, and so runs only in its own CI job
   (`bench-slow`) instead of lengthening `test:bun`. A new file meant to stay
   out of `test:bun` must avoid the `bun.test` substring and Vitest's
   `*.test.ts` pattern alike; `bun test` still runs it when given its path

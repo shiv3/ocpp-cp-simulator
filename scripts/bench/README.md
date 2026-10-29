@@ -1016,8 +1016,8 @@ a spare machine and a CSMS.
 - **Some teardown guards still have no run-level test.** The
   slow-path suite (`fleetBench.slowpath.test-bun.ts`, under "Directory
   layout") pins the settle-before-close ordering, the assigned-id stage of the
-  cycle bound, the retirement branch and the re-stop of a cancelled hold. A
-  mock CSMS cannot reach the rest:
+  cycle bound, the retirement branch, the re-stop of a cancelled hold and the
+  re-stop list keeping an acked stop. A mock CSMS cannot reach the rest:
   - the **RPC stages** of the cycle bound — the daemon acks `start_transaction`
     before Authorize is answered and `stop_transaction` once the frame is
     queued, so no CSMS delay makes a control-plane RPC slow. Dropping the RPC
@@ -1026,11 +1026,13 @@ a spare machine and a CSMS.
   - a **`cp.create_many` that outlives its 35s client deadline**, and the
     reconciliation after it — `createOneCp` starts the connection without
     awaiting it, so a slow CSMS never slows the create. That needs a fake
-    daemon or a daemon-side hook and is tracked as a follow-up to #330;
-  - the re-stop of a charge point whose stop was **already acked** — the
-    daemon's `stopTransaction` returns without sending anything once the first
-    stop has closed the connector's transaction, so removing those charge
-    points from the re-stop list changes nothing a CSMS can see.
+    daemon or a daemon-side hook and is tracked as #523, a follow-up to #330;
+  - what the re-stop of a charge point whose stop was **already acked** does
+    on the wire — the daemon's `stopTransaction` returns without sending
+    anything once the first stop has closed the connector's transaction, so a
+    CSMS sees one stop either way. That such a charge point stays on the
+    re-stop list _is_ pinned, but only off teardown's own
+    `closing N open transaction(s)` count on stderr.
 - **The heartbeat override covers reconnects, not a CSMS that changes the
   interval by hand.** `ChangeConfiguration HeartbeatInterval` reaches
   `ChargePoint`'s configuration listener
@@ -1182,14 +1184,15 @@ a spare machine and a CSMS.
   CSMS opened was closed by a stop carrying its id. It pins, each by a
   mutation that turns it red: settling in-flight cycles _before_ closing
   transactions; settling for each cycle's own bound, including its assigned-id
-  stage; leaving a retired charge point's transaction for teardown; and
-  re-stopping a transaction whose hold teardown cancelled. What it cannot pin
+  stage; leaving a retired charge point's transaction for teardown;
+  re-stopping a transaction whose hold teardown cancelled; and keeping a
+  charge point whose stop was acked on the re-stop list. What it cannot pin
   is listed under "Known limitations".
 
   It runs with `bun run test:bench-slow`, in its own CI job beside the main
   one, and **not** under `test:bun`: that script is the substring filter
   `bun test bun.test`, which this file name avoids on purpose, so the default
-  suite does not pay for it. It takes about 32s locally (one daemon, four
+  suite does not pay for it. It takes about 36s locally (one daemon, five
   cases, measured on an Apple M3 Pro), most of it the delays it injects.
 
   **Test-only timing overrides.** Two cases need a stage of the cycle to
@@ -1206,8 +1209,12 @@ a spare machine and a CSMS.
   | `FLEET_BENCH_TEST_LOCAL_START_TIMEOUT_MS` | 50000   | the local-start wait (`LOCAL_START_TIMEOUT_MS`) |
   | `FLEET_BENCH_TEST_ASSIGNED_ID_TIMEOUT_MS` | 95000   | the assigned-id wait (`ASSIGNED_ID_TIMEOUT_MS`) |
 
-  Overrides are independent: shortening the RPC deadline does not re-derive the
-  local-start wait from it.
+  `FLEET_BENCH_TEST_RPC_DEADLINE_MS` replaces `RPC_TIMEOUT_MS` itself, so it
+  also shortens everything derived from it: the default deadline of every pool
+  RPC, the RPC stages of the cycle bound, teardown's wait for an in-flight
+  `cp.create_many`, and `RECONCILE_DELAY_MS` before re-sweeping `not_found`
+  ids. Overrides are otherwise independent: shortening the RPC deadline does
+  not re-derive the local-start wait from it.
 
 - `smokeHarness.ts` — what both run-level suites share: the mock CSMS (with
   per-action `delayMs` and `stallAfter`, hooks on receipt and on reply, and

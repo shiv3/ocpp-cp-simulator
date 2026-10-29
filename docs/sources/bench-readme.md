@@ -692,9 +692,10 @@ arming.
   asserted empty. Each guard it pins turns it red when removed: settling
   in-flight cycles before closing transactions, settling for each cycle's own
   bound including its assigned-id stage, leaving a retired charge point's
-  transaction for teardown, and re-stopping a transaction whose hold teardown
-  cancelled. Run by `bun run test:bench-slow` in its own CI job — the name
-  avoids the `bun.test` substring `test:bun` filters on — in about 32s locally.
+  transaction for teardown, re-stopping a transaction whose hold teardown
+  cancelled, and keeping a charge point whose stop was acked on the re-stop
+  list. Run by `bun run test:bench-slow` in its own CI job — the name avoids
+  the `bun.test` substring `test:bun` filters on — in about 36s locally.
   Two cases shorten deadlines through **test-only** environment variables
   (`FLEET_BENCH_TEST_RPC_DEADLINE_MS`, `_LOCAL_START_TIMEOUT_MS`,
   `_ASSIGNED_ID_TIMEOUT_MS`; positive integer ms, unknown names refused,
@@ -714,9 +715,11 @@ answered and `stop_transaction` once the frame is queued), so the RPC stages of
 the cycle bound are pinned only as arithmetic by `lib.bun.test.ts`, with no
 run-level test showing teardown needs them; it cannot make `cp.create_many` outlive its 35s
 client deadline either, because `createOneCp` does not await the connection —
-that needs a fake daemon and is a follow-up to #330. Re-stopping a charge point
-whose stop was already acked sends nothing (`ChargePoint.stopTransaction`
-returns once the transaction is closed), so it is unobservable from the CSMS.
+that needs a fake daemon and is #523, a follow-up to #330. Re-stopping a charge
+point whose stop was already acked sends nothing (`ChargePoint.stopTransaction`
+returns once the transaction is closed), so the CSMS cannot tell it happened;
+that the charge point stays on the re-stop list is pinned only by teardown's
+`closing N open transaction(s)` count on stderr.
 
 **No measured number ships with this tool.** Producing one needs a real CSMS
 and a stated machine — neither exists in this repository's CI or review

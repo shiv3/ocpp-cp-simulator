@@ -185,6 +185,13 @@ export class ConfigurationStore {
     return this.getInteger("TransactionMessageAttempts") ?? 3;
   }
 
+  /** Canonical key `TransactionMessageRetryInterval` (seconds); default
+   *  `60`. 2.x reads it as `OCPPCommCtrlr.MessageAttemptInterval`
+   *  with instance `TransactionEvent` (#490). */
+  transactionMessageRetryInterval(): number {
+    return this.getInteger("TransactionMessageRetryInterval") ?? 60;
+  }
+
   /** Canonical key `AuthorizeRemoteTxRequests`; default `false`. */
   authorizeRemoteTxRequests(): boolean {
     return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;

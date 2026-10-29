@@ -1037,6 +1037,22 @@ export class ChargePoint {
     }
   }
 
+  /** Called by the 2.x handler on each CALLERROR answering a
+   *  TransactionEvent (#490). Reports only: the transaction is untouched. */
+  notifyTransactionMessageRejected(
+    event: ChargePointEvents["transactionMessageRejected"],
+  ): void {
+    this._events.emit("transactionMessageRejected", event);
+  }
+
+  /** Called by the 2.x handler when a TransactionEvent failed its last
+   *  attempt and is dropped (#490). Reports only, like the above. */
+  notifyTransactionMessageDiscarded(
+    event: ChargePointEvents["transactionMessageDiscarded"],
+  ): void {
+    this._events.emit("transactionMessageDiscarded", event);
+  }
+
   /** Called by AuthorizeResultHandler when Authorize.conf arrives
    *  (issue #181). Fans out to any in-flight `authorizeAndWait` callers
    *  tagId-matched via the `authorizeResult` event. */

@@ -1839,3 +1839,14 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
+
+## [2026-10-29] ingest | 2.x TransactionEvent CALLERROR follows E13 (#490)
+
+- A CALLERROR answering a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or `Ended`) was ignored. The station now keeps the transaction running, emits `transactionMessageRejected` on every CALLERROR, resends the same payload under a new message id after `MessageAttemptInterval[TransactionEvent]` × transmissions so far, and after `MessageAttempts[TransactionEvent]` transmissions discards it with `transactionMessageDiscarded`. A waiting resend is dropped on WebSocket close. 1.6 is unchanged (#447).
+- `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` and `MessageAttemptInterval[TransactionEvent]` (variable instance `TransactionEvent`, 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12) map to `TransactionMessageAttempts` and `TransactionMessageRetryInterval`, so GetBaseReport now lists them with their instance. The device-model map takes an optional instance: an exact instanced entry first, else the instance-less entry, so no existing variable changes when a CSMS names an instance.
+- A resend cancelled by a WebSocket close, or dropped because the station is offline when it falls due, is logged as a `warn`. Not holding back the next transaction message while a resend waits is documented as a known limitation (E13 Figure 62 describes sequential delivery).
+- [OCPP versions and transports → Transaction message retries](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x): new section.
+- [Charging sessions](concepts/charging-sessions.md): the session stays `active`; the Limits entry states the E13 behaviour.
+- [Operational timeline](concepts/operational-timeline.md): `transaction_message_rejected` and `transaction_message_discarded` kinds, format `1.2`.
+- [Index](index.md): Operational timeline and OCPP versions and transports summaries.
+- [GitHub issues](sources/github-issues.md): #490.

@@ -110,6 +110,108 @@ describe("handleGetVariablesV201", () => {
     });
   });
 
+  // #490: OCPP 2.0.1 §2.1.10/2.1.11 and 2.1 §2.1.12 name these
+  // MessageAttempts / MessageAttemptInterval with variableInstance
+  // "TransactionEvent"; the flat "...TransactionEvent" names never existed.
+  it("resolves an instanced variable and echoes the instance back", () => {
+    const store = new ConfigurationStore(
+      "cp-test",
+      [
+        { key: ConfigurationKeys.Core.TransactionMessageAttempts, value: 4 },
+        {
+          key: ConfigurationKeys.Core.TransactionMessageRetryInterval,
+          value: 30,
+        },
+      ],
+      null,
+    );
+    const request: GetVariablesRequestV201 = {
+      getVariableData: [
+        {
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttempts", instance: "TransactionEvent" },
+        },
+        {
+          component: { name: "OCPPCommCtrlr" },
+          variable: {
+            name: "MessageAttemptInterval",
+            instance: "TransactionEvent",
+          },
+        },
+        {
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttempts" },
+        },
+        {
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttempts", instance: "Other" },
+        },
+        {
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttemptsTransactionEvent" },
+        },
+      ],
+    };
+
+    const response = handleGetVariablesV201(request, store);
+
+    expect(response.getVariableResult).toEqual([
+      {
+        attributeStatus: "Accepted",
+        attributeType: "Actual",
+        attributeValue: "4",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttempts", instance: "TransactionEvent" },
+      },
+      {
+        attributeStatus: "Accepted",
+        attributeType: "Actual",
+        attributeValue: "30",
+        component: { name: "OCPPCommCtrlr" },
+        variable: {
+          name: "MessageAttemptInterval",
+          instance: "TransactionEvent",
+        },
+      },
+      {
+        attributeStatus: "UnknownVariable",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttempts" },
+      },
+      {
+        attributeStatus: "UnknownVariable",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttempts", instance: "Other" },
+      },
+      {
+        attributeStatus: "UnknownVariable",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttemptsTransactionEvent" },
+      },
+    ]);
+  });
+
+  it("still resolves an instance-less variable when the CSMS names an instance", () => {
+    const request: GetVariablesRequestV201 = {
+      getVariableData: [
+        {
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "HeartbeatInterval", instance: "Anything" },
+        },
+      ],
+    };
+
+    const response = handleGetVariablesV201(request, storeWithDefaults());
+
+    expect(response.getVariableResult[0]).toEqual({
+      attributeStatus: "Accepted",
+      attributeType: "Actual",
+      attributeValue: "300",
+      component: { name: "OCPPCommCtrlr" },
+      variable: { name: "HeartbeatInterval", instance: "Anything" },
+    });
+  });
+
   it("returns NotSupportedAttributeType for non-Actual mapped variables", () => {
     const request: GetVariablesRequestV201 = {
       getVariableData: [

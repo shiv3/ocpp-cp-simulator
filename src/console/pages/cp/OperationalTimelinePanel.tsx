@@ -24,6 +24,8 @@ const TONE_BY_KIND: Partial<Record<TimelineKind, Tone>> = {
   disconnected: "fault",
   authorization_rejected: "fault",
   transaction_rejected: "fault",
+  transaction_message_rejected: "fault",
+  transaction_message_discarded: "fault",
   scenario_error: "fault",
   recovery_completed: "recovery",
   connected: "connection",

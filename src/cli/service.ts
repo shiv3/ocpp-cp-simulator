@@ -79,6 +79,7 @@ import {
   matchAutoStart,
 } from "../cp/application/scenario/autoStart";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
+import type { ScenarioRepository } from "../cp/domain/persistence/ScenarioRepository";
 import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "../cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "../cp/domain/persistence/createScenarioRunRepository";
@@ -556,7 +557,7 @@ export class CLIChargePointService {
     string,
     ScenarioExecutionContext
   > = new Map();
-  private readonly _scenarioRepo: SqliteScenarioRepository;
+  private readonly _scenarioRepo: ScenarioRepository;
   private readonly _runtimeRepo: ConnectorRuntimeRepository;
   /**
    * Per-connector scenario execution position that was loaded from the
@@ -670,11 +671,14 @@ export class CLIChargePointService {
     runs?: ScenarioRunRepository,
     /** #447: the daemon-wide session history; defaults like `runs`. */
     sessions?: ChargingSessionRepository,
+    /** #495: the daemon-wide scenario definitions; defaults to a store of
+     *  this service's own on `database`. */
+    scenarios?: ScenarioRepository,
   ) {
     this._init = { ...init, labels: normalizeLabels(init.labels) };
     this._runs = runs ?? createScenarioRunRepository(database);
     this._sessions = sessions ?? createChargingSessionRepository(database);
-    this._scenarioRepo = new SqliteScenarioRepository(database);
+    this._scenarioRepo = scenarios ?? new SqliteScenarioRepository(database);
     this._runtimeRepo = database
       ? new SqliteConnectorRuntimeRepository(database)
       : new NoopConnectorRuntimeRepository();

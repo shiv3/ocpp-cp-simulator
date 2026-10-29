@@ -31,7 +31,6 @@ import {
 } from "../protocol/labels";
 import { BunSqliteDatabase } from "../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import { setGlobalLogFormat } from "../cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
@@ -1508,7 +1507,8 @@ function createStandaloneChargePointRuntime(
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms,
   });
   const configRepository = createSocketConfigRepository(database);
-  const scenarioRepository = new SqliteScenarioRepository(database);
+  // #495: the registry's, which its charge points write to as well.
+  const scenarioRepository = registry.scenarioDefinitions;
   const connectorSettingsRepository = new SqliteConnectorSettingsRepository(
     database,
   );

@@ -107,7 +107,7 @@ such a quote, or across such an assignment, the value is redacted to the end
 of its first line and the next line's assignments are matched on their own.
 A value starting with `-----BEGIN` (a PEM, after optional whitespace) ends
 only at a quote that follows its `-----END …-----` marker (a label of
-letters, digits and spaces; whitespace or a `\n` / `\r` escape before the
+letters, digits, spaces and dots; whitespace or a `\n` / `\r` escape before the
 quote) with no secret-named assignment before it, even after a backslash,
 whatever quotes its body holds; otherwise the rest of the message is
 redacted (#519). Both rules fail closed, so they over-redact: a truncated

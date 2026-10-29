@@ -51,14 +51,15 @@ const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
  *
  * The assignment guard also looks past one backslash: the escape branch
  * consumes `\p` of `\privateKey=` in one step, so the guard never runs at
- * the `p`. The END label is letters, digits and spaces only (real PEM
- * labels), so it cannot carry an assignment either.
+ * the `p`. The END label is letters, digits, spaces and dots only (real
+ * PEM labels, `X9.42 DH PARAMETERS` included), so it cannot carry an
+ * assignment either.
  */
 const NO_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=])`;
 const QUOTED_PEM_VALUE =
   `(?=\\s*-----BEGIN)` +
   `(?:(?:${NO_ASSIGNMENT_AHEAD}[\\s\\S])*?` +
-  `-----END[A-Z0-9 ]*-----(?:\\s|\\\\[nr])*\\2|[\\s\\S]*)`;
+  `-----END[A-Z0-9 .]*-----(?:\\s|\\\\[nr])*\\2|[\\s\\S]*)`;
 const QUOTED_MULTILINE_VALUE =
   `(?:${NO_ASSIGNMENT_AHEAD}(?:\\\\[\\s\\S]|(?!\\2)[^\\\\]))*` +
   `\\2(?<![:=]\\s*\\2)(?=[\\s,}\\]]|$)`;

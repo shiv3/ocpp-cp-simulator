@@ -706,6 +706,18 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
       `password="${R}"\n\\privateKey='${R}'`,
     ],
     [
+      "a later-line secret after three backslashes",
+      "password=\"a\n\\\\\\privateKey='S1 x\" y S2'",
+      ["S1", "S2"],
+      `password="${R}"\n\\\\\\privateKey='${R}'`,
+    ],
+    [
+      "a PEM with a dotted label",
+      'privateKey="-----BEGIN X9.42 DH PARAMETERS-----\nSECRET1\n-----END X9.42 DH PARAMETERS-----" x=1',
+      ["SECRET1"],
+      `privateKey="${R}" x=1`,
+    ],
+    [
       "a PEM END label carrying an assignment (fail closed)",
       "privateKey=\"-----BEGIN K-----\nA\n-----END password='S1 -----\" y S2'",
       ["S1", "S2"],
@@ -956,6 +968,7 @@ describe("text redactor parity with the structured redactor (#515)", () => {
       `password="a\n${"\\passwor".repeat(25_000)}`,
       `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
       `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
+      `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
       `privateKey="-----BEGIN K-----\n${pemBody}`,
       `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
       `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,

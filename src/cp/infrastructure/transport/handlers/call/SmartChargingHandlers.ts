@@ -12,9 +12,10 @@
  *   connector composite, not the sum across simultaneous transactions.
  *   The simulator typically drives one connector at a time, so summing
  *   would mostly produce the same result as the per-connector view.
- * - Unit conversion W↔A in GetCompositeSchedule responses uses
- *   `numberPhases=3`, voltage=230 — matches what the resolver assumes
- *   internally and is sufficient for CSMS validation tests.
+ * - GetCompositeSchedule restates each winning period in its own unit and
+ *   `numberPhases`; a request for the other unit converts W↔A at 230 V on
+ *   that period's phase count (3 when it states none), not on the
+ *   connector's electrical model (#323).
  */
 
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
@@ -36,10 +37,10 @@ import {
 } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 import { defaultConfiguration } from "../../../../domain/charge-point/Configuration";
-import { buildCompositeWattsSchedule } from "../../../../domain/connector/ChargingScheduleResolver";
-
-const REFERENCE_PHASE_VOLTAGE = 230;
-const DEFAULT_PHASES = 3;
+import {
+  buildCompositeWattsSchedule,
+  compositeLimitInUnit,
+} from "../../../../domain/connector/ChargingScheduleResolver";
 
 function getIntegerConfigValue(
   chargePoint: HandlerContext["chargePoint"],
@@ -348,16 +349,6 @@ export class ClearChargingProfileHandler implements CallHandler<
   }
 }
 
-function wattsToUnit(watts: number, unit: ChargingRateUnitType): number {
-  if (unit === ChargingRateUnitType.W) return watts;
-  // W → A: divide by phase voltage × phases. Mirrors the reference-voltage
-  // branch `buildCompositeWattsSchedule` resolves with — that builder is
-  // deliberately not given a connector's electrical model (#301), so this
-  // pair stays each other's exact inverse. Caller is responsible for rounding
-  // semantics; we return the raw float here.
-  return watts / REFERENCE_PHASE_VOLTAGE / DEFAULT_PHASES;
-}
-
 /**
  * §5.7 GetCompositeSchedule.req
  *
@@ -413,7 +404,7 @@ export class GetCompositeScheduleHandler implements CallHandler<
       .filter((s) => Number.isFinite(s.watts))
       .map((s) => ({
         startPeriod: s.startPeriod,
-        limit: wattsToUnit(s.watts, responseUnit as ChargingRateUnitType),
+        ...compositeLimitInUnit(s, responseUnit as ChargingRateUnitType),
       }));
 
     return {

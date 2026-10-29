@@ -10,6 +10,7 @@ import type {
 } from "../types/DataTransfer";
 import { Logger, LogType, LogEntry } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
+import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
 import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
@@ -17,6 +18,9 @@ import { Connector } from "../connector/Connector";
 import type {
   BootNotificationResult,
   ChargePointEvents,
+  ChargingProfileClearReason,
+  ChargingProfileSource,
+  ClearedChargingProfiles,
   IncomingCallCompletion,
   RegistrationStatus,
 } from "./ChargePointEvents";
@@ -47,7 +51,7 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { isSoapVersion } from "../types/OcppVersion";
+import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
 import {
   SOAP_OPERATION_NAMES,
   soapDialectForVersion,
@@ -72,7 +76,10 @@ import type {
 import type { ReadingContext } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
-import { ChargingProfileStore } from "./ChargingProfileStore";
+import {
+  ChargingProfileStore,
+  type ProfileRemoveCriteria,
+} from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
@@ -194,6 +201,7 @@ export class ChargePoint {
   private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
+  private readonly _clockAligned: ClockAlignedMeterScheduler;
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -408,6 +416,9 @@ export class ChargePoint {
 
     this._heartbeat = new HeartbeatService(this._logger);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
+    this._clockAligned = new ClockAlignedMeterScheduler((boundary) =>
+      this.emitClockAlignedSamples(boundary),
+    );
 
     // #299: a charge point that draws from a pool when a call names no tag.
     // An explicit tagId always wins, so this only ever fills a gap.
@@ -479,6 +490,11 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    // A persisted override never fires onChange; the scheduler only runs
+    // once a boot is Accepted (#454).
+    this._clockAligned.setIntervalSeconds(
+      this._configuration.clockAlignedDataInterval(),
+    );
     // A value persisted with --state-db is in force from the first open.
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
@@ -571,8 +587,20 @@ export class ChargePoint {
             this._webSocket?.setPingInterval(value);
           }
           break;
-        // Other keys (ClockAlignedDataInterval etc.) are wired in subsequent
-        // phases as the dependent subsystems are extended.
+        case "ClockAlignedDataInterval":
+          // #454: takes effect at once on the new grid while boot is Accepted.
+          if (typeof value === "number") {
+            this._clockAligned.setIntervalSeconds(value);
+          }
+          this._logger.info(
+            `ClockAlignedDataInterval=${String(value)}${
+              this._configuration.meterValuesAlignedData().length === 0
+                ? " (MeterValuesAlignedData is empty: nothing will be sent)"
+                : ""
+            }`,
+            LogType.CONFIGURATION,
+          );
+          break;
         default:
           break;
       }
@@ -789,10 +817,77 @@ export class ChargePoint {
     return this._localAuthListManager;
   }
 
-  /** Read-only access for handlers and tests. SetChargingProfile /
-   *  ClearChargingProfile mutate this directly. */
-  get stationProfiles(): ChargingProfileStore {
+  /** Read-only: install and remove profiles with `applyChargingProfile` /
+   *  `clearChargingProfiles`, which report the change (#469). */
+  get stationProfiles(): Pick<ChargingProfileStore, "all" | "getActive"> {
     return this._stationProfiles;
+  }
+
+  /**
+   * Install a profile on the station store (`connectorId` 0) or on its
+   * connector, replacing any profile with the same id in that scope, and
+   * emit `chargingProfileApplied`. Validation is the caller's job.
+   *
+   * @returns `false`, changing nothing, when the connector does not exist.
+   */
+  applyChargingProfile(
+    profile: ActiveChargingProfile,
+    source: ChargingProfileSource,
+  ): boolean {
+    let replaced: boolean;
+    if (profile.connectorId === 0) {
+      replaced = this._stationProfiles.add(profile);
+    } else {
+      const connector = this.getConnector(profile.connectorId);
+      if (!connector) return false;
+      replaced = connector.addChargingProfile(profile);
+    }
+    this._events.emit("chargingProfileApplied", {
+      connectorId: profile.connectorId,
+      profile,
+      replaced,
+      source,
+    });
+    return true;
+  }
+
+  /**
+   * Remove the profiles matching `criteria` (1.6 §5.4 / 2.x K10 targets):
+   * no `connectorId` clears the station store and every connector, `0` the
+   * station store only, `> 0` that connector. Emits one
+   * `chargingProfilesCleared` per scope that lost a profile.
+   *
+   * @returns The non-empty scopes, station store first.
+   */
+  clearChargingProfiles(
+    connectorId: number | undefined,
+    criteria: ProfileRemoveCriteria,
+    reason: ChargingProfileClearReason,
+  ): ClearedChargingProfiles[] {
+    const cleared: ClearedChargingProfiles[] = [];
+    const report = (scope: number, profiles: ActiveChargingProfile[]) => {
+      if (profiles.length === 0) return;
+      cleared.push({ connectorId: scope, profiles });
+      this._events.emit("chargingProfilesCleared", {
+        connectorId: scope,
+        profiles,
+        reason,
+      });
+    };
+    if (connectorId === undefined || connectorId === 0) {
+      report(0, this._stationProfiles.take(criteria));
+    }
+    if (connectorId === 0) return cleared;
+    const targets =
+      connectorId === undefined
+        ? this._connectors.values()
+        : [this.getConnector(connectorId)];
+    for (const connector of targets) {
+      if (connector) {
+        report(connector.id, connector.takeChargingProfiles(criteria));
+      }
+    }
+    return cleared;
   }
 
   /** Convenience: the currently active ChargePointMaxProfile (highest
@@ -1460,6 +1555,7 @@ export class ChargePoint {
       this.applyBootAccepted(interval);
     } else {
       this.stopHeartbeat();
+      this._clockAligned.disable();
     }
   }
 
@@ -1494,6 +1590,44 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
     }
+
+    this._clockAligned.enable();
+  }
+
+  /**
+   * One clock-aligned sample per connector for `boundaryMs` (#454), carrying
+   * `MeterValuesAlignedData` with `Sample.Clock` and the boundary instant.
+   * OCPP 2.x puts a sample for an EVSE with a live transaction into
+   * TransactionEvent(Updated, MeterValueClock) — never the MeterValuePeriodic
+   * trigger of #347 — and every other sample into MeterValues. On 1.x a live
+   * transaction's id rides along once the CSMS has assigned one.
+   */
+  private emitClockAlignedSamples(boundaryMs: number): void {
+    // Empty by default; the interval change already logged that it is.
+    const measurands = this._configuration.meterValuesAlignedData();
+    if (measurands.length === 0) return;
+    const timestamp = new Date(boundaryMs);
+    const isV2 = isOcpp2Version(this._ocppVersion);
+    this._connectors.forEach((connector) => {
+      const live = connector.hasRunningTransaction;
+      if (live && isV2) {
+        this._outbox.sendTransactionUpdate(connector.id, {
+          triggerReason: "MeterValueClock",
+          meterValues: true,
+          context: "Sample.Clock",
+          measurands,
+          timestamp,
+        });
+        return;
+      }
+      // `0` until StartTransaction.conf assigns the id.
+      const id = connector.transaction?.id;
+      const transactionId = live && id ? id : undefined;
+      this._outbox.sendMeterValue(transactionId, connector.id, "Sample.Clock", {
+        measurands,
+        timestamp,
+      });
+    });
   }
 
   boot(): void {
@@ -1545,10 +1679,11 @@ export class ChargePoint {
     });
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
+    this._clockAligned.disable();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._localAuthListManager.dispose();
-    this._stationProfiles.clear();
+    this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // Cancel any pending firmware-update simulation so its status train
     // doesn't keep firing against a dead WebSocket.
     this._firmwareUpdateTimers.forEach((t) => clearTimeout(t));
@@ -1850,12 +1985,14 @@ export class ChargePoint {
     // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)
     // NOTE: Only TxProfile is cleared. TxDefaultProfile persists for future transactions.
     // ChargePointMaxProfile also persists as it applies to the entire station.
-    const clearedProfiles = connector.removeChargingProfiles({
-      purpose: ChargingProfilePurposeType.TxProfile,
-    });
-    if (clearedProfiles > 0) {
+    const [cleared] = this.clearChargingProfiles(
+      connector.id,
+      { purpose: ChargingProfilePurposeType.TxProfile },
+      "TransactionEnded",
+    );
+    if (cleared) {
       this._logger.info(
-        `Cleared ${clearedProfiles} TxProfile(s) after transaction end on connector ${connector.id}`,
+        `Cleared ${cleared.profiles.length} TxProfile(s) after transaction end on connector ${connector.id}`,
         LogType.TRANSACTION,
       );
     }
@@ -1981,6 +2118,7 @@ export class ChargePoint {
     const connector = this._connectors.get(connectorId);
     if (!connector) return false;
 
+    this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
     connector.dispose();
     const removed = this._connectors.delete(connectorId);
     if (removed) {

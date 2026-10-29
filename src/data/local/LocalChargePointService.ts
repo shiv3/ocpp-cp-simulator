@@ -53,6 +53,7 @@ import type { ConfigRepository } from "../interfaces/ConfigRepository";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 import {
   BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
+  BROWSER_LABELS_UNSUPPORTED_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
@@ -100,7 +101,11 @@ import {
 } from "../../utils/scenarioTemplates";
 import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
 import { SqliteConnectorSettingsRepository } from "../sqlite/SqliteConnectorSettingsRepository";
-import type { SimulatorConfigInput, WireSimulatorConfig } from "../../protocol";
+import type {
+  Labels,
+  SimulatorConfigInput,
+  WireSimulatorConfig,
+} from "../../protocol";
 import { mergeWriteOnlyConfigSecrets } from "../configPort";
 
 function toConnectorSnapshot(
@@ -676,6 +681,15 @@ export class LocalChargePointService implements ChargePointService {
     throw new UnsupportedFeatureError(
       "browser_auto_traffic_unsupported",
       BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
+    );
+  }
+
+  /** Labels (#446) belong to daemon charge points (#471): refuse rather
+   *  than report a relabel that stored nothing. */
+  async setChargePointLabels(_cpId: string, _labels: Labels): Promise<void> {
+    throw new UnsupportedFeatureError(
+      "browser_labels_unsupported",
+      BROWSER_LABELS_UNSUPPORTED_MESSAGE,
     );
   }
 

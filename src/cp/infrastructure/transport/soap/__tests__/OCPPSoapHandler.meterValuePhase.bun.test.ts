@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { OCPPSoapHandler } from "../OCPPSoapHandler";
+import { OCPP12_DIALECT, OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
 import { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
@@ -265,4 +266,39 @@ describe("OCPPSoapHandler.sendMeterValue on OCPP 1.5 with only unsupported measu
       fetchMock.restore();
     }
   });
+});
+
+// #454: a clock-aligned sample reports the aligned measurands at the
+// boundary instant, not MeterValuesSampledData at "now", on every dialect.
+describe("OCPPSoapHandler.sendMeterValue overrides (#454)", () => {
+  for (const dialect of [OCPP12_DIALECT, OCPP15_DIALECT, OCPP16_DIALECT]) {
+    it(`${dialect.version}: uses the given measurands and timestamp`, async () => {
+      const fetchMock = mockFetchCapturingBody();
+      try {
+        const chargePoint = createMockChargePoint(threePhaseConnectorStub(), [
+          "Current.Import",
+        ]);
+        const handler = new OCPPSoapHandler(chargePoint, createMockLogger(), {
+          centralSystemUrl: CSMS_URL,
+          dialect,
+        });
+        handler.setBootStatus({ status: "Accepted" });
+
+        handler.sendMeterValue(1, 1, "Sample.Clock", {
+          measurands: ["Energy.Active.Import.Register"],
+          timestamp: new Date("2026-10-28T12:15:00Z"),
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(fetchMock.bodies.length).toBe(1);
+        const body = fetchMock.bodies[0]!;
+        expect(body).toContain("2026-10-28T12:15:00.000Z");
+        expect(body).not.toContain("Current.Import");
+      } finally {
+        fetchMock.restore();
+      }
+    });
+  }
 });

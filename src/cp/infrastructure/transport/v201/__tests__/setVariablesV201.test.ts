@@ -121,4 +121,52 @@ describe("handleSetVariablesV201", () => {
       ["LocalAuthListEnabled", false],
     ]);
   });
+
+  // #454: AlignedDataCtrlr drives the clock-aligned scheduler through the
+  // same 1.6 keys ChangeConfiguration writes.
+  it("maps AlignedDataCtrlr Interval and Measurands, rejecting a negative interval", () => {
+    const store = new ConfigurationStore(
+      "cp-test",
+      [
+        { key: ConfigurationKeys.Core.ClockAlignedDataInterval, value: 0 },
+        { key: ConfigurationKeys.Core.MeterValuesAlignedData, value: [] },
+      ],
+      null,
+    );
+    const changes: Array<[string, ConfigurationValueType]> = [];
+    store.onChange((key, value) => changes.push([key, value]));
+
+    const response = handleSetVariablesV201(
+      {
+        setVariableData: [
+          {
+            attributeValue: "900",
+            component: { name: "AlignedDataCtrlr" },
+            variable: { name: "Interval" },
+          },
+          {
+            attributeValue: "Energy.Active.Import.Register,Voltage",
+            component: { name: "AlignedDataCtrlr" },
+            variable: { name: "Measurands" },
+          },
+          {
+            attributeValue: "-60",
+            component: { name: "AlignedDataCtrlr" },
+            variable: { name: "Interval" },
+          },
+        ],
+      },
+      store,
+    );
+
+    expect(response.setVariableResult.map((r) => r.attributeStatus)).toEqual([
+      "Accepted",
+      "Accepted",
+      "Rejected",
+    ]);
+    expect(changes).toEqual([
+      ["ClockAlignedDataInterval", 900],
+      ["MeterValuesAlignedData", ["Energy.Active.Import.Register", "Voltage"]],
+    ]);
+  });
 });

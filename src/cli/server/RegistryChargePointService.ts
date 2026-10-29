@@ -149,9 +149,11 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   /** Daemon-only (#446): relabel without the rebuild `updateChargePoint`
-   *  does. `false` when no such charge point is registered. */
-  setChargePointLabels(id: string, labels: Labels): boolean {
-    return this.registry.setLabels(id, labels);
+   *  does. Rejects like it when no such charge point is registered. */
+  async setChargePointLabels(id: string, labels: Labels): Promise<void> {
+    if (!this.registry.setLabels(id, labels)) {
+      throw new Error(`cpId not found: ${id}`);
+    }
   }
 
   /** Daemon-only (#470): the ids a label selector matches, without building

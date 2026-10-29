@@ -677,7 +677,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       "Retrieve a charge point's operational timeline (#448): normalized, " +
       "ordered events — connection loss and reconnect, injected network " +
       "faults and the recovery they caused, CP/connector status changes, " +
-      "transactions, authorization rejections and scenario runs. Entries " +
+      "transactions, authorization rejections, scenario runs and " +
+      "smart-charging profiles applied, cleared or expired. Entries " +
       "are ordered by `seq`; entries of one fault share an `incidentId` and " +
       "`recovery_completed` reports `durationMs`. Windowed like get_logs: " +
       "`limit` takes the newest N, `offset` pages backwards.",

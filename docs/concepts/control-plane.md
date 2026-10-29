@@ -373,6 +373,14 @@ The schema is [`src/protocol/labels.ts`](../../src/protocol/labels.ts).
   the connection and transactions are untouched. It is persisted before the
   live charge point changes, and pushes a registry `updated` event carrying the
   new list item. `{}` clears; an unknown `cpId` answers `not_found`.
+- The daemon's startup bootstrap takes them from a repeated
+  `--label key=value` and gives them to every charge point of the
+  `--cp-count` fleet ([CLI](../entities/cli.md)) — validated with the same
+  schema, but refused at startup rather than with `invalid_params`. A charge
+  point restored from `--state-db` keeps its stored labels: like every other
+  bootstrap option, the flag only reaches the charge points this start-up
+  creates, and the `reusing` line of the startup log adds
+  `--label not applied` with the stored map when the two differ (#472).
 
 **Read and select.** `cp.list`, `status` (`config.labels`) and every registry
 push return the labels. `cp.list { labels: { … } }` returns only the charge
@@ -382,8 +390,9 @@ the create parameters, `cp.list`'s params are **strict**: a misspelled
 `label` is refused with `invalid_params` rather than ignored, because ignoring
 it would silently list the whole fleet. The MCP `cp_list` and `cp_labels_set`
 tools take the same schemas ([MCP endpoint](../entities/mcp-endpoint.md)), and
-the web console edits, shows and filters labels
-([Web console](../entities/web-console.md)).
+the web console shows and filters labels, sets them in the Add form and
+relabels a charge point in place with `cp.labels.set` from its page header
+(#471; [Web console](../entities/web-console.md#charge-point-page)).
 
 **Group operations.** `cp.bulk { labels, action }` runs one lifecycle action —
 `connect`, `disconnect` or `reset` — on every charge point the selector
@@ -426,9 +435,6 @@ is dropped with a warning on restore rather than breaking every `cp.list`
 **never** used as Prometheus label values — for the same reason metrics carry
 no `cpId` ([Daemon → Metrics](../entities/daemon.md#metrics)). Select with
 `cp.list` and aggregate client-side instead.
-
-`--cp-count` has no flag for labels yet; label a bootstrapped fleet with
-`cp.labels.set` after start-up.
 
 ##### Blueprints
 

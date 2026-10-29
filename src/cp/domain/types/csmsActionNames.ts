@@ -1,3 +1,5 @@
+import { isOcpp2Version } from "./OcppVersion";
+
 /**
  * CSMS→CP action names across OCPP versions (#349).
  *
@@ -64,7 +66,7 @@ export function csmsActionMatches(
 
 /** OCPP 2.x JSON stations translate; 1.x (JSON and SOAP) spell 1.6. */
 export function translatesCsmsActionNames(ocppVersion: string): boolean {
-  return ocppVersion.startsWith("OCPP-2.");
+  return isOcpp2Version(ocppVersion);
 }
 
 /**

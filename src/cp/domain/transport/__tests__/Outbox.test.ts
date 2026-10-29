@@ -229,8 +229,12 @@ describe("Outbox", () => {
     outbox.sendTransactionUpdate(1, updateOptions);
     expectCall(handler, "sendTransactionUpdate", [1, updateOptions]);
 
-    outbox.sendMeterValue(42, 1, "Sample.Periodic");
-    expectCall(handler, "sendMeterValue", [42, 1, "Sample.Periodic"]);
+    const overrides = {
+      measurands: ["Energy.Active.Import.Register"],
+      timestamp: new Date("2026-10-28T12:15:00Z"),
+    };
+    outbox.sendMeterValue(42, 1, "Sample.Clock", overrides);
+    expectCall(handler, "sendMeterValue", [42, 1, "Sample.Clock", overrides]);
 
     void outbox.sendDataTransfer("Vendor", "Message", '{"ok":true}');
     expectCall(handler, "sendDataTransfer", [

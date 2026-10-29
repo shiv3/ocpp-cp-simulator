@@ -1,7 +1,8 @@
 export type UnsupportedFeatureCode =
   | "browser_tls_unsupported"
   | "browser_scenario_file_unsupported"
-  | "browser_auto_traffic_unsupported";
+  | "browser_auto_traffic_unsupported"
+  | "browser_labels_unsupported";
 
 export class UnsupportedFeatureError extends Error {
   readonly code: UnsupportedFeatureCode;
@@ -21,3 +22,6 @@ export const BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE =
 
 export const BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE =
   "Seeded background traffic is CLI/server-only; configure it on the daemon runtime.";
+
+export const BROWSER_LABELS_UNSUPPORTED_MESSAGE =
+  "Charge point labels are daemon-only; local charge points have none.";

@@ -252,7 +252,7 @@ describe("useCpConfigActions", () => {
       expect(service.createChargePoint).not.toHaveBeenCalled();
     });
 
-    it("updateCp sends the labels as a complete map (#446)", async () => {
+    it("addCp sends the labels as a complete map (#446)", async () => {
       const service = createFakeChargePointService();
       const { root, click } = await mountProbe(service, "remote", {
         ...fixtureConfig,
@@ -260,17 +260,23 @@ describe("useCpConfigActions", () => {
       });
       cleanup = () => unmount(root);
 
-      await click("update");
+      await click("add");
 
-      expect(service.updateChargePoint).toHaveBeenCalledWith({
+      expect(service.createChargePoint).toHaveBeenCalledWith({
         ...expectedRemoteParams,
         labels: { site: "s1" },
       });
     });
 
-    it("updateCp omits labels the form never knew, so the daemon keeps them (#446)", async () => {
+    // #471: cp.update rebuilds the charge point and replaces its labels with
+    // whatever it carries; the page header relabels in place instead, so an
+    // update never carries them and the daemon keeps its own.
+    it("updateCp never sends labels, even when the config carries them (#471)", async () => {
       const service = createFakeChargePointService();
-      const { root, click } = await mountProbe(service, "remote");
+      const { root, click } = await mountProbe(service, "remote", {
+        ...fixtureConfig,
+        labels: { site: "s1" },
+      });
       cleanup = () => unmount(root);
 
       await click("update");

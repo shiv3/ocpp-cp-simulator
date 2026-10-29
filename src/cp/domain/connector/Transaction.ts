@@ -1,3 +1,5 @@
+import type { MeterSampleOverrides } from "./MeterValueBuilder";
+
 /**
  * StopTransaction.req `reason` enumeration (OCPP 1.6 §7.36).
  *
@@ -176,9 +178,11 @@ export interface StopTransactionCommandOptions {
  * state the next status-driven Updated event is de-duplicated against.
  * `meterValues: true` attaches the connector's current sampled values with
  * `context` (default `Sample.Periodic`), which is how 2.0.1 carries
- * in-transaction metering.
+ * in-transaction metering. `measurands` and `timestamp` replace
+ * `MeterValuesSampledData` and "now" for a clock-aligned sample (#454); the
+ * control plane does not expose them.
  */
-export interface TransactionUpdateOptions {
+export interface TransactionUpdateOptions extends MeterSampleOverrides {
   triggerReason: TransactionEventTriggerReason;
   chargingState?: TransactionChargingState;
   meterValues?: boolean;

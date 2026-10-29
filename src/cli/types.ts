@@ -38,6 +38,11 @@ export interface CLIOptions {
    */
   readonly cpIdPattern: string | null;
   /**
+   * `--label key=value` (#472): labels every bootstrapped charge point is
+   * created with. A charge point restored from `--state-db` keeps its own.
+   */
+  readonly labels?: Labels;
+  /**
    * `--soap-callback-url` as given, before `resolveSoapCallbackUrl` folded it
    * together with the public base. A fleet has to re-derive the callback per
    * charge point, so it needs the inputs, not just the resolved result.

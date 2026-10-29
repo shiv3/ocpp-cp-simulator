@@ -136,8 +136,6 @@ function scenarioEvents(events: ChargePointEvent[]) {
 describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
   it("loads and runs a scenario, reporting its progress as service events", async () => {
     const { service, chargePoint, events } = await setup();
-    // ScenarioManager.executeScenario silently skips a run while the CP is
-    // not Available, so set it explicitly (normally BootNotification does).
     chargePoint.status = OCPPStatus.Available;
     const definition = statusScenario("s-run", OCPPStatus.Preparing);
 
@@ -153,6 +151,50 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
       "scenario-node-execute:s-run:end",
       "scenario-completed:s-run",
     ]);
+  });
+
+  it("runs a scenario on a charge point that is not Available, like the daemon (#425)", async () => {
+    const { service, chargePoint, events } = await setup();
+    // Never booted (the CSMS URL is unreachable): the CP stays Unavailable.
+    expect(chargePoint.status).toBe(OCPPStatus.Unavailable);
+    const definition = statusScenario("s-unavailable", OCPPStatus.Preparing);
+
+    const { scenarioId } = await service.loadScenario(CP_ID, 1, definition);
+    await service.runScenario(CP_ID, 1, scenarioId);
+    await settle();
+
+    expect(chargePoint.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
+    expect(scenarioEvents(events)).toEqual([
+      "scenario-started:s-unavailable",
+      "scenario-node-execute:s-unavailable:start",
+      "scenario-node-execute:s-unavailable:set",
+      "scenario-node-execute:s-unavailable:end",
+      "scenario-completed:s-unavailable",
+    ]);
+  });
+
+  it("does not fire a statusChange trigger while the charge point is not Available", async () => {
+    const { service, chargePoint, events } = await setup(
+      await memoryDatabase(),
+    );
+    chargePoint.status = OCPPStatus.Faulted;
+    await service.saveScenarioDefinition(
+      CP_ID,
+      1,
+      statusScenario("s-trigger-gated", OCPPStatus.Finishing, {
+        trigger: {
+          type: "statusChange",
+          conditions: { toStatus: OCPPStatus.Charging },
+        },
+      }),
+    );
+    await settle();
+
+    chargePoint.updateConnectorStatus(1, OCPPStatus.Charging);
+    await settle();
+
+    expect(scenarioEvents(events)).toEqual([]);
+    expect(chargePoint.getConnector(1)?.status).toBe(OCPPStatus.Charging);
   });
 
   it("loading a scenario keeps the other scenarios loaded on the connector", async () => {

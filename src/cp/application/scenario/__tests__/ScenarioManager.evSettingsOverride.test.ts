@@ -16,7 +16,7 @@ function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
 }
 
-// A ScenarioManager only needs `status` (gate for executeScenario) and
+// A ScenarioManager only needs `status` (gate for the statusChange trigger) and
 // `logger` (scenario execution logging) from its ChargePoint — the rest of
 // the callbacks this scenario exercises (onSetEVSettings, onWaitForStatus)
 // operate on the connector directly.

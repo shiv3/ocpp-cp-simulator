@@ -1741,3 +1741,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
+
+## [2026-10-29] ingest | Local mode runs a scenario on a charge point that is not Available (#425)
+
+- `ScenarioManager.executeScenario` returned without a word while the charge point was not `Available`, so in Local mode the console's **Run** (and a template run) showed a running scenario that never progressed; the daemon's `runScenario` has no such gate. The gate now applies only to the automatic `statusChange` trigger (`ScenarioManager.handleStatusChange`, at the same point as before: after it stops the running scenarios); the connect / status auto-start keeps its own gate in `LocalScenarioRuntime`.
+- [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): explicit runs start whatever the charge point's status in both modes; only the automatic starts wait for `Available`.
+- [GitHub issues](sources/github-issues.md): #425.

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Log
@@ -1679,3 +1679,21 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Charge-point labels](concepts/control-plane.md#charge-point-labels): the startup bootstrap as a fourth write path; a charge point restored from `--state-db` keeps its stored labels.
 - [GitHub issues](sources/github-issues.md): #472.
 - Review follow-up: `--label` beside a client mode is refused with the client-mode reason even without `--cp-id`; a restored charge point whose stored labels differ from the flag's gets `--label not applied` on its `reusing` startup line ([Control plane](concepts/control-plane.md#charge-point-labels), [CLI](entities/cli.md#cli-options), [Daemon](entities/daemon.md)).
+
+## [2026-10-28] ingest | Smart-charging profiles on the operational timeline (#469)
+
+- [Operational timeline](concepts/operational-timeline.md): format `1.1`; new kinds `charging_profile_applied`, `charging_profile_cleared` and `charging_profile_expired`; new [Smart-charging profiles](concepts/operational-timeline.md#smart-charging-profiles) section — station-wide entries carry no entry-level `connectorId` (`data.connectorId` 0), `purpose` uses 1.6 names on 2.x, clear reasons `ClearChargingProfile` / `TransactionEnded` / `ConnectionClosed` / `ConnectorRemoved`, one cleared entry per scope and none for a clear that matched nothing, expiry recorded when `validTo` passes. Limits: RemoteStart profiles are ignored, zero-limit periods are not entries, Local-mode restored profiles are not recorded.
+- [Index](index.md): the timeline row mentions profiles.
+- [GitHub issues](sources/github-issues.md): #469.
+
+## [2026-10-28] ingest | Clock-aligned meter values (#454)
+
+- [OCPP versions & transports → Clock-aligned meter values](concepts/ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval): new section. `ClockAlignedDataInterval` / `AlignedDataCtrlr.Interval` now send one `Sample.Clock` sample per connector on UTC-midnight boundaries, with `MeterValuesAlignedData` / `AlignedDataCtrlr.Measurands` (now writable) as measurands; 2.x uses `TransactionEvent(Updated, MeterValueClock)` during a transaction; the interval is bounded to `0`–`86400`. SOAP 1.5 / 1.2 narrow the measurands as for any `MeterValues` (1.2 carries no `context`).
+- [GitHub issues](sources/github-issues.md): #454.
+
+## [2026-10-28] ingest | ScenarioEditor standalone mode removed (#443)
+
+- Removing the standalone mode changes no behaviour: the Graph view's full graph editor (ReactFlow, `src/components/scenario/ScenarioEditor.tsx`) was always opened in its embedded mode since the classic UI was retired (#426). Its unreachable standalone mode is gone — prop re-hydration, the debounced autosave and its Status Trigger → trigger rewrite, the run state and Stop, its own Save, the settings dialog with the template picker, import / export — with the `scenarioPersistence` helpers only it used (`persistEditorScenario`, `createLatestWinsSaver`, the applied-scenario autosave suppression). The editor takes `scenario` and reports graph edits through `onGraphChange`; the Meter Value nodes still show the connector's live reading.
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): the "Scenario EV Settings" panel now lives only in the web console's scenario editor.
+- [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
+- [GitHub issues](sources/github-issues.md): #443.

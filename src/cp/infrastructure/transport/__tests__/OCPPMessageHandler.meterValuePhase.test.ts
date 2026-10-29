@@ -131,4 +131,42 @@ describe("OCPPMessageHandler.sendMeterValue phase passthrough (1.6-J, #301)", ()
     expect(phases.sort()).toEqual(["L1", "L2", "L3"]);
     expect(samples.some((s) => s.phase === undefined)).toBe(true);
   });
+
+  // #454: a clock-aligned sample reports the aligned measurands at the
+  // boundary instant, not MeterValuesSampledData at "now".
+  it("honours measurand and timestamp overrides", () => {
+    let captured: MeterValuesRequestV16 | undefined;
+    fakeSocket.sendAction = (
+      _id: string,
+      action: string,
+      payload: unknown,
+      _gen?: GenerationToken,
+      onSettled?: (s: Settlement) => void,
+    ): boolean => {
+      if (action === "MeterValues") captured = payload as MeterValuesRequestV16;
+      onSettled?.({ outcome: "written" });
+      return true;
+    };
+
+    handler.sendMeterValue(7, 1, "Sample.Clock", {
+      measurands: ["Energy.Active.Import.Register"],
+      timestamp: new Date("2026-10-28T12:15:00Z"),
+    });
+
+    expect(captured).toEqual({
+      transactionId: 7,
+      connectorId: 1,
+      meterValue: [
+        {
+          timestamp: "2026-10-28T12:15:00.000Z",
+          sampledValue: [
+            expect.objectContaining({
+              measurand: "Energy.Active.Import.Register",
+              context: "Sample.Clock",
+            }),
+          ],
+        },
+      ],
+    });
+  });
 });

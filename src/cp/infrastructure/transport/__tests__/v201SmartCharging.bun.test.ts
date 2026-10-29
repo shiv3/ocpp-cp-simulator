@@ -6,6 +6,7 @@ import type {
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
+import { bootedChargePoint } from "./stationHarness";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
   return (frame) => frame[0] === 3 && frame[1] === messageId;
@@ -180,6 +181,54 @@ describe("OCPP 2.0.1 Smart Charging", () => {
       expect(uncappedCompositeFrame[2]).toEqual({ status: "Accepted" });
     } finally {
       cp.disconnect();
+      await csms.stop();
+    }
+  });
+});
+
+describe("OCPP 2.0.1 Smart Charging on the operational timeline (#469)", () => {
+  it("records station-wide and EVSE profiles applied, then cleared", async () => {
+    const csms = startMockCsms();
+    let cp: ChargePoint | undefined;
+    try {
+      cp = await bootedChargePoint(csms, "CP201-SMART-TIMELINE", "OCPP-2.0.1");
+
+      await sendCall(csms, "scp-station", "SetChargingProfile", {
+        evseId: 0,
+        chargingProfile: {
+          ...txDefaultProfile(10),
+          chargingProfilePurpose: "ChargingStationMaxProfile",
+        },
+      });
+      await sendCall(csms, "scp-evse", "SetChargingProfile", {
+        evseId: 1,
+        chargingProfile: txDefaultProfile(11),
+      });
+      expect(
+        await sendCall(csms, "ccp-none", "ClearChargingProfile", {
+          chargingProfileId: 999,
+        }),
+      ).toEqual([3, "ccp-none", { status: "Unknown" }]);
+      await sendCall(csms, "ccp-all", "ClearChargingProfile", {});
+
+      const entries = cp.timeline.query({
+        kinds: ["charging_profile_applied", "charging_profile_cleared"],
+      }).entries;
+      expect(
+        entries.map((e) => [
+          e.kind,
+          e.connectorId,
+          e.data.connectorId,
+          e.data.purpose ?? e.data.reason,
+        ]),
+      ).toEqual([
+        ["charging_profile_applied", undefined, 0, "ChargePointMaxProfile"],
+        ["charging_profile_applied", 1, 1, "TxDefaultProfile"],
+        ["charging_profile_cleared", undefined, 0, "ClearChargingProfile"],
+        ["charging_profile_cleared", 1, 1, "ClearChargingProfile"],
+      ]);
+    } finally {
+      cp?.disconnect();
       await csms.stop();
     }
   });

@@ -18,6 +18,14 @@ export type ReadingContext =
   | "Interruption.End"
   | "Other";
 
+/** What a caller can impose on one MeterValues sample instead of the
+ *  defaults (`MeterValuesSampledData`, "now"). Clock-aligned samples carry
+ *  `MeterValuesAlignedData` and the boundary instant (#454). */
+export interface MeterSampleOverrides {
+  measurands?: string[];
+  timestamp?: Date;
+}
+
 /** SampledValue shape per OCPP 1.6 §7.43. */
 export interface SampledValue {
   value: string;

@@ -77,12 +77,12 @@ describe("ChargingProfileStore", () => {
     ).toBeNull();
   });
 
-  describe("remove", () => {
+  describe("take", () => {
     it("removes by profileId", () => {
       const store = new ChargingProfileStore();
       store.add(profile({ chargingProfileId: 1 }));
       store.add(profile({ chargingProfileId: 2 }));
-      expect(store.remove({ profileId: 1 })).toBe(1);
+      expect(store.take({ profileId: 1 }).length).toBe(1);
       expect(store.all()).toHaveLength(1);
     });
 
@@ -96,8 +96,10 @@ describe("ChargingProfileStore", () => {
         }),
       );
       expect(
-        store.remove({ purpose: ChargingProfilePurposeType.TxDefaultProfile }),
-      ).toBe(1);
+        store
+          .take({ purpose: ChargingProfilePurposeType.TxDefaultProfile })
+          .map((p) => p.chargingProfileId),
+      ).toEqual([2]);
       expect(store.all()).toHaveLength(1);
     });
 
@@ -105,7 +107,7 @@ describe("ChargingProfileStore", () => {
       const store = new ChargingProfileStore();
       store.add(profile({ chargingProfileId: 1 }));
       store.add(profile({ chargingProfileId: 2 }));
-      expect(store.remove({})).toBe(2);
+      expect(store.take({}).length).toBe(2);
       expect(store.all()).toEqual([]);
     });
   });

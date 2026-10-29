@@ -4,114 +4,35 @@ import {
   ClearChargingProfileHandler,
   GetCompositeScheduleHandler,
 } from "../SmartChargingHandlers";
-import { ChargingProfileStore } from "../../../../../domain/charge-point/ChargingProfileStore";
-import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
 import {
   ChargingProfilePurposeType,
-  OCPPStatus,
+  DefaultBootNotification,
 } from "../../../../../domain/types/OcppTypes";
-import type { ActiveChargingProfile } from "../../../../../domain/connector/Connector";
 
 /**
- * Construct a stand-in HandlerContext that exposes only the slice these
- * handlers consume:
- *   - chargePoint.stationProfiles  (real ChargingProfileStore)
- *   - chargePoint.connectors       (Map of stub connectors)
- *   - chargePoint.getConnector(id) (Map lookup)
- *   - chargePoint.updateConnectorStatus(id, status) (no-op)
- *   - chargePoint.getActiveChargePointMaxProfile()
- *
- * The stub connectors expose `addChargingProfile`, `removeChargingProfiles`,
- * `getActiveChargingProfile`, and the `id` / `status` / `transaction`
- * shape touched by `applyProfileStatus`.
+ * A HandlerContext over a real, unconnected ChargePoint: the handlers route
+ * through `applyChargingProfile` / `clearChargingProfiles`, which also feed
+ * the operational timeline (#469).
  */
-function buildContext(opts: { connectorIds?: number[] } = {}) {
-  const stationProfiles = new ChargingProfileStore();
-  const logger = new Logger();
-  const ids = opts.connectorIds ?? [1, 2];
-
-  const connectors = new Map<number, ConnectorStub>();
-  for (const id of ids) {
-    connectors.set(id, makeConnectorStub(id));
-  }
-
-  const chargePoint = {
-    stationProfiles,
-    connectors,
-    getConnector: (id: number) => connectors.get(id),
-    updateConnectorStatus: (_id: number, _status: OCPPStatus) => {
-      // no-op: status transitions are not under test here
-    },
-    getActiveChargePointMaxProfile: (now?: Date) =>
-      stationProfiles.getActive(
-        ChargingProfilePurposeType.ChargePointMaxProfile,
-        now,
-      ),
-    // ConfigurationStore stub for defaultConfiguration() in validate path
-    wsUrl: "ws://stub",
-    connectorNumber: ids.length,
-  };
-
+function buildContext(opts: { connectorCount?: number } = {}) {
+  const chargePoint = new ChargePoint(
+    "CP-SMART-16",
+    DefaultBootNotification,
+    opts.connectorCount ?? 2,
+    "ws://stub",
+    null,
+    null,
+  );
   return {
     ctx: {
-      chargePoint: chargePoint as unknown as ChargePoint,
-      logger,
+      chargePoint,
+      logger: chargePoint.logger,
     } as HandlerContext,
-    stationProfiles,
-    connectors,
-  };
-}
-
-interface ConnectorStub {
-  id: number;
-  status: OCPPStatus;
-  transaction: null;
-  profiles: ActiveChargingProfile[];
-  addChargingProfile(p: ActiveChargingProfile): void;
-  removeChargingProfiles(criteria: {
-    profileId?: number;
-    purpose?: ChargingProfilePurposeType;
-    stackLevel?: number;
-  }): number;
-  getActiveChargingProfile(): ActiveChargingProfile | null;
-}
-
-function makeConnectorStub(id: number): ConnectorStub {
-  return {
-    id,
-    status: OCPPStatus.Available,
-    transaction: null,
-    profiles: [],
-    addChargingProfile(p: ActiveChargingProfile) {
-      this.profiles = this.profiles.filter(
-        (x) => x.chargingProfileId !== p.chargingProfileId,
-      );
-      this.profiles.push(p);
-    },
-    removeChargingProfiles(criteria) {
-      const before = this.profiles.length;
-      this.profiles = this.profiles.filter((p) => {
-        if (
-          criteria.profileId != null &&
-          p.chargingProfileId !== criteria.profileId
-        )
-          return true;
-        if (
-          criteria.purpose != null &&
-          p.chargingProfilePurpose !== criteria.purpose
-        )
-          return true;
-        if (criteria.stackLevel != null && p.stackLevel !== criteria.stackLevel)
-          return true;
-        return false;
-      });
-      return before - this.profiles.length;
-    },
-    getActiveChargingProfile() {
-      return this.profiles[0] ?? null;
-    },
+    chargePoint,
+    stationProfiles: chargePoint.stationProfiles,
+    connectors: chargePoint.connectors,
   };
 }
 
@@ -143,7 +64,7 @@ describe("SetChargingProfileHandler", () => {
     expect(stationProfiles.all()).toHaveLength(1);
     // Crucially: no duplication onto each connector.
     for (const c of connectors.values()) {
-      expect(c.profiles).toEqual([]);
+      expect(c.chargingProfiles).toEqual([]);
     }
   });
 
@@ -207,32 +128,95 @@ describe("SetChargingProfileHandler", () => {
       },
       ctx,
     );
-    expect(connectors.get(1)!.profiles).toHaveLength(1);
-    expect(connectors.get(2)!.profiles).toHaveLength(0);
+    expect(connectors.get(1)!.chargingProfiles).toHaveLength(1);
+    expect(connectors.get(2)!.chargingProfiles).toHaveLength(0);
   });
 });
 
 describe("ClearChargingProfileHandler", () => {
   it("clears station profiles when connectorId is omitted", () => {
-    const { ctx, stationProfiles } = buildContext();
-    stationProfiles.add({
-      chargingProfileId: 9,
-      connectorId: 0,
-      stackLevel: 0,
-      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
-      chargingProfileKind: "Absolute" as never,
-      chargingRateUnit: "W" as never,
-      chargingSchedulePeriods: [{ startPeriod: 0, limit: 1000 }],
-    });
+    const { ctx, chargePoint, stationProfiles } = buildContext();
+    chargePoint.applyChargingProfile(
+      {
+        chargingProfileId: 9,
+        connectorId: 0,
+        stackLevel: 0,
+        chargingProfilePurpose:
+          ChargingProfilePurposeType.ChargePointMaxProfile,
+        chargingProfileKind: "Absolute" as never,
+        chargingRateUnit: "W" as never,
+        chargingSchedulePeriods: [{ startPeriod: 0, limit: 1000 }],
+      },
+      "SetChargingProfile",
+    );
     const res = new ClearChargingProfileHandler().handle({}, ctx);
     expect(res).toEqual({ status: "Accepted" });
     expect(stationProfiles.all()).toEqual([]);
   });
 
   it("Accepted even when no profiles matched (§5.4)", () => {
-    const { ctx } = buildContext();
+    const { ctx, chargePoint } = buildContext();
     const res = new ClearChargingProfileHandler().handle({ id: 999 }, ctx);
     expect(res).toEqual({ status: "Accepted" });
+    expect(
+      chargePoint.timeline.query({ kinds: ["charging_profile_cleared"] }).total,
+    ).toBe(0);
+  });
+});
+
+describe("1.6 smart charging on the operational timeline (#469)", () => {
+  it("records a station-wide and a connector profile set, then cleared", () => {
+    const { ctx, chargePoint } = buildContext();
+    const set = (connectorId: number, id: number, purpose: string) =>
+      new SetChargingProfileHandler().handle(
+        {
+          connectorId,
+          csChargingProfiles: {
+            chargingProfileId: id,
+            stackLevel: 1,
+            chargingProfilePurpose: purpose,
+            chargingProfileKind: "Absolute",
+            chargingSchedule: {
+              chargingRateUnit: "W",
+              chargingSchedulePeriod: [{ startPeriod: 0, limit: 5000 }],
+            },
+          },
+        } as never,
+        ctx,
+      );
+
+    expect(set(0, 100, "ChargePointMaxProfile")).toEqual({
+      status: "Accepted",
+    });
+    expect(set(2, 5, "TxDefaultProfile")).toEqual({ status: "Accepted" });
+    new ClearChargingProfileHandler().handle({}, ctx);
+
+    const entries = chargePoint.timeline.query({
+      kinds: ["charging_profile_applied", "charging_profile_cleared"],
+    }).entries;
+    expect(
+      entries.map((e) => [
+        e.kind,
+        e.connectorId,
+        e.data.profileId ?? e.data.profiles,
+        e.data.source ?? e.data.reason,
+      ]),
+    ).toEqual([
+      ["charging_profile_applied", undefined, 100, "SetChargingProfile"],
+      ["charging_profile_applied", 2, 5, "SetChargingProfile"],
+      [
+        "charging_profile_cleared",
+        undefined,
+        [{ profileId: 100, purpose: "ChargePointMaxProfile", stackLevel: 1 }],
+        "ClearChargingProfile",
+      ],
+      [
+        "charging_profile_cleared",
+        2,
+        [{ profileId: 5, purpose: "TxDefaultProfile", stackLevel: 1 }],
+        "ClearChargingProfile",
+      ],
+    ]);
   });
 });
 
@@ -251,9 +235,9 @@ describe("GetCompositeScheduleHandler", () => {
   });
 
   it("returns the min-merge of tx + station max", () => {
-    const { ctx, connectors, stationProfiles } = buildContext();
+    const { ctx, chargePoint, connectors } = buildContext();
     // Connector 1 has a tx profile capped at 10kW for 30min then 8kW
-    connectors.get(1)!.profiles = [
+    connectors.get(1)!.setChargingProfiles([
       {
         chargingProfileId: 1,
         connectorId: 1,
@@ -266,17 +250,21 @@ describe("GetCompositeScheduleHandler", () => {
           { startPeriod: 1800, limit: 8_000 },
         ],
       },
-    ];
+    ]);
     // Station-wide max capped at 5kW
-    stationProfiles.add({
-      chargingProfileId: 99,
-      connectorId: 0,
-      stackLevel: 0,
-      chargingProfilePurpose: ChargingProfilePurposeType.ChargePointMaxProfile,
-      chargingProfileKind: "Absolute" as never,
-      chargingRateUnit: "W" as never,
-      chargingSchedulePeriods: [{ startPeriod: 0, limit: 5_000 }],
-    });
+    chargePoint.applyChargingProfile(
+      {
+        chargingProfileId: 99,
+        connectorId: 0,
+        stackLevel: 0,
+        chargingProfilePurpose:
+          ChargingProfilePurposeType.ChargePointMaxProfile,
+        chargingProfileKind: "Absolute" as never,
+        chargingRateUnit: "W" as never,
+        chargingSchedulePeriods: [{ startPeriod: 0, limit: 5_000 }],
+      },
+      "SetChargingProfile",
+    );
 
     const res = new GetCompositeScheduleHandler().handle(
       { connectorId: 1, duration: 3600 },

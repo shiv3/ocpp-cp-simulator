@@ -79,18 +79,21 @@ with one predicate for the variable names, so for the fields above a frame's
 log line and its event hide the same values. They differ in form: where the
 log line shows `[redacted]` for a field named after a secret (`password`,
 `apnPassword`, `basicAuthPassword`, `simPin`, `apiKey`, …), the structured redactor
-drops the field. Field names do not match alike either: the text redactor
-knows only the spellings listed in `redaction.ts`, so a `Password` or
-`tls_key` field stays readable in a log line, while the structured redactor
-ignores case, `-` and `_`. The match is on JSON object shapes: a SOAP (XML)
-body does not get it. A duplicated key does not hide a secret — `JSON.parse`
+drops the field. Both ignore case, `-` and `_` in a field name (`Password`,
+`tls_key`, `authorization_key=…`), but the text redactor is stricter: it
+also hides a name that ends in a secret name (`api_password`, `OED_API_KEY`,
+`oedApiKey`, `tlsPrivateKey`), where the structured redactor drops only an
+exact secret name and keeps such a field (#515). The match is on JSON
+object shapes: a SOAP (XML) body does not get it. A duplicated key does not hide a secret — `JSON.parse`
 keeps the last copy, so any copy of `key` / `variable` makes the entry
 sensitive and every copy of `value` / `attributeValue`, and of the `key` in
 every `vpn` member, is redacted. A redacted scalar inside a JSON member
 (string, number such as `simPin`, boolean, `null`) becomes the quoted string
 `"[redacted]"`, so the frame stays valid JSON: the [trace adapter](trace-format.md#producing-records)
 gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
-object or array held by a secret-named member does not get that guarantee. A
+object or array held by a secret-named member is replaced whole by the same
+`"[redacted]"`, so `{"password":{"a":"b"}}` logs `{"password":"[redacted]"}`
+(#515). Outside a complete JSON object (non-JSON text, a truncated frame), a
 quoted value stays on its line: it ends at the first unescaped closing quote
 on that line (an escaped quote, `"ab\"cd"`, does not end it), or at the end
 of the line when none comes (a truncated message), so an assignment on the
@@ -100,7 +103,7 @@ up to its closing quote, or to the end of the message without one (#401). In
 log text, a non-PEM quoted value with a raw newline (or a backslash before
 the line end) is redacted only to the end of its first line, and a PEM value
 that lacks its closing quote ends at the next quote, so an assignment after
-it can be read — limits tracked with the other text-redactor gaps in #515.
+it can be read — limits tracked in #519.
 
 ## WebSocket close lines
 

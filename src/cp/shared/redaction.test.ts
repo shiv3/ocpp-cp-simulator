@@ -523,7 +523,7 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     expect(redacted).toContain(REDACTED_VALUE);
   });
 
-  // Exact outputs, including the limits the line rule leaves (#515): a
+  // Exact outputs, including the limits the line rule leaves (#519): a
   // non-PEM value with a raw newline, or a backslash before the line end, is
   // redacted only to the end of its first line.
   it.each([
@@ -563,9 +563,9 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
       'password="a"\nx\nprivateKey="b" y',
       `password="${REDACTED_VALUE}"\nx\nprivateKey="${REDACTED_VALUE}" y`,
     ],
-    // Limit (#515): the continuation line after a backslash stays readable.
+    // Limit (#519): the continuation line after a backslash stays readable.
     ['password="ab\\\ncd" user=u', `password="${REDACTED_VALUE}"\ncd" user=u`],
-    // Limit (#515): a non-PEM value with a raw newline keeps its later lines.
+    // Limit (#519): a non-PEM value with a raw newline keeps its later lines.
     ['password="line1\nline2" x', `password="${REDACTED_VALUE}"\nline2" x`],
     [
       "simPin=9731 api_key=s3cret",
@@ -640,5 +640,87 @@ describe("vehicle catalog API keys (#458)", () => {
     expect(redactSensitiveValue({ apiKey: "s3cret", name: "x" })).toEqual({
       name: "x",
     });
+  });
+});
+
+describe("text redactor parity with the structured redactor (#515)", () => {
+  const R = REDACTED_VALUE;
+
+  // Field names match as in `isSensitiveKeyName`: case, `-` and `_` ignored.
+  it.each([
+    [
+      'Received: [2,"m1","X",{"Password":"x"}]',
+      `Received: [2,"m1","X",{"Password":"${R}"}]`,
+    ],
+    ['{"tls_key":"x","n":1}', `{"tls_key":"${R}","n":1}`],
+    ['{"TLS-KEY":7}', `{"TLS-KEY":"${R}"}`],
+    ["authorization_key=x tail", `authorization_key=${R} tail`],
+    ["Authorization-Key: x", `Authorization-Key: ${R}`],
+    ["PASSWORD=x", `PASSWORD=${R}`],
+    ["_api_key=x", `_api_key=${R}`],
+    ['Password="x" n=1', `Password="${R}" n=1`],
+  ])("redacts the name variant in %j", (text, expected) => {
+    expect(redactSensitiveText(text)).toBe(expected);
+  });
+
+  // A name ending in a secret name is one too, as the spelling list matched
+  // it as a suffix: `api_password` and `OED_API_KEY` are this project's own.
+  it.each([
+    ["api_password=x", `api_password=${R}`],
+    ["OED_API_KEY=x", `OED_API_KEY=${R}`],
+    ["tlsPrivateKey=x", `tlsPrivateKey=${R}`],
+    ["x_password=x", `x_password=${R}`],
+    ["myPassword=x", `myPassword=${R}`],
+    ["x-api-key: x", `x-api-key: ${R}`],
+    ['{"newPassword":"x"}', `{"newPassword":"${R}"}`],
+    ['{"oedApiKey":{"a":1},"n":1}', `{"oedApiKey":"${R}","n":1}`],
+    // A truncated frame: no closing brace, so the regex does it, quoted.
+    ['Received: {"api_password":9731', `Received: {"api_password":"${R}"`],
+  ])("redacts the longer name in %j", (text, expected) => {
+    expect(redactSensitiveText(text)).toBe(expected);
+  });
+
+  it.each(["passwordHint=x", '{"passwordHint":"x"}', '{"apiKeyId":7}'])(
+    "leaves %j readable",
+    (text) => {
+      expect(redactSensitiveText(text)).toBe(text);
+    },
+  );
+
+  it("keeps a longer name in the structured redactor", () => {
+    // The text redactor is stricter here: the structured one drops a field
+    // only under an exact key name.
+    expect(redactSensitiveValue({ newPassword: "x" })).toEqual({
+      newPassword: "x",
+    });
+  });
+
+  it("still finds an assignment inside a non-secret quoted value", () => {
+    expect(redactSensitiveText('msg="see password=s3cret here"')).toBe(
+      `msg="see password=${R} here"`,
+    );
+  });
+
+  // The whole value of a secret-named member is replaced, so the frame stays
+  // JSON for the trace adapter.
+  it.each([
+    ['{"password":{"a":"b"}}', `{"password":"${R}"}`],
+    ['{"password":["a"]}', `{"password":"${R}"}`],
+    ['{"password":{"apnPassword":"x"},"n":1}', `{"password":"${R}","n":1}`],
+    ['{"privateKey":[{"tlsKey":"y"}],"n":1}', `{"privateKey":"${R}","n":1}`],
+    [
+      '{"key":"AuthorizationKey","value":{"password":"x"}}',
+      `{"key":"AuthorizationKey","value":"${R}"}`,
+    ],
+    ['{"vpn":{"key":{"password":"x"}}}', `{"vpn":{"key":"${R}"}}`],
+    [
+      'Received: [2,"m1","X",{"Password":{"a":"b"},"n":[1]}]',
+      `Received: [2,"m1","X",{"Password":"${R}","n":[1]}]`,
+    ],
+  ])("redacts the object or array value of %j", (text, expected) => {
+    const redacted = redactSensitiveText(text);
+    expect(redacted).toBe(expected);
+    const json = redacted.replace(/^Received: /, "");
+    expect(() => JSON.parse(json)).not.toThrow();
   });
 });

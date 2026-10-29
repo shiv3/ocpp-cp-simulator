@@ -8,6 +8,7 @@ import {
 } from "socket.io";
 
 import { handleJsonCommand } from "../jsonMode";
+import { runCpBulk } from "./cpBulk";
 import type { CLIChargePointService } from "../service";
 import {
   INFLIGHT_CAP,
@@ -21,7 +22,9 @@ import {
   createManyParamsSchema,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
-  matchesLabelSelector,
+  ARRAY_MAX_ITEMS,
+  CP_BULK_WAIT_MS,
+  type CpBulkResult,
   isRpcMethod,
   redactSimulatorConfig,
   registryCpToWire,
@@ -527,6 +530,8 @@ export async function dispatchRpcCore(
       return deleteCp(deps, call.params);
     case "cp.labels.set":
       return setCpLabels(deps, call.params);
+    case "cp.bulk":
+      return bulkCps(deps, call.params);
     case "logs.get":
       return getLogs(deps, call.params);
     case "logs.clear":
@@ -677,10 +682,38 @@ async function listCps(
   chargePointService: RegistryChargePointService,
   params: Params<"cp.list">,
 ): Promise<CpListItem[]> {
+  // #470: the selector is applied before any status snapshot is built.
   return runFacadeOperation(async () =>
-    (await chargePointService.listChargePoints())
-      .filter((cp) => matchesLabelSelector(cp.config?.labels, params.labels))
-      .map(snapshotToRegistryCpWire),
+    (await chargePointService.listChargePoints(params.labels)).map(
+      snapshotToRegistryCpWire,
+    ),
+  );
+}
+
+/**
+ * `cp.bulk` (#470): one lifecycle action on every charge point a label
+ * selector matches, each through the same facade call — and so the same error
+ * classification — as the per-CP method of that name.
+ */
+async function bulkCps(
+  deps: RuntimeSocketIoDeps,
+  { labels, action }: Params<"cp.bulk">,
+): Promise<CpBulkResult> {
+  const service = deps.chargePointService;
+  const cpIds = service.selectChargePointIds(labels);
+  // Refused before acting: nothing caps the registry, and a match the result
+  // arrays cannot hold would fail result validation after every action ran.
+  if (cpIds.length > ARRAY_MAX_ITEMS) {
+    throw new RpcFailure(
+      "invalid_params",
+      `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
+    );
+  }
+  // Each action is named after the facade method that runs it.
+  return runCpBulk(
+    cpIds,
+    (cpId) => runFacadeOperation(() => service[action](cpId)),
+    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
   );
 }
 
@@ -808,7 +841,7 @@ function deleteBlueprint(
  * leaks nothing. Anything else goes through the same redaction the log lines
  * use, since a create can fail on a URL carrying Basic Auth credentials.
  */
-function createFailureReason(err: unknown): string {
+function batchFailureReason(err: unknown): string {
   const reason =
     err instanceof RpcFailure ? err.message || err.code : safeLogMessage(err);
   // Bounded to the result schema's own limit. A failure whose message repeats a
@@ -973,7 +1006,7 @@ async function createManyCps(
       }
       created.push(cpId);
     } catch (err) {
-      failed.push({ cpId: entry.cpId, reason: createFailureReason(err) });
+      failed.push({ cpId: entry.cpId, reason: batchFailureReason(err) });
     }
   }
   return { created, failed };
@@ -1631,6 +1664,12 @@ async function dispatchFacadeCpCommand(
     }
     case "disconnect": {
       await runFacadeOperation(() => chargePointService.disconnect(id));
+      return handled(undefined);
+    }
+    case "reset": {
+      // Declared in METHODS but never routed: it fell through to JSON Lines,
+      // which has no `reset` command, and answered `internal`.
+      await runFacadeOperation(() => chargePointService.reset(id));
       return handled(undefined);
     }
     case "status": {

@@ -118,8 +118,10 @@ export class RegistryChargePointService implements ChargePointService {
     private readonly deps: RegistryChargePointServiceDeps,
   ) {}
 
-  async listChargePoints(): Promise<ChargePointSnapshot[]> {
-    return this.listChargePointSnapshots();
+  /** `selector` is daemon-only (#470): only the charge points it matches get
+   *  a status snapshot built. Absent or empty, every charge point is listed. */
+  async listChargePoints(selector?: Labels): Promise<ChargePointSnapshot[]> {
+    return this.listChargePointSnapshots(selector);
   }
 
   async getChargePoint(id: string): Promise<ChargePointSnapshot | null> {
@@ -152,6 +154,12 @@ export class RegistryChargePointService implements ChargePointService {
     if (!this.registry.setLabels(id, labels)) {
       throw new Error(`cpId not found: ${id}`);
     }
+  }
+
+  /** Daemon-only (#470): the ids a label selector matches, without building
+   *  any status snapshot. An absent or empty selector matches every one. */
+  selectChargePointIds(selector: Labels | undefined): string[] {
+    return this.registry.selectByLabels(selector);
   }
 
   async ping(): Promise<{ ok: boolean; cps: number }> {
@@ -922,9 +930,9 @@ export class RegistryChargePointService implements ChargePointService {
     return manager.triggerDisconnect(cpId, ruleId);
   }
 
-  private listChargePointSnapshots(): ChargePointSnapshot[] {
+  private listChargePointSnapshots(selector?: Labels): ChargePointSnapshot[] {
     return this.registry
-      .list()
+      .selectByLabels(selector)
       .map((cpId) => this.registry.get(cpId)?.getStatus())
       .filter((status): status is ChargePointStatus => Boolean(status))
       .map(toChargePointSnapshot);

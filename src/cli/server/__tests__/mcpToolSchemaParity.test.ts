@@ -303,6 +303,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "blueprint_save", method: "blueprint.save" },
     { tool: "cp_delete", method: "cp.delete" },
     { tool: "cp_labels_set", method: "cp.labels.set" },
+    { tool: "cp_bulk", method: "cp.bulk" },
     { tool: "cp_connect", method: "connect" },
     { tool: "cp_disconnect", method: "disconnect" },
     { tool: "cp_status", method: "status" },

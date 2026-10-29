@@ -17,6 +17,9 @@ export {
   createParamsSchema,
   cpListParamsSchema,
   cpLabelsSetParamsSchema,
+  cpBulkParamsSchema,
+  cpBulkResultSchema,
+  CP_BULK_ACTIONS,
   createManyParamsSchema,
   expandIdPattern,
   hasIdPatternPlaceholder,
@@ -31,7 +34,7 @@ export {
   SCENARIO_RUNS_PAGE_DEFAULT,
   SCENARIO_RUNS_PAGE_MAX,
 } from "./methods";
-export type { Blueprint, ServerInfo } from "./methods";
+export type { Blueprint, CpBulkResult, ServerInfo } from "./methods";
 
 /** Every valid rpc method id. */
 export type RpcMethod = keyof typeof METHODS;

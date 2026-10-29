@@ -78,7 +78,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(44);
+    expect(EXPLICIT_METHODS).toHaveLength(45);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -258,5 +258,46 @@ describe("charge-point labels (#446)", () => {
     expect(params.safeParse({ cpId: "CP", labels }).success).toBe(true);
     expect(params.safeParse({ cpId: "CP", labels: {} }).success).toBe(true);
     expect(params.safeParse({ cpId: "CP" }).success).toBe(false);
+  });
+});
+
+describe("cp.bulk (#470)", () => {
+  const params = METHODS["cp.bulk"].params;
+
+  it.each(["connect", "disconnect", "reset"] as const)(
+    "accepts %s on a non-empty selector",
+    (action) => {
+      expect(params.parse({ labels: { site: "s1" }, action })).toEqual({
+        labels: { site: "s1" },
+        action,
+      });
+    },
+  );
+
+  it("refuses an empty or missing selector rather than acting on every charge point", () => {
+    expect(params.safeParse({ labels: {}, action: "reset" }).success).toBe(
+      false,
+    );
+    expect(params.safeParse({ action: "reset" }).success).toBe(false);
+  });
+
+  it("refuses an unknown action, a missing one and an unknown field", () => {
+    const labels = { site: "s1" };
+    expect(params.safeParse({ labels, action: "delete" }).success).toBe(false);
+    expect(params.safeParse({ labels }).success).toBe(false);
+    expect(
+      params.safeParse({ labels, action: "reset", cpId: "CP" }).success,
+    ).toBe(false);
+  });
+
+  it("reports every matched, succeeded and failed id", () => {
+    const result = METHODS["cp.bulk"].result;
+    expect(
+      result.safeParse({
+        matched: ["A", "B"],
+        succeeded: ["A"],
+        failed: [{ cpId: "B", reason: "Connection timeout" }],
+      }).success,
+    ).toBe(true);
   });
 });

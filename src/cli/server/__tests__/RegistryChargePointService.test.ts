@@ -738,6 +738,67 @@ describe("RegistryChargePointService", () => {
   });
 });
 
+describe("RegistryChargePointService label selection (#470)", () => {
+  function labelledFleet() {
+    const { registry, service } = createFacade();
+    const fleet: Array<[string, Record<string, string> | undefined]> = [
+      ["A", { site: "s1", env: "lab" }],
+      ["B", { site: "s1", env: "prod" }],
+      ["C", { site: "s2", env: "lab" }],
+      ["D", undefined],
+    ];
+    const statusSpies = new Map(
+      fleet.map(([cpId, labels]) => {
+        const perCp = registry.create(
+          {
+            cpId,
+            wsUrl: "ws://example.test/ocpp",
+            connectors: 1,
+            vendor: "FacadeVendor",
+            model: "FacadeModel",
+            basicAuth: null,
+            labels,
+          },
+          { seedDefault: false },
+        );
+        return [cpId, vi.spyOn(perCp, "getStatus")] as const;
+      }),
+    );
+    return { service, statusSpies };
+  }
+
+  it("selects the charge points carrying every pair, from init alone", () => {
+    const { service, statusSpies } = labelledFleet();
+
+    expect(service.selectChargePointIds({ site: "s1" })).toEqual(["A", "B"]);
+    expect(service.selectChargePointIds({ site: "s1", env: "lab" })).toEqual([
+      "A",
+    ]);
+    expect(service.selectChargePointIds({ site: "nowhere" })).toEqual([]);
+    expect(service.selectChargePointIds({})).toEqual(["A", "B", "C", "D"]);
+    expect(service.selectChargePointIds(undefined)).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+    ]);
+    // Selection reads `getInit().labels`; no status snapshot is built.
+    for (const spy of statusSpies.values()) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("builds a status snapshot only for the charge points that match", async () => {
+    const { service, statusSpies } = labelledFleet();
+
+    const listed = await service.listChargePoints({ env: "lab" });
+
+    expect(listed.map((cp) => cp.id)).toEqual(["A", "C"]);
+    expect(statusSpies.get("A")).toHaveBeenCalled();
+    expect(statusSpies.get("C")).toHaveBeenCalled();
+    expect(statusSpies.get("B")).not.toHaveBeenCalled();
+    expect(statusSpies.get("D")).not.toHaveBeenCalled();
+  });
+});
+
 function createFacade(registryOptions?: {
   soapPublicBaseUrl: string;
   soapPath: string;

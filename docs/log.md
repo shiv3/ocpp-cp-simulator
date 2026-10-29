@@ -1785,3 +1785,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The quoted-value pattern stopped at a raw newline, so a multi-line `privateKey="-----BEGIN…"` in non-JSON text had its later PEM lines logged in clear (on `main` the whole value leaked). A quoted secret now runs to its first unescaped closing quote across lines; with no closing quote at all, the rest of the message is redacted. Separate assignments still stop at their own closing quotes.
 - [Log format](concepts/log-format.md): Redaction section states the multi-line and end-of-message rules.
+
+## [2026-10-29] ingest | Confine quoted secrets to their line, PEM excepted (#401 review)
+
+- With the closed-quote match spanning lines, `password="a` followed on the next line by `privateKey="SECRET"` closed on the quote opening `SECRET` and logged it. A quoted secret now ends at its closing quote on the same line, or at the end of the line; only a `-----BEGIN` (PEM) value spans lines, up to its closing quote or the end of the message. The cases of this review round are one table-driven test in `redaction.test.ts`.
+- [Log format](concepts/log-format.md): Redaction section states the line rule, the PEM exception, and two remaining limits (backslash line continuation, an unterminated PEM followed by an assignment), tracked in #515.
+- [GitHub issues](sources/github-issues.md): #515 row.

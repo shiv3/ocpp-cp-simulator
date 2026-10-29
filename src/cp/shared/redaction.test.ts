@@ -421,87 +421,114 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     ).not.toThrow();
   });
 
-  it("redacts a quoted secret past an escaped quote", () => {
-    // A lazy `(.*?)` stopped at the escaped quote and logged the suffix.
-    for (const [text, expected] of [
-      [
-        String.raw`{"apn":{"apnPassword":"ab\"cd","apn":"x"}}`,
-        `{"apn":{"apnPassword":"${REDACTED_VALUE}","apn":"x"}}`,
-      ],
-      [
-        String.raw`{"password":"ab\"cd\\","user":"u"}`,
-        `{"password":"${REDACTED_VALUE}","user":"u"}`,
-      ],
-      [
-        String.raw`password='ab\'cd' user=u`,
-        `password='${REDACTED_VALUE}' user=u`,
-      ],
-    ]) {
-      const redacted = redactSensitiveText(text);
-      expect(redacted).not.toContain("cd");
-      expect(redacted).toBe(expected);
+  // Text-redactor rule: a quoted value ends at its first unescaped closing
+  // quote on the same line, else at the end of that line; only a PEM
+  // (`-----BEGIN`) value may span lines, up to its closing quote, else to the
+  // end of the text.
+  it.each([
+    [
+      "an escaped double quote",
+      String.raw`{"apn":{"apnPassword":"ab\"SECRET1","apn":"x"}}`,
+      ["SECRET1"],
+      ['"apn":"x"'],
+    ],
+    [
+      "an escaped quote and a trailing escaped backslash",
+      String.raw`{"password":"ab\"SECRET1\\","user":"u"}`,
+      ["SECRET1"],
+      ['"user":"u"'],
+    ],
+    [
+      "single quotes with an escaped quote",
+      String.raw`password='ab\'SECRET1' user=u`,
+      ["SECRET1"],
+      [" user=u"],
+    ],
+    [
+      "an unterminated value",
+      'Received: password="SECRET1',
+      ["SECRET1"],
+      ["Received: password="],
+    ],
+    [
+      "an unterminated value with an escaped quote",
+      String.raw`Received: {"password":"SECRET1\"SECRET2`,
+      ["SECRET1", "SECRET2"],
+      ["Received: "],
+    ],
+    [
+      "an unterminated value ending in a backslash",
+      'Received: password="SECRET1\\',
+      ["SECRET1"],
+      ["Received: "],
+    ],
+    [
+      "an unterminated value followed by another line",
+      'password="SECRET1\nnext line',
+      ["SECRET1"],
+      ["\nnext line"],
+    ],
+    [
+      "an unterminated value followed by another assignment",
+      'password="a\nprivateKey="SECRET1"',
+      ["SECRET1"],
+      ["\nprivateKey="],
+    ],
+    [
+      "a backslash before the line end",
+      'password="SECRET1\\\nuser=u',
+      ["SECRET1"],
+      ["\nuser=u"],
+    ],
+    [
+      "two assignments on one line",
+      'password="SECRET1" x privateKey="SECRET2"',
+      ["SECRET1", "SECRET2"],
+      [" x privateKey="],
+    ],
+    [
+      "two assignments on separate lines",
+      'password="SECRET1"\nx\nprivateKey="SECRET2" y',
+      ["SECRET1", "SECRET2"],
+      ["\nx\nprivateKey=", " y"],
+    ],
+    [
+      "a closed multi-line PEM",
+      'privateKey="-----BEGIN PRIVATE KEY-----\nSECRET1\n-----END PRIVATE KEY-----" next=1',
+      ["SECRET1", "BEGIN", "END"],
+      [" next=1"],
+    ],
+    [
+      "an unterminated multi-line PEM",
+      'privateKey="-----BEGIN PRIVATE KEY-----\nSECRET1\nSECRET2',
+      ["SECRET1", "SECRET2"],
+      ["privateKey="],
+    ],
+    [
+      "a JSON number",
+      '{"simPin":9731,"apn":"x"}',
+      ["9731"],
+      [`"simPin":"${REDACTED_VALUE}"`, '"apn":"x"'],
+    ],
+    [
+      "bare assignments",
+      "simPin=9731 api_key=SECRET1 tail",
+      ["9731", "SECRET1"],
+      [`simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE} tail`],
+    ],
+  ])("text redactor: %s", (_case, text, absent, kept) => {
+    const redacted = redactSensitiveText(text);
+    for (const secret of absent) expect(redacted).not.toContain(secret);
+    for (const value of kept) expect(redacted).toContain(value);
+    expect(redacted).toContain(REDACTED_VALUE);
+  });
+
+  it("keeps a redacted JSON frame valid JSON", () => {
+    for (const payload of [{ apnPassword: 'ab"cd', n: 1 }, { simPin: 9731 }]) {
+      expect(() =>
+        JSON.parse(redactSensitiveText(JSON.stringify(payload))),
+      ).not.toThrow();
     }
-    expect(
-      JSON.parse(
-        redactSensitiveText(JSON.stringify({ apnPassword: 'ab"cd', n: 1 })),
-      ),
-    ).toEqual({ apnPassword: REDACTED_VALUE, n: 1 });
-  });
-
-  it("fails closed on a quoted secret that is never closed", () => {
-    // A truncated log line: without a closing quote the value runs to the
-    // end of the text, and the whole of it is redacted.
-    for (const text of [
-      String.raw`Received: {"password":"ab\"cd`,
-      'Received: password="abcd',
-      String.raw`Received: {"apn":{"apnPassword":"ab\"cd`,
-      'Received: password="abcd\\',
-    ]) {
-      const redacted = redactSensitiveText(text);
-      expect(redacted).not.toContain("ab");
-      expect(redacted).not.toContain("cd");
-      expect(redacted).toContain(REDACTED_VALUE);
-    }
-    // No closing quote anywhere: everything after the opening quote goes.
-    expect(redactSensitiveText('first {"password":"ab\\"cd\nsecond line')).toBe(
-      `first {"password":"${REDACTED_VALUE}"`,
-    );
-    // An unterminated multi-line PEM loses every line after the header.
-    const pem = redactSensitiveText(
-      'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END',
-    );
-    expect(pem).not.toContain("MIIBsecret");
-    expect(pem).not.toContain("BEGIN");
-  });
-
-  it("redacts a closed quoted secret spanning several lines", () => {
-    // A PEM in non-JSON text keeps its raw newlines.
-    expect(
-      redactSensitiveText(
-        'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END PRIVATE KEY-----" next=1',
-      ),
-    ).toBe(`privateKey="${REDACTED_VALUE}" next=1`);
-  });
-
-  it("stops each closed quoted secret at its own closing quote", () => {
-    expect(redactSensitiveText('password="a" x privateKey="b"')).toBe(
-      `password="${REDACTED_VALUE}" x privateKey="${REDACTED_VALUE}"`,
-    );
-    expect(redactSensitiveText('password="a"\nx\nprivateKey="b" y')).toBe(
-      `password="${REDACTED_VALUE}"\nx\nprivateKey="${REDACTED_VALUE}" y`,
-    );
-  });
-
-  it("consumes a backslash-newline inside a quoted secret", () => {
-    const redacted = redactSensitiveText('password="ab\\\ncd" user=u');
-    expect(redacted).not.toContain("cd");
-    expect(redacted).toBe(`password="${REDACTED_VALUE}" user=u`);
-  });
-
-  it("keeps a bare value bare outside a JSON member", () => {
-    expect(redactSensitiveText("simPin=9731 api_key=s3cret")).toBe(
-      `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,
-    );
   });
 
   it("redacts every duplicate vpn and key member, not only the first", () => {

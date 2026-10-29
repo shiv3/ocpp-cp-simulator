@@ -91,11 +91,16 @@ every `vpn` member, is redacted. A redacted scalar inside a JSON member
 `"[redacted]"`, so the frame stays valid JSON: the [trace adapter](trace-format.md#producing-records)
 gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
 object or array held by a secret-named member does not get that guarantee. A
-quoted value is redacted whole: an escaped quote inside it (`"ab\"cd"`) does
-not end the match early, a value spanning several lines (a PEM in non-JSON
-text) is redacted up to its closing quote, and a value whose closing quote
-never comes (a truncated message) is redacted to the end of the message
-(#401).
+quoted value stays on its line: it ends at the first unescaped closing quote
+on that line (an escaped quote, `"ab\"cd"`, does not end it), or at the end
+of the line when none comes (a truncated message), so an assignment on the
+next line is still matched on its own. Only a value starting with
+`-----BEGIN` (a PEM in non-JSON text) spans lines, up to its closing quote,
+or to the end of the message without one (#401). Two limits remain, tracked
+with the other text-redactor gaps in #515: a backslash at the end of a line
+does not carry a value onto the next line, so a continuation line stays
+readable; and a PEM value that lacks its closing quote ends at the next
+quote, so an assignment after it can be read.
 
 ## WebSocket close lines
 

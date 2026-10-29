@@ -20,15 +20,18 @@ const SENSITIVE_KEY_NAMES = new Set([
 const SENSITIVE_ASSIGNMENT_NAMES =
   "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|simPin|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
 /**
- * The quoted value runs to its first unescaped closing quote, across lines
- * (a PEM in non-JSON text keeps its raw newlines) and past escape sequences
- * (`"ab\"cd"`), so no suffix is left in clear. It fails closed: a value
- * whose closing quote never comes (a truncated message) is redacted to the
- * end of the text.
+ * A quoted value is confined to its line: it ends at the first unescaped
+ * closing quote on that line (`"ab\"cd"` is one value), or, when none comes
+ * (a truncated message), at the end of the line, so the next line's own
+ * assignment is still seen. Only a PEM (`-----BEGIN`) value, which keeps raw
+ * newlines in non-JSON text, spans lines: up to its closing quote, else to
+ * the end of the text. Both fail closed.
  */
+const QUOTED_PEM_VALUE = `(?=-----BEGIN)(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\])*\\2|[\\s\\S]*)`;
+const QUOTED_LINE_VALUE = `(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n])*\\2|[^\\n]*`;
 const SENSITIVE_ASSIGNMENT = new RegExp(
   `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])` +
-    `(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\])*\\2|[\\s\\S]*)`,
+    `(?:${QUOTED_PEM_VALUE}|${QUOTED_LINE_VALUE})`,
   "g",
 );
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(

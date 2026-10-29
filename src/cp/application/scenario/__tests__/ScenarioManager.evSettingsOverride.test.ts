@@ -361,6 +361,26 @@ describe("ScenarioManager EV settings override ownership (#333)", () => {
     expect(connector.evSettings.targetSoc).toBe(66);
   });
 
+  it("a run whose callbacks cannot apply EV settings claims nothing", async () => {
+    const connector = makeConnector();
+    const chargePoint = makeChargePointStub();
+    // Callbacks without `onSetEVSettings`: the executor skips the declared
+    // evSettings, so the declaration never becomes a claim.
+    const manager = new ScenarioManager(connector, chargePoint, () => {
+      const { onSetEVSettings: _cannotApply, ...callbacks } =
+        createScenarioExecutorCallbacks({ chargePoint, connector });
+      void _cannotApply;
+      return callbacks;
+    });
+    connector.applyEvSettingsOverride({ targetSoc: 66 });
+    manager.loadScenarios([completingScenario("blind", { targetSoc: 55 })]);
+
+    await manager.executeScenario("blind");
+
+    expect(connector.evSettings.targetSoc).toBe(66);
+    expect(defaultPropagationLands(connector, 99)).toBe(false);
+  });
+
   it("a run that actually claimed since keeps its override when the earlier run ends", async () => {
     const { connector, manager } = newManager();
     manager.loadScenarios([

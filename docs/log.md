@@ -1725,6 +1725,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
 - [GitHub issues](sources/github-issues.md): #443.
 
+## [2026-10-29] ingest | Network simulation latency example (#497)
+
+- [Network simulation → Rule schema and example](concepts/network-simulation.md#rule-schema-and-example): the latency example carried `messageType`, which the daemon rejects as an unknown field; it now uses `match.actions`, and the section lists the latency rule's fields and the unknown-field error.
+
 ## [2026-10-29] ingest | Scenario definitions without `--state-db` (#495)
 
 - A daemon without `--state-db` built its scenario repositories on a `null` database, the browser's Remote-mode no-op: a definition saved over RPC (the web console's Library) was dropped and `scenario.definitions.list` never returned it, and a charge point's own scenarios (the seeded default) never reached a store the RPC layer reads. The Library editor and a run's panel showed "Scenario not found".

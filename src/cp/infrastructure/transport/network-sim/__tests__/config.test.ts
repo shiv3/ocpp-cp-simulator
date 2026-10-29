@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { deriveSeed32 } from "../SeededRng";
@@ -1393,5 +1395,36 @@ describe("resolveNetworkSimConfig", () => {
         "CP-A",
       ),
     ).toThrow(/64/);
+  });
+});
+
+describe("the documented rule example (#497)", () => {
+  const doc = readFileSync(
+    new URL(
+      "../../../../../../docs/concepts/network-simulation.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const section = doc.slice(doc.indexOf("## Rule schema and example"));
+  const example = /```json\n([\s\S]*?)\n```/.exec(section)?.[1];
+
+  it("is a layer config the daemon accepts", () => {
+    expect(example).toBeDefined();
+    expect(validateLayerConfig(JSON.parse(example!))).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
+  });
+
+  it("rejects a field a rule does not have, such as messageType", () => {
+    expectInvalid(
+      {
+        enabled: true,
+        rules: {
+          lag: { type: "latency", delayMs: 300, messageType: "CALL" },
+        },
+      },
+      ["config.rules.lag.messageType: unknown field"],
+    );
   });
 });

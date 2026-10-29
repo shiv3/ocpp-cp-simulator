@@ -9,6 +9,7 @@ import {
   runMigrations,
 } from "../schema";
 import { SqliteConnectorRuntimeRepository } from "../SqliteConnectorRuntimeRepository";
+import { legacyGeneratedBaseId } from "../legacyStartupInstances";
 import type { ConnectorRuntimeSnapshot } from "../ConnectorRuntimeRepository";
 import { OCPPStatus } from "../../types/OcppTypes";
 
@@ -653,13 +654,55 @@ describe("startup scenario provenance schema, v18 (#338)", () => {
     db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
   }
 
-  it("adds a nullable startup_source column and keeps every existing row", () => {
+  it("recognises exactly the ids older builds generated", () => {
+    // Table test of the two shapes the deleted prunes matched: the
+    // `-<epoch ms>` suffix `--scenario` minted through 0f6f951, and the
+    // template instance id minted through v0.9.0. Anchored on a 13+ digit
+    // epoch, on the row's own connector and (templates) charge point.
+    const cases: Array<[string, number, string, string | null]> = [
+      ["CP", 1, "demo-c1-1757200000000", "demo"],
+      ["CP", 2, "demo-c2-17572000000001", "demo"],
+      ["CP", 1, "a.b-c1-1757200000000", "a.b"],
+      [
+        "CP",
+        1,
+        "essential-cp-behavior-CP-c1-1760000000000-abc123",
+        "essential-cp-behavior",
+      ],
+      [
+        "C.P",
+        3,
+        "full-charging-cycle-C.P-c3-1760000000000-z9",
+        "full-charging-cycle",
+      ],
+      // Not generated: no epoch, a short number, another connector, another
+      // charge point, a trailing word.
+      ["CP", 1, "demo-c1", null],
+      ["CP", 1, "demo", null],
+      ["CP", 1, "demo-c1-manual", null],
+      ["CP", 1, "demo-c1-42", null],
+      ["CP", 1, "demo-c1-202610291200", null],
+      ["CP", 1, "demo-c2-1757200000000", null],
+      ["CP", 1, "essential-cp-behavior-OTHER-c1-1760000000000-abc123", null],
+      ["CP", 1, "essential-cp-behavior-CP-c1-123-abc123", null],
+      ["CP", 1, "essential-cp-behavior-CP-c1-1760000000000-ABC", null],
+      ["CP", 1, "demo-c1-1757200000000-final", null],
+      ["CP", 1, "user-authored", null],
+    ];
+    for (const [cpId, connectorId, id, base] of cases) {
+      expect({
+        id,
+        base: legacyGeneratedBaseId(cpId, connectorId, id),
+      }).toEqual({ id, base });
+    }
+  });
+
+  it("adds a nullable startup_source column, keeps every row and marks only generated legacy ids", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       rebuildV17Scenarios(db);
       // What a v17 database can hold: a user scenario, a stable startup id
-      // (#314) and the clock-suffixed ids older builds minted. None of them
-      // says where it came from.
+      // (#314) and the clock-suffixed ids older builds minted.
       const ids = [
         "user-authored",
         "demo-c1",
@@ -681,17 +724,21 @@ describe("startup scenario provenance schema, v18 (#338)", () => {
         .all<{ name: string }>("PRAGMA table_info(scenarios)")
         .map((c) => c.name);
       expect(columns).toContain("startup_source");
-      // Nothing dropped, nothing marked: a row written before the column
-      // existed is indistinguishable from a user-authored one, which is the
-      // direction that never deletes it.
+      // Nothing dropped. The two clock-suffixed ids are recorded as legacy
+      // generated instances of their base; everything else — including the
+      // stable `demo-c1`, which could as well be an operator's — stays NULL.
       const rows = db.all<{ scenario_id: string; startup_source: unknown }>(
         "SELECT scenario_id, startup_source FROM scenarios ORDER BY scenario_id",
       );
-      expect(rows).toEqual(
-        [...ids]
-          .sort()
-          .map((id) => ({ scenario_id: id, startup_source: null })),
-      );
+      expect(rows).toEqual([
+        { scenario_id: "demo-c1", startup_source: null },
+        { scenario_id: "demo-c1-1757200000000", startup_source: "legacy:demo" },
+        {
+          scenario_id: "essential-cp-behavior-CP-c1-1760000000000-abc123",
+          startup_source: "legacy:essential-cp-behavior",
+        },
+        { scenario_id: "user-authored", startup_source: null },
+      ]);
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );

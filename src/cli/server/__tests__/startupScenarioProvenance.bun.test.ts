@@ -145,6 +145,72 @@ function idsOn(svc: CLIChargePointService, connectorId: number): string[] {
 }
 
 const cleanups: Array<() => void | Promise<void>> = [];
+
+/** A schema v17 database holding `seeded`, migrated to the current schema. */
+function v17Database(
+  seeded: ReadonlyArray<
+    readonly [
+      number,
+      string,
+      { readonly triggerOn?: "connect"; readonly enabled?: false }?,
+    ]
+  >,
+): BunSqliteDatabase {
+  const db = memoryDb();
+  db.exec("DROP TABLE scenarios");
+  db.exec(
+    "CREATE TABLE scenarios (" +
+      "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
+      "scenario_id TEXT NOT NULL, name TEXT NOT NULL, " +
+      "enabled INTEGER NOT NULL, updated_at TEXT NOT NULL, " +
+      "definition TEXT NOT NULL, " +
+      "PRIMARY KEY (cp_id, connector_id, scenario_id))",
+  );
+  db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+  for (const [connectorId, id, options] of seeded) {
+    db.run(
+      "INSERT INTO scenarios (cp_id, connector_id, scenario_id, name, " +
+        "enabled, updated_at, definition) VALUES (?, ?, ?, ?, 1, ?, ?)",
+      [
+        CP,
+        connectorId,
+        id,
+        id,
+        "2026-10-01T00:00:00Z",
+        JSON.stringify({
+          ...(JSON.parse(scenarioJson(id, options)) as object),
+          targetId: connectorId,
+          ...(options?.enabled === false ? { enabled: false } : {}),
+        }),
+      ],
+    );
+  }
+  runMigrations(db);
+  return db;
+}
+
+/** Dial the mock CSMS and accept the boot: every connect-triggered scenario
+ *  still loaded auto-starts now. */
+async function acceptBoot(
+  svc: CLIChargePointService,
+  csms: ReturnType<typeof startMockCsms>,
+): Promise<void> {
+  await svc.connect();
+  const bootCall = await csms.waitForCall("BootNotification");
+  csms.replyCallResult(bootCall.messageId, {
+    currentTime: new Date().toISOString(),
+    interval: 300,
+    status: "Accepted",
+  });
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+function activeIds(svc: CLIChargePointService, connectorId: number): string[] {
+  return svc
+    .listScenarios(connectorId)
+    .filter((s) => s.active)
+    .map((s) => s.scenarioId);
+}
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
@@ -345,29 +411,24 @@ describe("one prune rule for startup scenarios (#338)", () => {
     ]);
   });
 
-  it("a seeded default stays unless a startup flag loads over its key", () => {
-    // The startup ids are a namespace. A charge point's seed and a
-    // `--scenario-template` of the same template are the same key; once the
-    // flag has loaded over it the row is the flag's, and a boot without the
-    // flag removes it. A seed nothing loaded over is user-authored.
+  it("a seeded default a startup flag loads over stays user-authored", () => {
+    // A charge point's seed and a `--scenario-template` of the same template
+    // are the same key. The flag replaces the definition but did not create
+    // the row, so the row keeps its NULL provenance and a later boot without
+    // the flag leaves it — the charge point keeps its default, as on main.
     const SEED = "essential-cp-behavior";
-    const seededOnly = memoryDb();
-    const seeded = track(boot(seededOnly, NO_FLAGS, 1));
-    seeded.seedDefaultScenarios(SEED);
-    seeded.cleanup(false);
-    track(boot(seededOnly, NO_FLAGS, 1)).cleanup(false);
-    expect(rows(seededOnly).map((r) => r.scenario_id)).toEqual([`${SEED}-c1`]);
-
-    const takenOver = memoryDb();
-    const first = track(boot(takenOver, NO_FLAGS, 1));
+    const db = memoryDb();
+    const first = track(boot(db, NO_FLAGS, 1));
     first.seedDefaultScenarios(SEED);
     first.cleanup(false);
-    track(boot(takenOver, { ...NO_FLAGS, scenarioTemplate: SEED }, 1)).cleanup(
-      false,
-    );
-    expect(rows(takenOver).map((r) => r.scenario_id)).toEqual([`${SEED}-c1`]);
-    track(boot(takenOver, NO_FLAGS, 1)).cleanup(false);
-    expect(rows(takenOver)).toEqual([]);
+
+    track(boot(db, { ...NO_FLAGS, scenarioTemplate: SEED }, 1)).cleanup(false);
+    expect(rows(db)).toEqual([
+      { connector_id: 1, scenario_id: `${SEED}-c1`, startup_source: null },
+    ]);
+
+    const later = track(boot(db, NO_FLAGS, 1));
+    expect(idsOn(later, 1)).toEqual([`${SEED}-c1`]);
   });
 
   it("a user-authored scenario loaded by RPC survives every boot", () => {
@@ -410,65 +471,87 @@ describe("one prune rule for startup scenarios (#338)", () => {
     expect(rows(db).map((r) => r.scenario_id)).toEqual(["mine", "A-c2-manual"]);
   });
 
-  it("a database written before the migration keeps every scenario", () => {
-    // Acceptance 4. A v17 database has no provenance column, so every row it
-    // holds — including ids an older build generated — reads as user-authored.
-    const dir = tmp();
-    const file = join(dir, "scenario.json");
-    writeFileSync(file, scenarioJson("demo"));
-    const db = memoryDb();
-    db.exec("DROP TABLE scenarios");
-    db.exec(
-      "CREATE TABLE scenarios (" +
-        "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
-        "scenario_id TEXT NOT NULL, name TEXT NOT NULL, " +
-        "enabled INTEGER NOT NULL, updated_at TEXT NOT NULL, " +
-        "definition TEXT NOT NULL, " +
-        "PRIMARY KEY (cp_id, connector_id, scenario_id))",
-    );
-    db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
-    const legacy = [
-      "demo-c1",
+  it("a database written before the migration keeps every scenario no boot replaces", () => {
+    // Acceptance 4. Nothing an operator wrote is lost: a v17 row is NULL, and
+    // an older build's clock-suffixed instance is only removed once a boot
+    // installs its stable successor — which a boot without flags never does.
+    const db = v17Database([
+      [1, "operator-scenario"],
+      [2, "demo-c2"],
+      [1, "demo-c1-1757200000000"],
+      [2, `essential-cp-behavior-${CP}-c2-1760000000000-abc123`],
+    ]);
+    const svc = track(boot(db, NO_FLAGS, 2));
+
+    const expected = [
       "demo-c1-1757200000000",
       "demo-c2",
       `essential-cp-behavior-${CP}-c2-1760000000000-abc123`,
       "operator-scenario",
     ];
-    for (const id of legacy) {
-      const definition = JSON.parse(scenarioJson(id)) as ScenarioDefinition;
-      db.run(
-        "INSERT INTO scenarios (cp_id, connector_id, scenario_id, name, " +
-          "enabled, updated_at, definition) VALUES (?, ?, ?, ?, 1, ?, ?)",
-        [
-          CP,
-          id.includes("-c2") ? 2 : 1,
-          id,
-          id,
-          "2026-10-01T00:00:00Z",
-          JSON.stringify(definition),
-        ],
-      );
-    }
-    runMigrations(db);
-
-    // Boot with a flag that only names c1: under #338's rule a *marked* c2
-    // row would go, but nothing here is marked.
-    const svc = track(
-      boot(db, { ...NO_FLAGS, scenario: file, scenarioConnector: "1" }, 2),
-    );
-
     expect(
       rows(db)
         .map((r) => r.scenario_id)
         .sort(),
-    ).toEqual(
-      // `demo` is new: c1 is the single connector the file targets, so it
-      // loads under its own id beside the rows it does not own.
-      [...legacy, "demo"].sort(),
+    ).toEqual(expected);
+    expect([...idsOn(svc, 1), ...idsOn(svc, 2)].sort()).toEqual(expected);
+  });
+
+  it("upgrading replaces an older build's --scenario instances instead of running them beside the stable ones", async () => {
+    // The duplicate-traffic symptom, on the upgrade path: a pre-#314 state DB
+    // holds `<base>-c<n>-<epoch ms>` copies of the file this boot loads. They
+    // go before the charge point dials; the operator's scenario stays.
+    const dir = tmp();
+    const file = join(dir, "scenario.json");
+    writeFileSync(file, scenarioJson("demo", { triggerOn: "connect" }));
+    const db = v17Database([
+      [1, "demo-c1-1757200000000", { triggerOn: "connect" }],
+      [2, "demo-c2-1757200000000", { triggerOn: "connect" }],
+      // Disabled, so the connector's auto-start slot is the startup one's.
+      [1, "operator-scenario", { enabled: false }],
+    ]);
+    const csms = startMockCsms();
+    cleanups.push(() => csms.stop());
+
+    const svc = track(boot(db, { ...NO_FLAGS, scenario: file }, 2, csms.url));
+    cleanups.push(() => svc.disconnect());
+    expect(rows(db).map((r) => [r.scenario_id, r.startup_source])).toEqual([
+      ["demo-c1", `--scenario=${resolve(file)}`],
+      ["operator-scenario", null],
+      ["demo-c2", `--scenario=${resolve(file)}`],
+    ]);
+
+    await acceptBoot(svc, csms);
+    expect(activeIds(svc, 1)).toEqual(["demo-c1"]);
+    expect(activeIds(svc, 2)).toEqual(["demo-c2"]);
+  });
+
+  it("upgrading replaces an older build's --scenario-template instance, and only on the connector the flag names", () => {
+    const db = v17Database([
+      [1, `essential-cp-behavior-${CP}-c1-1760000000000-abc123`],
+      [2, `essential-cp-behavior-${CP}-c2-1760000000001-def456`],
+      [2, `full-charging-cycle-${CP}-c2-1760000000002-ghi789`],
+      [1, "operator-scenario"],
+    ]);
+    track(
+      boot(
+        db,
+        {
+          ...NO_FLAGS,
+          scenarioTemplate: "essential-cp-behavior",
+          scenarioConnector: "1",
+        },
+        2,
+      ),
     );
-    expect([...idsOn(svc, 1), ...idsOn(svc, 2)].sort()).toEqual(
-      [...legacy, "demo"].sort(),
-    );
+
+    expect(rows(db).map((r) => [r.connector_id, r.scenario_id])).toEqual([
+      [1, "essential-cp-behavior-c1"],
+      [1, "operator-scenario"],
+      // c2 is not configured by this boot, so nothing replaces these.
+      [2, `essential-cp-behavior-${CP}-c2-1760000000001-def456`],
+      [2, `full-charging-cycle-${CP}-c2-1760000000002-ghi789`],
+    ]);
   });
 
   it("leaves the previous boot's instances alone when the flag's file cannot be read", () => {

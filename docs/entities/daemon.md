@@ -369,26 +369,35 @@ The rules, in the order they bite:
   connector, so passing two is refused — at parse time, with a message naming
   the flags it cannot reconcile — rather than silently ranked.
 - **A startup scenario never outlives its configuration** (#338). With
-  `--state-db`, each row a startup flag installs records what generated it —
+  `--state-db`, each row a startup flag creates records what generated it —
   `--scenario=<path>`, `--scenario-template-file=<path>` or
   `--scenario-template=<id>` in `scenarios.startup_source` (schema v18). On
   every boot, before the watches are restored and before any charge point
   dials, each restored charge point loses the marked rows this boot's flags do
   not call for: a connector `--scenario-connector` no longer names, a file
   whose own `id` changed, a switched or dropped flag, a charge point no longer
-  in the bootstrap fleet. A row without provenance is never removed — anything
-  loaded over the control plane or the console under an id no flag generated,
-  a console upload replacing a connector's set, and every row written before
-  v18, including the clock-suffixed instances older builds generated (remove
-  those once with `remove_scenario`). When the flag's file cannot be read, or
-  the template id is unknown, nothing is removed on the fleet's charge points.
-  A row keeps its provenance through a re-save under the same id (a `--watch`
-  reload, a `load_scenario` over it) and loses it only with the row. The
-  startup ids are a namespace: a scenario loaded under one of them is the
-  flag's, and so is a charge point's seeded `essential-cp-behavior-c<n>`
-  once `--scenario-template essential-cp-behavior` has loaded over it — a
-  later boot without the flag removes it, and a restored charge point is not
-  seeded again.
+  in the bootstrap fleet. When the flag's file cannot be read, or the template
+  id is unknown, nothing is removed on the fleet's charge points.
+  - **A row without provenance is never removed**: anything loaded over the
+    control plane or the console under an id no flag created, a console
+    upload replacing a connector's set, and a row written before v18. A flag
+    that loads over such a row — a charge point's seeded
+    `essential-cp-behavior-c<n>`, an operator's scenario under the same id —
+    replaces its definition but leaves it user-authored, so a later boot
+    without the flag keeps it. The flip side: a stable startup row written by
+    a pre-v18 build (`<base>-c<n>`, #314) stays user-authored too, and is not
+    pruned when a later boot narrows the flags; remove it once with
+    `remove_scenario`.
+  - **Clock-suffixed instances of older builds are replaced, not kept beside**:
+    the v18 migration records `<base>-c<n>-<epoch ms>` (`--scenario`, through
+    `0f6f951`) and `<template>-<cpId>-c<n>-<epoch ms>-<suffix>` (template
+    instances, through v0.9.0) as `legacy:<base>`, matched exactly on a 13+
+    digit epoch. Such a row goes on the first boot whose flags install
+    `<base>-c<n>` or `<base>` on that connector, and stays while nothing
+    replaces it.
+  - A marked row keeps its provenance through a re-save under the same id (a
+    `--watch` reload, a `load_scenario` over it) and loses it only with the
+    row: an id a flag created is the flag's.
 - **Blueprints are not watched; the file a blueprint names is.** A blueprint
   lives in the `blueprints` table (#297 declined a watched blueprint file
   deliberately), so a `blueprint.save` edit never reaches a charge point that

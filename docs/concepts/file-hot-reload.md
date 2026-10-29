@@ -442,10 +442,14 @@ hold at once and no single position satisfies all three:
    switched or dropped flag and a charge point that left the bootstrap fleet.
    It replaced two narrower prunes: the `<base>-c<connector>-<epoch ms>` match
    added here for builds through `0f6f951`, and `--scenario-template`'s own
-   per-template cleanup. A row without provenance is never removed, and that
-   includes every row written before v18 — so those clock-suffixed rows stay
-   after an upgrade until an operator removes them. When the flag's file cannot
-   be read, the boot removes nothing on the fleet's charge points.
+   per-template cleanup. Their recognition moved into the v18 migration, which
+   records those clock-suffixed ids exactly as `legacy:<base>`; the same rule
+   removes such a row once the boot installs its stable successor on that
+   connector, which is when the old prunes removed it. A row without
+   provenance is never removed, and a flag that loads over one (a seeded
+   default, an operator's scenario under the same id) leaves it so. When the
+   flag's file cannot be read, the boot removes nothing on the fleet's charge
+   points.
 
    **The file is read once per boot**, and both the claim above and the load use
    that read. Because the load now happens before the dial, the registration's

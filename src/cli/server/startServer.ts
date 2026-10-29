@@ -50,9 +50,10 @@ import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
 import {
   deleteScenarioRow,
   listStartupScenarioRows,
-  markStartupScenario,
+  loadWithStartupProvenance,
 } from "./startupScenarioRows";
 import { scenarioInstanceId } from "../scenarioInstanceId";
+import { LEGACY_STARTUP_SOURCE_PREFIX } from "../../cp/domain/persistence/legacyStartupInstances";
 import { getTemplateById } from "../../utils/scenarioTemplates";
 import * as path from "path";
 
@@ -1048,7 +1049,8 @@ export interface InstalledStartupScenario {
  * still install; an unreadable file installs nothing and reports it.
  * **Provenance**: with a database, every row installed here is marked with
  * the flag that generated it ({@link startupProvenance}, #338), which is what
- * lets a later boot's {@link pruneStaleStartupScenarios} recognise it. Nothing
+ * lets a later boot's {@link pruneStaleStartupScenarios} recognise it — except
+ * a row that already existed user-authored under the same id, which stays so. Nothing
  * is removed here: the prune ran at restore, before anything dialled.
  * **Trigger**: called once per bootstrap charge point, before its dial.
  */
@@ -1093,16 +1095,12 @@ export function installStartupScenario(
   if (mode.kind === "template") {
     for (const connectorId of connectors) {
       try {
-        const scenarioId = svc.loadScenarioTemplate(
-          mode.templateId,
-          connectorId,
-        );
-        markStartupScenario(
+        const scenarioId = loadWithStartupProvenance(
           database,
           svc.getInit().cpId,
           connectorId,
-          scenarioId,
           startupProvenance(mode),
+          () => svc.loadScenarioTemplate(mode.templateId, connectorId),
         );
         installed.push({ connectorId, scenarioId });
         process.stderr.write(
@@ -1137,13 +1135,12 @@ export function installStartupScenario(
     for (const connectorId of connectors) {
       try {
         const instance = instantiateTemplate(template, connectorId);
-        const scenarioId = svc.loadScenario(connectorId, instance);
-        markStartupScenario(
+        const scenarioId = loadWithStartupProvenance(
           database,
           svc.getInit().cpId,
           connectorId,
-          scenarioId,
           startupProvenance(mode),
+          () => svc.loadScenario(connectorId, instance),
         );
         // #314: `prepare` replays the same per-connector rewrite on every
         // reload, so a fan-out across connectors keeps its independent copies
@@ -1211,13 +1208,12 @@ export function installStartupScenario(
           scenarioFileTargetsConnector(next, connectorId, connectors.length)
             ? next
             : instantiateTemplate(next, connectorId);
-        const scenarioId = svc.loadScenario(connectorId, prepare(definition));
-        markStartupScenario(
+        const scenarioId = loadWithStartupProvenance(
           database,
           svc.getInit().cpId,
           connectorId,
-          scenarioId,
           startupProvenance(mode),
+          () => svc.loadScenario(connectorId, prepare(definition)),
         );
         fileReload?.registerScenarioFile({
           filePath: mode.path,
@@ -1679,17 +1675,24 @@ export function startupProvenance(mode: StartupScenarioMode): string {
  * charge point that the boot's flags do not call for.
  *
  * A row is startup-generated when `scenarios.startup_source` is set; a NULL row
- * is user-authored and never touched — which includes every row written before
- * schema v18, whatever its id looks like. What the flags call for is
+ * is user-authored and never touched. What the flags call for is
  * `claims.get(cpId)`, the exact set {@link startupClaimedInstances} predicts
  * and {@link installStartupScenario} then loads: a charge point the flags do
  * not configure (no flag, or not in the bootstrap fleet) keeps nothing marked,
  * and one whose claim is `null` (the boot cannot tell) is left as it is.
  *
+ * A `legacy:<base>` row — a clock-suffixed id an older build generated, marked
+ * by the v18 migration — is called for until the flags call for its stable
+ * successor instead: it goes when this boot installs `<base>-c<connector>` or
+ * `<base>` on the same connector, which is when the builds that minted it
+ * removed it. One nothing replaces (a seeded default, a template loaded over
+ * the control plane) stays, as it did.
+ *
  * This one rule covers every way a previous boot's copy can outlive its
  * configuration: a `--scenario-connector` that no longer names a connector, a
  * file whose own `id` changed, a switched or dropped flag, a charge point that
- * left the fleet. It replaces the two narrower prunes that preceded it — the
+ * left the fleet, and an older build's clock-suffixed copy of what this boot
+ * installs. It replaces the two narrower prunes that preceded it — the
  * `-<epoch ms>` suffix match for `--scenario` and `loadScenarioTemplate`'s
  * per-template cleanup.
  *
@@ -1713,6 +1716,15 @@ export function pruneStaleStartupScenarios(
   );
   for (const row of listStartupScenarioRows(database, cpId)) {
     if (keep.has(`${row.connector_id}\u0000${row.scenario_id}`)) continue;
+    if (row.startup_source.startsWith(LEGACY_STARTUP_SOURCE_PREFIX)) {
+      const base = row.startup_source.slice(
+        LEGACY_STARTUP_SOURCE_PREFIX.length,
+      );
+      const replaced = [base, scenarioInstanceId(base, row.connector_id)].some(
+        (id) => keep.has(`${row.connector_id}\u0000${id}`),
+      );
+      if (!replaced) continue;
+    }
     try {
       if (!svc.removeScenario(row.connector_id, row.scenario_id)) {
         deleteScenarioRow(database, cpId, row.connector_id, row.scenario_id);
@@ -1724,7 +1736,7 @@ export function pruneStaleStartupScenarios(
         row.scenario_id,
       );
       process.stderr.write(
-        `[server] Removed startup scenario "${row.scenario_id}" on ${cpId} connector ${row.connector_id}: generated by ${row.startup_source}, which this boot does not call for (#338)\n`,
+        `[server] Removed startup scenario "${row.scenario_id}" on ${cpId} connector ${row.connector_id}: generated by ${row.startup_source}; this boot does not call for it (#338)\n`,
       );
     } catch (err) {
       process.stderr.write(

@@ -23,7 +23,7 @@ export interface StartupScenarioRow {
  * already loaded, and a row left unmarked reads as user-authored — the
  * direction in which the prune keeps it rather than deleting it.
  */
-export function markStartupScenario(
+function markStartupScenario(
   database: Database | null | undefined,
   cpId: string,
   connectorId: number,
@@ -41,6 +41,59 @@ export function markStartupScenario(
       `[server] could not record startup provenance for ${cpId}/${connectorId}/${scenarioId}: ` +
         `${err instanceof Error ? err.message : String(err)}\n`,
     );
+  }
+}
+
+/**
+ * Run a startup load and record `source` on the row it installs — unless that
+ * row already existed as a user-authored one (#338).
+ *
+ * A flag that loads over an existing NULL row (a charge point's seeded
+ * default, a scenario an operator loaded under the same id, a row written
+ * before schema v18) leaves it user-authored: marking it would hand it to the
+ * prune, and a later boot without the flag would delete a scenario the flag
+ * never created. A row the flag creates, or one it marked before, carries the
+ * flag. Returns the load's scenario id.
+ */
+export function loadWithStartupProvenance(
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number,
+  source: string,
+  load: () => string,
+): string {
+  const userAuthored = userAuthoredScenarioIds(database, cpId, connectorId);
+  const scenarioId = load();
+  if (userAuthored !== null && !userAuthored.has(scenarioId)) {
+    markStartupScenario(database, cpId, connectorId, scenarioId, source);
+  }
+  return scenarioId;
+}
+
+/** Ids of the rows on this connector that carry no provenance, or `null` when
+ *  they cannot be read — the load then marks nothing, the direction in which
+ *  no row is ever handed to the prune by mistake. */
+function userAuthoredScenarioIds(
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number,
+): Set<string> | null {
+  try {
+    return new Set(
+      (
+        database?.all<{ scenario_id: string }>(
+          "SELECT scenario_id FROM scenarios " +
+            "WHERE cp_id = ? AND connector_id = ? AND startup_source IS NULL",
+          [cpId, connectorId],
+        ) ?? []
+      ).map((row) => row.scenario_id),
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[server] could not read scenario provenance for ${cpId}/${connectorId}: ` +
+        `${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return null;
   }
 }
 

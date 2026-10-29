@@ -446,12 +446,13 @@ On the **daemon**, instantiating a template is idempotent per
 same key, and discards its run if one is in flight. Without that, every pod
 restart and every `run_scenario_template` left one more copy behind in
 `--state-db` forever. A different template on the same connector, or the same
-template on another connector, is untouched. Instances an older build
-persisted under the clock-suffixed id above are not recognised any more and
-stay until removed with `remove_scenario`: a stored row cannot say whether a
-startup flag, the control plane or a charge point's seed produced it, and the
-daemon does not delete a scenario on a guess. A `--scenario-template` instance
-from a configuration no longer in force is removed at boot — see
+template on another connector, is untouched. An instance an older build
+persisted under the clock-suffixed id above is recorded as such by the schema
+v18 migration and removed on the first boot whose `--scenario-template`
+installs its successor on that connector; a runtime load does not remove it,
+and nothing removes one that no boot replaces (a seeded default, a template
+loaded over the control plane). A `--scenario-template` instance from a
+configuration no longer in force is removed at boot — see
 [Daemon → File hot-reload](../entities/daemon.md#file-hot-reload).
 
 ## Charging curve (v1.2)

@@ -46,10 +46,11 @@ CREATE TABLE IF NOT EXISTS scenarios (
   updated_at   TEXT NOT NULL,
   definition   TEXT NOT NULL,
   -- #338: which startup flag generated this row, e.g.
-  -- \`--scenario=/abs/path.json\` or \`--scenario-template=<id>\`. NULL means
-  -- user-authored, and a NULL row is never pruned. Written by the daemon's
-  -- startup install only; a re-save under the same key keeps it, deleting the
-  -- row drops it. Every boot removes the marked rows its flags no longer call
+  -- \`--scenario=/abs/path.json\` or \`--scenario-template=<id>\`; or
+  -- \`legacy:<base>\` for a clock-suffixed id an older build generated (set by
+  -- the v18 migration). NULL means user-authored, and a NULL row is never
+  -- pruned. Written by the daemon's startup install on a row it creates;
+  -- a re-save under the same key keeps it, deleting the row drops it. Every boot removes the marked rows its flags no longer call
   -- for — see \`pruneStaleStartupScenarios\` in \`src/cli/server/startServer.ts\`.
   startup_source TEXT,
   PRIMARY KEY (cp_id, connector_id, scenario_id)
@@ -333,6 +334,10 @@ export function perChargePointTables(): readonly string[] {
 }
 
 import type { Database } from "./Database";
+import {
+  LEGACY_STARTUP_SOURCE_PREFIX,
+  legacyGeneratedBaseId,
+} from "./legacyStartupInstances";
 
 /**
  * Thrown when the on-disk DB was written by a future / forward-incompatible
@@ -594,14 +599,43 @@ export function runMigrations(db: Database): void {
   // `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
 
   // v17 → v18 (#338): `scenarios.startup_source`, what generated a startup
-  // row. Nullable and not backfilled on purpose: a row written before the
-  // column existed cannot say whether a flag or an operator produced it, and
-  // NULL reads as user-authored — the direction in which the startup prune
-  // leaves it alone rather than deleting it.
+  // row. A row written before the column existed cannot say whether a flag or
+  // an operator produced it, so it stays NULL — user-authored, the direction
+  // in which the startup prune leaves it alone. The one exception is an id
+  // only a generator ever minted: the clock-suffixed instance ids of older
+  // builds, matched exactly (see `legacyStartupInstances.ts`) and recorded as
+  // `legacy:<base>`. The prune removes such a row once a boot installs its
+  // stable successor on the same connector, as the builds that minted it did.
   if (stored < 18) {
     const cols = db.all<{ name: string }>("PRAGMA table_info(scenarios)");
     if (!new Set(cols.map((c) => c.name)).has("startup_source")) {
       db.exec("ALTER TABLE scenarios ADD COLUMN startup_source TEXT");
+    }
+    const unmarked = db.all<{
+      cp_id: string;
+      connector_id: number;
+      scenario_id: string;
+    }>(
+      "SELECT cp_id, connector_id, scenario_id FROM scenarios " +
+        "WHERE startup_source IS NULL",
+    );
+    for (const row of unmarked) {
+      const base = legacyGeneratedBaseId(
+        row.cp_id,
+        row.connector_id,
+        row.scenario_id,
+      );
+      if (base === null) continue;
+      db.run(
+        "UPDATE scenarios SET startup_source = ? " +
+          "WHERE cp_id = ? AND connector_id = ? AND scenario_id = ?",
+        [
+          `${LEGACY_STARTUP_SOURCE_PREFIX}${base}`,
+          row.cp_id,
+          row.connector_id,
+          row.scenario_id,
+        ],
+      );
     }
   }
 

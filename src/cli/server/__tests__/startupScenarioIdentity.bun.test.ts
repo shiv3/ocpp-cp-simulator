@@ -160,13 +160,13 @@ describe("startup scenario identity across a restart (#314)", () => {
     }
   });
 
-  it("keeps an instance a previous build generated with a clock-based id", async () => {
-    // The upgrade path, and a check #338 deliberately drops. Builds through
-    // 0f6f951 minted `<base>-c<connector>-<epoch ms>`, and #314 pruned that
-    // exact shape on the next boot. Such a row predates provenance
-    // (`scenarios.startup_source`), so it reads as user-authored, and the one
-    // startup prune never deletes a scenario on the strength of what its id
-    // looks like. It stays until an operator removes it.
+  it("leaves an older build's clock-based instance to the boot prune", async () => {
+    // Builds through 0f6f951 minted `<base>-c<connector>-<epoch ms>`. The
+    // install itself no longer removes such a row: the schema v18 migration
+    // records it as `legacy:<base>` and the daemon's one startup prune removes
+    // it at restore, once the boot installs its stable successor (#338, see
+    // `startupScenarioProvenance.bun.test.ts`). Without a state DB nothing is
+    // recorded, and nothing here prunes.
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-identity-legacy-"));
     const file = join(tmpDir, "template.json");
     writeFileSync(file, scenarioJson("startup-template", 11));

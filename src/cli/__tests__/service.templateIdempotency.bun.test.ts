@@ -110,14 +110,14 @@ describe("template instantiation is idempotent per (template, connector)", () =>
     expect(idsOn(restarted, 1)).toEqual([kept]);
   });
 
-  it("keeps instances older builds left behind: they are no longer recognised, and a scenario is never deleted on a guess", () => {
-    // The check the per-template cleanup pass made and #338 deliberately
-    // drops. It matched the old clock-suffixed id format (rows without a
-    // `templateId`) and any instance carrying this `templateId`, whatever its
-    // id. Such a row cannot say whether a startup flag, the control plane or a
-    // charge-point seed produced it, and the acceptance for #338 is that a
-    // database written before provenance existed keeps every scenario. An
-    // operator removes these once with `remove_scenario`.
+  it("does not remove instances older builds left behind when loading a template at runtime", () => {
+    // The check the per-template cleanup pass made, moved (#338). It matched
+    // the old clock-suffixed id format and any instance carrying this
+    // `templateId`, whatever its id. A runtime load no longer removes
+    // anything; the schema v18 migration records the clock-suffixed shape as
+    // `legacy:<template>`, and the daemon's one startup prune removes it on
+    // the first boot whose `--scenario-template` installs the stable
+    // successor. An instance under another id is the operator's and stays.
     const db = BunSqliteDatabase.open(":memory:");
     const service = newService(db);
     const template = service.getScenario(

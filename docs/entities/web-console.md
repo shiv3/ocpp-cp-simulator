@@ -16,7 +16,7 @@ related:
   - ../concepts/vehicle-profiles.md
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Web console (browser UI)
@@ -924,7 +924,10 @@ scenario or a copy of one (`libraryId`). All use the same content
   **Save**) under the line "This scenario has joins or loops; the full graph
   editor is used", with **Steps** disabled. Once open, that editor stays for
   the visit even when an edit makes the scenario drawable again (picking
-  **Steps** leaves it).
+  **Steps** leaves it). A **Meter Value** node there shows the connector's
+  live meter reading once the connector reports one, and its configured
+  value until then (always in the Library editor, which has no connector);
+  a reading is not an edit — no unsaved change, no undo step.
 
 The two views share the drag
 ([`useLaneDrag`](../../src/console/lib/useLaneDrag.ts), pointer events, no

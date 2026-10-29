@@ -59,7 +59,7 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
     const server = await startTestServer({ database: db });
     cleanups.push(() => server.close());
 
-    // Upload persist — exactly what persistEditorScenario() sends.
+    // Upload persist — a replace of the connector's definition set.
     const client = await connectTestClient(server);
     cleanups.push(() => client.close());
     const replaceAck = await emitRpc(client, {

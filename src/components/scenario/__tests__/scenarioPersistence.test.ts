@@ -1,14 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  createLatestWinsSaver,
-  persistEditorScenario,
   retargetScenarioToConnector,
   saveEditorScenario,
-  scenarioAutosaveSuppressionFingerprint,
-  shouldSuppressAppliedScenarioAutosave,
 } from "../scenarioPersistence";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
-import { deferred, type Deferred } from "../../../test/deferred";
 
 const scenario = (id: string): ScenarioDefinition =>
   ({
@@ -50,16 +45,6 @@ function makeRemoteStyleService(existing: ScenarioDefinition[] = []) {
           return definition;
         },
       ),
-      replaceConnectorScenarioDefinitions: vi.fn(
-        async (
-          _cpId: string,
-          _connectorId: number | null,
-          definitions: readonly ScenarioDefinition[],
-        ) => {
-          stored = [...definitions];
-          return stored;
-        },
-      ),
       loadScenario: vi.fn(
         async (
           _cpId: string,
@@ -77,43 +62,37 @@ function makeRemoteStyleService(existing: ScenarioDefinition[] = []) {
   };
 }
 
-async function flushPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
+describe("saveEditorScenario (single definition upsert)", () => {
+  it("upserts through saveScenarioDefinition without pruning siblings", async () => {
+    const chargePointService = makeService([scenario("old-a")]);
+    const edited = scenario("edited-1");
 
-describe("persistEditorScenario (scenario upload / template replace persistence — #101)", () => {
-  it("replaces the connector definition set with the uploaded scenario through the service port", async () => {
-    const stale = scenario("old-a");
-    const keep = scenario("new-1");
-    const chargePointService = makeService([stale, keep]);
-    const uploaded = scenario("new-1");
-
-    await persistEditorScenario(
+    await saveEditorScenario(
       {
         mode: "local",
         chargePointService,
         cpId: "CP1",
         connectorId: 1,
       },
-      uploaded,
+      edited,
     );
 
-    expect(chargePointService.listScenarioDefinitions).toHaveBeenCalledWith(
+    expect(chargePointService.saveScenarioDefinition).toHaveBeenCalledWith(
       "CP1",
       1,
+      edited,
     );
+    expect(chargePointService.listScenarioDefinitions).not.toHaveBeenCalled();
     expect(
       chargePointService.replaceConnectorScenarioDefinitions,
-    ).toHaveBeenCalledWith("CP1", 1, [uploaded]);
-    expect(chargePointService.saveScenarioDefinition).not.toHaveBeenCalled();
+    ).not.toHaveBeenCalled();
     expect(chargePointService.loadScenario).not.toHaveBeenCalled();
   });
 
-  it("serializes the graph before replace persistence", async () => {
+  it("serializes the graph before persisting it", async () => {
     const chargePointService = makeService([]);
-    const uploaded = {
-      ...scenario("new-1"),
+    const edited = {
+      ...scenario("edited-1"),
       nodes: [
         {
           id: "meter-1",
@@ -143,19 +122,18 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
       ],
     } as unknown as ScenarioDefinition;
 
-    await persistEditorScenario(
+    await saveEditorScenario(
       {
         mode: "local",
         chargePointService,
         cpId: "CP1",
         connectorId: 1,
       },
-      uploaded,
+      edited,
     );
 
     const persisted =
-      chargePointService.replaceConnectorScenarioDefinitions.mock
-        .calls[0][2][0];
+      chargePointService.saveScenarioDefinition.mock.calls[0][2];
     expect(persisted.nodes[0]).not.toHaveProperty("selected");
     expect(persisted.nodes[0]).not.toHaveProperty("dragging");
     expect(persisted.nodes[0].data).not.toHaveProperty("progress");
@@ -167,157 +145,6 @@ describe("persistEditorScenario (scenario upload / template replace persistence 
       source: "start",
       target: "meter-1",
     });
-    expect(chargePointService.loadScenario).not.toHaveBeenCalled();
-  });
-
-  it("persists and activates the remote runtime after autosave replace", async () => {
-    const stale = scenario("stale");
-    const edited = scenario("edited");
-    const remote = makeRemoteStyleService([stale]);
-
-    await persistEditorScenario(
-      {
-        mode: "remote",
-        chargePointService: remote.service,
-        cpId: "CP1",
-        connectorId: 1,
-      },
-      edited,
-    );
-
-    expect(
-      remote.service.replaceConnectorScenarioDefinitions,
-    ).toHaveBeenCalledWith("CP1", 1, [edited]);
-    expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
-    expect(remote.getStored()).toEqual([edited]);
-    expect(remote.getActive()).toEqual(edited);
-  });
-
-  it("does not re-activate remote import/template applies on the matching autosave pass", async () => {
-    const imported = {
-      ...scenario("imported"),
-      updatedAt: "2026-06-30T00:00:00.000Z",
-    };
-    const remote = makeRemoteStyleService([scenario("old")]);
-    const suppression = {
-      scenarioId: imported.id,
-      updatedAt: imported.updatedAt,
-      fingerprint: scenarioAutosaveSuppressionFingerprint(imported),
-    };
-
-    await persistEditorScenario(
-      {
-        mode: "remote",
-        chargePointService: remote.service,
-        cpId: "CP1",
-        connectorId: 1,
-      },
-      imported,
-    );
-
-    expect(shouldSuppressAppliedScenarioAutosave(suppression, imported)).toBe(
-      true,
-    );
-    if (!shouldSuppressAppliedScenarioAutosave(suppression, imported)) {
-      await persistEditorScenario(
-        {
-          mode: "remote",
-          chargePointService: remote.service,
-          cpId: "CP1",
-          connectorId: 1,
-        },
-        imported,
-      );
-    }
-
-    expect(remote.service.loadScenario).toHaveBeenCalledTimes(1);
-    expect(remote.service.loadScenario).toHaveBeenCalledWith(
-      "CP1",
-      1,
-      imported,
-    );
-    expect(remote.getStored()).toEqual([imported]);
-    expect(remote.getActive()).toEqual(imported);
-    expect(
-      shouldSuppressAppliedScenarioAutosave(suppression, {
-        ...imported,
-        name: "Autosave-normalized name",
-      }),
-    ).toBe(false);
-  });
-
-  it("does not arm autosave suppression when a delayed apply persist rejects (#101 / #165)", async () => {
-    // ScenarioEditor arms the applied-scenario autosave suppression only in
-    // persistEditorScenario(...).then(...). If the replace rejects, arm() must
-    // never run — otherwise the 400ms fallback autosave matches the
-    // fingerprint, clears the marker, skips its write, and silently drops the
-    // imported/template scenario.
-    const imported = {
-      ...scenario("imported"),
-      updatedAt: "2026-06-30T00:00:00.000Z",
-    };
-    const remote = makeRemoteStyleService([scenario("old")]);
-    const gate = deferred();
-    remote.service.replaceConnectorScenarioDefinitions.mockImplementationOnce(
-      () => gate.promise as unknown as Promise<ScenarioDefinition[]>,
-    );
-
-    let armed: Parameters<typeof shouldSuppressAppliedScenarioAutosave>[0] =
-      null;
-    const apply = persistEditorScenario(
-      {
-        mode: "remote",
-        chargePointService: remote.service,
-        cpId: "CP1",
-        connectorId: 1,
-      },
-      imported,
-    )
-      .then(() => {
-        armed = {
-          scenarioId: imported.id,
-          updatedAt: imported.updatedAt,
-          fingerprint: scenarioAutosaveSuppressionFingerprint(imported),
-        };
-      })
-      .catch(() => {
-        /* apply failed → suppression intentionally left unarmed */
-      });
-
-    gate.reject(new Error("replace failed"));
-    await apply;
-    await flushPromises();
-
-    expect(armed).toBeNull();
-    // Unarmed suppression → the fallback autosave is free to persist the import.
-    expect(shouldSuppressAppliedScenarioAutosave(armed, imported)).toBe(false);
-  });
-});
-
-describe("saveEditorScenario (single definition upsert)", () => {
-  it("upserts through saveScenarioDefinition without pruning siblings", async () => {
-    const chargePointService = makeService([scenario("old-a")]);
-    const edited = scenario("edited-1");
-
-    await saveEditorScenario(
-      {
-        mode: "local",
-        chargePointService,
-        cpId: "CP1",
-        connectorId: 1,
-      },
-      edited,
-    );
-
-    expect(chargePointService.saveScenarioDefinition).toHaveBeenCalledWith(
-      "CP1",
-      1,
-      edited,
-    );
-    expect(chargePointService.listScenarioDefinitions).not.toHaveBeenCalled();
-    expect(
-      chargePointService.replaceConnectorScenarioDefinitions,
-    ).not.toHaveBeenCalled();
     expect(chargePointService.loadScenario).not.toHaveBeenCalled();
   });
 
@@ -347,208 +174,6 @@ describe("saveEditorScenario (single definition upsert)", () => {
     expect(remote.service.loadScenario).toHaveBeenCalledWith("CP1", 1, edited);
     expect(remote.getStored()).toEqual([edited]);
     expect(remote.getActive()).toEqual(edited);
-  });
-});
-
-describe("createLatestWinsSaver", () => {
-  it("saves a queued newer payload after the in-flight save", async () => {
-    const gates: Deferred[] = [];
-    const persisted: string[] = [];
-    const saveFn = vi.fn((payload: string) => {
-      const gate = deferred();
-      gates.push(gate);
-      return gate.promise.then(() => {
-        persisted.push(payload);
-      });
-    });
-    const saveLatest = createLatestWinsSaver(saveFn);
-
-    const saveA = saveLatest("A");
-    await flushPromises();
-    expect(saveFn).toHaveBeenCalledTimes(1);
-    expect(saveFn).toHaveBeenLastCalledWith("A");
-
-    const saveB = saveLatest("B");
-    expect(saveFn).toHaveBeenCalledTimes(1);
-
-    gates[0].resolve();
-    await saveA;
-    await flushPromises();
-    expect(saveFn).toHaveBeenCalledTimes(2);
-    expect(saveFn).toHaveBeenLastCalledWith("B");
-
-    gates[1].resolve();
-    await saveB;
-    expect(persisted).toEqual(["A", "B"]);
-  });
-
-  it("lets an even newer queued replace supersede an older queued replace", async () => {
-    const gates: Deferred[] = [];
-    const chargePointService = makeService([]);
-    chargePointService.replaceConnectorScenarioDefinitions.mockImplementation(
-      async () => {
-        const gate = deferred();
-        gates.push(gate);
-        return gate.promise.then(() => []);
-      },
-    );
-    const saveLatest = createLatestWinsSaver<ScenarioDefinition>((definition) =>
-      persistEditorScenario(
-        {
-          mode: "local",
-          chargePointService,
-          cpId: "CP1",
-          connectorId: 1,
-        },
-        definition,
-      ),
-    );
-
-    const saveA = saveLatest(scenario("A"));
-    await flushPromises();
-    const saveB = saveLatest(scenario("B"));
-    const saveC = saveLatest(scenario("C"));
-
-    gates[0].resolve();
-    await saveA;
-    await saveB;
-    await flushPromises();
-
-    expect(
-      chargePointService.replaceConnectorScenarioDefinitions,
-    ).toHaveBeenCalledTimes(2);
-    expect(
-      chargePointService.replaceConnectorScenarioDefinitions,
-    ).toHaveBeenNthCalledWith(1, "CP1", 1, [scenario("A")]);
-    expect(
-      chargePointService.replaceConnectorScenarioDefinitions,
-    ).toHaveBeenLastCalledWith("CP1", 1, [scenario("C")]);
-    expect(
-      chargePointService.replaceConnectorScenarioDefinitions,
-    ).not.toHaveBeenCalledWith("CP1", 1, [scenario("B")]);
-
-    gates[1].resolve();
-    await saveC;
-  });
-
-  it("continues with the latest queued save after an in-flight failure", async () => {
-    const gates: Deferred[] = [];
-    const persisted: string[] = [];
-    const saveFn = vi.fn((payload: string) => {
-      const gate = deferred();
-      gates.push(gate);
-      return gate.promise.then(() => {
-        persisted.push(payload);
-      });
-    });
-    const saveLatest = createLatestWinsSaver(saveFn);
-
-    const saveA = saveLatest("A");
-    await flushPromises();
-    const saveB = saveLatest("B");
-
-    gates[0].reject(new Error("A failed"));
-    await expect(saveA).rejects.toThrow("A failed");
-    await flushPromises();
-    expect(saveFn).toHaveBeenCalledTimes(2);
-    expect(saveFn).toHaveBeenLastCalledWith("B");
-
-    gates[1].resolve();
-    await saveB;
-    expect(persisted).toEqual(["B"]);
-  });
-});
-
-describe("shouldSuppressAppliedScenarioAutosave (fingerprint guard)", () => {
-  it("returns true for identical scenario (unedited after apply)", () => {
-    const applied = {
-      ...scenario("applied-1"),
-      name: "Applied Scenario",
-      updatedAt: "2026-06-30T00:00:00.000Z",
-    };
-    const suppression = {
-      scenarioId: applied.id,
-      updatedAt: applied.updatedAt,
-      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
-    };
-
-    expect(shouldSuppressAppliedScenarioAutosave(suppression, applied)).toBe(
-      true,
-    );
-  });
-
-  it("returns false when scenario name changes (real user edit)", () => {
-    const applied = {
-      ...scenario("applied-1"),
-      name: "Original Name",
-      updatedAt: "2026-06-30T00:00:00.000Z",
-    };
-    const suppression = {
-      scenarioId: applied.id,
-      updatedAt: applied.updatedAt,
-      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
-    };
-    const edited = {
-      ...applied,
-      name: "Edited Name",
-    };
-
-    expect(shouldSuppressAppliedScenarioAutosave(suppression, edited)).toBe(
-      false,
-    );
-  });
-
-  it("returns false when a node property changes", () => {
-    const applied = {
-      ...scenario("applied-1"),
-      updatedAt: "2026-06-30T00:00:00.000Z",
-      nodes: [
-        {
-          id: "node-1",
-          type: "start",
-          position: { x: 0, y: 0 },
-          data: { label: "Start" },
-        },
-      ],
-    } as unknown as ScenarioDefinition;
-    const suppression = {
-      scenarioId: applied.id,
-      updatedAt: applied.updatedAt,
-      fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
-    };
-    const edited = {
-      ...applied,
-      nodes: [
-        {
-          id: "node-1",
-          type: "start",
-          position: { x: 100, y: 100 },
-          data: { label: "Start Modified" },
-        },
-      ],
-    } as unknown as ScenarioDefinition;
-
-    expect(shouldSuppressAppliedScenarioAutosave(suppression, edited)).toBe(
-      false,
-    );
-  });
-
-  it("returns false when null suppression record is passed", () => {
-    const scenario1 = scenario("any-scenario");
-    expect(shouldSuppressAppliedScenarioAutosave(null, scenario1)).toBe(false);
-  });
-
-  it("returns false when scenario id differs from suppression record", () => {
-    const suppression = {
-      scenarioId: "other-id",
-      updatedAt: "2026-06-30T00:00:00.000Z",
-      fingerprint: "some-fingerprint",
-    };
-    const applied = scenario("applied-1");
-
-    expect(shouldSuppressAppliedScenarioAutosave(suppression, applied)).toBe(
-      false,
-    );
   });
 });
 

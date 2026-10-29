@@ -523,9 +523,7 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     expect(redacted).toContain(REDACTED_VALUE);
   });
 
-  // Exact outputs, including the limits the line rule leaves (#519): a
-  // non-PEM value with a raw newline, or a backslash before the line end, is
-  // redacted only to the end of its first line.
+  // Exact outputs of the quoted-value rule, across lines included (#519).
   it.each([
     [
       String.raw`{"apn":{"apnPassword":"ab\"cd","apn":"x"}}`,
@@ -563,16 +561,239 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
       'password="a"\nx\nprivateKey="b" y',
       `password="${REDACTED_VALUE}"\nx\nprivateKey="${REDACTED_VALUE}" y`,
     ],
-    // Limit (#519): the continuation line after a backslash stays readable.
-    ['password="ab\\\ncd" user=u', `password="${REDACTED_VALUE}"\ncd" user=u`],
-    // Limit (#519): a non-PEM value with a raw newline keeps its later lines.
-    ['password="line1\nline2" x', `password="${REDACTED_VALUE}"\nline2" x`],
+    // #519: a backslash line continuation and a raw newline stay inside the
+    // value up to its closing quote.
+    ['password="ab\\\ncd" user=u', `password="${REDACTED_VALUE}" user=u`],
+    ['password="line1\nline2" x', `password="${REDACTED_VALUE}" x`],
     [
       "simPin=9731 api_key=s3cret",
       `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,
     ],
   ])("text redactor output of %j", (text, expected) => {
     expect(redactSensitiveText(text)).toBe(expected);
+  });
+
+  // #519: a quoted value may span lines, but only up to a closing quote that
+  // is followed by a delimiter and does not open a value (`name="`); a PEM
+  // only up to a quote after its `-----END …-----` marker. Each row names
+  // the secrets that must be gone and the exact output, over-redaction
+  // (fail closed) included.
+  const R = REDACTED_VALUE;
+  it.each<[string, string, string[], string]>([
+    [
+      "an escaped quote",
+      String.raw`password="ab\"SECRET1" x`,
+      ["SECRET1"],
+      `password="${R}" x`,
+    ],
+    [
+      "an unterminated value",
+      'Received: password="SECRET1',
+      ["SECRET1"],
+      `Received: password="${R}"`,
+    ],
+    [
+      "an unterminated value with an escaped quote",
+      String.raw`password="ab\"SECRET1`,
+      ["SECRET1"],
+      `password="${R}"`,
+    ],
+    [
+      "an unterminated value with a backslash before the line end",
+      'password="SECRET1\\\nuser=u',
+      ["SECRET1"],
+      `password="${R}"\nuser=u`,
+    ],
+    [
+      "a raw newline inside the value",
+      'password="line1\nSECRET1" x',
+      ["line1", "SECRET1"],
+      `password="${R}" x`,
+    ],
+    [
+      "a backslash line continuation",
+      'password="ab\\\nSECRET1" user=u',
+      ["SECRET1"],
+      `password="${R}" user=u`,
+    ],
+    [
+      "a PEM whose END marker is not followed by a quote",
+      'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END PRIVATE KEY----- user="u" password=leak',
+      ["MIIBsecret", "leak"],
+      `privateKey="${R}"`,
+    ],
+    [
+      "an unterminated PEM followed by a quoted assignment",
+      'privateKey="-----BEGIN KEY\nAAA\nnext=1 x="y" tail=SECRET1',
+      ["AAA", "SECRET1"],
+      `privateKey="${R}"`,
+    ],
+    [
+      "a closed multi-line PEM",
+      'privateKey="-----BEGIN K-----\nSECRET1\n-----END K-----" next=1',
+      ["SECRET1"],
+      `privateKey="${R}" next=1`,
+    ],
+    [
+      "a closed multi-line PEM after a leading newline",
+      'privateKey="\n-----BEGIN K-----\nSECRET1\n-----END K-----\n" next=1',
+      ["SECRET1"],
+      `privateKey="${R}" next=1`,
+    ],
+    [
+      "an unterminated multi-line PEM",
+      'privateKey="-----BEGIN K-----\nSECRET1\nSECRET2',
+      ["SECRET1", "SECRET2"],
+      `privateKey="${R}"`,
+    ],
+    [
+      "an unterminated multi-line PEM after a leading newline",
+      'privateKey="\n-----BEGIN K-----\nSECRET1',
+      ["SECRET1"],
+      `privateKey="${R}"`,
+    ],
+    [
+      "a PEM with a quote inside its body",
+      'privateKey="-----BEGIN K-----\nAB"SECRET1\n-----END K-----" next=1',
+      ["SECRET1"],
+      `privateKey="${R}" next=1`,
+    ],
+    [
+      "a single-line PEM without an END marker (fail closed)",
+      'privateKey="-----BEGIN SECRET1" y',
+      ["SECRET1"],
+      `privateKey="${R}"`,
+    ],
+    [
+      "a PEM with escaped newlines in a truncated JSON frame",
+      String.raw`Received: {"privateKey":"-----BEGIN K-----\nSECRET1\n-----END K-----\n","user":"u"`,
+      ["SECRET1"],
+      `Received: {"privateKey":"${R}","user":"u"`,
+    ],
+    [
+      "two assignments on one line",
+      'password="SECRET1" x privateKey="SECRET2"',
+      ["SECRET1", "SECRET2"],
+      `password="${R}" x privateKey="${R}"`,
+    ],
+    [
+      "an unterminated value followed by a secret on the next line",
+      'password="a\nprivateKey="SECRET1"',
+      ["SECRET1"],
+      `password="${R}"\nprivateKey="${R}"`,
+    ],
+    [
+      "a next-line secret starting with a space",
+      'password="a\nprivateKey=" SECRET1"',
+      ["SECRET1"],
+      `password="${R}"\nprivateKey="${R}"`,
+    ],
+    [
+      "a next-line secret starting with a comma",
+      'password="a\nprivateKey=",SECRET1"',
+      ["SECRET1"],
+      `password="${R}"\nprivateKey="${R}"`,
+    ],
+    [
+      "a later-line secret in the other quote holding the closing quote",
+      "password=\"a\nprivateKey='S1 x\" y S2'",
+      ["S1", "S2"],
+      `password="${R}"\nprivateKey='${R}'`,
+    ],
+    [
+      "a later-line secret in double quotes holding the closing quote",
+      "password='a\nprivateKey=\"S1 x' y S2\"",
+      ["S1", "S2"],
+      `password='${R}'\nprivateKey="${R}"`,
+    ],
+    [
+      "a later-line bare secret before the closing quote",
+      'password="a\napi_key=S1 x" y',
+      ["S1"],
+      `password="${R}"\napi_key=${R} x" y`,
+    ],
+    [
+      "a later-line non-secret name before the closing quote (fail closed)",
+      'password="a\ntoken=S1 x" y',
+      ["S1"],
+      `password="${R}" y`,
+    ],
+    [
+      "a secret two lines down before the closing quote",
+      'password="a\nfoo\nprivateKey="S1" z" w',
+      ["S1"],
+      `password="${R}"\nfoo\nprivateKey="${R}" z" w`,
+    ],
+    [
+      "a PEM body holding a later assignment and an END marker (fail closed)",
+      "privateKey=\"-----BEGIN K-----\nA\npassword='-----END K-----\" S1'",
+      ["S1"],
+      `privateKey="${R}"`,
+    ],
+    [
+      "a single-quoted PEM without END inside a JSON string (fail closed)",
+      `{"msg":"privateKey='-----BEGIN K-----\\nA'","n":1}`,
+      ["\\nA"],
+      `{"msg":"privateKey='${R}'`,
+    ],
+    [
+      "an unterminated value followed by a quoted assignment",
+      'password="a\nuser="bob" x',
+      ["a\n"],
+      `password="${R}"\nuser="bob" x`,
+    ],
+    [
+      "an unterminated value followed by a line ending in a quote (fail closed)",
+      'password="a\nuser=bob" x',
+      ["bob"],
+      `password="${R}" x`,
+    ],
+    [
+      "single quotes spanning a line with double quotes (fail closed)",
+      "password='a\nuser=\"bob\" x'",
+      ["bob"],
+      `password='${R}'`,
+    ],
+    [
+      "single quotes with an escaped quote",
+      String.raw`password='ab\'SECRET1' user=u`,
+      ["SECRET1"],
+      `password='${R}' user=u`,
+    ],
+    [
+      "a JSON number",
+      '{"simPin":9731,"apn":"x"}',
+      ["9731"],
+      `{"simPin":"${R}","apn":"x"}`,
+    ],
+    [
+      "a bare assignment",
+      "api_key=SECRET1 tail",
+      ["SECRET1"],
+      `api_key=${R} tail`,
+    ],
+    [
+      "duplicate JSON keys",
+      '{"password":"decoy","password":"SECRET1"}',
+      ["decoy", "SECRET1"],
+      `{"password":"${R}","password":"${R}"}`,
+    ],
+    [
+      "a multi-line value followed by a comma",
+      'password="a\nSECRET1",user=u',
+      ["SECRET1"],
+      `password="${R}",user=u`,
+    ],
+    [
+      "a multi-line value followed by a closing brace",
+      'x {password="a\nSECRET1"} y',
+      ["SECRET1"],
+      `x {password="${R}"} y`,
+    ],
+  ])("text redactor across lines: %s", (_case, text, absent, expected) => {
+    const redacted = redactSensitiveText(text);
+    for (const secret of absent) expect(redacted).not.toContain(secret);
+    expect(redacted).toBe(expected);
   });
 
   it("keeps a redacted JSON frame valid JSON", () => {
@@ -696,6 +917,34 @@ describe("text redactor parity with the structured redactor (#515)", () => {
     ]) {
       expect(redactSensitiveText(text)).toBe(text);
     }
+  });
+
+  // #519: the quoted-value and PEM patterns scan across lines; none of them
+  // may backtrack quadratically on a long run.
+  it("stays linear on long runs after a quoted name", { timeout: 2000 }, () => {
+    const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
+      char.repeat(200_000),
+    );
+    const pemBody = "A".repeat(200_000);
+    const texts = [
+      ...runs,
+      ...runs.map((run) => `password=${run}`),
+      ...runs.map((run) => `password="${run}`),
+      `password="${"a\n".repeat(100_000)}`,
+      'password="a\n'.repeat(20_000),
+      `password="${"\nx".repeat(100_000)}`,
+      `password="a\n${"passwor".repeat(30_000)}`,
+      `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
+      `privateKey="-----BEGIN K-----\n${pemBody}`,
+      `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
+      `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
+    ];
+    for (const text of texts) {
+      expect(typeof redactSensitiveText(text)).toBe("string");
+    }
+    expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
+      `privateKey="${REDACTED_VALUE}"`,
+    );
   });
 
   it("keeps a longer name in the structured redactor", () => {

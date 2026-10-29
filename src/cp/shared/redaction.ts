@@ -20,11 +20,14 @@ const SENSITIVE_KEY_NAMES = new Set([
 const SENSITIVE_ASSIGNMENT_NAMES =
   "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|simPin|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
 /**
- * The quoted value consumes escape sequences, so an escaped quote inside it
- * (`"ab\"cd"`) does not end the match and leave the suffix in clear.
+ * The quoted value consumes escape sequences (a backslash-newline included),
+ * so an escaped quote inside it (`"ab\"cd"`) does not end the match and leave
+ * the suffix in clear. It fails closed: a value whose closing quote never
+ * comes (a truncated line) is redacted to the end of its line.
  */
 const SENSITIVE_ASSIGNMENT = new RegExp(
-  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])((?:\\\\.|(?!\\2)[^\\\\])*)\\2`,
+  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])` +
+    `(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\\\n])*\\2|[^\\n]*)`,
   "g",
 );
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(

@@ -448,6 +448,37 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     ).toEqual({ apnPassword: REDACTED_VALUE, n: 1 });
   });
 
+  it("fails closed on a quoted secret that is never closed", () => {
+    // A truncated log line: without a closing quote the value runs to the
+    // end of the line, and the whole of it is redacted.
+    for (const text of [
+      String.raw`Received: {"password":"ab\"cd`,
+      'Received: password="abcd',
+      String.raw`Received: {"apn":{"apnPassword":"ab\"cd`,
+      'Received: password="abcd\\',
+    ]) {
+      const redacted = redactSensitiveText(text);
+      expect(redacted).not.toContain("ab");
+      expect(redacted).not.toContain("cd");
+      expect(redacted).toContain(REDACTED_VALUE);
+    }
+    const multiLine = redactSensitiveText(
+      'first {"password":"ab\\"cd\nsecond line',
+    );
+    expect(multiLine).not.toContain("cd");
+    expect(multiLine).toContain("\nsecond line");
+    // The next line's quotes do not close the truncated value.
+    expect(redactSensitiveText('password="abcd\nnext "quoted" line')).toBe(
+      `password="${REDACTED_VALUE}"\nnext "quoted" line`,
+    );
+  });
+
+  it("consumes a backslash-newline inside a quoted secret", () => {
+    const redacted = redactSensitiveText('password="ab\\\ncd" user=u');
+    expect(redacted).not.toContain("cd");
+    expect(redacted).toBe(`password="${REDACTED_VALUE}" user=u`);
+  });
+
   it("keeps a bare value bare outside a JSON member", () => {
     expect(redactSensitiveText("simPin=9731 api_key=s3cret")).toBe(
       `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,

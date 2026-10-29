@@ -92,7 +92,8 @@ every `vpn` member, is redacted. A redacted scalar inside a JSON member
 gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
 object or array held by a secret-named member does not get that guarantee. A
 quoted value is redacted whole: an escaped quote inside it (`"ab\"cd"`) does
-not end the match early (#401).
+not end the match early, and a value whose closing quote never comes on its
+line (a truncated message) is redacted to the end of that line (#401).
 
 ## WebSocket close lines
 

@@ -1775,3 +1775,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The text redactor's quoted-value pattern stopped at the first matching quote, escaped or not, so `"apnPassword":"ab\"cd"` (or any secret-named field, `password` included, which predates #401) logged `cd` in clear. The value pattern now consumes escape sequences; single-quoted values and the quoted JSON number replacement keep working.
 - [Log format](concepts/log-format.md): Redaction section says a quoted value is redacted whole.
+
+## [2026-10-29] ingest | Fail closed on an unterminated quoted secret (#401 review)
+
+- The escape-aware pattern needed a closing quote, so a truncated value (`"password":"ab\"cd` or `password="abc` at the end of a message) was no longer matched at all and leaked whole. A quoted secret without a closing quote on its line is now redacted to the end of that line; a backslash-newline is consumed as an escape.
+- [Log format](concepts/log-format.md): Redaction section states the end-of-line rule.

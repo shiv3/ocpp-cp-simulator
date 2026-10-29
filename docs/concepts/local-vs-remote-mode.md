@@ -14,7 +14,8 @@ related:
   - control-plane.md
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
-updated: 2026-10-11
+  - charging-sessions.md
+updated: 2026-10-28
 ---
 
 # Local vs Remote mode (browser)
@@ -55,6 +56,11 @@ overridden.
   [Open EV Directory](../entities/open-ev-directory.md) from the tab with a
   key you type, held in memory only, and only works if the API allows the
   page's origin (CORS); otherwise the console points you to daemon mode.
+- The [charging-session history](charging-sessions.md) (#447) works in both
+  modes: the daemon's `charging_sessions` table (or its in-memory store
+  without `--state-db`) in Remote mode, the browser's sql.js database in Local
+  mode. Local mode keeps a removed charge point's sessions until the next
+  reset.
 - In Remote mode the browser's log download and the daemon's `logs.get` return
   the same rows ([Log format](log-format.md)).
 - [Expert OCPP calls](expert-ocpp-calls.md) (#389) work in both modes: the

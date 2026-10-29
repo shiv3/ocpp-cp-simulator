@@ -30,6 +30,7 @@ import {
   registryCpToWire,
   rpcRequestSchema,
   SCENARIO_RUNS_PAGE_DEFAULT,
+  CHARGING_SESSIONS_PAGE_DEFAULT,
   statusToWire,
   subscribeResultSchema,
   type CpListItem,
@@ -558,6 +559,8 @@ export async function dispatchRpcCore(
       return listScenarioRuns(deps, call.params);
     case "timeline.get":
       return getTimeline(deps, call.params);
+    case "sessions.list":
+      return listChargingSessions(deps, call.params);
     case "scenario.definitions.list":
       return listScenarioDefinitions(deps, call.params);
     case "scenario.definitions.save":
@@ -1249,6 +1252,19 @@ async function getTimeline(
     deps.chargePointService.getOperationalTimeline(cpId, query),
   );
   return { version: TIMELINE_FORMAT_VERSION, ...page };
+}
+
+/** #447: an unknown cpId is `not_found`, like `timeline.get`. */
+async function listChargingSessions(
+  deps: RuntimeSocketIoDeps,
+  { cpId, ...query }: Params<"sessions.list">,
+): Promise<Result<"sessions.list">> {
+  return runFacadeOperation(() =>
+    deps.chargePointService.listChargingSessions(cpId, {
+      ...query,
+      limit: query.limit ?? CHARGING_SESSIONS_PAGE_DEFAULT,
+    }),
+  );
 }
 
 async function listScenarioDefinitions(

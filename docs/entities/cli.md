@@ -21,6 +21,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/trace-format.md
   - open-ev-directory.md
+  - ../concepts/charging-sessions.md
 updated: 2026-10-28
 ---
 
@@ -751,6 +752,7 @@ Events are emitted in all modes:
 | `scenario_wait_changed` | `connectorId`, `scenarioId`, `kind`       | An operator extended, retried or continued the wait the scenario is parked on (`kind`: `extend` / `retry` / `continue`; also carries `nodeId` and `runId`) (#240)                                                                              |
 | `scenario_run_recorded` | `connectorId`, `scenarioId`, `runId`      | A finished run's report was added to the daemon's [run history](../concepts/control-plane.md#scenario-run-history), so a client listing runs can re-list (#388)                                                                                |
 | `timeline_entry`        | the entry (`seq`, `timestamp`, `kind`, …) | An entry was added to the charge point's [operational timeline](../concepts/operational-timeline.md) (#448)                                                                                                                                    |
+| `charging_session`      | the whole session (`sessionId`, …)        | A [charging session](../concepts/charging-sessions.md) was opened, updated or closed and stored; carries the full record (#447)                                                                                                                |
 | `csms_call_received`    | `action`, `messageId`, `payload`          | The CSMS sent a CALL (any OCPP-J action; a dispatchable SOAP one), announced before it is handled; see [CSMS call events](#csms-call-events) (#396)                                                                                            |
 | `csms_call_completed`   | `action`, `messageId`, `outcome`          | The simulator decided its answer to that CALL: `CallResult`, `CallError` (with `errorCode`) or `NoResponse`; see [CSMS call events](#csms-call-events) (#396)                                                                                  |
 

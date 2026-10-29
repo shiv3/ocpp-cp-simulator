@@ -160,6 +160,56 @@ export function splitStopReason(reason: StopReason | undefined): {
   };
 }
 
+/**
+ * The 2.0.1 `stoppedReason` for a 1.6-shaped `stopReason`, when the stop
+ * named no 2.0.1 reason of its own. 2.0.1 has no reset or unlock reasons of
+ * the 1.6 kind, so `HardReset` / `SoftReset` / `UnlockCommand` map onto the
+ * closest ones.
+ */
+export function toV201StoppedReason(
+  reason: StopTransactionReason | undefined,
+): TransactionStoppedReason {
+  switch (reason) {
+    case undefined:
+      return "Local";
+    case "DeAuthorized":
+    case "EmergencyStop":
+    case "EVDisconnected":
+    case "Local":
+    case "Other":
+    case "PowerLoss":
+    case "Reboot":
+    case "Remote":
+      return reason;
+    case "HardReset":
+      return "ImmediateReset";
+    case "SoftReset":
+      return "Reboot";
+    case "UnlockCommand":
+      return "Other";
+    default:
+      return "Other";
+  }
+}
+
+/** The 2.x Ended event's `stoppedReason`: the one the stop named, else the
+ *  1.6-shaped `stopReason` mapped. */
+export function endedStoppedReason(
+  transaction: Pick<Transaction, "stoppedReason" | "stopReason">,
+): TransactionStoppedReason {
+  return (
+    transaction.stoppedReason ?? toV201StoppedReason(transaction.stopReason)
+  );
+}
+
+/** The 2.x Ended event's `triggerReason`; the local StopAuthorized path when
+ *  the stop named none. */
+export function endedTriggerReason(
+  transaction: Pick<Transaction, "stopTriggerReason">,
+): TransactionStopTriggerReason {
+  return transaction.stopTriggerReason ?? "StopAuthorized";
+}
+
 /** `start_transaction` options a control-plane caller may name (#335). */
 export interface StartTransactionCommandOptions {
   triggerReason?: TransactionEventTriggerReason;
@@ -249,6 +299,13 @@ export interface Transaction {
   /** OCPP 2.x TransactionEvent stoppedReason named explicitly by the stop
    *  (#335). When absent the encoder maps `stopReason` instead. */
   stoppedReason?: TransactionStoppedReason;
+  /** The id status the CSMS answered other than `Accepted` (StartTransaction
+   *  .conf `idTagInfo`, 2.x TransactionEvent.conf `idTokenInfo`), recorded
+   *  before the station stops on it (#447). */
+  authorizationStatus?: string;
+  /** 2.x: that status answered an `Updated` event, i.e. the CSMS withdrew
+   *  the id mid-session rather than refusing the start (#447). */
+  authorizationRejectedMidSession?: boolean;
   batteryCapacityKwh?: number; // EV battery capacity in kWh
   initialSoc?: number; // Initial State of Charge percentage (0-100)
 }

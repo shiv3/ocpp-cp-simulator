@@ -470,6 +470,29 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [{ version: "1.0", entries: [], total: 0 }],
       },
       {
+        name: "listChargingSessions",
+        invoke: (service) =>
+          service.listChargingSessions("cp-1", {
+            connectorId: 2,
+            outcomes: ["active", "failed"],
+            limit: 5,
+            order: "asc",
+          }),
+        expected: [
+          {
+            method: "sessions.list",
+            params: {
+              cpId: "cp-1",
+              connectorId: 2,
+              outcomes: ["active", "failed"],
+              limit: 5,
+              order: "asc",
+            },
+          },
+        ],
+        results: [{ sessions: [], total: 0 }],
+      },
+      {
         name: "loadConfig",
         invoke: (service) => service.loadConfig(),
         expected: [{ method: "config.get", params: {} }],

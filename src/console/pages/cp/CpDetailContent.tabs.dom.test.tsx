@@ -15,7 +15,7 @@ import {
 } from "../../test/harness";
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import { LogLevel, LogType } from "../../../cp/shared/Logger";
-import type { StateHistoryEntry } from "../../../cp/application/services/types/StateSnapshot";
+import { activeChargingSession } from "../../../test/chargingSessionFixtures";
 import type { ChargePointSnapshot } from "../../../data/interfaces/ChargePointService";
 
 function connector(
@@ -66,18 +66,11 @@ const cpA = snapshot({
   ],
 });
 
-const txEntry: StateHistoryEntry = {
-  id: "hist-1",
-  timestamp: new Date("2024-01-01T00:00:00.000Z"),
-  entity: "connector",
-  entityId: 1,
-  transitionType: "transaction",
-  fromState: "Available",
-  toState: "Preparing",
-  context: { source: "UI", timestamp: new Date("2024-01-01T00:00:00.000Z") },
-  validationResult: { level: "OK" },
-  success: true,
-};
+const txSession = activeChargingSession({
+  cpId: "CP-A",
+  transactionId: "7",
+  idTag: "TAG-7",
+});
 
 describe("CpDetailContent: connector tabs, inline config, lower half", () => {
   let cleanup: (() => Promise<void>) | null = null;
@@ -107,7 +100,11 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
   ) {
     const service = createFakeChargePointService({
       snapshots,
-      getStateHistory: vi.fn(async () => [txEntry]),
+      getStateHistory: vi.fn(async () => []),
+      listChargingSessions: vi.fn(async () => ({
+        sessions: [txSession],
+        total: 1,
+      })),
       listScenarios: vi.fn(async () => []),
       getNetworkSimGlobal: vi.fn(async () => null),
       getNetworkSimCp: vi.fn(async () => ({
@@ -697,10 +694,13 @@ describe("CpDetailContent: connector tabs, inline config, lower half", () => {
 
     expect(location?.search).toBe("?tab=transactions");
     expect(location?.type).toBe("REPLACE");
-    expect(service.getStateHistory).toHaveBeenCalledWith("CP-A", {
-      transitionType: "transaction",
+    expect(service.listChargingSessions).toHaveBeenCalledWith("CP-A", {
+      limit: 50,
     });
-    expect(container.textContent).toContain("Available → Preparing");
+    await flush();
+    expect(
+      container.querySelector('[data-testid="session-row"]')?.textContent,
+    ).toContain("TAG-7");
     expect(
       container.querySelector('[data-testid="cp-message-log"]'),
     ).toBeNull();

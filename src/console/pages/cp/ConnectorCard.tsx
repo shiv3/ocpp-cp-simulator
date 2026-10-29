@@ -25,6 +25,7 @@ import Figure from "./Figure";
 import PowerSparkline from "./PowerSparkline";
 import { curvePointsToPower, describePowerCurve } from "./powerCurve";
 import SessionFlow from "./SessionFlow";
+import { formatSessionDuration } from "@/lib/connectorFormat";
 import { useConnectorPower } from "./useConnectorPower";
 
 export interface ConnectorCardProps {
@@ -35,15 +36,6 @@ export interface ConnectorCardProps {
   selected?: boolean;
   /** Clicking the header (not its controls) selects the connector. */
   onSelect?: () => void;
-}
-
-/** "12 m 40 s" under an hour, "2 h 41 m" above. */
-function formatSession(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return h > 0 ? `${h} h ${m} m` : `${m} m ${String(s).padStart(2, "0")} s`;
 }
 
 const formatKw = (kw: number) => String(Number(kw.toFixed(1)));
@@ -281,7 +273,9 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
           <Figure
             label="Session"
             value={
-              hasTx && startedAt != null ? formatSession(now - startedAt) : "—"
+              hasTx && startedAt != null
+                ? formatSessionDuration(now - startedAt)
+                : "—"
             }
             note={
               hasTx ? (

@@ -47,11 +47,12 @@ import {
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
-import type {
-  StopTransactionReason,
-  Transaction,
-  TransactionChargingState,
-  TransactionUpdateOptions,
+import {
+  endedStoppedReason,
+  endedTriggerReason,
+  type Transaction,
+  type TransactionChargingState,
+  type TransactionUpdateOptions,
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
@@ -89,37 +90,8 @@ type V201ResponsePayload =
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
 
-type V201StoppedReason = NonNullable<
-  TransactionEventRequestV201["transactionInfo"]["stoppedReason"]
->;
 type V201MeterValuesSampledValue =
   MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
-
-function toV201StoppedReason(
-  reason: StopTransactionReason | undefined,
-): V201StoppedReason {
-  switch (reason) {
-    case undefined:
-      return "Local";
-    case "DeAuthorized":
-    case "EmergencyStop":
-    case "EVDisconnected":
-    case "Local":
-    case "Other":
-    case "PowerLoss":
-    case "Reboot":
-    case "Remote":
-      return reason;
-    case "HardReset":
-      return "ImmediateReset";
-    case "SoftReset":
-      return "Reboot";
-    case "UnlockCommand":
-      return "Other";
-    default:
-      return "Other";
-  }
-}
 
 function ocppStatusToV201(
   status: OCPPStatus,
@@ -553,6 +525,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
+    if (pending?.action === "TransactionEvent") {
+      this.applyTransactionEventResult(
+        pending.payload as TransactionEventRequestV201,
+        payload as TransactionEventResponseV201,
+      );
+      return;
+    }
+
     const bootResult = payload as BootNotificationResponseV201;
     if (
       bootResult.status !== undefined &&
@@ -569,6 +549,50 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         currentTime: bootResult.currentTime,
       });
     }
+  }
+
+  /**
+   * #447: the 2.x twin of 1.6's non-Accepted StartTransaction.conf (#181).
+   * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
+   * in `idTokenInfo`. When it is not Accepted and the transaction is still
+   * running, `TxCtrlr/StopTxOnInvalidId` (default true) ends it as
+   * Deauthorized / DeAuthorized; false leaves it running. Either way the
+   * rejection is reported like the 1.6 one.
+   */
+  private applyTransactionEventResult(
+    request: TransactionEventRequestV201,
+    response: TransactionEventResponseV201,
+  ): void {
+    const status = response.idTokenInfo?.status;
+    if (status === undefined || status === "Accepted") return;
+    if (request.eventType === "Ended") return;
+    const transactionId = request.transactionInfo.transactionId;
+    const connector = [...this._chargePoint.connectors.values()].find(
+      (c) =>
+        c.transaction?.cpTransactionId === transactionId &&
+        c.transaction.stopTime === null,
+    );
+    if (!connector) return;
+    const stopOnInvalid =
+      this._chargePoint.configuration.stopTransactionOnInvalidId();
+    this._logger.warn(
+      `[v2.0.1] TransactionEvent idTokenInfo ${status} for transaction ${transactionId}; StopTxOnInvalidId=${stopOnInvalid}`,
+      LogType.TRANSACTION,
+    );
+    connector.transaction!.authorizationStatus = status;
+    connector.transaction!.authorizationRejectedMidSession =
+      request.eventType !== "Started";
+    if (stopOnInvalid) {
+      this._chargePoint.stopTransaction(connector, "DeAuthorized", {
+        triggerReason: "Deauthorized",
+        stoppedReason: "DeAuthorized",
+      });
+    }
+    this._chargePoint.notifyStartTransactionNotAccepted(
+      connector.id,
+      status,
+      stopOnInvalid,
+    );
   }
 
   public sendBootNotification(bootPayload: BootNotification): void {
@@ -731,15 +755,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
       timestamp,
-      triggerReason: transaction.stopTriggerReason ?? "StopAuthorized",
+      triggerReason: endedTriggerReason(transaction),
       seqNo,
       transactionInfo: {
         transactionId,
         // #335: an explicitly named 2.0.1 reason is sent verbatim; only an
         // unnamed one is derived from the 1.6-shaped `stopReason`.
-        stoppedReason:
-          transaction.stoppedReason ??
-          toV201StoppedReason(transaction.stopReason),
+        stoppedReason: endedStoppedReason(transaction),
       },
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }

@@ -25,6 +25,8 @@ import {
 } from "../../protocol/labels";
 import type { ScenarioRunRepository } from "../../cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "../../cp/domain/persistence/createScenarioRunRepository";
+import type { ChargingSessionRepository } from "../../cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "../../cp/domain/persistence/createChargingSessionRepository";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by
@@ -103,6 +105,9 @@ export class CPRegistry {
   /** #388: one run history for the whole daemon, so `scenario.runs.list` can
    *  span charge points without `--state-db` too. */
   readonly scenarioRuns: ScenarioRunRepository;
+  /** #447: one session history for the whole daemon, so it outlives a
+   *  `cp.update` rebuild without `--state-db` too. */
+  readonly chargingSessions: ChargingSessionRepository;
 
   constructor(
     private readonly bus: EventBus,
@@ -123,6 +128,7 @@ export class CPRegistry {
     },
   ) {
     this.scenarioRuns = createScenarioRunRepository(database);
+    this.chargingSessions = createChargingSessionRepository(database);
   }
 
   /** True when a SOAP charge point may be created without a callback URL. */
@@ -268,7 +274,7 @@ export class CPRegistry {
       }
       // Use the internal create path WITHOUT re-inserting into the DB —
       // these rows already exist.
-      const svc = this.instantiate(init);
+      const svc = this.instantiate(init, { reconcileSessions: false });
       // Restore per-connector runtime state (OCPP status, in-flight
       // transaction, meter, soc) BEFORE wiring the WebSocket so the
       // first StatusNotification we send carries the resumed status
@@ -277,6 +283,8 @@ export class CPRegistry {
       // without emitting statusChange — so the listeners on the new
       // service won't trigger a duplicate persist or notification.
       const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
+      // #447: after the restore, so a restored transaction keeps its session.
+      svc.reconcileChargingSessions();
       if (restoredConnectors > 0) {
         console.log(
           `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
@@ -603,12 +611,22 @@ export class CPRegistry {
 
   /** Construct + register the in-memory CLIChargePointService without
    *  touching the DB. Used by both create() (after DB insert) and
-   *  restoreFromDatabase() (DB row already exists). */
-  private instantiate(init: ChargePointInitOptions): CLIChargePointService {
+   *  restoreFromDatabase() (DB row already exists).
+   *
+   *  #447: the charging sessions a previous instance under this id left open
+   *  are reconciled here, before anyone hears of the service — a `cp.update`
+   *  rebuild drops the in-memory transactions, so they end up interrupted.
+   *  The restore path opts out and reconciles once the connector runtime is
+   *  back, so a restored transaction keeps its session. */
+  private instantiate(
+    init: ChargePointInitOptions,
+    { reconcileSessions = true }: { reconcileSessions?: boolean } = {},
+  ): CLIChargePointService {
     const svc = new CLIChargePointService(
       this.withDerivedSoapCallback(init),
       this.database,
       this.scenarioRuns,
+      this.chargingSessions,
     );
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
     const unsubSettled = svc.onSessionSettled((info) =>
@@ -619,6 +637,7 @@ export class CPRegistry {
       unsub();
       unsubSettled();
     });
+    if (reconcileSessions) svc.reconcileChargingSessions();
     // The single choke point for "a service now exists under this init" —
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();
@@ -868,8 +887,9 @@ export class CPRegistry {
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.
     this.persistRemove(cpId);
-    // The in-memory run history has no table for persistRemove to cascade to.
+    // The in-memory histories have no table for persistRemove to cascade to.
     this.scenarioRuns.deleteForChargePoint(cpId);
+    this.chargingSessions.deleteForChargePoint(cpId);
     this.notifyInitChange();
     return true;
   }

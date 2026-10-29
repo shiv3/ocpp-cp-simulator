@@ -86,6 +86,13 @@ import type {
   TimelinePage,
   TimelineQuery,
 } from "../../cp/application/services/OperationalTimeline";
+import { ChargingSessionRecorder } from "../../cp/application/services/ChargingSessionRecorder";
+import type {
+  ChargingSessionPage,
+  ChargingSessionQuery,
+  ChargingSessionRepository,
+} from "../../cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "../../cp/domain/persistence/createChargingSessionRepository";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
@@ -217,6 +224,8 @@ export class LocalChargePointService implements ChargePointService {
   private readonly connectorSettingsRepository: ConnectorSettingsRepository;
   private readonly scenarioRepository: SqliteScenarioRepository;
   private readonly vehicleProfiles: VehicleProfileRepository;
+  /** #447: the browser's sql.js `charging_sessions` table, or in memory. */
+  private readonly chargingSessions: ChargingSessionRepository;
 
   constructor(
     private readonly database: Database | null = null,
@@ -228,6 +237,7 @@ export class LocalChargePointService implements ChargePointService {
     );
     this.scenarioRepository = new SqliteScenarioRepository(database);
     this.vehicleProfiles = new VehicleProfileRepository(database);
+    this.chargingSessions = createChargingSessionRepository(database);
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -311,8 +321,9 @@ export class LocalChargePointService implements ChargePointService {
     // will rebuild them from the (now empty) Config + scenario tables.
     const ids = Array.from(this.chargePoints.keys());
     for (const id of ids) this.unregisterChargePoint(id);
-    // Also reaches the in-memory store a service without a database keeps.
+    // Also reaches the in-memory stores a service without a database keeps.
     this.vehicleProfiles.clear();
+    this.chargingSessions.clear();
     if (this.database) {
       resetSimulatorState(this.database);
       await this.database.flush?.();
@@ -784,6 +795,13 @@ export class LocalChargePointService implements ChargePointService {
     const cp = this.chargePoints.get(id);
     if (!cp) return { entries: [], total: 0 };
     return cp.timeline.query(query);
+  }
+
+  async listChargingSessions(
+    id: string,
+    query: Omit<ChargingSessionQuery, "cpId"> = {},
+  ): Promise<ChargingSessionPage> {
+    return this.chargingSessions.list({ ...query, cpId: id });
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
@@ -1416,6 +1434,18 @@ export class LocalChargePointService implements ChargePointService {
         this.emit(chargePoint.id, { type: "timeline-entry", entry });
       }),
     );
+
+    // #447: a browser reload restores no transaction, so the reconcile marks
+    // what the previous page left running interrupted.
+    const sessionRecorder = new ChargingSessionRecorder(
+      chargePoint,
+      this.chargingSessions,
+    );
+    sessionRecorder.onChange((session) => {
+      this.emit(chargePoint.id, { type: "charging-session", session });
+    });
+    sessionRecorder.reconcile();
+    unsubscribes.push(() => sessionRecorder.dispose());
 
     unsubscribes.push(
       chargePoint.events.on("statusChange", ({ status }) => {

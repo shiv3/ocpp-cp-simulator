@@ -16,6 +16,7 @@ related:
   - log-format.md
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
+  - charging-sessions.md
 updated: 2026-10-28
 ---
 
@@ -43,6 +44,10 @@ is one additional, normalized view of what happened to a charge point:
 It is an observability and debugging feature, not an alarm-management
 subsystem: there is no acknowledgement, assignment or ticketing. Raw logs and
 OCPP frames are unchanged; scenario runs are linked by `runId`, never copied.
+The timeline records each transaction event as it happens; the
+[charging-session history](charging-sessions.md) (#447) is the per-transaction
+summary — duration, energy, stop reason, outcome — and, unlike the timeline,
+is persisted with `--state-db`.
 
 ## Where it lives
 
@@ -99,7 +104,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `transaction_started`      | connector | `tagId`, `transactionId` (2.x only)                                  | A transaction starts. OCPP 2.x carries the CP-minted id; 1.6 has no id yet.                                             |
 | `transaction_id_assigned`  | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                         |
 | `transaction_stopped`      | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
-| `transaction_rejected`     | connector | `status`, `stopped`                                                  | StartTransaction.conf carries a non-Accepted idTagInfo; `stopped` says whether `StopTransactionOnInvalidId` stopped it. |
+| `transaction_rejected`     | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
 | `authorization_rejected`   | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
 | `scenario_started`         | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`    | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
@@ -114,6 +119,12 @@ recorded: `transaction_started` has no id on 1.6, and
 `transaction_id_assigned` reports the CSMS's id. A disconnect never records a
 "transaction interrupted" entry: a 1.6 transaction can legitimately continue
 offline.
+
+`transaction_rejected.stopped` says whether the station ended the transaction
+on the rejection: `StopTransactionOnInvalidId` on 1.6 (#181),
+`TxCtrlr/StopTxOnInvalidId` (default true) on 2.x. Before #447 a non-Accepted
+2.x `idTokenInfo` was ignored and recorded nothing; it is checked only while
+the transaction runs (not on an `Ended` event's answer).
 
 ### Smart-charging profiles
 

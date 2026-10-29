@@ -40,6 +40,10 @@ import type {
   TimelinePage,
   TimelineQuery,
 } from "../../cp/application/services/OperationalTimeline";
+import type {
+  ChargingSessionPage,
+  ChargingSessionQuery,
+} from "../../cp/domain/persistence/ChargingSessionRepository";
 import type { Database } from "../../cp/domain/persistence/Database";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
@@ -565,6 +569,13 @@ export class RegistryChargePointService implements ChargePointService {
     query?: TimelineQuery,
   ): Promise<TimelinePage> {
     return this.requireService(id).getOperationalTimeline(query);
+  }
+
+  async listChargingSessions(
+    id: string,
+    query?: Omit<ChargingSessionQuery, "cpId">,
+  ): Promise<ChargingSessionPage> {
+    return this.requireService(id).listChargingSessions(query);
   }
 
   async listScenarioDefinitions(

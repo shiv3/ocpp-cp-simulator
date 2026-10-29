@@ -1299,6 +1299,10 @@ export class OCPPMessageHandler {
         LogType.TRANSACTION,
       );
       this._chargePoint.cleanTransaction(connectorId);
+      this._chargePoint.notifyTransactionStartFailed(
+        connectorId,
+        error.errorCode,
+      );
       this._chargePoint.updateConnectorStatus(
         connectorId,
         OCPPStatus.Available,

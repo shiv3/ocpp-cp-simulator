@@ -21,6 +21,7 @@ related:
   - security-profiles.md
   - trace-format.md
   - scenario-format.md
+  - charging-sessions.md
 updated: 2026-10-28
 ---
 

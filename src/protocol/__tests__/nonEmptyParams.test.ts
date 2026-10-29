@@ -159,6 +159,7 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
     valid: { cpId: "CP", incidentId: "i" },
     field: "incidentId",
   },
+  { method: "sessions.list", valid: { cpId: "CP" }, field: "cpId" },
   { method: "blueprint.delete", valid: { id: "b" }, field: "id" },
 ];
 

@@ -606,12 +606,33 @@ describe("charge-point labels schema, v16 (#446)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(Number(version?.value)).toBe(16);
-      expect(SCHEMA_VERSION).toBe(16);
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
 
       // Re-running the step on a migrated database is a no-op, not an error.
       db.run("UPDATE schema_meta SET value = '15' WHERE key = 'version'");
       expect(() => runMigrations(db)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("charging sessions schema, v17 (#447)", () => {
+  it("creates charging_sessions on a database stamped 16", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE charging_sessions");
+      db.run("UPDATE schema_meta SET value = '16' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("charging_sessions");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("charging_sessions");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(17);
+      expect(SCHEMA_VERSION).toBe(17);
     } finally {
       db.close();
     }

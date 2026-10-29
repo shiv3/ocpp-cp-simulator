@@ -1,5 +1,6 @@
 import type { ScenarioRunResult } from "../../application/verification/ScenarioAssertions";
 import type { Database, SqlParam } from "./Database";
+import { parseStoredJson } from "./parseStoredJson";
 import {
   summarizeRun,
   type ScenarioRunPage,
@@ -129,14 +130,5 @@ export class SqliteScenarioRunRepository implements ScenarioRunRepository {
 
 /** The stored JSON, or null when it no longer parses to a run object. */
 function parseRun<T extends { runId: string }>(json: string): T | null {
-  try {
-    const value: unknown = JSON.parse(json);
-    return typeof value === "object" &&
-      value !== null &&
-      typeof (value as { runId?: unknown }).runId === "string"
-      ? (value as T)
-      : null;
-  } catch {
-    return null;
-  }
+  return parseStoredJson<T>(json, "runId");
 }

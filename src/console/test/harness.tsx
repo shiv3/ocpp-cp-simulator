@@ -85,6 +85,8 @@ export function createFakeChargePointService(
     getChargePoint: vi.fn(
       async (id: string) => snapshots?.find((s) => s.id === id) ?? null,
     ),
+    // #447: the Transactions tab reads a page; `undefined` is not one.
+    listChargingSessions: vi.fn(async () => ({ sessions: [], total: 0 })),
     subscribe: vi.fn((id: string, handler: Handler) =>
       registerHandler(handlers.subscribe, id, handler),
     ),

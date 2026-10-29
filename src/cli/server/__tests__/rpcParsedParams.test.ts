@@ -143,6 +143,7 @@ describe("RPC params are narrowed by the schema alone (#383)", () => {
     ["logs.get", { cpId: "" }],
     ["logs.clear", { cpId: "" }],
     ["timeline.get", { cpId: "" }],
+    ["sessions.list", { cpId: "" }],
     ["blueprint.delete", { id: "" }],
   ])("%s refuses an empty id as invalid_params", async (method, params) => {
     const error = await rpcError({}, { method, params });

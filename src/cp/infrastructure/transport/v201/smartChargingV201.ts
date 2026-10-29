@@ -471,8 +471,8 @@ export function handleGetCompositeScheduleV201(
     req.duration,
   )
     .filter((period) => Number.isFinite(period.watts))
-    // Restated in the winning profile's own unit and `numberPhases`, the
-    // same rule as 1.6 (#323).
+    // Restated in the winning profile's own unit, with the joint phase
+    // count as `numberPhases`, the same rule as 1.6 (#323).
     .map((period) => ({
       startPeriod: period.startPeriod,
       ...compositeLimitInUnit(period, unit),

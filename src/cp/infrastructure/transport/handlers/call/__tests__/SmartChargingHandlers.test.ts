@@ -473,6 +473,23 @@ describe("GetCompositeScheduleHandler round trip (#323)", () => {
     ]);
   });
 
+  it("follows a tx phase restriction that ends over time under a station cap", () => {
+    const profiles = {
+      tx: {
+        unit: "A" as const,
+        periods: [
+          { startPeriod: 0, limit: 16, numberPhases: 1 },
+          { startPeriod: 600, limit: 16 },
+        ],
+      },
+      max: { unit: "A" as const, periods: [{ startPeriod: 0, limit: 10 }] },
+    };
+    expect(compositeFor(profiles, "A").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 10, numberPhases: 1 },
+      { startPeriod: 600, limit: 10 },
+    ]);
+  });
+
   it("restates a 1000 W tx under a 6 A / 1-phase station cap on 1 phase", () => {
     const profiles = {
       tx: { unit: "W" as const, periods: [{ startPeriod: 0, limit: 1000 }] },

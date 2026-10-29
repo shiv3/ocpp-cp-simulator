@@ -48,12 +48,17 @@ const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
  * The `:` / `=` lookbehind comes after the quote it checks: placed before
  * it, V8 runs it at every backtrack position of a long whitespace run
  * (quadratic).
+ *
+ * The assignment guard also looks past one backslash: the escape branch
+ * consumes `\p` of `\privateKey=` in one step, so the guard never runs at
+ * the `p`. The END label is letters, digits and spaces only (real PEM
+ * labels), so it cannot carry an assignment either.
  */
-const NO_ASSIGNMENT_AHEAD = `(?!${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=])`;
+const NO_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=])`;
 const QUOTED_PEM_VALUE =
   `(?=\\s*-----BEGIN)` +
   `(?:(?:${NO_ASSIGNMENT_AHEAD}[\\s\\S])*?` +
-  `-----END[^-\\n]*-----(?:\\s|\\\\[nr])*\\2|[\\s\\S]*)`;
+  `-----END[A-Z0-9 ]*-----(?:\\s|\\\\[nr])*\\2|[\\s\\S]*)`;
 const QUOTED_MULTILINE_VALUE =
   `(?:${NO_ASSIGNMENT_AHEAD}(?:\\\\[\\s\\S]|(?!\\2)[^\\\\]))*` +
   `\\2(?<![:=]\\s*\\2)(?=[\\s,}\\]]|$)`;

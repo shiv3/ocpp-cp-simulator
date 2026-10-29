@@ -565,6 +565,11 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     // value up to its closing quote.
     ['password="ab\\\ncd" user=u', `password="${REDACTED_VALUE}" user=u`],
     ['password="line1\nline2" x', `password="${REDACTED_VALUE}" x`],
+    ['password="line1\r\nSECRET2" x', `password="${REDACTED_VALUE}" x`],
+    // Limit (#519): a later-line quote followed by a non-delimiter, or
+    // preceded by `=`, does not end the value; its later lines stay readable.
+    ['password="line1\nSECRET2";', `password="${REDACTED_VALUE}"\nSECRET2";`],
+    ['password="line1\nline2=" x', `password="${REDACTED_VALUE}"\nline2=" x`],
     [
       "simPin=9731 api_key=s3cret",
       `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,
@@ -693,6 +698,18 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
       'password="a\nprivateKey=",SECRET1"',
       ["SECRET1"],
       `password="${R}"\nprivateKey="${R}"`,
+    ],
+    [
+      "a later-line secret right after a backslash",
+      "password=\"a\n\\privateKey='S1 x\" y S2'",
+      ["S1", "S2"],
+      `password="${R}"\n\\privateKey='${R}'`,
+    ],
+    [
+      "a PEM END label carrying an assignment (fail closed)",
+      "privateKey=\"-----BEGIN K-----\nA\n-----END password='S1 -----\" y S2'",
+      ["S1", "S2"],
+      `privateKey="${R}"`,
     ],
     [
       "a later-line secret in the other quote holding the closing quote",
@@ -935,6 +952,10 @@ describe("text redactor parity with the structured redactor (#515)", () => {
       `password="${"\nx".repeat(100_000)}`,
       `password="a\n${"passwor".repeat(30_000)}`,
       `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
+      `password="a\n${"\\p".repeat(100_000)}`,
+      `password="a\n${"\\passwor".repeat(25_000)}`,
+      `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
+      `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
       `privateKey="-----BEGIN K-----\n${pemBody}`,
       `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
       `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,

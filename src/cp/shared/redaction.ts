@@ -16,9 +16,18 @@ const SENSITIVE_KEY_NAMES = new Set([
   "tlskey",
 ]);
 
-/** The names the text redactor matches in `name: value` / `name=value`. */
-const SENSITIVE_ASSIGNMENT_NAMES =
-  "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|simPin|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
+/**
+ * The name the text redactor matches in `name: value` / `name=value`: one
+ * that ends in a key name above under the `normalizeKeyName` rule (any case,
+ * `-` and `_` anywhere), quoted or not. A suffix, as the spelling list it
+ * replaces matched (#515): `api_password` and `OED_API_KEY` are secrets.
+ * No leading `[-_]*`: the match is unanchored, so it adds nothing, and on a
+ * long `_` run it backtracks from every position (quadratic).
+ */
+const SENSITIVE_NAME_VARIANTS = [...SENSITIVE_KEY_NAMES]
+  .map((name) => name.split("").join("[-_]*"))
+  .join("|");
+const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
 /**
  * A quoted value is confined to its line: it ends at the first unescaped
  * closing quote on that line (`"ab\"cd"` is one value), or, when none comes
@@ -26,19 +35,19 @@ const SENSITIVE_ASSIGNMENT_NAMES =
  * assignment is still seen. Only a PEM value (`-----BEGIN`, after optional
  * whitespace), which keeps raw newlines in non-JSON text, spans lines: up to
  * its closing quote, else to the end of the text. Both fail closed. Limit
- * (#515): any other value with a raw newline is redacted only to the end of
+ * (#519): any other value with a raw newline is redacted only to the end of
  * its first line.
  */
 const QUOTED_PEM_VALUE = `(?=\\s*-----BEGIN)(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\])*\\2|[\\s\\S]*)`;
 const QUOTED_LINE_VALUE = `(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n])*\\2|[^\\n]*`;
 const SENSITIVE_ASSIGNMENT = new RegExp(
-  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])` +
+  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(["'])` +
     `(?:${QUOTED_PEM_VALUE}|${QUOTED_LINE_VALUE})`,
-  "g",
+  "gi",
 );
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(
-  `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(?!["'])([^\\s,}\\]]+)`,
-  "g",
+  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(?!["'])([^\\s,}\\]]+)`,
+  "gi",
 );
 
 /** #458: an `Authorization: Bearer …` value. */
@@ -71,6 +80,12 @@ export function normalizeKeyName(key: string): string {
 
 export function isSensitiveKeyName(key: string): boolean {
   return SENSITIVE_KEY_NAMES.has(normalizeKeyName(key));
+}
+
+/** The text redactor's name rule: `apiPassword` as well as `password`. */
+function endsWithSensitiveKeyName(key: string): boolean {
+  const normalized = normalizeKeyName(key);
+  return [...SENSITIVE_KEY_NAMES].some((name) => normalized.endsWith(name));
 }
 
 /**
@@ -121,10 +136,11 @@ export function redactSensitiveText(text: string): string {
 /**
  * A quoted name is a JSON member (`"simPin":1234`): quote the replacement so
  * the logged frame still parses for the trace adapter (#401). Elsewhere
- * (`api_key=…`) it stays bare.
+ * (`api_key=…`) it stays bare. The match may start inside the name
+ * (`password":` of `"api_password":`), so the closing quote decides.
  */
 function redactBareValue(_match: string, prefix: string): string {
-  return prefix.startsWith('"')
+  return /"\s*[:=]/.test(prefix)
     ? `${prefix}"${REDACTED_VALUE}"`
     : `${prefix}${REDACTED_VALUE}`;
 }
@@ -175,11 +191,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Redacts, in serialized text, the value of a 1.6 `{ key, value }` entry
- * whose key is sensitive, the `attributeValue` of a 2.0.1
- * `{ variable: { name }, attributeValue }` entry whose variable is (#400)
- * and the `key` of an object held under `vpn` (#401) — the same shapes
- * `redactSensitiveValue` handles on parsed payloads.
+ * Redacts, in serialized text, the whole value of a member whose name is
+ * sensitive (#515), the value of a 1.6 `{ key, value }` entry whose key is,
+ * the `attributeValue` of a 2.0.1 `{ variable: { name }, attributeValue }`
+ * entry whose variable is (#400) and the `key` of an object held under `vpn`
+ * (#401) — the same shapes `redactSensitiveValue` handles on parsed payloads.
  */
 function redactOcppKeyValueText(text: string): string {
   const replacements: Replacement[] = [];
@@ -188,6 +204,15 @@ function redactOcppKeyValueText(text: string): string {
 
   for (const [start, end] of objectRanges) {
     const fields = readObjectFields(text, start, end);
+    // A secret-named member, whatever its value holds: the regexes stop at
+    // the first `}` / `]` of an object or array value and break the JSON
+    // (#515). Same name rule as theirs, so none of their matches is left.
+    for (const field of fields) {
+      if (endsWithSensitiveKeyName(field.name)) {
+        replacements.push(redactField(field));
+      }
+    }
+
     const sensitiveKey = fields.some(
       (field) =>
         field.name === "key" &&
@@ -426,10 +451,24 @@ function findValueEnd(text: string, start: number, objectEnd: number): number {
   return objectEnd - 1;
 }
 
+/**
+ * The ranges come from one parse, so two of them are disjoint or nested: a
+ * range inside one already replaced (`{"password":{"tlsKey":"x"}}`) is
+ * dropped, since its offsets no longer hold once the outer one is applied.
+ */
 function applyReplacements(text: string, replacements: Replacement[]): string {
-  let redacted = text;
+  const outermost: Replacement[] = [];
+  let lastEnd = -1;
+  for (const replacement of [...replacements].sort(
+    (a, b) => a.start - b.start || b.end - a.end,
+  )) {
+    if (replacement.start < lastEnd) continue;
+    outermost.push(replacement);
+    lastEnd = replacement.end;
+  }
 
-  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+  let redacted = text;
+  for (const replacement of outermost.reverse()) {
     redacted =
       redacted.slice(0, replacement.start) +
       replacement.value +

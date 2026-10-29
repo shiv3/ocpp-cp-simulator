@@ -1798,6 +1798,14 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The exact outputs dropped when this round's tests became a table are restored as a second table, with the line-rule limits pinned: a non-PEM quoted value with a raw newline, or a backslash before the line end, is redacted only to the end of its first line (#515).
 - [Log format](concepts/log-format.md): Redaction section states those limits in one sentence pointing to #515.
 
+## [2026-10-29] ingest | Text redactor key-name parity and JSON-safe object values (#515)
+
+- The text redactor matched a fixed list of spellings, so `"Password":"…"`, `"tls_key":"…"` or `authorization_key=…` stayed readable in a log line while the structured redactor hid them. Its name pattern is now built from the same key-name set, ignoring case, `-` and `_`. It still matches a name ending in a secret name, as the list did (`api_password`, `OED_API_KEY`, `tlsPrivateKey`), so the text redactor stays stricter than the structured one, which drops exact secret names only.
+- A secret-named JSON member holding an object or array was cut at its first `}` / `]`, leaving invalid JSON that the trace adapter dropped. Inside a complete JSON object the whole member value is now replaced by `"[redacted]"`; a nested secret inside it no longer corrupts the replacement offsets.
+- The line-rule limits (multi-line non-PEM value, backslash line end, unterminated PEM) move to #519.
+- [Log format](concepts/log-format.md): Redaction section states the name rule and the object/array guarantee; the limits sentence points to #519.
+- [GitHub issues](sources/github-issues.md): #515 row rewritten, #519 row.
+
 ## [2026-10-29] ingest | Local mode runs a scenario on a charge point that is not Available (#425)
 
 - `ScenarioManager.executeScenario` returned without a word while the charge point was not `Available`, so in Local mode the console's **Run** (and a template run) showed a running scenario that never progressed; the daemon's `runScenario` has no such gate. The gate now applies only to the automatic `statusChange` trigger (`ScenarioManager.handleStatusChange`), checked before it stops the running scenarios, as the daemon does: a matching transition on a charge point that is not `Available` no longer ends a manual run and then starts nothing. On an `Available` charge point a matching trigger still replaces the running scenario. The connect / status auto-start keeps its own gate in `LocalScenarioRuntime`.

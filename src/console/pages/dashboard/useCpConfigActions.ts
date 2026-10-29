@@ -29,9 +29,9 @@ export interface UseCpConfigActionsResult {
  * instance.
  */
 /**
- * `labels` for cp.create / cp.update (#446): omitted when the form never knew
- * them, so the update keeps the daemon's; otherwise the complete map, which
- * replaces them.
+ * `labels` for cp.create (#446): the complete map, omitted when the form has
+ * none. cp.update never carries them (#471): it rebuilds the charge point, and
+ * the page header relabels in place with cp.labels.set instead.
  */
 function remoteLabels(
   cpConfig: ChargePointConfig,
@@ -45,7 +45,8 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
   const { tagIds: tagIDs } = useGlobalTagIds();
   const { refresh } = useChargePoints(config, { isLoading });
 
-  // The same shape is used for both create and update.
+  // The same shape is used for both create and update; only create adds
+  // labels.
   const buildRemoteParams = useCallback(
     (cpConfig: ChargePointConfig): CreateChargePointParams => ({
       cpId: cpConfig.cpId,
@@ -79,7 +80,6 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         imsi: cpConfig.imsi,
       },
       autoConnect: true,
-      ...remoteLabels(cpConfig),
     }),
     [],
   );
@@ -154,7 +154,10 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           if (!chargePointService.createChargePoint) {
             throw new Error("createChargePoint not supported in this mode");
           }
-          await chargePointService.createChargePoint(params);
+          await chargePointService.createChargePoint({
+            ...params,
+            ...remoteLabels(cpConfig),
+          });
         }
         await applyAutoMeterValueDefaults(cpConfig);
         await refresh();

@@ -77,6 +77,7 @@ import {
   RpcFailure,
   type CpListItem,
   type EventEnvelope,
+  type Labels,
   type Params,
   type Result,
   type RpcAck,
@@ -1657,6 +1658,10 @@ export class RemoteChargePointService implements ChargePointService {
 
   async updateChargePoint(params: CreateChargePointParams): Promise<void> {
     await this.rpc("cp.update", toWireCreateParams(params));
+  }
+
+  async setChargePointLabels(cpId: string, labels: Labels): Promise<void> {
+    await this.rpc("cp.labels.set", { cpId, labels });
   }
 
   async removeChargePoint(id: string): Promise<void> {

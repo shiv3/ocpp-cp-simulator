@@ -1048,10 +1048,9 @@ async function setCpLabels(
   deps: RuntimeSocketIoDeps,
   params: Params<"cp.labels.set">,
 ): Promise<{ cpId: string }> {
-  const found = await runFacadeOperation(() =>
+  await runFacadeOperation(() =>
     deps.chargePointService.setChargePointLabels(params.cpId, params.labels),
   );
-  if (!found) throw new RpcFailure("not_found", "");
   return { cpId: params.cpId };
 }
 

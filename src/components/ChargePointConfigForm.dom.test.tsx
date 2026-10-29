@@ -351,7 +351,7 @@ describe("ChargePointConfigForm", () => {
     });
   });
 
-  describe("labels (#446)", () => {
+  describe("labels in the Add form (#446)", () => {
     const type = async (input: HTMLInputElement, value: string) => {
       const setter = Object.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
@@ -370,6 +370,7 @@ describe("ChargePointConfigForm", () => {
     it("shows the current labels and saves them untouched", async () => {
       const labels = { site: "s1", env: "lab" };
       const { onSave } = await render({
+        isNewChargePoint: true,
         initialConfig: { ...defaultChargePointConfig, cpId: "CP-1", labels },
       });
       expect(labelInput("Label 1 key").value).toBe("site");
@@ -382,6 +383,7 @@ describe("ChargePointConfigForm", () => {
 
     it("adds, edits and removes rows", async () => {
       const { onSave } = await render({
+        isNewChargePoint: true,
         initialConfig: {
           ...defaultChargePointConfig,
           cpId: "CP-1",
@@ -406,6 +408,7 @@ describe("ChargePointConfigForm", () => {
 
     it("refuses an invalid key with a message instead of saving", async () => {
       const { onSave } = await render({
+        isNewChargePoint: true,
         initialConfig: {
           ...defaultChargePointConfig,
           cpId: "CP-1",
@@ -424,13 +427,27 @@ describe("ChargePointConfigForm", () => {
     });
 
     it("leaves unknown labels undefined so the daemon keeps them", async () => {
-      const { onSave } = await render();
+      const { onSave } = await render({ isNewChargePoint: true });
       await act(async () => button("Save")!.click());
       expect(onSave.mock.calls[0][0].labels).toBeUndefined();
     });
 
     it("is not offered in local mode", async () => {
-      await render({ mode: "local" });
+      await render({ mode: "local", isNewChargePoint: true });
+      expect(button("Add label")).toBeUndefined();
+    });
+
+    // #471: an edit saves through cp.update, which rebuilds the charge point
+    // (and never carries labels, see useCpConfigActions); the page header
+    // relabels in place instead, so the edit form does not offer them.
+    it("is not offered when editing", async () => {
+      await render({
+        initialConfig: {
+          ...defaultChargePointConfig,
+          cpId: "CP-1",
+          labels: { site: "s1" },
+        },
+      });
       expect(button("Add label")).toBeUndefined();
     });
   });

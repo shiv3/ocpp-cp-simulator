@@ -1855,3 +1855,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The 2.x dispatcher awaits a handler only when it returns a promise, so synchronous answers keep their ordering; a rejected promise is an `InternalError` CALLERROR.
 - [Security profiles → OCPP 2.0.1 and 2.1 behaviour](concepts/security-profiles.md#ocpp-201-and-21-behaviour): new section with statuses, limits and what is not covered.
 - [Log format](concepts/log-format.md): the 2.x `SignCertificateResponse` log lines. [GitHub issues](sources/github-issues.md): #456 row.
+
+## [2026-10-29] ingest | Certificate store ordering, reinstall and save failures (#456)
+
+- The certificate store runs its operations one at a time, so a `GetInstalledCertificateIds` or `DeleteCertificate` sent right after an `InstallCertificate` sees it, on 1.6 and 2.x.
+- 2.x replaces a reinstalled certificate and answers `Accepted`, even in a full store (M05.FR.17); 1.6 keeps duplicates. `InstallCertificate` answers `Failed` when the database refuses the row. A 1.6 `CertificateSigned` chain replaces the previous one.
+- A 2.x answer that settles after the connection changed is reported as unanswered; `sign_certificate`'s `csr` is bounded to 5500 characters.
+- [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): 1.6 and 2.x behaviour, ordering, limits (`V2G20Certificate` chains, `serialNumber` leading zero, whitepaper M04.FR.06), persistence failures.
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): `sign_certificate` bound.

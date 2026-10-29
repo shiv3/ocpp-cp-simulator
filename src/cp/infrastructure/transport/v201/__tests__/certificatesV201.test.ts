@@ -322,11 +322,56 @@ describe.each(VERSIONS)(
         context(store).ctx,
       );
 
-      expect(
-        (response as { certificateHashDataChain: unknown[] })
-          .certificateHashDataChain,
-      ).toHaveLength(1);
+      const chain = (
+        response as {
+          certificateHashDataChain: { childCertificateHashData: unknown[] }[];
+        }
+      ).certificateHashDataChain;
+      expect(chain).toHaveLength(1);
       expect(validGetIds(response)).toBe(true);
+      // The validator does enforce the 0..4 bound the handler caps to.
+      const [entry] = chain;
+      const untruncated = {
+        ...(response as object),
+        certificateHashDataChain: [
+          {
+            ...entry,
+            childCertificateHashData: [
+              ...entry.childCertificateHashData,
+              entry.childCertificateHashData[0],
+            ],
+          },
+        ],
+      };
+      expect(validGetIds(untruncated)).toBe(false);
+    });
+
+    it("answers a query and a delete synchronously once no install is pending", async () => {
+      const store = new CertificateStore();
+      const root = await selfSignedRoot("01", "Root");
+      const hash = await computeCertificateHashData(root.pem);
+      await handlers.InstallCertificate(
+        { certificateType: "CSMSRootCertificate", certificate: root.pem },
+        context(store).ctx,
+      );
+
+      const listed = handlers.GetInstalledCertificateIds(
+        {},
+        context(store).ctx,
+      );
+      expect(listed).not.toBeInstanceOf(Promise);
+      expect((listed as V201HandlerResult).response).toMatchObject({
+        status: "Accepted",
+      });
+
+      const deleted = handlers.DeleteCertificate(
+        { certificateHashData: hash },
+        context(store).ctx,
+      );
+      expect(deleted).not.toBeInstanceOf(Promise);
+      expect((deleted as V201HandlerResult).response).toEqual({
+        status: "Accepted",
+      });
     });
 
     it("sends a schema-valid SecurityEventNotification for a rejected chain", async () => {

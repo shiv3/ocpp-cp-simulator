@@ -725,7 +725,8 @@ export const METHODS = {
     result: ANY,
   },
   sign_certificate: {
-    params: z.object({ csr: NON_EMPTY_STR.optional() }),
+    // SignCertificateRequest.csr is string[0..5500] (1.6, 2.0.1, 2.1).
+    params: z.object({ csr: NON_EMPTY_STR.max(5500).optional() }),
     result: ANY,
   },
 

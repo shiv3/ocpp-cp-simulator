@@ -242,9 +242,11 @@ sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
 
 - `InstallCertificate` answers `Accepted`, or `Rejected` for a malformed
   certificate (whitepaper M05.FR.06) or when the store already holds
-  `CertificateStoreMaxLength` trust anchors (M05.FR.03). Signed chains do
-  not count toward that limit, and installing the same certificate twice
-  keeps two entries.
+  `CertificateStoreMaxLength` trust anchors (M05.FR.03). It answers `Failed`
+  when the state database refuses the row (M05.FR.04): nothing is installed.
+  Signed chains do not count toward that limit. Installing the same
+  certificate twice keeps two entries: the whitepaper says nothing about a
+  reinstall.
 - `GetInstalledCertificateIds` answers `Accepted` with the hash data of every
   trust anchor of the requested type, in install order, or `NotFound`.
 - `DeleteCertificate` removes the first trust anchor whose hash data matches
@@ -254,7 +256,15 @@ sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
   deleted (whitepaper M04.FR.05).
 - `CertificateSigned` stores a well-formed chain that passes the certificate
   quirks without checking it against the pending CSR, and leaves that CSR
-  pending.
+  pending. The chain replaces the previous one, so a persisted store keeps
+  one chain; no 1.6 message reads it back.
+- The 1.6 dispatcher starts each CALL without waiting for the previous
+  one, so the answer of an async handler (`InstallCertificate`,
+  `CertificateSigned`) can follow the answer to a later CALL. The store
+  still runs certificate operations one at a time: a
+  `GetInstalledCertificateIds` or `DeleteCertificate` sent right after an
+  `InstallCertificate`, without waiting for its answer, sees the installed
+  certificate.
 
 ### OCPP 2.0.1 and 2.1 behaviour
 
@@ -269,8 +279,10 @@ CALLERROR.
   `Rejected` for a certificate that does not parse (M05.FR.07) or when the
   store already holds `CertificateStoreMaxLength` trust anchors (M05.FR.06).
   The limit is the 1.6 key: `SecurityCtrlr.CertificateEntries` is not
-  modelled. Installing the same certificate twice keeps two entries, where
-  M05.FR.17 asks for a replacement.
+  modelled. A certificate already installed (same hash data) is replaced
+  and answered `Accepted`, even when the store is full (M05.FR.17). It
+  answers `Failed` when the state database refuses the row (M05.FR.03): the
+  store keeps what it held before, a replaced copy included.
 - `GetInstalledCertificateIds` answers `Accepted` with one
   `certificateHashDataChain` entry per installed certificate matching
   `certificateType`, or per installed certificate when it is absent
@@ -303,7 +315,9 @@ CALLERROR.
   (`requiredCertificateSignatureAlgorithms`) and `MaxCertificateChainSize`
   (A02.FR.16) are not applied on 2.x.
 - `sign_certificate` ([Control plane](control-plane.md#cp-command-methods))
-  sends a `SignCertificateRequest`. It carries the `csr` given, or one the
+  sends a `SignCertificateRequest`. It carries the `csr` given (at most 5500
+  characters, the schema's bound; a longer one is refused as invalid
+  params), or one the
   store generates with the certificate quirks' key algorithm and line endings
   and `CpoName`. That CSR becomes the pending Charging Station certificate
   CSR. `certificateType` is omitted, and so are the optional 2.1
@@ -317,7 +331,14 @@ The dispatcher of 2.x inbound CALLs awaits a handler only when it returns a
 promise. A synchronous handler still answers in the same tick, so a
 CALLRESULT keeps its place before the CALLs its follow-up sends, such as
 `GetBaseReport` → `NotifyReport`. A rejected promise is answered with an
-`InternalError` CALLERROR, like a handler that throws.
+`InternalError` CALLERROR, like a handler that throws. An answer that
+settles after the connection changed is not sent: the CALL is reported as
+unanswered (WARN log) and the handler's follow-up does not run.
+
+As on 1.6, the store runs certificate operations one at a time: a query or
+delete sent right after an install sees it. When no operation is pending,
+`GetInstalledCertificateIds` and `DeleteCertificate` still answer in the
+tick of their CALL.
 
 Not covered yet, on 2.x:
 
@@ -328,7 +349,19 @@ Not covered yet, on 2.x:
   `SignV2GCertificate`, which still answers `NotImplemented`;
 - the A02.FR.17-19 resend back-off;
 - the control-plane `security_event_notification` method, which only logs a
-  WARN on 2.x.
+  WARN on 2.x;
+- `V2G20Certificate` chains (2.1) in `GetInstalledCertificateIds`: 2.1 has
+  no query value for them, and the simulator lists only `V2GCertificate`
+  chains under `V2GCertificateChain` (its reading of M03.FR.05). A stored
+  `V2G20Certificate` chain is therefore not reported.
+
+Not covered yet, on 1.6 and 2.x:
+
+- `serialNumber` in `certificateHashData` is the hex of the certificate's
+  serial bytes, so it can start with `0` (`0a`), where the field
+  description asks for no leading zeroes;
+- whitepaper M04.FR.06 (1.6): deleting the `CentralSystemRootCertificate`
+  that the current connection uses is not refused.
 
 ### Persistence
 
@@ -336,4 +369,9 @@ With [state persistence](state-persistence.md) on, trust anchors and signed
 chains survive a restart (`certificates` table, schema v18). Pending CSRs do
 not: the key pair behind a CSR is gone after a restart, and 2.x A02.FR.17
 already has the station send a new CSR when no `CertificateSigned` arrives.
-`cp.delete` and `state.reset` remove the rows.
+`cp.delete` and `state.reset` remove the rows. A trust anchor whose row the
+database refuses is not installed (`InstallCertificate` answers `Failed`).
+A signed chain whose row is refused is logged and kept in memory only:
+`CertificateSigned` has no status for a station-side failure. A delete the
+database refuses is logged too: the certificate is removed in memory only
+and comes back after a restart.

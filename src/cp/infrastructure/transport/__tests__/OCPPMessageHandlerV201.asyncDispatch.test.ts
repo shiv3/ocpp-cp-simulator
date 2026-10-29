@@ -44,8 +44,12 @@ class FakeSocket {
     this.handler = h;
   }
   onCloseTransaction(): void {}
+  generation = 1;
   currentGeneration(): GenerationToken {
-    return { gen: 1, closeCause: null } as unknown as GenerationToken;
+    return {
+      gen: this.generation,
+      closeCause: null,
+    } as unknown as GenerationToken;
   }
   isConnected(): boolean {
     return true;
@@ -215,6 +219,92 @@ describe("OCPPMessageHandlerV201 async inbound handlers (#456)", () => {
     });
     const error = socket.wire[0] as Extract<WireEvent, { kind: "error" }>;
     expect(error.payload.errorDescription).toHaveLength(255);
+  });
+
+  it("drops a late answer after a reconnect: nothing written, afterResult never run", async () => {
+    let release!: (r: V201HandlerResult) => void;
+    const afterResult = vi.fn();
+    const { socket, chargePoint, handler } = setup({
+      InstallCertificate: {
+        validate: () => true,
+        handle: () =>
+          new Promise<V201HandlerResult>((resolve) => {
+            release = resolve;
+          }),
+      },
+    });
+    const register = vi.spyOn(
+      (handler as unknown as { _responseEffectQueue: { register: () => void } })
+        ._responseEffectQueue,
+      "register",
+    );
+
+    socket.deliver("late-1", "InstallCertificate", {});
+    socket.generation = 2;
+    release({ response: { status: "Accepted" }, afterResult });
+    await flush();
+
+    expect(socket.wire).toEqual([]);
+    expect(register).not.toHaveBeenCalled();
+    expect(afterResult).not.toHaveBeenCalled();
+    expect(chargePoint.notifyIncomingCallCompleted).toHaveBeenCalledTimes(1);
+    expect(chargePoint.notifyIncomingCallCompleted).toHaveBeenCalledWith({
+      action: "InstallCertificate",
+      messageId: "late-1",
+      outcome: "NoResponse",
+    });
+  });
+
+  it("drops a late rejection after a reconnect instead of answering InternalError", async () => {
+    let fail!: (error: Error) => void;
+    const { socket, chargePoint } = setup({
+      InstallCertificate: {
+        validate: () => true,
+        handle: () =>
+          new Promise<V201HandlerResult>((_resolve, reject) => {
+            fail = reject;
+          }),
+      },
+    });
+
+    socket.deliver("late-2", "InstallCertificate", {});
+    socket.generation = 2;
+    fail(new Error("boom"));
+    await flush();
+
+    expect(socket.wire).toEqual([]);
+    expect(chargePoint.notifyIncomingCallCompleted).toHaveBeenCalledWith({
+      action: "InstallCertificate",
+      messageId: "late-2",
+      outcome: "NoResponse",
+    });
+  });
+
+  it("answers a thenable that is not a Promise (its then returns nothing)", async () => {
+    const { socket } = setup({
+      InstallCertificate: {
+        validate: () => true,
+        handle: () =>
+          ({
+            then(resolve: (r: V201HandlerResult) => void) {
+              resolve({ response: { status: "Accepted" } });
+            },
+          }) as unknown as Promise<V201HandlerResult>,
+      },
+    });
+
+    expect(() =>
+      socket.deliver("thenable-1", "InstallCertificate", {}),
+    ).not.toThrow();
+    await flush();
+
+    expect(socket.wire).toEqual([
+      {
+        kind: "result",
+        messageId: "thenable-1",
+        payload: { status: "Accepted" },
+      },
+    ]);
   });
 
   it("still answers a synchronously throwing handler with InternalError", () => {

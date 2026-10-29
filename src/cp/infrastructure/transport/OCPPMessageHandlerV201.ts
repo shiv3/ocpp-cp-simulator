@@ -407,7 +407,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
         };
+        // An async answer that settles after the socket generation changed
+        // cannot reach the CSMS (`sendResult` / `sendError` drop it): report
+        // the CALL as unanswered and run no afterResult.
+        const droppedAfterReconnect = (): boolean => {
+          if (this._webSocket.currentGeneration().gen === gen.gen) return false;
+          this._logger.warn(
+            `[v2.0.1] ${action} answered after the connection changed; not sent`,
+            LogType.OCPP,
+          );
+          this.ignoreCall(action, messageId);
+          return true;
+        };
         const fail = (error: unknown): void => {
+          if (droppedAfterReconnect()) return;
           // Same answer as the 1.6J handler: a failing handler is the
           // station's fault, so the CSMS gets InternalError instead of
           // waiting for its timeout (#399).
@@ -429,12 +442,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           );
         };
         const finish = ({ response, afterResult }: V201HandlerResult): void => {
+          if (droppedAfterReconnect()) return;
           // Register effect with queue if present, get settlement callback
           const onSettled = afterResult
             ? this._responseEffectQueue.register(gen, afterResult)
             : undefined;
-          // `gen` is the generation captured before the handler ran, so a
-          // late async answer is dropped rather than sent on a new socket.
           this.answerCall(action, messageId, response, gen, onSettled);
         };
         let handled: ReturnType<typeof entry.handle>;
@@ -446,9 +458,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         }
         // #456: await only a real thenable. An unconditional await would
         // defer every CALLRESULT by a microtask and reorder it against the
-        // follow-up CALLs other code sends meanwhile.
+        // follow-up CALLs other code sends meanwhile. `Promise.resolve`
+        // adopts any thenable, including one whose `then` returns nothing.
         if (isThenable(handled)) {
-          handled
+          Promise.resolve(handled)
             .then(finish, fail)
             .catch((error: unknown) =>
               this._logger.error(

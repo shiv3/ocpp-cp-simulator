@@ -29,6 +29,8 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
+  SignCertificateRequestV201,
+  SignCertificateResponseV201,
 } from "../../../ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
@@ -72,6 +74,7 @@ import {
 import {
   buildV201InboundRegistry,
   type V201Action,
+  type V201HandlerResult,
   type V201InboundContext,
   type V201InboundRegistry,
   type V201RequestPayload,
@@ -89,6 +92,11 @@ type V201ResponsePayload =
   | TransactionEventResponseV201
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
+
+/** True for a promise or any other thenable a handler may return. */
+function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
 
 type V201MeterValuesSampledValue =
   MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
@@ -399,10 +407,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
         };
-        let handled: ReturnType<typeof entry.handle>;
-        try {
-          handled = entry.handle(payload, ctx);
-        } catch (error) {
+        const fail = (error: unknown): void => {
           // Same answer as the 1.6J handler: a failing handler is the
           // station's fault, so the CSMS gets InternalError instead of
           // waiting for its timeout (#399).
@@ -422,14 +427,38 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             ),
             gen,
           );
+        };
+        const finish = ({ response, afterResult }: V201HandlerResult): void => {
+          // Register effect with queue if present, get settlement callback
+          const onSettled = afterResult
+            ? this._responseEffectQueue.register(gen, afterResult)
+            : undefined;
+          // `gen` is the generation captured before the handler ran, so a
+          // late async answer is dropped rather than sent on a new socket.
+          this.answerCall(action, messageId, response, gen, onSettled);
+        };
+        let handled: ReturnType<typeof entry.handle>;
+        try {
+          handled = entry.handle(payload, ctx);
+        } catch (error) {
+          fail(error);
           return;
         }
-        const { response, afterResult } = handled;
-        // Register effect with queue if present, get settlement callback
-        const onSettled = afterResult
-          ? this._responseEffectQueue.register(gen, afterResult)
-          : undefined;
-        this.answerCall(action, messageId, response, gen, onSettled);
+        // #456: await only a real thenable. An unconditional await would
+        // defer every CALLRESULT by a microtask and reorder it against the
+        // follow-up CALLs other code sends meanwhile.
+        if (isThenable(handled)) {
+          handled
+            .then(finish, fail)
+            .catch((error: unknown) =>
+              this._logger.error(
+                `[v2.0.1] Error answering ${action}: ${error}`,
+                LogType.OCPP,
+              ),
+            );
+          return;
+        }
+        finish(handled);
         return;
       }
 
@@ -525,6 +554,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
+    if (pending?.action === "SignCertificate") {
+      this.applySignCertificateResult(payload as SignCertificateResponseV201);
+      return;
+    }
+
     if (pending?.action === "TransactionEvent") {
       this.applyTransactionEventResult(
         pending.payload as TransactionEventRequestV201,
@@ -549,6 +583,28 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         currentTime: bootResult.currentTime,
       });
     }
+  }
+
+  /**
+   * A02 SignCertificateResponse (#456), the 2.x twin of 1.6's #410 result
+   * handling: logged only. A Rejected answer (A02.FR.12) leaves the CSR
+   * pending: A02 has no rule to discard it, and a CertificateSigned that
+   * still arrives for it can be matched.
+   */
+  private applySignCertificateResult(
+    response: SignCertificateResponseV201,
+  ): void {
+    if (response.status === "Accepted") {
+      this._logger.info(
+        "[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned",
+        LogType.OCPP,
+      );
+      return;
+    }
+    this._logger.warn(
+      `[v2.0.1] SignCertificate not accepted by the CSMS (status ${response.status}); the CSR stays pending`,
+      LogType.OCPP,
+    );
   }
 
   /**
@@ -1004,11 +1060,45 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  public async sendSignCertificate(_csr?: string): Promise<void> {
-    this._logger.warn(
-      "[v2.0.1] SignCertificate is not wired through this handler",
-      LogType.OCPP,
-    );
+  /**
+   * A02 SignCertificateRequest (#456): sends `csr` as given, or a CSR newly
+   * generated by the certificate store, and records it as the pending
+   * Charging Station certificate CSR that CertificateSigned is matched
+   * against. `certificateType` is omitted (the certificate serves every
+   * connection, A02.FR.13 does not apply), and so are the optional 2.1
+   * `requestId` / `hashRootCertificate`, which the station has no source
+   * for.
+   */
+  public async sendSignCertificate(csr?: string): Promise<void> {
+    const store = this._chargePoint.certificateStore;
+    let payloadCsr: string;
+    if (csr) {
+      payloadCsr = csr;
+      if (!store.recordPendingCsr("ChargingStationCertificate", csr)) {
+        this._logger.warn(
+          "[v2.0.1] SignCertificate: the given CSR is not a parseable PKCS#10 request; no CertificateSigned can match it",
+          LogType.OCPP,
+        );
+      }
+    } else {
+      const quirks = this._chargePoint.certificateQuirks;
+      if (quirks.csrKeyAlgorithm === "RSA") {
+        this._logger.info(
+          "[v2.0.1] SignCertificate: generating RSA CSR (certificate quirk)",
+          LogType.OCPP,
+        );
+      }
+      payloadCsr = await store.generateNewCsr(
+        this._chargePoint.id,
+        this._chargePoint.configuration.getString("CpoName") ?? "",
+        {
+          keyAlgorithm: quirks.csrKeyAlgorithm,
+          pemLineEndings: quirks.csrPemLineEndings,
+        },
+      );
+    }
+    const payload: SignCertificateRequestV201 = { csr: payloadCsr };
+    this.send("SignCertificate", this.generateMessageId(), payload);
   }
 
   public sendDiagnosticsStatusNotification(_status: DiagnosticsStatus): void {

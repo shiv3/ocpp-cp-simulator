@@ -7,6 +7,7 @@ sources:
   - src/cli/
   - src/cp/domain/security/CertificateStore.ts (certificate store, issue #456)
   - src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
+  - src/cp/infrastructure/transport/v201/certificatesV201.ts (2.x certificate handlers, issue #456)
   - src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
   - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:
@@ -255,9 +256,79 @@ sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
   quirks without checking it against the pending CSR, and leaves that CSR
   pending.
 
-The OCPP 2.0.1 and 2.1 certificate handlers still answer schema-valid
-negative acknowledgements; their stateful behaviour on this store is the rest
-of #456.
+### OCPP 2.0.1 and 2.1 behaviour
+
+Since #456 the 2.x handlers work on the same store
+(`src/cp/infrastructure/transport/v201/certificatesV201.ts`). 2.0.1 and 2.1
+share them; each registry builds them with its own use mapping. A value a
+version does not define (`OEMRootCertificate`, `V2G20Certificate` on 2.0.1)
+fails that version's schema validator and gets a `FormationViolation`
+CALLERROR.
+
+- `InstallCertificate` answers `Accepted` once installed (M05.FR.02), or
+  `Rejected` for a certificate that does not parse (M05.FR.07) or when the
+  store already holds `CertificateStoreMaxLength` trust anchors (M05.FR.06).
+  The limit is the 1.6 key: `SecurityCtrlr.CertificateEntries` is not
+  modelled. Installing the same certificate twice keeps two entries, where
+  M05.FR.17 asks for a replacement.
+- `GetInstalledCertificateIds` answers `Accepted` with one
+  `certificateHashDataChain` entry per installed certificate matching
+  `certificateType`, or per installed certificate when it is absent
+  (M03.FR.03/04). Otherwise it answers `NotFound` (M03.FR.02).
+  `V2GCertificateChain` lists each stored V2G chain as its leaf, with the
+  sub-CAs as `childCertificateHashData` (M03.FR.05). The schema allows 4
+  children: any further sub-CA is left out, with a WARN log. A certificate
+  whose use the version has no name for is left out too. This happens when a
+  2.1 station installs an `OEMRootCertificate` and a 2.0.1 station later
+  reads the same state database.
+- `DeleteCertificate` searches the trust anchors, then the signed chains. It
+  answers `Accepted` once deleted (M04.FR.02) and `NotFound` for an unknown
+  hash (M04.FR.04). For the Charging Station certificate it answers `Failed`
+  (M04.FR.06). Deleting a member of a V2G chain removes the whole chain,
+  which M04.FR.08 allows.
+- `CertificateSigned` splits `certificateChain` into PEM certificates, leaf
+  first. It answers `Accepted` only when a CSR is pending for the chain's use and the
+  leaf carries that CSR's public key (A02.FR.06). The chain then replaces any
+  older chain of the same use, and the CSR is no longer pending. An absent
+  `certificateType` means the Charging Station certificate: per the field
+  description, the certificate then serves both the CSMS and the 15118
+  connection, and the simulator has no 15118 stack. In every other case the
+  answer is `Rejected`, nothing is stored, and the CSR stays pending. Once
+  that answer is written, the station sends a `SecurityEventNotification` of
+  type `InvalidChargingStationCertificate` (A02.FR.07). Its `techInfo` gives
+  the reason: a malformed chain, no pending CSR, or a key mismatch. The spec
+  does not name the case of a chain without a pending CSR. Rejecting it is
+  this simulator's reading: such a chain cannot be checked against a key
+  the station generated. The certificate quirks
+  (`requiredCertificateSignatureAlgorithms`) and `MaxCertificateChainSize`
+  (A02.FR.16) are not applied on 2.x.
+- `sign_certificate` ([Control plane](control-plane.md#cp-command-methods))
+  sends a `SignCertificateRequest`. It carries the `csr` given, or one the
+  store generates with the certificate quirks' key algorithm and line endings
+  and `CpoName`. That CSR becomes the pending Charging Station certificate
+  CSR. `certificateType` is omitted, and so are the optional 2.1
+  `requestId` and `hashRootCertificate`. A given CSR that does not parse is
+  still sent, with a WARN log, but no `CertificateSigned` can match it.
+- The `SignCertificateResponse` status is only logged: `Accepted` at INFO,
+  any other status at WARN. A `Rejected` answer (A02.FR.12) leaves the CSR
+  pending, since A02 has no rule to discard it.
+
+The dispatcher of 2.x inbound CALLs awaits a handler only when it returns a
+promise. A synchronous handler still answers in the same tick, so a
+CALLRESULT keeps its place before the CALLs its follow-up sends, such as
+`GetBaseReport` → `NotifyReport`. A rejected promise is answered with an
+`InternalError` CALLERROR, like a handler that throws.
+
+Not covered yet, on 2.x:
+
+- `GetCertificateStatus` and OCSP;
+- the ISO 15118 flows (`Get15118EVCertificate`, the V2G certificate as a
+  TLS identity);
+- `TriggerMessage` for `SignChargingStationCertificate` or
+  `SignV2GCertificate`, which still answers `NotImplemented`;
+- the A02.FR.17-19 resend back-off;
+- the control-plane `security_event_notification` method, which only logs a
+  WARN on 2.x.
 
 ### Persistence
 

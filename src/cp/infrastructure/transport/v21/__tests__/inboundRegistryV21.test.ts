@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { actionValidatorV21 } from "../../../../../ocpp/v21";
 import { buildV21InboundRegistry } from "../inboundRegistryV21";
+import type { V201HandlerResult } from "../../v201/inboundRegistryV201";
 
 const SHARED_ACTIONS = [
   "GetVariables",
@@ -80,7 +81,9 @@ const SKIPPED_CP_ACTIONS = [
 function responseFor(action: string): unknown {
   const handler = buildV21InboundRegistry().get(action);
   expect(handler).toBeDefined();
-  return handler?.handle({}, {} as never).response;
+  // These Tier-3 handlers answer synchronously.
+  return (handler?.handle({}, {} as never) as V201HandlerResult | undefined)
+    ?.response;
 }
 
 describe("buildV21InboundRegistry", () => {

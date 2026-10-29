@@ -1,0 +1,322 @@
+import type {
+  CertificateSignedRequestV201,
+  DeleteCertificateRequestV201,
+  GetInstalledCertificateIdsRequestV201,
+  InstallCertificateRequestV201,
+} from "../../../../ocpp";
+import type {
+  CertificateSignedResponseV21,
+  DeleteCertificateResponseV21,
+  GetInstalledCertificateIdsResponseV21,
+  InstallCertificateResponseV21,
+} from "../../../../ocpp/v21";
+import type { CertificateHashData } from "../../../domain/security/certificateHash";
+import type {
+  InstalledCertificateQuery,
+  RootCertificateUse,
+  SignedCertificateUse,
+} from "../../../domain/security/certificateUse";
+import { LogType } from "../../../shared/Logger";
+import {
+  installedCertificateQueryFromV201,
+  installedCertificateQueryFromV21,
+  installedCertificateQueryToV201,
+  installedCertificateQueryToV21,
+  rootUseFromV201,
+  rootUseFromV21,
+  signedUseFromV201,
+  signedUseFromV21,
+} from "../certificateUseMapping";
+import { splitPemChain } from "../handlers/call/CertificateSignedHandler";
+import type {
+  V201HandlerResult,
+  V201InboundContext,
+  V201InboundHandler,
+} from "./inboundRegistryV201";
+
+/**
+ * OCPP 2.0.1 / 2.1 certificate management on the station's CertificateStore
+ * (#456): M05 InstallCertificate, M03 GetInstalledCertificateIds, M04
+ * DeleteCertificate and A02/A03 CertificateSigned. Both versions share these
+ * handlers; only the enum mapping differs (2.1 adds OEMRootCertificate and
+ * V2G20Certificate), so each registry builds them with its own mapping.
+ * The 2.x responses are the 2.1 types, a superset of the 2.0.1 ones.
+ */
+
+/** The wire ↔ domain mapping one OCPP 2.x version uses. */
+export interface CertificateWireMapping {
+  readonly rootUseFrom: (value: string) => RootCertificateUse | undefined;
+  readonly queryFrom: (value: string) => InstalledCertificateQuery | undefined;
+  readonly queryTo: (query: InstalledCertificateQuery) => string | undefined;
+  readonly signedUseFrom: (value: string) => SignedCertificateUse | undefined;
+}
+
+export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
+  rootUseFrom: rootUseFromV201,
+  queryFrom: installedCertificateQueryFromV201,
+  queryTo: installedCertificateQueryToV201,
+  signedUseFrom: signedUseFromV201,
+};
+
+export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
+  rootUseFrom: rootUseFromV21,
+  queryFrom: installedCertificateQueryFromV21,
+  queryTo: installedCertificateQueryToV21,
+  signedUseFrom: signedUseFromV21,
+};
+
+/** `childCertificateHashData` is 0..4 in both 2.0.1 and 2.1. */
+const MAX_CHILD_HASH_DATA = 4;
+
+type CertificateHashDataChain = NonNullable<
+  GetInstalledCertificateIdsResponseV21["certificateHashDataChain"]
+>[number];
+type WireHashData = CertificateHashDataChain["certificateHashData"];
+
+function wireHashData(hash: CertificateHashData): WireHashData {
+  return { ...hash };
+}
+
+type CertificateAction =
+  | "InstallCertificate"
+  | "GetInstalledCertificateIds"
+  | "DeleteCertificate"
+  | "CertificateSigned";
+
+/** The four certificate handlers of one 2.x version. */
+export function buildCertificateHandlersV2x(
+  mapping: CertificateWireMapping,
+): Record<CertificateAction, V201InboundHandler["handle"]> {
+  return {
+    InstallCertificate: (payload, ctx) =>
+      installCertificate(mapping, payload, ctx),
+    GetInstalledCertificateIds: (payload, ctx) =>
+      getInstalledCertificateIds(mapping, payload, ctx),
+    DeleteCertificate: deleteCertificate,
+    CertificateSigned: (payload, ctx) =>
+      certificateSigned(mapping, payload, ctx),
+  };
+}
+
+/**
+ * M05: Accepted once installed (M05.FR.02); Rejected for a certificate that
+ * does not parse (M05.FR.07) or when the store already holds
+ * `CertificateStoreMaxLength` roots (M05.FR.06; the simulator has no
+ * separate `SecurityCtrlr.CertificateEntries` limit).
+ */
+async function installCertificate(
+  mapping: CertificateWireMapping,
+  payload: unknown,
+  ctx: V201InboundContext,
+): Promise<V201HandlerResult> {
+  const req = payload as InstallCertificateRequestV201;
+  const rejected = {
+    response: { status: "Rejected" } satisfies InstallCertificateResponseV21,
+  };
+  const use = mapping.rootUseFrom(req.certificateType);
+  if (!use) {
+    // The validator already refuses a value this version does not define.
+    ctx.logger.warn(
+      `InstallCertificate rejected: unsupported certificateType ${req.certificateType}`,
+      LogType.OCPP,
+    );
+    return rejected;
+  }
+  const maxEntries = ctx.chargePoint.configuration.certificateStoreMaxLength();
+  const outcome = await ctx.chargePoint.certificateStore.installRootCertificate(
+    use,
+    req.certificate,
+    { maxEntries },
+  );
+  switch (outcome.status) {
+    case "Installed":
+      ctx.logger.info(
+        `InstallCertificate accepted: type=${req.certificateType}`,
+        LogType.OCPP,
+      );
+      return {
+        response: {
+          status: "Accepted",
+        } satisfies InstallCertificateResponseV21,
+      };
+    case "StoreFull":
+      ctx.logger.warn(
+        `InstallCertificate rejected: store at CertificateStoreMaxLength (${outcome.limit})`,
+        LogType.OCPP,
+      );
+      return rejected;
+    case "Malformed":
+      ctx.logger.warn(
+        "InstallCertificate rejected: malformed certificate",
+        LogType.OCPP,
+      );
+      return rejected;
+  }
+}
+
+/**
+ * M03: every installed certificate matching `certificateType` (all of them
+ * when it is absent), Accepted with their hash data (M03.FR.03/04), else
+ * NotFound (M03.FR.02). A V2G chain lists its sub-CAs as children
+ * (M03.FR.05), capped at the schema's 4. A certificate whose use this
+ * version has no name for (an OEM root installed under 2.1, read back on
+ * 2.0.1 from the same state database) is left out.
+ */
+function getInstalledCertificateIds(
+  mapping: CertificateWireMapping,
+  payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult {
+  const req = payload as GetInstalledCertificateIdsRequestV201;
+  const queries = req.certificateType?.flatMap((value) => {
+    const query = mapping.queryFrom(value);
+    return query ? [query] : [];
+  });
+  const chain = ctx.chargePoint.certificateStore
+    .installedCertificateIds(queries)
+    .flatMap((entry): CertificateHashDataChain[] => {
+      const certificateType = mapping.queryTo(entry.use);
+      if (certificateType === undefined) return [];
+      let children = entry.childHashData;
+      if (children.length > MAX_CHILD_HASH_DATA) {
+        ctx.logger.warn(
+          `GetInstalledCertificateIds: ${children.length} sub-CA certificates under one ${certificateType}; reporting the first ${MAX_CHILD_HASH_DATA}`,
+          LogType.OCPP,
+        );
+        children = children.slice(0, MAX_CHILD_HASH_DATA);
+      }
+      return [
+        {
+          certificateType:
+            certificateType as CertificateHashDataChain["certificateType"],
+          certificateHashData: wireHashData(entry.hashData),
+          ...(children.length > 0
+            ? {
+                childCertificateHashData: children.map(
+                  wireHashData,
+                ) as CertificateHashDataChain["childCertificateHashData"],
+              }
+            : {}),
+        },
+      ];
+    });
+  const [first, ...rest] = chain;
+  if (first === undefined) {
+    ctx.logger.info(
+      "GetInstalledCertificateIds: no installed certificate matched",
+      LogType.OCPP,
+    );
+    return {
+      response: {
+        status: "NotFound",
+      } satisfies GetInstalledCertificateIdsResponseV21,
+    };
+  }
+  ctx.logger.info(
+    `GetInstalledCertificateIds: returning ${chain.length} entr${chain.length === 1 ? "y" : "ies"}`,
+    LogType.OCPP,
+  );
+  return {
+    response: {
+      status: "Accepted",
+      certificateHashDataChain: [first, ...rest],
+    } satisfies GetInstalledCertificateIdsResponseV21,
+  };
+}
+
+/**
+ * M04: Accepted once deleted (M04.FR.02), NotFound for an unknown hash
+ * (M04.FR.04), Failed for the Charging Station certificate (M04.FR.06).
+ */
+function deleteCertificate(
+  payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult {
+  const req = payload as DeleteCertificateRequestV201;
+  const outcome = ctx.chargePoint.certificateStore.deleteCertificate(
+    req.certificateHashData,
+  );
+  switch (outcome.status) {
+    case "Deleted":
+      ctx.logger.info(
+        `DeleteCertificate accepted: removed ${outcome.use}`,
+        LogType.OCPP,
+      );
+      return {
+        response: { status: "Accepted" } satisfies DeleteCertificateResponseV21,
+      };
+    case "NotFound":
+      ctx.logger.info(
+        "DeleteCertificate: no installed certificate matched the given hash data",
+        LogType.OCPP,
+      );
+      return {
+        response: { status: "NotFound" } satisfies DeleteCertificateResponseV21,
+      };
+    case "ChargingStationCertificate":
+      ctx.logger.warn(
+        "DeleteCertificate refused: the Charging Station certificate cannot be deleted",
+        LogType.OCPP,
+      );
+      return {
+        response: { status: "Failed" } satisfies DeleteCertificateResponseV21,
+      };
+  }
+}
+
+/**
+ * A02 / A03: the chain is accepted only when it parses, a CSR is pending
+ * for its use, and the leaf carries that CSR's public key (A02.FR.06).
+ * Anything else is Rejected and raises an
+ * `InvalidChargingStationCertificate` security event once the answer is
+ * written (A02.FR.07). An absent `certificateType` means the certificate
+ * serves both the CSMS and the 15118 connection; the simulator has no
+ * 15118 stack, so it is the Charging Station certificate.
+ */
+async function certificateSigned(
+  mapping: CertificateWireMapping,
+  payload: unknown,
+  ctx: V201InboundContext,
+): Promise<V201HandlerResult> {
+  const req = payload as CertificateSignedRequestV201;
+  const use =
+    req.certificateType === undefined
+      ? "ChargingStationCertificate"
+      : mapping.signedUseFrom(req.certificateType);
+  const pems = splitPemChain(req.certificateChain);
+  let reason: string;
+  if (!use) {
+    reason = `unsupported certificateType ${req.certificateType}`;
+  } else if (!pems) {
+    reason = "malformed or empty certificate chain";
+  } else {
+    const outcome = await ctx.chargePoint.certificateStore.applySignedChain(
+      use,
+      pems,
+    );
+    if (outcome.status === "Accepted") {
+      ctx.logger.info(
+        `CertificateSigned accepted: stored ${pems.length} certificate(s) as ${use}`,
+        LogType.OCPP,
+      );
+      return {
+        response: { status: "Accepted" } satisfies CertificateSignedResponseV21,
+      };
+    }
+    reason = {
+      Malformed: "malformed certificate chain",
+      NoPendingCsr: `no pending CSR for ${use}`,
+      PublicKeyMismatch: "the leaf does not match the pending CSR's public key",
+    }[outcome.status];
+  }
+  ctx.logger.warn(`CertificateSigned rejected: ${reason}`, LogType.OCPP);
+  return {
+    response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
+    afterResult: () =>
+      ctx.sendCall("SecurityEventNotification", {
+        type: "InvalidChargingStationCertificate",
+        timestamp: new Date().toISOString(),
+        techInfo: reason,
+      }),
+  };
+}

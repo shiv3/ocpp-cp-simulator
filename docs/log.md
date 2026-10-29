@@ -1847,3 +1847,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): new section, use mapping table, 1.6 behaviour, persistence.
 - [State persistence → Tables](concepts/state-persistence.md#tables): `certificates` row, schema version 18, `cp.delete` list.
 - [Index](index.md): security profiles summary. [GitHub issues](sources/github-issues.md): #456.
+
+## [2026-10-29] ingest | Stateful OCPP 2.x certificate management (#456)
+
+- The 2.0.1 / 2.1 `InstallCertificate`, `GetInstalledCertificateIds`, `DeleteCertificate` and `CertificateSigned` handlers no longer answer fixed negative acknowledgements: they install, list and delete on the certificate store (M03-M05) and match a returned chain to the pending CSR by public key (A02.FR.06). A rejected chain raises `InvalidChargingStationCertificate` (A02.FR.07). 2.1 registers the same handlers with its own enum mapping.
+- `sign_certificate` sends a real `SignCertificateRequest` on 2.x and records its CSR as pending; the response status is logged and a `Rejected` keeps the CSR.
+- The 2.x dispatcher awaits a handler only when it returns a promise, so synchronous answers keep their ordering; a rejected promise is an `InternalError` CALLERROR.
+- [Security profiles → OCPP 2.0.1 and 2.1 behaviour](concepts/security-profiles.md#ocpp-201-and-21-behaviour): new section with statuses, limits and what is not covered.
+- [Log format](concepts/log-format.md): the 2.x `SignCertificateResponse` log lines. [GitHub issues](sources/github-issues.md): #456 row.

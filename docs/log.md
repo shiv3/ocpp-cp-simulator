@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Log
@@ -1741,3 +1741,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
+
+## [2026-10-29] ingest | No StopTransaction after a failed 1.6 StartTransaction (#491)
+
+- A CALLERROR answering a 1.6 StartTransaction.req closed the transaction but left it on the connector, so every path that asks "is there a transaction?" took it for a running one: Reset and UnlockConnector sent a StopTransaction.req with the placeholder `transactionId: 0`, a RemoteStopTransaction for id `0` matched it, ChangeAvailability answered `Scheduled`. `ChargePoint.notifyTransactionStartFailed` now detaches it once `transactionStartFailed` listeners (the charging-session history, #447) have read it, and `ChargePoint.stopTransaction` ignores a transaction whose stop time is set ([Charging sessions → Rejections and failed starts](concepts/charging-sessions.md#rejections-and-failed-starts-447); its known-gap entry is removed).
+- [GitHub issues](sources/github-issues.md): #491.

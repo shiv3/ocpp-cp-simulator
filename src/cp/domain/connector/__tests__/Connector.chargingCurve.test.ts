@@ -980,9 +980,10 @@ describe("a curve is offset by its own start, not by the register (#301)", () =>
 
 describe("a rejected start leaves the connector idle for SoC purposes (#301)", () => {
   /**
-   * `ChargePoint.cleanTransaction` stamps `stopTime` and deliberately leaves
-   * the transaction object attached, so after a rejected `StartTransaction`
-   * the connector is logically idle with a transaction still hanging off it.
+   * `ChargePoint.cleanTransaction` stamps `stopTime` and leaves the
+   * transaction object attached (a failed start was left that way until #491,
+   * and a snapshot persisted then restores it so), so the connector is
+   * logically idle with a transaction still hanging off it.
    * Asking "is a transaction attached?" rather than "is one running?" marked
    * everything typed afterwards as belonging to that stopped session — and
    * the retry then discarded it, at exactly the moment an operator is most

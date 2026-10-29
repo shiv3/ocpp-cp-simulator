@@ -2847,8 +2847,10 @@ describe("a hold is never left waiting on something that is gone (#314)", () => 
       "the edit to be held for the open session",
     );
 
-    // Exactly `handleCallError`'s recovery: clean the transaction, then return
-    // the connector to Available. Nothing else happens afterwards.
+    // `handleCallError`'s recovery before #491, which left the closed
+    // transaction attached (a snapshot persisted then still restores it that
+    // way): clean the transaction, then return the connector to Available.
+    // Nothing else happens afterwards.
     const chargePoint = (
       service as unknown as {
         _chargePoint: {
@@ -2914,10 +2916,10 @@ describe("a hold is never left waiting on something that is gone (#314)", () => 
   });
 
   it("does not hold a reload behind a transaction that never ran", async () => {
-    // `cleanTransaction` stamps `stopTime` and leaves the object attached after
-    // a rejected or CALLERROR `StartTransaction` — deliberately (#301), and no
-    // `transactionChange(null)` follows, because nothing stopped a session that
-    // never ran. A gate keyed on "an object is attached" therefore closed with
+    // `cleanTransaction` stamps `stopTime` and leaves the object attached —
+    // as a CALLERROR `StartTransaction` did before #491, and as a snapshot
+    // persisted then restores it — and no `transactionChange(null)` follows.
+    // A gate keyed on "an object is attached" therefore closed with
     // nothing able to reopen it. It asks whether a session is *running*, which
     // is the definition the rest of the codebase already uses.
     const dir = tempDir();
@@ -2931,10 +2933,9 @@ describe("a hold is never left waiting on something that is gone (#314)", () => 
     const service = server.registry.get("CP-CALLERROR");
     if (!service) throw new Error("CP-CALLERROR missing");
     expect(await openSession(server, "CP-CALLERROR", "TAG-CE")).toBe("TAG-CE");
-    // Exactly what the CALLERROR recovery does: clean the transaction and
-    // return the connector to Available, leaving the stopped object attached.
-    // Reached through the charge point, because that is the code path
-    // `OCPPMessageHandler.handleCallError` takes.
+    // What the CALLERROR recovery did before #491: clean the transaction,
+    // leaving the stopped object attached. Reached through the charge point,
+    // because that is where `cleanTransaction` lives.
     const chargePoint = (
       service as unknown as {
         _chargePoint: {
@@ -2944,8 +2945,8 @@ describe("a hold is never left waiting on something that is gone (#314)", () => 
       }
     )._chargePoint;
     chargePoint.cleanTransaction(1);
-    // The object is still attached — that part is deliberate — and the gate
-    // nonetheless reads the connector as idle.
+    // The object is still attached, and the gate nonetheless reads the
+    // connector as idle.
     expect(chargePoint.getConnector(1)?.transaction).not.toBeNull();
     expect(service.hasOpenTransaction(1)).toBe(false);
 

@@ -166,11 +166,15 @@ describe.skipIf(!canBindBunServe())("ChargingSessionRecorder (#447)", () => {
         s.csms.send([4, start.messageId, "InternalError", "boom", {}]);
         await until(() => s.sessions()[0]?.outcome === "failed", "failed");
 
-        // The closed transaction stays on the connector until the next
-        // start; a reset path that only checks for its presence stops it.
+        const [failed] = s.sessions();
+
+        // #491: the failed transaction is detached, so a reset (and a direct
+        // stop) finds nothing to stop and the failed session is left as is.
+        s.cp.applyRemoteReset("Soft");
         s.cp.stopTransaction(1, "HardReset");
 
-        expect(s.sessions()).toMatchObject([{ outcome: "failed" }]);
+        expect(s.cp.getConnector(1)?.transaction).toBeNull();
+        expect(s.sessions()).toEqual([failed]);
       } finally {
         await s.stop();
       }

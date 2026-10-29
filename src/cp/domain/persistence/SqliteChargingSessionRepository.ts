@@ -85,20 +85,22 @@ export class SqliteChargingSessionRepository implements ChargingSessionRepositor
       params.push(...query.outcomes);
     }
     const where = ` WHERE ${clauses.join(" AND ")}`;
-    const direction = query.order === "asc" ? "ASC" : "DESC";
 
     const total =
       this.db.get<{ n: number }>(
         `SELECT COUNT(*) AS n FROM charging_sessions${where}`,
         params,
       )?.n ?? 0;
-    // SQLite needs a LIMIT to take an OFFSET; -1 means "no limit".
+    // `limit` / `offset` window the newest sessions; `order` only orders
+    // that window. SQLite needs a LIMIT to take an OFFSET; -1 means "no limit".
     const rows = this.db.all<{ session_json: string }>(
       `SELECT session_json FROM charging_sessions${where} ` +
-        `ORDER BY started_at ${direction}, seq ${direction} LIMIT ? OFFSET ?`,
+        "ORDER BY started_at DESC, seq DESC LIMIT ? OFFSET ?",
       [...params, query.limit ?? -1, query.offset ?? 0],
     );
-    return { sessions: parseRows(rows), total };
+    const sessions = parseRows(rows);
+    if (query.order === "asc") sessions.reverse();
+    return { sessions, total };
   }
 
   unended(cpId: string): ChargingSession[] {

@@ -24,7 +24,8 @@ export const CHARGING_SESSION_OUTCOMES = [
  * - `interrupted` — it ended abnormally (reset, emergency stop, fault, unlock
  *   command, …) or was lost across a process restart.
  * - `failed` — the CSMS refused the start: a CALLERROR on StartTransaction,
- *   or an id it did not accept and the station stopped on.
+ *   or an id it did not accept on the start and the station stopped on. An
+ *   id withdrawn on a 2.x `Updated` event ends it `interrupted` instead.
  */
 export type ChargingSessionOutcome = (typeof CHARGING_SESSION_OUTCOMES)[number];
 
@@ -107,10 +108,14 @@ const INTERRUPTING_REASONS: ReadonlySet<string> = new Set([
 export function classifyEndedSession(input: {
   reason: string | undefined;
   authorizationStatus: string | null;
+  /** The rejection answered a 2.x `Updated` event, not the start. */
+  rejectedMidSession?: boolean;
 }): Exclude<ChargingSessionOutcome, "active"> {
-  const { reason, authorizationStatus } = input;
+  const { reason, authorizationStatus, rejectedMidSession } = input;
   if (reason === "DeAuthorized") {
-    return authorizationStatus !== null ? "failed" : "interrupted";
+    return authorizationStatus !== null && !rejectedMidSession
+      ? "failed"
+      : "interrupted";
   }
   return reason !== undefined && INTERRUPTING_REASONS.has(reason)
     ? "interrupted"

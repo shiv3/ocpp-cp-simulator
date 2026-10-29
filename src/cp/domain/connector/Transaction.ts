@@ -303,6 +303,9 @@ export interface Transaction {
    *  .conf `idTagInfo`, 2.x TransactionEvent.conf `idTokenInfo`), recorded
    *  before the station stops on it (#447). */
   authorizationStatus?: string;
+  /** 2.x: that status answered an `Updated` event, i.e. the CSMS withdrew
+   *  the id mid-session rather than refusing the start (#447). */
+  authorizationRejectedMidSession?: boolean;
   batteryCapacityKwh?: number; // EV battery capacity in kWh
   initialSoc?: number; // Initial State of Charge percentage (0-100)
 }

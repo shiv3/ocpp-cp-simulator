@@ -1685,6 +1685,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode](concepts/local-vs-remote-mode.md): the session history works in both modes; Local mode keeps a removed charge point's sessions until the next reset.
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md): `related:` back-link to the new page.
 - [Overview](overview.md) (Observability bullet), [Index](index.md), [GitHub issues](sources/github-issues.md) (#447).
+- Maintainer review: `sessions.list` windows like `logs.get` — `limit` / `offset` select the newest sessions and `order` only orders the page; an id a 2.x `Updated` answer withdraws mid-session ends the session `interrupted`, not `failed` ([Charging sessions](concepts/charging-sessions.md)).
 
 ## [2026-10-28] ingest | Label-selector group operations (#470) and the per-CP `reset` RPC
 

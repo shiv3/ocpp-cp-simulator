@@ -200,7 +200,11 @@ export class ChargingSessionRecorder {
         : (transaction.stopReason ?? "Local"),
       triggerReason: this.isV2 ? endedTriggerReason(transaction) : null,
       authorizationStatus,
-      outcome: classifyEndedSession({ reason, authorizationStatus }),
+      outcome: classifyEndedSession({
+        reason,
+        authorizationStatus,
+        rejectedMidSession: transaction.authorizationRejectedMidSession,
+      }),
     });
   }
 

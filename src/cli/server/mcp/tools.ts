@@ -733,10 +733,14 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         "Only sessions on this connector",
       ),
       outcomes: sessions.outcomes.describe("Only sessions with these outcomes"),
-      limit: sessions.limit.describe("Page size (default 50)"),
-      offset: sessions.offset.describe("Skip this many matching sessions"),
+      limit: sessions.limit.describe(
+        "How many of the newest matching sessions to return (default 50)",
+      ),
+      offset: sessions.offset.describe(
+        "Skip this many of the newest matching sessions (pages back in time)",
+      ),
       order: sessions.order.describe(
-        "'desc' (newest first, default) or 'asc' (oldest first), by start time",
+        "Order of the returned page by start time: 'desc' (newest first, default) or 'asc'; it does not change which sessions are selected",
       ),
     }),
     handler: async (args) => {

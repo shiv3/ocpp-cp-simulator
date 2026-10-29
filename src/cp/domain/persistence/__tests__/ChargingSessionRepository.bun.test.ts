@@ -109,6 +109,20 @@ describe.each(implementations)(
       ]);
     });
 
+    it("windows the newest sessions whatever the order, like logs.get", () => {
+      const repo = create();
+      const [a, b, c] = [session(), session(), session()];
+      for (const s of [a, b, c]) repo.upsert(s);
+
+      expect(repo.list({ cpId: "CP-A", limit: 2 }).sessions).toEqual([c, b]);
+      expect(
+        repo.list({ cpId: "CP-A", limit: 2, order: "asc" }).sessions,
+      ).toEqual([b, c]);
+      expect(
+        repo.list({ cpId: "CP-A", limit: 2, offset: 1, order: "asc" }),
+      ).toEqual({ sessions: [a, b], total: 3 });
+    });
+
     it("filters by connector and by outcome, and counts the match before paging", () => {
       const repo = create();
       const c1 = session();

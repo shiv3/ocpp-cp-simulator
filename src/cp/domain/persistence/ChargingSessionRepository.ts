@@ -24,9 +24,12 @@ export interface ChargingSessionQuery {
   cpId: string;
   connectorId?: number;
   outcomes?: ChargingSessionOutcome[];
+  /** How many sessions to return: the newest N, like `logs.get`. */
   limit?: number;
+  /** How many of the newest sessions to skip before taking `limit`. */
   offset?: number;
-  /** By start time; `desc` (newest first) by default. */
+  /** Order of the returned window, by start time; `desc` (newest first) by
+   *  default. It never changes which sessions `limit` / `offset` select. */
   order?: "asc" | "desc";
 }
 
@@ -84,7 +87,6 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
   }
 
   list(query: ChargingSessionQuery): ChargingSessionPage {
-    const direction = query.order === "asc" ? 1 : -1;
     const { connectorId, outcomes } = query;
     const matching = [...(this.byCp.get(query.cpId)?.values() ?? [])]
       .filter(
@@ -94,16 +96,14 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
       )
       .sort(
         (a, b) =>
-          direction *
-          (a.session.startedAt.localeCompare(b.session.startedAt) ||
-            a.seq - b.seq),
+          b.session.startedAt.localeCompare(a.session.startedAt) ||
+          b.seq - a.seq,
       );
     const offset = query.offset ?? 0;
     const end = query.limit === undefined ? undefined : offset + query.limit;
-    return {
-      sessions: matching.slice(offset, end).map(({ session }) => session),
-      total: matching.length,
-    };
+    const window = matching.slice(offset, end).map(({ session }) => session);
+    if (query.order === "asc") window.reverse();
+    return { sessions: window, total: matching.length };
   }
 
   unended(cpId: string): ChargingSession[] {

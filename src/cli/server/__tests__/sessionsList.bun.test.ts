@@ -141,10 +141,16 @@ describe("#447 sessions.list over RPC", () => {
       ),
     ).toEqual([2]);
     expect((await sessions(socket, { connectorId: 1 })).total).toBe(1);
+    // `limit` takes the newest sessions whatever the order, like `logs.get`.
     expect(
       (await sessions(socket, { order: "asc", limit: 1 })).sessions.map(
         (s) => s.connectorId,
       ),
+    ).toEqual([2]);
+    expect(
+      (
+        await sessions(socket, { order: "asc", limit: 1, offset: 1 })
+      ).sessions.map((s) => s.connectorId),
     ).toEqual([1]);
   });
 

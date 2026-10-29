@@ -580,6 +580,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       LogType.TRANSACTION,
     );
     connector.transaction!.authorizationStatus = status;
+    connector.transaction!.authorizationRejectedMidSession =
+      request.eventType !== "Started";
     if (stopOnInvalid) {
       this._chargePoint.stopTransaction(connector, "DeAuthorized", {
         triggerReason: "Deauthorized",

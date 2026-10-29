@@ -78,7 +78,7 @@ for 2.x):
 | Outcome       | When                                                                                                                                                                                                                                                               |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `active`      | The transaction is still running.                                                                                                                                                                                                                                  |
-| `failed`      | The CSMS refused the start: a CALLERROR answered 1.6 StartTransaction, or the CSMS did not accept the id and the station stopped on it (`DeAuthorized`, see below).                                                                                                |
+| `failed`      | The CSMS refused the start: a CALLERROR answered 1.6 StartTransaction, or the CSMS did not accept the id on the start and the station stopped on it (`DeAuthorized`, see below). An id a 2.x `Updated` answer withdraws mid-session ends it `interrupted`.         |
 | `interrupted` | It ended with `EmergencyStop`, `HardReset`, `SoftReset`, `ImmediateReset`, `Reboot`, `PowerLoss`, `UnlockCommand`, `GroundFault`, `OvercurrentFault`, `PowerQuality`, `Timeout`, or `DeAuthorized` without a CSMS rejection; or its end was lost across a restart. |
 | `completed`   | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, …                                                                                                                                             |
 
@@ -159,8 +159,10 @@ browser reload (which restores none) leaves it `interrupted`.
 ## Reading it
 
 - **Control plane:** [`sessions.list`](control-plane.md) — `cpId` (required),
-  filters `connectorId` and `outcomes`, `limit` (default 50, at most 500),
-  `offset`, `order` (`"desc"`, newest first, by default; by start time).
+  filters `connectorId` and `outcomes`, then a window like `logs.get`'s:
+  `limit` takes the newest N (default 50, at most 500), `offset` skips the
+  newest N first, and `order` (`"desc"`, newest first, by default; by start
+  time) only orders the returned page.
   Answers `{ sessions, total }`; an unknown `cpId` answers `not_found`.
 - **MCP:** the curated [`list_charging_sessions`](../entities/mcp-endpoint.md)
   tool.

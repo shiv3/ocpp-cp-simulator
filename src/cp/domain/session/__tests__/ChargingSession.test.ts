@@ -76,6 +76,16 @@ describe("classifyEndedSession", () => {
     ).toBe("failed");
   });
 
+  it("is interrupted when a 2.x Updated answer withdrew the id mid-session", () => {
+    expect(
+      classifyEndedSession({
+        reason: "DeAuthorized",
+        authorizationStatus: "Invalid",
+        rejectedMidSession: true,
+      }),
+    ).toBe("interrupted");
+  });
+
   it("keeps a rejected session that ran to a normal end completed", () => {
     // StopTransactionOnInvalidId=false: the station kept charging.
     expect(

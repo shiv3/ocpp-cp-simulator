@@ -137,7 +137,7 @@ jobs:
 
   # The bench's teardown slow paths (#330), beside the main job rather than
   # inside `test:bun`. Each case makes a mock CSMS slow on one action and so
-  # costs wall-clock by construction (~32s locally, mostly injected delays);
+  # costs wall-clock by construction (~36s locally, mostly injected delays);
   # the file name avoids the `bun.test` substring `test:bun` filters on, so
   # this is the only place it runs. Same toolchain as `test`, nothing else.
   bench-slow:

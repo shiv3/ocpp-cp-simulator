@@ -62,6 +62,7 @@ import {
   socketPoolSize,
   staggerOffsetsMs,
   parseTestTimingOverrides,
+  DEFAULT_BENCH_TIMINGS,
   TransactionStarts,
   STEP_COLUMNS,
   sustainableRpcPerSec,
@@ -90,9 +91,20 @@ const PENDING_EVICTIONS_METRIC = "ocppcp_ocpp_pending_calls_evicted_total";
 const INFLIGHT_PER_SOCKET = 48;
 
 /** The defaults in lib.ts, unless a test-only `FLEET_BENCH_TEST_*` variable
- *  shortens one (#330). Read once, at load: an invalid value throws here, so
- *  a slow-path test can never run silently at the real deadlines. */
-const TEST_TIMINGS = parseTestTimingOverrides(process.env);
+ *  shortens one (#330). Read once, at load, because module constants below
+ *  derive from it. An invalid value is kept in {@link TEST_TIMINGS_ERROR} and
+ *  thrown as the first thing `main()` does, so it is refused like a bad flag
+ *  (`Error: …`, usage, exit 1) before anything is created — and a slow-path
+ *  test can never run silently at the real deadlines. */
+let TEST_TIMINGS_ERROR: unknown = null;
+const TEST_TIMINGS = ((): ReturnType<typeof parseTestTimingOverrides> => {
+  try {
+    return parseTestTimingOverrides(process.env);
+  } catch (err) {
+    TEST_TIMINGS_ERROR = err;
+    return { timings: { ...DEFAULT_BENCH_TIMINGS }, overridden: [] };
+  }
+})();
 const RPC_TIMEOUT_MS = TEST_TIMINGS.timings.rpcDeadlineMs;
 
 /** Deadline for every HTTP request this script makes (health, `/metrics`).
@@ -1439,6 +1451,7 @@ async function deleteFleet(
 async function main(): Promise<void> {
   let opts: BenchOptions;
   try {
+    if (TEST_TIMINGS_ERROR !== null) throw TEST_TIMINGS_ERROR;
     opts = validateOptions(parseArgv(process.argv.slice(2)));
   } catch (err) {
     if (err instanceof BenchValidationError) {

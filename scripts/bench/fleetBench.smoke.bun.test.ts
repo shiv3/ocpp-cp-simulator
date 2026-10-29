@@ -474,3 +474,29 @@ describe("fleet-bench end to end (#302)", () => {
     }
   }, 240_000);
 });
+
+describe("fleet-bench test-only timing overrides (#330)", () => {
+  it("refuses an invalid override the way it refuses a bad flag", async () => {
+    // The overrides are parsed at module load, before `main()` runs; a value
+    // they refuse used to escape as a raw stack trace instead of the
+    // `Error: …` line and usage every other invalid input gets. Nothing is
+    // contacted before the refusal, so the URLs need not answer.
+    const run = await runBench(
+      [
+        "--csms-url",
+        "ws://127.0.0.1:9/ocpp/",
+        "--daemon-url",
+        "http://127.0.0.1:9",
+        "--counts",
+        "1",
+      ],
+      { FLEET_BENCH_TEST_FOO: "1" },
+    );
+    expect(run.timedOut).toBe(false);
+    expect(run.exitCode).toBe(1);
+    expect(run.stderr).toContain(
+      "Error: unknown test-only override FLEET_BENCH_TEST_FOO",
+    );
+    expect(run.stderr).toContain("Usage: bun scripts/bench/fleet-bench.ts");
+  }, 60_000);
+});

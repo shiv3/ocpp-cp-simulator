@@ -1921,8 +1921,15 @@ export class ChargePoint {
     // what the wire sees first. Sending Preparing's StatusNotification.req
     // ahead of StartTransaction.req makes the OCPP-conformant wire order
     // (Preparing precedes StartTransaction) intrinsic to the domain rather
-    // than an accident of scenario node ordering (#176).
-    this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+    // than an accident of scenario node ordering (#176). A connector already
+    // in Preparing (plugged in first) has sent it: a second
+    // StatusNotification(Preparing) is a Preparing → Preparing transition
+    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts as before.
+    if (connector.status === OCPPStatus.Preparing) {
+      this.startConnectionTimeout(connectorId);
+    } else {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+    }
     this._outbox.sendTransactionEvent({
       phase: "started",
       transaction,

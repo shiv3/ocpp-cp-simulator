@@ -5,6 +5,9 @@ const SENSITIVE_KEY_NAMES = new Set([
   // 2.0.1 / 2.1 SetNetworkProfile `connectionData.apn.apnPassword` (#401).
   "apnpassword",
   "authorizationkey",
+  // 2.1 SetNetworkProfile `connectionData.basicAuthPassword` (#401), and the
+  // 2.0.1 `BasicAuthPassword` variable (#396).
+  "basicauthpassword",
   "password",
   "privatekey",
   "tlskey",
@@ -12,7 +15,7 @@ const SENSITIVE_KEY_NAMES = new Set([
 
 /** The names the text redactor matches in `name: value` / `name=value`. */
 const SENSITIVE_ASSIGNMENT_NAMES =
-  "AuthorizationKey|authorizationKey|password|apnPassword|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
+  "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
 const SENSITIVE_ASSIGNMENT = new RegExp(
   `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])(.*?)\\2`,
   "g",
@@ -56,14 +59,11 @@ export function isSensitiveKeyName(key: string): boolean {
 
 /**
  * OCPP 2.0.1 variables whose `attributeValue` is a secret (#396): the key
- * names above plus `BasicAuthPassword`, which is not one of them because it
- * is also a config field name that must survive redaction. The structured
- * and the text redactors both use this rule (#400).
+ * names above. The structured and the text redactors both use this rule
+ * (#400).
  */
 function isSensitiveVariableName(name: string): boolean {
-  return (
-    isSensitiveKeyName(name) || normalizeKeyName(name) === "basicauthpassword"
-  );
+  return isSensitiveKeyName(name);
 }
 
 function isSensitiveVariable(value: unknown): boolean {
@@ -188,14 +188,18 @@ function redactOcppKeyValueText(text: string): string {
       }
     }
 
-    // 2.0.1 / 2.1 SetNetworkProfile `vpn.key` (#401), as in `redactVpn`.
-    const vpnField = fields.find((field) => field.name === "vpn");
-    const vpnKeyField =
-      vpnField &&
-      nestedObjectFields(text, vpnField, objectEndByStart).find(
-        (field) => field.name === "key",
-      );
-    if (vpnKeyField) replacements.push(redactField(vpnKeyField));
+    // 2.0.1 / 2.1 SetNetworkProfile `vpn.key` (#401), as in `redactVpn`;
+    // every copy of a duplicated `vpn` / `key`, as above.
+    for (const vpnField of fields) {
+      if (vpnField.name !== "vpn") continue;
+      for (const field of nestedObjectFields(
+        text,
+        vpnField,
+        objectEndByStart,
+      )) {
+        if (field.name === "key") replacements.push(redactField(field));
+      }
+    }
   }
 
   return applyReplacements(text, replacements);

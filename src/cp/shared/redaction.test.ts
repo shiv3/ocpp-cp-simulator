@@ -352,6 +352,69 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     );
   });
 
+  describe("OCPP 2.1 connectionData.basicAuthPassword", () => {
+    const setNetworkProfile21 = () => {
+      const payload = setNetworkProfile();
+      return {
+        ...payload,
+        connectionData: {
+          ...payload.connectionData,
+          identity: "CP001",
+          basicAuthPassword: "basicSECRET",
+        },
+      };
+    };
+    const secrets21 = [...secrets, "basicSECRET"];
+
+    it("removes it with the APN password and the VPN key", () => {
+      const redacted = redactSensitiveValue(
+        setNetworkProfile21(),
+      ) as ReturnType<typeof setNetworkProfile21>;
+      const serialized = JSON.stringify(redacted);
+
+      for (const secret of secrets21) expect(serialized).not.toContain(secret);
+      expect(redacted.connectionData).not.toHaveProperty("basicAuthPassword");
+      expect(redacted.connectionData.vpn.key).toBe(REDACTED_VALUE);
+      expect(redacted.connectionData.identity).toBe("CP001");
+      expect(redacted.connectionData.apn.apnUserName).toBe("apnUSER");
+      expect(redacted.connectionData.vpn.server).toBe("vpn.example");
+      expect(redacted.connectionData.vpn.user).toBe("vpnUSER");
+    });
+
+    it("redacts it in the Received: log line of the frame", () => {
+      const redacted = redactSensitiveText(
+        `Received: [2,"m1","SetNetworkProfile",${JSON.stringify(setNetworkProfile21())}]`,
+      );
+
+      for (const secret of secrets21) expect(redacted).not.toContain(secret);
+      for (const value of [...readable, "CP001"]) {
+        expect(redacted).toContain(value);
+      }
+      expect(redacted).toContain(`"basicAuthPassword":"${REDACTED_VALUE}"`);
+    });
+  });
+
+  it("redacts every duplicate vpn and key member, not only the first", () => {
+    // JSON.parse keeps the last duplicate, so a first-match redaction would
+    // hide a decoy and log the value the station actually uses.
+    for (const text of [
+      '{"vpn":{"key":"decoyA","key":"vpnSHAREDKEY"}}',
+      '{"vpn":{"server":"vpn.example"},"vpn":{"key":"vpnSHAREDKEY"}}',
+      '{"apn":{"apnPassword":"decoyA","apnPassword":"apnSECRET"}}',
+      '{"basicAuthPassword":"decoyA","basicAuthPassword":"basicSECRET"}',
+    ]) {
+      const redacted = redactSensitiveText(text);
+      for (const secret of [
+        "decoyA",
+        "vpnSHAREDKEY",
+        "apnSECRET",
+        "basicSECRET",
+      ]) {
+        expect(redacted).not.toContain(secret);
+      }
+    }
+  });
+
   it("leaves a key outside a vpn object readable", () => {
     for (const text of [
       '{"key":"HeartbeatInterval","value":"30"}',

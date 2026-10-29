@@ -1755,3 +1755,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Log format](concepts/log-format.md): Redaction section lists the SetNetworkProfile fields and says the structured redactor drops a field named after a secret where the log line shows `[redacted]`, and that the text redactor matches field names only in the spellings `redaction.ts` lists.
 - [CLI → CSMS call events](entities/cli.md#csms-call-events): the Redaction bullet covers `SetNetworkProfile`.
 - [GitHub issues](sources/github-issues.md): #401 row.
+
+## [2026-10-29] ingest | Redact the 2.1 SetNetworkProfile basicAuthPassword and duplicate VPN keys (#401)
+
+- 2.1 `SetNetworkProfile` also carries `connectionData.basicAuthPassword`, which leaked in both redactors: `basicAuthPassword` was only a sensitive _variable_ name. It is now a sensitive key name (no redaction path needs that field readable; the config form never goes through the redactor). `connectionData.identity` stays readable.
+- The text redactor redacted only the first `vpn` member and the first `key` in it; a frame with duplicate members logged the last one, which is what `JSON.parse` keeps. Every copy is now redacted.
+- [Log format](concepts/log-format.md): Redaction section names `basicAuthPassword` and the duplicate-member rule.
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): Redaction bullet names the 2.1 field.
+- [GitHub issues](sources/github-issues.md): #401 row.

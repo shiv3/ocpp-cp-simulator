@@ -20,7 +20,7 @@ import { createScenarioExecutorCallbacks } from "../../../application/scenario/S
  * #488 — an EV-side disconnect (`ChargePoint.evDisconnected`) during a
  * transaction follows `StopTransactionOnEVSideDisconnect`
  * (`TxCtrlr.StopTxOnEVSideDisconnect` on 2.x):
- * - true: the transaction stops with `EVDisconnected` (1.6 §3.7 / §9.1.31,
+ * - true: the transaction stops with `EVDisconnected` (1.6 §4.10 / §9.1.23,
  *   2.0.1 E09: Ended, triggerReason EVCommunicationLost);
  * - false: the transaction is kept and the connector is SuspendedEV (1.6),
  *   2.0.1 E10: Updated, chargingState SuspendedEV, triggerReason
@@ -166,6 +166,37 @@ describe("EV-side disconnect on OCPP 1.6 (#488)", () => {
       expect(connector?.hasRunningTransaction).toBe(true);
       expect(connector?.transaction?.id).toBe(4880);
       expect(connector?.status).toBe(OCPPStatus.SuspendedEV);
+      expect(connector?.energyOfferSuspended).toBe(true);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("a second unplug while suspended sends nothing more", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16ChargingStation(
+      csms,
+      "CP16-EVSD-TWICE",
+      false,
+    );
+    try {
+      await startV16Transaction(cp, csms);
+      const before = csms.received.length - 1;
+      cp.evDisconnected(1);
+      await csms.waitForFrame(
+        (frame) =>
+          statusOf("SuspendedEV")(frame) && indexAfter(csms, before)(frame),
+      );
+
+      cp.evDisconnected(1);
+
+      await sentinel(cp, csms);
+      const after = csms.received.slice(before + 1);
+      expect(after.filter(callOf("StatusNotification"))).toHaveLength(1);
+      expect(callsOf(csms, "StopTransaction")).toHaveLength(0);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.SuspendedEV);
     } finally {
       stopAnswering();
       cp.disconnect();
@@ -273,6 +304,45 @@ describe("EV-side disconnect on OCPP 2.0.1 (#488)", () => {
       const connector = cp.getConnector(1);
       expect(connector?.hasRunningTransaction).toBe(true);
       expect(connector?.status).toBe(OCPPStatus.SuspendedEV);
+      expect(connector?.energyOfferSuspended).toBe(true);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("a second unplug while suspended resends no EVCommunicationLost", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201ChargingStation(
+      csms,
+      "CP201-EVSD-TWICE",
+      false,
+    );
+    try {
+      await startV201Transaction(cp, csms);
+      cp.evDisconnected(1);
+      await csms.waitForFrame(
+        (frame) =>
+          callOf("TransactionEvent")(frame) &&
+          (frame[3] as TransactionEventRequestV201).triggerReason ===
+            "EVCommunicationLost",
+      );
+      await sentinel(cp, csms);
+      const before = csms.received.length - 1;
+
+      cp.evDisconnected(1);
+
+      await sentinel(cp, csms);
+      const after = csms.received.slice(before + 1);
+      expect(
+        transactionEvents(csms).filter(
+          (e) => e.triggerReason === "EVCommunicationLost",
+        ),
+      ).toHaveLength(1);
+      expect(after.filter(callOf("StatusNotification"))).toHaveLength(0);
+      expect(after.filter(callOf("TransactionEvent"))).toHaveLength(0);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.SuspendedEV);
     } finally {
       stopAnswering();
       cp.disconnect();

@@ -2052,14 +2052,16 @@ export class ChargePoint {
    * The EV side of the cable was unplugged (#488). With a running
    * transaction, `StopTransactionOnEVSideDisconnect` (2.x
    * `TxCtrlr.StopTxOnEVSideDisconnect`) decides:
-   * - true: the transaction stops with `EVDisconnected` (1.6 §3.7; 2.0.1
-   *   E09: Ended, triggerReason `EVCommunicationLost`);
-   * - false: the transaction is kept and the connector goes SuspendedEV,
-   *   which stops the energy offer (the derived power is zero outside
-   *   Charging). On 2.x a TransactionEvent(Updated) carries
-   *   chargingState `SuspendedEV` and triggerReason `EVCommunicationLost`
-   *   (E10); the StatusNotification that follows is de-duplicated against
-   *   it.
+   * - true: the transaction stops with `EVDisconnected` (1.6 §4.9 / §4.10;
+   *   2.0.1 E09: Ended, triggerReason `EVCommunicationLost`);
+   * - false: the transaction is kept and the connector goes SuspendedEV
+   *   (1.6 §4.9 / §4.10) with its energy offer stopped: the register no
+   *   longer rises while periodic MeterValues keep going out, and the
+   *   derived power is zero outside Charging. On 2.x a
+   *   TransactionEvent(Updated) carries chargingState `SuspendedEV` and
+   *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
+   *   that follows is de-duplicated against it. A second unplug while so
+   *   suspended sends nothing.
    * Without a transaction the connector goes Available, as an unplug did
    * before.
    */
@@ -2075,6 +2077,17 @@ export class ChargePoint {
 
     if (!connector.hasRunningTransaction) {
       this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      return;
+    }
+
+    if (
+      connector.energyOfferSuspended &&
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.debug(
+        `Connector ${connectorId} EV side already disconnected, ignoring`,
+        LogType.TRANSACTION,
+      );
       return;
     }
 
@@ -2094,6 +2107,7 @@ export class ChargePoint {
       `Connector ${connectorId} EV side disconnected, suspending the transaction (StopTransactionOnEVSideDisconnect=false)`,
       LogType.TRANSACTION,
     );
+    connector.suspendEnergyOffer();
     if (isOcpp2Version(this._ocppVersion)) {
       this._outbox.sendTransactionUpdate(connectorId, {
         triggerReason: "EVCommunicationLost",

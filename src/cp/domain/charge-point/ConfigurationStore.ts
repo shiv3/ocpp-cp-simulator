@@ -199,7 +199,7 @@ export class ConfigurationStore {
 
   /** Canonical key `StopTransactionOnEVSideDisconnect` (2.x
    *  `TxCtrlr.StopTxOnEVSideDisconnect`); default `true`. Whether an EV-side
-   *  cable disconnect stops the running transaction (1.6 §3.7, 2.0.1 E09) or
+   *  cable disconnect stops the running transaction (1.6 §4.10, 2.0.1 E09) or
    *  only suspends it as SuspendedEV (2.0.1 E10) (#488). */
   stopTransactionOnEVSideDisconnect(): boolean {
     return this.getBoolean("StopTransactionOnEVSideDisconnect") ?? true;

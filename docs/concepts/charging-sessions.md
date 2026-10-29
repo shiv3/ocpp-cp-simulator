@@ -11,6 +11,7 @@ sources:
   - "issue #447"
   - "issue #491"
   - "issue #488"
+  - "issue #528"
   - src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
 related:
   - operational-timeline.md
@@ -200,8 +201,10 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   | `true`  | StopTransaction `reason` `EVDisconnected`, then Finishing (and Available while auto-reset is on) | E09: `Ended`, `triggerReason` `EVCommunicationLost`, `stoppedReason` `EVDisconnected`                         |
   | `false` | The transaction is kept; StatusNotification `SuspendedEV`                                        | E10: the transaction is kept; `Updated`, `chargingState` `SuspendedEV`, `triggerReason` `EVCommunicationLost` |
 
-  With `false` the session stays `active`, and the meter stops rising: the
-  derived power is zero outside `Charging`. The connector lock is not
+  With `false` the session stays `active` and the energy offer stops: the
+  energy register no longer rises, while the periodic MeterValues keep going
+  out, and the derived power is zero outside `Charging`. A second unplug
+  while so suspended sends nothing. The connector lock is not
   modelled. Without a running transaction, the console's **Unplug** sends
   StatusNotification `Available`, as before, while a scenario plug-out stays a
   no-op.
@@ -221,7 +224,15 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
 
 - A 2.x TransactionEvent produced while offline is lost: there is no 2.x
   offline queue, so nothing is replayed with `offline: true` (E11.FR.02); see
-  [EV-side disconnect and connection loss](#ev-side-disconnect-and-connection-loss).
+  [EV-side disconnect and connection loss](#ev-side-disconnect-and-connection-loss)
+  ([#528](https://github.com/shiv3/ocpp-cp-simulator/issues/528)).
+- The E10 resume is not modelled: plugging the cable back in during a
+  transaction suspended by an EV-side disconnect sends `Preparing`, not a
+  TransactionEvent `Updated` with `triggerReason` `CablePluggedIn` followed by
+  `Charging`.
+- On 1.6, an Unplug while StartTransaction.conf is still pending stops the
+  transaction with StopTransaction `transactionId: 0`. This predates #488
+  (`stop_transaction` does the same), but the Unplug button now reaches it.
 - A 1.6 StartTransaction that is never answered keeps `transactionId: null`.
 - A 2.x TransactionEvent that the CSMS answers with a CALLERROR does not mark
   the session `failed`; only 1.6 StartTransaction does

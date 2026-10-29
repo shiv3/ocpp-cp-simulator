@@ -185,9 +185,9 @@ export class ChargingSessionRecorder {
   private onStopped(connectorId: number, reason: string | undefined): void {
     const transaction = this.cp.connectors.get(connectorId)?.transaction;
     const open = this.active.get(connectorId);
-    // No running session: the transaction already ended, e.g. a failed
-    // start that a reset path stops again (it stays on the connector until
-    // the next start). A restored one was taken back by `reconcile`.
+    // No running session: the transaction already ended. (A failed start is
+    // detached from the connector, so no stop path reaches it since #491.)
+    // A restored one was taken back by `reconcile`.
     if (!transaction || !open) return;
     // The handlers that stop on a rejected id record the verdict on the
     // transaction first, so it is here before `startTransactionNotAccepted`.

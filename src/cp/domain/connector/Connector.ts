@@ -740,11 +740,13 @@ export class Connector {
    * Whether a session is running right now: a transaction that has begun and
    * not yet stopped.
    *
-   * Deliberately not "a transaction object is attached". When a
-   * `StartTransaction` is rejected, or comes back a CALLERROR,
-   * `ChargePoint.cleanTransaction` stamps `stopTime` and leaves the object on
-   * the connector — so the connector is logically idle with a transaction
-   * still hanging off it. `ChargePoint.startTransaction` already asks the
+   * Deliberately not "a transaction object is attached".
+   * `ChargePoint.cleanTransaction` stamps `stopTime` without detaching the
+   * object, and a `connector_runtime` snapshot persisted before #491 (when a
+   * CALLERROR start stayed attached) restores one that way — so the connector
+   * can be logically idle with a transaction still hanging off it.
+   * `ChargePoint.stopTransaction` asks this before stopping (#491), and
+   * `ChargePoint.startTransaction` already asks the
    * question this way before refusing a duplicate start; asking it the same
    * way here is what lets a hand retry after a rejection behave like a first
    * attempt, which is precisely when an operator is most likely to be typing

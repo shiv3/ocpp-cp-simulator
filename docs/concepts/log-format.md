@@ -11,7 +11,7 @@ related:
   - state-persistence.md
   - trace-format.md
   - ../entities/analyze.md
-updated: 2026-10-27
+updated: 2026-10-29
 ---
 
 # Log format
@@ -105,9 +105,19 @@ acknowledgement: `FirmwareStatusNotification`, `DiagnosticsStatusNotification`
 `<action> acknowledged` at DEBUG, so a reconnect-heavy station does not
 inflate the WARN rate. They are not the only empty 1.6 confirmations:
 `StatusNotification.conf` and `MeterValues.conf` are empty too, and already
-had their own result handlers, which log at DEBUG. `SignCertificate`, whose
-confirmation carries a `status`, still logs the warning. OCPP 2.x and the SOAP
-transports never log this line.
+had their own result handlers, which log at DEBUG.
+
+`SignCertificate.conf` is not empty: it carries a `status`. Since #410 it has
+its own result handler too. `Accepted` logs
+`SignCertificate accepted by the CSMS; awaiting CertificateSigned.req` at INFO;
+any other status (`Rejected`, or a value outside the spec) logs
+`SignCertificate not accepted by the CSMS (status <status>); certificate renewal will not happen`
+at WARN. The status is only logged: the `sign_certificate` method and
+`ExtendedTriggerMessage(SignChargePointCertificate)` still return once the
+request is queued, without the answer. With it, each of the 14 station-initiated
+1.6J actions listed in [Expert OCPP calls](expert-ocpp-calls.md#what-is-sent)
+has a result handler, so none of them logs the warning on its answer. OCPP 2.x
+and the SOAP transports never log this line.
 
 ## Related RPC methods
 

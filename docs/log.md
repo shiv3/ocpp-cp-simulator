@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Log
@@ -1741,3 +1741,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
+
+## [2026-10-29] ingest | SignCertificate.conf result handler on 1.6J (#410)
+
+- `SignCertificate.conf` had no result handler on 1.6J, so `Accepted` and `Rejected` both logged `No handler for action result: SignCertificate` at WARN and the status itself was never logged. A `SignCertificateResultHandler` now logs `Accepted` at INFO (the CSMS is expected to follow up with CertificateSigned.req) and any other status at WARN, naming it. The status is only logged; `sign_certificate` callers still do not receive it. 2.0.1 and SOAP are unchanged ([Log format → "No handler for action result"](concepts/log-format.md#no-handler-for-action-result)).
+- [GitHub issues](sources/github-issues.md): #410.

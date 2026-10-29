@@ -14,14 +14,7 @@ OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CS
 
 ![Web console — a charge point charging over OCPP 1.6J against SteVe, with labels, its connector card and the message log](docs/images/web-console-overview.png)
 
-<details>
-<summary>More screenshots</summary>
-
-![Web console — charge point list with labels and filters](docs/images/web-console-dashboard.png)
-
-![Web console — operational events tab of a charge point](docs/images/web-console-operational-events.png)
-
-</details>
+See the [web console tour](#web-console-tour) for each feature in action.
 
 ## Quick Start
 
@@ -106,6 +99,152 @@ Also browsable at https://deepwiki.com/shiv3/ocpp-cp-simulator.
 - **Diagnostics** — versioned OCPP trace files and DebugKit reports via `ocpp-cp-sim analyze`: [analyze](docs/entities/analyze.md).
 - **Persistence** — the browser (sql.js + IndexedDB) and the daemon (`--state-db`) share one SQLite schema: [State persistence](docs/concepts/state-persistence.md).
 - **Local vs Remote mode** — the browser decides once per load by probing `/v1/healthz`: [Local vs Remote mode](docs/concepts/local-vs-remote-mode.md).
+
+## Web console tour
+
+Recorded from the daemon's web console in Remote mode, with two charge points (`WEBCP001`, `WEBCP002`, OCPP 1.6J) connected to [SteVe](https://github.com/steve-community/steve) 3.14.1. GIFs play at 1.5–3× speed.
+
+### Settings: TagIDs and network simulation
+
+The TagIDs the connector card offers for **Start charging** (here the ones SteVe knows), and the global network-simulation layer.
+
+![Settings: TagIDs and network simulation](docs/images/tour/01-settings.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Settings — RFID TagIDs](docs/images/tour/01-settings-1-tag-ids.png)
+
+</details>
+
+### Fleet: charge points, connectors and labels
+
+Every charge point the daemon runs, as a hierarchy, a charge point list or a connector list, filtered by status, OCPP version or label (`site=tokyo-01`).
+
+![Fleet: charge points, connectors and labels](docs/images/tour/02-fleet.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Fleet — hierarchy](docs/images/tour/02-fleet-1-hierarchy.png)
+
+![Fleet — filtered by label](docs/images/tour/02-fleet-3-label-filter.png)
+
+</details>
+
+### A charging session from the connector card
+
+**Plug in → Start charging → Stop charging**: the connector card drives a real OCPP 1.6J transaction against SteVe, with the auto meter feeding power, energy and SoC; the **Transactions** tab keeps the session.
+
+![A charging session from the connector card](docs/images/tour/03-charging.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Connector charging](docs/images/tour/03-charging-1-charging.png)
+
+![Transactions tab](docs/images/tour/03-charging-2-transactions.png)
+
+</details>
+
+### Remote start from the CSMS
+
+SteVe sends **RemoteStartTransaction**; the charge point's _Essential CP Behavior_ scenario plugs in, starts the transaction and meters it, and the operational timeline records each step.
+
+![Remote start from the CSMS](docs/images/tour/04-remote-start.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![SteVe — RemoteStartTransaction](docs/images/tour/04-remote-start-1-steve-remote-start.png)
+
+![The charge point charging after the remote start](docs/images/tour/04-remote-start-3-console-charging.png)
+
+</details>
+
+### Labels, edited in place
+
+Relabel a charge point from its header (`cp.labels.set`): no reconnect, the chips update at once.
+
+![Labels, edited in place](docs/images/tour/05-labels.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Labels saved](docs/images/tour/05-labels-2-saved.png)
+
+</details>
+
+### Network faults and recovery
+
+Per-charge-point rules (here a 300 ms latency and a manual disconnect); the **Operational events** tab ties the injected fault, the reconnect, the boot and `recovery_completed` into one incident.
+
+![Network faults and recovery](docs/images/tour/06-network-fault.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Network simulation rules](docs/images/tour/06-network-fault-1-rules.png)
+
+![Incident and recovery on the operational timeline](docs/images/tour/06-network-fault-2-incident-and-recovery.png)
+
+</details>
+
+### Expert: any station-initiated call
+
+Send any OCPP call the station can send (here a DataTransfer) through the live connection and see the CSMS's answer.
+
+![Expert: any station-initiated call](docs/images/tour/07-expert.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Expert tab — DataTransfer answered](docs/images/tour/07-expert-1-result.png)
+
+</details>
+
+### Session analysis
+
+OCPP DebugKit's failure-pattern analysis over the charge point's stored logs, in the browser.
+
+![Session analysis](docs/images/tour/08-session-analysis.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Session analysis result](docs/images/tour/08-session-analysis-1-result.png)
+
+</details>
+
+### Scenarios
+
+Running scenarios per connector, and the template library (54 templates).
+
+![Scenarios](docs/images/tour/09-scenarios.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Active scenario runs](docs/images/tour/09-scenarios-1-active-runs.png)
+
+![Template browser](docs/images/tour/09-scenarios-3-templates.png)
+
+</details>
+
+### Run history and message log
+
+Past scenario runs with their verdicts, and every OCPP frame across charge points, filterable by charge point, level, type and connector.
+
+![Run history and message log](docs/images/tour/10-history-and-logs.gif)
+
+<details>
+<summary>Screenshots</summary>
+
+![Run history](docs/images/tour/10-history-and-logs-1-run-history.png)
+
+![Message log](docs/images/tour/10-history-and-logs-2-message-log.png)
+
+</details>
 
 ## Contributing
 

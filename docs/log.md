@@ -1846,3 +1846,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): new section (keys, carriers per version, test modes, what is not implemented).
 - [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md#4b-signed-meter-values-optional): 4b shipped under #315.
 - [GitHub issues](sources/github-issues.md): #315.
+
+## [2026-10-29] ingest | OCMF signed meter values review fixes (#315)
+
+- Review of #521: a `|` in the idTag or a serial is escaped as `\u007C` in the OCMF payload; a negative register is signed as it is instead of clamped to 0; a restored 1.6 transaction drops its begin record (the ephemeral key that signed it is gone); a stored begin record is still sent at the stop when signing was turned off since; the 2.x fallback energy sample carries the requested `context`, and `MeterValues` with an empty measurand list still sends the signed energy sample. The REPL `meter` command refuses an overflowing value (`Infinity`) as well as `NaN`.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): restart, signing-off-mid-transaction, escaping and negative registers.

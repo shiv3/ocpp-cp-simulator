@@ -294,7 +294,8 @@ export interface Transaction {
    *  transaction started (only while `SampledDataSignReadings` is on). 1.6
    *  has nowhere to send it at start, so it rides in StopTransaction's
    *  `transactionData` next to the end reading; signing it at start keeps
-   *  the meter's page numbers in time order. Persisted with the transaction. */
+   *  the meter's page numbers in time order. Dropped when a transaction is
+   *  restored after a restart: the key that signed it is gone. */
   signedBeginOcmf?: string;
   /** OCPP 2.x TransactionEvent triggerReason for the Ended event. If absent,
    *  the encoder defaults to the local StopAuthorized path. */

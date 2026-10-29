@@ -10,6 +10,8 @@ import {
 import { ConfigurationStore } from "../../charge-point/ConfigurationStore";
 import { defaultConfiguration } from "../../charge-point/Configuration";
 import type { ChargePoint } from "../../charge-point/ChargePoint";
+import { Connector } from "../Connector";
+import { Logger, LogLevel } from "../../../shared/Logger";
 
 /**
  * #315: the OCMF generator. Signatures are checked with WebCrypto, an
@@ -134,6 +136,33 @@ describe("OcmfMeter (#315)", () => {
     expect(record.ocmf).toContain('"RV":1234.568,');
   });
 
+  it("escapes | inside identifiers so the record still splits in three", async () => {
+    const m = new OcmfMeter({
+      meterSerial: "CP|1",
+      gatewayId: "ocpp-cp-simulator",
+      gatewaySerial: "CP|GW",
+    });
+    const record = m.sign([{ reason: "B", energyWh: 0, at }], "TAG|315");
+    expect(record.ocmf.split("|")).toHaveLength(3);
+    const payload = JSON.parse(record.ocmf.split("|")[1]) as {
+      ID: string;
+      MS: string;
+      GS: string;
+    };
+    expect([payload.ID, payload.MS, payload.GS]).toEqual([
+      "TAG|315",
+      "CP|1",
+      "CP|GW",
+    ]);
+    expect(record.ocmf).toContain('"ID":"TAG\\u007C315"');
+    expect(await verify(record.ocmf, record.publicKeyDer)).toBe(true);
+  });
+
+  it("writes a negative register as it is, not clamped to zero", () => {
+    const record = meter().sign([{ reason: "C", energyWh: -1500, at }], "T");
+    expect(record.ocmf).toContain('"RV":-1.500,');
+  });
+
   it("lists every mode", () => {
     expect(SIGNED_METER_MODES).toEqual([
       "valid",
@@ -230,3 +259,27 @@ function derToRaw(der: Uint8Array): Uint8Array<ArrayBuffer> | null {
   }
   return i === der.length ? out : null;
 }
+
+describe("restoring a transaction after a restart (#315)", () => {
+  it("drops the signed begin reading, whose key is gone", () => {
+    const connector = new Connector(1, new Logger(LogLevel.ERROR));
+    connector.beginTransaction({
+      id: 315,
+      connectorId: 1,
+      tagId: "TAG-315",
+      meterStart: 0,
+      meterStop: null,
+      startTime: at,
+      stopTime: null,
+      meterSent: false,
+      signedBeginOcmf: "OCMF|{}|{}",
+    });
+    const snapshot = connector.snapshotRuntime();
+    expect(snapshot.transaction?.signedBeginOcmf).toBe("OCMF|{}|{}");
+
+    const restored = new Connector(1, new Logger(LogLevel.ERROR));
+    restored.restoreRuntimeSnapshot(snapshot);
+    expect(restored.transaction?.signedBeginOcmf).toBeUndefined();
+    expect(restored.transaction?.id).toBe(315);
+  });
+});

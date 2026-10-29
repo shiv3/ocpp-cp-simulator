@@ -474,7 +474,8 @@ export class OCPPMessageHandler {
   /**
    * #315: StopTransaction.transactionData carrying the signed begin reading
    * (signed when the transaction started) and a freshly signed end reading,
-   * each as a `format: "SignedData"` sample. `undefined` while signing is off.
+   * each as a `format: "SignedData"` sample. A stored begin reading is sent
+   * even if signing was turned off since; `undefined` when there is neither.
    */
   private signedTransactionData(
     transaction: Transaction,
@@ -487,7 +488,7 @@ export class OCPPMessageHandler {
       energyWh: transaction.meterStop,
       at: transaction.stopTime,
     });
-    if (!end) return undefined;
+    if (!end && !transaction.signedBeginOcmf) return undefined;
     const data = [
       ...(transaction.signedBeginOcmf
         ? [
@@ -502,10 +503,14 @@ export class OCPPMessageHandler {
             },
           ]
         : []),
-      {
-        timestamp: transaction.stopTime.toISOString(),
-        sampledValue: [toOcpp16SampledValue(end.ocmf, "Transaction.End")],
-      },
+      ...(end
+        ? [
+            {
+              timestamp: transaction.stopTime.toISOString(),
+              sampledValue: [toOcpp16SampledValue(end.ocmf, "Transaction.End")],
+            },
+          ]
+        : []),
     ];
     // Same strict-unit-union cast as sendMeterValue below.
     return data as unknown as StopTransactionRequestV16["transactionData"];

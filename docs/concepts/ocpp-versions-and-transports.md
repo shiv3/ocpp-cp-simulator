@@ -159,7 +159,10 @@ calibrated meter**: nothing it produces is legally valid metering data.
   `SetVariables` on `SampledDataCtrlr.SignReadings`).
 - **One ephemeral key per connector**: ECDSA P-256
   (`ECDSA-secp256r1-SHA256`), made on first use and held in memory only. There
-  is no key store, import or rotation; a restart makes new keys.
+  is no key store, import or rotation; a restart makes new keys. A 1.6
+  transaction restored after a restart therefore drops its stored begin
+  record (the key that signed it is gone), and its `StopTransaction` carries
+  the end record only.
 - **Signing is synchronous** (`@noble/curves`), so turning it on never
   reorders the messages a station sends.
 
@@ -181,7 +184,11 @@ base64 of the OCMF document, `signingMethod`, `encodingMethod` `OCMF`,
 `publicKey` base64 DER): 2.0.1 requires them and 2.1, where two became
 optional, accepts them. Records are signed in time order, so the OCMF
 transaction page counter (`PG` `T1`, `T2`…) runs begin, samples, end, and a
-CSMS that collects every record of a session sees no gap.
+CSMS that collects every record of a session sees no gap. A 1.6 begin record
+signed at `StartTransaction` is still sent at the stop if signing was turned
+off in between. A `|` inside an identifier (idTag, serial) is written as the
+JSON escape `\u007C`, so the record always splits into its three
+sections; a negative register is signed as it is (`-1.500`), not clamped.
 
 **Test modes** (`SignedMeterDataMode`) apply to every record signed while
 set; the advertised key is always the connector's own:

@@ -291,8 +291,10 @@ export class Connector {
     this.statusValue = snapshot.status;
     this.availabilityValue = snapshot.availability;
     this.scheduledAvailabilityValue = snapshot.scheduledAvailability;
+    // #315: the signing key is in memory only, so a begin reading signed
+    // before the restart no longer matches MeterPublicKey<id>; drop it.
     this.transactionValue = snapshot.transaction
-      ? { ...snapshot.transaction }
+      ? { ...snapshot.transaction, signedBeginOcmf: undefined }
       : null;
     this.meterValueWh = snapshot.meterValueWh;
     this.socPercent = snapshot.socPercent;

@@ -149,7 +149,10 @@ export class OcmfMeter {
           r.energyWh,
         )},"RI":"01-00:01.08.00*FF","RU":"kWh","EF":"","ST":"G"}`,
     );
-    return `${JSON.stringify(head).slice(0, -1)},"RD":[${rd.join(",")}]}`;
+    // OCMF sections are split on `|`, so one inside a value (an idTag, a
+    // serial) is written as the JSON escape `\u007C`; it decodes the same.
+    const headJson = JSON.stringify(head).replace(/\|/g, "\\u007C");
+    return `${headJson.slice(0, -1)},"RD":[${rd.join(",")}]}`;
   }
 }
 
@@ -202,9 +205,14 @@ export function ocmfTime(at: Date): string {
     .slice(20, 23)}+0000 S`;
 }
 
+/** Wh as kWh with three decimals. A negative register is written as it is
+ *  (`-1.500`), not clamped: the record must show what the meter was told. */
 function kwh(energyWh: number): string {
-  const wh = Math.max(0, Math.round(energyWh));
-  return `${Math.floor(wh / 1000)}.${String(wh % 1000).padStart(3, "0")}`;
+  const wh = Math.round(energyWh);
+  const abs = Math.abs(wh);
+  return `${wh < 0 ? "-" : ""}${Math.floor(abs / 1000)}.${String(
+    abs % 1000,
+  ).padStart(3, "0")}`;
 }
 
 /** Change the last digit of the last `RV`, after signing. */

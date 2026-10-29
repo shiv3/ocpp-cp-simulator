@@ -857,13 +857,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const measurands =
         options.measurands ??
         this._chargePoint.configuration.meterValuesSampledData();
+      const context = options.context ?? "Sample.Periodic";
       const sampledValue = this.withSignedEnergy(
         this.toV201SampledValues(
-          buildSampledValues(
-            connector,
-            measurands,
-            options.context ?? "Sample.Periodic",
-          ),
+          buildSampledValues(connector, measurands, context),
         ),
         connectorId,
         transaction.tagId,
@@ -872,6 +869,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           energyWh: connector.meterValue,
           at: new Date(timestamp),
         },
+        context,
       );
       if (sampledValue.length > 0) {
         meterValue = [
@@ -913,14 +911,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /**
    * #315: while `SampledDataSignReadings` is on, sign `reading` and attach it
-   * as `signedMeterValue` to the energy register sample (adding one if the
-   * measurand list has none). Unchanged when signing is off.
+   * as `signedMeterValue` to the energy register sample (adding one, with
+   * `context`, if the measurand list has none). Unchanged when signing is off.
    */
   private withSignedEnergy(
     sampledValue: V201MeterValuesSampledValue[],
     connectorId: number,
     idTag: string,
     reading: OcmfReading,
+    context?: ReadingContext,
   ): [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]] {
     const signed = signReading(this._chargePoint, connectorId, idTag, reading);
     const list = sampledValue as [
@@ -945,6 +944,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         value: reading.energyWh / 1000,
         measurand: "Energy.Active.Import.Register",
         unitOfMeasure: { unit: "kWh" },
+        ...(context
+          ? { context: context as V201MeterValuesSampledValue["context"] }
+          : {}),
         signedMeterValue,
       },
     ];
@@ -991,20 +993,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
-    if (sampledValues.length === 0) {
-      this._logger.debug(
-        `[v2.0.1] sendMeterValue: no sampled values for connector ${connectorId}`,
-        LogType.METER_VALUE,
-      );
-      return;
-    }
-
     const timestamp = overrides.timestamp ?? new Date();
     let sampledValue = this.toV201SampledValues(sampledValues) as [
       V201MeterValuesSampledValue,
       ...V201MeterValuesSampledValue[],
     ];
-    // #315: during a transaction, sign the energy register too.
+    // #315: during a transaction, sign the energy register too. Done before
+    // the empty check, so an empty measurand list still sends the signed one.
     const transaction = connector.transaction;
     if (transaction && !transaction.stopTime) {
       sampledValue = this.withSignedEnergy(
@@ -1012,7 +1007,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         connectorId,
         transaction.tagId,
         { reason: "C", energyWh: connector.meterValue, at: timestamp },
+        context,
       );
+    }
+    if (sampledValue.length === 0) {
+      this._logger.debug(
+        `[v2.0.1] sendMeterValue: no sampled values for connector ${connectorId}`,
+        LogType.METER_VALUE,
+      );
+      return;
     }
 
     const payload: MeterValuesRequestV201 = {

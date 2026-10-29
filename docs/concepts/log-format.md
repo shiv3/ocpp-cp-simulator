@@ -86,7 +86,11 @@ ignores case, `-` and `_`. The match is on JSON object shapes: a SOAP (XML)
 body does not get it. A duplicated key does not hide a secret — `JSON.parse`
 keeps the last copy, so any copy of `key` / `variable` makes the entry
 sensitive and every copy of `value` / `attributeValue`, and of the `key` in
-every `vpn` member, is redacted.
+every `vpn` member, is redacted. A redacted scalar inside a JSON member
+(string, number such as `simPin`, boolean, `null`) becomes the quoted string
+`"[redacted]"`, so the frame stays valid JSON: the [trace adapter](trace-format.md#producing-records)
+gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
+object or array held by a secret-named member does not get that guarantee.
 
 ## WebSocket close lines
 

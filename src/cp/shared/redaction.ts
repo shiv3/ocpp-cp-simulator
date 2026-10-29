@@ -99,10 +99,21 @@ const URL_SECRET_QUERY =
 export function redactSensitiveText(text: string): string {
   return redactOcppKeyValueText(text)
     .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
-    .replace(SENSITIVE_BARE_ASSIGNMENT, `$1${REDACTED_VALUE}`)
+    .replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue)
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
     .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`)
     .replace(BEARER_TOKEN, `$1${REDACTED_VALUE}`);
+}
+
+/**
+ * A quoted name is a JSON member (`"simPin":1234`): quote the replacement so
+ * the logged frame still parses for the trace adapter (#401). Elsewhere
+ * (`api_key=…`) it stays bare.
+ */
+function redactBareValue(_match: string, prefix: string): string {
+  return prefix.startsWith('"')
+    ? `${prefix}"${REDACTED_VALUE}"`
+    : `${prefix}${REDACTED_VALUE}`;
 }
 
 export function redactSensitiveValue(value: unknown): unknown {

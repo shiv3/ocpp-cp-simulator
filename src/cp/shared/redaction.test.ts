@@ -413,8 +413,18 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
       `Received: [2,"m1","SetNetworkProfile",${JSON.stringify(withPin)}]`,
     );
     expect(text).not.toContain("9731");
-    expect(text).toContain(`"simPin":${REDACTED_VALUE}`);
+    // Quoted, so the frame stays JSON: the trace adapter parses it.
+    expect(text).toContain(`"simPin":"${REDACTED_VALUE}"`);
     expect(text).toContain("apnUSER");
+    expect(() =>
+      JSON.parse(redactSensitiveText(JSON.stringify(withPin))),
+    ).not.toThrow();
+  });
+
+  it("keeps a bare value bare outside a JSON member", () => {
+    expect(redactSensitiveText("simPin=9731 api_key=s3cret")).toBe(
+      `simPin=${REDACTED_VALUE} api_key=${REDACTED_VALUE}`,
+    );
   });
 
   it("redacts every duplicate vpn and key member, not only the first", () => {

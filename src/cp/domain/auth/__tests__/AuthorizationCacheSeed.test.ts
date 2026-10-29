@@ -69,6 +69,12 @@ describe("StationAuthorization.seedCache (#452 control seam)", () => {
       "an unparseable expiry",
       [{ idToken: "A", status: "Accepted", expiresAt: "soon" }],
     ],
+    ...["2026", "0", "soon 1", "2026-10-30", "2026-10-30T00:00:00"].map(
+      (expiresAt): [string, AuthorizationCacheSeedEntry[]] => [
+        `a non-ISO expiry ${JSON.stringify(expiresAt)}`,
+        [{ idToken: "A", status: "Accepted", expiresAt }],
+      ],
+    ),
     ["an empty parentId", [{ idToken: "A", status: "Accepted", parentId: "" }]],
     [
       "a duplicate idToken",

@@ -83,6 +83,13 @@ export class InvalidAuthorizationCacheSeedError extends Error {
 
 const STATUSES: ReadonlySet<string> = new Set(AUTHORIZATION_STATUSES);
 
+/** ISO 8601 date-time with `Z` or an offset, the shape the RPC schema
+ *  accepts (`z.iso.datetime({ offset: true })`). Checked here too, because
+ *  `Date.parse` alone takes `"2026"` or `"0"`, and the Local service calls
+ *  this parser without the schema. */
+const ISO_DATE_TIME =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 /** Check every entry, then convert; throws on the first fault so a refused
  *  seed changes nothing. `maxLength` bounds `idToken` and `parentId`
  *  ({@link idTokenMaxLength}); identifiers compare case-insensitively
@@ -131,7 +138,11 @@ export function parseAuthorizationCacheSeed(
     }
     const expiresAt =
       entry.expiresAt !== undefined ? Date.parse(entry.expiresAt) : undefined;
-    if (expiresAt !== undefined && !Number.isFinite(expiresAt)) {
+    if (
+      expiresAt !== undefined &&
+      (!ISO_DATE_TIME.test(entry.expiresAt ?? "") ||
+        !Number.isFinite(expiresAt))
+    ) {
       throw new InvalidAuthorizationCacheSeedError(
         `${where}.expiresAt is not a date`,
       );

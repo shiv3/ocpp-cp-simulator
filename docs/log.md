@@ -1729,3 +1729,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A daemon without `--state-db` built its scenario repositories on a `null` database, the browser's Remote-mode no-op: a definition saved over RPC (the web console's Library) was dropped and `scenario.definitions.list` never returned it, and a charge point's own scenarios (the seeded default) never reached a store the RPC layer reads. The Library editor and a run's panel showed "Scenario not found".
 - `CPRegistry` now owns one scenario repository for the daemon, like the run and session histories: the `scenarios` table with `--state-db`, an in-memory store (`InMemoryScenarioRepository`) without. The RPC layer and every charge point use it; deleting a charge point drops its scenarios and `state.reset` drops all of them, Library included ([State persistence](concepts/state-persistence.md)).
+
+## [2026-10-29] ingest | Operational timeline: recovery duration matches the entries
+
+- `recovery_completed.durationMs` and the fault / recovery entries' timestamps read the clock separately, so they could differ by a millisecond and `operationalTimeline.integration.bun.test.ts` (durationMs = recovery − fault timestamp) failed intermittently. A timeline record can now carry the instant it is stamped with (`at`), and the projector uses the same clock reading for the incident's start and the fault entry, and for the duration and the recovery entry ([Operational timeline](concepts/operational-timeline.md)).
+
+## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
+
+- `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).

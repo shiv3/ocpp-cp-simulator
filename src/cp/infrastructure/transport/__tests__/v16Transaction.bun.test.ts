@@ -6,7 +6,10 @@ import type {
 } from "../../../../ocpp";
 import { startMockCsms, normalizeTranscript, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import {
+  DefaultBootNotification,
+  OCPPStatus,
+} from "../../../domain/types/OcppTypes";
 
 function transactionFrames(frames: OcppFrame[]): OcppFrame[] {
   return frames.filter(
@@ -151,6 +154,62 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
       expect(preparingIndex).toBeLessThan(startTransactionIndex);
 
       expect(normalizeTranscript(relevantFrames)).toMatchSnapshot();
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("sends Preparing once when the connector was plugged in before the start (#496)", async () => {
+    const csms = startMockCsms();
+    const cp = new ChargePoint(
+      "CP016-PLUG",
+      DefaultBootNotification,
+      1,
+      csms.url,
+      null,
+      null,
+      null,
+      {},
+      [],
+      "OCPP-1.6J",
+      {},
+    );
+    cp.events.on("error", () => undefined);
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+
+    try {
+      cp.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      csms.replyCallResult(boot.messageId, {
+        status: "Accepted",
+        currentTime: "2026-10-29T00:00:00.000Z",
+        interval: 300,
+      });
+      await replyStatusNotification(csms, 0, "Available");
+      await replyStatusNotification(csms, 1, "Available");
+
+      // The console's Plug in: StatusNotification(Preparing), then a start.
+      cp.updateConnectorStatus(1, OCPPStatus.Preparing);
+      await replyStatusNotification(csms, 1, "Preparing");
+      cp.startTransaction("TAG-16", 1);
+
+      const startCall = await csms.waitForCall("StartTransaction");
+      csms.replyCallResult(startCall.messageId, {
+        transactionId: 1002,
+        idTagInfo: { status: "Accepted" },
+      });
+      await replyStatusNotification(csms, 1, "Charging");
+
+      const statuses = csms.received
+        .filter(
+          (frame) =>
+            frame[0] === 2 &&
+            frame[2] === "StatusNotification" &&
+            (frame[3] as { connectorId?: number }).connectorId === 1,
+        )
+        .map((frame) => (frame[3] as { status: string }).status);
+      expect(statuses).toEqual(["Available", "Preparing", "Charging"]);
     } finally {
       cp.disconnect();
       await csms.stop();

@@ -64,6 +64,9 @@ export interface TimelineRecord {
   connectorId?: number;
   runId?: string;
   data?: Record<string, unknown>;
+  /** Epoch ms to stamp the entry with, when the caller already read the
+   *  clock for its data (a duration); defaults to `now()`. */
+  at?: number;
 }
 
 /** Exact-match filters, then the `logs.get` window over the matching
@@ -148,7 +151,7 @@ export class OperationalTimeline {
     // Frozen, so `query` can hand entries out without copying them.
     const entry: TimelineEntry = Object.freeze({
       seq: this.nextSeq++,
-      timestamp: new Date(this.now()).toISOString(),
+      timestamp: new Date(record.at ?? this.now()).toISOString(),
       kind: record.kind,
       cpId: this.cpId,
       ...(record.connectorId !== undefined && {

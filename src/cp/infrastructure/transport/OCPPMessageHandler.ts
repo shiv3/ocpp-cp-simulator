@@ -1062,11 +1062,13 @@ export class OCPPMessageHandler {
     );
     switch (messageType) {
       case OCPPMessageType.CALL:
-        // Some handlers (e.g. GetInstalledCertificateIds/DeleteCertificate)
-        // compute certificate hashes via WebCrypto and are `async`; handleCall
-        // awaits `handler.handle()` internally. Not awaited here — CALL
-        // handling is fire-and-forget, matching the rest of this dispatch
-        // loop (nothing downstream depends on completion order).
+        // Not awaited: each CALL starts at once, without waiting for the
+        // previous one's answer; handleCall awaits `handler.handle()`
+        // internally. An async handler (InstallCertificate and
+        // CertificateSigned hash via WebCrypto) can therefore be overtaken
+        // by a later CALL. Handlers that need the order keep it themselves:
+        // the certificate handlers run through CertificateStore, which
+        // completes its operations one at a time (#456).
         void this.handleCall(
           messageId,
           action,

@@ -10,6 +10,10 @@ import type {
   GetInstalledCertificateIdsResponseV21,
   InstallCertificateResponseV21,
 } from "../../../../ocpp/v21";
+import type {
+  DeleteCertificateOutcome,
+  InstalledCertificateIds,
+} from "../../../domain/security/CertificateStore";
 import type { CertificateHashData } from "../../../domain/security/certificateHash";
 import type {
   InstalledCertificateQuery,
@@ -99,10 +103,30 @@ export function buildCertificateHandlersV2x(
 }
 
 /**
+ * Runs `read` on the store after every certificate operation dispatched
+ * before it (an install still hashing), then builds the answer. The answer
+ * stays synchronous when the store is idle, so the dispatcher sends it in
+ * the tick of its CALL.
+ */
+function afterPendingOperations<T>(
+  ctx: V201InboundContext,
+  read: () => T,
+  answer: (value: T) => V201HandlerResult,
+): V201HandlerResult | Promise<V201HandlerResult> {
+  const value = ctx.chargePoint.certificateStore.runExclusive(read);
+  return value instanceof Promise
+    ? value.then((v: Awaited<T>) => answer(v as T))
+    : answer(value as T);
+}
+
+/**
  * M05: Accepted once installed (M05.FR.02); Rejected for a certificate that
  * does not parse (M05.FR.07) or when the store already holds
  * `CertificateStoreMaxLength` roots (M05.FR.06; the simulator has no
- * separate `SecurityCtrlr.CertificateEntries` limit).
+ * separate `SecurityCtrlr.CertificateEntries` limit). A certificate already
+ * installed replaces the old copy and is Accepted, full store or not
+ * (M05.FR.17; AdditionalRootCertificateCheck, M05.FR.10, is not
+ * implemented). Failed when the state database refuses it (M05.FR.03).
  */
 async function installCertificate(
   mapping: CertificateWireMapping,
@@ -126,7 +150,7 @@ async function installCertificate(
   const outcome = await ctx.chargePoint.certificateStore.installRootCertificate(
     use,
     req.certificate,
-    { maxEntries },
+    { maxEntries, replaceDuplicate: true },
   );
   switch (outcome.status) {
     case "Installed":
@@ -151,6 +175,14 @@ async function installCertificate(
         LogType.OCPP,
       );
       return rejected;
+    case "PersistFailed":
+      ctx.logger.error(
+        "InstallCertificate failed: the certificate could not be saved",
+        LogType.OCPP,
+      );
+      return {
+        response: { status: "Failed" } satisfies InstallCertificateResponseV21,
+      };
   }
 }
 
@@ -166,40 +198,50 @@ function getInstalledCertificateIds(
   mapping: CertificateWireMapping,
   payload: unknown,
   ctx: V201InboundContext,
-): V201HandlerResult {
+): V201HandlerResult | Promise<V201HandlerResult> {
   const req = payload as GetInstalledCertificateIdsRequestV201;
   const queries = req.certificateType?.flatMap((value) => {
     const query = mapping.queryFrom(value);
     return query ? [query] : [];
   });
-  const chain = ctx.chargePoint.certificateStore
-    .installedCertificateIds(queries)
-    .flatMap((entry): CertificateHashDataChain[] => {
-      const certificateType = mapping.queryTo(entry.use);
-      if (certificateType === undefined) return [];
-      let children = entry.childHashData;
-      if (children.length > MAX_CHILD_HASH_DATA) {
-        ctx.logger.warn(
-          `GetInstalledCertificateIds: ${children.length} sub-CA certificates under one ${certificateType}; reporting the first ${MAX_CHILD_HASH_DATA}`,
-          LogType.OCPP,
-        );
-        children = children.slice(0, MAX_CHILD_HASH_DATA);
-      }
-      return [
-        {
-          certificateType:
-            certificateType as CertificateHashDataChain["certificateType"],
-          certificateHashData: wireHashData(entry.hashData),
-          ...(children.length > 0
-            ? {
-                childCertificateHashData: children.map(
-                  wireHashData,
-                ) as CertificateHashDataChain["childCertificateHashData"],
-              }
-            : {}),
-        },
-      ];
-    });
+  return afterPendingOperations(
+    ctx,
+    () => ctx.chargePoint.certificateStore.installedCertificateIds(queries),
+    (installed) => answerInstalledCertificateIds(mapping, installed, ctx),
+  );
+}
+
+function answerInstalledCertificateIds(
+  mapping: CertificateWireMapping,
+  installed: readonly InstalledCertificateIds[],
+  ctx: V201InboundContext,
+): V201HandlerResult {
+  const chain = installed.flatMap((entry): CertificateHashDataChain[] => {
+    const certificateType = mapping.queryTo(entry.use);
+    if (certificateType === undefined) return [];
+    let children = entry.childHashData;
+    if (children.length > MAX_CHILD_HASH_DATA) {
+      ctx.logger.warn(
+        `GetInstalledCertificateIds: ${children.length} sub-CA certificates under one ${certificateType}; reporting the first ${MAX_CHILD_HASH_DATA}`,
+        LogType.OCPP,
+      );
+      children = children.slice(0, MAX_CHILD_HASH_DATA);
+    }
+    return [
+      {
+        certificateType:
+          certificateType as CertificateHashDataChain["certificateType"],
+        certificateHashData: wireHashData(entry.hashData),
+        ...(children.length > 0
+          ? {
+              childCertificateHashData: children.map(
+                wireHashData,
+              ) as CertificateHashDataChain["childCertificateHashData"],
+            }
+          : {}),
+      },
+    ];
+  });
   const [first, ...rest] = chain;
   if (first === undefined) {
     ctx.logger.info(
@@ -231,11 +273,20 @@ function getInstalledCertificateIds(
 function deleteCertificate(
   payload: unknown,
   ctx: V201InboundContext,
-): V201HandlerResult {
+): V201HandlerResult | Promise<V201HandlerResult> {
   const req = payload as DeleteCertificateRequestV201;
-  const outcome = ctx.chargePoint.certificateStore.deleteCertificate(
-    req.certificateHashData,
+  const store = ctx.chargePoint.certificateStore;
+  return afterPendingOperations(
+    ctx,
+    () => store.deleteCertificate(req.certificateHashData),
+    (outcome) => answerDeleteCertificate(outcome, ctx),
   );
+}
+
+function answerDeleteCertificate(
+  outcome: DeleteCertificateOutcome,
+  ctx: V201InboundContext,
+): V201HandlerResult {
   switch (outcome.status) {
     case "Deleted":
       ctx.logger.info(

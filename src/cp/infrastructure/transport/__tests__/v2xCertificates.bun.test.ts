@@ -6,6 +6,7 @@ import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../../domain/persistence/Database";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import { computeCertificateHashData } from "../../../domain/security/certificateHash";
 import { generateCsr } from "../../../domain/security/csr";
 import {
   leafForCsr,
@@ -158,6 +159,55 @@ describe.skipIf(!canBindBunServe())(
               certificateHashData: chain[0].certificateHashData,
             }),
           ).toEqual({ status: "Accepted" });
+          expect(await result(csms, "GetInstalledCertificateIds", {})).toEqual({
+            status: "NotFound",
+          });
+        });
+      });
+
+      it("answers a query and a delete sent right after an install as if it had completed", async () => {
+        await withStation(version, async (csms) => {
+          const root = await selfSignedRoot("0B", "Back to back");
+          const hash = await computeCertificateHashData(root.pem);
+          const answer = (id: string) =>
+            csms.waitForFrame(
+              (frame) => (frame[0] === 3 || frame[0] === 4) && frame[1] === id,
+            );
+          const install = { certificateType: "CSMSRootCertificate" };
+
+          csms.send([
+            2,
+            "b2b-install-1",
+            "InstallCertificate",
+            { ...install, certificate: root.pem },
+          ]);
+          csms.send([2, "b2b-get", "GetInstalledCertificateIds", {}]);
+          expect((await answer("b2b-install-1"))[2]).toEqual({
+            status: "Accepted",
+          });
+          const listed = (await answer("b2b-get"))[2] as {
+            certificateHashDataChain?: HashDataChain[];
+          };
+          expect(listed.certificateHashDataChain).toHaveLength(1);
+
+          csms.send([
+            2,
+            "b2b-install-2",
+            "InstallCertificate",
+            { ...install, certificate: root.pem },
+          ]);
+          csms.send([
+            2,
+            "b2b-delete",
+            "DeleteCertificate",
+            { certificateHashData: hash },
+          ]);
+          expect((await answer("b2b-install-2"))[2]).toEqual({
+            status: "Accepted",
+          });
+          expect((await answer("b2b-delete"))[2]).toEqual({
+            status: "Accepted",
+          });
           expect(await result(csms, "GetInstalledCertificateIds", {})).toEqual({
             status: "NotFound",
           });

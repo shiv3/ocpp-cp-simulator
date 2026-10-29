@@ -57,7 +57,20 @@ export interface InstalledCertificateIds {
 export type InstallRootCertificateOutcome =
   | { status: "Installed"; certificate: InstalledRootCertificate }
   | { status: "Malformed" }
-  | { status: "StoreFull"; limit: number };
+  | { status: "StoreFull"; limit: number }
+  /** The database refused the row; nothing was installed. */
+  | { status: "PersistFailed" };
+
+export interface InstallRootCertificateOptions {
+  /** Roots the store may hold (signed chains do not count). */
+  maxEntries: number;
+  /**
+   * Replace an installed root with the same hash data instead of adding a
+   * second copy (2.x M05.FR.17). The replaced root does not count against
+   * `maxEntries`. Off by default: 1.6 keeps duplicates.
+   */
+  replaceDuplicate?: boolean;
+}
 
 export type DeleteCertificateOutcome =
   | { status: "Deleted"; use: RootCertificateUse | SignedCertificateUse }
@@ -115,17 +128,53 @@ interface CertificateRow {
  * Private keys: `generateNewCsr` drops the generated private key (A02.FR.05,
  * it never leaves the station, and the simulator does not use it). A
  * returned chain is matched to its CSR by public key only.
+ *
+ * Ordering: installs and signed-chain updates hash asynchronously, so they
+ * run one at a time through {@link runExclusive}. A transport handler that
+ * reads or deletes runs its work through `runExclusive` too, so a query
+ * issued after an install observes that install even though the transport
+ * dispatches CALLs without waiting for each other.
  */
 export class CertificateStore {
   #entries: Entry[] = [];
   #pendingCsrs = new Map<SignedCertificateUse, PendingCsr>();
   #nextSeq = 1;
+  /** Settles once every operation queued so far has completed. */
+  #tail: Promise<void> = Promise.resolve();
+  #pendingOperations = 0;
 
   constructor(
     private readonly chargePointId: string = "",
     private readonly database: Database | null = null,
   ) {
     this.load();
+  }
+
+  // ── Ordering ────────────────────────────────────────────────────────────
+
+  /**
+   * Runs `op` once every certificate operation started before it has
+   * completed. When none is pending, `op` runs at once and a synchronous
+   * result is returned synchronously (a 2.x query then still answers in
+   * the tick of its CALL). An operation that throws or rejects does not
+   * block the ones after it. `op` must not call `runExclusive` itself.
+   */
+  runExclusive<T>(op: () => T): T | Promise<Awaited<T>> {
+    if (this.#pendingOperations === 0) {
+      const result = op();
+      if (!isPromiseLike(result)) return result;
+      return this.track(Promise.resolve(result));
+    }
+    return this.track(this.#tail.then(op) as Promise<Awaited<T>>);
+  }
+
+  private track<T>(operation: Promise<T>): Promise<T> {
+    this.#pendingOperations++;
+    const done = (): void => {
+      this.#pendingOperations--;
+    };
+    this.#tail = operation.then(done, done);
+    return operation;
   }
 
   // ── CSR (A02 / A03) ─────────────────────────────────────────────────────
@@ -171,15 +220,19 @@ export class CertificateStore {
   /**
    * OCPP 1.6 CertificateSigned: stores the chain unconditionally, without
    * consulting or clearing the pending CSR (the 1.6 behaviour before #456).
-   * The caller has already parsed every PEM.
+   * It replaces the previous chain of the same use, so persisted rows do
+   * not pile up; no 1.6 message reads signed chains back. The caller has
+   * already parsed every PEM.
    */
-  async storeSignedChain(
+  storeSignedChain(
     pemChain: readonly string[],
     use: SignedCertificateUse = "ChargingStationCertificate",
   ): Promise<StoredCertificateChain> {
-    const chain = await this.buildChain(use, pemChain);
-    this.append({ kind: "chain", seq: this.#nextSeq++, value: chain });
-    return chain;
+    return this.runExclusive(async () => {
+      const chain = await this.buildChain(use, pemChain);
+      this.replaceChains(use, chain);
+      return chain;
+    });
   }
 
   /**
@@ -190,7 +243,14 @@ export class CertificateStore {
    * newest certificate is the one used) and the CSR is no longer pending.
    * On failure nothing changes, the CSR stays pending.
    */
-  async applySignedChain(
+  applySignedChain(
+    use: SignedCertificateUse,
+    pemChain: readonly string[],
+  ): Promise<ApplySignedChainOutcome> {
+    return this.runExclusive(() => this.applySignedChainNow(use, pemChain));
+  }
+
+  private async applySignedChainNow(
     use: SignedCertificateUse,
     pemChain: readonly string[],
   ): Promise<ApplySignedChainOutcome> {
@@ -211,12 +271,7 @@ export class CertificateStore {
       return { status: "PublicKeyMismatch" };
     }
 
-    for (const entry of this.#entries.filter(
-      (e) => e.kind === "chain" && e.value.use === use,
-    )) {
-      this.remove(entry);
-    }
-    this.append({ kind: "chain", seq: this.#nextSeq++, value: chain });
+    this.replaceChains(use, chain);
     this.#pendingCsrs.delete(use);
     return { status: "Accepted", chain };
   }
@@ -234,14 +289,26 @@ export class CertificateStore {
   /**
    * Installs a root after parsing and hashing it. `StoreFull` when the
    * store already holds `maxEntries` roots (signed chains do not count).
-   * The capacity check and the insert run synchronously after the hash, so
-   * concurrent installs cannot overshoot the limit. Duplicates are kept, as
-   * before #456.
+   * Installs run one at a time ({@link runExclusive}), so concurrent ones
+   * cannot overshoot the limit. Duplicates are kept, as before #456, unless
+   * `replaceDuplicate` is set. `PersistFailed` when the database refuses
+   * the row: the store then keeps its previous content, so a certificate
+   * answered as installed is one that survives a restart.
    */
-  async installRootCertificate(
+  installRootCertificate(
     use: RootCertificateUse,
     pem: string,
-    { maxEntries }: { maxEntries: number },
+    options: InstallRootCertificateOptions,
+  ): Promise<InstallRootCertificateOutcome> {
+    return this.runExclusive(() =>
+      this.installRootCertificateNow(use, pem, options),
+    );
+  }
+
+  private async installRootCertificateNow(
+    use: RootCertificateUse,
+    pem: string,
+    { maxEntries, replaceDuplicate = false }: InstallRootCertificateOptions,
   ): Promise<InstallRootCertificateOutcome> {
     const trimmed = pem.trim();
     let hashData: CertificateHashData;
@@ -250,7 +317,15 @@ export class CertificateStore {
     } catch {
       return { status: "Malformed" };
     }
-    if (this.listRootCertificates().length >= maxEntries) {
+    const duplicate = replaceDuplicate
+      ? this.#entries.find(
+          (e) =>
+            e.kind === "root" &&
+            certificateHashDataEquals(e.value.hashData, hashData),
+        )
+      : undefined;
+    const kept = this.listRootCertificates().length - (duplicate ? 1 : 0);
+    if (kept >= maxEntries) {
       return { status: "StoreFull", limit: maxEntries };
     }
     const certificate: InstalledRootCertificate = {
@@ -259,7 +334,14 @@ export class CertificateStore {
       hashData,
       installedAt: new Date().toISOString(),
     };
-    this.append({ kind: "root", seq: this.#nextSeq++, value: certificate });
+    const entry: Entry = {
+      kind: "root",
+      seq: this.#nextSeq++,
+      value: certificate,
+    };
+    if (!this.persist(entry)) return { status: "PersistFailed" };
+    this.#entries.push(entry);
+    if (duplicate) this.remove(duplicate);
     return { status: "Installed", certificate };
   }
 
@@ -400,8 +482,27 @@ export class CertificateStore {
     return { use, pems, hashData, storedAt: new Date().toISOString() };
   }
 
-  private append(entry: Entry): void {
+  /**
+   * Stores `chain` in place of every chain of the same use. A chain the
+   * database refuses is still kept in memory (logged): CertificateSigned
+   * has no status for a station-side failure.
+   */
+  private replaceChains(
+    use: SignedCertificateUse,
+    chain: StoredCertificateChain,
+  ): void {
+    for (const entry of this.#entries.filter(
+      (e) => e.kind === "chain" && e.value.use === use,
+    )) {
+      this.remove(entry);
+    }
+    const entry: Entry = { kind: "chain", seq: this.#nextSeq++, value: chain };
+    this.persist(entry);
     this.#entries.push(entry);
+  }
+
+  /** INSERTs `entry`; `false` (logged) when the database refuses it. */
+  private persist(entry: Entry): boolean {
     const [body, installedAt] =
       entry.kind === "root"
         ? [
@@ -412,7 +513,7 @@ export class CertificateStore {
             { pems: entry.value.pems, hashData: entry.value.hashData },
             entry.value.storedAt,
           ];
-    this.runSafely("persist certificate", () =>
+    return this.runSafely("persist certificate", () =>
       this.database?.run(
         "INSERT INTO certificates (cp_id, seq, kind, certificate_use, body, installed_at) " +
           "VALUES (?, ?, ?, ?, ?, ?)",
@@ -459,13 +560,20 @@ export class CertificateStore {
     }
   }
 
-  private runSafely(what: string, fn: () => void): void {
+  /** Runs a database write; `false` (logged) when it throws. */
+  private runSafely(what: string, fn: () => void): boolean {
     try {
       fn();
+      return true;
     } catch (err) {
       console.error(`Failed to ${what}:`, err);
+      return false;
     }
   }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
 }
 
 function rowToEntry(row: CertificateRow): Entry | null {

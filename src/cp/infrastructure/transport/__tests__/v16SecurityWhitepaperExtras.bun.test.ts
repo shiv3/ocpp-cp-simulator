@@ -8,6 +8,7 @@ import type {
   InstallCertificateResponseV16,
 } from "../../../../ocpp";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { computeCertificateHashData } from "../../../domain/security/certificateHash";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
@@ -175,6 +176,89 @@ describe.skipIf(!canBindBunServe())(
           status: "Accepted",
         });
 
+        expect(cp.certificateStore.listRootCertificates()).toEqual([]);
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+
+    it("answers a query and a delete sent right after an install as if it had completed", async () => {
+      const csms = startMockCsms();
+      const cp = new ChargePoint(
+        "CP016-CERT-B2B",
+        DefaultBootNotification,
+        1,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.6J",
+        {},
+      );
+      cp.events.on("error", () => undefined);
+      try {
+        cp.connect();
+        await bootAndDrain(csms);
+        const pem = await selfSignedRootCertPem();
+        const hash = await computeCertificateHashData(pem);
+        const answer = (id: string) =>
+          csms.waitForFrame(
+            (frame) => (frame[0] === 3 || frame[0] === 4) && frame[1] === id,
+          );
+        const install = {
+          certificateType: "ManufacturerRootCertificate",
+          certificate: pem,
+        };
+
+        // No wait between the CALLs: the 1.6 dispatcher starts each one
+        // without waiting for the previous answer.
+        csms.send([2, "b2b-install-1", "InstallCertificate", install]);
+        csms.send([
+          2,
+          "b2b-get",
+          "GetInstalledCertificateIds",
+          { certificateType: "ManufacturerRootCertificate" },
+        ]);
+        expect((await answer("b2b-install-1"))[2]).toEqual({
+          status: "Accepted",
+        });
+        const listed = (
+          await answer("b2b-get")
+        )[2] as GetInstalledCertificateIdsResponseV16;
+        expect(listed.status).toBe("Accepted");
+        expect(listed.certificateHashData).toEqual([hash]);
+
+        csms.send([
+          2,
+          "b2b-delete",
+          "DeleteCertificate",
+          {
+            certificateHashData: hash,
+          },
+        ]);
+        expect((await answer("b2b-delete"))[2]).toEqual({
+          status: "Accepted",
+        });
+        expect(cp.certificateStore.listRootCertificates()).toEqual([]);
+
+        csms.send([2, "b2b-install-2", "InstallCertificate", install]);
+        csms.send([
+          2,
+          "b2b-delete-2",
+          "DeleteCertificate",
+          {
+            certificateHashData: hash,
+          },
+        ]);
+        expect((await answer("b2b-install-2"))[2]).toEqual({
+          status: "Accepted",
+        });
+        expect((await answer("b2b-delete-2"))[2]).toEqual({
+          status: "Accepted",
+        });
         expect(cp.certificateStore.listRootCertificates()).toEqual([]);
       } finally {
         cp.disconnect();

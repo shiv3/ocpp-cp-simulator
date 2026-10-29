@@ -8,6 +8,8 @@ import {
 } from "../CertificateManagementHandlers";
 import { Logger } from "../../../../../shared/Logger";
 import { CertificateStore } from "../../../../../domain/security/CertificateStore";
+import { computeCertificateHashData } from "../../../../../domain/security/certificateHash";
+import type { Database } from "../../../../../domain/persistence/Database";
 import { rootUseFromV16, rootUseToV16 } from "../../../certificateUseMapping";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
@@ -58,8 +60,10 @@ function v16View(store: CertificateStore) {
     .map((cert) => ({ type: rootUseToV16(cert.use), pem: cert.pem }));
 }
 
-function buildContext(maxLength = 10) {
-  const certificateStore = new CertificateStore();
+function buildContext(
+  maxLength = 10,
+  certificateStore = new CertificateStore(),
+) {
   const chargePoint = {
     id: "CP-CERT-TEST",
     certificateStore,
@@ -330,5 +334,73 @@ describe("1.6 certificate handlers on the version-neutral store", () => {
     expect(logged).not.toContain("PRIVATE KEY");
     expect(logged).not.toContain("BEGIN CERTIFICATE");
     expect(logged).toContain("type=ManufacturerRootCertificate");
+  });
+});
+
+describe("1.6 certificate handlers ordering and failures (#456 review)", () => {
+  it("lists a certificate whose install was dispatched just before the query", async () => {
+    const { ctx } = buildContext();
+    const pem = await selfSignedRootCert("01", "Back to back");
+
+    // Both handlers start before either answer is awaited, as the 1.6
+    // dispatcher does for two CALLs arriving back to back.
+    const installed = new InstallCertificateHandler().handle(
+      { certificateType: "CentralSystemRootCertificate", certificate: pem },
+      ctx,
+    );
+    const listed = new GetInstalledCertificateIdsHandler().handle(
+      { certificateType: "CentralSystemRootCertificate" },
+      ctx,
+    );
+
+    expect(await installed).toEqual({ status: "Accepted" });
+    expect(await listed).toMatchObject({
+      status: "Accepted",
+      certificateHashData: [expect.anything()],
+    });
+  });
+
+  it("deletes a certificate whose install was dispatched just before the delete", async () => {
+    const { ctx, certificateStore } = buildContext();
+    const pem = await selfSignedRootCert("01", "Back to back");
+    const hash = await computeCertificateHashData(pem);
+
+    const installed = new InstallCertificateHandler().handle(
+      { certificateType: "ManufacturerRootCertificate", certificate: pem },
+      ctx,
+    );
+    const deleted = new DeleteCertificateHandler().handle(
+      { certificateHashData: hash },
+      ctx,
+    );
+
+    expect(await installed).toEqual({ status: "Accepted" });
+    expect(await deleted).toEqual({ status: "Accepted" });
+    expect(certificateStore.listRootCertificates()).toEqual([]);
+  });
+
+  it("answers Failed when the certificate cannot be persisted (whitepaper M05.FR.04)", async () => {
+    const database: Database = {
+      exec() {},
+      run(sql: string) {
+        if (sql.startsWith("INSERT")) throw new Error("disk I/O error");
+      },
+      all: <T>() => [] as T[],
+      get: () => null,
+      close() {},
+    };
+    const { ctx, certificateStore } = buildContext(
+      10,
+      new CertificateStore("CP-CERT-TEST", database),
+    );
+    const pem = await selfSignedRootCert("01", "Unsaved");
+
+    expect(
+      await new InstallCertificateHandler().handle(
+        { certificateType: "CentralSystemRootCertificate", certificate: pem },
+        ctx,
+      ),
+    ).toEqual({ status: "Failed" });
+    expect(certificateStore.listRootCertificates()).toEqual([]);
   });
 });

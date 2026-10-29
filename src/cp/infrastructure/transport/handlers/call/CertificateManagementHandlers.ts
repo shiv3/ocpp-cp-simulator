@@ -26,8 +26,9 @@ x509.cryptoProvider.set(globalThis.crypto as Crypto);
  * certificate (CentralSystemRootCertificate / ManufacturerRootCertificate)
  * for later use validating the CSMS or a firmware signer. `Rejected`
  * covers both a malformed/unparseable PEM and a full certificate store
- * (M05.FR.03 / M05.FR.06). The store hashes the certificate at install
- * time, so this handler is async.
+ * (M05.FR.03 / M05.FR.06); `Failed` a certificate the state database
+ * refused (M05.FR.04). The store hashes the certificate at install time,
+ * so this handler is async.
  */
 export class InstallCertificateHandler implements CallHandler<
   InstallCertificateRequestV16,
@@ -86,6 +87,12 @@ export class InstallCertificateHandler implements CallHandler<
           LogType.OCPP,
         );
         return { status: "Rejected" };
+      case "PersistFailed":
+        context.logger.error(
+          "InstallCertificate failed: the certificate could not be saved",
+          LogType.OCPP,
+        );
+        return { status: "Failed" };
     }
   }
 }
@@ -100,10 +107,10 @@ export class GetInstalledCertificateIdsHandler implements CallHandler<
   GetInstalledCertificateIdsRequestV16,
   GetInstalledCertificateIdsResponseV16
 > {
-  handle(
+  async handle(
     payload: GetInstalledCertificateIdsRequestV16,
     context: HandlerContext,
-  ): GetInstalledCertificateIdsResponseV16 {
+  ): Promise<GetInstalledCertificateIdsResponseV16> {
     const use = isValidGetInstalledCertificateIdsRequestV16(payload)
       ? rootUseFromV16(payload.certificateType)
       : undefined;
@@ -115,9 +122,12 @@ export class GetInstalledCertificateIdsHandler implements CallHandler<
       return { status: "NotFound" };
     }
 
-    const matches = context.chargePoint.certificateStore.listRootCertificates([
-      use,
-    ]);
+    // After any install dispatched before this query (CertificateStore
+    // runs its operations one at a time).
+    const store = context.chargePoint.certificateStore;
+    const matches = await store.runExclusive(() =>
+      store.listRootCertificates([use]),
+    );
 
     if (matches.length === 0) {
       context.logger.info(
@@ -152,10 +162,10 @@ export class DeleteCertificateHandler implements CallHandler<
   DeleteCertificateRequestV16,
   DeleteCertificateResponseV16
 > {
-  handle(
+  async handle(
     payload: DeleteCertificateRequestV16,
     context: HandlerContext,
-  ): DeleteCertificateResponseV16 {
+  ): Promise<DeleteCertificateResponseV16> {
     if (!isValidDeleteCertificateRequestV16(payload)) {
       context.logger.warn(
         "DeleteCertificate: invalid request payload",
@@ -164,8 +174,9 @@ export class DeleteCertificateHandler implements CallHandler<
       return { status: "Failed" };
     }
 
-    const deleted = context.chargePoint.certificateStore.deleteRootCertificate(
-      payload.certificateHashData,
+    const store = context.chargePoint.certificateStore;
+    const deleted = await store.runExclusive(() =>
+      store.deleteRootCertificate(payload.certificateHashData),
     );
     if (deleted) {
       context.logger.info(

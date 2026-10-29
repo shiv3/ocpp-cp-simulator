@@ -85,6 +85,23 @@ describe("CertificateStore persistence", () => {
     db.close();
   });
 
+  it("keeps one row per use for repeated 1.6 CertificateSigned chains", async () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    const store = new CertificateStore("CP-1", db);
+    const first = await selfSignedRoot("01", "First");
+    const second = await selfSignedRoot("02", "Second");
+    await store.storeSignedChain([first.pem]);
+    await store.storeSignedChain([second.pem]);
+
+    expect(
+      db.all("SELECT seq FROM certificates WHERE cp_id = ?", ["CP-1"]),
+    ).toHaveLength(1);
+    expect(
+      new CertificateStore("CP-1", db).listSignedChains().map((c) => c.pems),
+    ).toEqual([[second.pem.trim()]]);
+    db.close();
+  });
+
   it("does not persist a pending CSR (its key pair is gone after a restart)", async () => {
     const db = BunSqliteDatabase.open(":memory:");
     const store = new CertificateStore("CP-1", db);

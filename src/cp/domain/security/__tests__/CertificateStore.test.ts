@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 
+import type { Database } from "../../persistence/Database";
 import { CertificateStore } from "../CertificateStore";
 import { computeCertificateHashData } from "../certificateHash";
 import { generateCsr } from "../csr";
@@ -375,5 +376,189 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
     expect(store.listRootCertificates()).toEqual([]);
     expect(store.listSignedChains()).toEqual([]);
     expect(store.pendingCsr("ChargingStationCertificate")).toBeUndefined();
+  });
+
+  it("replaces the previous 1.6 chain of the same use, keeping other uses", async () => {
+    const store = new CertificateStore();
+    const first = await selfSignedRoot("01", "First");
+    const second = await selfSignedRoot("02", "Second");
+    const v2g = await selfSignedRoot("03", "V2G");
+    await store.storeSignedChain([first.pem]);
+    await store.storeSignedChain([v2g.pem], "V2GCertificate");
+
+    await store.storeSignedChain([second.pem]);
+
+    expect(store.toJSON().signedChains).toEqual([
+      [v2g.pem.trim()],
+      [second.pem.trim()],
+    ]);
+  });
+});
+
+/** A database whose INSERTs fail while `failInserts` is set. */
+function flakyInsertDatabase(): Database & { failInserts: boolean } {
+  return {
+    failInserts: true,
+    exec() {},
+    run(sql: string) {
+      if (this.failInserts && sql.startsWith("INSERT")) {
+        throw new Error("disk I/O error");
+      }
+    },
+    all: <T>() => [] as T[],
+    get: () => null,
+    close() {},
+  };
+}
+
+describe("CertificateStore operation ordering (#456 review)", () => {
+  it("lets an exclusive read issued after an install observe it", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+
+    const installing = store.installRootCertificate(
+      "CsmsRootCertificate",
+      root.pem,
+      { maxEntries: 10 },
+    );
+    const listed = store.runExclusive(
+      () => store.listRootCertificates().length,
+    );
+
+    expect(await listed).toBe(1);
+    expect((await installing).status).toBe("Installed");
+  });
+
+  it("lets an exclusive delete issued after an install remove it", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+    const hash = await computeCertificateHashData(root.pem);
+
+    void store.installRootCertificate("CsmsRootCertificate", root.pem, {
+      maxEntries: 10,
+    });
+    const deleted = await store.runExclusive(() =>
+      store.deleteRootCertificate(hash),
+    );
+
+    expect(deleted?.use).toBe("CsmsRootCertificate");
+    expect(store.listRootCertificates()).toEqual([]);
+  });
+
+  it("runs an exclusive operation inline when nothing is pending", () => {
+    const store = new CertificateStore();
+    expect(store.runExclusive(() => 42)).toBe(42);
+  });
+
+  it("keeps serving operations after a queued one throws", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+    void store.installRootCertificate("CsmsRootCertificate", root.pem, {
+      maxEntries: 10,
+    });
+
+    const failing = store.runExclusive(() => {
+      throw new Error("boom");
+    });
+    const after = store.runExclusive(() => store.listRootCertificates().length);
+
+    await expect(failing).rejects.toThrow("boom");
+    expect(await after).toBe(1);
+  });
+});
+
+describe("CertificateStore reinstall (M05.FR.17, 2.x)", () => {
+  it("replaces a reinstalled certificate instead of duplicating it", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+    const options = { maxEntries: 10, replaceDuplicate: true };
+    await store.installRootCertificate(
+      "CsmsRootCertificate",
+      root.pem,
+      options,
+    );
+
+    const outcome = await store.installRootCertificate(
+      "ManufacturerRootCertificate",
+      root.pem,
+      options,
+    );
+
+    expect(outcome.status).toBe("Installed");
+    expect(store.listRootCertificates().map((c) => c.use)).toEqual([
+      "ManufacturerRootCertificate",
+    ]);
+  });
+
+  it("accepts a reinstall into a full store", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+    const options = { maxEntries: 1, replaceDuplicate: true };
+    await store.installRootCertificate(
+      "CsmsRootCertificate",
+      root.pem,
+      options,
+    );
+
+    const outcome = await store.installRootCertificate(
+      "CsmsRootCertificate",
+      root.pem,
+      options,
+    );
+
+    expect(outcome.status).toBe("Installed");
+    expect(store.listRootCertificates()).toHaveLength(1);
+  });
+
+  it("still refuses a different certificate into a full store", async () => {
+    const store = new CertificateStore();
+    const a = await selfSignedRoot("01", "A");
+    const b = await selfSignedRoot("02", "B");
+    const options = { maxEntries: 1, replaceDuplicate: true };
+    await store.installRootCertificate("CsmsRootCertificate", a.pem, options);
+
+    expect(
+      await store.installRootCertificate("CsmsRootCertificate", b.pem, options),
+    ).toEqual({ status: "StoreFull", limit: 1 });
+  });
+});
+
+describe("CertificateStore persistence failures (#456 review)", () => {
+  it("answers PersistFailed and keeps nothing when the INSERT fails", async () => {
+    const db = flakyInsertDatabase();
+    const store = new CertificateStore("CP-1", db);
+    const root = await selfSignedRoot("01", "Root");
+
+    expect(
+      await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+        maxEntries: 10,
+      }),
+    ).toEqual({ status: "PersistFailed" });
+    expect(store.listRootCertificates()).toEqual([]);
+  });
+
+  it("keeps the old certificate when a replacing INSERT fails", async () => {
+    const db = flakyInsertDatabase();
+    db.failInserts = false;
+    const store = new CertificateStore("CP-1", db);
+    const root = await selfSignedRoot("01", "Root");
+    const options = { maxEntries: 10, replaceDuplicate: true };
+    await store.installRootCertificate(
+      "CsmsRootCertificate",
+      root.pem,
+      options,
+    );
+    db.failInserts = true;
+
+    expect(
+      await store.installRootCertificate(
+        "ManufacturerRootCertificate",
+        root.pem,
+        options,
+      ),
+    ).toEqual({ status: "PersistFailed" });
+    expect(store.listRootCertificates().map((c) => c.use)).toEqual([
+      "CsmsRootCertificate",
+    ]);
   });
 });

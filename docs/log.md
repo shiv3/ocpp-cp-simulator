@@ -1724,3 +1724,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): the "Scenario EV Settings" panel now lives only in the web console's scenario editor.
 - [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
 - [GitHub issues](sources/github-issues.md): #443.
+
+## [2026-10-29] ingest | Operational timeline: recovery duration matches the entries
+
+- `recovery_completed.durationMs` and the fault / recovery entries' timestamps read the clock separately, so they could differ by a millisecond and `operationalTimeline.integration.bun.test.ts` (durationMs = recovery − fault timestamp) failed intermittently. A timeline record can now carry the instant it is stamped with (`at`), and the projector uses the same clock reading for the incident's start and the fault entry, and for the duration and the recovery entry ([Operational timeline](concepts/operational-timeline.md)).
+

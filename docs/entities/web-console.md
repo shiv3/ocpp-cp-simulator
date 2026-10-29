@@ -111,6 +111,14 @@ connecting, green once connected, red when the daemon cannot be reached, with
 the reason in its tooltip, as the classic navbar's badge did. Before #423 it
 was always green. Local mode has no daemon, so its dot carries no status.
 
+The button beside the logo (**Collapse sidebar** / **Expand sidebar**)
+folds the sidebar into a 52 px icon rail: the logo, the navigation icons
+(each label becomes the link's tooltip and accessible name), the mode dot
+and the theme toggle. The server URL and the version line are hidden while
+it is collapsed. The sidebar starts expanded; the collapsed state is kept in
+`localStorage` (`ocpp-cp.console.sidebar.collapsed`), so it survives a
+reload, and a browser without storage just does not keep it.
+
 ### Dashboard
 
 The dashboard (`/`, titled **Charge Points**) lists every charge point in one

@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useId, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   History,
+  PanelLeftClose,
+  PanelLeftOpen,
   PlugZap,
   Play,
   ScrollText,
@@ -71,12 +73,46 @@ const HEALTH_DOT: Record<RemoteHealth, string> = {
   down: "bg-cx-rose animate-pulse",
 };
 
+const SIDEBAR_COLLAPSED_KEY = "ocpp-cp.console.sidebar.collapsed";
+
+function readStoredCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeCollapsed(collapsed: boolean): void {
+  try {
+    if (collapsed) {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "1");
+    } else {
+      window.localStorage.removeItem(SIDEBAR_COLLAPSED_KEY);
+    }
+  } catch {
+    // storage unavailable (private window): the state just isn't kept
+  }
+}
+
 const AppShell: React.FC = () => {
   const location = useLocation();
   const { mode, serverUrl } = useDataContext();
   const serverInfo = useServerInfo();
   const health = useRemoteHealth();
   const isRemote = mode === "remote";
+  const navId = useId();
+  // Collapsed, the sidebar is an icon rail: the labels become tooltips and
+  // the server URL and version line are dropped.
+  const [collapsed, setCollapsed] = useState(readStoredCollapsed);
+
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    storeCollapsed(next);
+  };
+
+  const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
 
   return (
     // Mounted here (the layout route wrapping every console page's
@@ -85,20 +121,44 @@ const AppShell: React.FC = () => {
     // resetting each time a page mounts a fresh instance.
     <GlobalLogsProvider>
       <div className="flex h-screen">
-        <aside className="flex w-[220px] shrink-0 flex-col border-r border-cx-border bg-cx-side">
-          <div className="flex items-center gap-2 px-4 py-4">
-            <Zap className="h-6 w-6 text-cx-accent" />
-            <div>
-              <div className="text-sm font-semibold leading-tight">
-                CP Simulator
+        <aside
+          data-collapsed={collapsed ? "true" : "false"}
+          className={cn(
+            "flex shrink-0 flex-col border-r border-cx-border bg-cx-side transition-[width] duration-150",
+            collapsed ? "w-[52px]" : "w-[220px]",
+          )}
+        >
+          <div
+            className={cn(
+              "flex items-center gap-2 py-4",
+              collapsed ? "flex-col px-2" : "px-4",
+            )}
+          >
+            <Zap className="h-6 w-6 shrink-0 text-cx-accent" />
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold leading-tight">
+                  CP Simulator
+                </div>
+                <div className="font-mono text-[11px] leading-tight text-cx-faint">
+                  OCPP 1.2–2.1
+                </div>
               </div>
-              <div className="font-mono text-[11px] leading-tight text-cx-faint">
-                OCPP 1.2–2.1
-              </div>
-            </div>
+            )}
+            <button
+              type="button"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
+              aria-controls={navId}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={toggleCollapsed}
+              className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-cx-muted hover:bg-cx-sub hover:text-cx-fg"
+            >
+              <ToggleIcon className="h-4 w-4" />
+            </button>
           </div>
 
-          <nav className="flex-1 space-y-1 px-2">
+          <nav id={navId} className="flex-1 space-y-1 px-2">
             {NAV_ITEMS.map(({ label, to, icon: Icon, isActive }) => {
               const active = isActive(location.pathname);
               return (
@@ -106,20 +166,38 @@ const AppShell: React.FC = () => {
                   key={label}
                   to={to}
                   aria-current={active ? "page" : undefined}
+                  aria-label={collapsed ? label : undefined}
+                  title={collapsed ? label : undefined}
                   className={cn(
-                    "flex items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[13.5px] font-medium text-cx-muted hover:text-cx-fg",
+                    "flex items-center gap-2 rounded-[7px] py-1.5 text-[13.5px] font-medium text-cx-muted hover:text-cx-fg",
+                    collapsed ? "justify-center px-0" : "px-2.5",
                     active && "bg-cx-sub text-cx-fg",
                   )}
                 >
-                  <Icon className={cn("h-4 w-4", active && "text-cx-accent")} />
-                  {label}
+                  <Icon
+                    className={cn(
+                      "h-4 w-4 shrink-0",
+                      active && "text-cx-accent",
+                    )}
+                  />
+                  {!collapsed && label}
                 </Link>
               );
             })}
           </nav>
 
-          <div className="space-y-2 border-t border-cx-border p-3 text-[11.5px] text-cx-faint">
-            <div className="flex items-center justify-between">
+          <div
+            className={cn(
+              "space-y-2 border-t border-cx-border text-[11.5px] text-cx-faint",
+              collapsed ? "px-1 py-3" : "p-3",
+            )}
+          >
+            <div
+              className={cn(
+                "flex items-center",
+                collapsed ? "flex-col gap-2" : "justify-between",
+              )}
+            >
               <span
                 data-testid="mode-indicator"
                 title={
@@ -146,21 +224,27 @@ const AppShell: React.FC = () => {
                     className="h-[7px] w-[7px] rounded-full bg-cx-emerald"
                   />
                 )}
-                {isRemote ? "Remote mode" : "Local mode"}
+                <span className={cn(collapsed && "sr-only")}>
+                  {isRemote ? "Remote mode" : "Local mode"}
+                </span>
               </span>
               <ThemeToggle />
             </div>
-            <div
-              className="truncate font-mono text-[11.5px] text-cx-faint"
-              title={serverUrl}
-            >
-              {serverUrl}
-            </div>
-            {/* Build and daemon version line (issue #364). */}
-            <AppBuildInfo
-              className="flex-wrap"
-              daemonVersion={serverInfo?.version}
-            />
+            {!collapsed && (
+              <>
+                <div
+                  className="truncate font-mono text-[11.5px] text-cx-faint"
+                  title={serverUrl}
+                >
+                  {serverUrl}
+                </div>
+                {/* Build and daemon version line (issue #364). */}
+                <AppBuildInfo
+                  className="flex-wrap"
+                  daemonVersion={serverInfo?.version}
+                />
+              </>
+            )}
           </div>
         </aside>
 

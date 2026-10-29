@@ -1724,3 +1724,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): the "Scenario EV Settings" panel now lives only in the web console's scenario editor.
 - [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
 - [GitHub issues](sources/github-issues.md): #443.
+
+## [2026-10-29] ingest | README screenshots refreshed
+
+- The README's screenshot showed the classic UI retired in #426. `docs/images/web-console-overview.png` is now the console's charge point page (connector charging, message log); `web-console-dashboard.png` (charge point list) and `web-console-operational-events.png` (#448 tab) are new, under **More screenshots**. [Web console](entities/web-console.md) uses the same overview image.
+- Captured from the daemon's own console in a headless browser, with two charge points connected to SteVe.

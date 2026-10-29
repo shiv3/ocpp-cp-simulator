@@ -12,7 +12,16 @@ OCPP 1.6J charge point simulator for **AI agent testing**, CI automation, and CS
 | **Docker**  | Pre-built image (daemon + web console) on GHCR          | [Docker image](docs/entities/docker-image.md)                                             |
 | **MCP**     | `POST /mcp` tools for Claude Code and other MCP clients | [MCP endpoint](docs/entities/mcp-endpoint.md)                                             |
 
-![Web console — connector panel, scenario editor, and real-time logs](docs/images/web-console-overview.png)
+![Web console — a charge point charging over OCPP 1.6J against SteVe, with labels, its connector card and the message log](docs/images/web-console-overview.png)
+
+<details>
+<summary>More screenshots</summary>
+
+![Web console — charge point list with labels and filters](docs/images/web-console-dashboard.png)
+
+![Web console — operational events tab of a charge point](docs/images/web-console-operational-events.png)
+
+</details>
 
 ## Quick Start
 

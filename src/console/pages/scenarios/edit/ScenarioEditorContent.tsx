@@ -53,8 +53,6 @@ const ScenarioEditor = lazy(
 
 type EditorView = "steps" | "graph";
 
-const noop = () => {};
-
 /** JSON snapshot used for dirty-tracking: deep-compares the *serialized*
  *  def (runtime-only node/edge fields stripped, same as what
  *  `saveEditorScenario` persists) rather than the raw editor state, so
@@ -530,8 +528,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         </div>
       )}
 
-      {/* The rest of the scenario's settings, which the classic graph
-          editor's settings dialog also edits (#424). */}
+      {/* The rest of the scenario's settings: description and EV
+          settings (#424). */}
       <div className="mb-4 space-y-2">
         <input
           aria-label="Scenario description"
@@ -620,8 +618,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                 cpId={cpId}
                 connectorId={connectorId}
                 scenario={scenario}
-                onClose={noop}
-                embedded={{ onGraphChange: handleGraphChange }}
+                onGraphChange={handleGraphChange}
               />
             </Suspense>
           </div>

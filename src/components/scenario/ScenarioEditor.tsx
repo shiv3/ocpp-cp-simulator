@@ -1,7 +1,6 @@
 import React, {
   useState,
   useCallback,
-  useMemo,
   useRef,
   useEffect,
   lazy,
@@ -24,20 +23,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-
-import {
   ScenarioDefinition,
   ScenarioNodeType,
-  ScenarioExecutionMode,
-  ScenarioExecutionContext,
-  ScenarioExecutionState,
   ScenarioNode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
@@ -51,20 +38,7 @@ import {
   isScenarioNodeType,
 } from "./forms/nodeFormRegistry";
 import type { NodeFormData } from "./forms/types";
-import {
-  type AppliedScenarioAutosaveSuppression,
-  createLatestWinsSaver,
-  persistEditorScenario,
-  retargetScenarioToConnector,
-  saveEditorScenario,
-  scenarioAutosaveSuppressionFingerprint,
-  shouldSuppressAppliedScenarioAutosave,
-} from "./scenarioPersistence";
 import { serializeScenarioGraph } from "./scenarioSerialize";
-import { type EVSettings } from "../../cp/domain/connector/EVSettings";
-import { withNormalizedChargingCurve } from "../../cp/domain/connector/ChargingCurve";
-import ScenarioEvSettingsFields from "./ScenarioEvSettingsFields";
-import { compactScenarioEvSettings } from "./compactScenarioEvSettings";
 
 // Dynamic import for heavy component (bundle-dynamic-imports)
 const MeterValueCurveModal = lazy(() => import("../MeterValueCurveModal"));
@@ -93,92 +67,25 @@ import ConfigSetNode from "./nodes/ConfigSetNode";
 import DataTransferNode from "./nodes/DataTransferNode";
 import OcppCallNode from "./nodes/OcppCallNode";
 import ConnectionTriggerNode from "./nodes/ConnectionTriggerNode";
+import { LiveMeterReadingContext } from "./nodes/liveMeterReading";
 
-import {
-  exportScenarioToJSON,
-  importScenarioFromJSON,
-} from "../../utils/scenarioFile";
-import {
-  scenarioTemplates,
-  getTemplateById,
-} from "../../utils/scenarioTemplates";
-
-type EditorScenarioSaveRequest = {
-  deps: Parameters<typeof saveEditorScenario>[0];
-  scenario: ScenarioDefinition;
-};
-
-/**
- * Minimal Start → End scenario used as the editor's fallback when no
- * scenario has been loaded yet. The previous fallback (createDefaultScenario)
- * carried the full "plug-in → RemoteStart → auto-meter → plug-out" flow,
- * which auto-seeded itself back into storage after every Reset and made
- * the "Reset all simulator data" button feel like a no-op. Operators now
- * pick the canonical demo flow explicitly from the template picker (the
- * "Essential CP Behavior" template).
- */
-function createEmptyScenario(
-  chargePointId: string,
-  connectorId: number | null,
-): ScenarioDefinition {
-  const targetType: "chargePoint" | "connector" =
-    connectorId === null ? "chargePoint" : "connector";
-  const now = new Date().toISOString();
-  return {
-    id: `${chargePointId}_${connectorId ?? "cp"}_empty`,
-    name:
-      targetType === "chargePoint"
-        ? `Scenario for ${chargePointId}`
-        : `Scenario for ${chargePointId} Connector ${connectorId}`,
-    description: "",
-    targetType,
-    targetId: connectorId ?? undefined,
-    nodes: [
-      {
-        id: "start",
-        type: "start",
-        position: { x: 400, y: 0 },
-        data: { label: "Start" },
-      },
-      {
-        id: "end",
-        type: "end",
-        position: { x: 400, y: 200 },
-        data: { label: "End" },
-      },
-    ],
-    edges: [{ id: "e-start-end", source: "start", target: "end" }],
-    createdAt: now,
-    updatedAt: now,
-    trigger: { type: "manual" },
-    defaultExecutionMode: "oneshot",
-    enabled: true,
-  };
-}
-import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
-import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 
+/**
+ * The ReactFlow graph editor of the web console's scenario editor (its Graph
+ * view, for the scenarios the card graph cannot draw). The page owns the
+ * definition, its metadata and Save: this editor edits the graph only and
+ * reports each graph edit through `onGraphChange` — opening is not one, even
+ * when that drops orphan edges. Hydrated once from `scenario`; remount
+ * (`key`) to load another scenario.
+ */
 interface ScenarioEditorProps {
+  /** With `connectorId`, the source of the live meter reading the Meter Value nodes show. */
   cpId: string;
   connectorId: number | null;
-  scenario?: ScenarioDefinition | null;
-  scenarioId?: string; // Optional: if provided, edit specific scenario
-  executionContext?: ScenarioExecutionContext | null; // Execution context from ScenarioManager
-  nodeProgress?: Record<string, { remaining: number; total: number }>; // Node progress from ScenarioManager
-  onClose: () => void;
-  /**
-   * Embedded in a page that owns the definition (the web console's scenario
-   * editor): the editor edits the graph only and reports each graph edit
-   * through `onGraphChange` (opening it is not one, even when that drops
-   * orphan edges) — no autosave, no own Save / settings / import /
-   * template, no run controls. The page persists on its own Save. Hydrated
-   * once from `scenario`; remount (`key`) to load another scenario.
-   */
-  embedded?: {
-    onGraphChange: (graph: Pick<ScenarioDefinition, "nodes" | "edges">) => void;
-  };
+  scenario: ScenarioDefinition;
+  onGraphChange: (graph: Pick<ScenarioDefinition, "nodes" | "edges">) => void;
 }
 
 type StartEndNodeWrapperProps = Omit<
@@ -262,90 +169,32 @@ const MINIMAP_NODE_FALLBACK = "#64748b";
 const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   cpId,
   connectorId,
-  scenario: scenarioProp,
-  scenarioId,
-  executionContext: propsExecutionContext,
-  nodeProgress: propsNodeProgress,
-  embedded,
-  // onClose is still required by the props interface for back-compat with
-  // callers, but the editor itself no longer self-closes — the parent
-  // panel owns its visibility now. Intentionally not destructured.
+  scenario,
+  onGraphChange,
 }) => {
-  const { chargePointService, mode, defaultEvSettings } = useDataContext();
+  const { chargePointService } = useDataContext();
   const { isDark } = useDarkMode();
-  const isEmbedded = embedded !== undefined;
   // Latest callback without re-running the graph effect when the page
   // re-renders with a new closure.
-  const onGraphChangeRef = useRef(embedded?.onGraphChange);
-  onGraphChangeRef.current = embedded?.onGraphChange;
+  const onGraphChangeRef = useRef(onGraphChange);
+  onGraphChangeRef.current = onGraphChange;
   // The last graph the page knows about, serialized: the opened one, then
   // each one reported. Opening the graph — and dropping its orphan edges —
   // is not an edit, so only a different graph is reported.
-  const embeddedGraphKeyRef = useRef<string | null>(null);
-  const localCp: ChargePoint | null =
-    mode === "local" && chargePointService.getLocalChargePoint
-      ? (chargePointService.getLocalChargePoint(cpId) as ChargePoint | null)
-      : null;
+  const graphKeyRef = useRef<string | null>(null);
 
-  // Initial scenario: when the caller hands us one via `scenarioProp`,
-  // use it; otherwise start from the default and async-hydrate from the
-  // repository in the effect below if a `scenarioId` was supplied. The
-  // brief default-state flash before the async load completes is
-  // acceptable for first-mount; the editor doesn't render different DOM
-  // for a "loaded" vs "loading" scenario.
-  const [scenario, setScenario] = useState<ScenarioDefinition>(
-    () => scenarioProp ?? createEmptyScenario(cpId, connectorId),
-  );
-
+  // Hydrated once: the page feeds every graph change back as a new
+  // `scenario` prop, and re-hydrating from it would reset the canvas and the
+  // undo history on each edit.
   const [nodes, setNodes, onNodesChange] = useNodesState(scenario.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(scenario.edges);
-  const [executionState, setExecutionState] =
-    useState<ScenarioExecutionState>("idle");
-  // executionMode is no longer surfaced — scenarios always run one-shot.
-  // We keep a no-op setter so the existing call sites (which still pass a
-  // ScenarioExecutionMode through ScenarioExecutor)
-  // continue to compile without surgery.
-  const setExecutionMode = (_mode: ScenarioExecutionMode): void => {
-    /* no-op */
-  };
-  const [executionContext, setExecutionContext] =
-    useState<ScenarioExecutionContext | null>(null);
   const [selectedNode, setSelectedNode] = useState<ScenarioNode | null>(null);
   const [formData, setFormData] = useState<NodeFormData>({});
-  // Connector status / meter / transactionId / CP status used to drive the
-  // now-removed toolbar status strip. We still take the setters from useState
-  // so the existing event handlers don't need rewiring, but the values
-  // themselves are unused inside this component — the panel-level header
-  // owns the visible status display.
-  const [, setConnectorStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
-  const [liveMeterValueWh, setMeterValue] = useState<number>(0);
-  const [, setTransactionId] = useState<number | null>(null);
-  const [, setCpStatus] = useState<OCPPStatus>(OCPPStatus.Unavailable);
-  const [nodeProgress, setNodeProgress] = useState<
-    Record<string, { remaining: number; total: number }>
-  >({});
+  // The connector's live meter reading, shown on every Meter Value node
+  // (`LiveMeterReadingContext`); null until the connector reports one.
+  const [liveMeterValueWh, setMeterValue] = useState<number | null>(null);
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
-  // Scenario metadata state
-  const [scenarioName, setScenarioName] = useState(scenario.name);
-  const [scenarioDescription, setScenarioDescription] = useState(
-    scenario.description || "",
-  );
-  const [defaultExecutionMode, setDefaultExecutionMode] =
-    useState<ScenarioExecutionMode>(scenario.defaultExecutionMode || "oneshot");
-  const [scenarioEnabled, setScenarioEnabled] = useState(
-    scenario.enabled !== false,
-  );
-  // Scenario-level EV settings — applied to the target connector at scenario
-  // start (see ScenarioExecutor.start). Partial: only filled fields are
-  // written; the others keep the connector's current values.
-  const [scenarioEvSettings, setScenarioEvSettings] = useState<
-    Partial<EVSettings>
-  >(() => withNormalizedChargingCurve({ ...(scenario.evSettings ?? {}) }));
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-
-  const executorRef = useRef<ScenarioExecutor | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   // Captured from `<ReactFlow onInit>` so handleAutoLayout can call
   // fitView() to re-frame the graph immediately after re-positioning.
   const rfInstanceRef = useRef<ReactFlowInstance<ScenarioNode, Edge> | null>(
@@ -366,25 +215,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   const lastStructuralKeyRef = useRef<string>("");
   const skipHistoryRef = useRef<boolean>(false);
   const [historyTick, setHistoryTick] = useState(0);
-  const [saveFeedback, setSaveFeedback] = useState<"idle" | "saved">("idle");
-  const saveFeedbackTimerRef = useRef<number | null>(null);
-  const appliedRemoteScenarioAutosaveRef =
-    useRef<AppliedScenarioAutosaveSuppression | null>(null);
-  // Debounce for the autosave effect's I/O (DB write + ScenarioManager
-  // resync): both cost a full sql.js export in local mode and a full
-  // connector-scoped definitions re-list either way, so firing them on
-  // every keystroke/drag tick made every edit pay that cost. The derived
-  // React state above (setScenario/setEdges) stays synchronous; only the
-  // write + resync wait for the user to pause.
-  const AUTOSAVE_DEBOUNCE_MS = 400;
-  const autosaveIoTimerRef = useRef<number | null>(null);
-  const saveRemoteEditorScenarioLatest = useMemo(
-    () =>
-      createLatestWinsSaver<EditorScenarioSaveRequest>(({ deps, scenario }) =>
-        saveEditorScenario(deps, scenario),
-      ),
-    [],
-  );
 
   const structuralKey = useCallback(
     (ns: ScenarioNode[], es: Edge[]): string => {
@@ -403,289 +233,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [],
   );
 
-  const saveEditorScenarioLatest = useCallback(
-    (scenarioToSave: ScenarioDefinition): Promise<void> => {
-      const deps = {
-        mode,
-        chargePointService,
-        cpId,
-        connectorId,
-      };
-
-      if (mode !== "remote") {
-        return saveEditorScenario(deps, scenarioToSave);
-      }
-
-      return saveRemoteEditorScenarioLatest({
-        deps,
-        scenario: scenarioToSave,
-      });
-    },
-    [
-      mode,
-      chargePointService,
-      cpId,
-      connectorId,
-      saveRemoteEditorScenarioLatest,
-    ],
-  );
-
-  // Stamp a fresh updatedAt on a scenario the user is applying (upload /
-  // template) so it wins the `updated_at DESC` ordering. Does NOT arm the
-  // autosave suppression — see armAppliedScenarioAutosaveSuppression, which
-  // must run only after the apply's persistence succeeds.
-  const prepareAppliedRemoteScenario = useCallback(
-    (next: ScenarioDefinition): ScenarioDefinition => {
-      if (mode !== "remote") return next;
-      const updatedAt = next.updatedAt ?? new Date().toISOString();
-      return { ...next, updatedAt };
-    },
-    [mode],
-  );
-
-  // Arm the applied-scenario autosave suppression. MUST be called only after
-  // the apply's persistence (replace) has succeeded: if the import/template
-  // persist fails, the marker must stay unset so the fallback autosave still
-  // writes the scenario instead of being suppressed into a silent drop (#101).
-  const armAppliedScenarioAutosaveSuppression = useCallback(
-    (applied: ScenarioDefinition): void => {
-      if (mode !== "remote") return;
-      appliedRemoteScenarioAutosaveRef.current = {
-        scenarioId: applied.id,
-        updatedAt: applied.updatedAt ?? null,
-        fingerprint: scenarioAutosaveSuppressionFingerprint(applied),
-      };
-    },
-    [mode],
-  );
-
-  // Reload scenario when props change
-  useEffect(() => {
-    // Embedded: the page feeds every graph change back as a new `scenario`
-    // prop; re-hydrating from it would reset the canvas and the undo
-    // history on each edit. The initial state already came from the prop.
-    if (isEmbedded) return;
-    const resetHistory = () => {
-      historyRef.current = { past: [], future: [] };
-      prevSnapshotRef.current = null;
-      lastStructuralKeyRef.current = "";
-      skipHistoryRef.current = true;
-      setHistoryTick((t) => t + 1);
-    };
-    if (scenarioProp) {
-      setScenario(scenarioProp);
-      setNodes(scenarioProp.nodes);
-      setEdges(scenarioProp.edges);
-      setScenarioName(scenarioProp.name);
-      setScenarioDescription(scenarioProp.description || "");
-      setDefaultExecutionMode(scenarioProp.defaultExecutionMode || "oneshot");
-      setScenarioEnabled(scenarioProp.enabled !== false);
-      setScenarioEvSettings(
-        withNormalizedChargingCurve({ ...(scenarioProp.evSettings ?? {}) }),
-      );
-      // #101 fix C: a scenario just hydrated from the daemon is already
-      // persisted verbatim — suppress the autosave this state change would
-      // otherwise trigger. Without this, re-hydrating a scenario re-saves it
-      // with a fresh updated_at, which (combined with the runtime/definition
-      // desync) let a seeded default keep winning the newest-wins selection and
-      // shadow the user's uploaded scenario across refreshes. The suppression
-      // is fingerprint-based, so the first real user edit still autosaves.
-      armAppliedScenarioAutosaveSuppression(scenarioProp);
-      resetHistory();
-      return;
-    }
-
-    if (scenarioId) {
-      // Async lookup via the scenario repository (replaces the legacy
-      // sync getScenarioById helper backed by localStorage). The
-      // cancellation flag prevents a stale fetch from overwriting state
-      // after the effect re-runs.
-      let cancelled = false;
-      void chargePointService
-        .listScenarioDefinitions(cpId, connectorId)
-        .then((all) => {
-          if (cancelled) return;
-          const found = all.find(
-            (s) =>
-              s.id === scenarioId &&
-              // Same filter `getScenarioById` used: prefer the scenario
-              // targeted at this (cp, connector). null connector means
-              // "CP-level scenarios only".
-              (connectorId === null
-                ? s.targetType !== "connector"
-                : s.targetType !== "connector" || s.targetId === connectorId),
-          );
-          if (!found) return;
-          setScenario(found);
-          setNodes(found.nodes);
-          setEdges(found.edges);
-          setScenarioName(found.name);
-          setScenarioDescription(found.description || "");
-          setDefaultExecutionMode(found.defaultExecutionMode || "oneshot");
-          setScenarioEnabled(found.enabled !== false);
-          setScenarioEvSettings(
-            withNormalizedChargingCurve({ ...(found.evSettings ?? {}) }),
-          );
-          resetHistory();
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-  }, [
-    scenarioProp,
-    scenarioId,
-    cpId,
-    connectorId,
-    chargePointService,
-    setNodes,
-    setEdges,
-    armAppliedScenarioAutosaveSuppression,
-    isEmbedded,
-  ]);
-
-  // Update execution context from props
-  useEffect(() => {
-    if (propsExecutionContext) {
-      setExecutionContext(propsExecutionContext);
-      setExecutionState(propsExecutionContext.state);
-      setExecutionMode(propsExecutionContext.mode);
-    } else {
-      // Reset execution context when props are null
-      setExecutionContext(null);
-    }
-  }, [propsExecutionContext]);
-
-  // Update node progress from props
-  useEffect(() => {
-    if (propsNodeProgress) {
-      setNodeProgress(propsNodeProgress);
-    }
-  }, [propsNodeProgress]);
-
-  // Stable key over the node ID set — recomputes when nodes are added /
-  // removed / replaced, but stays equal across pure style/position updates.
-  // The highlight effect below uses this so that re-hydrating the editor
-  // with a new scenario (e.g. opening the side panel mid-run, when the
-  // graph swaps from the placeholder default to the running scenario)
-  // forces the executing-node CSS to re-apply against the freshly loaded
-  // node ids. Without this, the executor's context is the same object
-  // ref each poll tick, the prop effect short-circuits, and the highlight
-  // never gets a chance to run against the real nodes.
-  const nodeIdKey = useMemo(() => nodes.map((n) => n.id).join("|"), [nodes]);
-
-  // Update node styles based on execution context and progress
-  useEffect(() => {
-    // Reset styles if no execution context
-    if (!executionContext) {
-      setNodes((nds) =>
-        nds.map((node) => ({
-          ...node,
-          className: (node.className || "")
-            .replace(/executing-node|executed-node/g, "")
-            .trim(),
-          style: {
-            ...node.style,
-            border: undefined,
-            boxShadow: undefined,
-            opacity: 1,
-          },
-          data: {
-            ...node.data,
-            progress: undefined,
-          },
-        })),
-      );
-      return;
-    }
-
-    setNodes((nds) =>
-      nds.map((node) => {
-        const isCurrentNode = node.id === executionContext.currentNodeId;
-        const isExecuted = executionContext.executedNodes.includes(node.id);
-        const progress = nodeProgress[node.id];
-
-        // Apply styles based on execution state
-        let className = node.className || "";
-        let style = { ...node.style };
-
-        if (isCurrentNode) {
-          // Highlight current executing node with green border
-          className = `${className} executing-node`;
-          style = {
-            ...style,
-            border: "3px solid #10b981",
-            boxShadow: "0 0 10px rgba(16, 185, 129, 0.5)",
-          };
-        } else if (isExecuted) {
-          // Mark executed nodes with gray background. Clear any previous
-          // executing-node border/boxShadow explicitly — without this they
-          // stick around because the previous branch left them set.
-          className =
-            `${className.replace(/executing-node/g, "")} executed-node`
-              .replace(/\s+/g, " ")
-              .trim();
-          style = {
-            ...style,
-            border: undefined,
-            boxShadow: undefined,
-            opacity: 0.6,
-          };
-        } else {
-          // Reset to default
-          className = className
-            .replace(/executing-node|executed-node/g, "")
-            .trim();
-          style = {
-            ...style,
-            border: undefined,
-            boxShadow: undefined,
-            opacity: 1,
-          };
-        }
-
-        return {
-          ...node,
-          className,
-          style,
-          data: {
-            ...node.data,
-            progress: progress || undefined,
-          },
-        };
-      }),
-    );
-  }, [executionContext, nodeProgress, setNodes, nodeIdKey]);
-
-  // Push the connector's live meter reading into every MeterValue node's
-  // `data.currentValue` so the node face renders the running total instead
-  // of the static `data.value` from the scenario JSON. We don't mutate
-  // `data.value` (that's the configured starting value); MeterValueNode
-  // already prefers `currentValue` when present.
-  useEffect(() => {
-    setNodes((nds) => {
-      let changed = false;
-      const next = nds.map((node) => {
-        if (node.type !== "meterValue") return node;
-        const cur = (node.data as { currentValue?: number }).currentValue;
-        if (cur === liveMeterValueWh) return node;
-        changed = true;
-        return {
-          ...node,
-          data: { ...node.data, currentValue: liveMeterValueWh },
-        };
-      });
-      return changed ? next : nds;
-    });
-  }, [liveMeterValueWh, setNodes]);
-
-  // Re-fit the ReactFlow viewport whenever the scenario id changes. The
-  // editor opens with `createEmptyScenario` (just Start + End in a tight
-  // y-range), ReactFlow's `fitView` prop runs once against that, and
-  // when the real scenario hydrates moments later — typically 9+ nodes
-  // spanning y=50..1050 — there's no re-fit, so the user sees only the
-  // top of the flow. Manually re-fit on every load so the whole graph
-  // is in frame from the first paint.
+  // Re-fit the ReactFlow viewport once the scenario's nodes have flushed, so
+  // the whole graph is in frame from the first paint (the editor remounts per
+  // scenario, so this runs once per opened scenario).
   useEffect(() => {
     const instance = rfInstanceRef.current;
     if (!instance) return;
@@ -729,103 +279,30 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // In remote mode the in-browser executor is never set, so executionState
-  // would stay "idle" forever and Force Step would keep re-running the
-  // scenario. Sync executionState from scenario_* events instead.
-  useEffect(() => {
-    if (localCp) return;
-    const unsub = chargePointService.subscribe(cpId, (event) => {
-      if (
-        event.type === "scenario-started" &&
-        event.scenarioId === scenario.id
-      ) {
-        setExecutionState("running");
-      } else if (
-        (event.type === "scenario-completed" ||
-          event.type === "scenario-error") &&
-        event.scenarioId === scenario.id
-      ) {
-        setExecutionState("idle");
-      }
-    });
-    return () => unsub();
-  }, [localCp, chargePointService, cpId, scenario.id]);
-
-  // Subscribe to connector status changes via the service event bus.
+  // Follow the connector's meter reading via the service event bus.
   useEffect(() => {
     if (!connectorId) return;
 
     const unsubscribe = chargePointService.subscribe(cpId, (event) => {
       if ("connectorId" in event && event.connectorId !== connectorId) return;
-      if (event.type === "connector-status") {
-        setConnectorStatus(event.status);
-      } else if (event.type === "connector-meter") {
+      if (event.type === "connector-meter") {
         setMeterValue(event.meterValue);
-      } else if (event.type === "connector-transaction") {
-        setTransactionId(event.transactionId);
       }
     });
 
-    // Pull initial values from the snapshot.
+    // Pull the initial value from the snapshot.
     void chargePointService.getChargePoint(cpId).then((snapshot) => {
       if (!snapshot) return;
       const connector = snapshot.connectors.find((c) => c.id === connectorId);
       if (!connector) return;
-      setConnectorStatus(connector.status);
       setMeterValue(connector.meterValue);
-      setTransactionId(connector.transactionId);
     });
 
     return () => unsubscribe();
   }, [chargePointService, cpId, connectorId]);
 
-  // Track CP-level status so we can hold the auto-start until the CSMS is
-  // connected and BootNotification has been accepted. The CP starts in
-  // Unavailable and flips to Available only after the boot result arrives.
-  // Disconnect / reset events drop it back to Unavailable.
+  // Report each graph edit to the page.
   useEffect(() => {
-    const unsubscribe = chargePointService.subscribe(cpId, (event) => {
-      if (event.type === "status") {
-        setCpStatus(event.status);
-      } else if (event.type === "disconnected") {
-        setCpStatus(OCPPStatus.Unavailable);
-      }
-    });
-
-    void chargePointService.getChargePoint(cpId).then((snapshot) => {
-      if (!snapshot) return;
-      setCpStatus(snapshot.status);
-    });
-
-    return () => unsubscribe();
-  }, [chargePointService, cpId]);
-
-  // Auto-save to localStorage when nodes, edges, or metadata change
-  useEffect(() => {
-    // Auto-detect trigger from nodes (if StatusTriggerNode exists)
-    let autoTrigger: ScenarioDefinition["trigger"];
-    const statusTriggerNode = nodes.find(
-      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
-    );
-
-    if (statusTriggerNode) {
-      const nodeData = statusTriggerNode.data as Record<string, unknown>;
-      if (nodeData.targetStatus) {
-        autoTrigger = {
-          type: "statusChange" as const,
-          conditions: {
-            toStatus: nodeData.targetStatus as OCPPStatus,
-          },
-        };
-        console.log(
-          `[ScenarioEditor] Auto-detected trigger from StatusTriggerNode: toStatus=${nodeData.targetStatus}`,
-        );
-      }
-    }
-
-    // Use auto-detected trigger or default to manual
-    const trigger = autoTrigger || { type: "manual" as const };
-
     // Clean up orphaned edges (edges pointing to non-existent nodes)
     const nodeIds = new Set(nodes.map((n) => n.id));
     const cleanedEdges = edges.filter((edge) => {
@@ -845,96 +322,15 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       setEdges(cleanedEdges);
     }
 
-    const pendingRemoteApply = appliedRemoteScenarioAutosaveRef.current;
-    const appliedUpdatedAt =
-      pendingRemoteApply?.scenarioId === scenario.id
-        ? pendingRemoteApply.updatedAt
-        : null;
-
-    const updatedScenario: ScenarioDefinition = {
-      ...scenario,
-      name: scenarioName,
-      description: scenarioDescription,
-      nodes,
-      edges: cleanedEdges,
-      trigger,
-      defaultExecutionMode,
-      enabled: scenarioEnabled,
-      evSettings: compactScenarioEvSettings(scenarioEvSettings),
-      updatedAt: appliedUpdatedAt ?? new Date().toISOString(),
-    };
-    if (isEmbedded) {
-      // The page owns the definition (and its trigger / metadata): report
-      // the graph only, synchronously so its Save never misses an edit.
-      const graph = serializeScenarioGraph(nodes, cleanedEdges);
-      const graphKey = JSON.stringify(graph);
-      const isOpening = embeddedGraphKeyRef.current === null;
-      if (graphKey === embeddedGraphKeyRef.current) return;
-      embeddedGraphKeyRef.current = graphKey;
-      if (!isOpening) onGraphChangeRef.current?.(graph);
-      return;
-    }
-
-    setScenario(updatedScenario);
-
-    if (autosaveIoTimerRef.current !== null) {
-      window.clearTimeout(autosaveIoTimerRef.current);
-    }
-    autosaveIoTimerRef.current = window.setTimeout(() => {
-      autosaveIoTimerRef.current = null;
-      if (scenario.id) {
-        const serializedGraph = serializeScenarioGraph(nodes, cleanedEdges);
-        const scenarioToSave: ScenarioDefinition = {
-          ...updatedScenario,
-          ...serializedGraph,
-        };
-        const suppressAppliedRemoteAutosave =
-          mode === "remote" &&
-          shouldSuppressAppliedScenarioAutosave(
-            pendingRemoteApply,
-            scenarioToSave,
-          );
-        if (suppressAppliedRemoteAutosave) {
-          appliedRemoteScenarioAutosaveRef.current = null;
-        } else {
-          if (pendingRemoteApply) {
-            appliedRemoteScenarioAutosaveRef.current = null;
-          }
-          // Auto-save through the latest-wins replace boundary. Fire-and-forget;
-          // if it fails we log to console rather than block the in-flight edit.
-          void saveEditorScenarioLatest(scenarioToSave).catch((err) =>
-            console.error("Failed to autosave scenario", err),
-          );
-        }
-      }
-
-      // In Local mode the runtime (LocalScenarioRuntime) reloads the
-      // connector's ScenarioManager from the store after the save above.
-    }, AUTOSAVE_DEBOUNCE_MS);
-
-    return () => {
-      if (autosaveIoTimerRef.current !== null) {
-        window.clearTimeout(autosaveIoTimerRef.current);
-        autosaveIoTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- scenario is intentionally excluded to avoid infinite loop (this effect updates scenario)
-  }, [
-    nodes,
-    edges,
-    scenarioName,
-    scenarioDescription,
-    defaultExecutionMode,
-    scenarioEnabled,
-    scenarioEvSettings,
-    setEdges,
-    scenario.id,
-    cpId,
-    connectorId,
-    localCp,
-    mode,
-    isEmbedded,
-  ]);
+    // The page owns the definition (and its trigger / metadata): report the
+    // graph only, synchronously so its Save never misses an edit.
+    const graph = serializeScenarioGraph(nodes, cleanedEdges);
+    const graphKey = JSON.stringify(graph);
+    const isOpening = graphKeyRef.current === null;
+    if (graphKey === graphKeyRef.current) return;
+    graphKeyRef.current = graphKey;
+    if (!isOpening) onGraphChangeRef.current(graph);
+  }, [nodes, edges, setEdges]);
 
   // Track structural changes for undo/redo. Position-only changes update
   // the latest snapshot silently so dragging doesn't fill the stack but
@@ -988,52 +384,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     setEdges(next.edges);
     setHistoryTick((t) => t + 1);
   }, [nodes, edges, setNodes, setEdges]);
-
-  const handleManualSave = useCallback(() => {
-    const trigger = scenario.trigger ?? { type: "manual" as const };
-    const updated: ScenarioDefinition = {
-      ...scenario,
-      name: scenarioName,
-      description: scenarioDescription,
-      nodes,
-      edges,
-      trigger,
-      defaultExecutionMode,
-      enabled: scenarioEnabled,
-      evSettings: compactScenarioEvSettings(scenarioEvSettings),
-      updatedAt: new Date().toISOString(),
-    };
-    if (scenario.id) {
-      const serializedGraph = serializeScenarioGraph(nodes, edges);
-      const scenarioToSave: ScenarioDefinition = {
-        ...updated,
-        ...serializedGraph,
-      };
-      appliedRemoteScenarioAutosaveRef.current = null;
-      void saveEditorScenarioLatest(scenarioToSave).catch((err) =>
-        console.error("Failed to save scenario", err),
-      );
-    }
-    setScenario(updated);
-    setSaveFeedback("saved");
-    if (saveFeedbackTimerRef.current !== null) {
-      window.clearTimeout(saveFeedbackTimerRef.current);
-    }
-    saveFeedbackTimerRef.current = window.setTimeout(() => {
-      setSaveFeedback("idle");
-      saveFeedbackTimerRef.current = null;
-    }, 1500);
-  }, [
-    scenario,
-    scenarioName,
-    scenarioDescription,
-    nodes,
-    edges,
-    defaultExecutionMode,
-    scenarioEnabled,
-    scenarioEvSettings,
-    saveEditorScenarioLatest,
-  ]);
 
   // Keyboard shortcuts for undo / redo (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+Y).
   // Ignored when the user is typing in an input/textarea so text edits in
@@ -1132,10 +482,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     [setNodes, nodes],
   );
 
-  // Scenario execution is owned by the data layer (LocalScenarioRuntime in
-  // Local mode, the daemon in Remote mode); the editor only renders the
-  // graph and reacts to executionContext from outside.
-
   /**
    * Lay nodes out top-to-bottom by topological depth. Roots (no incoming
    * edges) sit at depth 0, their children at depth 1, etc. Nodes that
@@ -1222,201 +568,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     });
   }, [nodes, edges, setNodes]);
 
-  const handleForceStop = useCallback(() => {
-    // Stop both in-process and remote executors. In local mode the executor
-    // ref is set; in remote mode the server holds state and we must call
-    // stopScenario / stopAllScenarios over the wire.
-    executorRef.current?.stop();
-    if (!localCp && connectorId != null) {
-      void chargePointService
-        .stopScenario(cpId, connectorId, scenario.id)
-        .catch(() =>
-          chargePointService
-            .stopAllScenarios(cpId, connectorId)
-            .catch(() => {}),
-        );
-    }
-    setExecutionState("idle");
-    setNodes((nds) => nds.map((n) => ({ ...n, style: {} })));
-  }, [setNodes, localCp, connectorId, chargePointService, cpId, scenario.id]);
-
-  // Auto-start lives in the data layer (LocalScenarioRuntime), so it fires
-  // for every connector whatever UI is open. The editor here only handles
-  // manual Start/Stop and visualizes the running state of the connector's
-  // ScenarioManager.
-  //
-  // Keep the !scenarioEnabled / non-manual-trigger reset so the editor
-  // still surfaces "scenario disabled" visually when the user toggles it.
-  useEffect(() => {
-    if (!localCp) return;
-    if (!scenarioEnabled) {
-      executorRef.current?.stop();
-      setExecutionState("idle");
-      return;
-    }
-    const hasStatusTriggerNode = nodes.some(
-      (node) => node.type === ScenarioNodeType.STATUS_TRIGGER,
-    );
-    if (scenario.trigger?.type !== "manual" || hasStatusTriggerNode) {
-      executorRef.current?.stop();
-      setExecutionState("idle");
-    }
-  }, [scenarioEnabled, scenario.trigger?.type, nodes, localCp]);
-
-  // File operations
-  const handleExport = useCallback(() => {
-    const serializedGraph = serializeScenarioGraph(nodes, edges);
-    const currentScenario: ScenarioDefinition = {
-      ...scenario,
-      ...serializedGraph,
-    };
-    exportScenarioToJSON(currentScenario);
-  }, [scenario, nodes, edges]);
-
-  const handleImport = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleFileChange = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      try {
-        const imported = await importScenarioFromJSON(file);
-        // Retarget the uploaded scenario to the connector it's imported into.
-        // A file exported from a different connector keeps its old targetId,
-        // which the connector-scoped filters drop on the next refresh — so the
-        // upload would appear to "not save" (#101).
-        const targeted = retargetScenarioToConnector(
-          imported,
-          connectorId,
-          new Date().toISOString(),
-        );
-        const applied = prepareAppliedRemoteScenario(targeted);
-        const serializedGraph = serializeScenarioGraph(
-          applied.nodes,
-          applied.edges,
-        );
-        // `evSettings` are already normalized here: the curve is validated by
-        // `retargetScenarioToConnector`, the one function every upload path
-        // passes through, so what is persisted below carries the same curve
-        // the editor state shows (#301).
-        const scenarioToPersist: ScenarioDefinition = {
-          ...applied,
-          ...serializedGraph,
-        };
-        setScenario(scenarioToPersist);
-        setNodes(scenarioToPersist.nodes);
-        setEdges(scenarioToPersist.edges);
-        // Mirror the props-reload effect so the metadata fields reflect the
-        // uploaded scenario instead of the previously-open one.
-        setScenarioName(scenarioToPersist.name);
-        setScenarioDescription(scenarioToPersist.description || "");
-        setDefaultExecutionMode(
-          scenarioToPersist.defaultExecutionMode || "oneshot",
-        );
-        setScenarioEnabled(scenarioToPersist.enabled !== false);
-        setScenarioEvSettings(
-          withNormalizedChargingCurve({
-            ...(scenarioToPersist.evSettings ?? {}),
-          }),
-        );
-
-        // Persist through the replace boundary so stale connector siblings are
-        // pruned and reload selects the imported scenario (#101).
-        await persistEditorScenario(
-          { mode, chargePointService, cpId, connectorId },
-          scenarioToPersist,
-        );
-        // Only now that the write succeeded may we suppress the redundant
-        // autosave the programmatic setState above triggered.
-        armAppliedScenarioAutosaveSuppression(scenarioToPersist);
-      } catch (error) {
-        alert(`Failed to import scenario: ${error}`);
-      }
-    },
-    [
-      cpId,
-      connectorId,
-      mode,
-      chargePointService,
-      setNodes,
-      setEdges,
-      prepareAppliedRemoteScenario,
-      armAppliedScenarioAutosaveSuppression,
-    ],
-  );
-
-  const handleLoadTemplate = useCallback(
-    (templateId: string) => {
-      const template = getTemplateById(templateId);
-      if (!template) {
-        alert("Template not found");
-        return;
-      }
-
-      if (
-        nodes.length > 2 &&
-        !window.confirm("Discard the current scenario and load the template?")
-      ) {
-        return;
-      }
-
-      const templateScenario = prepareAppliedRemoteScenario(
-        template.createScenario(cpId, connectorId),
-      );
-      const serializedGraph = serializeScenarioGraph(
-        templateScenario.nodes,
-        templateScenario.edges,
-      );
-      const scenarioWithSerialized: ScenarioDefinition = {
-        ...templateScenario,
-        ...serializedGraph,
-      };
-      setScenario(scenarioWithSerialized);
-      setNodes(scenarioWithSerialized.nodes);
-      setEdges(scenarioWithSerialized.edges);
-      // Keep the metadata fields in sync with the loaded template.
-      setScenarioName(scenarioWithSerialized.name);
-      setScenarioDescription(scenarioWithSerialized.description || "");
-      setDefaultExecutionMode(
-        scenarioWithSerialized.defaultExecutionMode || "oneshot",
-      );
-      setScenarioEnabled(scenarioWithSerialized.enabled !== false);
-      setScenarioEvSettings(
-        withNormalizedChargingCurve({
-          ...(scenarioWithSerialized.evSettings ?? {}),
-        }),
-      );
-
-      // Same mode-aware persistence as the file-upload path: remote mode pushes
-      // through the daemon and prunes stale scenarios; local mode upserts into
-      // the browser sql.js repository (#101).
-      void persistEditorScenario(
-        { mode, chargePointService, cpId, connectorId },
-        scenarioWithSerialized,
-      )
-        .then(() =>
-          armAppliedScenarioAutosaveSuppression(scenarioWithSerialized),
-        )
-        .catch((err) =>
-          console.error("Failed to persist template scenario", err),
-        );
-    },
-    [
-      cpId,
-      connectorId,
-      mode,
-      chargePointService,
-      nodes.length,
-      setNodes,
-      setEdges,
-      prepareAppliedRemoteScenario,
-      armAppliedScenarioAutosaveSuppression,
-    ],
-  );
-
   // Handle node double-click to open config panel.
   // Start/End are intentionally read-only from the config panel; Start's
   // trigger summary is shown inline on the node face.
@@ -1456,60 +607,6 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     },
     [setNodes],
   );
-
-  // Get scenario state color class
-  const getScenarioStateColor = (state: ScenarioExecutionState) => {
-    switch (state) {
-      case "idle":
-        return "text-gray-600 dark:text-gray-400";
-      case "running":
-        return "text-green-700 dark:text-green-300";
-      case "paused":
-        return "text-yellow-700 dark:text-yellow-300";
-      case "waiting":
-        return "text-orange-700 dark:text-orange-300";
-      case "stepping":
-        return "text-purple-700 dark:text-purple-300";
-      case "completed":
-        return "text-emerald-700 dark:text-emerald-300";
-      case "error":
-        return "text-red-700 dark:text-red-300";
-      default:
-        return "text-gray-600 dark:text-gray-400";
-    }
-  };
-
-  // Get scenario state indicator
-  const getScenarioStateIndicator = (state: ScenarioExecutionState) => {
-    switch (state) {
-      case "idle":
-        return <span className="text-gray-700 dark:text-gray-300">●</span>;
-      case "running":
-        return (
-          <span className="text-green-700 dark:text-green-300 animate-pulse">
-            ●
-          </span>
-        );
-      case "paused":
-        return <span className="text-yellow-700 dark:text-yellow-300">⏸</span>;
-      case "waiting":
-        return (
-          <span className="text-orange-700 dark:text-orange-300 animate-pulse">
-            ⏳
-          </span>
-        );
-      case "stepping":
-        return <span className="text-purple-700 dark:text-purple-300">⏯</span>;
-      case "completed":
-        return (
-          <span className="text-emerald-700 dark:text-emerald-300">✓</span>
-        );
-      case "error":
-        return <span className="text-red-700 dark:text-red-300">✗</span>;
-      default:
-        return <span className="text-gray-700 dark:text-gray-300">●</span>;
-    }
-  };
 
   const getNodeTypeName = (type: string | undefined) =>
     isScenarioNodeType(type) ? NODE_FORM_REGISTRY[type].title : "Node";
@@ -1557,54 +654,11 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         </Suspense>
       ) : null}
 
-      {/* Header — slim toolbar.
-          Connector status / meter / SoC etc. are rendered by the page around
-          the editor; we just show the scenario-level state + action
-          buttons. */}
+      {/* Header — slim toolbar: undo / redo. The page around the editor
+          saves, runs and edits the metadata. */}
       <div className="panel px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="flex items-center gap-2 text-xs min-w-0 flex-1">
-            {/* Embedded: the page shows the run state and runs scenarios
-                from its own run console. */}
-            {!isEmbedded && (
-              <>
-                <span className="text-muted shrink-0">Scenario:</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  {getScenarioStateIndicator(executionState)}
-                  <span
-                    className={`font-semibold ${getScenarioStateColor(executionState)}`}
-                  >
-                    {executionState
-                      ? executionState.charAt(0).toUpperCase() +
-                        executionState.slice(1)
-                      : "Idle"}
-                  </span>
-                </div>
-                {executionContext && executionContext.currentNodeId && (
-                  <>
-                    <span className="text-muted shrink-0">·</span>
-                    <span className="font-mono text-blue-700 dark:text-blue-300 truncate min-w-0">
-                      {String(
-                        nodes.find(
-                          (n) => n.id === executionContext.currentNodeId,
-                        )?.data?.label || executionContext.currentNodeId,
-                      )}
-                    </span>
-                  </>
-                )}
-              </>
-            )}
-          </div>
+        <div className="flex items-center justify-end gap-2 min-w-0">
           <div className="flex gap-1 shrink-0">
-            {!isEmbedded && (
-              <button
-                onClick={handleForceStop}
-                className="btn-danger text-xs px-2 py-1"
-                title="Stop running scenario"
-              >
-                ■ Stop
-              </button>
-            )}
             <button
               onClick={handleUndo}
               disabled={historyRef.current.past.length === 0}
@@ -1623,151 +677,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             >
               ↷
             </button>
-            {/* Embedded: the page saves, edits the metadata and imports /
-                exports; the template picker (in the settings dialog)
-                would replace the connector's whole scenario set. */}
-            {!isEmbedded && (
-              <>
-                <button
-                  onClick={handleManualSave}
-                  className={`text-xs px-2 py-1 ${
-                    saveFeedback === "saved"
-                      ? "bg-emerald-700 text-white hover:bg-emerald-800"
-                      : "btn-secondary"
-                  }`}
-                  title="Save scenario"
-                >
-                  {saveFeedback === "saved" ? "✓ Saved" : "💾 Save"}
-                </button>
-                <button
-                  onClick={() => setIsSettingsModalOpen(true)}
-                  className="btn-secondary text-xs px-2 py-1"
-                  title="Scenario settings"
-                >
-                  ⚙
-                </button>
-                <button
-                  onClick={handleImport}
-                  className="btn-secondary text-xs px-2 py-1"
-                  title="Import JSON"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={handleExport}
-                  className="btn-secondary text-xs px-2 py-1"
-                  title="Export JSON"
-                >
-                  ↓
-                </button>
-              </>
-            )}
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleFileChange}
-            className="hidden"
-          />
         </div>
-
-        {/* Scenario settings modal — Template / Name / Description / Enabled / EV Settings */}
-        <Dialog
-          open={isSettingsModalOpen}
-          onOpenChange={(open) => !open && setIsSettingsModalOpen(false)}
-        >
-          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Scenario Settings</DialogTitle>
-            </DialogHeader>
-
-            {/* Template Selector */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-primary whitespace-nowrap">
-                📋 Template:
-              </label>
-              <select
-                className="input-base text-xs flex-1"
-                onChange={(e) => {
-                  if (e.target.value) {
-                    handleLoadTemplate(e.target.value);
-                    e.target.value = ""; // Reset selection
-                  }
-                }}
-                defaultValue=""
-              >
-                <option value="">Select a template...</option>
-                {scenarioTemplates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} - {template.description}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Scenario Settings */}
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {/* Name */}
-              <div>
-                <label className="block text-xs font-semibold text-primary mb-1">
-                  Scenario Name
-                </label>
-                <input
-                  type="text"
-                  className="input-base w-full text-xs"
-                  value={scenarioName}
-                  onChange={(e) => setScenarioName(e.target.value)}
-                  placeholder="Enter scenario name"
-                />
-              </div>
-
-              {/* Description */}
-              <div className="col-span-2">
-                <label className="block text-xs font-semibold text-primary mb-1">
-                  Description
-                </label>
-                <input
-                  type="text"
-                  className="input-base w-full text-xs"
-                  value={scenarioDescription}
-                  onChange={(e) => setScenarioDescription(e.target.value)}
-                  placeholder="Enter scenario description (optional)"
-                />
-              </div>
-
-              {/* Enabled Toggle */}
-              <div className="flex items-center">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mr-2"
-                    checked={scenarioEnabled}
-                    onChange={(e) => setScenarioEnabled(e.target.checked)}
-                  />
-                  <span className="text-xs font-semibold text-primary">
-                    Enabled
-                  </span>
-                </label>
-              </div>
-
-              <ScenarioEvSettingsFields
-                className="col-span-2 mt-1"
-                value={scenarioEvSettings}
-                onChange={setScenarioEvSettings}
-                defaultEvSettings={defaultEvSettings}
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                variant="secondary"
-                onClick={() => setIsSettingsModalOpen(false)}
-              >
-                Close
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
 
       <div className="flex-1 flex gap-3 p-3 overflow-hidden min-h-0">
@@ -1896,74 +807,79 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
             ref={flowContainerRef}
             className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden min-h-0"
           >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodesDelete={onNodesDelete}
-              onConnect={onConnect}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              onNodeDoubleClick={handleNodeDoubleClick}
-              nodeTypes={nodeTypes}
-              deleteKeyCode={["Backspace", "Delete"]}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              colorMode={isDark ? "dark" : "light"}
-              onInit={(instance) => {
-                rfInstanceRef.current = instance;
-                // Fire one more fit on init — `fitView` prop fits before
-                // the instance is captured, so any subsequent
-                // node-set hydration that landed before this callback
-                // already had a fresh frame to land in.
-                try {
-                  instance.fitView({ padding: 0.2, duration: 0 });
-                } catch {
-                  // best effort
-                }
-              }}
-            >
-              <Background />
-              <Controls>
-                <ControlButton
-                  onClick={handleAutoLayout}
-                  title="Auto-arrange nodes top-to-bottom"
-                  aria-label="Auto-arrange nodes"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="7" height="5" rx="1" />
-                    <rect x="14" y="3" width="7" height="5" rx="1" />
-                    <rect x="3" y="11" width="18" height="5" rx="1" />
-                    <rect x="8" y="19" width="8" height="3" rx="1" />
-                  </svg>
-                </ControlButton>
-              </Controls>
-              <MiniMap
-                pannable
-                zoomable
-                nodeColor={(node) =>
-                  MINIMAP_NODE_COLORS[node.type ?? ""] ?? MINIMAP_NODE_FALLBACK
-                }
-                nodeStrokeColor={isDark ? "#0f172a" : "#cbd5e1"}
-                nodeStrokeWidth={2}
-                maskColor={
-                  isDark ? "rgba(15, 23, 42, 0.6)" : "rgba(240, 240, 240, 0.6)"
-                }
-                style={{
-                  backgroundColor: isDark ? "#1f2937" : "#ffffff",
+            <LiveMeterReadingContext.Provider value={liveMeterValueWh}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onNodesDelete={onNodesDelete}
+                onConnect={onConnect}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onNodeDoubleClick={handleNodeDoubleClick}
+                nodeTypes={nodeTypes}
+                deleteKeyCode={["Backspace", "Delete"]}
+                fitView
+                fitViewOptions={{ padding: 0.2 }}
+                colorMode={isDark ? "dark" : "light"}
+                onInit={(instance) => {
+                  rfInstanceRef.current = instance;
+                  // Fire one more fit on init — `fitView` prop fits before
+                  // the instance is captured, so any subsequent
+                  // node-set hydration that landed before this callback
+                  // already had a fresh frame to land in.
+                  try {
+                    instance.fitView({ padding: 0.2, duration: 0 });
+                  } catch {
+                    // best effort
+                  }
                 }}
-              />
-            </ReactFlow>
+              >
+                <Background />
+                <Controls>
+                  <ControlButton
+                    onClick={handleAutoLayout}
+                    title="Auto-arrange nodes top-to-bottom"
+                    aria-label="Auto-arrange nodes"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="7" height="5" rx="1" />
+                      <rect x="14" y="3" width="7" height="5" rx="1" />
+                      <rect x="3" y="11" width="18" height="5" rx="1" />
+                      <rect x="8" y="19" width="8" height="3" rx="1" />
+                    </svg>
+                  </ControlButton>
+                </Controls>
+                <MiniMap
+                  pannable
+                  zoomable
+                  nodeColor={(node) =>
+                    MINIMAP_NODE_COLORS[node.type ?? ""] ??
+                    MINIMAP_NODE_FALLBACK
+                  }
+                  nodeStrokeColor={isDark ? "#0f172a" : "#cbd5e1"}
+                  nodeStrokeWidth={2}
+                  maskColor={
+                    isDark
+                      ? "rgba(15, 23, 42, 0.6)"
+                      : "rgba(240, 240, 240, 0.6)"
+                  }
+                  style={{
+                    backgroundColor: isDark ? "#1f2937" : "#ffffff",
+                  }}
+                />
+              </ReactFlow>
+            </LiveMeterReadingContext.Provider>
           </div>
         </div>
 
@@ -2002,7 +918,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 }}
                 className="flex-1 btn-primary text-sm"
               >
-                {/* Embedded, the page's own Save persists the scenario. */}
+                {/* Applies to the graph; the page's own Save persists it. */}
                 Save
               </button>
             </div>

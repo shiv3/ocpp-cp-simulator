@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Log
@@ -1672,3 +1672,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Web console → Charge point page](entities/web-console.md#charge-point-page): the **Charge point (connector 0)** card's **Error code** picker offers any code but `NoError`, `InternalError` by default — the connector card's list, now `FAULT_ERROR_CODES` in `src/cp/domain/types/OcppTypes.ts`.
 - [GitHub issues](sources/github-issues.md): #441.
+
+## [2026-10-28] ingest | ScenarioEditor standalone mode removed (#443)
+
+- Removing the standalone mode changes no behaviour: the Graph view's full graph editor (ReactFlow, `src/components/scenario/ScenarioEditor.tsx`) was always opened in its embedded mode since the classic UI was retired (#426). Its unreachable standalone mode is gone — prop re-hydration, the debounced autosave and its Status Trigger → trigger rewrite, the run state and Stop, its own Save, the settings dialog with the template picker, import / export — with the `scenarioPersistence` helpers only it used (`persistEditorScenario`, `createLatestWinsSaver`, the applied-scenario autosave suppression). The editor takes `scenario` and reports graph edits through `onGraphChange`; the Meter Value nodes still show the connector's live reading.
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md): the "Scenario EV Settings" panel now lives only in the web console's scenario editor.
+- [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
+- [GitHub issues](sources/github-issues.md): #443.

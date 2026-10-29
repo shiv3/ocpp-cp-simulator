@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
-import { DefaultBootNotification } from "../../types/OcppTypes";
-import type { Database, SqlParam, SqlRow } from "../../persistence/Database";
+import type { ChargePoint } from "../ChargePoint";
+import type { Database } from "../../persistence/Database";
 import { OCPPWebSocket } from "../../../infrastructure/transport/OCPPWebSocket";
+import { makeChargePoint, OverrideDatabase } from "./chargePointFixtures";
 
 // #406: WebSocketPingInterval reaches the transport, and a charge point
 // that cannot send a ping frame does not claim the key.
@@ -11,37 +11,7 @@ function makeCp(
   ocppVersion = "OCPP-1.6J",
   database: Database | null = null,
 ): ChargePoint {
-  return new ChargePoint(
-    "cp-ping",
-    DefaultBootNotification,
-    1,
-    "ws://localhost:8080",
-    null,
-    null,
-    database,
-    {},
-    [],
-    ocppVersion,
-    {},
-  );
-}
-
-/** Answers the configuration-override query and nothing else. */
-class OverrideDatabase implements Database {
-  constructor(private readonly overrides: Record<string, string>) {}
-  exec(): void {}
-  run(): void {}
-  all<T = SqlRow>(sql: string, _params: SqlParam[] = []): T[] {
-    if (!sql.includes("FROM configuration")) return [];
-    return Object.entries(this.overrides).map(([key, value]) => ({
-      key,
-      value,
-    })) as T[];
-  }
-  get<T = SqlRow>(): T | null {
-    return null;
-  }
-  close(): void {}
+  return makeChargePoint({ id: "cp-ping", ocppVersion, database });
 }
 
 describe("ChargePoint WebSocketPingInterval (#406)", () => {

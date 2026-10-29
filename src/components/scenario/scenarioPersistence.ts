@@ -4,23 +4,6 @@ import type { RuntimeMode } from "../../data/RuntimeMode";
 import { serializeScenarioGraph } from "./scenarioSerialize";
 import { withNormalizedChargingCurve } from "../../cp/domain/connector/ChargingCurve";
 
-/**
- * Dependencies needed to durably persist a scenario the user just loaded into
- * the editor. Narrowed to the handful of methods we call so tests can pass
- * lightweight mocks.
- */
-export interface PersistEditorScenarioDeps {
-  mode: RuntimeMode;
-  chargePointService: Pick<
-    ChargePointService,
-    | "listScenarioDefinitions"
-    | "replaceConnectorScenarioDefinitions"
-    | "loadScenario"
-  >;
-  cpId: string;
-  connectorId: number | null;
-}
-
 export interface SaveEditorScenarioDeps {
   mode: RuntimeMode;
   chargePointService: Pick<
@@ -29,63 +12,6 @@ export interface SaveEditorScenarioDeps {
   >;
   cpId: string;
   connectorId: number | null;
-}
-
-export interface AppliedScenarioAutosaveSuppression {
-  scenarioId: string;
-  updatedAt: string | null;
-  fingerprint: string;
-}
-
-export function createLatestWinsSaver<T>(
-  saveFn: (payload: T) => Promise<void>,
-): (payload: T) => Promise<void> {
-  let latestSeq = 0;
-  let tail: Promise<void> = Promise.resolve();
-
-  return (payload: T): Promise<void> => {
-    const seq = ++latestSeq;
-    const next = tail
-      .catch(() => undefined)
-      .then(async () => {
-        if (seq !== latestSeq) return;
-        await saveFn(payload);
-      });
-    tail = next;
-    return next;
-  };
-}
-
-export function shouldSuppressAppliedScenarioAutosave(
-  suppression: AppliedScenarioAutosaveSuppression | null,
-  scenario: ScenarioDefinition,
-): boolean {
-  if (!suppression) return false;
-  return (
-    suppression.scenarioId === scenario.id &&
-    suppression.updatedAt === (scenario.updatedAt ?? null) &&
-    suppression.fingerprint === scenarioAutosaveSuppressionFingerprint(scenario)
-  );
-}
-
-export function scenarioAutosaveSuppressionFingerprint(
-  scenario: ScenarioDefinition,
-): string {
-  const serialized = serializeScenarioForPersistence(scenario);
-  return JSON.stringify({
-    id: serialized.id,
-    name: serialized.name,
-    description: serialized.description ?? "",
-    targetType: serialized.targetType ?? null,
-    targetId: serialized.targetId ?? null,
-    nodes: serialized.nodes,
-    edges: serialized.edges,
-    trigger: serialized.trigger ?? null,
-    defaultExecutionMode: serialized.defaultExecutionMode ?? null,
-    enabled: serialized.enabled !== false,
-    evSettings: serialized.evSettings ?? null,
-    updatedAt: serialized.updatedAt ?? null,
-  });
 }
 
 function serializeScenarioForPersistence(
@@ -115,32 +41,6 @@ async function activateRemoteScenario(
 }
 
 /**
- * Durably persist a scenario the user just dropped into the editor — either by
- * uploading a JSON file (`handleFileChange`) or loading a template
- * (`handleLoadTemplate`).
- *
- * This is the editor's replace operation: stale sibling definitions for the
- * connector are pruned and the incoming definition becomes the complete
- * persisted set. The service port owns whether that means browser sql.js or the
- * daemon SQLite store.
- */
-export async function persistEditorScenario(
-  deps: PersistEditorScenarioDeps,
-  scenario: ScenarioDefinition,
-): Promise<void> {
-  const { chargePointService, cpId, connectorId } = deps;
-  const scenarioToPersist = serializeScenarioForPersistence(scenario);
-
-  await chargePointService.listScenarioDefinitions(cpId, connectorId);
-  await chargePointService.replaceConnectorScenarioDefinitions(
-    cpId,
-    connectorId,
-    [scenarioToPersist],
-  );
-  await activateRemoteScenario(deps, scenarioToPersist);
-}
-
-/**
  * Upsert the scenario currently being edited without pruning sibling
  * definitions. Used for explicit single-definition edits.
  */
@@ -167,14 +67,11 @@ export async function saveEditorScenario(
  * win the `updated_at DESC` ordering local mode lists by.
  *
  * This is also where an uploaded `chargingCurve` is normalized — sorted by
- * `socPercent`, invalid points dropped (#301). It is the one function every
- * upload path calls (the scenario editor's file input and the scenario
- * library's "open uploaded scenario"), and both write the result straight to
- * storage: the editor normalized only its own React state, so the raw curve
- * reached storage and any export taken from it, and the library path
- * normalized nowhere at all. Doing it here keeps one validator for the import
- * boundary rather than one per caller, which is the arrangement
- * {@link withNormalizedChargingCurve} exists to hold.
+ * `socPercent`, invalid points dropped (#301). Its callers, the scenario
+ * library's imports and per-connector copies (`toLibraryScenario`,
+ * `makeLibraryCopy`), write the result straight to storage, so normalizing
+ * here keeps the raw curve out of storage and of any export taken from it. Doing it at the import boundary rather than in each caller
+ * is the arrangement {@link withNormalizedChargingCurve} exists to hold.
  *
  * The domain was never at risk — `Connector`'s `evSettings` setter normalizes
  * again on the way in — but storage and export do not sit behind that setter.

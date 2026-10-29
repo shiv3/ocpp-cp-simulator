@@ -54,8 +54,14 @@ export class Outbox implements IChargePointMessageHandler {
     transactionId: Parameters<IChargePointMessageHandler["sendMeterValue"]>[0],
     connectorId: Parameters<IChargePointMessageHandler["sendMeterValue"]>[1],
     context?: Parameters<IChargePointMessageHandler["sendMeterValue"]>[2],
+    overrides?: Parameters<IChargePointMessageHandler["sendMeterValue"]>[3],
   ): ReturnType<IChargePointMessageHandler["sendMeterValue"]> {
-    return this.handler.sendMeterValue(transactionId, connectorId, context);
+    return this.handler.sendMeterValue(
+      transactionId,
+      connectorId,
+      context,
+      overrides,
+    );
   }
 
   sendDataTransfer(

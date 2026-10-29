@@ -24,6 +24,11 @@ export function isSoapVersion(v: string | OcppVersion | undefined): boolean {
   return v === OCPP_1_2 || v === OCPP_1_5 || v === OCPP_1_6_SOAP;
 }
 
+/** OCPP 2.0.1 / 2.1: the device model, TransactionEvent and 2.x action names. */
+export function isOcpp2Version(v: string): boolean {
+  return v.startsWith("OCPP-2.");
+}
+
 /** Exact supported versions are preserved; unknown values keep the legacy 1.6J fallback. */
 export function parseOcppVersion(raw: string | null | undefined): OcppVersion {
   if (raw && isOcppVersion(raw)) return raw;

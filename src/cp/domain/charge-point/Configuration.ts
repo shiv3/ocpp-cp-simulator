@@ -51,6 +51,9 @@ export const ConfigurationKeys = {
       required: true,
       readonly: false,
       type: "integer",
+      // #454: the grid restarts every midnight, so a day is the longest interval.
+      min: 0,
+      max: 86400,
     } as IntegerConfigurationKey,
     // Interval (in seconds) *from beginning of status: 'Preparing' until incipient Transaction is automatically canceled,
     // due to failure of EV driver to (correctly) insert the charging cable connector(s) into the appropriate socket(s).
@@ -136,7 +139,7 @@ export const ConfigurationKeys = {
     MeterValuesAlignedData: {
       name: "MeterValuesAlignedData",
       required: true,
-      readonly: true,
+      readonly: false,
       type: "array",
     } as ArrayConfigurationKey,
     // Maximum number of items in a MeterValuesAlignedData Configuration Key.

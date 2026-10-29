@@ -123,3 +123,28 @@ describe("#101 scenario upload survives refresh (remote/daemon mode)", () => {
     expect(names).toContain("Uploaded Scenario");
   });
 });
+
+describe("#495 scenario definitions without --state-db", () => {
+  it("lists a Library scenario back after saving it over RPC", async () => {
+    const server = await startTestServer();
+    cleanups.push(() => server.close());
+    const client = await connectTestClient(server);
+    cleanups.push(() => client.close());
+
+    const library = { ...uploadedScenario(1), id: "library-scenario" };
+    const saveAck = await emitRpc(client, {
+      method: "scenario.definitions.save",
+      params: { cpId: "__library__", connectorId: null, definition: library },
+    });
+    expect(saveAck.ok).toBe(true);
+
+    const listAck = await emitRpc(client, {
+      method: "scenario.definitions.list",
+      params: { cpId: "__library__", connectorId: null },
+    });
+    expect(listAck.ok).toBe(true);
+    expect(listAck.result.map((s: { id: string }) => s.id)).toEqual([
+      "library-scenario",
+    ]);
+  });
+});

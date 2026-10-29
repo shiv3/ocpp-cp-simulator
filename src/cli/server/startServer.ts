@@ -26,7 +26,6 @@ import { createMcpHandler } from "./mcp/mcpServer";
 import { RegistryChargePointService } from "./RegistryChargePointService";
 import { BunSqliteDatabase } from "../../cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "../../cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { getGlobalLogFormat } from "../../cp/shared/Logger";
 import { expandIdPattern } from "../../protocol";
@@ -318,7 +317,8 @@ export async function startServer(
   }
 
   const configRepository = createSocketConfigRepository(database);
-  const scenarioRepository = new SqliteScenarioRepository(database);
+  // #495: the registry's, which its charge points write to as well.
+  const scenarioRepository = registry.scenarioDefinitions;
   const chargePointService = new RegistryChargePointService(registry, {
     database,
     configRepository,

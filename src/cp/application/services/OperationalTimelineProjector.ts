@@ -126,9 +126,12 @@ export class OperationalTimelineProjector {
       // Minted first, so a throw cannot leave a half-opened incident behind.
       const incidentId = crypto.randomUUID();
       this.clearSettleTimer();
+      // One clock read for the incident's start and its entry, so the
+      // recovery's durationMs is exactly the gap between the two entries.
+      const startedAt = this.timeline.now();
       this.incident = {
         ruleId,
-        startedAt: this.timeline.now(),
+        startedAt,
         expected: new Map(
           [...this.connectors].map(([cid, c]) => [cid, c.status]),
         ),
@@ -139,6 +142,7 @@ export class OperationalTimelineProjector {
         kind: "network_fault_injected",
         summary: `Network fault injected by rule ${ruleId} (${ruleType}, reconnect blocked ${formatSeconds(reconnectDelayMs)})`,
         data: { ruleId, ruleType, reconnectDelayMs },
+        at: startedAt,
       });
     });
     on("transactionStarted", ({ connectorId, tagId }) => {
@@ -297,7 +301,8 @@ export class OperationalTimelineProjector {
     const incident = this.incident;
     if (!incident) return;
     this.clearSettleTimer();
-    const durationMs = this.timeline.now() - incident.startedAt;
+    const at = this.timeline.now();
+    const durationMs = at - incident.startedAt;
     const unrestored = this.unrestoredConnectors();
     this.timeline.record({
       kind: "recovery_completed",
@@ -312,6 +317,7 @@ export class OperationalTimelineProjector {
         restored,
         ...(!restored && { unrestored }),
       },
+      at,
     });
     this.incident = null;
     this.timeline.setActiveIncident(null);

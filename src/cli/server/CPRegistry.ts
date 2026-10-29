@@ -27,6 +27,11 @@ import type { ScenarioRunRepository } from "../../cp/domain/persistence/Scenario
 import { createScenarioRunRepository } from "../../cp/domain/persistence/createScenarioRunRepository";
 import type { ChargingSessionRepository } from "../../cp/domain/persistence/ChargingSessionRepository";
 import { createChargingSessionRepository } from "../../cp/domain/persistence/createChargingSessionRepository";
+import {
+  InMemoryScenarioRepository,
+  type ScenarioRepository,
+} from "../../cp/domain/persistence/ScenarioRepository";
+import { createScenarioRepository } from "../../cp/domain/persistence/createScenarioRepository";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by
@@ -108,6 +113,11 @@ export class CPRegistry {
   /** #447: one session history for the whole daemon, so it outlives a
    *  `cp.update` rebuild without `--state-db` too. */
   readonly chargingSessions: ChargingSessionRepository;
+  /** #495: one scenario-definition store for the whole daemon, read by the
+   *  RPC layer and written by every charge point, so a definition saved over
+   *  RPC (the Library included) or loaded by a charge point is there to read
+   *  back without `--state-db` too. */
+  readonly scenarioDefinitions: ScenarioRepository;
 
   constructor(
     private readonly bus: EventBus,
@@ -129,6 +139,15 @@ export class CPRegistry {
   ) {
     this.scenarioRuns = createScenarioRunRepository(database);
     this.chargingSessions = createChargingSessionRepository(database);
+    this.scenarioDefinitions = createScenarioRepository(database);
+  }
+
+  /** `state.reset` without `--state-db`: drop the in-memory definitions,
+   *  Library included, as `resetSimulatorState` empties the table. */
+  clearScenarioDefinitions(): void {
+    if (this.scenarioDefinitions instanceof InMemoryScenarioRepository) {
+      this.scenarioDefinitions.clear();
+    }
   }
 
   /** True when a SOAP charge point may be created without a callback URL. */
@@ -627,6 +646,7 @@ export class CPRegistry {
       this.database,
       this.scenarioRuns,
       this.chargingSessions,
+      this.scenarioDefinitions,
     );
     const unsub = svc.onEvent((evt) => this.bus.publish(init.cpId, evt));
     const unsubSettled = svc.onSessionSettled((info) =>
@@ -890,6 +910,9 @@ export class CPRegistry {
     // The in-memory histories have no table for persistRemove to cascade to.
     this.scenarioRuns.deleteForChargePoint(cpId);
     this.chargingSessions.deleteForChargePoint(cpId);
+    if (this.scenarioDefinitions instanceof InMemoryScenarioRepository) {
+      this.scenarioDefinitions.deleteForChargePoint(cpId);
+    }
     this.notifyInitChange();
     return true;
   }

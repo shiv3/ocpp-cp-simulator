@@ -14,7 +14,7 @@ export interface MonitoredReading {
 export interface MonitorState {
   /** Upper/LowerThreshold: the value is beyond the threshold. */
   readonly triggered: boolean;
-  /** Delta: the value when the monitor was set or last fired (N07.FR.18). */
+  /** Delta: the value when the monitor was set or last reported (N07.FR.18). */
   readonly baseline: MonitoredReading;
 }
 

@@ -221,6 +221,8 @@ export class ChargePoint {
   private readonly _certificateStore = new CertificateStore();
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
   private readonly _monitoring = new MonitoringStore();
+  // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
+  private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
@@ -571,8 +573,10 @@ export class ChargePoint {
   /**
    * OCPP 2.x variable monitoring (#457): restore the persisted monitors
    * (N07.FR.13), keep the table in step with the store, and evaluate the
-   * monitors whenever SetVariables / ChangeConfiguration changes the value
-   * they watch (N07). Events go out after the answer that caused them.
+   * monitors whenever SetVariables or a scenario `configSet` node changes
+   * the value they watch (N07). Events go out after the answer that caused
+   * them, and only while the boot is Accepted (B02.FR.02): reporting starts
+   * off and `applyBootAccepted` turns it on.
    */
   private wireVariableMonitoring(): void {
     const repository = new VariableMonitorRepository(this._id, this._database);
@@ -597,6 +601,8 @@ export class ChargePoint {
       },
       new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
     );
+    evaluation.setReporting(false);
+    this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
   }
 
@@ -1632,6 +1638,8 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
       this._clockAligned.disable();
+      // B02.FR.02: no NotifyEvent until the boot is Accepted.
+      this._monitorEvaluation?.setReporting(false);
     }
   }
 
@@ -1668,6 +1676,9 @@ export class ChargePoint {
     }
 
     this._clockAligned.enable();
+    // Re-checks the thresholds: what changed while Pending or offline, and
+    // a restored trigger already back in range (N07.FR.14).
+    this._monitorEvaluation?.setReporting(true);
   }
 
   /**
@@ -1756,6 +1767,8 @@ export class ChargePoint {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._clockAligned.disable();
+    // The next connection boots again; reporting resumes once Accepted.
+    this._monitorEvaluation?.setReporting(false);
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     this._localAuthListManager.dispose();

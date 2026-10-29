@@ -15,9 +15,10 @@ import type { Database } from "../../../domain/persistence/Database";
 
 /**
  * #457 part B: monitors installed by SetVariableMonitoring are evaluated
- * whenever SetVariables / ChangeConfiguration changes the value they watch,
- * and report through NotifyEvent (N07), filtered by the monitoring level
- * (N05.FR.03). SetMonitoringBase acts on the custom monitors (N03), and the
+ * whenever SetVariables (or a scenario `configSet` node) changes the value
+ * they watch, and report through NotifyEvent (N07), filtered by the
+ * monitoring level (N05.FR.03) and held back until the boot is Accepted
+ * (B02.FR.02). SetMonitoringBase acts on the custom monitors (N03), and the
  * monitors survive a restart on --state-db (N07.FR.13, FR.14).
  */
 
@@ -206,8 +207,9 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
             d.cleared,
           ]),
         ).toEqual([
-          // 500 is back above the lower threshold, and 480 from the last
-          // Delta baseline (20): both monitors in one request.
+          // 500 is back above the lower threshold, and 200 from the Delta
+          // baseline (300, the value it was set on: the filtered notices
+          // did not move it, N07.FR.18): both monitors in one request.
           [2, "Alerting", true],
           [3, "Delta", undefined],
         ]);
@@ -297,6 +299,108 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
     } finally {
       cp.disconnect();
       await csms.stop();
+    }
+  });
+
+  it("OCPP 2.0.1: no NotifyEvent while BootNotification is Pending; the thresholds report once Accepted (B02.FR.02)", async () => {
+    const csms = startMockCsms();
+    const cp = makeChargePoint(csms, "CP-MONITOR-PENDING", "OCPP-2.0.1");
+    try {
+      cp.connect();
+      const boot = await csms.waitForCall("BootNotification");
+      csms.replyCallResult(boot.messageId, {
+        status: "Pending",
+        currentTime: "2026-10-29T00:00:00.000Z",
+        interval: 0,
+      });
+      // CSMS-initiated traffic is allowed while Pending (B02.FR.03).
+      await call(csms, "svm-1", "SetVariableMonitoring", {
+        setMonitoringData: [
+          { value: 600, type: "UpperThreshold", severity: 4, ...HEARTBEAT },
+          { value: 10, type: "Delta", severity: 4, ...HEARTBEAT },
+        ],
+      });
+      await setHeartbeat(csms, "sv-700", 700);
+      // Sentinel: an event would have been written before this answer.
+      await call(csms, "trigger-boot", "TriggerMessage", {
+        requestedMessage: "BootNotification",
+      });
+      expect(notifyEvents(csms)).toEqual([]);
+
+      const reboot = await csms.waitForFrame(
+        (f) =>
+          f[0] === 2 && f[2] === "BootNotification" && f[1] !== boot.messageId,
+      );
+      csms.replyCallResult(reboot[1] as string, {
+        status: "Accepted",
+        currentTime: "2026-10-29T00:00:00.000Z",
+        interval: 300,
+      });
+      const event = await nextNotifyEvent(csms, 0);
+      expect(
+        (event.payload.eventData as EventData[]).map((d) => [
+          d.variableMonitoringId,
+          d.trigger,
+          d.actualValue,
+        ]),
+      ).toEqual([[1, "Alerting", "700"]]);
+      // The Delta kept the baseline it was set on (300).
+      await setHeartbeat(csms, "sv-705", 705);
+      const delta = await nextNotifyEvent(csms, 1);
+      expect(delta.data).toMatchObject({
+        variableMonitoringId: 2,
+        trigger: "Delta",
+        actualValue: "705",
+      });
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("OCPP 2.0.1: a restored trigger whose value is back in range at start-up sends cleared once Accepted (N07.FR.14)", async () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    const cpId = "CP-MONITOR-RESTART-CLEARED";
+    const first = startMockCsms();
+    const before = makeChargePoint(first, cpId, "OCPP-2.0.1", db);
+    try {
+      before.connect();
+      await bootAccepted(first, "StatusNotification");
+      await call(first, "svm-1", "SetVariableMonitoring", {
+        setMonitoringData: [
+          { value: 600, type: "UpperThreshold", severity: 4, ...HEARTBEAT },
+        ],
+      });
+      await setHeartbeat(first, "sv-700", 700);
+      await nextNotifyEvent(first, 0);
+    } finally {
+      before.disconnect();
+      await first.stop();
+    }
+    // The value is within range before the station starts again, with no
+    // change for a monitor to see.
+    db.run("UPDATE configuration SET value = ? WHERE cp_id = ? AND key = ?", [
+      JSON.stringify(300),
+      cpId,
+      "HeartbeatInterval",
+    ]);
+
+    const second = startMockCsms();
+    const after = makeChargePoint(second, cpId, "OCPP-2.0.1", db);
+    try {
+      after.connect();
+      await bootAccepted(second, "StatusNotification");
+      const cleared = await nextNotifyEvent(second, 0);
+      expect(cleared.data).toMatchObject({
+        variableMonitoringId: 1,
+        trigger: "Alerting",
+        cleared: true,
+        actualValue: "300",
+      });
+    } finally {
+      after.disconnect();
+      await second.stop();
+      db.close();
     }
   });
 

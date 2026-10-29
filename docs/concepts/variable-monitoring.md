@@ -69,6 +69,7 @@ apply one after the other, so two identical items in one request answer
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ---------------- |
 | `UnknownComponent`       | Component not in the device-model map                                                                                      | N04.FR.03        |
 | `UnknownVariable`        | Variable not in the map for that component                                                                                 | N04.FR.04        |
+| `Rejected`               | Variable mapped to a configuration key the station does not have (the `GetVariables` answer), no `statusInfo`              | —                |
 | `Rejected`               | `id` given and no monitor has it (`UnknownMonitorId`)                                                                      | N04.FR.13        |
 | `Rejected`               | `id` given and its monitor is on another component/variable (`TargetMismatch`)                                             | N04.FR.16        |
 | `UnsupportedMonitorType` | Type not supported on this variable (table above)                                                                          | N04.FR.05        |
@@ -76,8 +77,8 @@ apply one after the other, so two identical items in one request answer
 | `Duplicate`              | Another monitor with the same type and severity on the same component/variable                                             | N04.FR.10        |
 | `Accepted`               | Installed; the result carries the monitor `id`                                                                             | N04.FR.08        |
 
-A `Rejected` result carries `statusInfo.reasonCode` (the name in brackets)
-and an `additionalInfo` naming the requirement. Without an `id` the station
+Every other `Rejected` result carries `statusInfo.reasonCode` (the name in
+brackets) and an `additionalInfo` naming the requirement. Without an `id` the station
 allocates one (N04.FR.11); ids increase from 1 and are not reused while the
 station runs. With the `id` of an existing monitor on the same
 component/variable, the monitor is replaced in place (N04.FR.12) and becomes
@@ -145,20 +146,36 @@ variables of the map, so they never trigger a monitor.
   (N07.FR.02) and nothing while it stays beyond. A monitor installed on a
   value already beyond its threshold fires at once.
 - A Delta baseline is the value when the monitor was set (or replaced) or
-  last fired, whichever was last (N07.FR.18).
+  last reported, whichever was last: the step counts « since the last time
+  this event notice was sent » (N07.FR.18).
 - Replacing a threshold monitor by `id` re-checks it against the current
   value: a new threshold that clears the old one sends `cleared: true`, one
-  the value exceeds sends the trigger (N07.FR.11).
+  the value exceeds sends the trigger (N07.FR.11). A triggered threshold
+  replaced by a monitor of another type (the other threshold, or a Delta)
+  that is not triggered sends `cleared: true` for the old monitor, with its
+  type and severity; a replacement that is triggered sends its own trigger
+  only.
 - Removing a monitor (ClearVariableMonitoring, SetMonitoringBase) sends
   nothing, even if it was triggered (N07.FR.12).
 - The monitoring level and the `transaction` flag only decide whether an
-  event is **sent**; the monitor's state moves either way. A filtered
-  threshold trigger is followed later by its `cleared` event once the level
-  allows it, and a filtered Delta still moves its baseline. A monitor with
-  `transaction: true` reports only while a transaction runs on the station.
+  event is **sent**. A filtered threshold still records that it is
+  triggered, so its `cleared` event follows once the level allows it; a
+  filtered Delta keeps its baseline, so the next change is measured from the
+  last value reported. A monitor with `transaction: true` reports only while
+  a transaction runs on the station.
+- Nothing is sent until BootNotification is `Accepted` (B02.FR.02 allows no
+  NotifyEvent while `Pending`), nor between a disconnect and the next
+  `Accepted` boot. Meanwhile a threshold keeps the state the CSMS was last
+  told and a Delta keeps its baseline; on `Accepted` every threshold is
+  re-checked against the current value, so a crossing in between sends its
+  trigger or `cleared` then (a Delta waits for the next change). A
+  triggered threshold replaced in that window by the other threshold sends
+  its owed `cleared` with the replacement's type and severity; replaced by
+  a Delta, it never sends it.
 
-The events of one value change (or one install) go out as **one**
-`NotifyEvent`, after the answer to the message that caused them, with
+The events of one value change (or one install, or one `Accepted` boot) go
+out as **one** `NotifyEvent`, after the answer to the message that caused
+them, with
 `generatedAt`, `seqNo` 0 and `tbc` false (N07.FR.07), and one `eventData`
 per monitor, by increasing monitor id:
 
@@ -194,20 +211,34 @@ stored in the `variable_monitors` table (schema v18, see
 created again: monitors survive a reboot (N04 remarks, N07.FR.13). Ids
 resume after the highest restored one, so a CSMS that sends
 `GetMonitoringReport` after the reboot (N04.FR.19) sees the same ids. The
-triggered flag of a threshold monitor is stored too, so a value that returns
-within range after the reboot still sends `cleared: true` (N07.FR.14). A
-Delta baseline restarts at the restored value. The monitoring level is not
+triggered flag of a threshold monitor (as last reported) is stored too, so
+a value that returns within range after the reboot still sends
+`cleared: true` (N07.FR.14), at the first `Accepted` boot when the value
+is already back in range at start-up. A Delta baseline restarts at the
+restored value. The monitoring level is not
 stored (above).
 
 ## Limits
 
-- **Offline.** A `NotifyEvent` raised while the station is offline is
-  dropped, like any other 2.x CALL. N07.FR.04 queues events at or below
+- **Offline.** No `NotifyEvent` is queued while the station is offline:
+  N07.FR.04 queues events at or below
   `MonitoringCtrlr.OfflineQueuingSeverity`, an optional variable the
-  simulator does not model, so its precondition never holds.
-- **Boot.** Events are not held back while BootNotification is `Pending`;
-  they follow a CSMS `SetVariables` / `SetVariableMonitoring` or a scenario
-  `configSet` node.
+  simulator does not model, so its precondition never holds. Threshold
+  crossings meanwhile are reported by the re-check at the next `Accepted`
+  boot (above); Delta events are not.
+- **Value sources.** Events follow a CSMS `SetVariables` /
+  `SetVariableMonitoring`, a scenario `configSet` node, or the threshold
+  re-check of an `Accepted` boot. A `SetVariables` that changes several
+  values sends one `NotifyEvent` per value change, not one per request.
+- **Bounds.** A threshold outside the variable's range is rejected
+  (`ValueOutOfRange`, N04.FR.06), but `GetBaseReport` publishes no
+  `variableCharacteristics.minLimit` / `maxLimit`, so the CSMS cannot read
+  that range beforehand.
+- **Target.** `evse` and `instance` are ignored to resolve the variable,
+  as for `GetVariables`: a monitor on a station-level component with an
+  `evse` is accepted and is a distinct target from the same monitor without
+  one (`Duplicate`, `TargetMismatch` and the report grouping compare
+  `evse` and `instance`).
 - **Catalogs.** No hardwired or preconfigured monitors, no `Periodic` /
   `PeriodicClockAligned` monitors (N08), no 2.1 `TargetDelta` /
   `TargetDeltaRelative`.

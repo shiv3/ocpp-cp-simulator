@@ -311,6 +311,154 @@ describe("MonitorEvaluation", () => {
     h.change("HeartbeatInterval", num(40));
     expect(h.events.map((e) => [e.monitor.id, e.cleared])).toEqual([[4, true]]);
   });
+
+  it("keeps the baseline of a Delta filtered by the monitoring level (N07.FR.18)", () => {
+    const h = harness();
+    h.store.install(draft({ type: "Delta", value: 100, severity: 8 }));
+    h.store.setMonitoringLevel(7);
+    h.change("HeartbeatInterval", num(100));
+    h.change("HeartbeatInterval", num(160));
+    expect(h.events).toEqual([]);
+
+    // 121 from the value the monitor was set on (40): no notice was sent
+    // since, so the baseline did not move.
+    h.store.setMonitoringLevel(9);
+    h.change("HeartbeatInterval", num(161));
+    expect(h.events.map((e) => [e.trigger, e.actualValue])).toEqual([
+      ["Delta", "161"],
+    ]);
+  });
+
+  it("keeps the baseline of a transaction Delta while no transaction runs", () => {
+    const h = harness();
+    h.store.install(draft({ type: "Delta", value: 10, transaction: true }));
+    h.change("HeartbeatInterval", num(60));
+    h.transaction.active = true;
+    h.change("HeartbeatInterval", num(55));
+    expect(h.events.map((e) => e.actualValue)).toEqual(["55"]);
+  });
+
+  it("sends nothing while reporting is off, then reports the thresholds' current state (B02.FR.02)", () => {
+    const h = harness();
+    h.store.install(draft());
+    h.store.install(draft({ type: "LowerThreshold", value: 30 }));
+    h.store.install(draft({ type: "Delta", value: 5 }));
+    h.change("HeartbeatInterval", num(20));
+    expect(h.events.map((e) => [e.monitor.id, e.cleared])).toEqual([
+      [2, false],
+      [3, false],
+    ]);
+
+    h.evaluation.setReporting(false);
+    h.store.install(draft({ type: "UpperThreshold", value: 10, severity: 3 }));
+    h.change("HeartbeatInterval", num(60));
+    h.change("HeartbeatInterval", num(61));
+    expect(h.events).toHaveLength(2);
+    // The persisted flags still say what the CSMS was last told.
+    expect(h.evaluation.isTriggered(1)).toBe(false);
+    expect(h.evaluation.isTriggered(2)).toBe(true);
+    expect(h.evaluation.isTriggered(4)).toBe(false);
+
+    h.evaluation.setReporting(true);
+    expect(
+      h.events.slice(2).map((e) => [e.monitor.id, e.trigger, e.cleared]),
+    ).toEqual([
+      [1, "Alerting", false],
+      [2, "Alerting", true],
+      [4, "Alerting", false],
+    ]);
+    // A Delta is not re-checked; its baseline (20) is kept for the next
+    // change.
+    h.change("HeartbeatInterval", num(62));
+    expect(h.events.slice(5).map((e) => [e.monitor.id, e.trigger])).toEqual([
+      [3, "Delta"],
+    ]);
+  });
+
+  it("sends the cleared event of a restored trigger whose value is already back in range (N07.FR.14)", () => {
+    const store = new MonitoringStore();
+    store.restore([
+      {
+        id: 4,
+        type: "UpperThreshold",
+        severity: 5,
+        value: 50,
+        transaction: false,
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "HeartbeatInterval" },
+        valueKey: "HeartbeatInterval",
+        origin: "CustomMonitor",
+      },
+    ]);
+    const h = harness({
+      store,
+      restored: new Map([[4, true]]),
+      values: { HeartbeatInterval: num(40) },
+    });
+    h.evaluation.setReporting(false);
+    h.evaluation.setReporting(true);
+    expect(h.events.map((e) => [e.monitor.id, e.cleared])).toEqual([[4, true]]);
+    expect(h.triggered).toEqual([[4, false]]);
+  });
+
+  it("clears a triggered threshold replaced by a monitor of another type that is not triggered (N07.FR.11)", () => {
+    const h = harness();
+    h.store.install(draft({ severity: 4 }));
+    h.change("HeartbeatInterval", num(60));
+    h.store.install(draft({ id: 1, type: "Delta", value: 5, severity: 6 }));
+    expect(
+      h.events.map((e) => [e.monitor.type, e.monitor.severity, e.cleared]),
+    ).toEqual([
+      ["UpperThreshold", 4, false],
+      // The cleared event describes the condition that ends.
+      ["UpperThreshold", 4, true],
+    ]);
+    expect(h.triggered).toEqual([
+      [1, true],
+      [1, false],
+    ]);
+
+    // A threshold of the other kind the value does not exceed.
+    h.store.install(draft({ value: 50 }));
+    h.store.install(draft({ id: 2, type: "LowerThreshold", value: 30 }));
+    expect(h.events.slice(3).map((e) => [e.monitor.type, e.cleared])).toEqual([
+      ["UpperThreshold", true],
+    ]);
+  });
+
+  it("sends only the trigger when the replacement of another type is triggered too (N07.FR.11)", () => {
+    const h = harness();
+    h.store.install(draft());
+    h.change("HeartbeatInterval", num(60));
+    h.store.install(draft({ id: 1, type: "LowerThreshold", value: 70 }));
+    expect(h.events.map((e) => [e.monitor.type, e.cleared])).toEqual([
+      ["UpperThreshold", false],
+      ["LowerThreshold", false],
+    ]);
+  });
+
+  it("defers a replacement of another type while reporting is off: trigger or cleared on resume (N07.FR.11)", () => {
+    const h = harness();
+    h.store.install(draft());
+    h.store.install(draft({ value: 55, severity: 6 }));
+    h.change("HeartbeatInterval", num(60));
+    h.evaluation.setReporting(false);
+    // Exceeded too: its trigger is owed.
+    h.store.install(draft({ id: 1, type: "LowerThreshold", value: 70 }));
+    // Not exceeded: the old trigger's cleared is owed.
+    h.store.install(
+      draft({ id: 2, type: "LowerThreshold", value: 30, severity: 6 }),
+    );
+    expect(h.events).toHaveLength(2);
+
+    h.evaluation.setReporting(true);
+    expect(
+      h.events.slice(2).map((e) => [e.monitor.id, e.monitor.type, e.cleared]),
+    ).toEqual([
+      [1, "LowerThreshold", false],
+      [2, "LowerThreshold", true],
+    ]);
+  });
 });
 
 describe("MonitoringStore.restore", () => {

@@ -123,6 +123,13 @@ describe("ChargePoint variable-monitor persistence", () => {
       "OCPP-2.0.1",
       {},
     );
+    // The flag records what the CSMS was told, so the boot is Accepted
+    // first (B02.FR.02).
+    cp.onBootNotificationResult({
+      status: "Accepted",
+      interval: 0,
+      currentTime: "2026-10-29T00:00:00.000Z",
+    });
     // HeartbeatInterval defaults to 300, above this threshold: the
     // monitor triggers as it is installed, before any value change.
     cp.monitoring.install({

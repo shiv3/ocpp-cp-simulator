@@ -1861,3 +1861,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): evaluation, NotifyEvent, SetMonitoringBase, persistence, limits.
 - [State persistence](concepts/state-persistence.md): `variable_monitors` row, schema v18.
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [Index](index.md), [GitHub issues](sources/github-issues.md): #457.
+
+## [2026-10-29] ingest | OCPP 2.x variable monitoring: boot gate, Delta baseline, type change (#457 review)
+
+- No `NotifyEvent` until BootNotification is `Accepted` (B02.FR.02), nor between a disconnect and the next `Accepted` boot; thresholds keep the state last reported
+  and are re-checked on `Accepted`, which also sends the `cleared` of a restored trigger already back in range (N07.FR.14).
+- A Delta filtered by the level or the `transaction` flag keeps its baseline (N07.FR.18: « since the last time this event notice was sent »).
+- A triggered threshold replaced by a monitor of another type that is not triggered sends `cleared` for the old monitor (N07.FR.11).
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): the above, the `Rejected` check for a mapped key the station lacks, and new limits (bounds not
+  published, `evse` / `instance` ignored to resolve the variable, one `NotifyEvent` per value change).
+- [State persistence](concepts/state-persistence.md): `variable_monitors.triggered` holds the flag as last reported.

@@ -8,6 +8,7 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["SampledDataCtrlr/TxUpdatedInterval", "MeterValueSampleInterval"],
   ["SampledDataCtrlr/TxUpdatedMeasurands", "MeterValuesSampledData"],
   ["AlignedDataCtrlr/Interval", "ClockAlignedDataInterval"],
+  ["AlignedDataCtrlr/Measurands", "MeterValuesAlignedData"],
   ["LocalAuthListCtrlr/Enabled", "LocalAuthListEnabled"],
   ["LocalAuthListCtrlr/ItemsPerMessage", "SendLocalListMaxLength"],
   ["AuthCtrlr/AuthorizeRemoteStart", "AuthorizeRemoteTxRequests"],

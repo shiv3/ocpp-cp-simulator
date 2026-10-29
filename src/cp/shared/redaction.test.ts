@@ -687,6 +687,17 @@ describe("text redactor parity with the structured redactor (#515)", () => {
     },
   );
 
+  // A long `-` / `_` run made the unanchored name pattern backtrack from
+  // every position: about a minute for 200k characters of a CSMS frame.
+  it("stays linear on a long separator run", { timeout: 2000 }, () => {
+    for (const text of [
+      "_".repeat(200_000),
+      `password${"_".repeat(200_000)}`,
+    ]) {
+      expect(redactSensitiveText(text)).toBe(text);
+    }
+  });
+
   it("keeps a longer name in the structured redactor", () => {
     // The text redactor is stricter here: the structured one drops a field
     // only under an exact key name.

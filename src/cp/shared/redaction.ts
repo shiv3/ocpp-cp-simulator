@@ -21,11 +21,13 @@ const SENSITIVE_KEY_NAMES = new Set([
  * that ends in a key name above under the `normalizeKeyName` rule (any case,
  * `-` and `_` anywhere), quoted or not. A suffix, as the spelling list it
  * replaces matched (#515): `api_password` and `OED_API_KEY` are secrets.
+ * No leading `[-_]*`: the match is unanchored, so it adds nothing, and on a
+ * long `_` run it backtracks from every position (quadratic).
  */
 const SENSITIVE_NAME_VARIANTS = [...SENSITIVE_KEY_NAMES]
   .map((name) => name.split("").join("[-_]*"))
   .join("|");
-const SENSITIVE_ASSIGNMENT_NAME = `"?[-_]*(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
+const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
 /**
  * A quoted value is confined to its line: it ends at the first unescaped
  * closing quote on that line (`"ab\"cd"` is one value), or, when none comes

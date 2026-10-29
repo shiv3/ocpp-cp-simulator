@@ -1763,3 +1763,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Log format](concepts/log-format.md): Redaction section names `basicAuthPassword` and the duplicate-member rule.
 - [CLI → CSMS call events](entities/cli.md#csms-call-events): Redaction bullet names the 2.1 field.
 - [GitHub issues](sources/github-issues.md): #401 row.
+
+## [2026-10-29] ingest | Redact the SetNetworkProfile SIM PIN (#401)
+
+- `connectionData.apn.simPin` (an integer, 2.0.1 and 2.1) is the SIM card PIN; it is now a sensitive key name, dropped from structured payloads and `[redacted]` (unquoted, like any bare value) in a logged frame.
+- [Log format](concepts/log-format.md): Redaction section names `simPin`.
+- [CLI → CSMS call events](entities/cli.md#csms-call-events): Redaction bullet names `apn.simPin`.
+- [GitHub issues](sources/github-issues.md): #401 row.

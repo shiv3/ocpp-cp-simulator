@@ -394,6 +394,29 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
     });
   });
 
+  it("redacts the numeric SIM PIN in both redactors", () => {
+    const payload = setNetworkProfile();
+    const withPin = {
+      ...payload,
+      connectionData: {
+        ...payload.connectionData,
+        apn: { ...payload.connectionData.apn, simPin: 9731 },
+      },
+    };
+
+    const structured = redactSensitiveValue(withPin) as typeof withPin;
+    expect(JSON.stringify(structured)).not.toContain("9731");
+    expect(structured.connectionData.apn).not.toHaveProperty("simPin");
+    expect(structured.connectionData.apn.apnUserName).toBe("apnUSER");
+
+    const text = redactSensitiveText(
+      `Received: [2,"m1","SetNetworkProfile",${JSON.stringify(withPin)}]`,
+    );
+    expect(text).not.toContain("9731");
+    expect(text).toContain(`"simPin":${REDACTED_VALUE}`);
+    expect(text).toContain("apnUSER");
+  });
+
   it("redacts every duplicate vpn and key member, not only the first", () => {
     // JSON.parse keeps the last duplicate, so a first-match redaction would
     // hide a decoy and log the value the station actually uses.

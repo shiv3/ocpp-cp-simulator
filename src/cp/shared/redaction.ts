@@ -10,12 +10,15 @@ const SENSITIVE_KEY_NAMES = new Set([
   "basicauthpassword",
   "password",
   "privatekey",
+  // 2.0.1 / 2.1 SetNetworkProfile `connectionData.apn.simPin`, an integer
+  // (#401).
+  "simpin",
   "tlskey",
 ]);
 
 /** The names the text redactor matches in `name: value` / `name=value`. */
 const SENSITIVE_ASSIGNMENT_NAMES =
-  "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
+  "AuthorizationKey|authorizationKey|password|apnPassword|basicAuthPassword|BasicAuthPassword|simPin|privateKey|PrivateKey|tlsKey|TlsKey|apiKey|ApiKey|api_key|API_KEY";
 const SENSITIVE_ASSIGNMENT = new RegExp(
   `((?:"?(?:${SENSITIVE_ASSIGNMENT_NAMES})"?)\\s*[:=]\\s*)(["'])(.*?)\\2`,
   "g",

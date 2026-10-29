@@ -59,14 +59,15 @@ it replaces with `[redacted]`:
 
 - the `value` of a 1.6 `{ "key", "value" }` entry whose key is
   `AuthorizationKey` (or another sensitive key name: `ApiKey`, `ApnPassword`,
-  `BasicAuthPassword`, `Password`, `PrivateKey`, `TlsKey`) — a
+  `BasicAuthPassword`, `Password`, `PrivateKey`, `SimPin`, `TlsKey`) — a
   `ChangeConfiguration`, a `GetConfiguration` answer;
 - the `attributeValue` of a 2.0.1 `{ "variable": { "name" }, "attributeValue" }`
   entry whose variable is `BasicAuthPassword` or `AuthorizationKey` (or
   another of those key names) — a `SetVariables` request, a `GetVariables`
   answer (#400);
-- in a 2.0.1 / 2.1 `SetNetworkProfile`, the `apnPassword` of
-  `connectionData.apn`, the `key` (VPN shared secret) of
+- in a 2.0.1 / 2.1 `SetNetworkProfile`, the `apnPassword` and the integer
+  `simPin` (SIM card PIN) of `connectionData.apn`, the `key` (VPN shared
+  secret) of
   `connectionData.vpn` and, in 2.1, `connectionData.basicAuthPassword`
   (#401). `vpn.password` was already caught as a `password` field;
   `connectionData.identity` stays readable. A `key` field outside a `vpn`
@@ -77,7 +78,7 @@ payload and to scenario reports ([CLI → CSMS call events](../entities/cli.md#c
 with one predicate for the variable names, so for the fields above a frame's
 log line and its event hide the same values. They differ in form: where the
 log line shows `[redacted]` for a field named after a secret (`password`,
-`apnPassword`, `basicAuthPassword`, `apiKey`, …), the structured redactor
+`apnPassword`, `basicAuthPassword`, `simPin`, `apiKey`, …), the structured redactor
 drops the field. Field names do not match alike either: the text redactor
 knows only the spellings listed in `redaction.ts`, so a `Password` or
 `tls_key` field stays readable in a log line, while the structured redactor

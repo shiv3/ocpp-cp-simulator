@@ -804,7 +804,7 @@ the OCPP answer are unchanged.
   `ChangeConfiguration` of `AuthorizationKey` and a 2.x `SetVariables` of
   `BasicAuthPassword` / `AuthorizationKey` carry `[redacted]` as the value;
   a 2.x `SetNetworkProfile` carries `[redacted]` as `vpn.key` and has no
-  `apn.apnPassword` / `vpn.password` field, nor a 2.1
+  `apn.apnPassword` / `apn.simPin` / `vpn.password` field, nor a 2.1
   `connectionData.basicAuthPassword` (#401).
   The `Received:` log line of the same OCPP-J frame hides those values too
   ([Log format → Redaction](../concepts/log-format.md#redaction), #400).

@@ -28,6 +28,7 @@ import {
   type EVSettings,
   type EVSettingsPatch,
   assertRequiredFieldsKept,
+  defaultEVSettings,
   getDefaultEVSettings,
   withoutNulls,
 } from "./EVSettings";
@@ -739,11 +740,13 @@ export class Connector {
    * Whether a session is running right now: a transaction that has begun and
    * not yet stopped.
    *
-   * Deliberately not "a transaction object is attached". When a
-   * `StartTransaction` is rejected, or comes back a CALLERROR,
-   * `ChargePoint.cleanTransaction` stamps `stopTime` and leaves the object on
-   * the connector — so the connector is logically idle with a transaction
-   * still hanging off it. `ChargePoint.startTransaction` already asks the
+   * Deliberately not "a transaction object is attached".
+   * `ChargePoint.cleanTransaction` stamps `stopTime` without detaching the
+   * object, and a `connector_runtime` snapshot persisted before #491 (when a
+   * CALLERROR start stayed attached) restores one that way — so the connector
+   * can be logically idle with a transaction still hanging off it.
+   * `ChargePoint.stopTransaction` asks this before stopping (#491), and
+   * `ChargePoint.startTransaction` already asks the
    * question this way before refusing a duplicate start; asking it the same
    * way here is what lets a hand retry after a rejection behave like a first
    * attempt, which is precisely when an operator is most likely to be typing
@@ -830,13 +833,20 @@ export class Connector {
   }
 
   /**
-   * Default-EV-settings propagation (#105): replaces the settings wholesale,
-   * same as the `evSettings` setter, but only when no override is active —
+   * Default-EV-settings propagation (#105), only when no override is active —
    * a running scenario/explicit override wins over this until cleared.
+   *
+   * Merged onto the built-in {@link defaultEVSettings} (#333), as
+   * {@link applyEvSettingsOverride} merges onto the current settings: a field
+   * the default omits reads back as the built-in value rather than vanishing,
+   * so a partial `ev_settings.apply_default` can no longer leave a required
+   * field such as `initialSoc` absent. Onto the constant, not the current
+   * settings: a default that names no `chargingCurve` describes a car without
+   * one, so nothing of an earlier default or override carries over.
    */
-  applyDefaultEvSettings(settings: EVSettings): void {
+  applyDefaultEvSettings(settings: EVSettingsPatch): void {
     if (this._evSettingsOverridden) return;
-    this.evSettings = { ...settings };
+    this.evSettings = { ...defaultEVSettings, ...settings } as EVSettings;
   }
 
   /**
@@ -1135,11 +1145,14 @@ export class Connector {
       // and clears the value already.
       //
       // `EVSettings.initialSoc` is typed `number`, so TypeScript believes this
-      // is unreachable. It is not: `applyDefaultEvSettings` replaces the
-      // settings wholesale, and the control plane's
-      // `ev_settings.apply_default` validates only `z.object({ settings:
-      // OBJ() })` before casting — so a client that omits `initialSoc` lands
-      // here. (`applyEvSettingsOverride` merges and cannot.)
+      // is unreachable. Until #333 it was not: `applyDefaultEvSettings`
+      // replaced the settings wholesale, so an `ev_settings.apply_default`
+      // that omitted `initialSoc` landed here. Both entry points now merge
+      // (`applyEvSettingsOverride` onto the current settings,
+      // `applyDefaultEvSettings` onto `defaultEVSettings`), so no known write
+      // drops it. The branch stays as the guard for settings cast past the
+      // type: the `evSettings` setter refuses a `null` required field, not an
+      // absent one.
       if (this.socPercent !== null) {
         this.socPercent = null;
         this.eventsEmitter.emit("socChange", { soc: null });

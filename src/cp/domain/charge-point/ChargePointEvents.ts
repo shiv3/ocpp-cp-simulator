@@ -192,7 +192,8 @@ export interface ChargePointEvents {
   /** Emitted when the CSMS answers StartTransaction.req with a CALLERROR
    *  (#447), once the connector's transaction is closed (its stop time and
    *  meter stamped): it never started on the CSMS side, and no
-   *  StopTransaction.req follows. */
+   *  StopTransaction.req follows. Listeners still find it on the connector;
+   *  it is detached right after, so no stop path reaches it (#491). */
   transactionStartFailed: {
     connectorId: number;
     errorCode: string;

@@ -9,6 +9,7 @@ sources:
   - src/cp/domain/persistence/SqliteChargingSessionRepository.ts
   - src/protocol/methods.ts (sessions.list)
   - "issue #447"
+  - "issue #491"
 related:
   - operational-timeline.md
   - state-persistence.md
@@ -18,7 +19,7 @@ related:
   - ../entities/web-console.md
   - ../entities/cli.md
   - local-vs-remote-mode.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Charging sessions
@@ -93,7 +94,15 @@ Two domain gaps were closed so these outcomes can be told apart:
 - **1.6 StartTransaction CALLERROR.** The station already closed the
   transaction (stop time and meter stamped) and went back to Available; it
   now also emits `transactionStartFailed`, once the transaction is closed and
-  before Available. No StopTransaction.req follows.
+  before Available. No StopTransaction.req follows. Once the listeners have
+  read it, the closed transaction is detached from the connector (#491). A
+  later Reset or UnlockConnector finds no transaction there and sends no
+  StopTransaction.req for it (one used to go out with the placeholder
+  `transactionId: 0`); a RemoteStopTransaction for id `0` is `Rejected`, and
+  ChangeAvailability is `Accepted` at once rather than `Scheduled`.
+  `ChargePoint.stopTransaction` also ignores a transaction whose stop time is
+  already set, such as one restored from a `connector_runtime` snapshot
+  persisted before this fix.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
@@ -121,7 +130,7 @@ A session still open when the same connector starts another transaction lost
 its end; it is closed as `interrupted`, and so is the running session of a
 connector that is removed (removal does not stop the transaction). A stop
 with no running session on its connector is ignored: the transaction already
-ended, e.g. a failed start that a reset stops again.
+ended.
 
 ## Persistence and restarts
 
@@ -183,8 +192,5 @@ browser reload (which restores none) leaves it `interrupted`.
   ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet
   ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
-- After a failed 1.6 start, a Reset or UnlockConnector still sends a
-  StopTransaction.req for it (`transactionId: 0`); the history ignores that
-  second stop ([#491](https://github.com/shiv3/ocpp-cp-simulator/issues/491)).
 - Local mode does not drop a removed charge point's sessions until
   `state.reset`.

@@ -980,9 +980,10 @@ describe("a curve is offset by its own start, not by the register (#301)", () =>
 
 describe("a rejected start leaves the connector idle for SoC purposes (#301)", () => {
   /**
-   * `ChargePoint.cleanTransaction` stamps `stopTime` and deliberately leaves
-   * the transaction object attached, so after a rejected `StartTransaction`
-   * the connector is logically idle with a transaction still hanging off it.
+   * `ChargePoint.cleanTransaction` stamps `stopTime` and leaves the
+   * transaction object attached (a failed start was left that way until #491,
+   * and a snapshot persisted then restores it so), so the connector is
+   * logically idle with a transaction still hanging off it.
    * Asking "is a transaction attached?" rather than "is one running?" marked
    * everything typed afterwards as belonging to that stopped session — and
    * the retry then discarded it, at exactly the moment an operator is most
@@ -1198,19 +1199,16 @@ describe("a session with no opening SoC anywhere starts from the fallback (#301)
    * and the auto-stop therefore ran on the finished session's battery: for one
    * interval with meter/SoC sync on, and for the whole session with it off.
    *
-   * `EVSettings.initialSoc` is typed `number`, so this state is reached the
-   * way production reaches it — `applyDefaultEvSettings`, which replaces the
-   * settings wholesale and is fed by the control plane's
-   * `ev_settings.apply_default` (validated only as `z.object({ settings:
-   * OBJ() })`). The cast below is the evidence that the type is not enforced
-   * at that boundary, not a convenience.
+   * `EVSettings.initialSoc` is typed `number`. Production used to reach this
+   * state through `applyDefaultEvSettings`, which replaced the settings
+   * wholesale; since #333 it merges onto `defaultEVSettings` and no known write
+   * drops the field. The guard stays for settings cast past the type, which is
+   * what the setter write below does.
    */
   function settingsWithoutInitialSoc(connector: Connector): void {
     const { initialSoc: _dropped, ...rest } = connector.evSettings;
     void _dropped;
-    connector.applyDefaultEvSettings(
-      rest as unknown as typeof connector.evSettings,
-    );
+    connector.evSettings = rest as unknown as typeof connector.evSettings;
   }
 
   it("clears a leftover SoC when neither the transaction nor the settings name one", () => {

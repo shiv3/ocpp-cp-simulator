@@ -82,6 +82,7 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import { MonitoringStore } from "../monitoring/MonitoringStore";
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
@@ -214,6 +215,8 @@ export class ChargePoint {
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
   private readonly _certificateStore = new CertificateStore();
+  // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
+  private readonly _monitoring = new MonitoringStore();
   private readonly _configuration: ConfigurationStore;
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
@@ -815,6 +818,11 @@ export class ChargePoint {
 
   get localAuthListManager(): LocalAuthListManager {
     return this._localAuthListManager;
+  }
+
+  /** OCPP 2.x variable monitors (SetVariableMonitoring, #457). */
+  get monitoring(): MonitoringStore {
+    return this._monitoring;
   }
 
   /** Read-only: install and remove profiles with `applyChargingProfile` /

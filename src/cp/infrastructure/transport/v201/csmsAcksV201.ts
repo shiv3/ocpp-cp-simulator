@@ -2,8 +2,6 @@
 import type {
   CertificateSignedResponseV201,
   ClearDisplayMessageResponseV201,
-  ClearVariableMonitoringRequestV201,
-  ClearVariableMonitoringResponseV201,
   CostUpdatedResponseV201,
   CustomerInformationResponseV201,
   DataTransferResponseV201,
@@ -12,17 +10,13 @@ import type {
   GetInstalledCertificateIdsResponseV201,
   GetLocalListVersionResponseV201,
   GetLogResponseV201,
-  GetMonitoringReportResponseV201,
   InstallCertificateResponseV201,
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
   SendLocalListResponseV201,
   SetDisplayMessageResponseV201,
   SetMonitoringBaseResponseV201,
-  SetMonitoringLevelResponseV201,
   SetNetworkProfileResponseV201,
-  SetVariableMonitoringRequestV201,
-  SetVariableMonitoringResponseV201,
   UnpublishFirmwareResponseV201,
   UpdateFirmwareResponseV201,
   UpdateFirmwareRequestV201,
@@ -45,14 +39,6 @@ type V201AckHandler = (
   ctx: V201InboundContext,
 ) => V201HandlerResult;
 
-type SetMonitoringResult =
-  SetVariableMonitoringResponseV201["setMonitoringResult"][number];
-type SetMonitoringResultTuple =
-  SetVariableMonitoringResponseV201["setMonitoringResult"];
-type ClearMonitoringResult =
-  ClearVariableMonitoringResponseV201["clearMonitoringResult"][number];
-type ClearMonitoringResultTuple =
-  ClearVariableMonitoringResponseV201["clearMonitoringResult"];
 type DomainAuthStatus = LocalAuthorizationEntry["status"];
 
 function toDomainAuthStatus(s: AuthorizationStatusEnumType): DomainAuthStatus {
@@ -85,22 +71,10 @@ function toV201SendLocalListStatus(
   }
 }
 
-export const handleGetMonitoringReportAckV201 = (() => ({
-  response: {
-    status: "EmptyResultSet",
-  } satisfies GetMonitoringReportResponseV201,
-})) satisfies V201AckHandler;
-
 export const handleSetMonitoringBaseAckV201 = (() => ({
   response: {
     status: "NotSupported",
   } satisfies SetMonitoringBaseResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleSetMonitoringLevelAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies SetMonitoringLevelResponseV201,
 })) satisfies V201AckHandler;
 
 export const handleSetNetworkProfileAckV201 = (() => ({
@@ -304,38 +278,3 @@ export const handleGetLocalListVersionAckV201 = ((
 export const handleCostUpdatedAckV201 = (() => ({
   response: {} satisfies CostUpdatedResponseV201,
 })) satisfies V201AckHandler;
-
-export const handleSetVariableMonitoringAckV201 = ((p: unknown) => {
-  const req = p as SetVariableMonitoringRequestV201;
-  const results: SetMonitoringResult[] = req.setMonitoringData.map(
-    (d): SetMonitoringResult => ({
-      status: "Rejected",
-      type: d.type,
-      component: d.component,
-      variable: d.variable,
-      severity: d.severity,
-    }),
-  );
-
-  return {
-    response: {
-      setMonitoringResult: results as SetMonitoringResultTuple,
-    } satisfies SetVariableMonitoringResponseV201,
-  };
-}) satisfies V201AckHandler;
-
-export const handleClearVariableMonitoringAckV201 = ((p: unknown) => {
-  const req = p as ClearVariableMonitoringRequestV201;
-  const results: ClearMonitoringResult[] = req.id.map(
-    (id): ClearMonitoringResult => ({
-      status: "NotFound",
-      id,
-    }),
-  );
-
-  return {
-    response: {
-      clearMonitoringResult: results as ClearMonitoringResultTuple,
-    } satisfies ClearVariableMonitoringResponseV201,
-  };
-}) satisfies V201AckHandler;

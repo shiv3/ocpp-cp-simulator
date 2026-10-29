@@ -15,6 +15,9 @@ import type {
   MeterValuesRequestV201,
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
+  ClearVariableMonitoringRequestV201,
+  SetMonitoringLevelRequestV201,
+  SetVariableMonitoringRequestV201,
   SetVariablesRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
@@ -67,7 +70,6 @@ import { buildBaseReportData } from "./baseReportV201";
 import {
   handleCertificateSignedAckV201,
   handleClearDisplayMessageAckV201,
-  handleClearVariableMonitoringAckV201,
   handleCostUpdatedAckV201,
   handleCustomerInformationAckV201,
   handleDataTransferAckV201,
@@ -76,15 +78,12 @@ import {
   handleGetInstalledCertificateIdsAckV201,
   handleGetLocalListVersionAckV201,
   handleGetLogAckV201,
-  handleGetMonitoringReportAckV201,
   handleInstallCertificateAckV201,
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
   handleSetDisplayMessageAckV201,
   handleSetMonitoringBaseAckV201,
-  handleSetMonitoringLevelAckV201,
   handleSetNetworkProfileAckV201,
-  handleSetVariableMonitoringAckV201,
   handleUnpublishFirmwareAckV201,
   handleUpdateFirmwareAckV201,
 } from "./csmsAcksV201";
@@ -99,6 +98,13 @@ import {
 } from "./coreControlV201";
 import { handleGetVariablesV201 } from "./getVariablesV201";
 import { handleSetVariablesV201 } from "./setVariablesV201";
+import {
+  createGetMonitoringReportHandlerV201,
+  handleClearVariableMonitoringV201,
+  handleSetMonitoringLevelV201,
+  handleSetVariableMonitoringV201,
+  type NotifyMonitoringReportPayload,
+} from "./variableMonitoringV201";
 import {
   handleGetTransactionStatusV201,
   handleRequestStartTransactionV201,
@@ -120,6 +126,8 @@ export type V201Action =
   | "Authorize"
   | "DataTransfer"
   | "NotifyReport"
+  // #457: N02 report answering GetMonitoringReport.
+  | "NotifyMonitoringReport"
   | "ReportChargingProfiles"
   // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
   | "FirmwareStatusNotification"
@@ -134,6 +142,7 @@ export type V201RequestPayload =
   | AuthorizeRequestV201
   | DataTransferRequestV201
   | NotifyReportRequestV201
+  | NotifyMonitoringReportPayload
   | ReportChargingProfilesRequestV201
   | FirmwareStatusNotificationRequestV201
   | LogStatusNotificationRequestV201;
@@ -372,7 +381,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "GetMonitoringReport",
       {
         validate: isValidGetMonitoringReportRequestV201,
-        handle: handleGetMonitoringReportAckV201,
+        handle: createGetMonitoringReportHandlerV201("v201"),
       },
     ],
     [
@@ -386,7 +395,12 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "SetMonitoringLevel",
       {
         validate: isValidSetMonitoringLevelRequestV201,
-        handle: handleSetMonitoringLevelAckV201,
+        handle: (p, ctx) => ({
+          response: handleSetMonitoringLevelV201(
+            p as SetMonitoringLevelRequestV201,
+            ctx.chargePoint.monitoring,
+          ),
+        }),
       },
     ],
     [
@@ -512,14 +526,25 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "SetVariableMonitoring",
       {
         validate: isValidSetVariableMonitoringRequestV201,
-        handle: handleSetVariableMonitoringAckV201,
+        handle: (p, ctx) => ({
+          response: handleSetVariableMonitoringV201(
+            p as SetVariableMonitoringRequestV201,
+            ctx.chargePoint.monitoring,
+            ctx.chargePoint.configuration,
+          ),
+        }),
       },
     ],
     [
       "ClearVariableMonitoring",
       {
         validate: isValidClearVariableMonitoringRequestV201,
-        handle: handleClearVariableMonitoringAckV201,
+        handle: (p, ctx) => ({
+          response: handleClearVariableMonitoringV201(
+            p as ClearVariableMonitoringRequestV201,
+            ctx.chargePoint.monitoring,
+          ),
+        }),
       },
     ],
   ]);

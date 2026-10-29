@@ -22,7 +22,8 @@ related:
   - trace-format.md
   - scenario-format.md
   - charging-sessions.md
-updated: 2026-10-28
+  - variable-monitoring.md
+updated: 2026-10-29
 ---
 
 # OCPP versions and transports
@@ -38,6 +39,10 @@ updated: 2026-10-28
 
 Message types and validators for the JSON versions are generated from the
 [vendored OCA schemas](../sources/vendored-ocpp-schemas.md).
+
+On 2.0.1 and 2.1, `SetVariableMonitoring`, `ClearVariableMonitoring`,
+`GetMonitoringReport` and `SetMonitoringLevel` act on a stored monitor
+catalog: see [OCPP 2.x variable monitoring](variable-monitoring.md) (#457).
 
 ## Version-agnostic scenarios
 

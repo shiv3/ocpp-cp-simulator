@@ -1839,3 +1839,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
+
+## [2026-10-29] ingest | OCPP 2.x variable monitoring: store, statuses, report (#457)
+
+- `SetVariableMonitoring`, `ClearVariableMonitoring`, `GetMonitoringReport` and `SetMonitoringLevel` no longer answer fixed stubs on 2.0.1 / 2.1: the station keeps custom
+  `UpperThreshold` / `LowerThreshold` / `Delta` monitors on the device-model variables, answers per-item statuses with their N04 / N06 requirement ids, reports them through
+  one `NotifyMonitoringReport` (2.1 adds `eventNotificationType`) and stores the monitoring level. `GetBaseReport` / `GetReport` now say `supportsMonitoring: true`.
+- Not yet: `NotifyEvent` evaluation, level filtering, persistence; `SetMonitoringBase` stays `NotSupported`.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new page.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md): link to it.
+- [Index](index.md), [GitHub issues](sources/github-issues.md): #457.

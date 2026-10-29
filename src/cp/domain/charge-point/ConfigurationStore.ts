@@ -168,6 +168,18 @@ export class ConfigurationStore {
     );
   }
 
+  /** Canonical key `ClockAlignedDataInterval` (seconds); default `0` = no
+   *  clock-aligned data (#454). */
+  clockAlignedDataInterval(): number {
+    return this.getInteger("ClockAlignedDataInterval") ?? 0;
+  }
+
+  /** Canonical key `MeterValuesAlignedData`; default `[]`, which sends no
+   *  clock-aligned sample at all (#454). */
+  meterValuesAlignedData(): string[] {
+    return this.getArray("MeterValuesAlignedData") ?? [];
+  }
+
   /** Canonical key `TransactionMessageAttempts`; default `3`. */
   transactionMessageAttempts(): number {
     return this.getInteger("TransactionMessageAttempts") ?? 3;

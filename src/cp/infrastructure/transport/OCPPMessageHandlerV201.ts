@@ -55,6 +55,7 @@ import type {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  type MeterSampleOverrides,
   type ReadingContext,
   type SampledValue,
 } from "../../domain/connector/MeterValueBuilder";
@@ -804,11 +805,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       transaction.cpLastTransactionEventChargingState = options.chargingState;
     }
     connector.markTransactionChanged();
-    const timestamp = new Date().toISOString();
+    const timestamp = (options.timestamp ?? new Date()).toISOString();
 
     let meterValue: TransactionEventRequestV201["meterValue"];
     if (options.meterValues) {
       const measurands =
+        options.measurands ??
         this._chargePoint.configuration.meterValuesSampledData();
       const sampledValue = this.toV201SampledValues(
         buildSampledValues(
@@ -880,6 +882,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     _transactionId: number | undefined,
     connectorId: number,
     context: ReadingContext = "Sample.Periodic",
+    overrides: MeterSampleOverrides = {},
   ): void {
     const messageId = this.generateMessageId();
     const connector = this._chargePoint.getConnector(connectorId);
@@ -891,7 +894,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
-    const measurands = this._chargePoint.configuration.meterValuesSampledData();
+    const measurands =
+      overrides.measurands ??
+      this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
     if (sampledValues.length === 0) {
       this._logger.debug(
@@ -910,7 +915,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       evseId: v201MeterEvseId(connectorId),
       meterValue: [
         {
-          timestamp: new Date().toISOString(),
+          timestamp: (overrides.timestamp ?? new Date()).toISOString(),
           sampledValue,
         },
       ],

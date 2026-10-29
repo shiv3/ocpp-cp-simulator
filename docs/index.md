@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # Index
@@ -38,7 +38,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [State persistence](concepts/state-persistence.md)                       | SQLite schema shared by daemon (`--state-db`) and browser (sql.js); table catalog; `state.reset`                                                  |
 | [Log format](concepts/log-format.md)                                     | One log-line shape across stderr, `logs` table, browser download and `logs.get`; newest-first `limit` windowing; retention                        |
 | [Network simulation](concepts/network-simulation.md)                     | Seeded latency / disconnect fault injection; layering and null semantics; RPC methods; timer behaviors; limitations                               |
-| [Operational timeline](concepts/operational-timeline.md)                 | Per-CP in-memory event projection: stable kinds, `seq` order, fault incidents with recovery time, run attribution; `timeline.get` (#448)          |
+| [Operational timeline](concepts/operational-timeline.md)                 | Per-CP in-memory event projection: stable kinds, `seq` order, fault incidents with recovery time, runs, profiles; `timeline.get` (#448, #469)     |
 | [Access control](concepts/access-control.md)                             | Bind gate, Basic Auth gate, CORS policy table, reverse-proxy 403 fix (`--cors-origin` / `--trust-forwarded-headers`)                              |
 | [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) | 1.6J / 2.0.1 / 2.1 over WebSocket and 1.2 / 1.5 / 1.6S over SOAP; callback URL precedence; per-surface support                                    |
 | [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security extension messages and keys                                                                     |

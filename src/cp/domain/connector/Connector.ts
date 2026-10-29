@@ -42,7 +42,12 @@ import {
   resolveSocForCurve,
   withNormalizedChargingCurve,
 } from "./ChargingCurve";
-import type { ChargingProfileStore } from "../charge-point/ChargingProfileStore";
+import {
+  partitionProfiles,
+  upsertProfile,
+  type ChargingProfileStore,
+  type ProfileRemoveCriteria,
+} from "../charge-point/ChargingProfileStore";
 
 export interface ChargingSchedulePeriod {
   startPeriod: number;
@@ -935,58 +940,31 @@ export class Connector {
 
   /**
    * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
+   * @returns Whether a profile with the same ID was replaced
    */
-  addChargingProfile(profile: ActiveChargingProfile): void {
-    // Remove existing profile with same ID
-    this._chargingProfiles = this._chargingProfiles.filter(
-      (p) => p.chargingProfileId !== profile.chargingProfileId,
+  addChargingProfile(profile: ActiveChargingProfile): boolean {
+    const { profiles, replaced } = upsertProfile(
+      this._chargingProfiles,
+      profile,
     );
-    // Add new profile
-    this._chargingProfiles.push(profile);
+    this._chargingProfiles = profiles;
     this.emitProfileChanges();
+    return replaced;
   }
 
   /**
-   * Remove charging profiles matching the given criteria
-   * @param criteria Filter criteria (profileId, connectorId, purpose, stackLevel)
-   * @returns Number of profiles removed
+   * Remove the charging profiles matching every given criterion
+   * @returns The removed profiles
    */
-  removeChargingProfiles(criteria: {
-    profileId?: number;
-    connectorId?: number;
-    purpose?: ChargingProfilePurposeType;
-    stackLevel?: number;
-  }): number {
-    const before = this._chargingProfiles.length;
-    this._chargingProfiles = this._chargingProfiles.filter((profile) => {
-      if (
-        criteria.profileId != null &&
-        profile.chargingProfileId !== criteria.profileId
-      ) {
-        return true; // Keep (doesn't match filter)
-      }
-      if (
-        criteria.connectorId != null &&
-        profile.connectorId !== criteria.connectorId
-      ) {
-        return true;
-      }
-      if (
-        criteria.purpose != null &&
-        profile.chargingProfilePurpose !== criteria.purpose
-      ) {
-        return true;
-      }
-      if (
-        criteria.stackLevel != null &&
-        profile.stackLevel !== criteria.stackLevel
-      ) {
-        return true;
-      }
-      return false; // Remove (matches all criteria)
-    });
-    const removed = before - this._chargingProfiles.length;
-    if (removed > 0) {
+  takeChargingProfiles(
+    criteria: ProfileRemoveCriteria,
+  ): ActiveChargingProfile[] {
+    const { kept, removed } = partitionProfiles(
+      this._chargingProfiles,
+      criteria,
+    );
+    this._chargingProfiles = kept;
+    if (removed.length > 0) {
       this.emitProfileChanges();
     }
     return removed;

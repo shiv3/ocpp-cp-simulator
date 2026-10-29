@@ -2,7 +2,8 @@
  * Operational timeline (#448): a per-charge-point, in-memory projection of
  * the domain events that matter when reconstructing an incident — connection
  * loss and recovery, injected network faults, status transitions,
- * transactions, authorization rejections and scenario runs.
+ * transactions, authorization rejections, scenario runs and smart-charging
+ * profile changes (#469).
  *
  * It is an additional view: raw logs stay untouched, and scenario runs are
  * linked by `runId`, never copied. The kind vocabulary and the correlation
@@ -12,7 +13,7 @@
 import { selectLogWindow, type LogWindowOptions } from "../../shared/window";
 
 /** Bumped by minor for additive changes; consumers ignore unknown kinds. */
-export const TIMELINE_FORMAT_VERSION = "1.0";
+export const TIMELINE_FORMAT_VERSION = "1.1";
 
 export const TIMELINE_KINDS = [
   "connected",
@@ -32,6 +33,9 @@ export const TIMELINE_KINDS = [
   "scenario_wait_changed",
   "scenario_error",
   "scenario_finished",
+  "charging_profile_applied",
+  "charging_profile_cleared",
+  "charging_profile_expired",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];

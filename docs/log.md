@@ -1729,3 +1729,6 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `recovery_completed.durationMs` and the fault / recovery entries' timestamps read the clock separately, so they could differ by a millisecond and `operationalTimeline.integration.bun.test.ts` (durationMs = recovery − fault timestamp) failed intermittently. A timeline record can now carry the instant it is stamped with (`at`), and the projector uses the same clock reading for the incident's start and the fault entry, and for the duration and the recovery entry ([Operational timeline](concepts/operational-timeline.md)).
 
+## [2026-10-29] ingest | No second Preparing on a start after Plug in (#496)
+
+- `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).

@@ -1780,3 +1780,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The escape-aware pattern needed a closing quote, so a truncated value (`"password":"ab\"cd` or `password="abc` at the end of a message) was no longer matched at all and leaked whole. A quoted secret without a closing quote on its line is now redacted to the end of that line; a backslash-newline is consumed as an escape.
 - [Log format](concepts/log-format.md): Redaction section states the end-of-line rule.
+
+## [2026-10-29] ingest | Redact multi-line quoted secrets to their closing quote (#401 review)
+
+- The quoted-value pattern stopped at a raw newline, so a multi-line `privateKey="-----BEGIN…"` in non-JSON text had its later PEM lines logged in clear (on `main` the whole value leaked). A quoted secret now runs to its first unescaped closing quote across lines; with no closing quote at all, the rest of the message is redacted. Separate assignments still stop at their own closing quotes.
+- [Log format](concepts/log-format.md): Redaction section states the multi-line and end-of-message rules.

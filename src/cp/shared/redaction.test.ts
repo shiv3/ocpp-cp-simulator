@@ -450,7 +450,7 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
 
   it("fails closed on a quoted secret that is never closed", () => {
     // A truncated log line: without a closing quote the value runs to the
-    // end of the line, and the whole of it is redacted.
+    // end of the text, and the whole of it is redacted.
     for (const text of [
       String.raw`Received: {"password":"ab\"cd`,
       'Received: password="abcd',
@@ -462,14 +462,33 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
       expect(redacted).not.toContain("cd");
       expect(redacted).toContain(REDACTED_VALUE);
     }
-    const multiLine = redactSensitiveText(
-      'first {"password":"ab\\"cd\nsecond line',
+    // No closing quote anywhere: everything after the opening quote goes.
+    expect(redactSensitiveText('first {"password":"ab\\"cd\nsecond line')).toBe(
+      `first {"password":"${REDACTED_VALUE}"`,
     );
-    expect(multiLine).not.toContain("cd");
-    expect(multiLine).toContain("\nsecond line");
-    // The next line's quotes do not close the truncated value.
-    expect(redactSensitiveText('password="abcd\nnext "quoted" line')).toBe(
-      `password="${REDACTED_VALUE}"\nnext "quoted" line`,
+    // An unterminated multi-line PEM loses every line after the header.
+    const pem = redactSensitiveText(
+      'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END',
+    );
+    expect(pem).not.toContain("MIIBsecret");
+    expect(pem).not.toContain("BEGIN");
+  });
+
+  it("redacts a closed quoted secret spanning several lines", () => {
+    // A PEM in non-JSON text keeps its raw newlines.
+    expect(
+      redactSensitiveText(
+        'privateKey="-----BEGIN PRIVATE KEY-----\nMIIBsecret\n-----END PRIVATE KEY-----" next=1',
+      ),
+    ).toBe(`privateKey="${REDACTED_VALUE}" next=1`);
+  });
+
+  it("stops each closed quoted secret at its own closing quote", () => {
+    expect(redactSensitiveText('password="a" x privateKey="b"')).toBe(
+      `password="${REDACTED_VALUE}" x privateKey="${REDACTED_VALUE}"`,
+    );
+    expect(redactSensitiveText('password="a"\nx\nprivateKey="b" y')).toBe(
+      `password="${REDACTED_VALUE}"\nx\nprivateKey="${REDACTED_VALUE}" y`,
     );
   });
 

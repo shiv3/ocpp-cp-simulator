@@ -631,8 +631,76 @@ describe("charging sessions schema, v17 (#447)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(Number(version?.value)).toBe(17);
-      expect(SCHEMA_VERSION).toBe(17);
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("startup scenario provenance schema, v18 (#338)", () => {
+  /** The v17 `scenarios` table, which has no `startup_source` column. */
+  function rebuildV17Scenarios(db: BunSqliteDatabase): void {
+    db.exec("DROP TABLE scenarios");
+    db.exec(
+      "CREATE TABLE scenarios (" +
+        "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
+        "scenario_id TEXT NOT NULL, name TEXT NOT NULL, " +
+        "enabled INTEGER NOT NULL, updated_at TEXT NOT NULL, " +
+        "definition TEXT NOT NULL, " +
+        "PRIMARY KEY (cp_id, connector_id, scenario_id))",
+    );
+    db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+  }
+
+  it("adds a nullable startup_source column and keeps every existing row", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      rebuildV17Scenarios(db);
+      // What a v17 database can hold: a user scenario, a stable startup id
+      // (#314) and the clock-suffixed ids older builds minted. None of them
+      // says where it came from.
+      const ids = [
+        "user-authored",
+        "demo-c1",
+        "demo-c1-1757200000000",
+        "essential-cp-behavior-CP-c1-1760000000000-abc123",
+      ];
+      for (const id of ids) {
+        db.run(
+          "INSERT INTO scenarios (cp_id, connector_id, scenario_id, name, " +
+            "enabled, updated_at, definition) VALUES ('CP', 1, ?, ?, 1, " +
+            "'2026-10-01T00:00:00Z', '{}')",
+          [id, id],
+        );
+      }
+
+      runMigrations(db);
+
+      const columns = db
+        .all<{ name: string }>("PRAGMA table_info(scenarios)")
+        .map((c) => c.name);
+      expect(columns).toContain("startup_source");
+      // Nothing dropped, nothing marked: a row written before the column
+      // existed is indistinguishable from a user-authored one, which is the
+      // direction that never deletes it.
+      const rows = db.all<{ scenario_id: string; startup_source: unknown }>(
+        "SELECT scenario_id, startup_source FROM scenarios ORDER BY scenario_id",
+      );
+      expect(rows).toEqual(
+        [...ids]
+          .sort()
+          .map((id) => ({ scenario_id: id, startup_source: null })),
+      );
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+      expect(SCHEMA_VERSION).toBe(18);
+
+      // Re-running the step on a migrated database is a no-op, not an error.
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
     } finally {
       db.close();
     }

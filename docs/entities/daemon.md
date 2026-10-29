@@ -20,7 +20,7 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Daemon (server mode)
@@ -368,6 +368,27 @@ The rules, in the order they bite:
   and `--scenario-template-file` each load a definition onto every selected
   connector, so passing two is refused — at parse time, with a message naming
   the flags it cannot reconcile — rather than silently ranked.
+- **A startup scenario never outlives its configuration** (#338). With
+  `--state-db`, each row a startup flag installs records what generated it —
+  `--scenario=<path>`, `--scenario-template-file=<path>` or
+  `--scenario-template=<id>` in `scenarios.startup_source` (schema v18). On
+  every boot, before the watches are restored and before any charge point
+  dials, each restored charge point loses the marked rows this boot's flags do
+  not call for: a connector `--scenario-connector` no longer names, a file
+  whose own `id` changed, a switched or dropped flag, a charge point no longer
+  in the bootstrap fleet. A row without provenance is never removed — anything
+  loaded over the control plane or the console under an id no flag generated,
+  a console upload replacing a connector's set, and every row written before
+  v18, including the clock-suffixed instances older builds generated (remove
+  those once with `remove_scenario`). When the flag's file cannot be read, or
+  the template id is unknown, nothing is removed on the fleet's charge points.
+  A row keeps its provenance through a re-save under the same id (a `--watch`
+  reload, a `load_scenario` over it) and loses it only with the row. The
+  startup ids are a namespace: a scenario loaded under one of them is the
+  flag's, and so is a charge point's seeded `essential-cp-behavior-c<n>`
+  once `--scenario-template essential-cp-behavior` has loaded over it — a
+  later boot without the flag removes it, and a restored charge point is not
+  seeded again.
 - **Blueprints are not watched; the file a blueprint names is.** A blueprint
   lives in the `blueprints` table (#297 declined a watched blueprint file
   deliberately), so a `blueprint.save` edit never reaches a charge point that

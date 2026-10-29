@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS scenarios (
   enabled      INTEGER NOT NULL,
   updated_at   TEXT NOT NULL,
   definition   TEXT NOT NULL,
+  -- #338: which startup flag generated this row, e.g.
+  -- \`--scenario=/abs/path.json\` or \`--scenario-template=<id>\`. NULL means
+  -- user-authored, and a NULL row is never pruned. Written by the daemon's
+  -- startup install only; a re-save under the same key keeps it, deleting the
+  -- row drops it. Every boot removes the marked rows its flags no longer call
+  -- for — see \`pruneStaleStartupScenarios\` in \`src/cli/server/startServer.ts\`.
+  startup_source TEXT,
   PRIMARY KEY (cp_id, connector_id, scenario_id)
 );
 CREATE INDEX IF NOT EXISTS scenarios_by_cp_conn
@@ -585,6 +592,18 @@ export function runMigrations(db: Database): void {
 
   // v16 → v17 (#447): the `charging_sessions` history table and its index,
   // `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
+
+  // v17 → v18 (#338): `scenarios.startup_source`, what generated a startup
+  // row. Nullable and not backfilled on purpose: a row written before the
+  // column existed cannot say whether a flag or an operator produced it, and
+  // NULL reads as user-authored — the direction in which the startup prune
+  // leaves it alone rather than deleting it.
+  if (stored < 18) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(scenarios)");
+    if (!new Set(cols.map((c) => c.name)).has("startup_source")) {
+      db.exec("ALTER TABLE scenarios ADD COLUMN startup_source TEXT");
+    }
+  }
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

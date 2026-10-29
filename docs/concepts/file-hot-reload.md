@@ -8,13 +8,14 @@ sources:
   - src/cli/server/startServer.ts
   - src/cli/service.ts
   - GitHub issue #314
+  - GitHub issue #338
 related:
   - ../entities/daemon.md
   - ../entities/cli.md
   - state-persistence.md
   - control-plane.md
   - scenario-format.md
-updated: 2026-09-12
+updated: 2026-10-29
 ---
 
 # File hot-reload (`--watch`)
@@ -416,7 +417,8 @@ hold at once and no single position satisfies all three:
    connectors and `--scenario-template-file` both instantiate a per-connector
    copy, and that copy is named `<file's scenario id>-c<connector>` — derived
    from the configuration, not from the clock, so it is the same id on every
-   boot. It has to be: with `--state-db`, a restart restores the previous boot's
+   boot. A built-in `--scenario-template` instance follows since #338:
+   `<template id>-c<connector>`. It has to be: with `--state-db`, a restart restores the previous boot's
    copy, and unless the new one lands on the same key the daemon cannot
    recognise its own previous output. It then loaded a **second** graph beside
    the restored one, which stayed unwatched — a startup registration is not
@@ -427,14 +429,23 @@ hold at once and no single position satisfies all three:
    overwritten by the startup load rather than coexisting with it, the same
    collision `--scenario` already had whenever its file kept its own id.
 
-   A state DB written by a build through `0f6f951` carries the old
-   `<base>-c<connector>-<epoch ms>` ids, which no stable id can ever match. Each
-   boot drops exactly those — that shape, on that connector, for that base id,
-   and nothing else — before loading, so an upgrade self-cleans. Two cases are
-   deliberately **not** pruned, because recognising them needs preparation
-   metadata stored alongside the scenario: a boot that narrows
-   `--scenario-connector`, and a file whose own `id` changed, both leave the
-   previous boot's copy loaded on a connector this boot never touches.
+   **A copy from a configuration no longer in force is removed at boot**
+   (#338). A stable id only recognises the instance the boot is about to
+   create. A boot that narrows `--scenario-connector`, or a file whose own `id`
+   changed, used to leave the previous boot's copy loaded — unwatched and able
+   to auto-start — on a key this boot never touches. Each row a startup flag
+   installs now records what generated it (`scenarios.startup_source`, schema
+   v18), and one rule acts on it: at restore, before the first watch pass and
+   before anything dials, every marked row the boot's flags do not call for is
+   removed. The kept set is the exact claim the first watch pass skips
+   (constraint 2 below), so the rule also covers a
+   switched or dropped flag and a charge point that left the bootstrap fleet.
+   It replaced two narrower prunes: the `<base>-c<connector>-<epoch ms>` match
+   added here for builds through `0f6f951`, and `--scenario-template`'s own
+   per-template cleanup. A row without provenance is never removed, and that
+   includes every row written before v18 — so those clock-suffixed rows stay
+   after an upgrade until an operator removes them. When the flag's file cannot
+   be read, the boot removes nothing on the fleet's charge points.
 
    **The file is read once per boot**, and both the claim above and the load use
    that read. Because the load now happens before the dial, the registration's

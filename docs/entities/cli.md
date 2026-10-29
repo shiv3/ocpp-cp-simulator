@@ -22,7 +22,7 @@ related:
   - ../concepts/trace-format.md
   - open-ev-directory.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -572,6 +572,13 @@ connector, so passing two is refused at parse time with a message naming the
 flags it cannot reconcile — the daemon does not start. They were silently
 ranked before, and the three places in the daemon that derive from these flags
 ranked them differently: see the startup rules in
+[Daemon](daemon.md#file-hot-reload).
+
+**Restarts with `--state-db`.** Each instance a startup flag loads keeps the
+same id across restarts and records which flag generated it. A restart
+removes the startup instances the current flags no longer call for — a
+connector dropped from `--scenario-connector`, a file whose own `id` changed, a switched or dropped flag — and never a scenario
+loaded over the control plane under an id no flag generated (#338). Details:
 [Daemon](daemon.md#file-hot-reload).
 
 ### 4. Client Modes (`--send` / `--events` / `--stop`)

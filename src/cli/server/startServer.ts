@@ -47,6 +47,14 @@ import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
+import {
+  deleteScenarioRow,
+  listStartupScenarioRows,
+  markStartupScenario,
+} from "./startupScenarioRows";
+import { scenarioInstanceId } from "../scenarioInstanceId";
+import { getTemplateById } from "../../utils/scenarioTemplates";
+import * as path from "path";
 
 /**
  * Setup-time chatter from the daemon ("[server] Listening on …",
@@ -343,9 +351,9 @@ export async function startServer(
   //   dial.
   // - *Which charge points is startup about to configure at all?* —
   //   `startupTargets`. Used to hold the dial back, where being narrow is
-  //   wrong: `--scenario-template` and `--scenario-template-file` instantiate a
-  //   fresh id every boot, so they claim nothing and answer the first question
-  //   with an empty set while still being about to reconfigure the connector.
+  //   wrong: a flag whose file cannot be read claims nothing and answers the
+  //   first question with an empty set while still being about to reconfigure
+  //   the charge point.
   //
   // Per charge point for the first, because the connector count decides whether
   // `--scenario` keeps the file's own id or instantiates a fresh one.
@@ -356,17 +364,25 @@ export async function startServer(
   // file that was no longer the one being loaded (#314). See
   // {@link readStartupScenarioFile}.
   const startupScenarioSource = readStartupScenarioFile(opts.startupScenario);
+  // The exact (connector, id) pairs the flags will install, per bootstrap
+  // charge point — `null` where the boot cannot tell (#338). The startup prune
+  // keeps these and nothing else; the watch restore's first pass skips their
+  // ids.
+  const startupClaims = new Map(
+    fleet.map((init) => [
+      init.cpId,
+      startupClaimedInstances(
+        opts.startupScenario,
+        init.connectors,
+        startupScenarioSource,
+      ),
+    ]),
+  );
   const startupClaimedByCp = new Map<string, ReadonlySet<string>>(
-    hasExplicitStartupScenario
-      ? fleet.map((init) => [
-          init.cpId,
-          startupClaimedScenarioIds(
-            opts.startupScenario,
-            init.connectors,
-            startupScenarioSource,
-          ),
-        ])
-      : [],
+    [...startupClaims].map(([cpId, claimed]) => [
+      cpId,
+      new Set((claimed ?? []).map((one) => one.scenarioId)),
+    ]),
   );
   const startupTargets = startupTargetCpIds(opts.startupScenario, fleet);
 
@@ -388,6 +404,14 @@ export async function startServer(
     serverLog(
       `Restored ${restored.length} CP(s) from state DB: ${restored.join(", ")}`,
     );
+  }
+  // The one startup prune (#338): every restored charge point drops the
+  // startup-generated rows this boot's flags no longer call for — before its
+  // watches are restored and before anything dials, so a copy left by a
+  // configuration no longer in force can neither be watched nor auto-start.
+  for (const cpId of restored) {
+    const svc = registry.get(cpId);
+    if (svc) pruneStaleStartupScenarios(svc, database, startupClaims);
   }
   // First pass. See `finishWatchSetup` for the second, and for the three
   // constraints this sequence has to satisfy at once.
@@ -1022,8 +1046,10 @@ export interface InstalledStartupScenario {
  *
  * **Failure**: a per-connector failure is reported and the other connectors
  * still install; an unreadable file installs nothing and reports it.
- * **Destruction**: a previous build's clock-suffixed instance for the same
- * file and connector is pruned first, so the connector never holds two.
+ * **Provenance**: with a database, every row installed here is marked with
+ * the flag that generated it ({@link startupProvenance}, #338), which is what
+ * lets a later boot's {@link pruneStaleStartupScenarios} recognise it. Nothing
+ * is removed here: the prune ran at restore, before anything dialled.
  * **Trigger**: called once per bootstrap charge point, before its dial.
  */
 export function installStartupScenario(
@@ -1071,6 +1097,13 @@ export function installStartupScenario(
           mode.templateId,
           connectorId,
         );
+        markStartupScenario(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          startupProvenance(mode),
+        );
         installed.push({ connectorId, scenarioId });
         process.stderr.write(
           `[server] Scenario template "${mode.templateId}" loaded (id: ${scenarioId}, connector: ${connectorId})\n`,
@@ -1104,8 +1137,14 @@ export function installStartupScenario(
     for (const connectorId of connectors) {
       try {
         const instance = instantiateTemplate(template, connectorId);
-        pruneLegacyStartupInstances(svc, connectorId, template.id);
         const scenarioId = svc.loadScenario(connectorId, instance);
+        markStartupScenario(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          startupProvenance(mode),
+        );
         // #314: `prepare` replays the same per-connector rewrite on every
         // reload, so a fan-out across connectors keeps its independent copies
         // instead of collapsing onto the file's own targetId.
@@ -1117,8 +1156,7 @@ export function installStartupScenario(
           prepare: (definition) => instantiateTemplate(definition, connectorId),
           loadedText: templateText,
           // Not persisted: a row cannot carry `prepare`, and this bootstrap
-          // runs again on every boot with a fresh instance id per connector.
-          // Persisting it left the next `--state-db` start with the previous
+          // runs again on every boot and registers again. Persisting it left the next `--state-db` start with the previous
           // run's watches restored prepare-less, reloading the file's own
           // target over the prepared copies (#314).
           persist: false,
@@ -1173,8 +1211,14 @@ export function installStartupScenario(
           scenarioFileTargetsConnector(next, connectorId, connectors.length)
             ? next
             : instantiateTemplate(next, connectorId);
-        pruneLegacyStartupInstances(svc, connectorId, definition.id);
         const scenarioId = svc.loadScenario(connectorId, prepare(definition));
+        markStartupScenario(
+          database,
+          svc.getInit().cpId,
+          connectorId,
+          scenarioId,
+          startupProvenance(mode),
+        );
         fileReload?.registerScenarioFile({
           filePath: mode.path,
           cpId: svc.getInit().cpId,
@@ -1345,8 +1389,8 @@ export function startupClaimedRowSkip(
  * irrelevant here.
  *
  * Keying the dial deferral on the id set instead let three of the four startup
- * modes through: `--scenario-template` and `--scenario-template-file` mint a
- * fresh id each boot and so claim nothing, as does a `--scenario` that has to
+ * modes through: `--scenario-template` and `--scenario-template-file` minted a
+ * fresh id each boot and so claimed nothing, as did a `--scenario` that had to
  * be instantiated across connectors. Their restored charge points therefore
  * dialled immediately and their persisted `triggerOn: connect` scenarios
  * auto-started from the database, well before the configured definition
@@ -1531,173 +1575,165 @@ export function readStartupScenarioFile(
 }
 
 /**
- * The persisted scenario ids the startup flags will claim on this boot.
+ * The exact (connector, scenario id) pairs the startup flags will install on a
+ * charge point with `connectorCount` connectors — or `null` when this boot
+ * cannot tell.
  *
- * **Exact, not narrow.** It used to be narrow because it had to be: only
- * `--scenario` on a file that already targeted its single connector kept a
- * predictable id, and everything else went through `instantiateTemplate`, whose
- * ids carried `Date.now()` and could not be predicted — so those modes claimed
- * nothing and their stored rows were reconciled in the first pass, under ids
- * this boot was about to abandon. Now that a generated instance's id is
- * {@link startupInstanceId} — derived from the file and the connector, the same
- * across restarts — every id the boot will load is knowable here, and this
- * returns exactly that set.
+ * **Exact, not narrow.** Every startup-generated id is now stable —
+ * {@link scenarioInstanceId}, derived from the file's or template's own id and
+ * the connector — so every id the boot will load is knowable before it loads
+ * anything, and this returns exactly that set. Two readers depend on it:
  *
- * Exact is still narrow in the sense that matters: it names the ids the flags
- * will overwrite and no others. Skipping more than that leaves a charge point's
- * *other* restored scenarios unwatched until it dials, which is the failure the
- * first pass exists to prevent (#314).
+ * - the watch restore's first pass skips these ids (through
+ *   {@link startupClaimedScenarioIds}) and nothing else, or a charge point's
+ *   *other* restored scenarios go unwatched until it dials (#314);
+ * - {@link pruneStaleStartupScenarios} keeps these rows and removes every
+ *   other startup-generated row, before anything dials (#338).
+ *
+ * **`null` is not empty.** An unreadable or unparsable file, a file without a
+ * string `id`, or an unknown built-in template means the boot does not know
+ * what its configuration calls for. The prune then removes nothing on the
+ * charge points that configuration targets: the previous boot's instance stays
+ * rather than an unreadable file wiping the scenario it configured last time.
+ * No flag at all is the empty list: nothing is called for, so every
+ * startup-generated row goes.
  *
  * Takes the boot's single read rather than opening the file itself: a
  * prediction with its own read is a prediction of a file that may not be the
  * one loaded, which is the bug this signature exists to make unrepresentable.
- * A built-in `--scenario-template` still claims nothing — `loadScenarioTemplate`
- * mints that id and prunes its own prior instances.
+ */
+export function startupClaimedInstances(
+  opt: ServerOptions["startupScenario"],
+  connectorCount: number,
+  source: StartupScenarioFile | null,
+): InstalledStartupScenario[] | null {
+  // Resolved first, ahead of the `source` check, so a conflicting combination
+  // is refused here too rather than answered with a set that happens to look
+  // harmless. Asked through the same resolver the load reads, so the
+  // prediction and the load cannot disagree about which flag is in effect.
+  const mode = resolveStartupScenarioMode(opt);
+  // A mode implies options, but only to a reader: narrowed for the compiler.
+  if (!mode || !opt) return [];
+  const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
+  if (mode.kind === "template") {
+    if (!getTemplateById(mode.templateId)) return null;
+    // `loadScenarioTemplate` derives its id through the same function.
+    return connectors.map((connectorId) => ({
+      connectorId,
+      scenarioId: scenarioInstanceId(mode.templateId, connectorId),
+    }));
+  }
+  const definition = source?.definition;
+  if (!definition || source.text === null) return null;
+  const baseId = definition.id;
+  if (typeof baseId !== "string") return null;
+  // The same branch `installStartupScenario` takes, through the same
+  // predicate — a second copy of the rule would drift from the load it
+  // predicts. A template file always instantiates; a `--scenario` keeps its own
+  // id only when it already targets its single connector.
+  return connectors.map((connectorId) => ({
+    connectorId,
+    scenarioId:
+      mode.kind === "file" &&
+      scenarioFileTargetsConnector(definition, connectorId, connectors.length)
+        ? baseId
+        : scenarioInstanceId(baseId, connectorId),
+  }));
+}
+
+/**
+ * The persisted scenario ids the startup flags will claim on this boot: the
+ * ids of {@link startupClaimedInstances}, and nothing when that is unknown.
  */
 export function startupClaimedScenarioIds(
   opt: ServerOptions["startupScenario"],
   connectorCount: number,
   source: StartupScenarioFile | null,
 ): Set<string> {
-  const claimed = new Set<string>();
-  // Resolved first, ahead of the `source` check, so a conflicting combination
-  // is refused here too rather than answered with an empty set that happens to
-  // look harmless.
-  const mode = resolveStartupScenarioMode(opt);
-  // A built-in `--scenario-template` claims nothing — `loadScenarioTemplate`
-  // mints that id and prunes its own prior instances. Asked through the same
-  // resolver the load reads, so the prediction and the load cannot disagree
-  // about which flag is in effect (#314).
-  if (!mode || mode.kind === "template") return claimed;
-  // A mode implies options, but only to a reader: narrowed for the compiler.
-  if (!opt) return claimed;
-  if (!source) return claimed;
-  const baseId = source.definition?.id;
-  if (!source.definition) return claimed;
-  if (typeof baseId !== "string") return claimed;
-  const connectors = resolveConnectorIds(opt.scenarioConnector, connectorCount);
-  for (const connectorId of connectors) {
-    // The same branch `runStartupScenario` takes, through the same predicate —
-    // a second copy of the rule would drift from the load it predicts. A
-    // template file always instantiates; a `--scenario` keeps its own id only
-    // when it already targets its single connector.
-    claimed.add(
-      mode.kind === "file" &&
-        scenarioFileTargetsConnector(
-          source.definition,
-          connectorId,
-          connectors.length,
-        )
-        ? baseId
-        : startupInstanceId(baseId, connectorId),
-    );
-  }
-  return claimed;
-}
-
-/**
- * The id a startup flag gives its per-connector copy of a scenario file.
- *
- * **Stable across restarts, deliberately.** This used to carry `Date.now()`,
- * which meant a daemon could not recognise its own previous output: with
- * `--state-db`, a restart restored the previous boot's generated instance and
- * then loaded a *second* one under a fresh id, so the operator's single
- * configured scenario became two loaded graphs — the stale one unwatched (a
- * startup registration is `persist: false`, so no source row survives to
- * re-attach a watch to it) and able to auto-start alongside the new one. A
- * restart producing duplicate OCPP traffic is the worst symptom this can have,
- * and every part of it followed from the generated scenario having no stable
- * identity.
- *
- * Derived from what is the same across restarts for the same configuration —
- * the file's own scenario id and the connector — so the restored instance and
- * the newly prepared one are the *same key*: `loadScenario` replaces rather
- * than duplicates, and the watch attaches to the id that actually exists.
- *
- * The cost is a deterministic namespace: a scenario an operator authored under
- * exactly `<file id>-c<connector>` on the same charge point is overwritten by
- * the startup load instead of coexisting with it. That is the same collision
- * `--scenario` already has when its file targets its single connector and
- * keeps its own id, and it is much the better trade against duplicate traffic
- * on every restart (#314).
- */
-export function startupInstanceId(baseId: string, connectorId: number): string {
-  return `${baseId}-c${connectorId}`;
-}
-
-/**
- * Instances a *previous* build of this daemon generated for the same file and
- * connector, which this boot will not replace.
- *
- * An upgrade path, not a general prune. Builds through `0f6f951` minted
- * `<base>-c<connector>-<epoch ms>`, so a `--state-db` written by one carries a
- * row this boot's stable id can never match: left alone it stays loaded
- * forever, unwatched, and auto-starts beside the configured graph. The pattern
- * is exact — a 13-or-more-digit epoch suffix on this connector's own prefix —
- * because that shape is only ever minted here. A wider rule ("anything that
- * looks generated") would delete a scenario an operator authored and meant to
- * keep, which is the objection to pruning as a strategy; this is narrow enough
- * not to raise it.
- *
- * What it deliberately does **not** cover: a boot that narrows
- * `--scenario-connector`, or a file whose own `id` changed, leaves the previous
- * boot's instance loaded on a connector this boot never touches. Recognising
- * those needs preparation metadata persisted alongside the scenario — a schema
- * change — so they are named in `docs/entities/daemon.md` rather than guessed
- * at here.
- */
-export function legacyStartupInstanceIds(
-  loadedScenarioIds: readonly string[],
-  baseId: string,
-  connectorId: number,
-): string[] {
-  const legacy = new RegExp(
-    `^${escapeRegExp(baseId)}-c${connectorId}-\\d{13,}$`,
+  return new Set(
+    (startupClaimedInstances(opt, connectorCount, source) ?? []).map(
+      (one) => one.scenarioId,
+    ),
   );
-  return loadedScenarioIds.filter((id) => legacy.test(id));
 }
 
 /**
- * Drop the previous build's generated instances for this connector before the
- * stable-id load replaces the current one.
- *
- * **Ordering**: before `loadScenario`, so the connector never holds two graphs
- * at once. With `--auto-connect` the charge point has already dialled by the
- * time `runStartupScenario` runs on it — that adjacency is deliberate, see
- * `restoredDialsToDefer` — so a restored legacy instance with a matching
- * trigger can have auto-started in the gap; `removeScenario` stops it, which is
- * the point. **Failure**: a removal that throws is reported and the load
- * continues, because a stale extra graph is a worse outcome than a noisy line
- * but a better one than no configured scenario at all. **Destruction**: the row
- * goes with the scenario — `removeScenario` deletes from memory and the DB
- * both, so the next boot does not restore it again. **Trigger**: only a boot
- * that loads a startup scenario file onto this connector; nothing else prunes.
+ * What a startup flag records as the provenance of the rows it installs
+ * (`scenarios.startup_source`, #338): the flag and its source — the resolved
+ * file path, or the built-in template id. Informational: the prune only asks
+ * whether a row has one.
  */
-function pruneLegacyStartupInstances(
+export function startupProvenance(mode: StartupScenarioMode): string {
+  switch (mode.kind) {
+    case "template":
+      return `--scenario-template=${mode.templateId}`;
+    case "templateFile":
+      return `--scenario-template-file=${path.resolve(mode.path)}`;
+    case "file":
+      return `--scenario=${path.resolve(mode.path)}`;
+  }
+}
+
+/**
+ * **The** startup prune (#338): remove every startup-generated row on this
+ * charge point that the boot's flags do not call for.
+ *
+ * A row is startup-generated when `scenarios.startup_source` is set; a NULL row
+ * is user-authored and never touched — which includes every row written before
+ * schema v18, whatever its id looks like. What the flags call for is
+ * `claims.get(cpId)`, the exact set {@link startupClaimedInstances} predicts
+ * and {@link installStartupScenario} then loads: a charge point the flags do
+ * not configure (no flag, or not in the bootstrap fleet) keeps nothing marked,
+ * and one whose claim is `null` (the boot cannot tell) is left as it is.
+ *
+ * This one rule covers every way a previous boot's copy can outlive its
+ * configuration: a `--scenario-connector` that no longer names a connector, a
+ * file whose own `id` changed, a switched or dropped flag, a charge point that
+ * left the fleet. It replaces the two narrower prunes that preceded it — the
+ * `-<epoch ms>` suffix match for `--scenario` and `loadScenarioTemplate`'s
+ * per-template cleanup.
+ *
+ * **Ordering**: at restore, before the watch restore and before the charge
+ * point dials, so a stale copy is never watched and never reaches the boot
+ * gate's auto-start. **Destruction**: `removeScenario` discards any run and
+ * deletes the row; a row whose id memory holds on another connector is
+ * deleted directly. Its watch row goes too. **Failure**: a removal that throws
+ * is reported and the next row is still processed.
+ */
+export function pruneStaleStartupScenarios(
   svc: CLIChargePointService,
-  connectorId: number,
-  baseId: string,
+  database: Database | null,
+  claims: ReadonlyMap<string, readonly InstalledStartupScenario[] | null>,
 ): void {
-  const loaded = svc.listScenarios(connectorId).map((s) => s.scenarioId);
-  for (const staleId of legacyStartupInstanceIds(loaded, baseId, connectorId)) {
+  const cpId = svc.getInit().cpId;
+  const claimed = claims.has(cpId) ? claims.get(cpId) : [];
+  if (claimed === null || claimed === undefined) return;
+  const keep = new Set(
+    claimed.map((one) => `${one.connectorId}\u0000${one.scenarioId}`),
+  );
+  for (const row of listStartupScenarioRows(database, cpId)) {
+    if (keep.has(`${row.connector_id}\u0000${row.scenario_id}`)) continue;
     try {
-      svc.removeScenario(connectorId, staleId);
+      if (!svc.removeScenario(row.connector_id, row.scenario_id)) {
+        deleteScenarioRow(database, cpId, row.connector_id, row.scenario_id);
+      }
+      forgetWatchedScenarioFile(
+        database,
+        cpId,
+        row.connector_id,
+        row.scenario_id,
+      );
       process.stderr.write(
-        `[server] Removed a previous run's generated scenario "${staleId}" on connector ${connectorId}; startup instances now use the stable id "${startupInstanceId(baseId, connectorId)}" (#314)\n`,
+        `[server] Removed startup scenario "${row.scenario_id}" on ${cpId} connector ${row.connector_id}: generated by ${row.startup_source}, which this boot does not call for (#338)\n`,
       );
     } catch (err) {
       process.stderr.write(
-        `[server] Failed to remove stale startup scenario "${staleId}": ${
+        `[server] Failed to remove stale startup scenario "${row.scenario_id}" on ${cpId} connector ${row.connector_id}: ${
           err instanceof Error ? err.message : err
         }\n`,
       );
     }
   }
-}
-
-/** Escape a string for literal use inside a RegExp. */
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -1712,7 +1748,7 @@ function instantiateTemplate(
   const cloned = JSON.parse(JSON.stringify(template)) as ScenarioDefinition;
   return {
     ...cloned,
-    id: startupInstanceId(cloned.id, connectorId),
+    id: scenarioInstanceId(cloned.id, connectorId),
     name: cloned.name
       ? `${cloned.name} (Connector ${connectorId})`
       : `Connector ${connectorId}`,

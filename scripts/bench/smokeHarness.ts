@@ -102,6 +102,8 @@ export interface MockCall {
   readonly action: string;
   /** 1-based count of this action across every charge point. */
   readonly nth: number;
+  /** The CALL's payload, as received. */
+  readonly payload: Readonly<Record<string, unknown>> | undefined;
 }
 
 export interface MockCsmsOptions {
@@ -176,7 +178,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
         const { cpId, connection } = ws.data;
         const nth = (callCounts.get(action) ?? 0) + 1;
         callCounts.set(action, nth);
-        const call: MockCall = { cpId, action, nth };
+        const call: MockCall = { cpId, action, nth, payload };
         options.onCall?.(call);
         const idTag = payload?.idTag;
         if (typeof idTag === "string") seenIdTags.add(idTag);

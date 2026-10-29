@@ -124,11 +124,6 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
     ];
   }
 
-  /** SIGINT the bench, once, `afterMs` from now. */
-  function interruptLater(bench: () => RunningBench | null, afterMs: number) {
-    setTimeout(() => bench()?.proc.kill("SIGINT"), afterMs);
-  }
-
   it("waits out an in-flight cycle's own bound before closing its transaction", async () => {
     // Guards 4 and 5 of #330: teardown settles in-flight cycles first, and
     // for the bound the cycle itself works to — every stage of
@@ -189,15 +184,32 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
     // and the late conf would find no transaction to assign its id to.
     //
     // A 3s assigned-id bound against a 6s conf retires the charge point; the
-    // conf then lands and assigns the real id, and SIGINT 1.5s later sends
-    // teardown's closing stop, which must carry it. Stopping at retirement
-    // instead leaves id 1 open and records a placeholder stop.
+    // conf then lands and assigns the real id, and SIGINT sends teardown's
+    // closing stop, which must carry it. Stopping at retirement instead
+    // leaves id 1 open and records a placeholder stop.
+    //
+    // SIGINT waits for the StatusNotification(Charging) the charge point
+    // emits from its StartTransaction.conf handler, right after storing the
+    // id — not for a timer after the reply, which a slow runner can beat
+    // before the conf is processed. Only a Charging seen after the reply
+    // counts.
     let bench: RunningBench | null = null;
+    let confSent = false;
+    let interruptedOnCharging = false;
     const csms = startMockCsms({
       behaviour: { StartTransaction: { delayMs: 6_000 } },
       onReply: ({ action, nth }) => {
-        if (action === "StartTransaction" && nth === 1) {
-          interruptLater(() => bench, 1_500);
+        if (action === "StartTransaction" && nth === 1) confSent = true;
+      },
+      onCall: ({ action, payload }) => {
+        if (
+          action === "StatusNotification" &&
+          payload?.status === "Charging" &&
+          confSent &&
+          !interruptedOnCharging
+        ) {
+          interruptedOnCharging = true;
+          bench?.proc.kill("SIGINT");
         }
       },
     });
@@ -207,6 +219,9 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
       });
       const run = await bench.done;
 
+      // First, or a run that never saw Charging ends at --duration with a
+      // misleading exit code.
+      expect(interruptedOnCharging).toBe(true);
       expect(run.timedOut).toBe(false);
       expect(run.exitCode).toBe(SIGINT_EXIT);
       expect(csms.openTransactionIds()).toEqual([]);
@@ -270,6 +285,47 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
       expect(stopReceivedAtMs).not.toBeNull();
       expect(stopReceivedAtMs!).toBeGreaterThanOrEqual(interruptedAtMs!);
       expect(run.stderr).toContain("closing 1 open transaction(s)");
+      expect(await listCpIds(daemon.url)).toEqual([]);
+    } finally {
+      csms.stop();
+    }
+  }, 240_000);
+
+  it("keeps a charge point whose stop was acked on the re-stop list", async () => {
+    // An acked `stop_transaction` only says the frame was queued, so the
+    // cycle moves its charge point from `openTransactions` to
+    // `stopsAwaitingWire` rather than dropping it. SIGINT lands when the CSMS
+    // receives the cycle's own stop, with its conf held for 5s; teardown
+    // settles that cycle first, so by the time it closes transactions the
+    // charge point is held on the re-stop list by `stopsAwaitingWire` alone.
+    //
+    // The re-stop itself sends nothing — the daemon's `stopTransaction`
+    // returns once the first stop has closed the connector's transaction —
+    // so the CSMS sees one stop either way, and only teardown's own count on
+    // stderr tells the two apart. Defaults throughout: no override.
+    let bench: RunningBench | null = null;
+    const csms = startMockCsms({
+      behaviour: { StopTransaction: { delayMs: 5_000 } },
+      onCall: ({ action, nth }) => {
+        if (action === "StopTransaction" && nth === 1) {
+          bench?.proc.kill("SIGINT");
+        }
+      },
+    });
+    try {
+      bench = startBench(activeArgs(csms, 4));
+      const run = await bench.done;
+
+      expect(run.timedOut).toBe(false);
+      expect(run.exitCode).toBe(SIGINT_EXIT);
+      expect(run.stderr).toContain("closing 1 open transaction(s)");
+      // Preconditions: default deadlines, one cycle, and only its own stop
+      // on the wire — the re-stop added none.
+      expect(run.stderr).not.toContain("TEST-ONLY timing overrides");
+      expect(csms.calls("StartTransaction")).toBe(1);
+      expect(csms.calls("StopTransaction")).toBe(1);
+      expect(csms.openTransactionIds()).toEqual([]);
+      expect(csms.unmatchedStops()).toEqual([]);
       expect(await listCpIds(daemon.url)).toEqual([]);
     } finally {
       csms.stop();

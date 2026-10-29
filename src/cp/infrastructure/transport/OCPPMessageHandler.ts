@@ -1229,9 +1229,15 @@ export class OCPPMessageHandler {
     // For transaction-related handlers that need connector info, create them dynamically
     if (!handler) {
       if (action === OCPPAction.StartTransaction) {
-        handler = new StartTransactionResultHandler(request.connectorId || 1);
+        handler = new StartTransactionResultHandler(
+          request.connectorId || 1,
+          (request.payload as StartTransactionRequestV16).idTag,
+        );
       } else if (action === OCPPAction.StopTransaction) {
-        handler = new StopTransactionResultHandler(request.connectorId || 1);
+        handler = new StopTransactionResultHandler(
+          request.connectorId || 1,
+          (request.payload as StopTransactionRequestV16).idTag,
+        );
       } else if (action === OCPPAction.MeterValues) {
         handler = new MeterValuesResultHandler(
           (request.payload as MeterValuesRequestV16).connectorId,

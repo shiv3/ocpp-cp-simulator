@@ -10,7 +10,8 @@ related:
   - ../entities/scenario-templates.md
   - ../concepts/scenario-format.md
   - steve-verify-readme.md
-updated: 2026-09-03
+  - ../concepts/local-authorization.md
+updated: 2026-10-29
 ---
 
 # Source: `src/utils/scenarios/README.md`
@@ -43,8 +44,9 @@ Accepted/Failed/NotSupported/VersionMismatch; ChangeConfiguration:
 Accepted/Rejected/RebootRequired/NotSupported; …). This matrix is deliberately
 not encoded in the JSON Schema ([Scenario format](../concepts/scenario-format.md#responseoverride-notes)).
 
-**Out of scope.** TC_007 (cached authorization — local auth list is
-write-only today, issue #181), TC_032/037/039 (offline transactions — no
+**Out of scope.** TC_007 (cached authorization — no template yet; since
+#452 the [Authorization Cache](../concepts/local-authorization.md) exists and
+a local start consults it, so the case is drivable), TC_032/037/039 (offline transactions — no
 offline queue in the engine), TC_047 (reservation expiry not observable),
 TC_049 (no connector 0 reservation), TC_073–TC_088 (security / certificates /
 key provisioning).

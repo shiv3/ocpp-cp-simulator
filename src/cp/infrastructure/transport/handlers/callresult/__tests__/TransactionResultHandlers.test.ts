@@ -429,3 +429,88 @@ describe("MeterValuesResultHandler (#374)", () => {
     expect(other.meterSent).toBe(false);
   });
 });
+
+/**
+ * Issue #452: OCPP 1.6 §3.5.1 — "The Cache is updated using all received
+ * IdTagInfo (from Authorize.conf, StartTransaction.conf and
+ * StopTransaction.conf)". The identifier comes from the request the conf
+ * answers, never from connector state.
+ */
+describe("Authorization cache updates from 1.6 idTagInfo (#452)", () => {
+  function cachingChargePoint(): ChargePoint {
+    const cp = buildChargePoint();
+    cp.configuration.applyChange("AuthorizationCacheEnabled", "true");
+    return cp;
+  }
+
+  it("Authorize.conf writes status, expiryDate and parentIdTag", () => {
+    const cp = cachingChargePoint();
+    new AuthorizeResultHandler({ idTag: "TAG-1" }).handle(
+      {
+        idTagInfo: {
+          status: "Accepted",
+          expiryDate: "2030-01-01T00:00:00.000Z",
+          parentIdTag: "PARENT",
+        },
+      },
+      buildContext(cp),
+    );
+    expect(cp.authorization.cache.get("TAG-1")).toMatchObject({
+      status: "Accepted",
+      expiresAt: Date.parse("2030-01-01T00:00:00.000Z"),
+      parentId: "PARENT",
+    });
+  });
+
+  it("a NOT-valid Authorize.conf is cached too (§3.5.1: valid and NOT-valid)", () => {
+    const cp = cachingChargePoint();
+    new AuthorizeResultHandler({ idTag: "TAG-1" }).handle(
+      { idTagInfo: { status: "Blocked" } },
+      buildContext(cp),
+    );
+    expect(cp.authorization.cache.get("TAG-1")?.status).toBe("Blocked");
+  });
+
+  it("an unparseable expiryDate is dropped, not cached as NaN", () => {
+    const cp = cachingChargePoint();
+    new AuthorizeResultHandler({ idTag: "TAG-1" }).handle(
+      { idTagInfo: { status: "Accepted", expiryDate: "not-a-date" } },
+      buildContext(cp),
+    );
+    expect(cp.authorization.cache.get("TAG-1")).not.toHaveProperty("expiresAt");
+  });
+
+  it("writes nothing while AuthorizationCacheEnabled=false (default)", () => {
+    const cp = buildChargePoint();
+    new AuthorizeResultHandler({ idTag: "TAG-1" }).handle(
+      { idTagInfo: { status: "Accepted" } },
+      buildContext(cp),
+    );
+    expect(cp.authorization.cache.size()).toBe(0);
+  });
+
+  it("StartTransaction.conf updates the entry of the request's idTag", () => {
+    const cp = cachingChargePoint();
+    cp.startTransaction("TAG-S", 1);
+    new StartTransactionResultHandler(1, "TAG-S").handle(
+      { transactionId: 7, idTagInfo: { status: "Accepted" } },
+      buildContext(cp),
+    );
+    expect(cp.authorization.cache.get("TAG-S")?.status).toBe("Accepted");
+  });
+
+  it("StopTransaction.conf with idTagInfo updates the entry, even after the connector was cleared (#367)", () => {
+    const cp = cachingChargePoint();
+    new StopTransactionResultHandler(1, "TAG-T").handle(
+      { idTagInfo: { status: "Invalid" } },
+      buildContext(cp),
+    );
+    expect(cp.authorization.cache.get("TAG-T")?.status).toBe("Invalid");
+  });
+
+  it("StopTransaction.conf without idTagInfo leaves the cache alone", () => {
+    const cp = cachingChargePoint();
+    new StopTransactionResultHandler(1, "TAG-T").handle({}, buildContext(cp));
+    expect(cp.authorization.cache.size()).toBe(0);
+  });
+});

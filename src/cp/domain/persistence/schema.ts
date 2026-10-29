@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -91,6 +91,21 @@ CREATE TABLE IF NOT EXISTS pending_messages (
 );
 CREATE INDEX IF NOT EXISTS pending_by_cp
   ON pending_messages (cp_id, created_at);
+
+-- Authorization Cache (#452): the latest identifier information the CSMS
+-- returned (OCPP 1.6 §3.5.1, 2.0.1 C10), valid and NOT-valid alike. Kept
+-- across restarts (1.6 §3.5.1 + errata 3.4, C10.FR.02). Dates are ISO 8601;
+-- \`expires_at\` is the idTagInfo expiryDate / cacheExpiryDateTime.
+CREATE TABLE IF NOT EXISTS authorization_cache (
+  cp_id        TEXT NOT NULL,
+  id_token     TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  expires_at   TEXT,
+  parent_id    TEXT,
+  inserted_at  TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (cp_id, id_token)
+);
 
 CREATE TABLE IF NOT EXISTS kv (
   key   TEXT PRIMARY KEY,
@@ -304,6 +319,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "charging_profiles", perCp: true, resetOnStateReset: true },
   { name: "configuration", perCp: true, resetOnStateReset: true },
   { name: "pending_messages", perCp: true, resetOnStateReset: true },
+  { name: "authorization_cache", perCp: true, resetOnStateReset: true },
   { name: "kv", perCp: false, resetOnStateReset: true },
   { name: "logs", perCp: true, resetOnStateReset: true },
   { name: "charge_points", perCp: true, resetOnStateReset: true },
@@ -585,6 +601,9 @@ export function runMigrations(db: Database): void {
 
   // v16 → v17 (#447): the `charging_sessions` history table and its index,
   // `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
+
+  // v17 → v18 (#452): the `authorization_cache` table, `IF NOT EXISTS` in
+  // SCHEMA_SQL like the v14 step.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

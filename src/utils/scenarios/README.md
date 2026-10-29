@@ -94,7 +94,7 @@ When using the `responseOverride` node to arm a one-shot response override for a
 
 The following test cases are not covered by scenarios:
 
-- **TC_007** (Cached Authorization) — the local auth list is write-only in this simulator today (SendLocalList populates it, but nothing consults it on a local start — see issue #181's core report); there's no auth-cache seam to drive a "cached idTag" scenario against without adding cache-consultation logic, which is out of scope here. Follow-up: LocalPreAuthorize (see #181's PR body).
+- **TC_007** (Cached Authorization) — no template yet. Since #452 the CP has a real Authorization Cache and consults it, with the Local Authorization List, on a local start (`AuthorizationCacheEnabled`, `LocalPreAuthorize`, `LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`; see `docs/concepts/local-authorization.md`), so the case is drivable; the template itself is not written.
 - **TC_032, TC_037, TC_039** (Offline Power Failure, Offline Transactions) — No offline transaction queue or transaction replication in the scenario engine.
 - **TC_047** (Reservation Expiry) — CP expires reservations passively on TTL; transition is internal, not observable as a status change.
 - **TC_049** (Charge-Point-Wide Reservation) — CP has no connector 0; ReserveNow(connectorId=0) is rejected by core; no distinct behavior to verify.

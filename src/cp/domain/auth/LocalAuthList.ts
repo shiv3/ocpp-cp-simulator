@@ -1,19 +1,23 @@
 import { Logger, LogType } from "../../shared/Logger";
 
 /**
- * idTagInfo subset stored in the local authorization list. Matches
- * ts-ocpp's inline `idTagInfo` shape on SendLocalListRequest entries.
- * `expiryDate`/`parentIdTag` are intentionally not modeled — ts-ocpp's
- * generated type allows `[k: string]: unknown` for extras, but for our
- * authorization-decision path only `status` is consulted.
+ * idTagInfo stored in the local authorization list. Matches ts-ocpp's
+ * inline `idTagInfo` shape on SendLocalListRequest entries. `expiryDate`
+ * is kept because local authorization decisions need it: an entry "that
+ * was valid but is apparently expired due to passage of time MUST also be
+ * rejected" (1.6 §3.5.4; issue #452). Optional fields are only present
+ * when the CSMS sent them.
  */
 export interface LocalAuthorizationEntry {
   status: "Accepted" | "Blocked" | "Expired" | "Invalid" | "ConcurrentTx";
+  /** ISO 8601 date-time, as received. */
+  expiryDate?: string;
+  parentIdTag?: string;
 }
 
 export type SendLocalListItem = {
   idTag: string;
-  idTagInfo?: { status: LocalAuthorizationEntry["status"] };
+  idTagInfo?: LocalAuthorizationEntry;
 };
 
 export type SendLocalListStatus =
@@ -95,7 +99,7 @@ export class LocalAuthListManager {
     const fresh = new Map<string, LocalAuthorizationEntry>();
     for (const item of next) {
       if (item.idTagInfo) {
-        fresh.set(item.idTag, { status: item.idTagInfo.status });
+        fresh.set(item.idTag, toEntry(item.idTagInfo));
       }
       // §9.2: in a Full update, entries without idTagInfo are simply not
       // included in the resulting list — same semantics as omitting them.
@@ -139,7 +143,7 @@ export class LocalAuthListManager {
     const draft = new Map(this.list);
     for (const item of updates) {
       if (item.idTagInfo) {
-        draft.set(item.idTag, { status: item.idTagInfo.status });
+        draft.set(item.idTag, toEntry(item.idTagInfo));
       } else {
         draft.delete(item.idTag);
       }
@@ -164,4 +168,15 @@ export class LocalAuthListManager {
     this.list.clear();
     this.version = 0;
   }
+}
+
+/** Copy only the fields the list keeps, dropping any extras of the wire. */
+function toEntry(info: LocalAuthorizationEntry): LocalAuthorizationEntry {
+  return {
+    status: info.status,
+    ...(info.expiryDate !== undefined ? { expiryDate: info.expiryDate } : {}),
+    ...(info.parentIdTag !== undefined
+      ? { parentIdTag: info.parentIdTag }
+      : {}),
+  };
 }

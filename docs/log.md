@@ -1839,3 +1839,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Control plane → Daemon methods](concepts/control-plane.md#daemon-methods): read-back after a partial `ev_settings.apply_default`.
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
+
+## [2026-10-29] ingest | Authorization cache and offline authorization (#452)
+
+- A local start now consults the Local Authorization List, then a real Authorization Cache, before (or instead of) Authorize.req: `LocalPreAuthorize` starts a valid cached or listed identifier online without the round trip, and offline the charge point decides at once (`LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`), per OCPP 1.6 §3.5 and 2.0.1 C10–C15.
+- Behaviour change: an offline local start with an identifier in neither the list nor the cache is refused under the default configuration (`AllowOfflineTxForUnknownId=false`), where it used to wait 10 s and start. Online with the cache disabled, the wire is unchanged.
+- The cache is filled from 1.6 Authorize.conf, StartTransaction.conf and StopTransaction.conf, never for a listed identifier, evicts NOT-valid entries first at 1,000 entries, and persists in the new `authorization_cache` table (schema v18). ClearCache empties it and answers `Accepted`.
+- [Local authorization](concepts/local-authorization.md): new page, the decision table, cache rules and limits.
+- [State persistence](concepts/state-persistence.md#tables): `authorization_cache` row, `.tables` listing, `cp.delete` list.
+- [src/utils/scenarios/README.md](sources/cert16-templates-readme.md): TC_007 no longer blocked by a missing cache; TC_061 description.
+- [Index](index.md), [GitHub issues](sources/github-issues.md): new page, #452 row.

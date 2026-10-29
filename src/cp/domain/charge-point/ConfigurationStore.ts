@@ -205,6 +205,31 @@ export class ConfigurationStore {
     return this.getBoolean("AuthorizeBeforeLocalStart") ?? true;
   }
 
+  /** Canonical key `AuthorizationCacheEnabled`; default `false`. §9.1.2:
+   *  whether the Authorization Cache is in use (issue #452). */
+  authorizationCacheEnabled(): boolean {
+    return this.getBoolean("AuthorizationCacheEnabled") ?? false;
+  }
+
+  /** Canonical key `LocalPreAuthorize`; default `false`. §9.1.13: online,
+   *  start for a locally-authorized identifier without Authorize.req. */
+  localPreAuthorize(): boolean {
+    return this.getBoolean("LocalPreAuthorize") ?? false;
+  }
+
+  /** Canonical key `LocalAuthorizeOffline`; default `true`. §9.1.12:
+   *  offline, start for a locally-authorized identifier. */
+  localAuthorizeOffline(): boolean {
+    return this.getBoolean("LocalAuthorizeOffline") ?? true;
+  }
+
+  /** Canonical key `AllowOfflineTxForUnknownId`; default `false`. §9.1.1 /
+   *  §3.5.4: offline, start for an identifier neither the local list nor
+   *  the cache knows. */
+  allowOfflineTxForUnknownId(): boolean {
+    return this.getBoolean("AllowOfflineTxForUnknownId") ?? false;
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;

@@ -37,6 +37,22 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["AuthCacheCtrlr/LifeTime", "AuthCacheLifeTime"],
   ["TxCtrlr/StopTxOnInvalidId", "StopTransactionOnInvalidId"],
   ["TxCtrlr/StopTxOnEVSideDisconnect", "StopTransactionOnEVSideDisconnect"],
+  // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-
+  // §2.13.9), read-only values the station defines at runtime (2.x only).
+  // ItemsPerMessage / BytesPerMessage exist per variableInstance.
+  ...["SetVariableMonitoring", "ClearVariableMonitoring"].flatMap(
+    (instance): [string, string][] => [
+      [
+        `MonitoringCtrlr/ItemsPerMessage/${instance}`,
+        `ItemsPerMessage${instance}`,
+      ],
+      [
+        `MonitoringCtrlr/BytesPerMessage/${instance}`,
+        `BytesPerMessage${instance}`,
+      ],
+    ],
+  ),
+  ["MonitoringCtrlr/ActiveMonitoringLevel", "ActiveMonitoringLevel"],
 ]);
 
 // Components that appear in the table - used to distinguish UnknownComponent vs UnknownVariable.

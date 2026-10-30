@@ -60,6 +60,12 @@ export function buildBaseReportData(
       ] as [VariableAttributeType],
       variableCharacteristics: {
         dataType: toCharacteristicDataType(entry.key.type),
+        // #538: the bounds SetVariables and SetVariableMonitoring enforce
+        // (a threshold outside them is ValueOutOfRange, N04.FR.06).
+        ...(entry.key.type === "integer" &&
+          entry.key.min !== undefined && { minLimit: entry.key.min }),
+        ...(entry.key.type === "integer" &&
+          entry.key.max !== undefined && { maxLimit: entry.key.max }),
         // Every mapped variable accepts at least a Delta monitor (#457).
         supportsMonitoring: true,
       },

@@ -290,6 +290,28 @@ export class ConfigurationStore {
     this.emit(name, value);
   }
 
+  /**
+   * The integer counterpart of {@link defineRuntimeKey}, such as an OCPP 2.x
+   * `MonitoringCtrlr` value the station owns (#538): read-only, never
+   * persisted, and redefining it fires the listeners like a change does.
+   */
+  defineRuntimeIntegerKey(
+    name: string,
+    value: number,
+    bounds: { readonly min?: number; readonly max?: number } = {},
+  ): void {
+    const key: IntegerConfigurationKey = {
+      name,
+      required: false,
+      readonly: true,
+      type: "integer",
+      ...(bounds.min !== undefined && { min: bounds.min }),
+      ...(bounds.max !== undefined && { max: bounds.max }),
+    };
+    this.values.set(name, { key, value });
+    this.emit(name, value);
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;

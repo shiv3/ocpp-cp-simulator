@@ -373,18 +373,21 @@ CALLERROR.
   (F06.FR.08).
 - The `SignCertificateResponse` status is logged: `Accepted` at INFO, any
   other status at WARN. A `Rejected` answer (A02.FR.12) leaves the CSR
-  pending, since A02 has no rule to discard it.
+  pending, since A02 has no rule to discard it. An answer to a request
+  whose CSR a newer one replaced is logged at INFO and otherwise ignored:
+  it neither starts nor ends the back-off.
 - **Resend back-off** (A02.FR.17-19, #537). After an `Accepted`
   `SignCertificateResponse`, the station waits `CertSigningWaitMinimum`
   seconds for `CertificateSigned`. When none came and the CSR is still
   pending, it resends the same request (same CSR). Every expiry doubles
   the wait, which restarts as the resend goes out: W, 2W, 4W… (A02.FR.18).
-  A resend answered with a CALLERROR, or not at all, does not hold the
+  A wait longer than a timer can hold (about 24.8 days) is waited out in
+  full. A resend answered with a CALLERROR, or not at all, does not hold the
   sequence back. After `CertSigningRepeatTimes` resends it stops until a
   `TriggerMessage` starts over (A02.FR.19). One sequence runs per
   certificate use. It ends on any `CertificateSigned` for that use
-  (A02.FR.20 for a rejected one), on a non-`Accepted` `SignCertificate`
-  answer and when the connection closes. `sign_certificate` gets the same
+  (A02.FR.20 for a rejected one), on a non-`Accepted` answer to the
+  current `SignCertificate` request and when the connection closes. `sign_certificate` gets the same
   back-off.
 - **`GetCertificateStatus`** (M06, #537). The station asks the CSMS for the
   OCSP status of its V2G certificates (`V2GCertificate`, 2.1

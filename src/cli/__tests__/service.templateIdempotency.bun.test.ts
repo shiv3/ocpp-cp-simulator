@@ -110,14 +110,12 @@ describe("template instantiation is idempotent per (template, connector)", () =>
     expect(idsOn(restarted, 1)).toEqual([kept]);
   });
 
-  it("does not remove instances older builds left behind when loading a template at runtime", () => {
-    // The check the per-template cleanup pass made, moved (#338). It matched
-    // the old clock-suffixed id format and any instance carrying this
-    // `templateId`, whatever its id. A runtime load no longer removes
-    // anything; the schema v18 migration records the clock-suffixed shape as
-    // `legacy:<template>`, and the daemon's one startup prune removes it on
-    // the first boot whose `--scenario-template` installs the stable
-    // successor. An instance under another id is the operator's and stays.
+  it("replaces the instances older builds minted for this template on this connector when loading it at runtime", () => {
+    // An older build's clock-suffixed instance of the same template on the
+    // same connector is what this load replaces, as the builds that minted it
+    // removed it; left in place it would run beside the stable instance. The
+    // match is the exact legacy id shape (see legacyStartupInstances.ts), not
+    // `templateId`: an instance under another id is the operator's and stays.
     const db = BunSqliteDatabase.open(":memory:");
     const service = newService(db);
     const template = service.getScenario(
@@ -133,12 +131,12 @@ describe("template instantiation is idempotent per (template, connector)", () =>
       { ...template, id: `${TEMPLATE}-${CP_ID}-c1-1760000000000-def456` },
     ];
     for (const definition of legacy) service.loadScenario(1, definition);
+    const operators = { ...template, id: "operators-copy" };
+    service.loadScenario(1, operators);
 
     const fresh = service.loadScenarioTemplate(TEMPLATE, 1);
 
-    expect(idsOn(service, 1).sort()).toEqual(
-      [fresh, ...legacy.map((d) => d.id)].sort(),
-    );
+    expect(idsOn(service, 1).sort()).toEqual([fresh, operators.id].sort());
   });
 
   it("does not mistake a different template whose id shares this one's prefix", () => {

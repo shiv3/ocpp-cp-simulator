@@ -42,7 +42,13 @@ import { getProtocolProfile } from "../../infrastructure/transport/profile/profi
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
-import { type OcppCallOutcome, type OcppCallRequest } from "../types/OcppCall";
+import {
+  type OcppCallOutcome,
+  type OcppCallRequest,
+  type RawFrameOutcome,
+  type RawFrameRequest,
+} from "../types/OcppCall";
+import { RawFrameSender } from "../../infrastructure/transport/RawFrameSender";
 import { OcppCallRejectedError } from "../errors/OcppCallErrors";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
@@ -233,6 +239,8 @@ export class ChargePoint {
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket | null;
+  /** #393: level C expert sends; null on SOAP. */
+  private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
   private readonly _idTagPool: IdTagPool | null;
@@ -419,6 +427,7 @@ export class ChargePoint {
 
     if (isSoapVersion(this._ocppVersion)) {
       this._webSocket = null;
+      this._rawFrames = null;
       const dialect = soapDialectForVersion(this._ocppVersion);
       this._messageHandler = new OCPPSoapHandler(this, this._logger, {
         centralSystemUrl: this._transportUrl,
@@ -440,6 +449,7 @@ export class ChargePoint {
         cpoName,
         tls,
       );
+      this._rawFrames = new RawFrameSender(this._webSocket);
       this._webSocket.observers.on("simulatedDisconnect", (fault) =>
         this._events.emit("networkFaultInjected", fault),
       );
@@ -1746,6 +1756,24 @@ export class ChargePoint {
       );
     }
     return this._outbox.sendOcppCall(request);
+  }
+
+  /**
+   * Expert raw frame (#393, level C of #389): one text frame written to the
+   * WebSocket as given, valid OCPP-J or not, outside the 1.6 serial CALL
+   * queue. Replies are correlated best effort and kept from the station's
+   * handlers. See {@link RawFrameSender}.
+   */
+  sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
+    if (!this._rawFrames) {
+      return Promise.reject(
+        new OcppCallRejectedError(
+          "unsupported_transport",
+          `Raw frames need an OCPP-J station; ${this._ocppVersion} is SOAP`,
+        ),
+      );
+    }
+    return this._rawFrames.send(request);
   }
 
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */

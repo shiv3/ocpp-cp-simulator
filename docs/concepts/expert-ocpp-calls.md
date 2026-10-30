@@ -9,14 +9,16 @@ sources:
   - src/cp/infrastructure/transport/codec/defaultPayload.ts
   - src/cp/infrastructure/transport/ExpertCalls.ts
   - src/console/pages/cp/ExpertCallPanel.tsx
+  - src/cp/infrastructure/transport/RawFrameSender.ts
   - "issue #389"
+  - "issue #393"
 related:
   - control-plane.md
   - scenario-format.md
   - ocpp-versions-and-transports.md
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
-updated: 2026-10-05
+updated: 2026-10-30
 ---
 
 # Expert OCPP calls
@@ -87,9 +89,9 @@ the next call — expert or normal — is checked again. The console shows the
 check's result while you type and keeps **Send** disabled until the skip box is
 ticked; text that is not a JSON object is never sent.
 
-Malformed OCPP-J frames (wrong message type id, missing fields, broken JSON)
-are out of scope: the frame is always well-formed, only the payload may be
-invalid.
+The frame of an expert call is always well-formed; only the payload may be
+invalid. Malformed frames are a separate method,
+[raw frames](#raw-frames-level-c-393).
 
 ## The answer, and `applyResponse`
 
@@ -134,6 +136,49 @@ one. On OCPP 1.6 the wait starts when the call is queued: a call still waiting
 behind an unanswered CALL when its 25 s are up is withdrawn and never sent, so
 a caller told "no answer" never sees it go out later. A dropped call is never re-queued, including on OCPP 1.6, where a normal
 StartTransaction / StopTransaction / MeterValues would be kept for a retry.
+
+## Raw frames (level C, #393)
+
+`ChargePoint.sendRawFrame` writes one text frame to the WebSocket exactly as
+given, valid OCPP-J or not: a wrong message type id, a missing or extra
+element, a non-string id, invalid JSON, any text. It is its own method, never
+a side effect of `skipValidation`. Surfaces: the `send_raw_frame`
+[control-plane](control-plane.md#cp-command-methods) method, the same command
+in JSON-Lines mode, and the `send_raw_frame`
+[MCP tool](../entities/mcp-endpoint.md). The console and the scenario format
+do not expose it yet.
+
+- **Transport.** It goes through the same network-simulation pipeline, `Sent:`
+  log line and settlement as normal traffic, but **outside** the OCPP 1.6
+  one-CALL-in-flight queue (§4.1.1): a frame that is not a CALL may never be
+  answered, and holding the slot for it would stall normal traffic. It may
+  therefore overlap an in-flight CALL. No boot gate applies.
+- **Correlation, best effort.** When the frame parses as an array with a
+  string at index 1, that is its `messageId`. The reply is the first incoming
+  CALLRESULT or CALLERROR with that id, or a CALLERROR with id `""` or `"-1"`
+  (how a CSMS answers a frame it cannot read), arriving after the frame is
+  written, within `waitMs` (default 5000, at most 25000). The wait runs from
+  the moment the transport takes the frame, so a network-simulation delay
+  counts against it and the call always returns under the 30 s RPC deadline;
+  a frame still queued when the wait ends is written later, and nothing
+  cancels it. The reply is consumed: it never reaches the station's own
+  handlers. Pick an id no normal CALL uses; normal CALL ids are UUIDs.
+- **Result.** `{ sentFrame, messageId, reply, closed }`: `reply` is the frame
+  as received, or `null` when nothing matched in time; `closed` is set when
+  the connection ended during the wait, at once and with its cause:
+  `network` (the CSMS or the network closed it), `manual` (a disconnect),
+  `internal` (a reset), `simulated` (a network-simulation drop) or
+  `disposed` (the charge point was removed); else `null`. No reply and a
+  close are results, not errors. A close goes through the normal close and
+  reconnect path, and the next session is unaffected.
+- **Refusals** (`invalid_params`): a SOAP station (`unsupported_transport`),
+  and a socket that is not open (`not_connected`); nothing is written.
+- **Not written** (`disconnected`): the socket stayed open but the frame was
+  dropped before the wire (a full network-simulation queue, a failed write).
+  It is an error, not a `closed` result, since no connection ended.
+- **Observability.** The frame appears in the log as `Sent: <frame>`. The
+  trace export, the scenario verification transcript and `/metrics` read
+  well-formed OCPP-J arrays only and skip a malformed frame.
 
 ## Independence from the other fault-injection features
 

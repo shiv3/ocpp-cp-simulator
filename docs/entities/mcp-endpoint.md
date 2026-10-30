@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 29 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 30 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - src/cli/server/mcp/tools.ts
   - src/cli/server/__tests__/mcp.test.ts
@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -42,7 +42,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 29 curated tools wrapping the daemon's
+The endpoint exposes 30 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                     | RPC Method                | Params                                                                                                                                                                                                                                                                        |
@@ -62,6 +62,7 @@ The endpoint exposes 29 curated tools wrapping the daemon's
 | `stop_transaction`       | `stop_transaction`        | `cpId`, `connector`, `reason?`, `triggerReason?` — 1.6 reason / 2.0.1 stoppedReason and the 2.x Ended-event trigger (#335)                                                                                                                                                    |
 | `authorize`              | `authorize`               | `cpId`, `tagId?` — same idTag pool fallback as `start_transaction` (#299)                                                                                                                                                                                                     |
 | `send_ocpp_call`         | `send_ocpp_call`          | `cpId`, `action`, `payload`, `skipValidation?`, `applyResponse?` — [Expert OCPP calls](../concepts/expert-ocpp-calls.md) (#389)                                                                                                                                               |
+| `send_raw_frame`         | `send_raw_frame`          | `cpId`, `frame`, `waitMs?`: [Expert OCPP calls → Raw frames](../concepts/expert-ocpp-calls.md#raw-frames-level-c-393) (#393)                                                                                                                                                  |
 | `auth_cache_get`         | `get_auth_cache`          | `cpId` — cache switch and entries ([Local authorization](../concepts/local-authorization.md#control-plane-seam), #452)                                                                                                                                                        |
 | `auth_cache_seed`        | `seed_auth_cache`         | `cpId`, `entries` — schema taken from the method; writes whatever the cache switch says (#452)                                                                                                                                                                                |
 | `auth_cache_clear`       | `clear_auth_cache`        | `cpId` — empties the cache whatever its switch says; nothing goes on the wire (#452)                                                                                                                                                                                          |

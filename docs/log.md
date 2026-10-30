@@ -2026,6 +2026,20 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
 
+## [2026-10-30] ingest | Expert raw frames, level C of #389 (#393)
+
+- `ChargePoint.sendRawFrame` / `send_raw_frame` (control plane, JSON-Lines, MCP): one text frame written as given, through the normal pipeline and log but outside the 1.6 serial CALL queue; replies correlated best effort (frame id, or a CALLERROR with id `""` / `"-1"`) and kept from the station's handlers; a close is reported and the next session is unaffected. SOAP and a closed socket are refused.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): new section; the "malformed frames are out of scope" note now points to it.
+- [Control plane](concepts/control-plane.md#cp-command-methods): `send_raw_frame` row.
+- [MCP endpoint](entities/mcp-endpoint.md): `send_raw_frame` tool (30 curated tools).
+
+## [2026-10-30] ingest | Raw frames: review follow-ups (#393)
+
+- A reply counts only once the frame is written; the wait runs from the moment the transport takes the frame, so a network-sim delay counts against it and the call returns under the RPC deadline.
+- `closed` is set at once for every end of the connection (CSMS / network close, disconnect, reset, simulated drop, removal), with its cause.
+- A frame dropped while the socket stays open (full network-sim queue, failed write) is a `disconnected` error rather than a `closed` result.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): the above.
+
 ## [2026-10-30] ingest | Bench teardown under a slow control plane (#523, #330)
 
 - New in `scripts/bench/smokeHarness.ts`: `startSlowControlPlane`, a socket.io relay the bench reaches through `--daemon-url`. It opens one daemon socket per bench socket with the same handshake `auth`, re-emits every event both ways (acks included), proxies HTTP (`/v1/healthz`, `/metrics`), and holds chosen RPC **requests** (for a time, or until a promise settles), so the daemon acts after the bench may have given up. A closed daemon socket reaches the bench as a dropped transport and its unanswered RPCs get a `relay_upstream_closed` ack; no other outage is modelled. No production code changed.

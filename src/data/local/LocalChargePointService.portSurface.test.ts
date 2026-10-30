@@ -76,6 +76,27 @@ describe("LocalChargePointService A1.1d port methods", () => {
     expect(spy).toHaveBeenCalledWith(request);
   });
 
+  it("sends a raw frame through the local charge point (#393)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const outcome = {
+      sentFrame: '[2,"r1"]',
+      messageId: "r1",
+      reply: null,
+      closed: null,
+    };
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendRawFrame")
+      .mockResolvedValue(outcome);
+    const request = { frame: '[2,"r1"]', waitMs: 100 };
+
+    await expect(service.sendRawFrame("CP-PORT", request)).resolves.toBe(
+      outcome,
+    );
+
+    expect(spy).toHaveBeenCalledWith(request);
+  });
+
   it("sends FirmwareStatusNotification through the local charge point", async () => {
     const setup = await serviceWithChargePoint();
     service = setup.service;

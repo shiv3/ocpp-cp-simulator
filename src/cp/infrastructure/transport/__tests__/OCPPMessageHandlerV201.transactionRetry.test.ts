@@ -109,6 +109,8 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
         discarded.push(e),
     ),
     stopTransaction: vi.fn(),
+    // #315: signed meter values are off here.
+    signedMeterFor: vi.fn(() => null),
     configuration: {
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),

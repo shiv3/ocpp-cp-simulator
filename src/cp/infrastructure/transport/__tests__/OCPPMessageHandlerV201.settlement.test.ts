@@ -135,6 +135,8 @@ const createMockChargePoint = (): ChargePoint => {
     configuration: {
       meterValuesSampledData: vi.fn(() => []),
       getString: vi.fn(),
+      // #529: a written TransactionEvent arms its MessageTimeout.
+      messageTimeout: vi.fn(() => 30),
     },
     database: {} as unknown,
     certificateStore: {} as unknown,

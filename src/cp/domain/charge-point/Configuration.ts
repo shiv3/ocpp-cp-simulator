@@ -447,6 +447,18 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 0,
     } as IntegerConfigurationKey,
+    // #529: seconds a TransactionEvent may stay unanswered before it counts
+    // as a failed transmission (E13). 2.x only, as
+    // `OCPPCommCtrlr.MessageTimeout[Default]`, which OCPP 2.0.1 / 2.1 Part 2
+    // §2.1.3 "DefaultMessageTimeout" makes ReadOnly (it is set through a
+    // NetworkConnectionProfile; this simulator rejects SetNetworkProfile).
+    MessageTimeout: {
+      name: "MessageTimeout",
+      required: false,
+      readonly: true,
+      type: "integer",
+      min: 1,
+    } as IntegerConfigurationKey,
     // #315: sign the energy register in OCMF (German Eichrecht format) and
     // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by
     // default; nothing is generated, and no key is made, while false. The
@@ -639,6 +651,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // keeps its key set.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.AuthCacheLifeTime, 0)]
+      : []),
+    // #529: 2.x only (OCPPCommCtrlr.MessageTimeout[Default]), 30 s like the
+    // 1.6 serial queue's CALL timeout.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
       : []),
     boolVal(ConfigurationKeys.Custom.SampledDataSignReadings, false),
     strVal(ConfigurationKeys.Custom.SignedMeterDataMode, "valid"),

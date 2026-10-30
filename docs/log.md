@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Log
@@ -2025,3 +2025,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
+
+## [2026-10-30] ingest | 2.x TransactionEvent message timeout (#529)
+
+- E13 also counts a TransactionEvent left without a CALLRESULT or CALLERROR within `OCPPCommCtrlr.MessageTimeout[Default]` (2.0.1 / 2.1 §2.1.3, ReadOnly, default 30 s, 2.x-only key) as a failed transmission: resent and discarded under the same `MessageAttempts` / `MessageAttemptInterval` rules as a CALLERROR (#490). Late answers: the first CALLRESULT of any transmission settles the message and cancels a waiting resend; later answers, and a CALLERROR for an already timed-out transmission, change nothing; a late answer after the discard is ignored.
+- `transactionMessageRejected` / `transactionMessageDiscarded` gain `action` and `reason` (`callError` / `timeout`); `errorCode` is set for `callError` only. Timeline format `1.3`.
+- [OCPP versions and transports → Transaction message retries](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x), [Operational timeline](concepts/operational-timeline.md#kinds), [Charging sessions](concepts/charging-sessions.md), [GitHub issues](sources/github-issues.md): #529.

@@ -1192,8 +1192,9 @@ export class ChargePoint {
     }
   }
 
-  /** Called by the 2.x handler on each CALLERROR answering a
-   *  TransactionEvent (#490). Reports only: the transaction is untouched. */
+  /** Called by the 2.x handler on each failed TransactionEvent
+   *  transmission: a CALLERROR (#490) or no answer within `MessageTimeout`
+   *  (#529). Reports only: the transaction is untouched. */
   notifyTransactionMessageRejected(
     event: ChargePointEvents["transactionMessageRejected"],
   ): void {

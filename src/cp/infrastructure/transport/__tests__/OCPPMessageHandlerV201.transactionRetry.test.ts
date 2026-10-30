@@ -114,6 +114,9 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     configuration: {
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),
+      // #529: the timeout trigger is covered in
+      // OCPPMessageHandlerV201.transactionTimeout.test.ts.
+      messageTimeout: vi.fn(() => 30),
       meterValuesSampledData: vi.fn(() => []),
     },
   };
@@ -150,7 +153,9 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
       {
         connectorId: 1,
         transactionId: "tx-490",
+        action: "TransactionEvent",
         eventType: "Started",
+        reason: "callError",
         errorCode: "InternalError",
         attempt: 1,
       },
@@ -184,7 +189,9 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
       {
         connectorId: 1,
         transactionId: "tx-490",
+        action: "TransactionEvent",
         eventType: "Started",
+        reason: "callError",
         errorCode: "InternalError",
         attempts: 3,
       },

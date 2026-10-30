@@ -27,7 +27,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # OCPP versions and transports
@@ -110,16 +110,25 @@ WebSockets, at the cost of a control frame instead of a Heartbeat round trip.
 
 ## Transaction message retries (OCPP 2.x)
 
-On 2.0.1 and 2.1 a CALLERROR answering a TransactionEvent (`Started`,
-`Updated` or `Ended`) means the CSMS failed to process it (E13, #490). It
-used to be ignored. The station now:
+On 2.0.1 and 2.1 a transmission of a TransactionEvent (`Started`, `Updated`
+or `Ended`) fails in two ways (E13):
+
+- a CALLERROR answers it: the CSMS failed to process it (#490);
+- no CALLRESULT or CALLERROR comes within
+  `OCPPCommCtrlr.MessageTimeout[Default]` seconds (default 30, #529). E13
+  names this trigger in its description and remark (Table 120); OCPP-J
+  Part 4 §4.1.1 calls such a CALL timed out.
+
+On either failure the station:
 
 - **keeps the transaction running.** The connector stays as it was, the
   station does not end the transaction on the error, and the
   [charging session](charging-sessions.md) stays `active`. This differs from 1.6, where a StartTransaction CALLERROR
   abandons the transaction (#447);
 - **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
-  `eventType`, `errorCode`, `attempt`) on every CALLERROR;
+  `action`, `eventType`, `reason`, `errorCode`, `attempt`) on every failed
+  transmission. `action` is `TransactionEvent`; `reason` is `callError` or
+  `timeout`, and `errorCode` is set for `callError` only;
 - **resends the same payload** (same `seqNo`, same `transactionId`) under a
   new message id, as OCPP-J requires for a retry (Part 4 §4.1.4). It waits
   `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]` seconds times the
@@ -127,24 +136,50 @@ used to be ignored. The station now:
   default of 60;
 - **discards the message after `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`
   transmissions in all** (default 3, E13.FR.04) and emits
-  `transactionMessageDiscarded` (`attempts` instead of `attempt`).
+  `transactionMessageDiscarded` (`attempts` instead of `attempt`; `reason`
+  and `errorCode` describe the last failure).
 
 A CALLRESULT ends the retries; an answer to a resend goes through the normal
 `idTokenInfo` handling. Both settings are the 1.6 keys
 `TransactionMessageAttempts` and `TransactionMessageRetryInterval` under
 their 2.x names, so `SetVariables`, `GetVariables` and `GetBaseReport` see
-them and a change applies to the next CALLERROR. An attempts value below 1
+them and a change applies to the next failure. An attempts value below 1
 counts as 1; a negative interval counts as 0.
 
-Those two are instanced variables: the CSMS names them `MessageAttempts` /
-`MessageAttemptInterval` with `variableInstance = "TransactionEvent"`
+A timed-out transmission stays matched to its message, so a late answer is
+still handled. The rule (#529) is that each message is applied once and
+each transmission counts as failed once:
+
+- the **first CALLRESULT** for any transmission of the message settles it.
+  The station applies that answer, cancels a resend still waiting, and
+  forgets every other transmission of the message;
+- an answer to a forgotten transmission is ignored: a second CALLRESULT
+  applies nothing twice, and a CALLERROR triggers no resend;
+- a CALLERROR for a transmission that already timed out is not counted
+  again: the resend already scheduled stays the only one;
+- once the message is discarded, every transmission is forgotten, and a
+  CALLRESULT arriving later is ignored.
+
+`MessageTimeout` is a 2.x-only key (default 30, like the 1.6 serial queue's
+30 s CALL timeout), read at each transmission. The CSMS addresses it as
+`OCPPCommCtrlr.MessageTimeout` with `variableInstance = "Default"` (2.0.1
+and 2.1 §2.1.3 "DefaultMessageTimeout"). The spec makes it ReadOnly: the
+CSMS sets it through a NetworkConnectionProfile, and this simulator answers
+`SetNetworkProfile` with `Rejected`. So `SetVariables` answers `Rejected`
+too, and `GetBaseReport` reports it as ReadOnly. No other 2.x CALL is resent
+on a timeout. 1.6 `GetConfiguration` does not list the key.
+
+The two retry settings are instanced variables: the CSMS names them
+`MessageAttempts` / `MessageAttemptInterval` with
+`variableInstance = "TransactionEvent"`
 (2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12); "MessageAttemptsTransactionEvent" is
 only the title of the spec section. Without that instance, or under the
 flat name, `GetVariables` / `SetVariables` answer `UnknownVariable`. The
-results echo the `variable` the CSMS sent, instance included, and
-`GetBaseReport` reports `variable: { name, instance }` for them. Every
-other mapped variable has no instance and answers whatever instance the
-CSMS names, as before.
+same holds for `MessageTimeout` with instance `Default`. The results echo
+the `variable` the CSMS sent, instance included, and `GetBaseReport`
+reports `variable: { name, instance }` for them. Every other mapped
+variable has no instance and answers whatever instance the CSMS names, as
+before.
 
 Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
 resend does not hold back the next transaction message. E13 (Figure 62)
@@ -154,10 +189,11 @@ resend still waiting when the WebSocket closes
 (network loss, disconnect, reset, delete) is dropped: 2.x has no offline
 queue to hand it to. So is a resend that finds the station offline when it
 falls due. Either way the station logs a `warn` (category `TRANSACTION`)
-naming the event type, transaction and attempt; no event is emitted. Only TransactionEvents the station builds are retried;
-one sent as an [expert call](expert-ocpp-calls.md) is not. E13 also retries
-a message left unanswered within `MessageTimeout`; that trigger is not
-implemented.
+naming the event type, transaction and attempt; no event is emitted. A
+written TransactionEvent still waiting for its answer when the WebSocket
+closes is forgotten silently with its `MessageTimeout` timer, like any
+unanswered CALL. Only TransactionEvents the station builds are retried or
+time out; one sent as an [expert call](expert-ocpp-calls.md) is not.
 
 The [operational timeline](operational-timeline.md) records both events as
 `transaction_message_rejected` and `transaction_message_discarded`.

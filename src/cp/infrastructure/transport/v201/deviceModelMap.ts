@@ -17,6 +17,9 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
     "OCPPCommCtrlr/MessageAttemptInterval/TransactionEvent",
     "TransactionMessageRetryInterval",
   ],
+  // #529: OCPP 2.0.1 / 2.1 Part 2 §2.1.3 "DefaultMessageTimeout" —
+  // variableInstance "Default", ReadOnly, seconds.
+  ["OCPPCommCtrlr/MessageTimeout/Default", "MessageTimeout"],
   ["TxCtrlr/EVConnectionTimeOut", "ConnectionTimeOut"],
   ["SampledDataCtrlr/TxUpdatedInterval", "MeterValueSampleInterval"],
   ["SampledDataCtrlr/TxUpdatedMeasurands", "MeterValuesSampledData"],

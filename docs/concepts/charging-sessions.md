@@ -24,7 +24,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Charging sessions
@@ -124,8 +124,11 @@ or `Ended`) is not a failed start, unlike 1.6 (#490). OCPP E13 treats it as a
 failure to process the message: the station keeps the transaction running,
 resends the message and finally discards it (see
 [Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)).
-`transactionMessageRejected` and `transactionMessageDiscarded` report it.
-The recorder does not listen to them, so the session stays `active`.
+A TransactionEvent left unanswered within `MessageTimeout` is handled the
+same way (#529). `transactionMessageRejected` and
+`transactionMessageDiscarded` report both, with `reason` `callError` or
+`timeout`. The recorder does not listen to them, so the session stays
+`active`.
 
 ## Recording
 

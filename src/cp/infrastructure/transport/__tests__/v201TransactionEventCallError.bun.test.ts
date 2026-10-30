@@ -109,14 +109,18 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           {
             connectorId: 1,
             transactionId,
+            action: "TransactionEvent",
             eventType: "Started",
+            reason: "callError",
             errorCode: "InternalError",
             attempt: 1,
           },
           {
             connectorId: 1,
             transactionId,
+            action: "TransactionEvent",
             eventType: "Started",
+            reason: "callError",
             errorCode: "FormationViolation",
             attempt: 2,
           },
@@ -125,7 +129,9 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           {
             connectorId: 1,
             transactionId,
+            action: "TransactionEvent",
             eventType: "Started",
+            reason: "callError",
             errorCode: "FormationViolation",
             attempts: 2,
           },

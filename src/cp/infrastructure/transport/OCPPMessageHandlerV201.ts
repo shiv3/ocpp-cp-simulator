@@ -146,12 +146,36 @@ function ocppStatusToTransactionChargingState(
   }
 }
 
+/**
+ * One TransactionEvent the station is delivering under E13 (#490, #529),
+ * shared by all its transmissions. A message ends once it is settled (a
+ * CALLRESULT arrived for any transmission) or discarded; the handler then
+ * forgets every transmission of it.
+ */
+interface TransactionEventMessage {
+  readonly connectorId: number;
+  readonly payload: TransactionEventRequestV201;
+  /** Transmissions made so far (the latest one's 1-based number). */
+  sent: number;
+  /** Transmissions already counted as failed (CALLERROR or timeout). */
+  failed: number;
+  /** Message ids of the transmissions still awaiting an answer. */
+  readonly inFlight: Set<string>;
+  /** The resend waiting out `MessageAttemptInterval`, if any. */
+  resend?: ReturnType<typeof setTimeout>;
+  done: boolean;
+}
+
 /** Where a TransactionEvent CALL stands in its E13 delivery (#490). */
 interface TransactionEventDelivery {
-  readonly connectorId: number;
+  readonly message: TransactionEventMessage;
   /** 1-based transmission number of this CALL. */
   readonly attempt: number;
 }
+
+type TransactionEventFailure =
+  | { reason: "callError"; errorCode: string }
+  | { reason: "timeout"; seconds: number };
 
 export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _chargePoint: ChargePoint;
@@ -175,11 +199,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       transactionEvent?: TransactionEventDelivery;
     }
   >();
-  /** Resends waiting out `MessageAttemptInterval[TransactionEvent]`
-   *  (#490), with what each one would send; cleared on WebSocket close. */
-  private readonly _transactionEventRetries = new Map<
-    ReturnType<typeof setTimeout>,
-    { payload: TransactionEventRequestV201; attempt: number }
+  /** Messages whose resend waits out `MessageAttemptInterval[TransactionEvent]`
+   *  (#490); cleared on WebSocket close. */
+  private readonly _transactionEventRetries =
+    new Set<TransactionEventMessage>();
+  /** `MessageTimeout` timers of the written, unanswered TransactionEvent
+   *  CALLs, by message id (#529); cleared on answer and WebSocket close. */
+  private readonly _transactionEventTimeouts = new Map<
+    string,
+    ReturnType<typeof setTimeout>
   >();
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
@@ -317,6 +345,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             payload,
             ...(transactionEvent ? { transactionEvent } : {}),
           });
+          if (transactionEvent) {
+            this.armTransactionEventTimeout(messageId, transactionEvent);
+          }
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
         } else {
           // On drop outcomes (socket_closed, disposed, write_failed,
@@ -532,11 +563,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const error = payload as CallErrorFields;
       if (this._expertCalls.claimError(messageId, error)) return;
       if (pending?.transactionEvent) {
-        this.onTransactionEventCallError(
-          pending.payload as TransactionEventRequestV201,
-          pending.transactionEvent,
-          error.errorCode ?? "GenericError",
-        );
+        this.endTransmission(messageId, pending.transactionEvent);
+        this.onTransactionEventFailure(pending.transactionEvent, {
+          reason: "callError",
+          errorCode: error.errorCode ?? "GenericError",
+        });
         return;
       }
       if (pending?.action === "DataTransfer") {
@@ -619,6 +650,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
     if (pending?.action === "SignCertificate") {
       this.applySignCertificateResult(payload as SignCertificateResponseV201);
+      return;
+    }
+
+    if (pending?.transactionEvent) {
+      // #529: the first CALLRESULT for any transmission settles the
+      // message. Its other transmissions are forgotten, so a second answer
+      // finds no pending entry and is ignored like any unknown CALLRESULT.
+      // One written only after that (it sat in the socket's queue) finds
+      // the message done, and its answer is ignored too.
+      const { message } = pending.transactionEvent;
+      this.endTransmission(messageId, pending.transactionEvent);
+      if (message.done) return;
+      this.forgetTransactionEvent(message);
+      this.applyTransactionEventResult(
+        message.payload,
+        payload as TransactionEventResponseV201,
+      );
       return;
     }
 
@@ -733,34 +781,113 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  /** Send a TransactionEvent as transmission `attempt` (#490). Each
-   *  transmission is a new CALL with a new message id (OCPP-J Part 4 §4.1.4:
-   *  "This also applies to retries"); the payload, seqNo included, is the
-   *  same object every time. */
+  /** Start delivering a TransactionEvent built by this handler (#490). */
   private sendTransactionEventCall(
     connectorId: number,
     payload: TransactionEventRequestV201,
-    attempt = 1,
   ): void {
+    this.transmitTransactionEvent({
+      connectorId,
+      payload,
+      sent: 0,
+      failed: 0,
+      inFlight: new Set(),
+      done: false,
+    });
+  }
+
+  /** Send the next transmission of `message` (#490). Each transmission is a
+   *  new CALL with a new message id (OCPP-J Part 4 §4.1.4: "This also
+   *  applies to retries"); the payload, seqNo included, is the same object
+   *  every time. */
+  private transmitTransactionEvent(message: TransactionEventMessage): void {
+    const attempt = ++message.sent;
+    const messageId = this.generateMessageId();
+    message.inFlight.add(messageId);
     this.send(
       "TransactionEvent",
-      this.generateMessageId(),
-      payload,
-      attempt > 1
-        ? (reason) =>
-            this.warnResendLost(payload, attempt, `dropped: ${reason}`)
-        : undefined,
-      { connectorId, attempt },
+      messageId,
+      message.payload,
+      (reason) => {
+        message.inFlight.delete(messageId);
+        if (attempt === 1) return;
+        this.warnResendLost(message.payload, attempt, `dropped: ${reason}`);
+        this.forgetTransactionEvent(message);
+      },
+      { message, attempt },
     );
   }
 
   /**
-   * #490, OCPP 2.0.1 / 2.1 E13.FR.02-04: a CALLERROR answering a
-   * TransactionEvent means the CSMS failed to process it. The station
+   * #529: OCPP 2.0.1 / 2.1 E13 (Table 120, Description and Remark) also
+   * resends a transaction-related message the CSMS "does not reply [to]
+   * within the MessageTimeout"; OCPP-J Part 4 §4.1.1 calls such a CALL timed
+   * out. `OCPPCommCtrlr.MessageTimeout[Default]` is read at each
+   * transmission. The pending entry stays, so a late answer can still
+   * settle the message.
+   */
+  private armTransactionEventTimeout(
+    messageId: string,
+    delivery: TransactionEventDelivery,
+  ): void {
+    if (delivery.message.done) return;
+    const seconds = this._chargePoint.configuration.messageTimeout();
+    const timer = setTimeout(
+      () => {
+        this._transactionEventTimeouts.delete(messageId);
+        this.onTransactionEventFailure(delivery, {
+          reason: "timeout",
+          seconds,
+        });
+      },
+      Math.min(Math.max(1, seconds) * 1000, MAX_TIMER_MS),
+    );
+    unrefTimer(timer);
+    this._transactionEventTimeouts.set(messageId, timer);
+  }
+
+  /** A transmission got its answer: its timeout no longer applies. */
+  private endTransmission(
+    messageId: string,
+    { message }: TransactionEventDelivery,
+  ): void {
+    message.inFlight.delete(messageId);
+    const timer = this._transactionEventTimeouts.get(messageId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this._transactionEventTimeouts.delete(messageId);
+  }
+
+  /** Settle or discard `message`: cancel its waiting resend and forget all
+   *  its transmissions, so a later answer to any of them is ignored. */
+  private forgetTransactionEvent(message: TransactionEventMessage): void {
+    message.done = true;
+    if (message.resend !== undefined) {
+      clearTimeout(message.resend);
+      message.resend = undefined;
+      this._transactionEventRetries.delete(message);
+    }
+    for (const id of message.inFlight) {
+      const timer = this._transactionEventTimeouts.get(id);
+      if (timer !== undefined) clearTimeout(timer);
+      this._transactionEventTimeouts.delete(id);
+      this._pendingRequests.delete(id);
+    }
+    message.inFlight.clear();
+  }
+
+  /**
+   * #490 / #529, OCPP 2.0.1 / 2.1 E13.FR.02-04: a transmission of a
+   * TransactionEvent failed — a CALLERROR answered it (the CSMS failed to
+   * process it) or no answer came within `MessageTimeout`. The station
    * resends it after `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`
    * seconds times the number of transmissions so far, up to
    * `MessageAttempts[TransactionEvent]` transmissions, then discards it.
    * The transaction keeps running either way (unlike 1.6, #447).
+   *
+   * Each transmission counts as failed once: a CALLERROR arriving for a
+   * transmission that already timed out changes nothing, and neither does
+   * any failure once the message is settled or discarded.
    *
    * Known limitation: 2.x has no serial queue here (see `send`), so a
    * waiting resend does not hold back the next transaction message. E13
@@ -769,26 +896,40 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * `seqNo`. Both settings are read here, so a SetVariables applies to the
    * next failure.
    */
-  private onTransactionEventCallError(
-    payload: TransactionEventRequestV201,
+  private onTransactionEventFailure(
     delivery: TransactionEventDelivery,
-    errorCode: string,
+    failure: TransactionEventFailure,
   ): void {
-    const { connectorId, attempt } = delivery;
+    const { message, attempt } = delivery;
+    if (message.done || attempt <= message.failed) return;
+    message.failed = attempt;
+    const { connectorId, payload } = message;
     const report = {
       connectorId,
       transactionId: payload.transactionInfo.transactionId,
+      action: "TransactionEvent" as const,
       eventType: payload.eventType,
-      errorCode,
+      reason: failure.reason,
+      ...(failure.reason === "callError"
+        ? { errorCode: failure.errorCode }
+        : {}),
     };
+    const [cause, what] =
+      failure.reason === "callError"
+        ? [failure.errorCode, `answered with CALLERROR ${failure.errorCode}`]
+        : [
+            `no answer within ${failure.seconds}s`,
+            `got no answer within ${failure.seconds}s`,
+          ];
     const config = this._chargePoint.configuration;
     const attempts = Math.max(1, config.transactionMessageAttempts());
     this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
     if (attempt >= attempts) {
       this._logger.warn(
-        `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
+        `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${cause}`,
         LogType.TRANSACTION,
       );
+      this.forgetTransactionEvent(message);
       this._chargePoint.notifyTransactionMessageDiscarded({
         ...report,
         attempts: attempt,
@@ -800,18 +941,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       MAX_TIMER_MS,
     );
     this._logger.warn(
-      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} answered with CALLERROR ${errorCode}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
+      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} ${what}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
       LogType.TRANSACTION,
     );
     const timer = setTimeout(() => {
-      this._transactionEventRetries.delete(timer);
-      this.sendTransactionEventCall(connectorId, payload, attempt + 1);
+      this._transactionEventRetries.delete(message);
+      message.resend = undefined;
+      this.transmitTransactionEvent(message);
     }, delayMs);
     unrefTimer(timer);
-    this._transactionEventRetries.set(timer, {
-      payload,
-      attempt: attempt + 1,
-    });
+    message.resend = timer;
+    this._transactionEventRetries.add(message);
   }
 
   /** A resend that will never reach the CSMS: logged, no domain event. */
@@ -1456,6 +1596,16 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   public onWebSocketClosed(): void {
+    // #529: a written, unanswered TransactionEvent is forgotten with its
+    // `MessageTimeout` timer, silently, like any other unanswered CALL.
+    for (const pending of this._pendingRequests.values()) {
+      if (pending.transactionEvent)
+        pending.transactionEvent.message.done = true;
+    }
+    for (const timer of this._transactionEventTimeouts.values()) {
+      clearTimeout(timer);
+    }
+    this._transactionEventTimeouts.clear();
     // Clear written-but-unanswered correlation entries on disconnect.
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
@@ -1463,11 +1613,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // #490: a resend waiting for its interval dies with the connection (2.x
     // has no offline queue to hand it to). Close, disconnect, reset and
     // dispose all reach here through ChargePoint.teardownAfterClose.
-    for (const [timer, resend] of this._transactionEventRetries) {
-      clearTimeout(timer);
+    for (const message of this._transactionEventRetries) {
+      clearTimeout(message.resend);
+      message.resend = undefined;
+      message.done = true;
       this.warnResendLost(
-        resend.payload,
-        resend.attempt,
+        message.payload,
+        message.sent + 1,
         "cancelled: WebSocket closed",
       );
     }

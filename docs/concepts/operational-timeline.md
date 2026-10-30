@@ -20,7 +20,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - ocpp-versions-and-transports.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Operational timeline
@@ -85,11 +85,12 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.2`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.3`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
-`transaction_message_discarded` (#490).
+`transaction_message_discarded` (#490). `1.3` added their `action` and `reason`
+fields, and made `errorCode` conditional (#529).
 
 ## Kinds
 
@@ -109,8 +110,8 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `transaction_id_assigned`       | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                         |
 | `transaction_stopped`           | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
 | `transaction_rejected`          | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
-| `transaction_message_rejected`  | connector | `transactionId`, `eventType`, `errorCode`, `attempt`                 | (2.x, #490) A CALLERROR answers a TransactionEvent; it is resent unless this was its last attempt.                      |
-| `transaction_message_discarded` | connector | `transactionId`, `eventType`, `errorCode`, `attempts`                | (2.x, #490) The last attempt failed too: the message is dropped, the transaction keeps running.                         |
+| `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x, #490, #529) A TransactionEvent transmission fails (CALLERROR or no answer); it is resent unless it was the last.  |
+| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x, #490) The last attempt failed too: the message is dropped, the transaction keeps running.                         |
 | `authorization_rejected`        | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
 | `scenario_started`              | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`         | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
@@ -131,6 +132,16 @@ on the rejection: `StopTransactionOnInvalidId` on 1.6 (#181),
 `TxCtrlr/StopTxOnInvalidId` (default true) on 2.x. Before #447 a non-Accepted
 2.x `idTokenInfo` was ignored and recorded nothing; it is checked only while
 the transaction runs (not on an `Ended` event's answer).
+
+The message fields of `transaction_message_rejected` and
+`transaction_message_discarded` are `transactionId`, `action` (always
+`TransactionEvent` for now), `eventType` (`Started`, `Updated` or `Ended`),
+`reason` and `errorCode`. `reason` is `callError` when a CALLERROR answered
+the transmission (#490), and then `errorCode` holds its error code; it is
+`timeout` when no answer came within `OCPPCommCtrlr.MessageTimeout` (#529),
+and then there is no `errorCode`. On `transaction_message_discarded` they
+describe the last failure. See
+[Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x).
 
 ### Smart-charging profiles
 

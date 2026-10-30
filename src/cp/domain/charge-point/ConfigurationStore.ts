@@ -196,6 +196,12 @@ export class ConfigurationStore {
     return this.getInteger("TransactionMessageRetryInterval") ?? 60;
   }
 
+  /** 2.x key `MessageTimeout` (seconds); default `30` (#529). 2.x reads it
+   *  as `OCPPCommCtrlr.MessageTimeout` with instance `Default`. */
+  messageTimeout(): number {
+    return this.getInteger("MessageTimeout") ?? 30;
+  }
+
   /** Canonical key `AuthorizeRemoteTxRequests`; default `false`. */
   authorizeRemoteTxRequests(): boolean {
     return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;

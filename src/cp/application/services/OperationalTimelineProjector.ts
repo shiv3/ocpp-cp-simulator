@@ -184,28 +184,27 @@ export class OperationalTimelineProjector {
         data: { status, stopped },
       });
     });
-    on(
-      "transactionMessageRejected",
-      ({ connectorId, transactionId, eventType, errorCode, attempt }) => {
-        this.timeline.record({
-          kind: "transaction_message_rejected",
-          connectorId,
-          summary: `TransactionEvent ${eventType} of transaction ${transactionId} rejected (${errorCode}), attempt ${attempt}`,
-          data: { transactionId, eventType, errorCode, attempt },
-        });
-      },
-    );
-    on(
-      "transactionMessageDiscarded",
-      ({ connectorId, transactionId, eventType, errorCode, attempts }) => {
-        this.timeline.record({
-          kind: "transaction_message_discarded",
-          connectorId,
-          summary: `TransactionEvent ${eventType} of transaction ${transactionId} discarded after ${attempts} attempts (${errorCode})`,
-          data: { transactionId, eventType, errorCode, attempts },
-        });
-      },
-    );
+    on("transactionMessageRejected", ({ connectorId, attempt, ...event }) => {
+      const failure =
+        event.reason === "timeout"
+          ? "got no answer"
+          : `rejected (${event.errorCode})`;
+      this.timeline.record({
+        kind: "transaction_message_rejected",
+        connectorId,
+        summary: `${transactionMessageLabel(event)} ${failure}, attempt ${attempt}`,
+        data: { ...transactionMessageFields(event), attempt },
+      });
+    });
+    on("transactionMessageDiscarded", ({ connectorId, attempts, ...event }) => {
+      const cause = event.reason === "timeout" ? "no answer" : event.errorCode;
+      this.timeline.record({
+        kind: "transaction_message_discarded",
+        connectorId,
+        summary: `${transactionMessageLabel(event)} discarded after ${attempts} attempts (${cause})`,
+        data: { ...transactionMessageFields(event), attempts },
+      });
+    });
     on(
       "chargingProfileApplied",
       ({ connectorId, profile, replaced, source }) => {
@@ -350,6 +349,38 @@ export class OperationalTimelineProjector {
     clearTimeout(this.settleTimer);
     this.settleTimer = null;
   }
+}
+
+type TransactionMessageFields = Omit<
+  ChargePointEvents["transactionMessageRejected"],
+  "connectorId" | "attempt"
+>;
+
+/** "TransactionEvent Started of transaction tx-1"; 1.6 messages carry no
+ *  eventType. */
+function transactionMessageLabel(event: TransactionMessageFields): string {
+  const message = event.eventType
+    ? `${event.action} ${event.eventType}`
+    : event.action;
+  return `${message} of transaction ${event.transactionId}`;
+}
+
+/** The `data` of a `transaction_message_*` entry: `eventType` and
+ *  `errorCode` only when the event has them. */
+function transactionMessageFields({
+  transactionId,
+  action,
+  eventType,
+  reason,
+  errorCode,
+}: TransactionMessageFields) {
+  return {
+    transactionId,
+    action,
+    ...(eventType !== undefined && { eventType }),
+    reason,
+    ...(errorCode !== undefined && { errorCode }),
+  };
 }
 
 /** Station-wide profiles (connector 0) are charge-point-wide entries: the

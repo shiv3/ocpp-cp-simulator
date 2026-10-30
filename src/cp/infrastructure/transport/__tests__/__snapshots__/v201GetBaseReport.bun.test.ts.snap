@@ -108,6 +108,26 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "instance": "Default",
+            "name": "MessageTimeout",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "30",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "TxCtrlr",
           },
           "variable": {

@@ -465,10 +465,10 @@ restart and every `run_scenario_template` left one more copy behind in
 `--state-db` forever. A different template on the same connector, or the same
 template on another connector, is untouched. An instance an older build
 persisted under the clock-suffixed id above is recorded as such by the schema
-v18 migration and removed on the first boot whose `--scenario-template`
-installs its successor on that connector; a runtime load does not remove it,
-and nothing removes one that no boot replaces (a seeded default, a template
-loaded over the control plane). A `--scenario-template` instance from a
+v19 migration and removed on the first boot whose `--scenario-template`
+installs its successor on that connector, or when the same template is loaded
+on that connector at run time (`load_scenario_template`,
+`run_scenario_template`), so it never runs beside the stable instance. A `--scenario-template` instance from a
 configuration no longer in force is removed at boot — see
 [Daemon → File hot-reload](../entities/daemon.md#file-hot-reload).
 

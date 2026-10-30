@@ -66,6 +66,7 @@ import {
   type OcmfReading,
 } from "../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
@@ -130,6 +131,13 @@ function ocppStatusToTransactionChargingState(
   }
 }
 
+/** Where a TransactionEvent CALL stands in its E13 delivery (#490). */
+interface TransactionEventDelivery {
+  readonly connectorId: number;
+  /** 1-based transmission number of this CALL. */
+  readonly attempt: number;
+}
+
 export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _chargePoint: ChargePoint;
   private readonly _webSocket: OCPPWebSocket;
@@ -145,7 +153,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  removed once the matching CALLRESULT/CALLERROR arrives. */
   private readonly _pendingRequests = new Map<
     string,
-    { action: V201Action; payload: V201RequestPayload }
+    {
+      action: V201Action;
+      payload: V201RequestPayload;
+      /** Set on the TransactionEvents this handler builds (#490). */
+      transactionEvent?: TransactionEventDelivery;
+    }
+  >();
+  /** Resends waiting out `MessageAttemptInterval[TransactionEvent]`
+   *  (#490), with what each one would send; cleared on WebSocket close. */
+  private readonly _transactionEventRetries = new Map<
+    ReturnType<typeof setTimeout>,
+    { payload: TransactionEventRequestV201; attempt: number }
   >();
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
@@ -256,6 +275,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: V201RequestPayload,
     /** Told when the CALL never reached the wire (#348 waiters). */
     onDropped?: (reason: string) => void,
+    transactionEvent?: TransactionEventDelivery,
   ): void {
     if (!this._webSocket.isConnected()) {
       this._logger.warn(
@@ -277,7 +297,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       gen,
       (settlement) => {
         if (settlement.outcome === "written") {
-          this._pendingRequests.set(messageId, { action, payload });
+          this._pendingRequests.set(messageId, {
+            action,
+            payload,
+            ...(transactionEvent ? { transactionEvent } : {}),
+          });
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
         } else {
           // On drop outcomes (socket_closed, disposed, write_failed,
@@ -458,6 +482,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
       const error = payload as CallErrorFields;
       if (this._expertCalls.claimError(messageId, error)) return;
+      if (pending?.transactionEvent) {
+        this.onTransactionEventCallError(
+          pending.payload as TransactionEventRequestV201,
+          pending.transactionEvent,
+          error.errorCode ?? "GenericError",
+        );
+        return;
+      }
       if (pending?.action === "DataTransfer") {
         this._dataTransferWaiters.reject(
           messageId,
@@ -600,6 +632,99 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
+  /** Send a TransactionEvent as transmission `attempt` (#490). Each
+   *  transmission is a new CALL with a new message id (OCPP-J Part 4 §4.1.4:
+   *  "This also applies to retries"); the payload, seqNo included, is the
+   *  same object every time. */
+  private sendTransactionEventCall(
+    connectorId: number,
+    payload: TransactionEventRequestV201,
+    attempt = 1,
+  ): void {
+    this.send(
+      "TransactionEvent",
+      this.generateMessageId(),
+      payload,
+      attempt > 1
+        ? (reason) =>
+            this.warnResendLost(payload, attempt, `dropped: ${reason}`)
+        : undefined,
+      { connectorId, attempt },
+    );
+  }
+
+  /**
+   * #490, OCPP 2.0.1 / 2.1 E13.FR.02-04: a CALLERROR answering a
+   * TransactionEvent means the CSMS failed to process it. The station
+   * resends it after `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`
+   * seconds times the number of transmissions so far, up to
+   * `MessageAttempts[TransactionEvent]` transmissions, then discards it.
+   * The transaction keeps running either way (unlike 1.6, #447).
+   *
+   * Known limitation: 2.x has no serial queue here (see `send`), so a
+   * waiting resend does not hold back the next transaction message. E13
+   * (Figure 62) describes sequential delivery; this station may deliver
+   * `Ended` before the resent `Started`, leaving the CSMS to reorder by
+   * `seqNo`. Both settings are read here, so a SetVariables applies to the
+   * next failure.
+   */
+  private onTransactionEventCallError(
+    payload: TransactionEventRequestV201,
+    delivery: TransactionEventDelivery,
+    errorCode: string,
+  ): void {
+    const { connectorId, attempt } = delivery;
+    const report = {
+      connectorId,
+      transactionId: payload.transactionInfo.transactionId,
+      eventType: payload.eventType,
+      errorCode,
+    };
+    const config = this._chargePoint.configuration;
+    const attempts = Math.max(1, config.transactionMessageAttempts());
+    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
+    if (attempt >= attempts) {
+      this._logger.warn(
+        `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
+        LogType.TRANSACTION,
+      );
+      this._chargePoint.notifyTransactionMessageDiscarded({
+        ...report,
+        attempts: attempt,
+      });
+      return;
+    }
+    const delayMs = Math.min(
+      Math.max(0, config.transactionMessageRetryInterval()) * attempt * 1000,
+      MAX_TIMER_MS,
+    );
+    this._logger.warn(
+      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} answered with CALLERROR ${errorCode}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
+      LogType.TRANSACTION,
+    );
+    const timer = setTimeout(() => {
+      this._transactionEventRetries.delete(timer);
+      this.sendTransactionEventCall(connectorId, payload, attempt + 1);
+    }, delayMs);
+    unrefTimer(timer);
+    this._transactionEventRetries.set(timer, {
+      payload,
+      attempt: attempt + 1,
+    });
+  }
+
+  /** A resend that will never reach the CSMS: logged, no domain event. */
+  private warnResendLost(
+    payload: TransactionEventRequestV201,
+    attempt: number,
+    outcome: string,
+  ): void {
+    this._logger.warn(
+      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${payload.transactionInfo.transactionId}: attempt ${attempt} ${outcome}`,
+      LogType.TRANSACTION,
+    );
+  }
+
   public sendBootNotification(bootPayload: BootNotification): void {
     const messageId = this.generateMessageId();
     const payload: BootNotificationRequestV201 = {
@@ -667,7 +792,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       transaction.cpTransactionId = crypto.randomUUID();
     }
     const transactionId = transaction.cpTransactionId;
-    const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
     // #335: a driven start may name the state the transaction opens in
@@ -715,7 +839,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         },
       ],
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   private sendChargingStateChanged(
@@ -736,7 +860,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (!transaction.cpTransactionId) {
       transaction.cpTransactionId = crypto.randomUUID();
     }
-    const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
     transaction.cpLastTransactionEventChargingState = chargingState;
@@ -755,7 +878,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         : {}),
       evse: v201TransactionEvse(connectorId),
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   private sendStopTransaction(
@@ -763,7 +886,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     connectorId: number,
   ): void {
     const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
-    const messageId = this.generateMessageId();
     const timestamp = (transaction.stopTime ?? new Date()).toISOString();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
@@ -811,7 +933,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             ]
           : undefined,
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
@@ -845,7 +967,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (!transaction.cpTransactionId) {
       transaction.cpTransactionId = crypto.randomUUID();
     }
-    const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
     if (options.chargingState) {
@@ -908,7 +1029,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       evse: v201TransactionEvse(connectorId),
       ...(meterValue ? { meterValue } : {}),
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   /**
@@ -1190,6 +1311,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
     this._expertCalls.onClosed();
+    // #490: a resend waiting for its interval dies with the connection (2.x
+    // has no offline queue to hand it to). Close, disconnect, reset and
+    // dispose all reach here through ChargePoint.teardownAfterClose.
+    for (const [timer, resend] of this._transactionEventRetries) {
+      clearTimeout(timer);
+      this.warnResendLost(
+        resend.payload,
+        resend.attempt,
+        "cancelled: WebSocket closed",
+      );
+    }
+    this._transactionEventRetries.clear();
   }
 
   public flushPendingQueue(): void {

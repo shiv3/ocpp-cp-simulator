@@ -1065,6 +1065,22 @@ export class ChargePoint {
     }
   }
 
+  /** Called by the 2.x handler on each CALLERROR answering a
+   *  TransactionEvent (#490). Reports only: the transaction is untouched. */
+  notifyTransactionMessageRejected(
+    event: ChargePointEvents["transactionMessageRejected"],
+  ): void {
+    this._events.emit("transactionMessageRejected", event);
+  }
+
+  /** Called by the 2.x handler when a TransactionEvent failed its last
+   *  attempt and is dropped (#490). Reports only, like the above. */
+  notifyTransactionMessageDiscarded(
+    event: ChargePointEvents["transactionMessageDiscarded"],
+  ): void {
+    this._events.emit("transactionMessageDiscarded", event);
+  }
+
   /** Called by AuthorizeResultHandler when Authorize.conf arrives
    *  (issue #181). Fans out to any in-flight `authorizeAndWait` callers
    *  tagId-matched via the `authorizeResult` event. */
@@ -2074,6 +2090,75 @@ export class ChargePoint {
       this.persistAvailability();
     }
     connector.scheduledAvailability = null;
+  }
+
+  /**
+   * The EV side of the cable was unplugged (#488). With a running
+   * transaction, `StopTransactionOnEVSideDisconnect` (2.x
+   * `TxCtrlr.StopTxOnEVSideDisconnect`) decides:
+   * - true: the transaction stops with `EVDisconnected` (1.6 §4.9 / §4.10;
+   *   2.0.1 E09: Ended, triggerReason `EVCommunicationLost`);
+   * - false: the transaction is kept and the connector goes SuspendedEV
+   *   (1.6 §4.9 / §4.10) with its energy offer stopped: the register no
+   *   longer rises while periodic MeterValues keep going out, and the
+   *   derived power is zero outside Charging. On 2.x a
+   *   TransactionEvent(Updated) carries chargingState `SuspendedEV` and
+   *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
+   *   that follows is de-duplicated against it. A second unplug while so
+   *   suspended sends nothing.
+   * Without a transaction the connector goes Available, as an unplug did
+   * before.
+   */
+  evDisconnected(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (!connector.hasRunningTransaction) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      return;
+    }
+
+    if (
+      connector.energyOfferSuspended &&
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.debug(
+        `Connector ${connectorId} EV side already disconnected, ignoring`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (this._configuration.stopTransactionOnEVSideDisconnect()) {
+      this._logger.info(
+        `Connector ${connectorId} EV side disconnected, stopping the transaction (StopTransactionOnEVSideDisconnect=true)`,
+        LogType.TRANSACTION,
+      );
+      this.stopTransaction(connector, "EVDisconnected", {
+        triggerReason: "EVCommunicationLost",
+        stoppedReason: "EVDisconnected",
+      });
+      return;
+    }
+
+    this._logger.info(
+      `Connector ${connectorId} EV side disconnected, suspending the transaction (StopTransactionOnEVSideDisconnect=false)`,
+      LogType.TRANSACTION,
+    );
+    connector.suspendEnergyOffer();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this._outbox.sendTransactionUpdate(connectorId, {
+        triggerReason: "EVCommunicationLost",
+        chargingState: "SuspendedEV",
+      });
+    }
+    this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {

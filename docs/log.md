@@ -1840,6 +1840,52 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | 2.x TransactionEvent CALLERROR follows E13 (#490)
+
+- A CALLERROR answering a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or `Ended`) was ignored. The station now keeps the transaction running, emits `transactionMessageRejected` on every CALLERROR, resends the same payload under a new message id after `MessageAttemptInterval[TransactionEvent]` × transmissions so far, and after `MessageAttempts[TransactionEvent]` transmissions discards it with `transactionMessageDiscarded`. A waiting resend is dropped on WebSocket close. 1.6 is unchanged (#447).
+- `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` and `MessageAttemptInterval[TransactionEvent]` (variable instance `TransactionEvent`, 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12) map to `TransactionMessageAttempts` and `TransactionMessageRetryInterval`, so GetBaseReport now lists them with their instance. The device-model map takes an optional instance: an exact instanced entry first, else the instance-less entry, so no existing variable changes when a CSMS names an instance.
+- A resend cancelled by a WebSocket close, or dropped because the station is offline when it falls due, is logged as a `warn`. Not holding back the next transaction message while a resend waits is documented as a known limitation (E13 Figure 62 describes sequential delivery).
+- [OCPP versions and transports → Transaction message retries](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x): new section.
+- [Charging sessions](concepts/charging-sessions.md): the session stays `active`; the Limits entry states the E13 behaviour.
+- [Operational timeline](concepts/operational-timeline.md): `transaction_message_rejected` and `transaction_message_discarded` kinds, format `1.2`.
+- [Index](index.md): Operational timeline and OCPP versions and transports summaries.
+- [GitHub issues](sources/github-issues.md): #490.
+
+## [2026-10-29] ingest | EV-side disconnect follows StopTransactionOnEVSideDisconnect (#488)
+
+- New domain operation `ChargePoint.evDisconnected(connectorId)`, reached by the `ev_disconnected` method (JSON Lines, Socket.IO, the new curated `ev_disconnected` MCP tool — 26 curated tools), the console's **Unplug** and a scenario `connectorPlug` plug-out during a transaction. With a running transaction, `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`, default `true`, new `ConfigurationStore.stopTransactionOnEVSideDisconnect()`) stops it with `EVDisconnected` (2.0.1 E09: `Ended`, `triggerReason` `EVCommunicationLost`) or, with `false`, keeps it as `SuspendedEV` (2.0.1 E10: `Updated`, `chargingState` `SuspendedEV`, `triggerReason` `EVCommunicationLost`). Without a transaction the console's Unplug still sends `Available`; a scenario plug-out stays a no-op.
+- A WebSocket close keeps the transaction on 1.6 and 2.x, now pinned by tests; no option ends a transaction on connection loss. OCPP-J 1.6 replays the transaction messages queued offline; 2.x has no offline queue, so a TransactionEvent produced offline is dropped rather than replayed with `offline: true` (E11.FR.02) — recorded as a limit, follow-up #528.
+- With `false` the energy offer stops: the register freezes while periodic MeterValues go on, and a second unplug while suspended sends nothing.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): new section; the "Limits" entry for #488 is replaced by the 2.x offline-queue gap (#528), the unmodelled E10 resume and the 1.6 Unplug before StartTransaction.conf (`transactionId: 0`).
+- [Control plane](concepts/control-plane.md): `ev_disconnected` row. [MCP endpoint](entities/mcp-endpoint.md): `ev_disconnected` tool, 26 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)).
+- [Scenario format → `connectorPlug` notes](concepts/scenario-format.md#connectorplug-notes): what a plug-in and a plug-out do, and the k6 runtime's difference, also a row in [CLI → What the exported runtime models](entities/cli.md#what-the-exported-runtime-models).
+- [Web console](entities/web-console.md): Unplug is an EV-side disconnect. [State persistence](concepts/state-persistence.md): `pending_messages` is OCPP-J 1.6 only.
+- Template `cert16-tc005-ev-side-disconnect`: its plug-out now stops the transaction itself; description updated.
+- [GitHub issues](sources/github-issues.md): #488, #528.
+
+## [2026-10-29] ingest | Text redactor: quoted secrets across lines and unterminated PEMs (#519)
+
+- In non-JSON log text, a quoted secret with a raw newline or a backslash line continuation was redacted only to the end of its first line, and a PEM value without its closing quote ended at the next quote, so the text after that quote — the rest of the truncated PEM and anything following it (`x="y" tail=SECRET`) — was logged in clear.
+- A quoted value whose first unescaped quote is on a later line now ends there when a delimiter (whitespace, `,`, `}`, `]`, end of text) follows it and no `:` / `=` precedes it, so the #401 case (`password="a` then `privateKey="SECRET"`) still stops at the line end. Neither may it run over another secret-named assignment, whose own closing quote would come later (`password="a\nprivateKey='S1 x" y S2'` would otherwise log `S2`). A PEM value ends only at a quote after its `-----END …-----` marker with no such assignment before it, else at the end of the text.
+- Fail-closed side effects stated: `password="a\nuser=bob" x` logs `password="[redacted]" x`; a PEM without `-----END …-----"` hides the rest of the message, and inside a single-quoted JSON string value it cuts the frame. Remaining limit stated: a later-line quote followed by `;`, `)` or a letter does not end the value.
+- [Log format → Redaction](concepts/log-format.md#redaction): the line-rule paragraph restated with its exceptions; the #519 limits sentence removed.
+- [GitHub issues](sources/github-issues.md): #519 row rewritten.
+
+## [2026-10-29] ingest | 1.6 charging profiles in e2e, composite round trip (#323)
+
+- The gocpp fixture's 1.6 dispatch gains `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule`, and marshals decimals as JSON numbers. `e2e/chargingProfile.gocpp.e2e.ts` (in `test:e2e`) pins a 6 A profile on an AC 230 V / 3-phase / cos φ 0.9 connector: `Power.Active.Import` 3726 W and `Current.Import` 6.0 A, or 1242 W and 6.0 A with `numberPhases: 1`. The issue's 2.0 A for one phase was the old divide-by-three artefact.
+- `GetCompositeSchedule` (1.6, 2.0.1 and 2.1) converted A → W on the period's `numberPhases` and back over 3 phases, so 6 A on one phase came back as 2.0 A, and it dropped `numberPhases`. Each period now restates the winning profile period: verbatim in its own unit, converted at 230 V on the joint phase count (3 when none) for the other unit, with that count as `numberPhases`; equal watts from different periods no longer merge. A stack is converted on the joint phase count, as metering does, so the composite restates the cap the meter enforces (16 A / 1 ph under a 10 A station cap reads 10 A on 1 phase).
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence rewritten; the composite now equals the metering cap at the 230 V reference.
+- [Source: e2e/README.md](sources/e2e-readme.md): six suites, the new suite, the CSMS→CP action list per version.
+- [Testing strategy](analyses/testing-strategy.md): the e2e row mentions 1.6 charging profiles.
+- [GitHub issues](sources/github-issues.md): #323.
+
+## [2026-10-29] ingest | Retire the manual desktop release workflow (#516)
+
+- `.github/workflows/manual-release.yml` created a draft `v<version>` release and built the desktop bundles without `npm version`, so the bundle, the web console and the sidecar daemon reported the `0.0.0` placeholder. It never ran, and publishing its draft would have fired `release.yml` on the new tag and uploaded the bundles a second time. It is removed rather than stamped: publishing the release-drafter draft is the only release path.
+- [Desktop app → Download](entities/desktop-app.md#download): the tag path stamps the version; the manual workflow is gone; a branch dispatch of `release.yml` uploads nothing.
+- [GitHub issues](sources/github-issues.md): #516.
+
 ## [2026-10-29] ingest | Bench teardown slow paths tested against a slow mock CSMS (#330)
 
 - The bench smoke suite's mock CSMS answered every CALL at once, so the teardown guards that only engage when something is slow could be removed with every test green. `scripts/bench/smokeHarness.ts` now holds the mock (per-action `delayMs` / `stallAfter`, receipt and reply hooks, open transactions tracked by id), the daemon and bench subprocesses and the control-plane helpers, shared with the smoke file.

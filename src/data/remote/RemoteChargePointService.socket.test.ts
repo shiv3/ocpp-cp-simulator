@@ -728,6 +728,18 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [undefined],
       },
       {
+        name: "evDisconnected",
+        invoke: (service) => service.evDisconnected("cp-1", 1),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "ev_disconnected",
+            params: { connector: 1 },
+          },
+        ],
+        results: [undefined],
+      },
+      {
         name: "setMeterValue",
         invoke: (service) => service.setMeterValue("cp-1", 1, 1200),
         expected: [

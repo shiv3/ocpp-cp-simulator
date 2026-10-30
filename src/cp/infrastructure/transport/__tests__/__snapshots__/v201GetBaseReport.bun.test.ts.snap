@@ -68,6 +68,46 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "instance": "TransactionEvent",
+            "name": "MessageAttempts",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "3",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "instance": "TransactionEvent",
+            "name": "MessageAttemptInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "60",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
             "name": "TxCtrlr",
           },
           "variable": {

@@ -11,6 +11,7 @@ sources:
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
   - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
+  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries)
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -23,6 +24,8 @@ related:
   - trace-format.md
   - scenario-format.md
   - charging-sessions.md
+  - operational-timeline.md
+  - expert-ocpp-calls.md
 updated: 2026-10-29
 ---
 
@@ -97,6 +100,60 @@ WebSockets, at the cost of a control frame instead of a Heartbeat round trip.
   answers `NotSupported`, `GetConfiguration` lists the key as unknown, and
   2.x `SetVariables` answers `Rejected`. The CLI and daemon (Bun's client, or
   `ws` under Node) always send them.
+
+## Transaction message retries (OCPP 2.x)
+
+On 2.0.1 and 2.1 a CALLERROR answering a TransactionEvent (`Started`,
+`Updated` or `Ended`) means the CSMS failed to process it (E13, #490). It
+used to be ignored. The station now:
+
+- **keeps the transaction running.** The connector stays as it was, the
+  station does not end the transaction on the error, and the
+  [charging session](charging-sessions.md) stays `active`. This differs from 1.6, where a StartTransaction CALLERROR
+  abandons the transaction (#447);
+- **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
+  `eventType`, `errorCode`, `attempt`) on every CALLERROR;
+- **resends the same payload** (same `seqNo`, same `transactionId`) under a
+  new message id, as OCPP-J requires for a retry (Part 4 §4.1.4). It waits
+  `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]` seconds times the
+  number of transmissions so far (E13.FR.03): 60 s, then 120 s with the
+  default of 60;
+- **discards the message after `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`
+  transmissions in all** (default 3, E13.FR.04) and emits
+  `transactionMessageDiscarded` (`attempts` instead of `attempt`).
+
+A CALLRESULT ends the retries; an answer to a resend goes through the normal
+`idTokenInfo` handling. Both settings are the 1.6 keys
+`TransactionMessageAttempts` and `TransactionMessageRetryInterval` under
+their 2.x names, so `SetVariables`, `GetVariables` and `GetBaseReport` see
+them and a change applies to the next CALLERROR. An attempts value below 1
+counts as 1; a negative interval counts as 0.
+
+Those two are instanced variables: the CSMS names them `MessageAttempts` /
+`MessageAttemptInterval` with `variableInstance = "TransactionEvent"`
+(2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12); "MessageAttemptsTransactionEvent" is
+only the title of the spec section. Without that instance, or under the
+flat name, `GetVariables` / `SetVariables` answer `UnknownVariable`. The
+results echo the `variable` the CSMS sent, instance included, and
+`GetBaseReport` reports `variable: { name, instance }` for them. Every
+other mapped variable has no instance and answers whatever instance the
+CSMS names, as before.
+
+Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
+resend does not hold back the next transaction message. E13 (Figure 62)
+describes sequential delivery; this station may deliver `Ended` before the
+resent `Started`, and the CSMS has to order the messages by `seqNo`. A
+resend still waiting when the WebSocket closes
+(network loss, disconnect, reset, delete) is dropped: 2.x has no offline
+queue to hand it to. So is a resend that finds the station offline when it
+falls due. Either way the station logs a `warn` (category `TRANSACTION`)
+naming the event type, transaction and attempt; no event is emitted. Only TransactionEvents the station builds are retried;
+one sent as an [expert call](expert-ocpp-calls.md) is not. E13 also retries
+a message left unanswered within `MessageTimeout`; that trigger is not
+implemented.
+
+The [operational timeline](operational-timeline.md) records both events as
+`transaction_message_rejected` and `transaction_message_discarded`.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

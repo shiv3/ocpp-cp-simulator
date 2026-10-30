@@ -4,12 +4,9 @@ import { OCPPStatus } from "@/cp/domain/types/OcppTypes";
 import type { ChargePointService } from "@/data/interfaces/ChargePointService";
 
 /*
- * The connector card's plug in / unplug. The simulator's `connectorPlug`
- * scenario node runs a no-op callback (`ScenarioRuntime`'s `onConnectorPlug`);
- * the exported k6 runtime, the other implementation of the same node, sends a
- * StatusNotification: Preparing for a plug-in, Available for a plug-out. The
- * card does what that node means on the wire, through the existing
- * `sendStatusNotification`, so no new service method is needed.
+ * The connector card's plug in / unplug. A plug-in sends StatusNotification
+ * Preparing, as the exported k6 runtime does for a `connectorPlug` plug-in
+ * node; the simulator's own node treats a plug-in as a no-op.
  */
 export function plugIn(
   service: ChargePointService,
@@ -23,16 +20,18 @@ export function plugIn(
   );
 }
 
+/**
+ * An EV-side disconnect (#488): the station decides what it means. With a
+ * running transaction StopTransactionOnEVSideDisconnect stops it
+ * (`EVDisconnected`) or suspends it (SuspendedEV); without one the connector
+ * goes Available, as this button did before.
+ */
 export function unplug(
   service: ChargePointService,
   cpId: string,
   connectorId: number,
 ): Promise<void> {
-  return service.sendStatusNotification(
-    cpId,
-    connectorId,
-    OCPPStatus.Available,
-  );
+  return service.evDisconnected(cpId, connectorId);
 }
 
 /**

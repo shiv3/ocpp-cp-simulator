@@ -1,3 +1,4 @@
+import { isOneOf } from "../types/FirmwareLogStatus";
 import {
   isValidMonitorSeverity,
   MAX_MONITOR_SEVERITY,
@@ -74,6 +75,14 @@ export type MonitoringStoreEvent =
 
 export type MonitoringStoreListener = (event: MonitoringStoreEvent) => void;
 
+/** What {@link MonitoringStore.initialize} leaves persistence to do. */
+export interface MonitoringInitialization {
+  /** Persisted monitors the store ignored: delete their rows. */
+  readonly dropped: readonly VariableMonitor[];
+  /** The station's own monitors now installed: save their rows. */
+  readonly added: readonly VariableMonitor[];
+}
+
 /** `MonitoringBaseEnumType`, the same in 2.0.1 and 2.1. */
 export const MONITORING_BASES = [
   "All",
@@ -84,9 +93,7 @@ export const MONITORING_BASES = [
 export type MonitoringBase = (typeof MONITORING_BASES)[number];
 
 export function parseMonitoringBase(raw: string): MonitoringBase | null {
-  return (MONITORING_BASES as readonly string[]).includes(raw)
-    ? (raw as MonitoringBase)
-    : null;
+  return isOneOf(raw, MONITORING_BASES) ? raw : null;
 }
 
 /**
@@ -119,28 +126,38 @@ export class MonitoringStore {
    * means the station never stored its catalog state (a first start, or a
    * database from before #538): the preconfigured monitors are activated
    * as under `All`, a persisted monitor with the same id winning.
+   *
+   * Returns what persistence must catch up with: `dropped`, the persisted
+   * hardwired monitors the catalog lacks; `added`, the station's own
+   * monitors now installed (every hardwired one, and the preconfigured
+   * ones when `activeBase` is undefined), by increasing id.
    */
   initialize(
     persisted: readonly VariableMonitor[],
     activeBase: MonitoringBase | undefined,
-  ): void {
+  ): MonitoringInitialization {
     if (activeBase === undefined) {
       for (const monitor of this.preconfigured()) {
         this.monitors.set(monitor.id, monitor);
       }
     }
     // A hardwired row the catalog no longer has would be undeletable.
-    this.restore(
-      persisted.filter(
-        (m) => m.origin !== "HardWiredMonitor" || this.catalogIds.has(m.id),
-      ),
+    const dropped = persisted.filter(
+      (m) => m.origin === "HardWiredMonitor" && !this.catalogIds.has(m.id),
     );
+    this.restore(persisted.filter((m) => !dropped.includes(m)));
     for (const monitor of this.catalog) {
       if (monitor.origin === "HardWiredMonitor") {
         this.monitors.set(monitor.id, monitor);
       }
     }
     this.base = activeBase ?? "All";
+    const added = this.list().filter(
+      (m) =>
+        m.origin === "HardWiredMonitor" ||
+        (activeBase === undefined && m.origin === "PreconfiguredMonitor"),
+    );
+    return { dropped, added };
   }
 
   install(draft: MonitorDraft): InstallOutcome {
@@ -282,7 +299,9 @@ export class MonitoringStore {
 
   /** Monitors watching the given configuration key, by increasing id. */
   byValueKey(valueKey: string): VariableMonitor[] {
-    return this.list().filter((m) => m.valueKey === valueKey);
+    return [...this.monitors.values()]
+      .filter((m) => m.valueKey === valueKey)
+      .sort((a, b) => a.id - b.id);
   }
 
   /**

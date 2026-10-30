@@ -125,12 +125,6 @@ function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
 type V201MeterValuesSampledValue =
   MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
 
-function ocppStatusToV201(
-  status: OCPPStatus,
-): StatusNotificationRequestV201["connectorStatus"] {
-  return toV2ConnectorStatus(status);
-}
-
 function ocppStatusToTransactionChargingState(
   status: OCPPStatus,
 ): TransactionChargingState | null {
@@ -1154,7 +1148,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const ev = v201StatusEvse(connectorId);
     const payload: StatusNotificationRequestV201 = {
       timestamp: (opts?.timestamp ?? new Date()).toISOString(),
-      connectorStatus: ocppStatusToV201(status),
+      connectorStatus: toV2ConnectorStatus(status),
       evseId: ev.evseId,
       connectorId: ev.connectorId,
     };

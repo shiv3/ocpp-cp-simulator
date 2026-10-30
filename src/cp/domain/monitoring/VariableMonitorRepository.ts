@@ -1,7 +1,8 @@
 import type { Database, SqlParam } from "../persistence/Database";
-import { parseMonitoringBase, type MonitoringBase } from "./MonitoringStore";
+import { isOneOf } from "../types/FirmwareLogStatus";
+import { MONITORING_BASES, type MonitoringBase } from "./MonitoringStore";
 import {
-  parseSupportedMonitorType,
+  SUPPORTED_MONITOR_TYPES,
   type VariableMonitor,
 } from "./VariableMonitor";
 
@@ -76,7 +77,7 @@ export class VariableMonitorRepository {
         activeMonitoringBase?: unknown;
       } | null;
       const raw = value?.activeMonitoringBase;
-      return (typeof raw === "string" && parseMonitoringBase(raw)) || undefined;
+      return isOneOf(raw, MONITORING_BASES) ? raw : undefined;
     } catch (err) {
       console.error("Failed to load the monitoring base:", err);
       return undefined;
@@ -130,8 +131,7 @@ function parseMonitor(raw: string): VariableMonitor | null {
       typeof value.valueKey !== "string" ||
       typeof value.component?.name !== "string" ||
       typeof value.variable?.name !== "string" ||
-      typeof value.type !== "string" ||
-      parseSupportedMonitorType(value.type) === null
+      !isOneOf(value.type, SUPPORTED_MONITOR_TYPES)
     ) {
       return null;
     }

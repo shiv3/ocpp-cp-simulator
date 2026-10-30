@@ -3,6 +3,10 @@ import { OcppFeatureProfile } from "../types/OcppTypes";
 import { isOcpp2Version } from "../types/OcppVersion";
 import { MAX_TIMER_MS } from "../../shared/timers";
 import { SIGNED_METER_MODES } from "../connector/SignedMeterData";
+import {
+  MAX_MONITOR_SEVERITY,
+  MIN_MONITOR_SEVERITY,
+} from "../monitoring/VariableMonitor";
 
 export const ConfigurationKeys = {
   Core: {
@@ -468,8 +472,8 @@ export const ConfigurationKeys = {
       required: false,
       readonly: false,
       type: "integer",
-      min: 0,
-      max: 9,
+      min: MIN_MONITOR_SEVERITY,
+      max: MAX_MONITOR_SEVERITY,
     } as IntegerConfigurationKey,
     // #315: sign the energy register in OCMF (German Eichrecht format) and
     // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by

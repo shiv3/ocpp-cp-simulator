@@ -1,3 +1,5 @@
+import { isOneOf } from "../types/FirmwareLogStatus";
+
 /**
  * OCPP 2.x variable monitoring (use cases N02–N07) — domain types.
  *
@@ -29,9 +31,7 @@ export type SupportedMonitorType = (typeof SUPPORTED_MONITOR_TYPES)[number];
 export function parseSupportedMonitorType(
   raw: string,
 ): SupportedMonitorType | null {
-  return (SUPPORTED_MONITOR_TYPES as readonly string[]).includes(raw)
-    ? (raw as SupportedMonitorType)
-    : null;
+  return isOneOf(raw, SUPPORTED_MONITOR_TYPES) ? raw : null;
 }
 
 /**
@@ -56,10 +56,6 @@ export function monitorBehaviour(type: SupportedMonitorType): MonitorBehaviour {
     case "PeriodicClockAligned":
       return "periodic";
   }
-}
-
-export function isThresholdMonitorType(type: SupportedMonitorType): boolean {
-  return type === "UpperThreshold" || type === "LowerThreshold";
 }
 
 /** 2.1 TargetDelta / TargetDeltaRelative: Actual against Target. */

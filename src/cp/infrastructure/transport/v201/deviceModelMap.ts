@@ -6,6 +6,7 @@ import {
   evseValueKey,
   RUNTIME_VALUE_KEYS,
 } from "../../../domain/charge-point/runtimeValueKeys";
+import { MONITORING_CTRLR_KEYS } from "../../../domain/monitoring/monitoringCtrlrKeys";
 
 export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["OCPPCommCtrlr/HeartbeatInterval", "HeartbeatInterval"],
@@ -45,20 +46,30 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-
   // §2.13.9), read-only values the station defines at runtime (2.x only).
   // ItemsPerMessage / BytesPerMessage exist per variableInstance.
-  ...["SetVariableMonitoring", "ClearVariableMonitoring"].flatMap(
-    (instance): [string, string][] => [
-      [
-        `MonitoringCtrlr/ItemsPerMessage/${instance}`,
-        `ItemsPerMessage${instance}`,
-      ],
-      [
-        `MonitoringCtrlr/BytesPerMessage/${instance}`,
-        `BytesPerMessage${instance}`,
-      ],
-    ],
-  ),
-  ["MonitoringCtrlr/ActiveMonitoringLevel", "ActiveMonitoringLevel"],
-  ["MonitoringCtrlr/ActiveMonitoringBase", "ActiveMonitoringBase"],
+  [
+    "MonitoringCtrlr/ItemsPerMessage/SetVariableMonitoring",
+    MONITORING_CTRLR_KEYS.itemsPerSetVariableMonitoring,
+  ],
+  [
+    "MonitoringCtrlr/BytesPerMessage/SetVariableMonitoring",
+    MONITORING_CTRLR_KEYS.bytesPerSetVariableMonitoring,
+  ],
+  [
+    "MonitoringCtrlr/ItemsPerMessage/ClearVariableMonitoring",
+    MONITORING_CTRLR_KEYS.itemsPerClearVariableMonitoring,
+  ],
+  [
+    "MonitoringCtrlr/BytesPerMessage/ClearVariableMonitoring",
+    MONITORING_CTRLR_KEYS.bytesPerClearVariableMonitoring,
+  ],
+  [
+    "MonitoringCtrlr/ActiveMonitoringLevel",
+    MONITORING_CTRLR_KEYS.activeMonitoringLevel,
+  ],
+  [
+    "MonitoringCtrlr/ActiveMonitoringBase",
+    MONITORING_CTRLR_KEYS.activeMonitoringBase,
+  ],
   // #538: §2.11.7 / 2.1 §2.13.7 "OfflineMonitoringEventQueuingSeverity",
   // ReadWrite, no variableInstance; a persisted key (2.x only).
   ["MonitoringCtrlr/OfflineQueuingSeverity", "OfflineQueuingSeverity"],

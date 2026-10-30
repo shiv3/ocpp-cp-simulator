@@ -645,28 +645,14 @@ export class ChargePoint {
     // that never stored its catalog state, the preconfigured ones. The
     // station's own monitors are stored too, so they keep their triggered
     // flag (N07.FR.14) and a later start knows which were deleted.
-    this._monitoring.initialize(
+    const { dropped, added } = this._monitoring.initialize(
       persisted.map((p) => p.monitor),
       storedBase,
     );
     // A hardwired row the catalog no longer has was ignored: drop it, so a
     // later monitor under its id does not inherit its triggered flag.
-    for (const { monitor } of persisted) {
-      if (
-        monitor.origin === "HardWiredMonitor" &&
-        this._monitoring.get(monitor.id) === undefined
-      ) {
-        repository.delete(monitor.id);
-      }
-    }
-    for (const monitor of this._monitoring.list()) {
-      if (
-        monitor.origin === "HardWiredMonitor" ||
-        (storedBase === undefined && monitor.origin === "PreconfiguredMonitor")
-      ) {
-        repository.save(monitor);
-      }
-    }
+    for (const monitor of dropped) repository.delete(monitor.id);
+    for (const monitor of added) repository.save(monitor);
     if (storedBase === undefined) {
       repository.saveActiveBase(this._monitoring.activeMonitoringBase);
     }

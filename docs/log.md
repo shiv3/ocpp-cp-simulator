@@ -1840,6 +1840,15 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | 1.6 charging profiles in e2e, composite round trip (#323)
+
+- The gocpp fixture's 1.6 dispatch gains `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule`, and marshals decimals as JSON numbers. `e2e/chargingProfile.gocpp.e2e.ts` (in `test:e2e`) pins a 6 A profile on an AC 230 V / 3-phase / cos φ 0.9 connector: `Power.Active.Import` 3726 W and `Current.Import` 6.0 A, or 1242 W and 6.0 A with `numberPhases: 1`. The issue's 2.0 A for one phase was the old divide-by-three artefact.
+- `GetCompositeSchedule` (1.6, 2.0.1 and 2.1) converted A → W on the period's `numberPhases` and back over 3 phases, so 6 A on one phase came back as 2.0 A, and it dropped `numberPhases`. Each period now restates the winning profile period: verbatim in its own unit, converted at 230 V on the joint phase count (3 when none) for the other unit, with that count as `numberPhases`; equal watts from different periods no longer merge. A stack is converted on the joint phase count, as metering does, so the composite restates the cap the meter enforces (16 A / 1 ph under a 10 A station cap reads 10 A on 1 phase).
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence rewritten; the composite now equals the metering cap at the 230 V reference.
+- [Source: e2e/README.md](sources/e2e-readme.md): six suites, the new suite, the CSMS→CP action list per version.
+- [Testing strategy](analyses/testing-strategy.md): the e2e row mentions 1.6 charging profiles.
+- [GitHub issues](sources/github-issues.md): #323.
+
 ## [2026-10-29] ingest | Retire the manual desktop release workflow (#516)
 
 - `.github/workflows/manual-release.yml` created a draft `v<version>` release and built the desktop bundles without `npm version`, so the bundle, the web console and the sidecar daemon reported the `0.0.0` placeholder. It never ran, and publishing its draft would have fired `release.yml` on the new tag and uploaded the bundles a second time. It is removed rather than stamped: publishing the release-drafter draft is the only release path.

@@ -12,8 +12,11 @@ CSMS-initiated commands.
 bun run test:e2e
 ```
 
-This builds the Go CSMS fixture once, then runs all three suites
-(`e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`, `e2e/ocpp21.gocpp.e2e.ts`).
+This builds the Go CSMS fixture once, then runs the suites listed in the
+`test:e2e` script of `package.json`: the per-version suites
+(`e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`, `e2e/ocpp21.gocpp.e2e.ts`),
+`e2e/chargingProfile.gocpp.e2e.ts` (OCPP 1.6 smart charging),
+`e2e/scenario.gocpp.e2e.ts` and `e2e/comprehensive.gocpp.e2e.ts`.
 Run a single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 ## Requirements (local-only)
@@ -52,3 +55,28 @@ build graph. With the sibling gone, a CI job is now only a `setup-go` step away.
 - `support/buildCsms.ts` — builds the Go binary.
 - `ocpp16|201|21.gocpp.e2e.ts` — the per-version suites (driven in-process via
   `ChargePoint`, asserting on the CSMS frame log + CP state).
+- `chargingProfile.gocpp.e2e.ts` — OCPP 1.6 smart charging: a 6 A
+  `SetChargingProfile` on a 230 V / 3-phase / cos φ 0.9 connector reaches the
+  CSMS as `Power.Active.Import` 3726 W (1242 W with `numberPhases: 1`) and
+  `Current.Import` 6.0 A; `ClearChargingProfile` lifts it; `GetCompositeSchedule`
+  returns the limit and `numberPhases` the profile was set with (#323).
+
+## CSMS→CP actions
+
+`POST /command` takes `{ "cpId", "action", ...fields }`, the fields named as in
+the OCPP request, and returns `{ "ok", "result", "error" }` with the CP's
+response as `result`. Actions per `--version`
+(`csms/command.go`):
+
+- **1.6** — `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`,
+  `ReserveNow`, `CancelReservation`, `SetChargingProfile`,
+  `ClearChargingProfile`, `GetCompositeSchedule`.
+- **2.0.1** — `RequestStartTransaction`, `RequestStopTransaction`, `Reset`,
+  `ChangeAvailability`, `TriggerMessage`, `UnlockConnector`, `GetVariables`,
+  `SetVariables`, `GetBaseReport`, `ReserveNow`.
+- **2.1** — `RequestStartTransaction`, `RequestStopTransaction`,
+  `UsePriorityCharging`, `ReserveNow`.
+
+Any other action, sent to a connected CP, answers `ok: false` with an
+`unsupported <version> action` error. The
+fixture sends decimals (a schedule's `limit`) as JSON numbers.

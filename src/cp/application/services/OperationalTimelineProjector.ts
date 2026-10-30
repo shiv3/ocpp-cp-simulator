@@ -4,7 +4,7 @@ import type {
   ActiveChargingProfile,
   Connector,
 } from "../../domain/connector/Connector";
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { setTimeoutAt } from "../../shared/timers";
 import type { OperationalTimeline } from "./OperationalTimeline";
 
 /**
@@ -50,11 +50,8 @@ export class OperationalTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
   private incident: Incident | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
-  /** connectorId (0 = station) → profileId → pending expiry. */
-  private readonly expiryTimers = new Map<
-    number,
-    Map<number, ReturnType<typeof setTimeout>>
-  >();
+  /** connectorId (0 = station) → profileId → cancel the pending expiry. */
+  private readonly expiryTimers = new Map<number, Map<number, () => void>>();
 
   constructor(
     private readonly timeline: OperationalTimeline,
@@ -184,28 +181,27 @@ export class OperationalTimelineProjector {
         data: { status, stopped },
       });
     });
-    on(
-      "transactionMessageRejected",
-      ({ connectorId, transactionId, eventType, errorCode, attempt }) => {
-        this.timeline.record({
-          kind: "transaction_message_rejected",
-          connectorId,
-          summary: `TransactionEvent ${eventType} of transaction ${transactionId} rejected (${errorCode}), attempt ${attempt}`,
-          data: { transactionId, eventType, errorCode, attempt },
-        });
-      },
-    );
-    on(
-      "transactionMessageDiscarded",
-      ({ connectorId, transactionId, eventType, errorCode, attempts }) => {
-        this.timeline.record({
-          kind: "transaction_message_discarded",
-          connectorId,
-          summary: `TransactionEvent ${eventType} of transaction ${transactionId} discarded after ${attempts} attempts (${errorCode})`,
-          data: { transactionId, eventType, errorCode, attempts },
-        });
-      },
-    );
+    on("transactionMessageRejected", ({ connectorId, attempt, ...event }) => {
+      const failure =
+        event.reason === "timeout"
+          ? "got no answer"
+          : `rejected (${event.errorCode})`;
+      this.timeline.record({
+        kind: "transaction_message_rejected",
+        connectorId,
+        summary: `${transactionMessageLabel(event)} ${failure}, attempt ${attempt}`,
+        data: { ...transactionMessageFields(event), attempt },
+      });
+    });
+    on("transactionMessageDiscarded", ({ connectorId, attempts, ...event }) => {
+      const cause = event.reason === "timeout" ? "no answer" : event.errorCode;
+      this.timeline.record({
+        kind: "transaction_message_discarded",
+        connectorId,
+        summary: `${transactionMessageLabel(event)} discarded after ${attempts} attempts (${cause})`,
+        data: { ...transactionMessageFields(event), attempts },
+      });
+    });
     on(
       "chargingProfileApplied",
       ({ connectorId, profile, replaced, source }) => {
@@ -254,7 +250,7 @@ export class OperationalTimelineProjector {
   dispose(): void {
     this.clearSettleTimer();
     for (const timers of this.expiryTimers.values()) {
-      for (const timer of timers.values()) clearTimeout(timer);
+      for (const cancel of timers.values()) cancel();
     }
     this.expiryTimers.clear();
     for (const unsubscribe of this.unsubscribes) unsubscribe();
@@ -271,16 +267,7 @@ export class OperationalTimelineProjector {
     if (Number.isNaN(expiresAt)) return;
     // Copied out so a pending timer does not hold the whole schedule.
     const data = { ...profileFields(connectorId, profile), validTo };
-    const check = () => {
-      const remaining = expiresAt - this.timeline.now();
-      if (remaining > 0) {
-        const timer = setTimeout(check, Math.min(remaining, MAX_TIMER_MS));
-        // Weeks away, possibly: never the reason the process will not exit.
-        unrefTimer(timer);
-        const timers = this.expiryTimers.get(connectorId) ?? new Map();
-        this.expiryTimers.set(connectorId, timers.set(profileId, timer));
-        return;
-      }
+    const expire = () => {
       this.cancelExpiry(connectorId, profileId);
       this.timeline.record({
         kind: "charging_profile_expired",
@@ -289,14 +276,24 @@ export class OperationalTimelineProjector {
         data,
       });
     };
-    check();
+    if (expiresAt <= this.timeline.now()) {
+      expire();
+      return;
+    }
+    const cancel = setTimeoutAt(expiresAt, expire, {
+      now: () => this.timeline.now(),
+      // Weeks away, possibly: never the reason the process will not exit.
+      unref: true,
+    });
+    const timers = this.expiryTimers.get(connectorId) ?? new Map();
+    this.expiryTimers.set(connectorId, timers.set(profileId, cancel));
   }
 
   private cancelExpiry(connectorId: number, profileId: number): void {
     const timers = this.expiryTimers.get(connectorId);
-    const timer = timers?.get(profileId);
-    if (!timers || timer === undefined) return;
-    clearTimeout(timer);
+    const cancel = timers?.get(profileId);
+    if (!timers || cancel === undefined) return;
+    cancel();
     timers.delete(profileId);
     if (timers.size === 0) this.expiryTimers.delete(connectorId);
   }
@@ -350,6 +347,38 @@ export class OperationalTimelineProjector {
     clearTimeout(this.settleTimer);
     this.settleTimer = null;
   }
+}
+
+type TransactionMessageFields = Omit<
+  ChargePointEvents["transactionMessageRejected"],
+  "connectorId" | "attempt"
+>;
+
+/** "TransactionEvent Started of transaction tx-1"; 1.6 messages carry no
+ *  eventType. */
+function transactionMessageLabel(event: TransactionMessageFields): string {
+  const message = event.eventType
+    ? `${event.action} ${event.eventType}`
+    : event.action;
+  return `${message} of transaction ${event.transactionId}`;
+}
+
+/** The `data` of a `transaction_message_*` entry: `eventType` and
+ *  `errorCode` only when the event has them. */
+function transactionMessageFields({
+  transactionId,
+  action,
+  eventType,
+  reason,
+  errorCode,
+}: TransactionMessageFields) {
+  return {
+    transactionId,
+    action,
+    ...(eventType !== undefined && { eventType }),
+    reason,
+    ...(errorCode !== undefined && { errorCode }),
+  };
 }
 
 /** Station-wide profiles (connector 0) are charge-point-wide entries: the

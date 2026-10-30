@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import type { NotifyReportRequestV201 } from "../../../../ocpp";
 import type { ReportDataType } from "../../../../ocpp/types/v201/notify-report";
+import { isValidNotifyReportRequestV201 } from "../../../../ocpp/v201";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
@@ -80,6 +81,7 @@ describe("OCPP 2.0.1 GetBaseReport", () => {
         (frame) => frame[0] === 2 && frame[2] === "NotifyReport",
       );
       const notifyReport = notifyReportFrame[3] as NotifyReportRequestV201;
+      expect(isValidNotifyReportRequestV201(notifyReport)).toBe(true);
       expect(notifyReport.requestId).toBe(42);
       expect(notifyReport.seqNo).toBe(0);
       expect(notifyReport.tbc).toBe(false);
@@ -103,6 +105,45 @@ describe("OCPP 2.0.1 GetBaseReport", () => {
       expect(authorizeRemoteStart.variableAttribute[0]).toMatchObject({
         mutability: "ReadOnly",
       });
+
+      // #538: the runtime values, per EVSE for EVSE / Connector.
+      expect(reportDatum(reportData, "EVSE", "Power")).toEqual({
+        component: { name: "EVSE", evse: { id: 1 } },
+        variable: { name: "Power" },
+        variableAttribute: [
+          { type: "Actual", value: "0", mutability: "ReadOnly" },
+        ],
+        variableCharacteristics: {
+          dataType: "decimal",
+          unit: "W",
+          supportsMonitoring: true,
+        },
+      });
+      expect(
+        reportData
+          .filter((d) => d.variable.name === "AvailabilityState")
+          .map((d) => [
+            d.component,
+            d.variableAttribute[0].value,
+            d.variableCharacteristics?.valuesList,
+          ]),
+      ).toEqual([
+        [
+          { name: "ChargingStation" },
+          "Available",
+          "Available,Occupied,Reserved,Unavailable,Faulted",
+        ],
+        [
+          { name: "EVSE", evse: { id: 1 } },
+          "Available",
+          "Available,Occupied,Reserved,Unavailable,Faulted",
+        ],
+        [
+          { name: "Connector", evse: { id: 1, connectorId: 1 } },
+          "Available",
+          "Available,Occupied,Reserved,Unavailable,Faulted",
+        ],
+      ]);
 
       expect(csms.received.indexOf(notifyReportFrame)).toBeGreaterThan(
         csms.received.indexOf(callResultFrame),

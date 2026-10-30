@@ -1703,9 +1703,11 @@ async function main(): Promise<void> {
       // Settling *before* this, and for each cycle's own bound, is pinned by
       // `fleetBench.slowpath.test-bun.ts` (#330): closing first, or settling
       // for less than the assigned-id stage, sends a placeholder stop the
-      // CSMS cannot match. The RPC stages of that bound are pinned only as
-      // arithmetic, in `lib.bun.test.ts`: a mock CSMS cannot make a
-      // control-plane RPC slow, so no run-level test shows they are needed.
+      // CSMS cannot match. The RPC stage of that bound is pinned there too,
+      // through a relay that holds the cycle's `stop_transaction` (#523):
+      // without it, the charge point is deleted before that stop reaches the
+      // daemon. The CSMS sees no difference — the re-stop below closes the
+      // session either way — so that test asserts the order of the RPCs.
       const needClosing = loads.flatMap((l) => [
         ...l.openTransactions(),
         ...l.stopsAwaitingWire(),

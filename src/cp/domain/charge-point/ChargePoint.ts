@@ -57,7 +57,8 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
+import { isOcpp2Version, isSoapVersion, OCPP_2_1 } from "../types/OcppVersion";
+import { DeviceModelTargets } from "./DeviceModelTargets";
 import {
   SOAP_OPERATION_NAMES,
   soapDialectForVersion,
@@ -79,7 +80,16 @@ import type {
   TransactionStoppedReason,
   TransactionUpdateOptions,
 } from "../connector/Transaction";
-import type { ReadingContext } from "../connector/MeterValueBuilder";
+import {
+  reportedActivePowerW,
+  type ReadingContext,
+} from "../connector/MeterValueBuilder";
+import {
+  evseValueKey,
+  RUNTIME_VALUE_KEYS,
+  toV2ConnectorStatus,
+  V2_CONNECTOR_STATUSES,
+} from "./runtimeValueKeys";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
@@ -95,10 +105,24 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
-import { MonitoringStore } from "../monitoring/MonitoringStore";
+import {
+  MONITORING_BASES,
+  MonitoringStore,
+} from "../monitoring/MonitoringStore";
+import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
 import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
+import {
+  MAX_MONITOR_SEVERITY,
+  MIN_MONITOR_SEVERITY,
+  type VariableMonitor,
+} from "../monitoring/VariableMonitor";
+import {
+  MONITORING_CTRLR_KEYS,
+  MONITORING_REQUEST_MAX_BYTES,
+  MONITORING_REQUEST_MAX_ITEMS,
+} from "../monitoring/monitoringCtrlrKeys";
 import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
@@ -237,7 +261,9 @@ export class ChargePoint {
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
-  private readonly _monitoring = new MonitoringStore();
+  private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
+  // #538: Target attributes of the 2.1 device model (EVSE.Power).
+  private readonly _deviceModelTargets = new DeviceModelTargets();
   // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
   private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
@@ -541,6 +567,16 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    // §5.2: a CP-level Unavailable set previously must survive a reboot.
+    // We don't actually transition status here (no WebSocket yet); the
+    // saved flag is reapplied when ChangeAvailability runs or when the
+    // operator inspects the persisted state. Read before the 2.x runtime
+    // values are first published, so ChargingStation.AvailabilityState
+    // starts from it (#538).
+    const persistedCp = this.loadAvailability(0);
+    if (persistedCp === "Inoperative") {
+      this._status = OCPPStatus.Unavailable;
+    }
     if (isOcpp2Version(this._ocppVersion)) this.wireVariableMonitoring();
     // A persisted override never fires onChange; the scheduler only runs
     // once a boot is Accepted (#454).
@@ -551,15 +587,6 @@ export class ChargePoint {
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
     );
-
-    // §5.2: a CP-level Unavailable set previously must survive a reboot.
-    // We don't actually transition status here (no WebSocket yet); the
-    // saved flag is reapplied when ChangeAvailability runs or when the
-    // operator inspects the persisted state.
-    const persistedCp = this.loadAvailability(0);
-    if (persistedCp === "Inoperative") {
-      this._status = OCPPStatus.Unavailable;
-    }
   }
 
   /** Read a persisted Operative/Inoperative flag from the DB for the given
@@ -623,29 +650,216 @@ export class ChargePoint {
   private wireVariableMonitoring(): void {
     const repository = new VariableMonitorRepository(this._id, this._database);
     const persisted = repository.load();
-    this._monitoring.restore(persisted.map((p) => p.monitor));
+    const storedBase = repository.loadActiveBase();
+    // #538: the hardwired monitors, the persisted ones, and on a station
+    // that never stored its catalog state, the preconfigured ones. The
+    // station's own monitors are stored too, so they keep their triggered
+    // flag (N07.FR.14) and a later start knows which were deleted.
+    const { dropped, added } = this._monitoring.initialize(
+      persisted.map((p) => p.monitor),
+      storedBase,
+    );
+    // A hardwired row the catalog no longer has was ignored: drop it, so a
+    // later monitor under its id does not inherit its triggered flag.
+    for (const monitor of dropped) repository.delete(monitor.id);
+    for (const monitor of added) repository.save(monitor);
+    if (storedBase === undefined) {
+      repository.saveActiveBase(this._monitoring.activeMonitoringBase);
+    }
+    this.publishMonitoringCtrlr();
+    this.publishRuntimeValues();
     // Registered before the evaluation's own listener, so a new row exists
     // when its triggered flag is first written.
     this._monitoring.onChange((event) => {
       if (event.kind === "installed") repository.save(event.monitor);
       else if (event.kind === "cleared") repository.delete(event.monitor.id);
+      else if (event.kind === "levelChanged") {
+        this.publishActiveMonitoringLevel();
+      } else {
+        repository.saveActiveBase(event.base);
+        this.publishActiveMonitoringBase();
+      }
     });
     const evaluation = new MonitorEvaluation(
       {
         store: this._monitoring,
         read: (key) => this.readMonitoredValue(key),
+        // Sent after the answer to the message that caused them. A
+        // disposal in between (cp.delete, the instance a cp.update
+        // replaces) drops them: queued now, they would be a row for a
+        // charge point that is gone (#538).
         emit: (events) =>
-          queueMicrotask(() => this._outbox.sendNotifyEvent(events)),
+          queueMicrotask(() => {
+            if (!evaluation.disposed) this._outbox.sendNotifyEvent(events);
+          }),
+        // N07.FR.04, N08.FR.03: queued at once, in production order with
+        // the TransactionEvents queued offline (#538).
+        queue: (events) => this._outbox.queueNotifyEvent(events),
+        offlineQueuingSeverity: () =>
+          this._configuration.offlineQueuingSeverity(),
         transactionActive: () =>
           [...this._connectors.values()].some((c) => c.hasRunningTransaction),
+        transactionIdOf: (monitor) => this.monitoredTransactionId(monitor),
         onTriggeredChange: (id, triggered) =>
           repository.setTriggered(id, triggered),
+        // The reports a previous run queued keep their eventIds (#538).
+        lastQueuedEventId: () => this._outbox.highestQueuedNotifyEventId(),
       },
       new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
     );
-    evaluation.setReporting(false);
+    // Not connected yet: offline until the first Boot Accepted (#538).
+    evaluation.setOffline();
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
+    this._deviceModelTargets.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /**
+   * The read-only MonitoringCtrlr variables of the 2.x device model (#538),
+   * as runtime configuration keys: the request limits it advertises for
+   * Set/ClearVariableMonitoring, and the monitoring level in force.
+   */
+  private publishMonitoringCtrlr(): void {
+    const keys = MONITORING_CTRLR_KEYS;
+    for (const items of [
+      keys.itemsPerSetVariableMonitoring,
+      keys.itemsPerClearVariableMonitoring,
+    ]) {
+      this._configuration.defineRuntimeIntegerKey(
+        items,
+        MONITORING_REQUEST_MAX_ITEMS,
+      );
+    }
+    for (const bytes of [
+      keys.bytesPerSetVariableMonitoring,
+      keys.bytesPerClearVariableMonitoring,
+    ]) {
+      this._configuration.defineRuntimeIntegerKey(
+        bytes,
+        MONITORING_REQUEST_MAX_BYTES,
+      );
+    }
+    this.publishActiveMonitoringLevel();
+    this.publishActiveMonitoringBase();
+  }
+
+  /**
+   * The runtime values of the 2.x device model (#538), as read-only runtime
+   * keys refreshed on every connector event that can move them (status,
+   * meter tick, SoC, EV settings, charging profiles, transaction). A key is
+   * redefined only when its value changes, so a monitor is evaluated on
+   * change only, never once per meter tick.
+   */
+  private publishRuntimeValues(): void {
+    for (const connector of this._connectors.values()) {
+      const publish = () => this.publishConnectorValues(connector);
+      publish();
+      // 2.1: EVSE.Power has a Target, for TargetDelta monitors (N07.FR.22).
+      if (this._ocppVersion === OCPP_2_1) {
+        this._deviceModelTargets.declare(
+          evseValueKey(RUNTIME_VALUE_KEYS.evsePower, connector.id),
+        );
+      }
+      connector.events.on("statusChange", publish);
+      connector.events.on("meterValueChange", publish);
+      connector.events.on("socChange", publish);
+      connector.events.on("evSettingsChange", publish);
+      connector.events.on("transactionChange", publish);
+      connector.events.on("chargingProfilesChange", publish);
+      connector.events.on("scheduleLimitChange", publish);
+    }
+    this.publishStationAvailability();
+    this._events.on("statusChange", () => this.publishStationAvailability());
+    this._events.on("connectorRemoved", ({ connectorId }) =>
+      this.withdrawConnectorValues(connectorId),
+    );
+  }
+
+  /** `EVSE.Power`, `EVSE.AvailabilityState` and
+   *  `Connector.AvailabilityState` of EVSE N (connector N). */
+  private publishConnectorValues(connector: Connector): void {
+    const keys = RUNTIME_VALUE_KEYS;
+    this.publishRuntimeInteger(
+      evseValueKey(keys.evsePower, connector.id),
+      reportedActivePowerW(connector),
+    );
+    const state = toV2ConnectorStatus(connector.status);
+    for (const prefix of [keys.evseState, keys.connectorState]) {
+      this.publishRuntimeString(evseValueKey(prefix, connector.id), state);
+    }
+  }
+
+  /**
+   * A removed connector's EVSE leaves the device model (#538): its runtime
+   * keys and its `EVSE.Power` target go. A monitor on them stays installed
+   * and reads no value, so it reports nothing, periodic ticks included.
+   */
+  private withdrawConnectorValues(connectorId: number): void {
+    const keys = RUNTIME_VALUE_KEYS;
+    for (const prefix of [
+      keys.evsePower,
+      keys.evseState,
+      keys.connectorState,
+    ]) {
+      this._configuration.removeRuntimeKey(evseValueKey(prefix, connectorId));
+    }
+    this._deviceModelTargets.undeclare(
+      evseValueKey(keys.evsePower, connectorId),
+    );
+  }
+
+  /** `ChargingStation.AvailabilityState`: the station-level status. */
+  private publishStationAvailability(): void {
+    this.publishRuntimeString(
+      RUNTIME_VALUE_KEYS.chargingStationAvailabilityState,
+      toV2ConnectorStatus(this._status),
+    );
+  }
+
+  private publishRuntimeInteger(key: string, value: number): void {
+    if (this._configuration.get(key)?.value === value) return;
+    this._configuration.defineRuntimeIntegerKey(key, value);
+  }
+
+  private publishRuntimeString(key: string, value: string): void {
+    if (this._configuration.get(key)?.value === value) return;
+    this._configuration.defineRuntimeKey(key, value, V2_CONNECTOR_STATUSES);
+  }
+
+  /** `ActiveMonitoringBase` follows SetMonitoringBase. */
+  private publishActiveMonitoringBase(): void {
+    this._configuration.defineRuntimeKey(
+      MONITORING_CTRLR_KEYS.activeMonitoringBase,
+      this._monitoring.activeMonitoringBase,
+      MONITORING_BASES,
+    );
+  }
+
+  /** `ActiveMonitoringLevel` follows SetMonitoringLevel (0-9). */
+  private publishActiveMonitoringLevel(): void {
+    this._configuration.defineRuntimeIntegerKey(
+      MONITORING_CTRLR_KEYS.activeMonitoringLevel,
+      this._monitoring.monitoringLevel,
+      { min: MIN_MONITOR_SEVERITY, max: MAX_MONITOR_SEVERITY },
+    );
+  }
+
+  /**
+   * The 2.x transactionId a monitor's event is linked to (#538): the
+   * transaction running on the monitor's EVSE (EVSE N is connector N), or,
+   * for a station-level monitor reporting only during a transaction, the
+   * transaction when exactly one runs. Otherwise none.
+   */
+  private monitoredTransactionId(monitor: VariableMonitor): string | undefined {
+    const running = (c: Connector | undefined) =>
+      c?.hasRunningTransaction ? c.transaction?.cpTransactionId : undefined;
+    const evse = monitor.component.evse;
+    if (evse !== undefined) return running(this._connectors.get(evse.id));
+    if (!monitor.transaction) return undefined;
+    const active = [...this._connectors.values()].filter(
+      (c) => c.hasRunningTransaction,
+    );
+    return active.length === 1 ? running(active[0]) : undefined;
   }
 
   /** A configuration value as a monitor sees it: GetVariables' rendering
@@ -654,8 +868,9 @@ export class ChargePoint {
     const entry = this._configuration.get(key);
     if (entry === undefined) return undefined;
     const text = renderConfigValue(entry);
+    const target = this._deviceModelTargets.get(key);
     return typeof entry.value === "number"
-      ? { numeric: entry.value, text }
+      ? { numeric: entry.value, text, ...(target !== undefined && { target }) }
       : { text };
   }
 
@@ -946,6 +1161,11 @@ export class ChargePoint {
     return this._monitoring;
   }
 
+  /** The device-model variables with a Target attribute (2.1, #538). */
+  get deviceModelTargets(): DeviceModelTargets {
+    return this._deviceModelTargets;
+  }
+
   /** Local authorization (#452): Authorization Cache + Local Authorization
    *  List, and the decision over them. */
   get authorization(): StationAuthorization {
@@ -1202,8 +1422,9 @@ export class ChargePoint {
     }
   }
 
-  /** Called by the 2.x handler on each CALLERROR answering a
-   *  TransactionEvent (#490). Reports only: the transaction is untouched. */
+  /** Called by the 2.x handler on each failed TransactionEvent
+   *  transmission: a CALLERROR (#490) or no answer within `MessageTimeout`
+   *  (#529). Reports only: the transaction is untouched. */
   notifyTransactionMessageRejected(
     event: ChargePointEvents["transactionMessageRejected"],
   ): void {
@@ -1959,8 +2180,9 @@ export class ChargePoint {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._clockAligned.disable();
-    // The next connection boots again; reporting resumes once Accepted.
-    this._monitorEvaluation?.setReporting(false);
+    // Offline: events at or below OfflineQueuingSeverity are queued
+    // (N07.FR.04, N08.FR.03) until the next boot is Accepted (#538).
+    this._monitorEvaluation?.setOffline();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     // The Local Authorization List is kept: it is what authorizes while the
@@ -1988,8 +2210,8 @@ export class ChargePoint {
     this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));
     this._connectionTimeoutTimers.clear();
     // §4.1.1 serializer: drop the in-flight CALL + queued CALLs since the
-    // WebSocket they target is gone. Transaction-related ones are already
-    // persisted via PendingMessageQueue on prior send failures.
+    // WebSocket they target is gone. Transaction-related ones go to the
+    // PendingMessageQueue (1.6 §3.7; 2.x E11 TransactionEvents, #528).
     this._outbox.onWebSocketClosed();
     // Flush any buffered log lines so the operator can still see the
     // last seconds of activity after the CP went down.
@@ -2009,6 +2231,17 @@ export class ChargePoint {
   }
 
   /**
+   * Stop variable monitoring for good: its periodic timers, which run
+   * offline too (N08.FR.03), and any event still in flight. For an
+   * instance being discarded without {@link dispose} — the one a
+   * `cp.update` replaces — whose timers would otherwise keep it alive and
+   * queue NotifyEvents under its id (#538).
+   */
+  stopMonitoring(): void {
+    this._monitorEvaluation?.dispose();
+  }
+
+  /**
    * Terminal teardown: permanently releases the charge point.
    * Shuts down the network-sim controller and closes the socket,
    * then runs final CP-side teardown.
@@ -2016,6 +2249,8 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    // Offline monitoring keeps the periodic timers running: stop them.
+    this.stopMonitoring();
     this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its

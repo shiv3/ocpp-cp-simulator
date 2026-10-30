@@ -82,6 +82,9 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     id: 1,
     status: OCPPStatus.Preparing,
     transaction: transaction() as Transaction | null,
+    markStartCallError() {
+      if (this.transaction) this.transaction.startCallError = true;
+    },
   };
   const rejected: Array<ChargePointEvents["transactionMessageRejected"]> = [];
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];

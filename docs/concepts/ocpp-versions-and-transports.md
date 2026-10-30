@@ -337,9 +337,12 @@ runs on under that placeholder: its MeterValues.req and StopTransaction.req
 carry `transactionId: 0`, as they do while a StartTransaction.conf is still
 pending, and a connector still in `Preparing` goes to `Charging`, as when
 `StopTransactionOnInvalidId` is false. Any other status, such as one a
-scenario set meanwhile, is left alone. `ConnectionTimeOut` does not apply
-while the transaction runs, so it never moves a connector waiting in
-`Preparing` for the conf to `Finishing`. Once a CALLERROR answered its
+scenario set meanwhile, is left alone. On 1.x, `ConnectionTimeOut` does not
+apply while the transaction runs, so it never moves a connector waiting in
+`Preparing` for the conf to `Finishing`. On 2.x it maps to
+`TxCtrlr/EVConnectionTimeOut`, which targets exactly a transaction started
+before the cable is plugged in: it still fires while that transaction runs
+and ends it (E03.FR.05, #549). Once a CALLERROR answered its
 StartTransaction.req, while it is resent and after it is discarded, a
 RemoteStopTransaction for id `0` is `Rejected`, with no
 StopTransaction.req: the CSMS never issued that id (#491). A `0` the CSMS
@@ -354,7 +357,10 @@ after that transaction stopped, or after another one began on the connector,
 it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
 updates the Authorization Cache. A Reset drops a StartTransaction.req
-waiting for its resend: the reset ends that transaction.
+waiting for its resend: the reset ends that transaction. A CALLERROR
+answering a StartTransaction.req whose transaction no longer runs (a Reset
+stopped it while the request was in flight) is not resent: the request is
+reported rejected, then discarded after that one attempt.
 
 A resend still waiting when the WebSocket closes goes to the 1.6 offline
 queue (§3.7), ahead of the CALLs still queued, and is replayed after the

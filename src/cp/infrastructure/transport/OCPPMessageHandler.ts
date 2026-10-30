@@ -1536,6 +1536,11 @@ export class OCPPMessageHandler {
    * to Charging, as when StopTransactionOnInvalidId=false keeps a rejected
    * start running.
    *
+   * A CALLERROR answering a StartTransaction.req whose transaction no longer
+   * runs (stopped while the request was in flight, e.g. by a Reset) discards
+   * it at once, with no resend: the station reports it rejected, then
+   * discarded after that one attempt.
+   *
    * Known limitation, as on 2.x: a waiting resend does not hold back the
    * next transaction-related message, so a StopTransaction.req can overtake
    * the StartTransaction.req being retried (§3.7 asks for chronological
@@ -1565,19 +1570,28 @@ export class OCPPMessageHandler {
     // its `0` placeholder is now one the CSMS failed to process (#491).
     let startedTransaction: Transaction | null = null;
     if (request.action === OCPPAction.StartTransaction) {
-      const current = this._chargePoint.getConnector(connectorId)?.transaction;
+      const connector = this._chargePoint.getConnector(connectorId);
+      const current = connector?.transaction;
       const start = request.payload as StartTransactionRequestV16;
-      if (isRunningTransactionStartedBy(current, start)) {
+      if (connector && isRunningTransactionStartedBy(current, start)) {
         startedTransaction = current;
-        startedTransaction.startCallError = true;
+        connector.markStartCallError();
       }
     }
     const config = this._chargePoint.configuration;
     const attempts = Math.max(1, config.transactionMessageAttempts());
     this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
-    if (attempt >= attempts) {
+    // A StartTransaction.req whose transaction no longer runs (a Reset
+    // stopped it while the request was in flight) is not resent: it would
+    // reach the CSMS after the StopTransaction.req and open a transaction
+    // nothing stops. It is discarded at once, as after its last attempt.
+    const startOutlived =
+      request.action === OCPPAction.StartTransaction && !startedTransaction;
+    if (attempt >= attempts || startOutlived) {
       this._logger.warn(
-        `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
+        startOutlived
+          ? `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}; its transaction no longer runs`
+          : `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
         LogType.TRANSACTION,
       );
       this._chargePoint.notifyTransactionMessageDiscarded({

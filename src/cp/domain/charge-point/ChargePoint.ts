@@ -2439,10 +2439,15 @@ export class ChargePoint {
     // than an accident of scenario node ordering (#176). A connector already
     // in Preparing (plugged in first) has sent it: a second
     // StatusNotification(Preparing) is a Preparing → Preparing transition
-    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut is cleared: the
-    // transaction now runs, so the timeout no longer applies (#527).
+    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut is cleared on 1.6:
+    // the transaction now runs, so the timeout no longer applies (#527). On
+    // 2.x it restarts: EVConnectionTimeOut targets this very transaction.
     if (connector.status === OCPPStatus.Preparing) {
-      this.clearConnectionTimeout(connectorId);
+      if (isOcpp2Version(this._ocppVersion)) {
+        this.startConnectionTimeout(connectorId);
+      } else {
+        this.clearConnectionTimeout(connectorId);
+      }
     } else {
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     }
@@ -2852,10 +2857,14 @@ export class ChargePoint {
     });
   }
 
-  /** A connector whose transaction runs is past ConnectionTimeOut: it waits
-   *  in Preparing for StartTransaction.conf, which a CALLERROR resend can
-   *  hold back for longer than the timeout (#527). */
-  private hasRunningTransaction(connectorId: number): boolean {
+  /** OCPP 1.x (#527): a connector whose transaction runs is past
+   *  ConnectionTimeOut. It waits in Preparing for StartTransaction.conf,
+   *  which a CALLERROR resend can hold back for longer than the timeout.
+   *  On 2.x the setting is TxCtrlr/EVConnectionTimeOut, which targets
+   *  exactly a transaction started before the cable is plugged in, so a
+   *  running transaction does not hold it back there. */
+  private holdsConnectionTimeout(connectorId: number): boolean {
+    if (isOcpp2Version(this._ocppVersion)) return false;
     const transaction = this.getConnector(connectorId)?.transaction;
     return !!transaction && transaction.stopTime === null;
   }
@@ -2863,7 +2872,7 @@ export class ChargePoint {
   private startConnectionTimeout(connectorId: number): void {
     this.clearConnectionTimeout(connectorId);
     const timeoutSec = this._configuration?.connectionTimeOut();
-    if (timeoutSec <= 0 || this.hasRunningTransaction(connectorId)) return;
+    if (timeoutSec <= 0 || this.holdsConnectionTimeout(connectorId)) return;
     const handle = setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);
       const connector = this.getConnector(connectorId);
@@ -2888,7 +2897,7 @@ export class ChargePoint {
         }
         return;
       }
-      if (this.hasRunningTransaction(connectorId)) return;
+      if (this.holdsConnectionTimeout(connectorId)) return;
       this._logger.info(
         `Connector ${connectorId} ConnectionTimeOut elapsed; transitioning Preparing → Finishing (§4.9 B6)`,
         LogType.OCPP,

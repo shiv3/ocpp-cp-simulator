@@ -140,13 +140,6 @@ const TRANSACTION_STOPPED_REASON_SET: ReadonlySet<string> = new Set(
   TRANSACTION_STOPPED_REASON_VALUES,
 );
 
-/**
- * Split a `stop_transaction { reason }` into what each encoder reads (#335).
- * A 1.6 name sets `stopReason` (and, when 2.0.1 spells it the same, the
- * explicit `stoppedReason` too). A 2.0.1-only name — `SOCLimitReached`,
- * `GroundFault`, … — sets `stoppedReason` and falls back to `Other` for a
- * 1.6 StopTransaction.req, which has no closer value.
- */
 /** OCPP 1.6: whether `transaction` is the running one a StartTransaction.req
  *  with this `idTag` and `timestamp` started. A resent or replayed request
  *  carries the same payload, so its answer still finds it (#527). */
@@ -162,6 +155,13 @@ export function isRunningTransactionStartedBy(
   );
 }
 
+/**
+ * Split a `stop_transaction { reason }` into what each encoder reads (#335).
+ * A 1.6 name sets `stopReason` (and, when 2.0.1 spells it the same, the
+ * explicit `stoppedReason` too). A 2.0.1-only name — `SOCLimitReached`,
+ * `GroundFault`, … — sets `stoppedReason` and falls back to `Other` for a
+ * 1.6 StopTransaction.req, which has no closer value.
+ */
 export function splitStopReason(reason: StopReason | undefined): {
   stopReason?: StopTransactionReason;
   stoppedReason?: TransactionStoppedReason;

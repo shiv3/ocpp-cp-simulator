@@ -240,6 +240,9 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
       s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
       void s.cp.startTransaction("TAG-527", 1);
       callError(s.csms, await nthCall(s.csms, "StartTransaction", 1));
+      // The CALLERROR reaches the station while the transaction runs (one
+      // arriving after the stop is discarded at once).
+      await until(() => s.rejected.length === 1, "the CALLERROR");
       // The resend waits out its 1 s interval; the transaction stops.
       s.cp.stopTransaction(1, "Local");
       const stop = await nthCall(s.csms, "StopTransaction", 1);
@@ -433,6 +436,42 @@ describe("OCPP 1.6 stop paths around a StartTransaction CALLERROR (#491, #527)",
       }
     });
   }
+
+  it("a CALLERROR for a StartTransaction.req in flight across a Reset discards it: no StartTransaction.req after the StopTransaction.req", async () => {
+    const s = await station("CP16-527-RESET-INFLIGHT", ["StartTransaction"]);
+    try {
+      void s.cp.startTransaction("TAG-527", 1);
+      const start = await nthCall(s.csms, "StartTransaction", 1);
+
+      s.csms.send([2, "reset-527-inflight", "Reset", { type: "Soft" }]);
+      // The StopTransaction.req waits behind the unanswered Start (serial
+      // queue); the CALLERROR arrives once the Reset stopped the transaction.
+      await until(() => s.stops.length === 1, "the reset stop");
+      callError(s.csms, start);
+      await nthCall(s.csms, "StopTransaction", 1);
+      await rebooted(s);
+      // After the reboot: a resend salvaged at the reset's disconnect would
+      // be replayed from the offline queue by now.
+      await drainWire(s.cp, s.csms);
+
+      expect(callsOf(s.csms, "StartTransaction")).toHaveLength(1);
+      expect(s.rejected.map((r) => [r.action, r.attempt])).toEqual([
+        ["StartTransaction", 1],
+      ]);
+      expect(s.discarded).toEqual([
+        {
+          connectorId: 1,
+          transactionId: "0",
+          action: "StartTransaction",
+          reason: "callError",
+          errorCode: "InternalError",
+          attempts: 1,
+        },
+      ]);
+    } finally {
+      await s.stop();
+    }
+  });
 
   /** A station whose only StartTransaction.req was discarded. */
   async function discardedStart(id: string) {

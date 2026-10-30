@@ -16,7 +16,8 @@ export const UNSTAMPED_VERSION = "0.0.0";
 export const LOCAL_DEV_VERSION = "local-dev";
 
 const SHORT_SHA_LENGTH = 7;
-const SEMVER_PREFIX = /^\d+\.\d+\.\d+/;
+// A whole semver: core, optional prerelease and build metadata.
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
  * Resolution order:
@@ -49,5 +50,5 @@ export function resolveBuildVersion(input: {
 /** Display form: `v1.2.3` for a semver, the raw value otherwise — a short SHA
  *  such as `1234567-dev` can start with a digit but is not a release. */
 export function formatVersionLabel(version: string): string {
-  return SEMVER_PREFIX.test(version) ? `v${version}` : version;
+  return SEMVER.test(version) ? `v${version}` : version;
 }

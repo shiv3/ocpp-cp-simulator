@@ -61,6 +61,10 @@ describe("formatVersionLabel", () => {
   it.each([
     ["1.2.3", "v1.2.3"],
     ["1.2.3-rc.1", "v1.2.3-rc.1"],
+    ["1.2.3+build.5", "v1.2.3+build.5"],
+    // Only a whole semver gets the prefix, not a string that starts like one.
+    ["1.2.3broken", "1.2.3broken"],
+    ["1.2.3.4", "1.2.3.4"],
     ["0.0.0-dev", "v0.0.0-dev"],
     // A short SHA can start with a digit; it is not a semver.
     ["1234567-dev", "1234567-dev"],

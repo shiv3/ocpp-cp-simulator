@@ -11,6 +11,8 @@ sources:
   - src/cp/domain/security/SignCertificateBackoff.ts (A02.FR.17-19 resend back-off, issue #537)
   - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (2.x SignCertificate, GetCertificateStatus, SecurityEventNotification, issue #537)
   - src/cp/infrastructure/transport/handlers/call/CertificateManagementHandlers.ts (1.6 DeleteCertificate M04.FR.06, issue #537)
+  - src/cp/domain/security/get15118EVCertificate.ts (Get15118EVCertificate relay, issue #537)
+  - src/cp/infrastructure/transport/OCPPWebSocket.ts (renewed client certificate, A02.FR.08 / A02.FR.28, issue #537)
   - src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
   - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:
@@ -73,7 +75,7 @@ withdrawn by its author in #277.
 - `--security-profile <0|1|2|3>` selects transport security enforcement; `0` leaves transport/auth as configured, `1` adds Basic Auth without touching the scheme, `2`/`3` force `wss://` (see [Transport scheme rule](#transport-scheme-rule)).
 - `--authorization-key <hex>` sets the `AuthorizationKey` used as the Basic Auth password for profiles 1 and 2.
 - `--tls-ca <path>` loads a PEM CA bundle used to verify the CSMS server certificate. **Optional, and only for a private CA** — see below.
-- `--tls-cert <path>` loads the PEM client certificate for profile 3 mutual TLS.
+- `--tls-cert <path>` loads the PEM client certificate for profile 3 mutual TLS. On 2.x a Charging Station certificate the CSMS renews replaces it until the next restart ([Renewed client certificate](#renewed-client-certificate)).
 - `--tls-key <path>` loads the PEM client private key for profile 3 mutual TLS; the file must be mode `0600`.
 - `--cpo-name <name>` sets the CPO name used when generating certificate signing requests.
 - `--insecure-tls-key-perms` allows a `--tls-key` file readable by group/other for local testing.
@@ -197,7 +199,8 @@ Security extension configuration keys include `SecurityProfile`,
 [SecurityCtrlr variables](#securityctrlr-variables).
 The simulator can send `SecurityEventNotification` and `SignCertificate`,
 handle inbound `CertificateSigned`, and exposes the JSON-mode / RPC commands
-`security_event_notification` and `sign_certificate`
+`security_event_notification` and `sign_certificate`, plus the 2.x-only
+`get_15118_ev_certificate`
 ([Control plane](control-plane.md#cp-command-methods)).
 
 Certificate-handling quirks (RSA vs EC CSR keys, PEM line endings, accepted
@@ -226,10 +229,14 @@ zeroes (`a`, not `0a`), as the whitepaper and the 2.x
 compares both sides without leading zeroes, and rows a state database
 holds from before #537 are read back in the new form.
 
-The store never retains a private key. `SignCertificate` discards the key it
-generates for the CSR (the simulator does not use it), so the key cannot leave
-the station (whitepaper and 2.x A02.FR.05). A returned chain is matched to its
-CSR by public key.
+The store keeps the private key of a CSR it generated in memory only, never
+in the state database, a snapshot or a log line, so the key cannot leave the
+station (whitepaper and 2.x A02.FR.05). A returned chain is matched to its
+CSR by public key. Once the chain is accepted the key stays bound to its
+leaf: on 2.x it is what the station presents as its renewed TLS client
+certificate ([Renewed client certificate](#renewed-client-certificate),
+#537). A replaced, deleted or reset chain drops its key, and a chain signed
+for a CSR the caller supplied has none.
 
 ### Certificate uses
 
@@ -249,8 +256,9 @@ value that a version does not define is refused, not coerced.
 | `V2G20Certificate`            | —                              | —                             | `V2G20Certificate`            |
 
 `V2GCertificateChain` (2.x) is a `GetInstalledCertificateIds` query over the
-stored `V2GCertificate` chains: each chain is reported as its leaf, with the
-sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
+stored V2G chains, `V2GCertificate` and, on 2.1, `V2G20Certificate`: each
+chain is reported as its leaf, with the sub-CAs as `childCertificateHashData`
+(M03.FR.05). It cannot be installed.
 
 ### OCPP 1.6 behaviour
 
@@ -309,7 +317,11 @@ CALLERROR.
   `certificateType`, or per installed certificate when it is absent
   (M03.FR.03/04). Otherwise it answers `NotFound` (M03.FR.02).
   `V2GCertificateChain` lists each stored V2G chain as its leaf, with the
-  sub-CAs as `childCertificateHashData` (M03.FR.05). The schema allows 4
+  sub-CAs as `childCertificateHashData` (M03.FR.05). On 2.1 that covers the
+  `V2GCertificate` and `V2G20Certificate` chains, in install order: 2.1 has
+  no query value of its own for ISO 15118-20 certificates (#537). A 2.0.1
+  station reading a 2.1 station's state database leaves a
+  `V2G20Certificate` chain out. The schema allows 4
   children: any further sub-CA is left out, with a WARN log. A certificate
   whose use the version has no name for is left out too. This happens when a
   2.1 station installs an `OEMRootCertificate` and a 2.0.1 station later
@@ -339,7 +351,10 @@ CALLERROR.
   on 2.0.1, MAY on 2.1, applied on both). Any `CertificateSigned` for a use
   ends the resend back-off of that use's CSR, accepted (A02.FR.17) or
   rejected as invalid (A02.FR.20); one refused for its size does not. An
-  accepted V2G chain is followed by `GetCertificateStatus` (M06.FR.07).
+  accepted V2G chain is followed by `GetCertificateStatus` (M06.FR.07); an
+  accepted Charging Station certificate, on a security-profile-3 station, by
+  a reconnection that presents it
+  ([Renewed client certificate](#renewed-client-certificate)).
 - `sign_certificate` ([Control plane](control-plane.md#cp-command-methods))
   sends a `SignCertificateRequest`. It carries the `csr` given (at most 5500
   characters, the schema's bound; a longer one is refused as invalid
@@ -388,6 +403,87 @@ CALLERROR.
   queue is not modelled. The automatic `StartupOfTheDevice` event stays
   1.6-only.
 
+#### Get15118EVCertificate relay
+
+In M01 (certificate installation) and M02 (certificate update) an EV sends
+an ISO 15118 `CertificateInstallationReq` or `CertificateUpdateReq`, and the
+station forwards it to the CSMS with `Get15118EVCertificateRequest`
+(M01.FR.01, M02.FR.01). The simulator has no EV link and no EXI codec, so
+`get_15118_ev_certificate`
+([Control plane](control-plane.md#cp-command-methods), #537) stands in for
+the EV: the caller supplies the base64 EXI request and receives the CSMS's
+answers.
+
+- The parameters are the request's fields, sent as given:
+  `iso15118SchemaVersion`, `action` (`Install` / `Update`), `exiRequest`
+  (base64, up to 11000 characters) and the 2.1
+  `maximumContractCertificateChains` and `prioritizedEMAIDs`. The station
+  checks them against its version's schema before sending: on 2.0.1 the
+  2.1 fields and an `exiRequest` over 5600 characters are `invalid_params`,
+  and nothing is sent. 1.6 and SOAP stations have no such message and
+  answer `invalid_params` too.
+- The caller picks the ISO 15118 version: M01.FR.02/03 and M02.FR.02 tie
+  the 2.1 fields and the Install / Update choice to the EV's protocol,
+  which only the caller knows.
+- The result is `{ responses, callError?, noAnswer? }`: every CALLRESULT
+  payload as the CSMS sent it, in order. A CALLERROR is an answer too: it
+  comes back as `callError` and ends the relay.
+- With `maximumContractCertificateChains` (a 2.1 ISO 15118-20 session) the
+  station sends the same request again while an `Accepted` answer says
+  `remainingContracts` > 0 (2.1 M01.FR.06). It stops early when
+  `remainingContracts` does not go down (M01.FR.07 has the CSMS decrease
+  it), after `maximumContractCertificateChains` requests (at least one), and
+  when the 25 s the relay allows for all requests together run out. Without
+  the field the request is sent once.
+- A first request with no answer is an error: `timeout`, or `disconnected`
+  when it never reached the wire or the socket closed. A later one ends
+  the relay with the answers already had and `noAnswer`.
+
+The EXI answer goes to the caller, not to an EV, so two station duties have
+no simulator behaviour: rewriting `RemainingContractCertificateChains` in the
+EXI answer (2.1 M01.FR.05) and indicating a failure to the EV when the CSMS
+does not answer in time (M01 / M02 error handling).
+
+#### Renewed client certificate
+
+When `CertificateSigned` installs a new Charging Station certificate, the
+station switches to it by reconnecting the websocket and TLS connection
+with it (A02.FR.08, #537). This applies to a security-profile-3 station,
+whose client certificate it replaces; other profiles have none and stay
+connected.
+
+- The station presents the stored chain, leaf first, with the private key
+  of the CSR it generated. A chain signed for a CSR the caller passed to
+  `sign_certificate` has no key in the store: the station keeps its
+  configured certificate. The `--tls-ca` and server-name settings do not
+  change.
+- 2.0.1 asks the station to switch once the certificate's `notBefore` has
+  passed; the simulator waits for it on 2.1 too, so a certificate not yet
+  valid is switched to at that time.
+- A station that is not connected then (reconnect back-off, a simulated
+  outage, a manual disconnect) does not reconnect for it: it presents the
+  renewed certificate at its next connection, on that connection's timing.
+- Until a connection with the renewed certificate has opened, a failed
+  attempt makes the next one present the other certificate (2.1 A02.FR.28,
+  alternating as B10.FR.08 describes; the reconnect back-off is unchanged).
+  A02.FR.28 alternates once every `NetworkConfigurationPriority` entry has
+  failed; the simulator alternates after each failed attempt, which is the
+  same with one URL but not with a list of supervision URLs.
+  If the configured certificate connects first, the renewed one is
+  discarded (A02.FR.10) and the station keeps the configured one until the
+  next `CertificateSigned`. The stored chain stays, and no
+  `DiscardedRenewedClientCertificate` security event is sent (A02.FR.29 is
+  a SHOULD).
+- The key is memory-only, so a restart presents `--tls-cert` / `--tls-key`
+  again although the state database still holds the renewed chain.
+- 1.6 does not switch: its `CertificateSigned` stores the chain without
+  matching it to a CSR.
+
+In ISO 15118 the V2G (SECC) certificate is the station's TLS server
+certificate towards the EV, and A00.FR.428 lets the Charging Station
+certificate double as one. The simulator has no EV-facing TLS link, so
+neither certificate is presented to an EV.
+
 #### SecurityCtrlr variables
 
 2.x-only keys (#537), read and written through `GetVariables`,
@@ -422,14 +518,35 @@ delete sent right after an install sees it. When no operation is pending,
 `GetInstalledCertificateIds` and `DeleteCertificate` still answer in the
 tick of their CALL.
 
-Not covered yet, on 2.x:
+### Certificate follow-ups (#537)
 
-- the ISO 15118 flows (`Get15118EVCertificate`, the V2G certificate as a
-  TLS identity);
-- `V2G20Certificate` chains (2.1) in `GetInstalledCertificateIds`: 2.1 has
-  no query value for them, and the simulator lists only `V2GCertificate`
-  chains under `V2GCertificateChain` (its reading of M03.FR.05). A stored
-  `V2G20Certificate` chain is therefore not reported.
+What became of each item of
+[#537](https://github.com/shiv3/ocpp-cp-simulator/issues/537). Requirement
+ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
+
+| Item                                                                  | Outcome                                  | Requirement                                  |
+| --------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------- |
+| `GetCertificateStatus` and OCSP fixtures                              | Implemented                              | M06.FR.02/03/04/06/07/10                     |
+| `Get15118EVCertificate`                                               | Implemented, as a control-plane relay    | M01.FR.01, M02.FR.01; 2.1 M01.FR.06          |
+| Rewrite `remainingContracts` into the EXI answer                      | Declined: no EXI codec                   | 2.1 M01.FR.05                                |
+| Indicate a failure to the EV                                          | Declined: no EV link                     | M01 / M02 error handling (no FR id)          |
+| Renewed Charging Station certificate as the TLS client one            | Implemented: 2.x, security profile 3     | A02.FR.08; 2.1 A02.FR.28, A02.FR.10          |
+| `DiscardedRenewedClientCertificate` security event                    | Not sent                                 | 2.1 A02.FR.29 (SHOULD)                       |
+| V2G certificate as the TLS server one towards the EV                  | Declined: no EV link, no ISO 15118 stack | A00.FR.428, A00.FR.513                       |
+| `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                       | M03.FR.05                                    |
+| TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                              | F06.FR.04, A02.FR.02/03/13                   |
+| Resend SignCertificate with back-off                                  | Implemented                              | A02.FR.17-20                                 |
+| 2.x `security_event_notification`                                     | Implemented                              | A04.FR.01                                    |
+| Queue SecurityEventNotification while offline                         | Deferred: needs the 2.x queue of #528    | A04.FR.02                                    |
+| `SecurityCtrlr.CertificateEntries`                                    | Implemented                              | variable; the limit of M05.FR.06             |
+| `MaxCertificateChainSize`                                             | Implemented                              | A02.FR.16                                    |
+| `serialNumber` without leading zeroes                                 | Implemented                              | `CertificateHashDataType.serialNumber` field |
+| 1.6: keep the CSMS root the connection uses                           | Implemented                              | whitepaper M04.FR.06                         |
+
+`SignV2G20Certificate` and `SignCombinedCertificate` still answer
+`NotImplemented` (F06.FR.08), so a 2.1 station only gets a
+`V2G20Certificate` chain for a CSR generated another way. Offline queuing
+(A04.FR.02) is left to a follow-up once the 2.x offline queue of #528 is in.
 
 ### Persistence
 
@@ -437,6 +554,9 @@ With [state persistence](state-persistence.md) on, trust anchors and signed
 chains survive a restart (`certificates` table, schema v18). Pending CSRs do
 not: the key pair behind a CSR is gone after a restart, and neither does the
 A02.FR.17 resend back-off; a CSMS gets a new CSR through `TriggerMessage`.
+The private key of an accepted chain is gone too, so a profile-3 station
+presents `--tls-cert` / `--tls-key` again after a restart
+([Renewed client certificate](#renewed-client-certificate)).
 Cached OCSP responses do not either: every accepted boot asks again
 (M06.FR.06).
 `cp.delete` and `state.reset` remove the rows. A trust anchor whose row the

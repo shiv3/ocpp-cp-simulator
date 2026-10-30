@@ -2141,3 +2141,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `serialNumber` without leading zeroes on 1.6 and 2.x, backward compatible with persisted rows; 1.6 whitepaper M04.FR.06 refuses deleting the `--tls-ca` root of a `wss://` connection.
 - [Security profiles](concepts/security-profiles.md): 2.x behaviour bullets, new [SecurityCtrlr variables](concepts/security-profiles.md#securityctrlr-variables) table, "Not covered yet" list trimmed to the ISO 15118 items. [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool row and count.
 - [GitHub issues](sources/github-issues.md): #537.
+
+## [2026-10-30] ingest | Certificate follow-ups, second part (#537)
+
+- 2.x `get_15118_ev_certificate` relays a caller-supplied base64 EXI request with `Get15118EVCertificate` (M01 / M02) and returns the CSMS answers; on 2.1 an ISO 15118-20 request is repeated while `remainingContracts` > 0 (M01.FR.06). New curated MCP tool (32 curated tools).
+- A security-profile-3 2.x station reconnects with a Charging Station certificate that `CertificateSigned` accepted (A02.FR.08), after its `notBefore` on 2.0.1; failed attempts alternate with the configured certificate until one connects (2.1 A02.FR.28, A02.FR.10). The key stays in memory: a restart presents `--tls-cert` again.
+- 2.1 `GetInstalledCertificateIds` lists `V2G20Certificate` chains under `V2GCertificateChain` (M03.FR.05); 2.0.1 unchanged.
+- [Security profiles](concepts/security-profiles.md): new [Get15118EVCertificate relay](concepts/security-profiles.md#get15118evcertificate-relay) and [Renewed client certificate](concepts/security-profiles.md#renewed-client-certificate) sections; the "Not covered yet" list becomes the [Certificate follow-ups](concepts/security-profiles.md#certificate-follow-ups-537) table, every #537 item implemented, declined or deferred with its requirement id (EV-facing V2G TLS identity declined, A00.FR.428; A04.FR.02 offline queuing deferred until #528).
+- [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): method and tool rows, tool count. [GitHub issues](sources/github-issues.md): #537 row.

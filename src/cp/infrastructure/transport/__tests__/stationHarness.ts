@@ -1,6 +1,7 @@
 // Test-only helpers for bun tests that drive a real ChargePoint against the
 // mock CSMS (#348 DataTransfer, #389 expert calls).
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { Database } from "../../../domain/persistence/Database";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import type { MockCsms, OcppFrame } from "./mockCsms";
 
@@ -9,6 +10,36 @@ export const callOf = (action: string) => (frame: OcppFrame) =>
 
 export const callsOf = (csms: MockCsms, action: string): OcppFrame[] =>
   csms.received.filter(callOf(action));
+
+export interface StationOptions {
+  readonly connectors?: number;
+  /** The --state-db database; in-memory state when absent. */
+  readonly database?: Database | null;
+}
+
+/** A charge point pointed at `csms`, not connected yet. */
+export function stationFor(
+  csms: MockCsms,
+  id: string,
+  version: string,
+  options: StationOptions = {},
+): ChargePoint {
+  const cp = new ChargePoint(
+    id,
+    DefaultBootNotification,
+    options.connectors ?? 1,
+    csms.url,
+    null,
+    null,
+    options.database ?? null,
+    {},
+    [],
+    version,
+    {},
+  );
+  cp.events.on("error", () => undefined);
+  return cp;
+}
 
 /**
  * A charge point connected to `csms`, its BootNotification answered with
@@ -20,22 +51,9 @@ export async function bootedChargePoint(
   csms: MockCsms,
   id: string,
   version: string,
-  options: { connectors?: number; bootStatus?: "Accepted" | "Pending" } = {},
+  options: StationOptions & { bootStatus?: "Accepted" | "Pending" } = {},
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
-    id,
-    DefaultBootNotification,
-    options.connectors ?? 1,
-    csms.url,
-    null,
-    null,
-    null,
-    {},
-    [],
-    version,
-    {},
-  );
-  cp.events.on("error", () => undefined);
+  const cp = stationFor(csms, id, version, options);
   if (version === "OCPP-1.6S") return cp;
   cp.connect();
   const boot = await csms.waitForCall("BootNotification");

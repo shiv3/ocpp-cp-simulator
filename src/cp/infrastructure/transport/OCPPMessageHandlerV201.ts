@@ -68,11 +68,18 @@ import {
   type OcmfReading,
 } from "../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import { toV2ConnectorStatus } from "../../domain/charge-point/runtimeValueKeys";
 import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { OCPP_2_1 } from "../../domain/types/OcppVersion";
-import { buildNotifyEventRequest } from "./v201/notifyEventV201";
+import {
+  buildNotifyEventReport,
+  buildNotifyEventRequests,
+  notifyEventReportParts,
+  type NotifyEventReport,
+} from "./v201/notifyEventV201";
+import { isQueuedOffline } from "../../domain/monitoring/monitoringCtrlrKeys";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import {
@@ -97,6 +104,10 @@ import {
   type GenerationToken,
   type Settlement,
 } from "./network-sim";
+import {
+  PendingMessageQueue,
+  type PendingMessage,
+} from "../../domain/transport/PendingMessageQueue";
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -114,23 +125,6 @@ function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
 type V201MeterValuesSampledValue =
   MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
 
-function ocppStatusToV201(
-  status: OCPPStatus,
-): StatusNotificationRequestV201["connectorStatus"] {
-  switch (status) {
-    case OCPPStatus.Available:
-      return "Available";
-    case OCPPStatus.Reserved:
-      return "Reserved";
-    case OCPPStatus.Unavailable:
-      return "Unavailable";
-    case OCPPStatus.Faulted:
-      return "Faulted";
-    default:
-      return "Occupied";
-  }
-}
-
 function ocppStatusToTransactionChargingState(
   status: OCPPStatus,
 ): TransactionChargingState | null {
@@ -146,11 +140,79 @@ function ocppStatusToTransactionChargingState(
   }
 }
 
+/**
+ * One TransactionEvent the station is delivering under E13 (#490, #529),
+ * shared by all its transmissions. A message ends once it is settled (a
+ * CALLRESULT arrived for any transmission) or discarded; the handler then
+ * forgets every transmission of it.
+ */
+interface TransactionEventMessage {
+  readonly connectorId: number;
+  readonly payload: TransactionEventRequestV201;
+  /** Transmissions made so far (the latest one's 1-based number). */
+  sent: number;
+  /** Transmissions already counted as failed (CALLERROR or timeout). */
+  failed: number;
+  /** Message ids of the transmissions still awaiting an answer. */
+  readonly inFlight: Set<string>;
+  /** The resend waiting out `MessageAttemptInterval`, if any. */
+  resend?: ReturnType<typeof setTimeout>;
+  done: boolean;
+}
+
+/** Actions the 2.x handler queues offline and replays (#528, E11; #538,
+ *  N07.FR.04). Any other row in `pending_messages` was queued by the 1.6
+ *  handler under the same charge point id: the queue deletes it on load. */
+type V201QueuedAction = Extract<V201Action, "TransactionEvent" | "NotifyEvent">;
+const QUEUED_ON_OCPP2: ReadonlySet<V201QueuedAction> = new Set([
+  "TransactionEvent",
+  "NotifyEvent",
+]);
+
+/** How the logs name a TransactionEvent. */
+function describeTransactionEvent(
+  payload: TransactionEventRequestV201,
+): string {
+  return `TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${payload.transactionInfo.transactionId}`;
+}
+
 /** Where a TransactionEvent CALL stands in its E13 delivery (#490). */
 interface TransactionEventDelivery {
-  readonly connectorId: number;
+  readonly message: TransactionEventMessage;
   /** 1-based transmission number of this CALL. */
   readonly attempt: number;
+}
+
+/** A written CP→CSMS CALL awaiting its answer. */
+interface PendingRequest {
+  action: V201Action;
+  payload: V201RequestPayload;
+  /** Set on the TransactionEvents this handler builds (#490). */
+  transactionEvent?: TransactionEventDelivery;
+  /** Its `MessageTimeout` timer (#529), armed when the CALL is written;
+   *  cleared on answer and WebSocket close. */
+  timeout?: ReturnType<typeof setTimeout>;
+}
+
+type TransactionEventFailure =
+  | { reason: "callError"; errorCode: string }
+  | { reason: "timeout"; seconds: number };
+
+/**
+ * #538: most NotifyEvent reports the offline queue keeps per charge point.
+ * A Periodic monitor ticking through a long outage would otherwise grow the
+ * persisted queue without bound; past the cap the oldest report made only
+ * of Periodic events goes, else the oldest report. The TransactionEvents
+ * queued under E11 are not counted and never dropped.
+ */
+export const MAX_QUEUED_NOTIFY_EVENTS = 1000;
+
+/** Whether a queued NotifyEvent report holds only periodic ticks, whose
+ *  loss the next tick makes up for. */
+function isPeriodicOnlyReport(payload: unknown): boolean {
+  return (payload as NotifyEventReport).eventData.every(
+    (data) => data.trigger === "Periodic",
+  );
 }
 
 export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
@@ -166,21 +228,28 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  #181) — e.g. Authorize.conf carries no idToken of its own, so the
    *  idToken has to come from the original Authorize.req. Entries are
    *  removed once the matching CALLRESULT/CALLERROR arrives. */
-  private readonly _pendingRequests = new Map<
-    string,
-    {
-      action: V201Action;
-      payload: V201RequestPayload;
-      /** Set on the TransactionEvents this handler builds (#490). */
-      transactionEvent?: TransactionEventDelivery;
-    }
-  >();
-  /** Resends waiting out `MessageAttemptInterval[TransactionEvent]`
-   *  (#490), with what each one would send; cleared on WebSocket close. */
-  private readonly _transactionEventRetries = new Map<
-    ReturnType<typeof setTimeout>,
-    { payload: TransactionEventRequestV201; attempt: number }
-  >();
+  private readonly _pendingRequests = new Map<string, PendingRequest>();
+  /** Every TransactionEvent not yet settled, discarded or queued, in
+   *  creation order (#528): a close queues them all (E11.FR.01/07). */
+  private readonly _activeTransactionEvents =
+    new Set<TransactionEventMessage>();
+  /** True from `onWebSocketClosed` (and before the first connection) until
+   *  a CALL is written again: no close is left to queue the TransactionEvents
+   *  a drop strands, so the drop queues them itself (#528). */
+  private _outageHandled = true;
+  /** E11 offline queue (#528), persisted in `pending_messages` when the
+   *  charge point has a database; replayed after Boot Accepted. */
+  private readonly _pendingQueue: PendingMessageQueue<V201QueuedAction>;
+  /** True while TransactionEvents wait in the E11 queue for their replay
+   *  (#528): set when one is queued (or a restart finds persisted ones),
+   *  re-derived from the queued TransactionEvent rows after each replay.
+   *  While set, a new TransactionEvent joins the queue so the order holds.
+   *  Queued NotifyEvents (#538) never set it, so they cannot hold
+   *  TransactionEvents back. */
+  private _awaitingReplay: boolean;
+  /** NotifyEvent reports dropped from the full queue since the last
+   *  replay (#538); reported and reset by `flushPendingQueue`. */
+  private _droppedNotifyEvents = 0;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -213,6 +282,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this._logger = logger;
     this._codec = codec;
     this._inbound = inboundRegistry ?? buildV201InboundRegistry();
+    this._pendingQueue = new PendingMessageQueue(
+      chargePoint.id,
+      chargePoint.database ?? null,
+      QUEUED_ON_OCPP2,
+    );
+    // `cp.update` can switch ocppVersion over the same --state-db, leaving
+    // rows a 2.x CSMS does not know (one a 1.6 handler queued).
+    const dropped = this._pendingQueue.droppedOnLoad;
+    if (dropped.length > 0) {
+      this._logger.warn(
+        `[v2.0.1] Dropped ${dropped.length} queued message(s) not replayed on OCPP 2.x: ${dropped.join(", ")}`,
+        LogType.OCPP,
+      );
+    }
+    this._awaitingReplay = this._pendingQueue.countOf("TransactionEvent") > 0;
 
     // Initialize response effect queue with deps
     this._responseEffectQueue = new ResponseEffectQueue({
@@ -312,16 +396,29 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       gen,
       (settlement) => {
         if (settlement.outcome === "written") {
+          this._outageHandled = false;
+          // A transmission written after its message was settled or
+          // discarded is not tracked: nothing would ever remove it.
+          if (transactionEvent?.message.done) {
+            this._chargePoint.notifyOutgoingCall(false);
+            return;
+          }
           this._pendingRequests.set(messageId, {
             action,
             payload,
-            ...(transactionEvent ? { transactionEvent } : {}),
+            ...(transactionEvent
+              ? {
+                  transactionEvent,
+                  timeout: this.armTransactionEventTimeout(transactionEvent),
+                }
+              : {}),
           });
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
         } else {
           // On drop outcomes (socket_closed, disposed, write_failed,
-          // queue_overflow): no retry — a 2.x drop is unrecovered wire loss
-          // per spec. A caller waiting for an answer is told.
+          // queue_overflow): no retry here. The caller is told; a
+          // TransactionEvent's delivery queues it when offline (#528, E11),
+          // any other CALL is lost.
           onDropped?.(settlement.outcome);
         }
       },
@@ -532,11 +629,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const error = payload as CallErrorFields;
       if (this._expertCalls.claimError(messageId, error)) return;
       if (pending?.transactionEvent) {
-        this.onTransactionEventCallError(
-          pending.payload as TransactionEventRequestV201,
+        this.endTransmission(
+          messageId,
           pending.transactionEvent,
-          error.errorCode ?? "GenericError",
+          pending.timeout,
         );
+        this.onTransactionEventFailure(pending.transactionEvent, {
+          reason: "callError",
+          errorCode: error.errorCode ?? "GenericError",
+        });
         return;
       }
       if (pending?.action === "DataTransfer") {
@@ -619,6 +720,27 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
     if (pending?.action === "SignCertificate") {
       this.applySignCertificateResult(payload as SignCertificateResponseV201);
+      return;
+    }
+
+    if (pending?.transactionEvent) {
+      // #529: the first CALLRESULT for any transmission settles the
+      // message. Its other transmissions are forgotten, so a second answer
+      // finds no pending entry and is ignored like any unknown CALLRESULT.
+      // One written only after that (it sat in the socket's queue) finds
+      // the message done, and its answer is ignored too.
+      const { message } = pending.transactionEvent;
+      this.endTransmission(
+        messageId,
+        pending.transactionEvent,
+        pending.timeout,
+      );
+      if (message.done) return;
+      this.forgetTransactionEvent(message);
+      this.applyTransactionEventResult(
+        message.payload,
+        payload as TransactionEventResponseV201,
+      );
       return;
     }
 
@@ -733,34 +855,183 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  /** Send a TransactionEvent as transmission `attempt` (#490). Each
-   *  transmission is a new CALL with a new message id (OCPP-J Part 4 §4.1.4:
-   *  "This also applies to retries"); the payload, seqNo included, is the
-   *  same object every time. */
+  /** Start delivering a TransactionEvent built by this handler (#490).
+   *  #528: while the E11 queue holds events waiting for their replay, a new
+   *  one joins them, so the CSMS still gets them in the order they were
+   *  produced. */
   private sendTransactionEventCall(
     connectorId: number,
     payload: TransactionEventRequestV201,
-    attempt = 1,
   ): void {
+    const message = this.newTransactionEventMessage(connectorId, payload);
+    if (this._awaitingReplay) {
+      this.queueTransactionEvent(message);
+      return;
+    }
+    this.transmitTransactionEvent(message);
+  }
+
+  private newTransactionEventMessage(
+    connectorId: number,
+    payload: TransactionEventRequestV201,
+  ): TransactionEventMessage {
+    const message: TransactionEventMessage = {
+      connectorId,
+      payload,
+      sent: 0,
+      failed: 0,
+      inFlight: new Set(),
+      done: false,
+    };
+    this._activeTransactionEvents.add(message);
+    return message;
+  }
+
+  /** Send the next transmission of `message` (#490). Each transmission is a
+   *  new CALL with a new message id (OCPP-J Part 4 §4.1.4: "This also
+   *  applies to retries"); the payload, seqNo included, is the same object
+   *  every time. */
+  private transmitTransactionEvent(message: TransactionEventMessage): void {
+    const attempt = ++message.sent;
+    const messageId = this.generateMessageId();
+    message.inFlight.add(messageId);
     this.send(
       "TransactionEvent",
-      this.generateMessageId(),
-      payload,
-      attempt > 1
-        ? (reason) =>
-            this.warnResendLost(payload, attempt, `dropped: ${reason}`)
-        : undefined,
-      { connectorId, attempt },
+      messageId,
+      message.payload,
+      (reason) => {
+        message.inFlight.delete(messageId);
+        this.onTransmissionDropped(message, attempt, reason);
+      },
+      { message, attempt },
     );
   }
 
   /**
-   * #490, OCPP 2.0.1 / 2.1 E13.FR.02-04: a CALLERROR answering a
-   * TransactionEvent means the CSMS failed to process it. The station
+   * A transmission never reached the wire.
+   *
+   * #528, E11.FR.01: when the connection is going down (socket no longer
+   * open, or the close draining the network-sim pipeline), the message is
+   * queued for the replay. Until `onWebSocketClosed` has handled this
+   * outage it stays tracked, so that close queues it with the older
+   * unanswered events, in creation order; a network-sim cut drains the
+   * pipeline while the socket is still OPEN and closes it on a later task.
+   *
+   * With the socket still up (an overflowing network-sim queue), a first
+   * transmission is lost silently and a resend is logged as lost (#490).
+   */
+  private onTransmissionDropped(
+    message: TransactionEventMessage,
+    attempt: number,
+    reason: string,
+  ): void {
+    const goingOffline =
+      reason === "socket_closed" ||
+      reason === "disposed" ||
+      !this._webSocket.isConnected();
+    if (!message.done && goingOffline) {
+      if (this._outageHandled) this.queueTransactionEvent(message);
+      return;
+    }
+    if (attempt === 1) {
+      if (!message.done) this.forgetTransactionEvent(message);
+      return;
+    }
+    this.warnResendLost(message.payload, attempt, `dropped: ${reason}`);
+    // A timed-out transmission still on the wire keeps the message open:
+    // its late answer can still settle it.
+    if (message.inFlight.size === 0) this.forgetTransactionEvent(message);
+  }
+
+  /**
+   * #528, OCPP 2.0.1 / 2.1 E11.FR.01: queue a TransactionEvent the CSMS has
+   * not settled, once. Its transmissions are forgotten (a late answer to
+   * one is ignored) and its waiting resend is cancelled; the replay starts
+   * its E13 delivery anew. The payload is stored as it was last sent or
+   * built: without `offline` for an event not yet replayed, with
+   * `offline: true` for a replay queued again by a new close. The replay
+   * sets `offline: true` either way.
+   */
+  private queueTransactionEvent(message: TransactionEventMessage): void {
+    if (message.done) return;
+    this.forgetTransactionEvent(message);
+    this._awaitingReplay = true;
+    this._pendingQueue.enqueue({
+      action: "TransactionEvent",
+      payload: message.payload,
+      connectorId: message.connectorId,
+    });
+    this._logger.warn(
+      `[v2.0.1] ${describeTransactionEvent(message.payload)} queued while offline; queue size=${this._pendingQueue.size()}`,
+      LogType.TRANSACTION,
+    );
+  }
+
+  /**
+   * #529: OCPP 2.0.1 / 2.1 E13 (2.0.1 Table 120 / 2.1 E13 use case,
+   * Description and Remark) also
+   * resends a transaction-related message the CSMS "does not reply [to]
+   * within the MessageTimeout"; OCPP-J Part 4 §4.1.1 calls such a CALL timed
+   * out. `OCPPCommCtrlr.MessageTimeout[Default]` is read at each
+   * transmission. The pending entry stays, so a late answer can still
+   * settle the message. Armed when the CALL is written (the caller has
+   * checked the message is not done); the timer lives in the pending entry.
+   */
+  private armTransactionEventTimeout(
+    delivery: TransactionEventDelivery,
+  ): ReturnType<typeof setTimeout> {
+    const seconds = this._chargePoint.configuration.messageTimeout();
+    const timer = setTimeout(
+      () => {
+        this.onTransactionEventFailure(delivery, {
+          reason: "timeout",
+          seconds,
+        });
+      },
+      Math.min(Math.max(1, seconds) * 1000, MAX_TIMER_MS),
+    );
+    unrefTimer(timer);
+    return timer;
+  }
+
+  /** A transmission got its answer: its timeout no longer applies. */
+  private endTransmission(
+    messageId: string,
+    { message }: TransactionEventDelivery,
+    timeout: ReturnType<typeof setTimeout> | undefined,
+  ): void {
+    message.inFlight.delete(messageId);
+    clearTimeout(timeout);
+  }
+
+  /** Settle or discard `message`: cancel its waiting resend and forget all
+   *  its transmissions, so a later answer to any of them is ignored. */
+  private forgetTransactionEvent(message: TransactionEventMessage): void {
+    message.done = true;
+    this._activeTransactionEvents.delete(message);
+    if (message.resend !== undefined) {
+      clearTimeout(message.resend);
+      message.resend = undefined;
+    }
+    for (const id of message.inFlight) {
+      clearTimeout(this._pendingRequests.get(id)?.timeout);
+      this._pendingRequests.delete(id);
+    }
+    message.inFlight.clear();
+  }
+
+  /**
+   * #490 / #529, OCPP 2.0.1 / 2.1 E13.FR.02-04: a transmission of a
+   * TransactionEvent failed — a CALLERROR answered it (the CSMS failed to
+   * process it) or no answer came within `MessageTimeout`. The station
    * resends it after `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`
    * seconds times the number of transmissions so far, up to
    * `MessageAttempts[TransactionEvent]` transmissions, then discards it.
    * The transaction keeps running either way (unlike 1.6, #447).
+   *
+   * Each transmission counts as failed once: a CALLERROR arriving for a
+   * transmission that already timed out changes nothing, and neither does
+   * any failure once the message is settled or discarded.
    *
    * Known limitation: 2.x has no serial queue here (see `send`), so a
    * waiting resend does not hold back the next transaction message. E13
@@ -769,26 +1040,40 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * `seqNo`. Both settings are read here, so a SetVariables applies to the
    * next failure.
    */
-  private onTransactionEventCallError(
-    payload: TransactionEventRequestV201,
+  private onTransactionEventFailure(
     delivery: TransactionEventDelivery,
-    errorCode: string,
+    failure: TransactionEventFailure,
   ): void {
-    const { connectorId, attempt } = delivery;
+    const { message, attempt } = delivery;
+    if (message.done || attempt <= message.failed) return;
+    message.failed = attempt;
+    const { connectorId, payload } = message;
     const report = {
       connectorId,
       transactionId: payload.transactionInfo.transactionId,
+      action: "TransactionEvent" as const,
       eventType: payload.eventType,
-      errorCode,
+      reason: failure.reason,
+      ...(failure.reason === "callError"
+        ? { errorCode: failure.errorCode }
+        : {}),
     };
+    const [cause, what] =
+      failure.reason === "callError"
+        ? [failure.errorCode, `answered with CALLERROR ${failure.errorCode}`]
+        : [
+            `no answer within ${failure.seconds}s`,
+            `got no answer within ${failure.seconds}s`,
+          ];
     const config = this._chargePoint.configuration;
     const attempts = Math.max(1, config.transactionMessageAttempts());
     this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
     if (attempt >= attempts) {
       this._logger.warn(
-        `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
+        `[v2.0.1] ${describeTransactionEvent(payload)} discarded after ${attempt} attempt(s): ${cause}`,
         LogType.TRANSACTION,
       );
+      this.forgetTransactionEvent(message);
       this._chargePoint.notifyTransactionMessageDiscarded({
         ...report,
         attempts: attempt,
@@ -800,18 +1085,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       MAX_TIMER_MS,
     );
     this._logger.warn(
-      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} answered with CALLERROR ${errorCode}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
+      `[v2.0.1] ${describeTransactionEvent(payload)} ${what}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
       LogType.TRANSACTION,
     );
     const timer = setTimeout(() => {
-      this._transactionEventRetries.delete(timer);
-      this.sendTransactionEventCall(connectorId, payload, attempt + 1);
+      message.resend = undefined;
+      this.transmitTransactionEvent(message);
     }, delayMs);
     unrefTimer(timer);
-    this._transactionEventRetries.set(timer, {
-      payload,
-      attempt: attempt + 1,
-    });
+    message.resend = timer;
   }
 
   /** A resend that will never reach the CSMS: logged, no domain event. */
@@ -821,7 +1103,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     outcome: string,
   ): void {
     this._logger.warn(
-      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${payload.transactionInfo.transactionId}: attempt ${attempt} ${outcome}`,
+      `[v2.0.1] ${describeTransactionEvent(payload)}: attempt ${attempt} ${outcome}`,
       LogType.TRANSACTION,
     );
   }
@@ -866,7 +1148,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const ev = v201StatusEvse(connectorId);
     const payload: StatusNotificationRequestV201 = {
       timestamp: (opts?.timestamp ?? new Date()).toISOString(),
-      connectorStatus: ocppStatusToV201(status),
+      connectorStatus: toV2ConnectorStatus(status),
       evseId: ev.evseId,
       connectorId: ev.connectorId,
     };
@@ -1387,18 +1669,99 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("FirmwareStatusNotification", id, payload);
   }
 
-  /** N07 NotifyEvent.req: the events of one monitor evaluation (#457).
-   *  Dropped like any 2.x CALL while offline: OfflineQueuingSeverity
-   *  (N07.FR.04) is not modelled. */
+  /** N07 NotifyEvent.req: the events of one monitor evaluation (#457), in
+   *  as many parts as `buildNotifyEventRequests` makes, sent in order
+   *  (#538). Events the monitor evaluation produced online but that find
+   *  the socket already down are queued per `OfflineQueuingSeverity`
+   *  (N07.FR.04), the others dropped. */
   public sendNotifyEvent(events: readonly MonitoringEvent[]): void {
     const [first, ...rest] = events;
     if (first === undefined) return;
-    const dialect = this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
-    this.send(
-      "NotifyEvent",
-      this.generateMessageId(),
-      buildNotifyEventRequest([first, ...rest], dialect),
+    if (!this._webSocket.isConnected()) {
+      const threshold =
+        this._chargePoint.configuration.offlineQueuingSeverity();
+      const queued = events.filter((event) =>
+        isQueuedOffline(event.monitor.severity, threshold),
+      );
+      this.queueNotifyEvent(queued);
+      if (queued.length < events.length) {
+        this._logger.warn(
+          `[v2.0.1] Not connected, dropping ${events.length - queued.length} NotifyEvent event(s) above OfflineQueuingSeverity ${threshold}`,
+          LogType.WEBSOCKET,
+        );
+      }
+      return;
+    }
+    for (const part of buildNotifyEventRequests(
+      [first, ...rest],
+      this.notifyEventDialect(),
+    )) {
+      this.send("NotifyEvent", this.generateMessageId(), part);
+    }
+  }
+
+  /**
+   * #538, OCPP 2.0.1 / 2.1 N07.FR.04, N08.FR.03: queue the NotifyEvent of
+   * `events` while offline, as one whole report in the E11 queue (#528),
+   * cut into parts when it is replayed after the next Boot Accepted. The
+   * caller has applied `OfflineQueuingSeverity`.
+   */
+  public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
+    const [first, ...rest] = events;
+    if (first === undefined) return;
+    this.makeRoomForNotifyEvent();
+    this._pendingQueue.enqueue({
+      action: "NotifyEvent",
+      payload: buildNotifyEventReport([first, ...rest]),
+    });
+    // Debug, not warn: a Periodic monitor ticking through an outage would
+    // flood the log with one line per report.
+    this._logger.debug(
+      `[v2.0.1] NotifyEvent with ${events.length} event(s) queued while offline; queue size=${this._pendingQueue.size()}`,
+      LogType.OCPP,
     );
+  }
+
+  /** #538: the highest `eventId` of the NotifyEvent reports still queued,
+   *  0 when none, so a restarted station numbers its events past them. */
+  public highestQueuedNotifyEventId(): number {
+    let highest = 0;
+    for (const queued of this._pendingQueue.all()) {
+      if (queued.action !== "NotifyEvent") continue;
+      for (const data of (queued.payload as NotifyEventReport).eventData) {
+        highest = Math.max(highest, data.eventId);
+      }
+    }
+    return highest;
+  }
+
+  /**
+   * #538: keep the queued NotifyEvent reports under
+   * {@link MAX_QUEUED_NOTIFY_EVENTS} by dropping the oldest report made
+   * only of Periodic events, else the oldest report: a threshold crossing
+   * queued offline counts as told, so the re-check of the Accepted boot
+   * would never send it again. A TransactionEvent row is never dropped.
+   * The first drop of an outage warns; `flushPendingQueue` reports the
+   * total once the station is back.
+   */
+  private makeRoomForNotifyEvent(): void {
+    while (
+      this._pendingQueue.countOf("NotifyEvent") >= MAX_QUEUED_NOTIFY_EVENTS &&
+      (this._pendingQueue.removeOldest("NotifyEvent", isPeriodicOnlyReport) ||
+        this._pendingQueue.removeOldest("NotifyEvent"))
+    ) {
+      if (this._droppedNotifyEvents === 0) {
+        this._logger.warn(
+          `[v2.0.1] Offline NotifyEvent queue full (${MAX_QUEUED_NOTIFY_EVENTS} reports): dropping the oldest reports until the connection is back`,
+          LogType.OCPP,
+        );
+      }
+      this._droppedNotifyEvents += 1;
+    }
+  }
+
+  private notifyEventDialect(): "v21" | "v201" {
+    return this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
   }
 
   /** N01 LogStatusNotification.req (#345); `requestId` as above, from the
@@ -1456,25 +1819,138 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   public onWebSocketClosed(): void {
+    // #528, E11.FR.01 / E11.FR.07: every TransactionEvent the CSMS has not
+    // settled goes to the offline queue, in creation order and once each —
+    // written but unanswered (its `MessageTimeout` timer is cleared, #529),
+    // still in the network-sim pipeline, or waiting out
+    // `MessageAttemptInterval` for its resend (#490). Close, disconnect,
+    // reset and dispose all reach here through ChargePoint.teardownAfterClose.
+    // The Set holds them in creation order; queuing one removes it.
+    for (const message of [...this._activeTransactionEvents]) {
+      this.queueTransactionEvent(message);
+    }
+    this._outageHandled = true;
+    for (const pending of this._pendingRequests.values()) {
+      clearTimeout(pending.timeout);
+    }
     // Clear written-but-unanswered correlation entries on disconnect.
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
     this._expertCalls.onClosed();
-    // #490: a resend waiting for its interval dies with the connection (2.x
-    // has no offline queue to hand it to). Close, disconnect, reset and
-    // dispose all reach here through ChargePoint.teardownAfterClose.
-    for (const [timer, resend] of this._transactionEventRetries) {
-      clearTimeout(timer);
-      this.warnResendLost(
-        resend.payload,
-        resend.attempt,
-        "cancelled: WebSocket closed",
-      );
-    }
-    this._transactionEventRetries.clear();
   }
 
+  /**
+   * #528, OCPP 2.0.1 / 2.1 E11.FR.02: once BootNotification is Accepted,
+   * send the queued TransactionEvents in order, each with `offline = true`
+   * (E11.FR.07: a queued message is set Offline). The seqNo is the one the
+   * event was built with. Each replay is a fresh E13 delivery: its
+   * transmission and failure counts restart at zero, as a 1.6 replay goes
+   * through `sendRequest` anew. A row leaves the queue when its replay is
+   * handed to the socket; a close before the answer queues it again. A
+   * replay the socket refuses while it stays open (`not_accepted`, a
+   * network-sim overflow) stays at the head and the replay stops there, so
+   * the order holds; it waits for the next Boot Accepted. E13 owns the
+   * attempt counting, so the queue's own limit is off. Queued NotifyEvents
+   * (#538, N07.FR.04) replay in the same pass, in the order they were
+   * queued among the TransactionEvents.
+   */
   public flushPendingQueue(): void {
-    // OCPP 2.0.1: pending queue handled by TransactionEvent seqNo mechanism
+    if (!this._webSocket.isConnected()) return;
+    // The connection is live: a replay dropped from here on waits for the
+    // next close to be queued again, so this loop never feeds itself.
+    this._outageHandled = false;
+    if (this._droppedNotifyEvents > 0) {
+      this._logger.warn(
+        `[v2.0.1] Dropped ${this._droppedNotifyEvents} queued NotifyEvent report(s) during the outage (cap ${MAX_QUEUED_NOTIFY_EVENTS})`,
+        LogType.OCPP,
+      );
+      this._droppedNotifyEvents = 0;
+    }
+    let replayed = 0;
+    this._pendingQueue.flush((queued) => {
+      if (!this._webSocket.isConnected()) return false;
+      if (this.replayQueued(queued) === "held") return false;
+      replayed += 1;
+      return true;
+    }, Number.POSITIVE_INFINITY);
+    this._awaitingReplay = this._pendingQueue.countOf("TransactionEvent") > 0;
+    if (replayed > 0) {
+      this._logger.info(
+        `[v2.0.1] Replayed ${replayed} queued message(s); ${this._pendingQueue.size()} left`,
+        LogType.OCPP,
+      );
+    }
+  }
+
+  /**
+   * #538: send a queued NotifyEvent report, in parts cut now (seqNo from 0,
+   * N07.FR.07), with no offline marker: NotifyEventRequest has none. A
+   * first part the socket refuses keeps the whole row at the head, like a
+   * refused TransactionEvent; a later part refused loses the rest of the
+   * report, with a warning. A part written is not queued again by a later
+   * close.
+   */
+  private replayNotifyEvent(
+    queued: PendingMessage<V201QueuedAction>,
+  ): "replayed" | "held" {
+    const parts = notifyEventReportParts(
+      queued.payload as NotifyEventReport,
+      this.notifyEventDialect(),
+    );
+    for (const [index, part] of parts.entries()) {
+      let refused = false;
+      let sending = true;
+      this.send("NotifyEvent", this.generateMessageId(), part, () => {
+        if (sending) refused = true;
+      });
+      sending = false;
+      if (!refused) continue;
+      if (index === 0) {
+        this._logger.warn(
+          `[v2.0.1] Replay of a queued NotifyEvent refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
+          LogType.OCPP,
+        );
+        return "held";
+      }
+      this._logger.warn(
+        `[v2.0.1] Replay of a queued NotifyEvent refused at part ${index + 1} of ${parts.length}; the rest of the report is lost`,
+        LogType.OCPP,
+      );
+      return "replayed";
+    }
+    return "replayed";
+  }
+
+  /** Send one queued message again. Each queued action gets its own case. */
+  private replayQueued(
+    queued: PendingMessage<V201QueuedAction>,
+  ): "replayed" | "held" {
+    switch (queued.action) {
+      case "TransactionEvent": {
+        const payload: TransactionEventRequestV201 = {
+          ...(queued.payload as TransactionEventRequestV201),
+          offline: true,
+        };
+        const message = this.newTransactionEventMessage(
+          queued.connectorId ?? 0,
+          payload,
+        );
+        this.transmitTransactionEvent(message);
+        // Written, or dropped by a close (still tracked: that close queues
+        // it again), the message is open. Done right away means the socket
+        // refused it while staying up: keep the row instead of losing it.
+        if (message.done && this._webSocket.isConnected()) {
+          this._awaitingReplay = true;
+          this._logger.warn(
+            `[v2.0.1] Replay of ${describeTransactionEvent(payload)} refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
+            LogType.TRANSACTION,
+          );
+          return "held";
+        }
+        return "replayed";
+      }
+      case "NotifyEvent":
+        return this.replayNotifyEvent(queued);
+    }
   }
 }

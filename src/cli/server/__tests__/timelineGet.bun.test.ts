@@ -72,7 +72,7 @@ describe("#448 timeline.get over RPC", () => {
 
     const all = await rpc(socket, "timeline.get", { cpId: "CP-A" });
     expect(all.ok).toBe(true);
-    expect(all.result.version).toBe("1.2");
+    expect(all.result.version).toBe("1.3");
     expect(all.result.total).toBe(all.result.entries.length);
     const seqs = all.result.entries.map((e: any) => e.seq);
     expect(seqs).toEqual([...seqs].sort((a: number, b: number) => a - b));
@@ -116,7 +116,7 @@ describe("#448 timeline.get over RPC", () => {
     expect(updated.ok).toBe(true);
 
     const after = await rpc(socket, "timeline.get", { cpId: "CP-A" });
-    expect(after.result).toEqual({ version: "1.2", entries: [], total: 0 });
+    expect(after.result).toEqual({ version: "1.3", entries: [], total: 0 });
   });
 
   it("answers not_found for an unknown charge point", async () => {

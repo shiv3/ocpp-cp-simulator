@@ -3,6 +3,10 @@ import { OcppFeatureProfile } from "../types/OcppTypes";
 import { isOcpp2Version } from "../types/OcppVersion";
 import { MAX_TIMER_MS } from "../../shared/timers";
 import { SIGNED_METER_MODES } from "../connector/SignedMeterData";
+import {
+  MAX_MONITOR_SEVERITY,
+  MIN_MONITOR_SEVERITY,
+} from "../monitoring/VariableMonitor";
 
 export const ConfigurationKeys = {
   Core: {
@@ -447,6 +451,30 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 0,
     } as IntegerConfigurationKey,
+    // #529: seconds a TransactionEvent may stay unanswered before it counts
+    // as a failed transmission (E13). 2.x only, as
+    // `OCPPCommCtrlr.MessageTimeout[Default]`, which OCPP 2.0.1 / 2.1 Part 2
+    // §2.1.3 "DefaultMessageTimeout" makes ReadOnly (it is set through a
+    // NetworkConnectionProfile; this simulator rejects SetNetworkProfile).
+    MessageTimeout: {
+      name: "MessageTimeout",
+      required: false,
+      readonly: true,
+      type: "integer",
+      min: 1,
+    } as IntegerConfigurationKey,
+    // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
+    // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
+    // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
+    // 2.x only.
+    OfflineQueuingSeverity: {
+      name: "OfflineQueuingSeverity",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: MIN_MONITOR_SEVERITY,
+      max: MAX_MONITOR_SEVERITY,
+    } as IntegerConfigurationKey,
     // #315: sign the energy register in OCMF (German Eichrecht format) and
     // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by
     // default; nothing is generated, and no key is made, while false. The
@@ -639,6 +667,16 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // keeps its key set.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.AuthCacheLifeTime, 0)]
+      : []),
+    // #529: 2.x only (OCPPCommCtrlr.MessageTimeout[Default]), 30 s like the
+    // 1.6 serial queue's CALL timeout.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
+      : []),
+    // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
+    // only Emergency events while offline.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.OfflineQueuingSeverity, 0)]
       : []),
     boolVal(ConfigurationKeys.Custom.SampledDataSignReadings, false),
     strVal(ConfigurationKeys.Custom.SignedMeterDataMode, "valid"),

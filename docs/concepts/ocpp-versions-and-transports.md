@@ -213,9 +213,11 @@ is restored (E11 "Connection Loss During Transaction", #528):
   online"): an event produced while the WebSocket is down, an event the
   socket drops on close, an event written but still unanswered when the
   socket closes, and an E13 resend still waiting. Each message is queued
-  once, in the order the events were produced, with the payload as built
-  (no `offline` field). An event produced while the queue still waits for
-  its replay (socket back, BootNotification not yet Accepted) joins the
+  once, in the order the events were produced, with the payload as last
+  sent or built: no `offline` field for an event not yet replayed,
+  `offline: true` for a replay a new close queues again. An event produced
+  while the queue still waits for its replay (socket back, BootNotification
+  not yet Accepted, or a restart that found persisted rows) joins the
   queue too, so the order holds.
 - **Where**: the `pending_messages` table that 1.6 uses (action
   `TransactionEvent`), with [`--state-db`](state-persistence.md); in memory
@@ -225,13 +227,24 @@ is restored (E11 "Connection Loss During Transaction", #528):
   id, with the `seqNo` it was built with. E11.FR.07 ("every message that is
   still in the queue SHALL be set Offline") is why an event that was
   written before the close also carries `offline: true` on replay.
-  `offline` is set at replay time only; an event sent online never carries
-  it.
+  The replay sets `offline: true`; an event sent directly, not through the
+  queue, never carries it.
 - **E13 still applies to a replayed event**, with fresh counters: its
   `MessageAttempts[TransactionEvent]` budget and `transactionMessageRejected`
   `attempt` restart at 1, as a 1.6 replay goes through the serial queue
   anew. A row leaves the queue when its replay is handed to the socket; a
-  close before the answer queues the event again.
+  close before the answer queues the event again. A replay the socket
+  refuses while the connection stays up (a network-sim refusal or
+  overflow) is put back at the head of the queue, with a `warn` (category
+  `TRANSACTION`); the replay stops there, and that row, the rows behind it
+  and any new TransactionEvent wait for the next BootNotification
+  `Accepted`.
+- **Rows of the other protocol are dropped.** 1.6 and 2.x share
+  `pending_messages` by charge point id, and `cp.update` can switch
+  `ocppVersion` over the same `--state-db`. Each handler drops, with a
+  `warn`, a row it does not replay: the 2.x handler anything but
+  `TransactionEvent`, the 1.6 handler anything but StartTransaction,
+  StopTransaction and MeterValues.
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, NotifyEvent and the rest are dropped while offline, as
   before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is

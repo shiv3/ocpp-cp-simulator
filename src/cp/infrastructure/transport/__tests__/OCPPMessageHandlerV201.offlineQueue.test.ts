@@ -36,6 +36,8 @@ class FakeSocket {
   /** When set, settlements are held until `dropHeld` (network-sim delay). */
   holding = false;
   held: Settle[] = [];
+  /** CALLs `sendAction` refuses next (network-sim refusal, not_accepted). */
+  refuseNext = 0;
   private handler: Handler | null = null;
   setMessageHandler(handler: Handler): void {
     this.handler = handler;
@@ -54,6 +56,10 @@ class FakeSocket {
     _gen: unknown,
     onSettled?: Settle,
   ): boolean {
+    if (this.refuseNext > 0) {
+      this.refuseNext -= 1;
+      return false;
+    }
     if (this.holding) {
       if (onSettled) this.held.push(onSettled);
       return true;
@@ -237,7 +243,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expectValid(replayed);
     });
 
-    it("never sets offline on an event sent online", () => {
+    it("never sets offline on an event sent directly", () => {
       const { socket, start } = setup(version);
       start();
       const [sent] = socket.transactionPayloads();
@@ -441,6 +447,60 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         ["Started", true],
         ["Updated", true],
       ]);
+    });
+
+    it("puts a replay the socket refuses back at the head of the queue", async () => {
+      const { socket, start, update, close, handler, reconnect } =
+        setup(version);
+      close();
+      start();
+      update();
+      await settle();
+      // Boot Accepted, socket open, but the first replay is refused.
+      socket.connected = true;
+      socket.refuseNext = 1;
+      handler.flushPendingQueue();
+      expect(socket.transactionEvents()).toEqual([]);
+      expect(
+        vi.mocked(logger.warn).mock.calls.map((c) => String(c[0])),
+      ).toContainEqual(
+        expect.stringMatching(
+          /TransactionEvent Started \(seqNo 0\).*refused.*kept at the head/,
+        ),
+      );
+      // A new event still waits behind the queue.
+      update();
+      expect(socket.transactionEvents()).toEqual([]);
+
+      reconnect();
+      expect(
+        socket
+          .transactionPayloads()
+          .map((p) => [p.eventType, p.seqNo, p.offline]),
+      ).toEqual([
+        ["Started", 0, true],
+        ["Updated", 1, true],
+        ["Updated", 2, true],
+      ]);
+    });
+
+    it("sends a new event directly once the replay has drained the queue", async () => {
+      const { socket, start, update, close, reconnect } = setup(version);
+      close();
+      start();
+      await settle();
+      reconnect();
+      socket.callResult(socket.transactionEvents()[0].messageId, {});
+      vi.mocked(logger.warn).mockClear();
+
+      update();
+      const sent = socket.transactionPayloads();
+      expect(sent.map((p) => [p.eventType, p.seqNo])).toEqual([
+        ["Started", 0],
+        ["Updated", 1],
+      ]);
+      expect(sent[1]).not.toHaveProperty("offline");
+      expect(logger.warn).not.toHaveBeenCalled();
     });
 
     it("still drops other messages while offline", async () => {

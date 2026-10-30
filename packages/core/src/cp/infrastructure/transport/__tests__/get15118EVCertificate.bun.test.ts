@@ -183,17 +183,20 @@ describe.skipIf(!canBindBunServe())(
         expect(await relayed).toEqual({ responses: answers });
       });
     });
-
-    it("refuses OCPP 1.6 and SOAP stations before sending", async () => {
-      for (const [version, reason] of [
-        ["OCPP-1.6J", "unsupported_action"],
-        ["OCPP-1.6S", "unsupported_transport"],
-      ] as const) {
-        const cp = newChargePoint(`CP-15118-${version}`, "ws://x", version);
-        await expect(
-          cp.get15118EVCertificate(ISO2_REQUEST),
-        ).rejects.toMatchObject({ name: "OcppCallRejectedError", reason });
-      }
-    });
   },
 );
+
+// No server needed: these stations refuse before anything is sent.
+describe("Get15118EVCertificate relay refusals (#537)", () => {
+  it("refuses OCPP 1.6 and SOAP stations before sending", async () => {
+    for (const [version, reason] of [
+      ["OCPP-1.6J", "unsupported_action"],
+      ["OCPP-1.6S", "unsupported_transport"],
+    ] as const) {
+      const cp = newChargePoint(`CP-15118-${version}`, "ws://x", version);
+      await expect(
+        cp.get15118EVCertificate(ISO2_REQUEST),
+      ).rejects.toMatchObject({ name: "OcppCallRejectedError", reason });
+    }
+  });
+});

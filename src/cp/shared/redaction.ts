@@ -29,20 +29,44 @@ const SENSITIVE_NAME_VARIANTS = [...SENSITIVE_KEY_NAMES]
   .join("|");
 const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
 /**
- * A quoted value is confined to its line: it ends at the first unescaped
- * closing quote on that line (`"ab\"cd"` is one value), or, when none comes
- * (a truncated message), at the end of the line, so the next line's own
- * assignment is still seen. Only a PEM value (`-----BEGIN`, after optional
- * whitespace), which keeps raw newlines in non-JSON text, spans lines: up to
- * its closing quote, else to the end of the text. Both fail closed. Limit
- * (#519): any other value with a raw newline is redacted only to the end of
- * its first line.
+ * A quoted value ends at its first unescaped matching quote (`"ab\"cd"` is
+ * one value). On the opening line any such quote ends it. When it is on a
+ * later line (a raw newline, or a backslash before the line end), it ends
+ * the value only if a delimiter follows it (whitespace, `,`, `}`, `]`, end
+ * of text) and no `:` / `=` precedes it: the quote opening the next line's
+ * `privateKey="SECRET"` does not end `password="a` (#401, #519). Nor may the
+ * value run over another sensitive assignment (`privateKey='S1 x" y S2'`),
+ * whose own closing quote would come after. Without such a quote, or across
+ * such an assignment, the value ends at the end of its first line, so the
+ * next line's own assignment is still seen.
+ *
+ * A PEM value (`-----BEGIN`, after optional whitespace) ends only at a quote
+ * after its `-----END …-----` marker (whitespace or a `\n` / `\r` escape
+ * between) with no sensitive assignment before it, else at the end of the
+ * text, whatever quotes its body holds (#519). All fail closed.
+ *
+ * The `:` / `=` lookbehind comes after the quote it checks: placed before
+ * it, V8 runs it at every backtrack position of a long whitespace run
+ * (quadratic).
+ *
+ * The assignment guard also looks past one backslash: the escape branch
+ * consumes `\p` of `\privateKey=` in one step, so the guard never runs at
+ * the `p`. The END label is letters, digits, spaces and dots only (real
+ * PEM labels, `X9.42 DH PARAMETERS` included), so it cannot carry an
+ * assignment either.
  */
-const QUOTED_PEM_VALUE = `(?=\\s*-----BEGIN)(?:(?:\\\\[\\s\\S]|(?!\\2)[^\\\\])*\\2|[\\s\\S]*)`;
+const NO_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=])`;
+const QUOTED_PEM_VALUE =
+  `(?=\\s*-----BEGIN)` +
+  `(?:(?:${NO_ASSIGNMENT_AHEAD}[\\s\\S])*?` +
+  `-----END[A-Z0-9 .]*-----(?:\\s|\\\\[nr])*\\2|[\\s\\S]*)`;
+const QUOTED_MULTILINE_VALUE =
+  `(?:${NO_ASSIGNMENT_AHEAD}(?:\\\\[\\s\\S]|(?!\\2)[^\\\\]))*` +
+  `\\2(?<![:=]\\s*\\2)(?=[\\s,}\\]]|$)`;
 const QUOTED_LINE_VALUE = `(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n])*\\2|[^\\n]*`;
 const SENSITIVE_ASSIGNMENT = new RegExp(
   `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(["'])` +
-    `(?:${QUOTED_PEM_VALUE}|${QUOTED_LINE_VALUE})`,
+    `(?:${QUOTED_PEM_VALUE}|${QUOTED_MULTILINE_VALUE}|${QUOTED_LINE_VALUE})`,
   "gi",
 );
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(

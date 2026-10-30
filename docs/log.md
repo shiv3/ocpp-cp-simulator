@@ -1840,6 +1840,14 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | Text redactor: quoted secrets across lines and unterminated PEMs (#519)
+
+- In non-JSON log text, a quoted secret with a raw newline or a backslash line continuation was redacted only to the end of its first line, and a PEM value without its closing quote ended at the next quote, so the text after that quote — the rest of the truncated PEM and anything following it (`x="y" tail=SECRET`) — was logged in clear.
+- A quoted value whose first unescaped quote is on a later line now ends there when a delimiter (whitespace, `,`, `}`, `]`, end of text) follows it and no `:` / `=` precedes it, so the #401 case (`password="a` then `privateKey="SECRET"`) still stops at the line end. Neither may it run over another secret-named assignment, whose own closing quote would come later (`password="a\nprivateKey='S1 x" y S2'` would otherwise log `S2`). A PEM value ends only at a quote after its `-----END …-----` marker with no such assignment before it, else at the end of the text.
+- Fail-closed side effects stated: `password="a\nuser=bob" x` logs `password="[redacted]" x`; a PEM without `-----END …-----"` hides the rest of the message, and inside a single-quoted JSON string value it cuts the frame. Remaining limit stated: a later-line quote followed by `;`, `)` or a letter does not end the value.
+- [Log format → Redaction](concepts/log-format.md#redaction): the line-rule paragraph restated with its exceptions; the #519 limits sentence removed.
+- [GitHub issues](sources/github-issues.md): #519 row rewritten.
+
 ## [2026-10-29] ingest | 1.6 charging profiles in e2e, composite round trip (#323)
 
 - The gocpp fixture's 1.6 dispatch gains `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule`, and marshals decimals as JSON numbers. `e2e/chargingProfile.gocpp.e2e.ts` (in `test:e2e`) pins a 6 A profile on an AC 230 V / 3-phase / cos φ 0.9 connector: `Power.Active.Import` 3726 W and `Current.Import` 6.0 A, or 1242 W and 6.0 A with `numberPhases: 1`. The issue's 2.0 A for one phase was the old divide-by-three artefact.

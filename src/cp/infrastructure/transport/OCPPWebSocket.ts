@@ -295,6 +295,19 @@ export class OCPPWebSocket {
    * carries eleven positional arguments, and a charge point with one URL —
    * every charge point until now — should not have to pass anything.
    */
+  /**
+   * The PEM bundle that validates the current CSMS connection: the
+   * `--tls-ca` certificates of a `wss://` connection that verifies the
+   * server (#537, 1.6 whitepaper M04.FR.06). `undefined` over `ws://`,
+   * without `--tls-ca` (the runtime's own trust store then validates) or
+   * with verification turned off.
+   */
+  public connectionTrustAnchorsPem(): string | undefined {
+    if (!/^wss:/i.test(this._url)) return undefined;
+    if (this._tls?.rejectUnauthorized === false) return undefined;
+    return this._tls?.ca;
+  }
+
   /** Whether the CSMS link authenticates with a client certificate
    *  (security profile 3), the one a renewed certificate replaces. */
   public usesClientCertificate(): boolean {

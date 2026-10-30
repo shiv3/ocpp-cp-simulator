@@ -15,10 +15,11 @@ import type {
   InstalledCertificateIds,
 } from "../../../domain/security/CertificateStore";
 import type { CertificateHashData } from "../../../domain/security/certificateHash";
-import type {
-  InstalledCertificateQuery,
-  RootCertificateUse,
-  SignedCertificateUse,
+import {
+  V2G_CERTIFICATE_USES,
+  type InstalledCertificateQuery,
+  type RootCertificateUse,
+  type SignedCertificateUse,
 } from "../../../domain/security/certificateUse";
 import { LogType } from "../../../shared/Logger";
 import {
@@ -30,6 +31,8 @@ import {
   rootUseFromV21,
   signedUseFromV201,
   signedUseFromV21,
+  signedUseToV201,
+  signedUseToV21,
 } from "../certificateUseMapping";
 import { splitPemChain } from "../handlers/call/CertificateSignedHandler";
 import type {
@@ -53,6 +56,7 @@ export interface CertificateWireMapping {
   readonly queryFrom: (value: string) => InstalledCertificateQuery | undefined;
   readonly queryTo: (query: InstalledCertificateQuery) => string | undefined;
   readonly signedUseFrom: (value: string) => SignedCertificateUse | undefined;
+  readonly signedUseTo: (use: SignedCertificateUse) => string | undefined;
   /** The chains a `V2GCertificateChain` query lists (M03.FR.05). */
   readonly v2gChainUses: readonly SignedCertificateUse[];
 }
@@ -62,6 +66,7 @@ export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
   queryFrom: installedCertificateQueryFromV201,
   queryTo: installedCertificateQueryToV201,
   signedUseFrom: signedUseFromV201,
+  signedUseTo: signedUseToV201,
   v2gChainUses: ["V2GCertificate"],
 };
 
@@ -70,9 +75,10 @@ export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
   queryFrom: installedCertificateQueryFromV21,
   queryTo: installedCertificateQueryToV21,
   signedUseFrom: signedUseFromV21,
+  signedUseTo: signedUseToV21,
   // #537 M03.FR.05: 2.1 has no query value of its own for ISO 15118-20
   // certificates, so its V2G chains are listed under V2GCertificateChain.
-  v2gChainUses: ["V2GCertificate", "V2G20Certificate"],
+  v2gChainUses: V2G_CERTIFICATE_USES,
 };
 
 /** `childCertificateHashData` is 0..4 in both 2.0.1 and 2.1. */

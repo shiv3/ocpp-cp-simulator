@@ -264,9 +264,6 @@ export class ChargePoint {
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
-  /** `--tls-ca` / `--tls-cert` options of the CSMS connection (#537 reads
-   *  the trust anchors). */
-  private readonly _tls?: OcppTlsOptions;
   /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08),
    *  then for the transaction messages in flight before reconnecting. */
   private _clientCertificateSwitchTimer: ReturnType<typeof setTimeout> | null =
@@ -280,9 +277,6 @@ export class ChargePoint {
   private _clientCertificateSwitchReleased = false;
   /** #537: stops following the certificate store (dispose). */
   private _unwatchClientIdentity: (() => void) | null = null;
-  /** #537 2.1 A02.FR.29: a renewed certificate was discarded; reported
-   *  after the next accepted boot. */
-  private _renewedClientCertificateDiscarded = false;
   private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
@@ -391,7 +385,6 @@ export class ChargePoint {
     tls?: OcppTlsOptions,
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
-    this._tls = tls;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
@@ -499,12 +492,6 @@ export class ChargePoint {
       this._webSocket.observers.on("reconnectScheduled", (info) =>
         this._events.emit("reconnecting", info),
       );
-      this._webSocket.observers.on("renewedClientCertificateDiscarded", () => {
-        // DiscardedRenewedClientCertificate is a 2.1 security event only.
-        if (this._ocppVersion === OCPP_2_1) {
-          this._renewedClientCertificateDiscarded = true;
-        }
-      });
       const supervisionUrls = transportOptions.supervisionUrls;
       if (supervisionUrls && supervisionUrls.length > 1) {
         this._webSocket.setSupervisionUrlPool(
@@ -1202,17 +1189,10 @@ export class ChargePoint {
     return true;
   }
 
-  /**
-   * The PEM bundle that validates the current CSMS connection: the
-   * `--tls-ca` certificates of a `wss://` connection that verifies the
-   * server (#537, 1.6 whitepaper M04.FR.06). `undefined` over `ws://`,
-   * without `--tls-ca` (the runtime's own trust store then validates) or
-   * with verification turned off.
-   */
+  /** The PEM bundle that validates the current CSMS connection (#537), as
+   *  {@link OCPPWebSocket.connectionTrustAnchorsPem}; `undefined` on SOAP. */
   connectionTrustAnchorsPem(): string | undefined {
-    if (!/^wss:/i.test(this.wsUrl)) return undefined;
-    if (this._tls?.rejectUnauthorized === false) return undefined;
-    return this._tls?.ca;
+    return this._webSocket?.connectionTrustAnchorsPem();
   }
 
   get wsUrl(): string {
@@ -2363,14 +2343,6 @@ export class ChargePoint {
     // Re-checks the thresholds: what changed while Pending or offline, and
     // a restored trigger already back in range (N07.FR.14).
     this._monitorEvaluation?.setReporting(true);
-    // #537 2.1 A02.FR.29: the connection that discarded a renewed
-    // certificate is the one now booted.
-    if (this._renewedClientCertificateDiscarded) {
-      this._renewedClientCertificateDiscarded = false;
-      this._outbox.sendSecurityEventNotification(
-        "DiscardedRenewedClientCertificate",
-      );
-    }
   }
 
   /**

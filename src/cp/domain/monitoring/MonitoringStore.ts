@@ -1,6 +1,7 @@
 import {
   isValidMonitorSeverity,
   MAX_MONITOR_SEVERITY,
+  isTargetDeltaMonitorType,
   MIN_PERIODIC_INTERVAL_SECONDS,
   monitorBehaviour,
   parseSupportedMonitorType,
@@ -44,7 +45,9 @@ export type InstallRejectionReason =
   /** Severity outside 0-9 (the schemas only set a minimum). */
   | "SeverityOutOfRange"
   /** Periodic interval under one second (a simulator limit, #538). */
-  | "IntervalTooShort";
+  | "IntervalTooShort"
+  /** Negative TargetDelta / TargetDeltaRelative value (#538). */
+  | "NegativeTargetDelta";
 
 export type InstallOutcome =
   | {
@@ -310,6 +313,13 @@ function checkValue(
   switch (monitorBehaviour(type)) {
     case "alert": {
       if (!draft.valueType.numeric) return { status: "UnsupportedMonitorType" };
+      if (isTargetDeltaMonitorType(type)) {
+        // 2.1 N07.FR.22, FR.23 compare with the Target attribute.
+        if (!draft.valueType.hasTarget) {
+          return { status: "UnsupportedMonitorType" };
+        }
+        return draft.value < 0 ? rejected("NegativeTargetDelta") : undefined;
+      }
       const { min, max } = draft.valueType;
       if (
         (min !== undefined && draft.value < min) ||

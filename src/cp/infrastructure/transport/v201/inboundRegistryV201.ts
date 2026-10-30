@@ -202,6 +202,7 @@ export function handleGetBaseReportV201(
   const reportData = buildBaseReportData(
     ctx.chargePoint.configuration,
     ctx.chargePoint.connectors.keys(),
+    ctx.chargePoint.deviceModelTargets,
   );
   const first = reportData[0];
   if (first === undefined) {
@@ -233,6 +234,7 @@ export function handleGetReportV201(
   let reportData = buildBaseReportData(
     ctx.chargePoint.configuration,
     ctx.chargePoint.connectors.keys(),
+    ctx.chargePoint.deviceModelTargets,
   );
 
   if (req.componentVariable && req.componentVariable.length > 0) {
@@ -284,7 +286,10 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
           response: handleGetVariablesV201(
             p as GetVariablesRequestV201,
             ctx.chargePoint.configuration,
-            { evseExists: (evse) => evseOf(ctx, evse) },
+            {
+              evseExists: (evse) => evseOf(ctx, evse),
+              targets: ctx.chargePoint.deviceModelTargets,
+            },
           ),
         }),
       },
@@ -297,7 +302,10 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
           response: handleSetVariablesV201(
             p as SetVariablesRequestV201,
             ctx.chargePoint.configuration,
-            { evseExists: (evse) => evseOf(ctx, evse) },
+            {
+              evseExists: (evse) => evseOf(ctx, evse),
+              targets: ctx.chargePoint.deviceModelTargets,
+            },
           ),
         }),
       },
@@ -575,6 +583,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
             ctx.chargePoint.monitoring,
             ctx.chargePoint.configuration,
             (evse) => evseOf(ctx, evse),
+            ctx.chargePoint.deviceModelTargets,
           ),
         }),
       },

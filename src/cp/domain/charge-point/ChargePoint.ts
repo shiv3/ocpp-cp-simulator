@@ -51,7 +51,8 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
 } from "../types/OcppTypes";
-import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
+import { isOcpp2Version, isSoapVersion, OCPP_2_1 } from "../types/OcppVersion";
+import { DeviceModelTargets } from "./DeviceModelTargets";
 import {
   SOAP_OPERATION_NAMES,
   soapDialectForVersion,
@@ -253,6 +254,8 @@ export class ChargePoint {
   private readonly _certificateStore: CertificateStore;
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
+  // #538: Target attributes of the 2.1 device model (EVSE.Power).
+  private readonly _deviceModelTargets = new DeviceModelTargets();
   // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
   private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
@@ -688,6 +691,7 @@ export class ChargePoint {
     evaluation.setReporting(false);
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
+    this._deviceModelTargets.onChange((key) => evaluation.valueChanged(key));
   }
 
   /**
@@ -730,6 +734,12 @@ export class ChargePoint {
     for (const connector of this._connectors.values()) {
       const publish = () => this.publishConnectorValues(connector);
       publish();
+      // 2.1: EVSE.Power has a Target, for TargetDelta monitors (N07.FR.22).
+      if (this._ocppVersion === OCPP_2_1) {
+        this._deviceModelTargets.declare(
+          evseValueKey(RUNTIME_VALUE_KEYS.evsePower, connector.id),
+        );
+      }
       connector.events.on("statusChange", publish);
       connector.events.on("meterValueChange", publish);
       connector.events.on("socChange", publish);
@@ -815,8 +825,9 @@ export class ChargePoint {
     const entry = this._configuration.get(key);
     if (entry === undefined) return undefined;
     const text = renderConfigValue(entry);
+    const target = this._deviceModelTargets.get(key);
     return typeof entry.value === "number"
-      ? { numeric: entry.value, text }
+      ? { numeric: entry.value, text, ...(target !== undefined && { target }) }
       : { text };
   }
 
@@ -1105,6 +1116,11 @@ export class ChargePoint {
   /** OCPP 2.x variable monitors (SetVariableMonitoring, #457). */
   get monitoring(): MonitoringStore {
     return this._monitoring;
+  }
+
+  /** The device-model variables with a Target attribute (2.1, #538). */
+  get deviceModelTargets(): DeviceModelTargets {
+    return this._deviceModelTargets;
   }
 
   /** Local authorization (#452): Authorization Cache + Local Authorization

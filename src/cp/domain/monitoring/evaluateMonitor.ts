@@ -8,6 +8,8 @@ import { monitorBehaviour, type VariableMonitor } from "./VariableMonitor";
 export interface MonitoredReading {
   readonly numeric?: number;
   readonly text: string;
+  /** The variable's Target value, when it has one and it is set (#538). */
+  readonly target?: number;
 }
 
 /** What the evaluator remembers about one monitor between two values. */
@@ -58,16 +60,42 @@ export function evaluateMonitor(
   }
 
   const wasTriggered = previous?.triggered ?? false;
-  // A non-numeric reading cannot cross a threshold: keep the state.
-  const exceeded =
-    reading.numeric === undefined
-      ? wasTriggered
-      : monitor.type === "UpperThreshold"
-        ? reading.numeric > monitor.value // N07.FR.16: above, not on
-        : reading.numeric < monitor.value; // N07.FR.17: below, not on
+  // A non-numeric reading cannot cross a threshold, and a TargetDelta has
+  // nothing to compare without a target: keep the state.
+  const exceeded = beyondBound(monitor, reading) ?? wasTriggered;
   const state = { triggered: exceeded, baseline: reading };
   if (exceeded === wasTriggered) return { state };
   return { state, notice: { trigger: "Alerting", cleared: !exceeded } };
+}
+
+/** Whether an alert monitor's value is beyond its bound; `undefined` when
+ *  the reading cannot say. */
+function beyondBound(
+  monitor: Pick<VariableMonitor, "type" | "value">,
+  reading: MonitoredReading,
+): boolean | undefined {
+  const actual = reading.numeric;
+  if (actual === undefined) return undefined;
+  switch (monitor.type) {
+    case "UpperThreshold":
+      return actual > monitor.value; // N07.FR.16: above, not on
+    case "LowerThreshold":
+      return actual < monitor.value; // N07.FR.17: below, not on
+    case "TargetDelta":
+      // 2.1 N07.FR.22: "more than plus or minus value".
+      return reading.target === undefined
+        ? undefined
+        : Math.abs(actual - reading.target) > monitor.value;
+    case "TargetDeltaRelative":
+      // 2.1 N07.FR.23: "more than plus or minus (value * Target value)";
+      // the band is measured on the target's magnitude.
+      return reading.target === undefined
+        ? undefined
+        : Math.abs(actual - reading.target) >
+            monitor.value * Math.abs(reading.target);
+    default:
+      return undefined;
+  }
 }
 
 function deltaExceeded(

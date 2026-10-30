@@ -31,6 +31,28 @@ export function handleSetVariablesV201(
     }
     const v16Key = resolved.valueKey;
 
+    if (
+      data.attributeType === "Target" &&
+      context.targets?.supports(v16Key) === true
+    ) {
+      // #538: a decimal target; anything else is badly formatted (B05.FR.07).
+      const target =
+        data.attributeValue.trim() === "" ? NaN : Number(data.attributeValue);
+      if (!Number.isFinite(target)) {
+        return {
+          attributeStatus: "Rejected",
+          component: data.component,
+          variable: data.variable,
+        };
+      }
+      context.targets.set(v16Key, target);
+      return {
+        attributeStatus: "Accepted",
+        attributeType: "Target", // B05.FR.03
+        component: data.component,
+        variable: data.variable,
+      };
+    }
     if (data.attributeType !== undefined && data.attributeType !== "Actual") {
       return {
         attributeStatus: "NotSupportedAttributeType",

@@ -3,6 +3,7 @@ import type {
   GetVariablesResponseV201,
 } from "../../../../ocpp";
 import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
+import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import {
   resolveDeviceModelVariable,
   type DeviceModelEvse,
@@ -16,6 +17,9 @@ export interface DeviceModelContext {
   /** Whether the station has this EVSE (and connector); without it, no
    *  EVSE-scoped variable resolves. */
   readonly evseExists?: (evse: DeviceModelEvse) => boolean;
+  /** The variables with a Target attribute and their targets (2.1 only);
+   *  without it, `Target` is NotSupportedAttributeType everywhere. */
+  readonly targets?: DeviceModelTargets;
 }
 
 export function handleGetVariablesV201(
@@ -38,9 +42,23 @@ export function handleGetVariablesV201(
     }
     const v16Key = resolved.valueKey;
 
+    if (
+      data.attributeType === "Target" &&
+      context.targets?.supports(v16Key) === true
+    ) {
+      // B06.FR.03; B06.FR.13: an empty string while no target is set.
+      const target = context.targets.get(v16Key);
+      return {
+        attributeStatus: "Accepted",
+        attributeType: "Target",
+        attributeValue: target === undefined ? "" : String(target),
+        component: data.component,
+        variable: data.variable,
+      };
+    }
     if (data.attributeType !== undefined && data.attributeType !== "Actual") {
       return {
-        attributeStatus: "NotSupportedAttributeType",
+        attributeStatus: "NotSupportedAttributeType", // B06.FR.08
         component: data.component,
         variable: data.variable,
       };

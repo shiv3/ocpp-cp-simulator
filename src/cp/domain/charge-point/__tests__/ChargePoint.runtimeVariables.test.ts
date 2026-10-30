@@ -164,3 +164,61 @@ describe("OCPP 1.6 runtime values", () => {
     }
   });
 });
+
+describe("EVSE.Power Target and TargetDelta monitors (2.1, #538)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("2.1 gives EVSE.Power a Target; a TargetDelta monitor fires on actual or target changes (N07.FR.22)", async () => {
+    const cp = makeChargePoint({ ocppVersion: "OCPP-2.1", connectorCount: 2 });
+    try {
+      const sent = captureNotifyEvents(cp);
+      bootAccepted(cp);
+      const targets = cp.deviceModelTargets;
+      expect([1, 2].map((n) => targets.supports(`EVSEPower${n}`))).toEqual([
+        true,
+        true,
+      ]);
+      expect(
+        cp.monitoring.install({
+          type: "TargetDelta",
+          severity: 2,
+          value: 100,
+          component: { name: "EVSE", evse: { id: 1 } },
+          variable: { name: "Power" },
+          valueKey: "EVSEPower1",
+          valueType: { numeric: true, hasTarget: true },
+        }).status,
+      ).toBe("Accepted");
+
+      // No target yet: nothing to compare the actual value with.
+      startCharging(cp, 1, 7.4);
+      await flush();
+      expect(sent).toEqual([]);
+      targets.set("EVSEPower1", 7000);
+      await flush();
+      targets.set("EVSEPower1", 7350);
+      await flush();
+
+      expect(sent.every((p) => isValidNotifyEventRequestV21(p))).toBe(true);
+      expect(
+        sent
+          .flatMap((p) => p.eventData as EventData[])
+          .map((e) => [e.trigger, e.actualValue, e.cleared ?? false]),
+      ).toEqual([
+        ["Alerting", "7400", false],
+        ["Alerting", "7400", true],
+      ]);
+    } finally {
+      cp.dispose();
+    }
+  });
+
+  it("2.0.1 has no Target attribute", () => {
+    const cp = makeChargePoint({ ocppVersion: "OCPP-2.0.1" });
+    try {
+      expect(cp.deviceModelTargets.supports("EVSEPower1")).toBe(false);
+    } finally {
+      cp.dispose();
+    }
+  });
+});

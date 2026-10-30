@@ -14,6 +14,7 @@ import type {
   SetVariableMonitoringResponseV201,
 } from "../../../../ocpp";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
+import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import type {
   InstallOutcome,
   InstallRejectionReason,
@@ -57,6 +58,7 @@ const REJECTION_INFO: Record<InstallRejectionReason, string> = {
   NegativeDelta: "N04.FR.14: a Delta value cannot be negative",
   SeverityOutOfRange: "severity range is 0-9",
   IntervalTooShort: "a Periodic interval is at least 1 second",
+  NegativeTargetDelta: "a TargetDelta value cannot be negative",
 };
 
 export function handleSetVariableMonitoringV201(
@@ -64,6 +66,7 @@ export function handleSetVariableMonitoringV201(
   monitoring: MonitoringStore,
   configuration: ConfigurationStore,
   evseExists: (evse: MonitorEvse) => boolean,
+  targets?: Pick<DeviceModelTargets, "supports">,
 ): SetVariableMonitoringResponseV201 {
   // N04.FR.01 / FR.02: one result per item, echoing its target. Items are
   // applied in order, so a later item sees the monitors of earlier ones.
@@ -107,7 +110,11 @@ export function handleSetVariableMonitoringV201(
       component: data.component,
       variable: data.variable,
       valueKey,
-      valueType: valueTypeOf(entry.key),
+      valueType: {
+        ...valueTypeOf(entry.key),
+        // 2.1 TargetDelta monitors need a Target attribute (#538).
+        ...(targets?.supports(valueKey) === true && { hasTarget: true }),
+      },
     });
     return toSetMonitoringResult(outcome, echo);
   });
@@ -267,7 +274,9 @@ function groupByTarget(
       id: m.id,
       transaction: m.transaction,
       value: m.value,
-      type: m.type,
+      // The 2.1 TargetDelta types only exist on a 2.1 station: the 2.0.1
+      // schema refuses them in SetVariableMonitoring.
+      type: m.type as VariableMonitoringEntry["type"],
       severity: m.severity,
       // 2.1 N02.FR.22; the 2.0.1 schema forbids the field.
       ...(dialect === "v21" && { eventNotificationType: m.origin }),

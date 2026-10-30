@@ -9,6 +9,7 @@ import {
   isValidGetMonitoringReportResponseV201,
   isValidNotifyMonitoringReportRequestV201,
   isValidSetMonitoringLevelResponseV201,
+  isValidSetVariableMonitoringRequestV201,
   isValidSetVariableMonitoringResponseV201,
 } from "../../../../../ocpp/v201";
 import {
@@ -23,6 +24,7 @@ import {
   ConfigurationStore,
   type ConfigurationValue,
 } from "../../../../domain/charge-point/ConfigurationStore";
+import { DeviceModelTargets } from "../../../../domain/charge-point/DeviceModelTargets";
 import { MonitoringStore } from "../../../../domain/monitoring/MonitoringStore";
 import {
   buildMonitoringReportV201,
@@ -388,6 +390,56 @@ describe("handleSetVariableMonitoringV201 on runtime values (#538)", () => {
       ["EVSEPower1", { name: "EVSE", evse: { id: 1 } }],
       ["EVSEAvailabilityState1", { name: "EVSE", evse: { id: 1 } }],
     ]);
+  });
+});
+
+describe("handleSetVariableMonitoringV201 TargetDelta (2.1, #538)", () => {
+  const item = (type: string) =>
+    ({
+      value: 500,
+      type,
+      severity: 3,
+      component: { name: "EVSE", evse: { id: 1 } },
+      variable: { name: "Power" },
+    }) as unknown as MonitoringData;
+
+  function setTargetDelta(targets?: DeviceModelTargets) {
+    const configuration = config();
+    configuration.defineRuntimeIntegerKey("EVSEPower1", 0);
+    const request = {
+      setMonitoringData: [item("TargetDelta"), item("TargetDeltaRelative")],
+    } as SetVariableMonitoringRequestV201;
+    expect(isValidSetVariableMonitoringRequestV21(request)).toBe(true);
+    const response = handleSetVariableMonitoringV201(
+      request,
+      new MonitoringStore(),
+      configuration,
+      (e) => e.id === 1,
+      targets,
+    );
+    expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
+    return response.setMonitoringResult.map((r) => r.status);
+  }
+
+  it("accepts both types on a variable with a Target attribute (2.1 N07.FR.22, FR.23)", () => {
+    const targets = new DeviceModelTargets();
+    targets.declare("EVSEPower1");
+    expect(setTargetDelta(targets)).toEqual(["Accepted", "Accepted"]);
+  });
+
+  it("answers UnsupportedMonitorType where the variable has no Target (N04.FR.05)", () => {
+    expect(setTargetDelta()).toEqual([
+      "UnsupportedMonitorType",
+      "UnsupportedMonitorType",
+    ]);
+  });
+
+  it("is not a 2.0.1 monitor type: the 2.0.1 schema refuses the request", () => {
+    expect(
+      isValidSetVariableMonitoringRequestV201({
+        setMonitoringData: [item("TargetDelta")],
+      }),
+    ).toBe(false);
   });
 });
 

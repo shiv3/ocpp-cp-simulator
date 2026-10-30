@@ -68,7 +68,9 @@ import {
   isValidUnpublishFirmwareRequestV201,
   isValidUpdateFirmwareRequestV201,
 } from "../../../../ocpp/validation/v201";
+import type { ReportDataType } from "../../../../ocpp/types/v201/notify-report";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import {
@@ -99,7 +101,10 @@ import {
   handleTriggerMessageV201,
   handleUnlockConnectorV201,
 } from "./coreControlV201";
-import { handleGetVariablesV201 } from "./getVariablesV201";
+import {
+  handleGetVariablesV201,
+  type DeviceModelContext,
+} from "./getVariablesV201";
 import { handleSetVariablesV201 } from "./setVariablesV201";
 import { v201EvseExists } from "./topologyWireV201";
 import {
@@ -186,12 +191,21 @@ export interface V201InboundHandler {
 
 export type V201InboundRegistry = ReadonlyMap<string, V201InboundHandler>;
 
-/** Whether the charge point has this EVSE (and connector). */
-function evseOf(
-  ctx: V201InboundContext,
-  evse: { id: number; connectorId?: number },
-): boolean {
-  return v201EvseExists(evse, ctx.chargePoint.connectors.keys());
+/** The charge point's EVSEs and Targets, for a device-model lookup. */
+function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
+  return {
+    evseExists: (evse) => v201EvseExists(evse, ctx.chargePoint.connectors),
+    targets: ctx.chargePoint.deviceModelTargets,
+  };
+}
+
+/** Every variable of the charge point's device model, as reported. */
+function fullReportData(ctx: V201InboundContext): ReportDataType[] {
+  return buildBaseReportData(
+    ctx.chargePoint.configuration,
+    ctx.chargePoint.connectors.keys(),
+    ctx.chargePoint.deviceModelTargets,
+  );
 }
 
 export function handleGetBaseReportV201(
@@ -199,11 +213,7 @@ export function handleGetBaseReportV201(
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetBaseReportRequestV201;
-  const reportData = buildBaseReportData(
-    ctx.chargePoint.configuration,
-    ctx.chargePoint.connectors.keys(),
-    ctx.chargePoint.deviceModelTargets,
-  );
+  const reportData = fullReportData(ctx);
   const first = reportData[0];
   if (first === undefined) {
     return {
@@ -231,27 +241,15 @@ export function handleGetReportV201(
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetReportRequestV201;
-  let reportData = buildBaseReportData(
-    ctx.chargePoint.configuration,
-    ctx.chargePoint.connectors.keys(),
-    ctx.chargePoint.deviceModelTargets,
-  );
+  let reportData = fullReportData(ctx);
 
   if (req.componentVariable && req.componentVariable.length > 0) {
     const wanted = req.componentVariable;
+    // B08.FR.11, FR.20-FR.25 (#538): name, instance and EVSE (connector)
+    // of the component, name and instance of the variable, each a
+    // wildcard when absent.
     reportData = reportData.filter((rd) =>
-      wanted.some(
-        (cv) =>
-          cv.component.name === rd.component.name &&
-          // B08.FR.11 (#538): an EVSE (and connector) in the filter.
-          (cv.component.evse === undefined ||
-            (cv.component.evse.id === rd.component.evse?.id &&
-              (cv.component.evse.connectorId === undefined ||
-                cv.component.evse.connectorId ===
-                  rd.component.evse?.connectorId))) &&
-          (cv.variable?.name === undefined ||
-            cv.variable.name === rd.variable?.name),
-      ),
+      wanted.some((cv) => matchesComponentVariable(rd, cv)),
     );
   }
 
@@ -292,10 +290,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
           response: handleGetVariablesV201(
             p as GetVariablesRequestV201,
             ctx.chargePoint.configuration,
-            {
-              evseExists: (evse) => evseOf(ctx, evse),
-              targets: ctx.chargePoint.deviceModelTargets,
-            },
+            deviceModelContext(ctx),
           ),
         }),
       },
@@ -308,10 +303,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
           response: handleSetVariablesV201(
             p as SetVariablesRequestV201,
             ctx.chargePoint.configuration,
-            {
-              evseExists: (evse) => evseOf(ctx, evse),
-              targets: ctx.chargePoint.deviceModelTargets,
-            },
+            deviceModelContext(ctx),
           ),
         }),
       },
@@ -588,8 +580,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
             p as SetVariableMonitoringRequestV201,
             ctx.chargePoint.monitoring,
             ctx.chargePoint.configuration,
-            (evse) => evseOf(ctx, evse),
-            ctx.chargePoint.deviceModelTargets,
+            deviceModelContext(ctx),
           ),
         }),
       },

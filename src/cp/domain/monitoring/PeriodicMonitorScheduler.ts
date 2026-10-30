@@ -1,4 +1,4 @@
-import { MAX_TIMER_MS } from "../../shared/timers";
+import { setTimeoutAt } from "../../shared/timers";
 import { nextClockAlignedBoundary } from "../charge-point/ClockAlignedMeterScheduler";
 import type { VariableMonitor } from "./VariableMonitor";
 
@@ -21,7 +21,8 @@ const DAY_SECONDS = 86_400;
  * beyond setTimeout's limit is chained instead of firing at once.
  */
 export class PeriodicMonitorScheduler {
-  private readonly timers = new Map<number, ReturnType<typeof setTimeout>>();
+  /** The cancel function of each monitor's pending timer. */
+  private readonly timers = new Map<number, () => void>();
 
   constructor(private readonly onTick: (monitorId: number) => void) {}
 
@@ -32,14 +33,14 @@ export class PeriodicMonitorScheduler {
   }
 
   disarm(monitorId: number): void {
-    const timer = this.timers.get(monitorId);
-    if (timer === undefined) return;
-    clearTimeout(timer);
+    const cancel = this.timers.get(monitorId);
+    if (cancel === undefined) return;
+    cancel();
     this.timers.delete(monitorId);
   }
 
   disarmAll(): void {
-    for (const timer of this.timers.values()) clearTimeout(timer);
+    for (const cancel of this.timers.values()) cancel();
     this.timers.clear();
   }
 
@@ -47,20 +48,15 @@ export class PeriodicMonitorScheduler {
     monitor: Pick<VariableMonitor, "id" | "type" | "value">,
     fireAt: number,
   ): void {
-    const delay = Math.min(Math.max(0, fireAt - Date.now()), MAX_TIMER_MS);
     this.timers.set(
       monitor.id,
-      setTimeout(() => {
-        if (Date.now() < fireAt) {
-          this.schedule(monitor, fireAt);
-          return;
-        }
+      setTimeoutAt(fireAt, () => {
         this.schedule(
           monitor,
           this.nextFire(monitor, Math.max(Date.now(), fireAt)),
         );
         this.onTick(monitor.id);
-      }, delay),
+      }),
     );
   }
 

@@ -4,7 +4,7 @@ import type {
   ActiveChargingProfile,
   Connector,
 } from "../../domain/connector/Connector";
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { setTimeoutAt } from "../../shared/timers";
 import type { OperationalTimeline } from "./OperationalTimeline";
 
 /**
@@ -50,11 +50,8 @@ export class OperationalTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
   private incident: Incident | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
-  /** connectorId (0 = station) → profileId → pending expiry. */
-  private readonly expiryTimers = new Map<
-    number,
-    Map<number, ReturnType<typeof setTimeout>>
-  >();
+  /** connectorId (0 = station) → profileId → cancel the pending expiry. */
+  private readonly expiryTimers = new Map<number, Map<number, () => void>>();
 
   constructor(
     private readonly timeline: OperationalTimeline,
@@ -253,7 +250,7 @@ export class OperationalTimelineProjector {
   dispose(): void {
     this.clearSettleTimer();
     for (const timers of this.expiryTimers.values()) {
-      for (const timer of timers.values()) clearTimeout(timer);
+      for (const cancel of timers.values()) cancel();
     }
     this.expiryTimers.clear();
     for (const unsubscribe of this.unsubscribes) unsubscribe();
@@ -270,16 +267,7 @@ export class OperationalTimelineProjector {
     if (Number.isNaN(expiresAt)) return;
     // Copied out so a pending timer does not hold the whole schedule.
     const data = { ...profileFields(connectorId, profile), validTo };
-    const check = () => {
-      const remaining = expiresAt - this.timeline.now();
-      if (remaining > 0) {
-        const timer = setTimeout(check, Math.min(remaining, MAX_TIMER_MS));
-        // Weeks away, possibly: never the reason the process will not exit.
-        unrefTimer(timer);
-        const timers = this.expiryTimers.get(connectorId) ?? new Map();
-        this.expiryTimers.set(connectorId, timers.set(profileId, timer));
-        return;
-      }
+    const expire = () => {
       this.cancelExpiry(connectorId, profileId);
       this.timeline.record({
         kind: "charging_profile_expired",
@@ -288,14 +276,24 @@ export class OperationalTimelineProjector {
         data,
       });
     };
-    check();
+    if (expiresAt <= this.timeline.now()) {
+      expire();
+      return;
+    }
+    const cancel = setTimeoutAt(expiresAt, expire, {
+      now: () => this.timeline.now(),
+      // Weeks away, possibly: never the reason the process will not exit.
+      unref: true,
+    });
+    const timers = this.expiryTimers.get(connectorId) ?? new Map();
+    this.expiryTimers.set(connectorId, timers.set(profileId, cancel));
   }
 
   private cancelExpiry(connectorId: number, profileId: number): void {
     const timers = this.expiryTimers.get(connectorId);
-    const timer = timers?.get(profileId);
-    if (!timers || timer === undefined) return;
-    clearTimeout(timer);
+    const cancel = timers?.get(profileId);
+    if (!timers || cancel === undefined) return;
+    cancel();
     timers.delete(profileId);
     if (timers.size === 0) this.expiryTimers.delete(connectorId);
   }

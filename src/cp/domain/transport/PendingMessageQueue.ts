@@ -108,7 +108,9 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
 
   /** How many queued messages carry `action`. */
   countOf(action: A): number {
-    return this.items.filter((item) => item.action === action).length;
+    let count = 0;
+    for (const item of this.items) if (item.action === action) count++;
+    return count;
   }
 
   /**

@@ -68,7 +68,7 @@ function set(
     { setMonitoringData: items as [MonitoringData, ...MonitoringData[]] },
     store,
     config(),
-    () => true,
+    { evseExists: () => true },
   );
   expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
   expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
@@ -185,7 +185,7 @@ describe("handleSetVariableMonitoringV201", () => {
         },
         store,
         config(),
-        (e) => e.id === 1 && (e.connectorId ?? 1) === 1,
+        { evseExists: (e) => e.id === 1 && (e.connectorId ?? 1) === 1 },
       );
       expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
       expect(response.setMonitoringResult[0].status).toBe(status);
@@ -239,7 +239,7 @@ describe("handleSetVariableMonitoringV201", () => {
       request as SetVariableMonitoringRequestV201,
       store,
       config(),
-      () => true,
+      { evseExists: () => true },
     );
     expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
     expect(response.setMonitoringResult.map((r) => r.status)).toEqual([
@@ -377,7 +377,7 @@ describe("handleSetVariableMonitoringV201 on runtime values (#538)", () => {
       },
       store,
       runtimeConfig(),
-      (e) => e.id === 1 && (e.connectorId ?? 1) === 1,
+      { evseExists: (e) => e.id === 1 && (e.connectorId ?? 1) === 1 },
     );
     expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
     expect(response.setMonitoringResult.map((r) => r.status)).toEqual([
@@ -414,8 +414,7 @@ describe("handleSetVariableMonitoringV201 TargetDelta (2.1, #538)", () => {
       request,
       new MonitoringStore(),
       configuration,
-      (e) => e.id === 1,
-      targets,
+      { evseExists: (e) => e.id === 1, targets },
     );
     expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
     return response.setMonitoringResult.map((r) => r.status);

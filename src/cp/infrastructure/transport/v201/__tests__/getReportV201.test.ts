@@ -72,6 +72,28 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ).toBe("EmptyResultSet");
     });
 
+    it("matches the variable instance when the filter gives one (B08.FR.21)", () => {
+      const itemsPerMessage = (instance?: string) =>
+        report([
+          {
+            component: { name: "MonitoringCtrlr" },
+            variable: { name: "ItemsPerMessage", instance },
+          },
+        ]);
+      expect(itemsPerMessage().rows).toHaveLength(2);
+      expect(itemsPerMessage("ClearVariableMonitoring").rows).toEqual([
+        ["MonitoringCtrlr", undefined, undefined, "ItemsPerMessage"],
+      ]);
+      expect(itemsPerMessage("GetReport").status).toBe("EmptyResultSet");
+    });
+
+    it("matches the component instance when the filter gives one (B08.FR.22-FR.24)", () => {
+      expect(
+        report([{ component: { name: "MonitoringCtrlr", instance: "Main" } }])
+          .status,
+      ).toBe("EmptyResultSet");
+    });
+
     it("keeps every EVSE when the filter names none", () => {
       const evses = new Set(
         report([{ component: { name: "EVSE" } }]).rows.map(([, id]) => id),

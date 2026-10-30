@@ -14,7 +14,7 @@ import type {
   SetVariableMonitoringResponseV201,
 } from "../../../../ocpp";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
-import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
+import type { DeviceModelContext } from "./getVariablesV201";
 import type {
   InstallOutcome,
   InstallRejectionReason,
@@ -23,7 +23,6 @@ import type {
 import { selectMonitors } from "../../../domain/monitoring/selectMonitors";
 import {
   sameMonitorTarget,
-  type MonitorEvse,
   type MonitoredValueType,
   type SupportedMonitorType,
   type VariableMonitor,
@@ -65,8 +64,7 @@ export function handleSetVariableMonitoringV201(
   req: SetVariableMonitoringRequestV201,
   monitoring: MonitoringStore,
   configuration: ConfigurationStore,
-  evseExists: (evse: MonitorEvse) => boolean,
-  targets?: Pick<DeviceModelTargets, "supports">,
+  { evseExists = () => false, targets }: DeviceModelContext,
 ): SetVariableMonitoringResponseV201 {
   // N04.FR.01 / FR.02: one result per item, echoing its target. Items are
   // applied in order, so a later item sees the monitors of earlier ones.

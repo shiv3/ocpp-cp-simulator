@@ -31,7 +31,7 @@ describe("topologyWireV201", () => {
     [{ id: 1, connectorId: 0 }, false],
     [{ id: 1, connectorId: 2 }, false],
   ])("resolves EVSE %j on connectors 1-2 as %s", (evse, exists) => {
-    expect(v201EvseExists(evse, [1, 2])).toBe(exists);
+    expect(v201EvseExists(evse, new Set([1, 2]))).toBe(exists);
   });
 
   it("renders MeterValues evseId", () => {

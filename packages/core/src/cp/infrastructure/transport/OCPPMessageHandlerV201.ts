@@ -312,6 +312,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     certificateInstalled: (use) => {
       if (V2G_CERTIFICATE_USES.includes(use)) {
         this.requestCertificateStatus([use]);
+      } else if (use === "ChargingStationCertificate") {
+        // #537 A02.FR.08: switch to it as the TLS client certificate.
+        void this._chargePoint.useRenewedClientCertificate();
       }
     },
   };

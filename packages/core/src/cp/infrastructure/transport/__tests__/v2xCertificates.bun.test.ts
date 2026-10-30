@@ -322,6 +322,9 @@ describe.skipIf(!canBindBunServe())(
               certificateHashData: stored.hashData[0],
             }),
           ).toEqual({ status: "Failed" });
+          // #537: without security profile 3 there is no client certificate
+          // to replace, so the station stays on its connection.
+          expect(csms.openCount()).toBe(1);
         });
       });
 

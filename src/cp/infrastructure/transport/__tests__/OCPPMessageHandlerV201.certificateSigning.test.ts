@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isValidCertificateSignedResponseV201,
   isValidCertificateSignedResponseV21,
+  isValidSecurityEventNotificationRequestV201,
+  isValidSecurityEventNotificationRequestV21,
   isValidSignCertificateRequestV201,
   isValidSignCertificateRequestV21,
   isValidTriggerMessageResponseV201,
@@ -347,5 +349,35 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     handler.onWebSocketClosed();
     vi.advanceTimersByTime(10 * 60_000);
     expect(socket.calls("SignCertificate")).toHaveLength(1);
+  });
+});
+
+// #537: the control-plane `security_event_notification` method used to be
+// a WARN on 2.x; it now sends A04 SecurityEventNotificationRequest.
+describe.each([
+  ["OCPP-2.0.1", isValidSecurityEventNotificationRequestV201],
+  ["OCPP-2.1", isValidSecurityEventNotificationRequestV21],
+] as const)("%s SecurityEventNotification", (version, validEvent) => {
+  it("sends type, timestamp and techInfo", () => {
+    const { socket, handler } = setup(version);
+    handler.sendSecurityEventNotification("FirmwareUpdated", "v1.2.3");
+    const [event] = socket.calls("SecurityEventNotification");
+    expect(event.payload).toEqual({
+      type: "FirmwareUpdated",
+      timestamp: expect.any(String),
+      techInfo: "v1.2.3",
+    });
+    expect(Number.isNaN(Date.parse(event.payload.timestamp as string))).toBe(
+      false,
+    );
+    expect(validEvent(event.payload)).toBe(true);
+  });
+
+  it("leaves techInfo out when none is given", () => {
+    const { socket, handler } = setup(version);
+    handler.sendSecurityEventNotification("ResetOrReboot");
+    const [event] = socket.calls("SecurityEventNotification");
+    expect(event.payload).not.toHaveProperty("techInfo");
+    expect(validEvent(event.payload)).toBe(true);
   });
 });

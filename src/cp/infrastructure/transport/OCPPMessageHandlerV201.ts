@@ -29,6 +29,7 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
+  SecurityEventNotificationRequestV201,
   SignCertificateRequestV201,
   SignCertificateResponseV201,
 } from "../../../ocpp";
@@ -1642,14 +1643,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return answer;
   }
 
-  public sendSecurityEventNotification(
-    _type: string,
-    _techInfo?: string,
-  ): void {
-    this._logger.warn(
-      "[v2.0.1] SecurityEventNotification is not wired through this handler",
-      LogType.OCPP,
-    );
+  /**
+   * A04 SecurityEventNotificationRequest (#537), sent by the control-plane
+   * `security_event_notification` method. Dropped like any 2.x CALL while
+   * offline: the A04.FR.02 queue is not modelled.
+   */
+  public sendSecurityEventNotification(type: string, techInfo?: string): void {
+    const payload: SecurityEventNotificationRequestV201 = {
+      type,
+      timestamp: new Date().toISOString(),
+      ...(techInfo !== undefined ? { techInfo } : {}),
+    };
+    this.send("SecurityEventNotification", this.generateMessageId(), payload);
   }
 
   /**

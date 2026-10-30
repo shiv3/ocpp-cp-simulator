@@ -1728,7 +1728,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-29] ingest | README screenshots and web console tour
 
 - The README's screenshot showed the classic UI retired in #426. `docs/images/web-console-overview.png` is now the console's charge point page (connector charging, message log); [Web console](entities/web-console.md) uses the same image.
-- New **Web console tour** section in the README: one GIF per feature (settings, fleet and labels, a charging session, a remote start from SteVe, in-place relabel, network faults and recovery on the operational timeline, the Expert tab, session analysis, scenarios, run history and message log) with screenshots, under `docs/images/tour/`.
+- New **Web console tour** section in the README: one recording per feature (settings, fleet and labels, a charging session, a remote start from SteVe, in-place relabel, network faults and recovery on the operational timeline, the Expert tab, session analysis, scenarios (runs, library, editor), run history and message log) with screenshots under `docs/images/tour/`; the recordings are MP4 (H.264) attachments uploaded with `gh pr comment --attach` and embedded as bare `user-attachments` URLs (a `<video>` tag stays blank for signed-in viewers), so no video file lives in the repository.
 - Recorded from the daemon's own console in a headless browser, with `WEBCP001` / `WEBCP002` (OCPP 1.6J) connected to SteVe 3.14.1.
 
 ## [2026-10-29] ingest | Network simulation latency example (#497)

@@ -66,6 +66,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
       securityProfile: cpConfig.securityProfile,
       authorizationKey: cpConfig.authorizationKey,
       cpoName: cpConfig.cpoName,
+      txUpdatedMeterValues: cpConfig.txUpdatedMeterValues,
       tls: cpConfig.tls,
       tlsCaPath: cpConfig.tlsCaPath,
       tlsCertPath: cpConfig.tlsCertPath,

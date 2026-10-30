@@ -989,6 +989,13 @@ export function parseCreateBody(
       ? body.authorizationKey
       : undefined;
   const cpoName = typeof body.cpoName === "string" ? body.cpoName : undefined;
+  let txUpdatedMeterValues: boolean | undefined;
+  if (Object.prototype.hasOwnProperty.call(body, "txUpdatedMeterValues")) {
+    if (typeof body.txUpdatedMeterValues !== "boolean") {
+      throw new Error("txUpdatedMeterValues must be a boolean");
+    }
+    txUpdatedMeterValues = body.txUpdatedMeterValues;
+  }
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1060,6 +1067,7 @@ export function parseCreateBody(
     securityProfile,
     authorizationKey,
     cpoName,
+    ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

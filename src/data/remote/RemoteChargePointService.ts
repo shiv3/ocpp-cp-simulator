@@ -258,6 +258,7 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
       : null,
     securityProfile: config.securityProfile,
     cpoName: config.cpoName,
+    txUpdatedMeterValues: config.txUpdatedMeterValues,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,

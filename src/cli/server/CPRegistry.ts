@@ -81,6 +81,7 @@ interface ChargePointRow {
   boot_notif: string | null;
   created_at: string;
   labels: string | null;
+  tx_updated_meter_values: number | null;
 }
 
 interface CPRegistryOptions {
@@ -209,7 +210,7 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels " +
+        "basic_auth, boot_notif, created_at, labels, tx_updated_meter_values " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -268,6 +269,10 @@ export class CPRegistry {
             row.boot_notif,
           ) ?? undefined,
         labels: restoreLabels(row),
+        // #347: NULL — off, or a row older than the column — restores as off.
+        ...(row.tx_updated_meter_values === 1
+          ? { txUpdatedMeterValues: true }
+          : {}),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -746,8 +751,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels, tx_updated_meter_values) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -768,7 +773,8 @@ export class CPRegistry {
         "tls_cert_path = excluded.tls_cert_path, " +
         "tls_key_path = excluded.tls_key_path, " +
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
-        "labels = excluded.labels",
+        "labels = excluded.labels, " +
+        "tx_updated_meter_values = excluded.tx_updated_meter_values",
       [
         init.cpId,
         init.wsUrl,
@@ -794,6 +800,7 @@ export class CPRegistry {
         init.bootNotification ? JSON.stringify(init.bootNotification) : null,
         new Date().toISOString(),
         labelsColumn(init.labels),
+        init.txUpdatedMeterValues ? 1 : null,
       ],
     );
   }
@@ -1039,6 +1046,8 @@ function preserveOmittedInit(
     tlsCertPath: next.tlsCertPath ?? existing.tlsCertPath,
     tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
     labels: next.labels ?? existing.labels,
+    txUpdatedMeterValues:
+      next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
   };
 }
 

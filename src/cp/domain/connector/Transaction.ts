@@ -237,6 +237,13 @@ export interface TransactionUpdateOptions extends MeterSampleOverrides {
   chargingState?: TransactionChargingState;
   meterValues?: boolean;
   context?: MeterReadingContext;
+  /**
+   * With `meterValues`, send nothing when there is no sampled value to
+   * attach, rather than an Updated event without `meterValue`: a scheduled
+   * sample (#347) with nothing in it is not an event. Internal — the
+   * control plane does not expose it.
+   */
+  skipWithoutMeterValue?: boolean;
 }
 
 export const METER_READING_CONTEXTS = [

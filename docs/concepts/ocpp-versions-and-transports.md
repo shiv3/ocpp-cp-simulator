@@ -27,7 +27,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # OCPP versions and transports
@@ -208,6 +208,35 @@ register and never advances it.
 - Not implemented: connector 0 / `evseId` 0 (main meter), `StopTxnAlignedData`
   in `StopTransaction`, `AlignedDataCtrlr.SendDuringIdle` and the `TxEnded*`
   variables, and per-period aggregation of `*.Interval` measurands.
+
+## Periodic meter values in a 2.x transaction (#347)
+
+OCPP 2.0.1 and 2.1 carry in-transaction sampled data
+(`SampledDataCtrlr.TxUpdatedMeasurands`, mapped to `MeterValuesSampledData`)
+in `TransactionEvent(Updated)`, and keep `MeterValuesRequest` for data
+outside a transaction. The simulator's per-connector meter-value scheduler
+sends `MeterValuesRequest` either way **by default**, because changing that
+would change the wire for every existing 2.x integration.
+
+A charge point created with `txUpdatedMeterValues: true` (`cp.create`,
+`cp.update`, `cp.create_many`, the MCP `cp_create` tools) or with
+`--tx-updated-meter-values` opts in. It is persisted with `--state-db`.
+
+| Scheduler sample, OCPP 2.x | Option off (default) | Option on                                         |
+| -------------------------- | -------------------- | ------------------------------------------------- |
+| Transaction running        | `MeterValues`        | `TransactionEvent(Updated)`, `MeterValuePeriodic` |
+| No transaction             | `MeterValues`        | `MeterValues`                                     |
+
+With the option on, the Updated event shares the transaction's `seqNo` and
+goes through the [transaction message retries](#transaction-message-retries-ocpp-2x);
+its sampled values carry `context` `Sample.Periodic`, and a sample with no
+value in it sends nothing, as `MeterValues` does. The option never applies to
+a one-off sample (`send_meter_value`, a CSMS `TriggerMessage(MeterValues)`),
+to clock-aligned samples (above, `MeterValueClock` regardless), or to 1.x.
+The details are in [Control plane → Transaction event parameters](control-plane.md#transaction-event-parameters).
+
+Independently of the option, the register reading in `TransactionEvent(Started)`
+and `(Ended)` carries `context` `Transaction.Begin` / `Transaction.End`.
 
 ## Signed meter values (OCMF, #315)
 

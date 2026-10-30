@@ -21,7 +21,7 @@ related:
   - operational-timeline.md
   - charging-sessions.md
   - local-authorization.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Socket.IO control plane
@@ -189,6 +189,7 @@ one rather than restating a subset.
 | `bootNotification`                                | object                           | Overrides for the BootNotification payload.                                                                                                                                                                                                 |
 | `centralSystemUrl`, `soapPath`, `soapCallbackUrl` | string                           | SOAP only. `soapCallbackUrl` may be omitted when `server.info` reports a `soap.publicBaseUrl`: the daemon derives it and marks the CP's config `soapCallbackUrlDerived`. See [OCPP versions & transports](ocpp-versions-and-transports.md). |
 | `securityProfile`, `authorizationKey`, `cpoName`  | `0`–`3`, string, string          | OCPP 1.6 security profiles. See [Security profiles](security-profiles.md).                                                                                                                                                                  |
+| `txUpdatedMeterValues`                            | boolean                          | OCPP 2.x: scheduler samples during a transaction ride `TransactionEvent(Updated)` (#347). Default `false`; `cp.update` without it keeps it. See [Transaction event parameters](#transaction-event-parameters).                              |
 | `tlsCaPath`, `tlsCertPath`, `tlsKeyPath`          | string                           | Paths to PEM material. `tlsCaPath` **replaces** the system trust store.                                                                                                                                                                     |
 | `tls`                                             | object                           | The same material inline: `ca`, `cert`, `key`, `rejectUnauthorized`, `serverName`.                                                                                                                                                          |
 | `autoConnect`                                     | boolean                          | Connect immediately after the call.                                                                                                                                                                                                         |
@@ -607,11 +608,27 @@ Guarantees a conformance driver can rely on:
   CSMS-initiated start and **bypasses the `AuthorizeBeforeLocalStart` gate**
   (#181) — the station sends no `Authorize` first. Every other trigger
   reason, `CablePluggedIn` included, is a local start and is gated.
-- The periodic meter-value scheduler is **unchanged**: on 2.x it still emits a
-  standalone `MeterValuesRequest`. Carrying scheduler samples inside
-  `TransactionEvent(Updated)` by default is a wire-behaviour change for every
-  existing 2.0.1 integration and is tracked separately; `transaction_event
-{ "meterValues": true }` is the explicit way to produce that frame today.
+- By default the periodic meter-value scheduler still emits a standalone
+  `MeterValuesRequest` on 2.x, during a transaction too: switching every
+  existing 2.0.1 integration to `TransactionEvent` is a wire-behaviour change.
+  A charge point created with `txUpdatedMeterValues: true` (or
+  `--tx-updated-meter-values`) opts in (#347): while a transaction runs, each
+  scheduler sample is a `TransactionEvent(Updated)` with `triggerReason`
+  `MeterValuePeriodic`, `MeterValuesSampledData` values in `Sample.Periodic`
+  context, the shared `seqNo`, and the E13 transaction-message retries; a
+  sample with no value in it sends nothing. Outside a transaction the sample
+  stays a `MeterValuesRequest`. "Scheduler" means the per-connector
+  auto-meter generator, including the one a scenario meter-value node with
+  `autoIncrement` starts. The option never touches a one-off sample:
+  `send_meter_value`, a scenario meter-value node's single send and a CSMS
+  `TriggerMessage(MeterValues)` still produce `MeterValuesRequest`. 1.x ignores
+  it. Clock-aligned samples have their own path
+  ([`MeterValueClock`](ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval)),
+  independent of the option. `transaction_event { "meterValues": true }`
+  remains the explicit way to produce one such frame on demand.
+- The register reading of `TransactionEvent(Started)` carries
+  `context: "Transaction.Begin"` and that of `Ended`
+  `context: "Transaction.End"` (#347), signed or not.
 
 ### Daemon methods
 

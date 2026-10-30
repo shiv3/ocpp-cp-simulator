@@ -755,6 +755,7 @@ export class CLIChargePointService {
       init.cpoName,
       init.tls,
     );
+    this._chargePoint.txUpdatedMeterValues = init.txUpdatedMeterValues === true;
     this._soapServer = isSoapVersion(ocppVersion)
       ? new OCPPSoapServer(
           {
@@ -840,6 +841,7 @@ export class CLIChargePointService {
         securityProfile: options.securityProfile,
         authorizationKey: options.authorizationKey,
         cpoName: options.cpoName,
+        ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
         tls: options.tls,
         tlsCaPath: options.tlsCaPath,
         tlsCertPath: options.tlsCertPath,
@@ -985,6 +987,7 @@ export class CLIChargePointService {
         ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
         securityProfile: this._init.securityProfile,
         cpoName: this._init.cpoName,
+        txUpdatedMeterValues: this._init.txUpdatedMeterValues,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,
@@ -3469,7 +3472,7 @@ export class CLIChargePointService {
   private setupMeterValueCallbacks(): void {
     this._chargePoint.connectors.forEach((connector) => {
       connector.setOnMeterValueSend((id) => {
-        this._chargePoint.sendMeterValue(id);
+        this._chargePoint.sendScheduledMeterValue(id);
       });
     });
   }

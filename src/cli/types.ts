@@ -184,6 +184,8 @@ export interface CLIOptions {
   readonly securityProfile?: OcppSecurityProfile;
   readonly authorizationKey?: string;
   readonly cpoName?: string;
+  /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
+  readonly txUpdatedMeterValues?: boolean;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -267,6 +269,12 @@ export interface ChargePointInitOptions {
   readonly securityProfile?: OcppSecurityProfile;
   readonly authorizationKey?: string;
   readonly cpoName?: string;
+  /**
+   * OCPP 2.x: the meter-value scheduler's samples taken during a transaction
+   * ride TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues
+   * (#347). Absent means off.
+   */
+  readonly txUpdatedMeterValues?: boolean;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -356,6 +364,7 @@ export interface ChargePointStatus {
     readonly soapPath?: string;
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
+    readonly txUpdatedMeterValues?: boolean;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

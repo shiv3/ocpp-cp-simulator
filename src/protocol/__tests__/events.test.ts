@@ -23,6 +23,7 @@ const fullConfig = {
   basicAuth: { username: "u", password: "wire-basic-secret" },
   securityProfile: 3 as const,
   cpoName: "Example CPO",
+  txUpdatedMeterValues: true,
   tlsCaPath: "/etc/ocpp/ca.pem",
   tlsCertPath: "/etc/ocpp/client.pem",
   tlsKeyPath: "/etc/ocpp/client-key.pem",
@@ -129,10 +130,12 @@ describe("redaction (Sec-2)", () => {
     expect(w).toMatchObject({
       securityProfile: 3,
       cpoName: "Example CPO",
+      txUpdatedMeterValues: true,
       tlsCaPath: "/etc/ocpp/ca.pem",
       tlsCertPath: "/etc/ocpp/client.pem",
       tlsKeyPath: "/etc/ocpp/client-key.pem",
     });
+    expect(wireCpConfigSchema.safeParse(w).success).toBe(true);
     expectNoSecrets(w);
   });
 

@@ -1038,6 +1038,8 @@ function toInitOptions(
     securityProfile: params.securityProfile ?? existing?.securityProfile,
     authorizationKey: params.authorizationKey ?? existing?.authorizationKey,
     cpoName: params.cpoName ?? existing?.cpoName,
+    txUpdatedMeterValues:
+      params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1099,6 +1101,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
             : null,
           securityProfile: status.config.securityProfile,
           cpoName: status.config.cpoName,
+          txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,

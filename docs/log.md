@@ -2025,3 +2025,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
+
+## [2026-10-30] ingest | Periodic meter samples in 2.x TransactionEvent, opt-in (#347)
+
+- New per-charge-point option `txUpdatedMeterValues` (`cp.create` / `cp.update` / `cp.create_many`, the MCP `cp_create` tools through the derived schema, `--tx-updated-meter-values`, persisted as `charge_points.tx_updated_meter_values`, schema v22), off by default. With it on, an OCPP 2.x meter-value scheduler sample taken while a transaction runs is a `TransactionEvent(Updated, MeterValuePeriodic)` instead of a `MeterValuesRequest`, so it shares the `seqNo` and the E13 retries. Only `ChargePoint.sendScheduledMeterValue`, the scheduler's entry point, honours it: `send_meter_value`, a scenario node's single send and `TriggerMessage(MeterValues)` stay `MeterValuesRequest`. No `MeterValueClock` branch: the scheduler never produces `Sample.Clock` samples, and clock-aligned ones keep their #454 path.
+- Started / Ended register readings now carry `context` `Transaction.Begin` / `Transaction.End`, signed or not (a conformance fix, unconditional).
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#periodic-meter-values-in-a-2x-transaction-347): new section.
+- [Control plane](concepts/control-plane.md#transaction-event-parameters): the "scheduler unchanged" guarantee rewritten; `cp.create` parameters row.
+- [CLI](entities/cli.md): `--tx-updated-meter-values`. Not daemon-only, so `daemon.md` is unchanged.
+- [State persistence](concepts/state-persistence.md): the new column and schema version 22.
+- [GitHub issues](sources/github-issues.md): #347.

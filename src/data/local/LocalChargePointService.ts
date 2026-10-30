@@ -179,6 +179,8 @@ export interface LocalChargePointDefinition {
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   cpoName?: string;
+  /** #347: see ChargePoint.txUpdatedMeterValues. Absent means off. */
+  txUpdatedMeterValues?: boolean;
   tls?: OcppTlsOptions;
 }
 
@@ -1405,6 +1407,7 @@ export class LocalChargePointService implements ChargePointService {
       definition.cpoName,
       definition.tls,
     );
+    chargePoint.txUpdatedMeterValues = definition.txUpdatedMeterValues === true;
 
     // Restore connector-level settings from the SQLite store. Sync reads
     // are safe because both adapters expose `Database.get/all`
@@ -1650,7 +1653,7 @@ export class LocalChargePointService implements ChargePointService {
       );
 
       connector.setOnMeterValueSend((id) => {
-        chargePoint.sendMeterValue(id);
+        chargePoint.sendScheduledMeterValue(id);
       });
     });
 

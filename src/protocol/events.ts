@@ -53,6 +53,7 @@ interface FullCpConfig {
   basicAuth: { username: string; password?: string } | null;
   securityProfile?: OcppSecurityProfile;
   cpoName?: string;
+  txUpdatedMeterValues?: boolean;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -84,6 +85,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
       : null,
     securityProfile: config.securityProfile,
     cpoName: config.cpoName,
+    txUpdatedMeterValues: config.txUpdatedMeterValues,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
@@ -125,6 +127,7 @@ export const wireCpConfigSchema = z
       .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
       .optional(),
     cpoName: STR_64K.optional(),
+    txUpdatedMeterValues: z.boolean().optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),

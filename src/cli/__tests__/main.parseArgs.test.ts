@@ -53,6 +53,9 @@ function runParseArgs(args: string[]) {
     "  oedApiKeyFile: options.oedApiKeyFile,",
     "  labels: options.labels ?? null,",
     "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
+    "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
+    "  bootstrapTxUpdatedMeterValues:",
+    "    buildBootstrap(options)?.txUpdatedMeterValues ?? null,",
     "}));",
   ].join("\n");
 
@@ -206,6 +209,35 @@ describe("parseArgs OCPP 1.6 security flags", () => {
         )}`,
       },
       tls: { rejectUnauthorized: true },
+    });
+  });
+
+  it("--tx-updated-meter-values turns the #347 option on for the bootstrap charge point", () => {
+    const on = runParseArgs([
+      "--cp-id",
+      "CP-347",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--ocpp-version",
+      "OCPP-2.0.1",
+      "--tx-updated-meter-values",
+    ]);
+    expect(on.status).toBe(0);
+    expect(JSON.parse(on.stdout)).toMatchObject({
+      txUpdatedMeterValues: true,
+      bootstrapTxUpdatedMeterValues: true,
+    });
+
+    const off = runParseArgs([
+      "--cp-id",
+      "CP-347",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ]);
+    expect(off.status).toBe(0);
+    expect(JSON.parse(off.stdout)).toMatchObject({
+      txUpdatedMeterValues: null,
+      bootstrapTxUpdatedMeterValues: null,
     });
   });
 

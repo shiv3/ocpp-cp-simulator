@@ -265,6 +265,33 @@ describe("charge-point labels (#446)", () => {
   });
 });
 
+describe("txUpdatedMeterValues (#347)", () => {
+  it.each(["cp.create", "cp.update"] as const)(
+    "%s keeps a boolean and refuses anything else",
+    (method) => {
+      const params = METHODS[method].params;
+      const base = { cpId: "CP", wsUrl: "ws://h" };
+      expect(
+        params.parse({ ...base, txUpdatedMeterValues: true })
+          .txUpdatedMeterValues,
+      ).toBe(true);
+      expect(params.parse(base).txUpdatedMeterValues).toBeUndefined();
+      expect(
+        params.safeParse({ ...base, txUpdatedMeterValues: "true" }).success,
+      ).toBe(false);
+    },
+  );
+
+  it("cp.create_many carries it to every charge point", () => {
+    const parsed = METHODS["cp.create_many"].params.parse({
+      wsUrl: "ws://h",
+      count: 2,
+      txUpdatedMeterValues: true,
+    }) as { txUpdatedMeterValues?: boolean };
+    expect(parsed.txUpdatedMeterValues).toBe(true);
+  });
+});
+
 describe("cp.bulk (#470)", () => {
   const params = METHODS["cp.bulk"].params;
 

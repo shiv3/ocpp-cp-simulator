@@ -62,6 +62,7 @@ const expectedRemoteParams: CreateChargePointParams = {
   securityProfile: undefined,
   authorizationKey: undefined,
   cpoName: undefined,
+  txUpdatedMeterValues: undefined,
   tls: undefined,
   tlsCaPath: undefined,
   tlsCertPath: undefined,

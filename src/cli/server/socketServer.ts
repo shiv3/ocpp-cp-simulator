@@ -2633,6 +2633,11 @@ function mergeUpdateParams(
   preserveWhenMissing(merged, "securityProfile", init.securityProfile);
   preserveWhenMissing(merged, "authorizationKey", init.authorizationKey);
   preserveWhenMissing(merged, "cpoName", init.cpoName);
+  preserveWhenMissing(
+    merged,
+    "txUpdatedMeterValues",
+    init.txUpdatedMeterValues,
+  );
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

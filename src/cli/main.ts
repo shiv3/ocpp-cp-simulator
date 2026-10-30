@@ -254,6 +254,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let tlsKeyPath: string | undefined;
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
+  let txUpdatedMeterValues = false;
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -648,6 +649,9 @@ export function parseArgs(argv: string[]): CLIOptions {
       case "--cpo-name":
         cpoName = requireFlagValue("--cpo-name", next);
         i++;
+        break;
+      case "--tx-updated-meter-values":
+        txUpdatedMeterValues = true;
         break;
       case "--web-console":
         webConsoleEnabled = true;
@@ -1129,6 +1133,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     securityProfile,
     authorizationKey,
     cpoName,
+    ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1219,6 +1224,11 @@ Options:
                            --insecure-tls-key-perms is passed.
   --insecure-tls-key-perms Allow --tls-key files readable by group/other.
   --cpo-name <name>        CPO name for generated SignCertificate CSRs.
+  --tx-updated-meter-values
+                           OCPP 2.x: send the periodic meter samples taken
+                           during a transaction as TransactionEvent(Updated,
+                           MeterValuePeriodic) instead of MeterValues.
+                           Off by default.
   --basic-auth-user <u>    Outgoing WS Basic auth username (CP → CSMS)
   --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
   --web-console-basic-auth-user <u>
@@ -1485,6 +1495,7 @@ export function buildBootstrap(
     securityProfile: options.securityProfile,
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
+    ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
     tls: options.tls,
     tlsCaPath: options.tlsCaPath,
     tlsCertPath: options.tlsCertPath,

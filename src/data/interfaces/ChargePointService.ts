@@ -131,6 +131,8 @@ export interface ChargePointSnapshot {
     basicAuth: { username: string; password: string } | null;
     securityProfile?: OcppSecurityProfile;
     cpoName?: string;
+    /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x. */
+    txUpdatedMeterValues?: boolean;
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -181,6 +183,9 @@ export interface CreateChargePointParams {
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   cpoName?: string;
+  /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x.
+   *  Omitted on an update keeps the current value. */
+  txUpdatedMeterValues?: boolean;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;

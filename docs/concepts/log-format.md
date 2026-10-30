@@ -5,13 +5,16 @@ summary: One log-line shape (`timestamp` / `level` / `type` / `message` / `cpId`
 sources:
   - src/cli/server/ (logs.get / logs.clear)
   - src/trace/logEntryToTrace.ts
+  - src/cp/shared/Logger.ts
+  - src/cp/shared/redaction.ts
 related:
   - ../entities/daemon.md
   - ../entities/docker-image.md
   - state-persistence.md
   - trace-format.md
   - ../entities/analyze.md
-updated: 2026-10-27
+  - ../entities/cli.md
+updated: 2026-10-29
 ---
 
 # Log format
@@ -45,6 +48,78 @@ downloaded log file (see [Docker image → Structured logs](../entities/docker-i
 for an example). The same lines are what the [trace adapter](trace-format.md#producing-records)
 turns into trace records, which is how [`analyze --from-daemon`](../entities/analyze.md#reading-from-a-running-daemon---from-daemon)
 works without a trace file.
+
+## Redaction
+
+The charge point's `Logger` runs each message through the shared text
+redactor ([`redaction.ts`](../../src/cp/shared/redaction.ts)) before it
+reaches the console, the `logs` table or a log listener (the CLI `log` event,
+the Socket.IO log push). In an OCPP-J frame logged as `Sent:` / `Received:`
+it replaces with `[redacted]`:
+
+- the `value` of a 1.6 `{ "key", "value" }` entry whose key is
+  `AuthorizationKey` (or another sensitive key name: `ApiKey`, `ApnPassword`,
+  `BasicAuthPassword`, `Password`, `PrivateKey`, `SimPin`, `TlsKey`) — a
+  `ChangeConfiguration`, a `GetConfiguration` answer;
+- the `attributeValue` of a 2.0.1 `{ "variable": { "name" }, "attributeValue" }`
+  entry whose variable is `BasicAuthPassword` or `AuthorizationKey` (or
+  another of those key names) — a `SetVariables` request, a `GetVariables`
+  answer (#400);
+- in a 2.0.1 / 2.1 `SetNetworkProfile`, the `apnPassword` and the integer
+  `simPin` (SIM card PIN) of `connectionData.apn`, the `key` (VPN shared
+  secret) of
+  `connectionData.vpn` and, in 2.1, `connectionData.basicAuthPassword`
+  (#401). `vpn.password` was already caught as a `password` field;
+  `connectionData.identity` stays readable. A `key` field outside a `vpn`
+  object stays readable too: it names a 1.6 configuration entry.
+
+This is the rule the structured redactor applies to the `csms_call_received`
+payload and to scenario reports ([CLI → CSMS call events](../entities/cli.md#csms-call-events)),
+with one predicate for the variable names, so for the fields above a frame's
+log line and its event hide the same values. They differ in form: where the
+log line shows `[redacted]` for a field named after a secret (`password`,
+`apnPassword`, `basicAuthPassword`, `simPin`, `apiKey`, …), the structured redactor
+drops the field. Both ignore case, `-` and `_` in a field name (`Password`,
+`tls_key`, `authorization_key=…`), but the text redactor is stricter: it
+also hides a name that ends in a secret name (`api_password`, `OED_API_KEY`,
+`oedApiKey`, `tlsPrivateKey`), where the structured redactor drops only an
+exact secret name and keeps such a field (#515). The match is on JSON
+object shapes: a SOAP (XML) body does not get it. A duplicated key does not hide a secret — `JSON.parse`
+keeps the last copy, so any copy of `key` / `variable` makes the entry
+sensitive and every copy of `value` / `attributeValue`, and of the `key` in
+every `vpn` member, is redacted. A redacted scalar inside a JSON member
+(string, number such as `simPin`, boolean, `null`) becomes the quoted string
+`"[redacted]"`, so the frame stays valid JSON: the [trace adapter](trace-format.md#producing-records)
+gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
+object or array held by a secret-named member is replaced whole by the same
+`"[redacted]"`, so `{"password":{"a":"b"}}` logs `{"password":"[redacted]"}`
+(#515). Outside a complete JSON object (non-JSON text, a truncated frame), a
+quoted value ends at its first unescaped matching quote (an escaped quote,
+`"ab\"cd"`, does not end it). On the value's first line any such quote ends
+it. On a later line (after a raw newline, or a backslash before the line
+end) it ends the value only when whitespace, `,`, `}`, `]` or the end of the
+text follows it and no `:` / `=` (optionally followed by whitespace) precedes
+it, so `password="line1\nline2" x` logs `password="[redacted]" x` while the
+quote opening the next line's `privateKey="SECRET"` does not end
+`password="a` (#401, #519). Nor does it run over another secret-named
+assignment (`name=` or `name:`, quoted or bare) before that quote. Without
+such a quote, or across such an assignment, the value is redacted to the end
+of its first line and the next line's assignments are matched on their own.
+A value starting with `-----BEGIN` (a PEM, after optional whitespace) ends
+only at a quote that follows its `-----END …-----` marker (a label of
+letters, digits, spaces and dots; whitespace or a `\n` / `\r` escape before the
+quote) with no secret-named assignment before it, even after a backslash,
+whatever quotes its body holds; otherwise the rest of the message is
+redacted (#519). Both rules fail closed, so they over-redact: a truncated
+value followed by a later line that ends in a delimited quote swallows it
+(`password="a\nuser=bob" x` logs `password="[redacted]" x`), and a PEM
+without its `-----END …-----"` hides everything after it, later assignments
+included — inside a JSON string (a single-quoted
+`{"msg":"privateKey='-----BEGIN…'"}`) it also cuts the frame, which then no
+longer parses for the trace adapter. Limit: when the quote on a later line is followed by any other
+character (`;`, `)`, a letter) or preceded by `=` / `:`, the value is
+redacted only to the end of its first line and its later lines stay
+readable.
 
 ## WebSocket close lines
 
@@ -105,9 +180,24 @@ acknowledgement: `FirmwareStatusNotification`, `DiagnosticsStatusNotification`
 `<action> acknowledged` at DEBUG, so a reconnect-heavy station does not
 inflate the WARN rate. They are not the only empty 1.6 confirmations:
 `StatusNotification.conf` and `MeterValues.conf` are empty too, and already
-had their own result handlers, which log at DEBUG. `SignCertificate`, whose
-confirmation carries a `status`, still logs the warning. OCPP 2.x and the SOAP
-transports never log this line.
+had their own result handlers, which log at DEBUG.
+
+`SignCertificate.conf` is not empty: it carries a `status`. Since #410 it has
+its own result handler too. `Accepted` logs
+`SignCertificate accepted by the CSMS; awaiting CertificateSigned.req` at INFO;
+any other status (`Rejected`, or a value outside the spec) logs
+`SignCertificate not accepted by the CSMS (status <status>); certificate renewal will not happen`
+at WARN. The status is only logged: the `sign_certificate` method and
+`ExtendedTriggerMessage(SignChargePointCertificate)` still return once the
+request is queued, without the answer. With it, each of the 14 station-initiated
+1.6J actions listed in [Expert OCPP calls](expert-ocpp-calls.md#what-is-sent)
+has a result handler, so none of them logs the warning on its answer. OCPP 2.x
+and the SOAP transports never log this line. Since #456 the 2.x handler logs
+its own `SignCertificateResponse` lines:
+`[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned` at
+INFO, otherwise
+`[v2.0.1] SignCertificate not accepted by the CSMS (status <status>); the CSR stays pending`
+at WARN ([Security profiles](security-profiles.md#ocpp-201-and-21-behaviour)).
 
 ## Related RPC methods
 

@@ -36,6 +36,19 @@ import {
   type V201InboundHandler,
   type V201InboundRegistry,
 } from "../v201/inboundRegistryV201";
+import {
+  buildCertificateHandlersV2x,
+  V21_CERTIFICATE_MAPPING,
+} from "../v201/certificatesV201";
+import { createGetMonitoringReportHandlerV201 } from "../v201/variableMonitoringV201";
+
+// Shared actions whose 2.1 payload differs from 2.0.1's.
+const V21_SHARED_HANDLERS: Readonly<
+  Record<string, V201InboundHandler["handle"]>
+> = {
+  // 2.1 N02.FR.22: NotifyMonitoringReport carries eventNotificationType.
+  GetMonitoringReport: createGetMonitoringReportHandlerV201("v21"),
+};
 
 export function buildV21InboundRegistry(): V201InboundRegistry {
   const registry = new Map<string, V201InboundHandler>();
@@ -43,8 +56,17 @@ export function buildV21InboundRegistry(): V201InboundRegistry {
   for (const [action, entry] of buildV201InboundRegistry()) {
     registry.set(action, {
       validate: actionValidatorV21[action] ?? entry.validate,
-      handle: entry.handle,
+      handle: V21_SHARED_HANDLERS[action] ?? entry.handle,
     });
+  }
+
+  // #456: the certificate handlers map 2.1's own enums (OEMRootCertificate,
+  // V2G20Certificate). Re-setting an existing key keeps its position.
+  for (const [action, handle] of Object.entries(
+    buildCertificateHandlersV2x(V21_CERTIFICATE_MAPPING),
+  )) {
+    const entry = registry.get(action);
+    if (entry) registry.set(action, { validate: entry.validate, handle });
   }
 
   registry.set("AFRRSignal", {

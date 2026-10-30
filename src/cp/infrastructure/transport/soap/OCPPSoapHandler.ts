@@ -40,6 +40,7 @@ import type {
   TransactionUpdateOptions,
 } from "../../../domain/connector/Transaction";
 import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
+import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
 import type {
   BootNotification,
   ChargePointErrorCode,
@@ -1037,6 +1038,14 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     );
   }
 
+  /** NotifyEvent is OCPP 2.x only (#457); SOAP stations never send it. */
+  public sendNotifyEvent(_events: readonly MonitoringEvent[]): void {
+    this._logger.debug(
+      `${this._dialect.version} SOAP has no NotifyEvent; ignoring it`,
+      LogType.OCPP,
+    );
+  }
+
   public sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
       `${this._dialect.version} SOAP has no security extension; ignoring SignCertificate`,
@@ -1071,7 +1080,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       connectorId,
     );
     this.enqueueRequest("StartTransaction", payload, (env) => {
-      new StartTransactionResultHandler(connectorId).handle(
+      new StartTransactionResultHandler(connectorId, transaction.tagId).handle(
         this.startTransactionResponseFromPayload(env.payload),
         this.handlerContext(),
       );
@@ -1122,7 +1131,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
             meterStop: transaction.meterStop,
           };
     this.enqueueRequest("StopTransaction", soapPayload(payload), (env) => {
-      new StopTransactionResultHandler(connectorId).handle(
+      new StopTransactionResultHandler(connectorId, payload.idTag).handle(
         this.stopTransactionResponseFromPayload(env.payload),
         this.handlerContext(),
       );

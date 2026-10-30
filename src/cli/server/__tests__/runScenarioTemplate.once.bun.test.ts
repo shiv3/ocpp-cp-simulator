@@ -112,6 +112,36 @@ describe("run_scenario_template on an Available charge point (#318, #352)", () =
     }
   });
 
+  it("runs again while the previous run is in flight, replacing it under the same id (#338)", async () => {
+    // The instance id is stable now, so a second run lands on the key the
+    // first run still holds. Removing the previous instance used to discard
+    // its run as a side effect; replacing it must too, or the second call
+    // fails with "already running" and the stale executor keeps going.
+    const { registry, cps, svc } = harness();
+    try {
+      const first = await cps.runScenarioTemplate("cp-318", TEMPLATE, {
+        connectorId: 1,
+      });
+      expect(svc.isScenarioRunning(first.scenarioId)).toBe(true);
+
+      const second = await cps.runScenarioTemplate("cp-318", TEMPLATE, {
+        connectorId: 1,
+        once: true,
+      });
+
+      expect(second.scenarioId).toBe(first.scenarioId);
+      expect(svc.listScenarios(1).map((s) => s.scenarioId)).toEqual([
+        second.scenarioId,
+      ]);
+      // The run in flight is the second call's: its definition is the one
+      // loaded disabled by `once`.
+      expect(svc.isScenarioRunning(second.scenarioId)).toBe(true);
+      expect(definitionOf(svc, second.scenarioId)?.enabled).toBe(false);
+    } finally {
+      registry.shutdownAll();
+    }
+  });
+
   it("with `once: true` the instance is loaded disabled and does not re-arm", async () => {
     const { registry, cps, svc } = harness();
     try {

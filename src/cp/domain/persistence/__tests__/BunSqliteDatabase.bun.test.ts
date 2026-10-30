@@ -9,6 +9,7 @@ import {
   runMigrations,
 } from "../schema";
 import { SqliteConnectorRuntimeRepository } from "../SqliteConnectorRuntimeRepository";
+import { legacyGeneratedBaseId } from "../legacyStartupInstances";
 import type { ConnectorRuntimeSnapshot } from "../ConnectorRuntimeRepository";
 import { OCPPStatus } from "../../types/OcppTypes";
 
@@ -631,8 +632,182 @@ describe("charging sessions schema, v17 (#447)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(Number(version?.value)).toBe(17);
-      expect(SCHEMA_VERSION).toBe(17);
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("creates authorization_cache on a database stamped 17", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE authorization_cache");
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("authorization_cache");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("authorization_cache");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("certificates schema, v18 (#456)", () => {
+  it("creates certificates on a database stamped 17", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE certificates");
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("certificates");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("certificates");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("startup scenario provenance schema, v19 (#338)", () => {
+  /** The v17 `scenarios` table, which has no `startup_source` column. */
+  function rebuildV17Scenarios(db: BunSqliteDatabase): void {
+    db.exec("DROP TABLE scenarios");
+    db.exec(
+      "CREATE TABLE scenarios (" +
+        "cp_id TEXT NOT NULL, connector_id INTEGER NOT NULL, " +
+        "scenario_id TEXT NOT NULL, name TEXT NOT NULL, " +
+        "enabled INTEGER NOT NULL, updated_at TEXT NOT NULL, " +
+        "definition TEXT NOT NULL, " +
+        "PRIMARY KEY (cp_id, connector_id, scenario_id))",
+    );
+    db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+  }
+
+  it("recognises exactly the ids older builds generated", () => {
+    // Table test of the two shapes the deleted prunes matched: the
+    // `-<epoch ms>` suffix `--scenario` minted through 0f6f951, and the
+    // template instance id minted through v0.9.0. Anchored on a 13+ digit
+    // epoch, on the row's own connector and (templates) charge point.
+    const cases: Array<[string, number, string, string | null]> = [
+      ["CP", 1, "demo-c1-1757200000000", "demo"],
+      ["CP", 2, "demo-c2-17572000000001", "demo"],
+      ["CP", 1, "a.b-c1-1757200000000", "a.b"],
+      [
+        "CP",
+        1,
+        "essential-cp-behavior-CP-c1-1760000000000-abc123",
+        "essential-cp-behavior",
+      ],
+      [
+        "C.P",
+        3,
+        "full-charging-cycle-C.P-c3-1760000000000-z9",
+        "full-charging-cycle",
+      ],
+      // Not generated: no epoch, a short number, another connector, another
+      // charge point, a trailing word.
+      ["CP", 1, "demo-c1", null],
+      ["CP", 1, "demo", null],
+      ["CP", 1, "demo-c1-manual", null],
+      ["CP", 1, "demo-c1-42", null],
+      ["CP", 1, "demo-c1-202610291200", null],
+      ["CP", 1, "demo-c2-1757200000000", null],
+      ["CP", 1, "essential-cp-behavior-OTHER-c1-1760000000000-abc123", null],
+      ["CP", 1, "essential-cp-behavior-CP-c1-123-abc123", null],
+      ["CP", 1, "essential-cp-behavior-CP-c1-1760000000000-ABC", null],
+      ["CP", 1, "demo-c1-1757200000000-final", null],
+      ["CP", 1, "user-authored", null],
+    ];
+    for (const [cpId, connectorId, id, base] of cases) {
+      expect({
+        id,
+        base: legacyGeneratedBaseId(cpId, connectorId, id),
+      }).toEqual({ id, base });
+    }
+  });
+
+  it("adds a nullable startup_source column, keeps every row and marks only generated legacy ids", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      rebuildV17Scenarios(db);
+      // What a v17 database can hold: a user scenario, a stable startup id
+      // (#314) and the clock-suffixed ids older builds minted.
+      const ids = [
+        "user-authored",
+        "demo-c1",
+        "demo-c1-1757200000000",
+        "essential-cp-behavior-CP-c1-1760000000000-abc123",
+      ];
+      for (const id of ids) {
+        db.run(
+          "INSERT INTO scenarios (cp_id, connector_id, scenario_id, name, " +
+            "enabled, updated_at, definition) VALUES ('CP', 1, ?, ?, 1, " +
+            "'2026-10-01T00:00:00Z', '{}')",
+          [id, id],
+        );
+      }
+
+      runMigrations(db);
+
+      const columns = db
+        .all<{ name: string }>("PRAGMA table_info(scenarios)")
+        .map((c) => c.name);
+      expect(columns).toContain("startup_source");
+      // Nothing dropped. The two clock-suffixed ids are recorded as legacy
+      // generated instances of their base; everything else — including the
+      // stable `demo-c1`, which could as well be an operator's — stays NULL.
+      const rows = db.all<{ scenario_id: string; startup_source: unknown }>(
+        "SELECT scenario_id, startup_source FROM scenarios ORDER BY scenario_id",
+      );
+      expect(rows).toEqual([
+        { scenario_id: "demo-c1", startup_source: null },
+        { scenario_id: "demo-c1-1757200000000", startup_source: "legacy:demo" },
+        {
+          scenario_id: "essential-cp-behavior-CP-c1-1760000000000-abc123",
+          startup_source: "legacy:essential-cp-behavior",
+        },
+        { scenario_id: "user-authored", startup_source: null },
+      ]);
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+
+      // Re-running the step on a migrated database is a no-op, not an error.
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("variable monitors schema, v21 (#457)", () => {
+  it("creates variable_monitors on a database stamped 17", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE variable_monitors");
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("variable_monitors");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("variable_monitors");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
     } finally {
       db.close();
     }

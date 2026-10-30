@@ -21,6 +21,7 @@ import type {
   ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
+import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import type { TransactionUpdateOptions } from "../../domain/connector/Transaction";
 import type { DataTransferHandler } from "./handlers";
 
@@ -91,6 +92,9 @@ export interface IChargePointMessageHandler {
     status: FirmwareStatus,
     requestId?: number,
   ): void;
+  /** OCPP 2.x NotifyEvent.req for variable-monitor events (N07, #457):
+   *  one request, one eventData per event. 1.6 has no such message. */
+  sendNotifyEvent(events: readonly MonitoringEvent[]): void;
   setBootStatus(
     status:
       | { status: "Idle" }

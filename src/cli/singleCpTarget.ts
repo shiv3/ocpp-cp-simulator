@@ -13,6 +13,10 @@ import type {
   UploadLogStatus,
 } from "../cp/domain/types/FirmwareLogStatus";
 
+import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../cp/domain/auth/AuthorizationCacheSeed";
 import type { CLIChargePointService } from "./service";
 import {
   defaultAutoTrafficConfig,
@@ -90,6 +94,8 @@ export interface SingleCpCommandOps {
     connectorId: number,
     options: TransactionUpdateOptions,
   ): Promise<void>;
+  /** #488: an EV-side disconnect on `connectorId`. */
+  evDisconnected(connectorId: number): Promise<void>;
   setMeterValue(connectorId: number, value: number): Promise<void>;
   sendMeterValue(
     connectorId: number,
@@ -105,6 +111,11 @@ export interface SingleCpCommandOps {
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
+  getAuthorizationCache(): Promise<AuthorizationCacheView>;
+  seedAuthorizationCache(
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number>;
+  clearAuthorizationCache(): Promise<boolean>;
   updateConnectorStatus(
     connectorId: number,
     status: OCPPStatus,
@@ -269,6 +280,9 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendTransactionUpdate: async (connectorId, options) => {
       service.sendTransactionUpdate(connectorId, options);
     },
+    evDisconnected: async (connectorId) => {
+      service.evDisconnected(connectorId);
+    },
     setMeterValue: async (connectorId, value) => {
       service.setMeterValue(connectorId, value);
     },
@@ -290,6 +304,10 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(request),
+    getAuthorizationCache: async () => service.getAuthorizationCache(),
+    seedAuthorizationCache: async (entries) =>
+      service.seedAuthorizationCache(entries),
+    clearAuthorizationCache: async () => service.clearAuthorizationCache(),
     updateConnectorStatus: async (connectorId, status, opts) => {
       service.updateConnectorStatus(connectorId, status, opts);
     },
@@ -429,6 +447,7 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.stopTransaction(cpId, connectorId, options),
     sendTransactionUpdate: (connectorId, options) =>
       service.sendTransactionUpdate(cpId, connectorId, options),
+    evDisconnected: (connectorId) => service.evDisconnected(cpId, connectorId),
     setMeterValue: (connectorId, value) =>
       service.setMeterValue(cpId, connectorId, value),
     sendMeterValue: (connectorId, context) =>
@@ -441,6 +460,10 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(cpId, vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),
+    getAuthorizationCache: () => service.getAuthorizationCache(cpId),
+    seedAuthorizationCache: (entries) =>
+      service.seedAuthorizationCache(cpId, entries),
+    clearAuthorizationCache: () => service.clearAuthorizationCache(cpId),
     updateConnectorStatus: (connectorId, status, opts) =>
       service.sendStatusNotification(cpId, connectorId, status, opts),
     sendDiagnosticsStatusNotification: (status) =>

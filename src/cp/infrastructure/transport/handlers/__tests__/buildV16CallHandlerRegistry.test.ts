@@ -168,10 +168,53 @@ describe("buildV16CallHandlerRegistry", () => {
         registry.getCallResultHandler(OCPPAction.RemoteStartTransaction),
       ).toBeUndefined();
       expect(registry.getCallResultHandler(OCPPAction.Reset)).toBeUndefined();
-      // SignCertificate.conf carries a status: no blanket acknowledgement.
-      expect(
-        registry.getCallResultHandler(OCPPAction.SignCertificate),
-      ).toBeUndefined();
+    });
+
+    // SignCertificate.conf carries a status, so it gets its own handler
+    // rather than the blanket acknowledgement above (#410).
+    describe("SignCertificate (#410)", () => {
+      function answer(status: string) {
+        const handler = buildV16CallHandlerRegistry().getCallResultHandler(
+          OCPPAction.SignCertificate,
+        );
+        expect(handler).toBeDefined();
+        const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+        handler!.handle({ status }, {
+          chargePoint: {},
+          logger,
+        } as unknown as HandlerContext);
+        return logger;
+      }
+
+      it("logs Accepted at INFO, expecting CertificateSigned.req", () => {
+        const logger = answer("Accepted");
+
+        expect(logger.info).toHaveBeenCalledWith(
+          "SignCertificate accepted by the CSMS; awaiting CertificateSigned.req",
+          LogType.OCPP,
+        );
+        expect(logger.warn).not.toHaveBeenCalled();
+      });
+
+      it("logs Rejected at WARN, naming the status", () => {
+        const logger = answer("Rejected");
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          "SignCertificate not accepted by the CSMS (status Rejected); certificate renewal will not happen",
+          LogType.OCPP,
+        );
+        expect(logger.info).not.toHaveBeenCalled();
+      });
+
+      it("logs a status outside the spec at WARN too", () => {
+        const logger = answer("Unknown");
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          "SignCertificate not accepted by the CSMS (status Unknown); certificate renewal will not happen",
+          LogType.OCPP,
+        );
+        expect(logger.info).not.toHaveBeenCalled();
+      });
     });
   });
 

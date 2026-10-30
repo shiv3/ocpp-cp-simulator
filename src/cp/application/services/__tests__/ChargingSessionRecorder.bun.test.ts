@@ -166,11 +166,15 @@ describe.skipIf(!canBindBunServe())("ChargingSessionRecorder (#447)", () => {
         s.csms.send([4, start.messageId, "InternalError", "boom", {}]);
         await until(() => s.sessions()[0]?.outcome === "failed", "failed");
 
-        // The closed transaction stays on the connector until the next
-        // start; a reset path that only checks for its presence stops it.
+        const [failed] = s.sessions();
+
+        // #491: the failed transaction is detached, so a reset (and a direct
+        // stop) finds nothing to stop and the failed session is left as is.
+        s.cp.applyRemoteReset("Soft");
         s.cp.stopTransaction(1, "HardReset");
 
-        expect(s.sessions()).toMatchObject([{ outcome: "failed" }]);
+        expect(s.cp.getConnector(1)?.transaction).toBeNull();
+        expect(s.sessions()).toEqual([failed]);
       } finally {
         await s.stop();
       }
@@ -281,6 +285,43 @@ describe.skipIf(!canBindBunServe())("ChargingSessionRecorder (#447)", () => {
         await s.stop();
       }
     });
+
+    it.each(["OCPP-2.0.1", "OCPP-2.1"])(
+      "%s: keeps the session active when a TransactionEvent is rejected, then discarded (#490)",
+      async (version) => {
+        const s = await station(`CP-490-${version}`, version, [
+          "TransactionEvent",
+        ]);
+        try {
+          s.cp.configuration.applyChange("TransactionMessageAttempts", "2");
+          s.cp.configuration.applyChange(
+            "TransactionMessageRetryInterval",
+            "0",
+          );
+          let discarded = 0;
+          s.cp.events.on("transactionMessageDiscarded", () => discarded++);
+          void s.cp.startTransaction("TAG-490", 1);
+          const first = await s.csms.waitForFrame(transactionEvent("Started"));
+          s.csms.send([4, first[1], "InternalError", "boom", {}]);
+          const second = await s.csms.waitForFrame(
+            (f) => transactionEvent("Started")(f) && f[1] !== first[1],
+          );
+          s.csms.send([4, second[1], "InternalError", "boom", {}]);
+          await until(() => discarded === 1, "the discard");
+
+          expect(s.sessions()).toMatchObject([
+            {
+              transactionId: (first[3] as TransactionEventRequestV201)
+                .transactionInfo.transactionId,
+              outcome: "active",
+              endedAt: null,
+            },
+          ]);
+        } finally {
+          await s.stop();
+        }
+      },
+    );
   });
 });
 

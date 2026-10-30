@@ -1,28 +1,17 @@
 // Tier-3 schema-valid responses for the remaining CSMS-initiated 2.0.1 messages; honest non-Accepted statuses reflect features the simulator does not yet implement; deep behavior is a later fidelity phase.
 import type {
-  CertificateSignedResponseV201,
   ClearDisplayMessageResponseV201,
-  ClearVariableMonitoringRequestV201,
-  ClearVariableMonitoringResponseV201,
   CostUpdatedResponseV201,
   CustomerInformationResponseV201,
   DataTransferResponseV201,
-  DeleteCertificateResponseV201,
   GetDisplayMessagesResponseV201,
-  GetInstalledCertificateIdsResponseV201,
   GetLocalListVersionResponseV201,
   GetLogResponseV201,
-  GetMonitoringReportResponseV201,
-  InstallCertificateResponseV201,
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
   SendLocalListResponseV201,
   SetDisplayMessageResponseV201,
-  SetMonitoringBaseResponseV201,
-  SetMonitoringLevelResponseV201,
   SetNetworkProfileResponseV201,
-  SetVariableMonitoringRequestV201,
-  SetVariableMonitoringResponseV201,
   UnpublishFirmwareResponseV201,
   UpdateFirmwareResponseV201,
   UpdateFirmwareRequestV201,
@@ -45,14 +34,6 @@ type V201AckHandler = (
   ctx: V201InboundContext,
 ) => V201HandlerResult;
 
-type SetMonitoringResult =
-  SetVariableMonitoringResponseV201["setMonitoringResult"][number];
-type SetMonitoringResultTuple =
-  SetVariableMonitoringResponseV201["setMonitoringResult"];
-type ClearMonitoringResult =
-  ClearVariableMonitoringResponseV201["clearMonitoringResult"][number];
-type ClearMonitoringResultTuple =
-  ClearVariableMonitoringResponseV201["clearMonitoringResult"];
 type DomainAuthStatus = LocalAuthorizationEntry["status"];
 
 function toDomainAuthStatus(s: AuthorizationStatusEnumType): DomainAuthStatus {
@@ -84,24 +65,6 @@ function toV201SendLocalListStatus(
       return "Failed";
   }
 }
-
-export const handleGetMonitoringReportAckV201 = (() => ({
-  response: {
-    status: "EmptyResultSet",
-  } satisfies GetMonitoringReportResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleSetMonitoringBaseAckV201 = (() => ({
-  response: {
-    status: "NotSupported",
-  } satisfies SetMonitoringBaseResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleSetMonitoringLevelAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies SetMonitoringLevelResponseV201,
-})) satisfies V201AckHandler;
 
 export const handleSetNetworkProfileAckV201 = (() => ({
   response: {
@@ -207,30 +170,6 @@ export const handleDataTransferAckV201 = (() => ({
   } satisfies DataTransferResponseV201,
 })) satisfies V201AckHandler;
 
-export const handleCertificateSignedAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies CertificateSignedResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleDeleteCertificateAckV201 = (() => ({
-  response: {
-    status: "NotFound",
-  } satisfies DeleteCertificateResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleGetInstalledCertificateIdsAckV201 = (() => ({
-  response: {
-    status: "NotFound",
-  } satisfies GetInstalledCertificateIdsResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleInstallCertificateAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies InstallCertificateResponseV201,
-})) satisfies V201AckHandler;
-
 /** L03 PublishFirmware.req is for a Local Controller that serves firmware to
  *  the stations behind it. This simulated station is not one, so the request
  *  is refused — and PublishFirmwareStatusNotification is never sent (#345). */
@@ -304,38 +243,3 @@ export const handleGetLocalListVersionAckV201 = ((
 export const handleCostUpdatedAckV201 = (() => ({
   response: {} satisfies CostUpdatedResponseV201,
 })) satisfies V201AckHandler;
-
-export const handleSetVariableMonitoringAckV201 = ((p: unknown) => {
-  const req = p as SetVariableMonitoringRequestV201;
-  const results: SetMonitoringResult[] = req.setMonitoringData.map(
-    (d): SetMonitoringResult => ({
-      status: "Rejected",
-      type: d.type,
-      component: d.component,
-      variable: d.variable,
-      severity: d.severity,
-    }),
-  );
-
-  return {
-    response: {
-      setMonitoringResult: results as SetMonitoringResultTuple,
-    } satisfies SetVariableMonitoringResponseV201,
-  };
-}) satisfies V201AckHandler;
-
-export const handleClearVariableMonitoringAckV201 = ((p: unknown) => {
-  const req = p as ClearVariableMonitoringRequestV201;
-  const results: ClearMonitoringResult[] = req.id.map(
-    (id): ClearMonitoringResult => ({
-      status: "NotFound",
-      id,
-    }),
-  );
-
-  return {
-    response: {
-      clearMonitoringResult: results as ClearMonitoringResultTuple,
-    } satisfies ClearVariableMonitoringResponseV201,
-  };
-}) satisfies V201AckHandler;

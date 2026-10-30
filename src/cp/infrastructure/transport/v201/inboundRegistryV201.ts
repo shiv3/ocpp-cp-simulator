@@ -15,7 +15,14 @@ import type {
   MeterValuesRequestV201,
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
+  ClearVariableMonitoringRequestV201,
+  SetMonitoringBaseRequestV201,
+  SetMonitoringBaseResponseV201,
+  SetMonitoringLevelRequestV201,
+  SetVariableMonitoringRequestV201,
+  SecurityEventNotificationRequestV201,
   SetVariablesRequestV201,
+  SignCertificateRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
 } from "../../../../ocpp";
@@ -65,26 +72,21 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import {
-  handleCertificateSignedAckV201,
+  buildCertificateHandlersV2x,
+  V201_CERTIFICATE_MAPPING,
+} from "./certificatesV201";
+import {
   handleClearDisplayMessageAckV201,
-  handleClearVariableMonitoringAckV201,
   handleCostUpdatedAckV201,
   handleCustomerInformationAckV201,
   handleDataTransferAckV201,
-  handleDeleteCertificateAckV201,
   handleGetDisplayMessagesAckV201,
-  handleGetInstalledCertificateIdsAckV201,
   handleGetLocalListVersionAckV201,
   handleGetLogAckV201,
-  handleGetMonitoringReportAckV201,
-  handleInstallCertificateAckV201,
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
   handleSetDisplayMessageAckV201,
-  handleSetMonitoringBaseAckV201,
-  handleSetMonitoringLevelAckV201,
   handleSetNetworkProfileAckV201,
-  handleSetVariableMonitoringAckV201,
   handleUnpublishFirmwareAckV201,
   handleUpdateFirmwareAckV201,
 } from "./csmsAcksV201";
@@ -99,6 +101,14 @@ import {
 } from "./coreControlV201";
 import { handleGetVariablesV201 } from "./getVariablesV201";
 import { handleSetVariablesV201 } from "./setVariablesV201";
+import {
+  createGetMonitoringReportHandlerV201,
+  handleClearVariableMonitoringV201,
+  handleSetMonitoringLevelV201,
+  handleSetVariableMonitoringV201,
+  type NotifyMonitoringReportPayload,
+} from "./variableMonitoringV201";
+import type { NotifyEventPayload } from "./notifyEventV201";
 import {
   handleGetTransactionStatusV201,
   handleRequestStartTransactionV201,
@@ -120,10 +130,17 @@ export type V201Action =
   | "Authorize"
   | "DataTransfer"
   | "NotifyReport"
+  // #457: N02 report answering GetMonitoringReport.
+  | "NotifyMonitoringReport"
+  // #457: N07 variable-monitor events.
+  | "NotifyEvent"
   | "ReportChargingProfiles"
   // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
   | "FirmwareStatusNotification"
-  | "LogStatusNotification";
+  | "LogStatusNotification"
+  // #456: A02 certificate signing and its security event (A02.FR.07).
+  | "SignCertificate"
+  | "SecurityEventNotification";
 
 export type V201RequestPayload =
   | BootNotificationRequestV201
@@ -134,9 +151,13 @@ export type V201RequestPayload =
   | AuthorizeRequestV201
   | DataTransferRequestV201
   | NotifyReportRequestV201
+  | NotifyMonitoringReportPayload
+  | NotifyEventPayload
   | ReportChargingProfilesRequestV201
   | FirmwareStatusNotificationRequestV201
-  | LogStatusNotificationRequestV201;
+  | LogStatusNotificationRequestV201
+  | SignCertificateRequestV201
+  | SecurityEventNotificationRequestV201;
 
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
@@ -151,10 +172,15 @@ export interface V201HandlerResult {
 
 export interface V201InboundHandler {
   readonly validate: (data: unknown) => boolean;
+  /**
+   * A handler may answer asynchronously (#456: certificate hashing). The
+   * dispatcher awaits only a real promise, so a synchronous handler still
+   * answers in the same tick as its CALL.
+   */
   readonly handle: (
     payload: unknown,
     ctx: V201InboundContext,
-  ) => V201HandlerResult;
+  ) => V201HandlerResult | Promise<V201HandlerResult>;
 }
 
 export type V201InboundRegistry = ReadonlyMap<string, V201InboundHandler>;
@@ -231,6 +257,9 @@ export function handleGetReportV201(
 }
 
 export function buildV201InboundRegistry(): V201InboundRegistry {
+  const certificateHandlers = buildCertificateHandlersV2x(
+    V201_CERTIFICATE_MAPPING,
+  );
   return new Map<string, V201InboundHandler>([
     [
       "GetVariables",
@@ -372,21 +401,32 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "GetMonitoringReport",
       {
         validate: isValidGetMonitoringReportRequestV201,
-        handle: handleGetMonitoringReportAckV201,
+        handle: createGetMonitoringReportHandlerV201("v201"),
       },
     ],
     [
       "SetMonitoringBase",
       {
         validate: isValidSetMonitoringBaseRequestV201,
-        handle: handleSetMonitoringBaseAckV201,
+        handle: (p, ctx) => ({
+          response: {
+            status: ctx.chargePoint.monitoring.applyMonitoringBase(
+              (p as SetMonitoringBaseRequestV201).monitoringBase,
+            ),
+          } satisfies SetMonitoringBaseResponseV201,
+        }),
       },
     ],
     [
       "SetMonitoringLevel",
       {
         validate: isValidSetMonitoringLevelRequestV201,
-        handle: handleSetMonitoringLevelAckV201,
+        handle: (p, ctx) => ({
+          response: handleSetMonitoringLevelV201(
+            p as SetMonitoringLevelRequestV201,
+            ctx.chargePoint.monitoring,
+          ),
+        }),
       },
     ],
     [
@@ -449,28 +489,28 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "CertificateSigned",
       {
         validate: isValidCertificateSignedRequestV201,
-        handle: handleCertificateSignedAckV201,
+        handle: certificateHandlers.CertificateSigned,
       },
     ],
     [
       "DeleteCertificate",
       {
         validate: isValidDeleteCertificateRequestV201,
-        handle: handleDeleteCertificateAckV201,
+        handle: certificateHandlers.DeleteCertificate,
       },
     ],
     [
       "GetInstalledCertificateIds",
       {
         validate: isValidGetInstalledCertificateIdsRequestV201,
-        handle: handleGetInstalledCertificateIdsAckV201,
+        handle: certificateHandlers.GetInstalledCertificateIds,
       },
     ],
     [
       "InstallCertificate",
       {
         validate: isValidInstallCertificateRequestV201,
-        handle: handleInstallCertificateAckV201,
+        handle: certificateHandlers.InstallCertificate,
       },
     ],
     [
@@ -512,14 +552,25 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "SetVariableMonitoring",
       {
         validate: isValidSetVariableMonitoringRequestV201,
-        handle: handleSetVariableMonitoringAckV201,
+        handle: (p, ctx) => ({
+          response: handleSetVariableMonitoringV201(
+            p as SetVariableMonitoringRequestV201,
+            ctx.chargePoint.monitoring,
+            ctx.chargePoint.configuration,
+          ),
+        }),
       },
     ],
     [
       "ClearVariableMonitoring",
       {
         validate: isValidClearVariableMonitoringRequestV201,
-        handle: handleClearVariableMonitoringAckV201,
+        handle: (p, ctx) => ({
+          response: handleClearVariableMonitoringV201(
+            p as ClearVariableMonitoringRequestV201,
+            ctx.chargePoint.monitoring,
+          ),
+        }),
       },
     ],
   ]);

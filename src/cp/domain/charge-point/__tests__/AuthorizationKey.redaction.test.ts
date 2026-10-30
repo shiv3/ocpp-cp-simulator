@@ -14,6 +14,7 @@ const SECRET = "authorization-key-secret";
 const cpShape = {
   connectorNumber: 1,
   wsUrl: "ws://csms.example/ocpp/",
+  ocppVersion: "OCPP-1.6J",
 } as ChargePoint;
 
 function storeWithAuthorizationKey(): ConfigurationStore {

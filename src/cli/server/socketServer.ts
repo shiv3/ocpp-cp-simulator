@@ -53,7 +53,6 @@ import type {
 } from "../../data/interfaces/ChargePointService";
 import type { ConnectorSettingsRepository } from "../../data/interfaces/ConnectorSettingsRepository";
 import type { Database } from "../../cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "../../cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
 import {
   isScenarioDefinitionShape,
@@ -64,7 +63,9 @@ import type { AutoMeterValueConfig } from "../../cp/domain/connector/MeterValueC
 import {
   InvalidEvSettingsPatchError,
   type EVSettings,
+  type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
+import { InvalidAuthorizationCacheSeedError } from "../../cp/domain/auth/AuthorizationCacheSeed";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
 import {
   hasStatusNotificationOptions,
@@ -86,6 +87,7 @@ import {
 } from "../../cp/domain/errors/OcppCallErrors";
 import type { NetworkSimLayerConfig } from "../../cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
+import { createScenarioRepository } from "../../cp/domain/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "../../data/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "../../cp/domain/persistence/BlueprintRepository";
 import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
@@ -367,7 +369,10 @@ export function createRuntimeDeps(
         database,
         configRepository,
         scenarioRepository:
-          deps.scenarioRepository ?? new SqliteScenarioRepository(database),
+          deps.scenarioRepository ??
+          // A registry test double may not carry one.
+          deps.registry.scenarioDefinitions ??
+          createScenarioRepository(database),
         connectorSettingsRepository:
           deps.connectorSettingsRepository ??
           new SqliteConnectorSettingsRepository(database),
@@ -1224,9 +1229,11 @@ async function applyDefaultEVSettingsRpc(
   deps: RuntimeSocketIoDeps,
   params: Params<"ev_settings.apply_default">,
 ): Promise<undefined> {
+  // Possibly partial (#333): the connector merges it onto
+  // `defaultEVSettings`, so nothing here asserts a complete `EVSettings`.
   await runFacadeOperation(() =>
     deps.chargePointService.applyDefaultEVSettings(
-      params.settings as unknown as EVSettings,
+      params.settings as unknown as EVSettingsPatch,
     ),
   );
   return undefined;
@@ -1782,6 +1789,26 @@ async function dispatchFacadeCpCommand(
         ),
       );
     }
+    // #452: the Authorization Cache test seam.
+    case "get_auth_cache":
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getAuthorizationCache(id),
+        ),
+      );
+    case "seed_auth_cache": {
+      const { params } = call;
+      const seeded = await runFacadeOperation(() =>
+        chargePointService.seedAuthorizationCache(id, params.entries),
+      );
+      return handled({ seeded });
+    }
+    case "clear_auth_cache": {
+      const cleared = await runFacadeOperation(() =>
+        chargePointService.clearAuthorizationCache(id),
+      );
+      return handled({ cleared });
+    }
     case "diagnostics_status_notification": {
       const { params } = call;
       await runFacadeOperation(() =>
@@ -1842,6 +1869,13 @@ async function dispatchFacadeCpCommand(
           params.status,
           readStatusNotificationOptions(params),
         ),
+      );
+      return handled(undefined);
+    }
+    case "ev_disconnected": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evDisconnected(id, params.connector),
       );
       return handled(undefined);
     }
@@ -2352,6 +2386,10 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   }
   // #458: a set_ev_settings patch that would remove a required field.
   if (err instanceof InvalidEvSettingsPatchError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  // #452: a cache seed refused before anything was written.
+  if (err instanceof InvalidAuthorizationCacheSeedError) {
     return new RpcFailure("invalid_params", err.message);
   }
   if (!(err instanceof Error)) return null;

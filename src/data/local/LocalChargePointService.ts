@@ -1,4 +1,8 @@
 import { VehicleProfileRepository } from "../../cp/domain/persistence/VehicleProfileRepository";
+import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../../cp/domain/auth/AuthorizationCacheSeed";
 import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import {
   DIAGNOSTICS_STATUSES,
@@ -481,6 +485,27 @@ export class LocalChargePointService implements ChargePointService {
     return this.getExistingChargePointOrThrow(id).sendOcppCall(request);
   }
 
+  async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
+    return this.getExistingChargePointOrThrow(id).authorization.cacheView();
+  }
+
+  async seedAuthorizationCache(
+    id: string,
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number> {
+    const seeded =
+      this.getExistingChargePointOrThrow(id).authorization.seedCache(entries);
+    await this.database?.flush?.();
+    return seeded;
+  }
+
+  async clearAuthorizationCache(id: string): Promise<boolean> {
+    const cleared =
+      this.getExistingChargePointOrThrow(id).clearAuthorizationCache();
+    await this.database?.flush?.();
+    return cleared;
+  }
+
   async startTransaction(
     id: string,
     connectorId: number,
@@ -518,6 +543,10 @@ export class LocalChargePointService implements ChargePointService {
       connectorId,
       options,
     );
+  }
+
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    this.getExistingChargePointOrThrow(id).evDisconnected(connectorId);
   }
 
   async sendStatusNotification(
@@ -619,6 +648,9 @@ export class LocalChargePointService implements ChargePointService {
     // Default EV Settings propagation doesn't clobber it.
     const connector = this.requireConnector(id, connectorId);
     connector.applyEvSettingsOverride(settings);
+    // The operator now owns the override, so no run does — a run in flight
+    // that claimed it earlier must not release this set when it ends (#333).
+    connector.scenarioManager?.disownEvSettingsOverride();
   }
 
   async getEVSettings(
@@ -628,7 +660,7 @@ export class LocalChargePointService implements ChargePointService {
     return this.requireConnector(id, connectorId).evSettings ?? null;
   }
 
-  async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
+  async applyDefaultEVSettings(settings: EVSettingsPatch): Promise<void> {
     // Connectors freeze getDefaultEVSettings() at construction, so a mid-session
     // change to the Default EV Settings wouldn't reach the ones already live.
     // Push it onto every connector (per-connector EV settings aren't a

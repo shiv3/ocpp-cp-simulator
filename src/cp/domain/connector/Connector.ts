@@ -28,6 +28,7 @@ import {
   type EVSettings,
   type EVSettingsPatch,
   assertRequiredFieldsKept,
+  defaultEVSettings,
   getDefaultEVSettings,
   withoutNulls,
 } from "./EVSettings";
@@ -217,6 +218,16 @@ export class Connector {
   private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
 
+  /**
+   * The EV side of the cable was unplugged during a transaction the station
+   * keeps (`StopTransactionOnEVSideDisconnect=false`, 2.0.1 E10: the energy
+   * offer stops, the transaction does not) (#488). While set, the meter cap is
+   * zero: the scheduler keeps ticking, so periodic MeterValues still go out,
+   * but the energy register does not rise. Cleared when the connector leaves
+   * `SuspendedEV` and when a transaction begins. Not persisted.
+   */
+  private energyOfferSuspendedValue = false;
+
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
   private incrementFallback: IncrementStrategyConfig | null = null;
   private onMeterSend: ((connectorId: number) => void) | null = null;
@@ -290,8 +301,10 @@ export class Connector {
     this.statusValue = snapshot.status;
     this.availabilityValue = snapshot.availability;
     this.scheduledAvailabilityValue = snapshot.scheduledAvailability;
+    // #315: the signing key is in memory only, so a begin reading signed
+    // before the restart no longer matches MeterPublicKey<id>; drop it.
     this.transactionValue = snapshot.transaction
-      ? { ...snapshot.transaction }
+      ? { ...snapshot.transaction, signedBeginOcmf: undefined }
       : null;
     this.meterValueWh = snapshot.meterValueWh;
     this.socPercent = snapshot.socPercent;
@@ -571,6 +584,8 @@ export class Connector {
    */
   private effectiveMeterCapWatts(): number {
     const scheduleW = this.currentScheduleLimitWatts();
+    // Resolved first so the schedule latch bookkeeping still runs (#301).
+    if (this.energyOfferSuspendedValue) return 0;
     const curve = this._evSettings.chargingCurve;
     const maxKw = this._evSettings.maxChargingPowerKw ?? 0;
     const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
@@ -624,6 +639,9 @@ export class Connector {
   set status(newStatus: OCPPStatus) {
     const previousStatus = this.statusValue;
     this.statusValue = newStatus;
+    if (newStatus !== OCPPStatus.SuspendedEV) {
+      this.energyOfferSuspendedValue = false;
+    }
     this.eventsEmitter.emit("statusChange", {
       status: newStatus,
       previousStatus,
@@ -739,11 +757,13 @@ export class Connector {
    * Whether a session is running right now: a transaction that has begun and
    * not yet stopped.
    *
-   * Deliberately not "a transaction object is attached". When a
-   * `StartTransaction` is rejected, or comes back a CALLERROR,
-   * `ChargePoint.cleanTransaction` stamps `stopTime` and leaves the object on
-   * the connector — so the connector is logically idle with a transaction
-   * still hanging off it. `ChargePoint.startTransaction` already asks the
+   * Deliberately not "a transaction object is attached".
+   * `ChargePoint.cleanTransaction` stamps `stopTime` without detaching the
+   * object, and a `connector_runtime` snapshot persisted before #491 (when a
+   * CALLERROR start stayed attached) restores one that way — so the connector
+   * can be logically idle with a transaction still hanging off it.
+   * `ChargePoint.stopTransaction` asks this before stopping (#491), and
+   * `ChargePoint.startTransaction` already asks the
    * question this way before refusing a duplicate start; asking it the same
    * way here is what lets a hand retry after a rejection behave like a first
    * attempt, which is precisely when an operator is most likely to be typing
@@ -753,6 +773,17 @@ export class Connector {
     return (
       this.transactionValue !== null && this.transactionValue.stopTime === null
     );
+  }
+
+  /** See {@link energyOfferSuspendedValue} (#488). */
+  get energyOfferSuspended(): boolean {
+    return this.energyOfferSuspendedValue;
+  }
+
+  /** Stop the energy offer of the running transaction after an EV-side
+   *  disconnect (#488): the register freezes, sampling goes on. */
+  suspendEnergyOffer(): void {
+    this.energyOfferSuspendedValue = true;
   }
 
   get transaction(): Transaction | null {
@@ -830,13 +861,20 @@ export class Connector {
   }
 
   /**
-   * Default-EV-settings propagation (#105): replaces the settings wholesale,
-   * same as the `evSettings` setter, but only when no override is active —
+   * Default-EV-settings propagation (#105), only when no override is active —
    * a running scenario/explicit override wins over this until cleared.
+   *
+   * Merged onto the built-in {@link defaultEVSettings} (#333), as
+   * {@link applyEvSettingsOverride} merges onto the current settings: a field
+   * the default omits reads back as the built-in value rather than vanishing,
+   * so a partial `ev_settings.apply_default` can no longer leave a required
+   * field such as `initialSoc` absent. Onto the constant, not the current
+   * settings: a default that names no `chargingCurve` describes a car without
+   * one, so nothing of an earlier default or override carries over.
    */
-  applyDefaultEvSettings(settings: EVSettings): void {
+  applyDefaultEvSettings(settings: EVSettingsPatch): void {
     if (this._evSettingsOverridden) return;
-    this.evSettings = { ...settings };
+    this.evSettings = { ...defaultEVSettings, ...settings } as EVSettings;
   }
 
   /**
@@ -1060,6 +1098,7 @@ export class Connector {
     // attaches a transaction to this connector, and any resolve in the gap
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
+    this.energyOfferSuspendedValue = false;
     this.openSessionSoc(transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });
@@ -1135,11 +1174,14 @@ export class Connector {
       // and clears the value already.
       //
       // `EVSettings.initialSoc` is typed `number`, so TypeScript believes this
-      // is unreachable. It is not: `applyDefaultEvSettings` replaces the
-      // settings wholesale, and the control plane's
-      // `ev_settings.apply_default` validates only `z.object({ settings:
-      // OBJ() })` before casting — so a client that omits `initialSoc` lands
-      // here. (`applyEvSettingsOverride` merges and cannot.)
+      // is unreachable. Until #333 it was not: `applyDefaultEvSettings`
+      // replaced the settings wholesale, so an `ev_settings.apply_default`
+      // that omitted `initialSoc` landed here. Both entry points now merge
+      // (`applyEvSettingsOverride` onto the current settings,
+      // `applyDefaultEvSettings` onto `defaultEVSettings`), so no known write
+      // drops it. The branch stays as the guard for settings cast past the
+      // type: the `evSettings` setter refuses a `null` required field, not an
+      // absent one.
       if (this.socPercent !== null) {
         this.socPercent = null;
         this.eventsEmitter.emit("socChange", { soc: null });

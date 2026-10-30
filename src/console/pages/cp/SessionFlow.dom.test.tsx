@@ -76,7 +76,25 @@ describe("SessionFlow: the charging session as a stepper", () => {
       OCPPStatus.Preparing,
       null,
       "Start charging",
-      ["done", "next", "todo", "todo"],
+      ["done", "next", "todo", "alt"],
+    ],
+    [
+      OCPPStatus.Charging,
+      null,
+      "Start charging",
+      ["done", "next", "todo", "alt"],
+    ],
+    [
+      OCPPStatus.SuspendedEV,
+      null,
+      "Start charging",
+      ["done", "next", "todo", "alt"],
+    ],
+    [
+      OCPPStatus.SuspendedEVSE,
+      null,
+      "Start charging",
+      ["done", "next", "todo", "alt"],
     ],
     [
       OCPPStatus.Charging,
@@ -104,10 +122,50 @@ describe("SessionFlow: the charging session as a stepper", () => {
       expect(next(container)?.textContent).toContain(label);
       expect(next(container)?.disabled).toBe(false);
       expect(stepStates(container)).toEqual(states);
-      // Only the next step is a live button.
-      expect(steps(container).filter((s) => !s.disabled)).toHaveLength(1);
+      // The next step and the alternative one (if any) are the live buttons.
+      expect(
+        steps(container)
+          .filter((s) => !s.disabled)
+          .map((s) => s.dataset.state),
+      ).toEqual(states.filter((s) => s === "next" || s === "alt"));
     },
   );
+
+  it("a plugged connector can be unplugged without charging", async () => {
+    const { container, onUnplug, onStart } = await renderFlow({
+      status: OCPPStatus.Preparing,
+    });
+    const unplug = container.querySelector<HTMLButtonElement>(
+      '[data-step="unplug"]',
+    )!;
+    expect(unplug.disabled).toBe(false);
+    await act(async () => unplug.click());
+    expect(onUnplug).toHaveBeenCalledTimes(1);
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it("Unplug stays available when Start is blocked by a missing TagID", async () => {
+    const { container } = await renderFlow({
+      status: OCPPStatus.Preparing,
+      tagIds: [],
+    });
+    expect(next(container)?.disabled).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>('[data-step="unplug"]')
+        ?.disabled,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["Faulted while plugged", { status: OCPPStatus.Faulted }],
+    ["pending", { status: OCPPStatus.Preparing, pending: true }],
+  ] as const)("Unplug is not offered early when %s", async (_, props) => {
+    const { container } = await renderFlow(props);
+    const unplug = container.querySelector<HTMLButtonElement>(
+      '[data-step="unplug"]',
+    )!;
+    expect(unplug.disabled).toBe(true);
+  });
 
   it("marks done steps with a check", async () => {
     const { container } = await renderFlow({

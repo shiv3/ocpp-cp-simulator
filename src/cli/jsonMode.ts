@@ -5,6 +5,7 @@ import {
   UPLOAD_LOG_STATUSES,
 } from "../cp/domain/types/FirmwareLogStatus";
 import type { DataTransferData } from "../cp/domain/types/DataTransfer";
+import type { AuthorizationCacheSeedEntry } from "../cp/domain/auth/AuthorizationCacheSeed";
 import * as readline from "readline";
 import * as fs from "fs";
 import {
@@ -13,6 +14,7 @@ import {
   type StatusNotificationOptions,
 } from "../cp/domain/types/OcppTypes";
 import {
+  authorizationCacheSeedSchema,
   dataTransferDataSchema,
   METHODS,
   scenarioWaitExtensionSecondsSchema,
@@ -176,6 +178,11 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "ev_disconnected": {
+      await ops.evDisconnected(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
     case "set_meter_value": {
       const connectorId = requirePositiveInt(params, "connector");
       const value = requireNumber(params, "value");
@@ -284,6 +291,17 @@ export async function handleJsonCommand(
       // #389: validated against the daemon's own schema, so JSON-Lines mode
       // admits exactly what the control plane admits.
       return ops.sendOcppCall(ocppCallRequest(params));
+
+    // #452: the Authorization Cache test seam. Seed and clear act whatever
+    // the cache switch says.
+    case "get_auth_cache":
+      return ops.getAuthorizationCache();
+
+    case "seed_auth_cache":
+      return { seeded: await ops.seedAuthorizationCache(seedEntries(params)) };
+
+    case "clear_auth_cache":
+      return { cleared: await ops.clearAuthorizationCache() };
 
     case "update_connector_status": {
       // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
@@ -664,6 +682,25 @@ export function optionalDataTransferData(
     throw new Error(
       "Invalid parameter: data (expected a string of at most 64K characters or an object of at most 64 KB)",
     );
+  }
+  return parsed.data;
+}
+
+/** `seed_auth_cache`'s entries (#452), checked by the control
+ *  plane's own schema (`authorizationCacheSeedSchema`, #382). */
+function seedEntries(
+  params: Record<string, unknown>,
+): AuthorizationCacheSeedEntry[] {
+  const parsed = authorizationCacheSeedSchema.safeParse(params.entries);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(
+        parsed.error.issues.map((issue) =>
+          ["entries", ...issue.path].join("."),
+        ),
+      ),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
   }
   return parsed.data;
 }

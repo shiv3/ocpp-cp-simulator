@@ -20,7 +20,7 @@ export interface SessionFlowProps {
 }
 
 type StepId = "plugin" | "start" | "stop" | "unplug";
-type StepState = "done" | "next" | "current" | "todo";
+type StepState = "done" | "next" | "alt" | "current" | "todo";
 
 const STEPS: ReadonlyArray<{ id: StepId; label: string }> = [
   { id: "plugin", label: "Plug in" },
@@ -30,31 +30,37 @@ const STEPS: ReadonlyArray<{ id: StepId; label: string }> = [
 ];
 
 /**
- * Where the session stands: the index of the step to take next. A
- * transaction means charging (Stop next) until Finishing; without one, a
- * plugged connector (Preparing, or a charging status a scenario sent) waits
- * for Start, Finishing for Unplug, anything else for Plug in.
+ * Where the session stands: the step to take next. A transaction means
+ * charging (Stop next) until Finishing; without one, a plugged connector
+ * (Preparing, or a charging status a scenario sent) waits for Start,
+ * Finishing for Unplug, anything else for Plug in.
  */
-function sessionPosition(
-  status: OCPPStatus,
-  transactionId: number | null,
-): number {
-  if (status === OCPPStatus.Finishing) return 3;
-  if (transactionId != null) return 2;
+function nextStep(status: OCPPStatus, transactionId: number | null): StepId {
+  if (status === OCPPStatus.Finishing) return "unplug";
+  if (transactionId != null) return "stop";
   switch (status) {
     case OCPPStatus.Preparing:
     case OCPPStatus.Charging:
     case OCPPStatus.SuspendedEV:
     case OCPPStatus.SuspendedEVSE:
-      return 1;
+      return "start";
     default:
-      return 0;
+      return "plugin";
   }
 }
 
 /**
+ * Later steps that can be taken instead of the next one: a plugged connector
+ * can be unplugged without charging (Preparing → Available).
+ */
+const ALTERNATIVES: Partial<Record<StepId, ReadonlyArray<StepId>>> = {
+  start: ["unplug"],
+};
+
+/**
  * The charging session as a stepper (`Plug in → Start charging → Stop
  * charging → Unplug`): done steps carry a check, the next step is the primary
+ * button, an alternative to it (Unplug before charging) is a secondary
  * button, later steps are faint. Faulted shows where the session stopped with
  * nothing to press; Unavailable disables every step and says how to get out.
  */
@@ -74,13 +80,15 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
 
   const unavailable = status === OCPPStatus.Unavailable;
   const faulted = status === OCPPStatus.Faulted;
-  const position = sessionPosition(status, transactionId);
+  const next = nextStep(status, transactionId);
+  const nextIndex = STEPS.findIndex((s) => s.id === next);
 
-  const stateOf = (index: number): StepState => {
+  const stateOf = (id: StepId, index: number): StepState => {
     if (unavailable) return "todo";
-    if (index < position) return "done";
-    if (index > position) return "todo";
-    return faulted ? "current" : "next";
+    if (id === next) return faulted ? "current" : "next";
+    if (index < nextIndex) return "done";
+    if (!faulted && ALTERNATIVES[next]?.includes(id)) return "alt";
+    return "todo";
   };
 
   const actions: Record<StepId, () => void> = {
@@ -99,9 +107,9 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
       className="mt-3.5 flex flex-wrap items-center gap-y-1 rounded-[9px] bg-cx-sub px-2.5 py-2 @max-[520px]:px-1"
     >
       {STEPS.map((step, index) => {
-        const state = stateOf(index);
+        const state = stateOf(step.id, index);
         const label =
-          state === "current" && transactionId != null && index === 2
+          state === "current" && transactionId != null && step.id === "stop"
             ? "Charging (faulted)"
             : step.label;
         const blocked = step.id === "start" && !tagId;
@@ -117,13 +125,17 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
               type="button"
               data-step={step.id}
               data-state={state}
-              disabled={state !== "next" || pending || blocked}
+              disabled={
+                (state !== "next" && state !== "alt") || pending || blocked
+              }
               onClick={actions[step.id]}
               className={cn(
                 "inline-flex items-center gap-[7px] whitespace-nowrap rounded-[7px] px-[9px] py-[5px] text-[12.5px] font-medium @max-[520px]:gap-1.5 @max-[520px]:px-1.5 @max-[520px]:text-xs",
                 state === "todo" && "text-cx-faint",
                 state === "done" && "text-cx-muted",
                 state === "current" && "text-cx-fg",
+                state === "alt" &&
+                  "text-cx-fg shadow-[inset_0_0_0_1px_var(--cx-border-strong)] hover:bg-cx-card disabled:opacity-60",
                 state === "next" &&
                   "bg-cx-primary text-white hover:bg-cx-primary-hover disabled:opacity-60",
               )}
@@ -147,7 +159,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
         );
       })}
 
-      {!unavailable && !faulted && position === 1 && (
+      {!unavailable && !faulted && next === "start" && (
         <label className="ml-auto inline-flex items-center gap-1.5 pl-2 text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
           with tag
           <select
@@ -173,7 +185,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
           </select>
         </label>
       )}
-      {!unavailable && transactionId != null && position === 2 && (
+      {!unavailable && transactionId != null && next === "stop" && (
         <span className="ml-auto pl-2 font-mono text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
           Tx #{transactionId}
           {transactionTagId ? ` · ${transactionTagId}` : ""}

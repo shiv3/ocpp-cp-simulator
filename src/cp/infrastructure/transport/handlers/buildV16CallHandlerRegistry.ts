@@ -31,6 +31,7 @@ import {
   StatusNotificationResultHandler,
   DataTransferResultHandler,
   EmptyConfirmationResultHandler,
+  SignCertificateResultHandler,
 } from "./index";
 
 /**
@@ -210,6 +211,11 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
       new EmptyConfirmationResultHandler(action),
     );
   }
+  // SignCertificate.conf is not empty: its status is logged (#410).
+  registry.registerCallResultHandler(
+    OCPPAction.SignCertificate,
+    new SignCertificateResultHandler(),
+  );
 
   return registry;
 }

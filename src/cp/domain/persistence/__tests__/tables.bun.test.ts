@@ -57,7 +57,11 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
       [cp, t],
     );
     db.run(
-      "INSERT INTO logs (cp_id, timestamp, level, log_type, message) VALUES (?, ?, 'info', 'ocpp', 'hello')",
+      "INSERT INTO authorization_cache (cp_id, id_token, status, inserted_at, updated_at) VALUES (?, 'TAG', 'Accepted', ?, ?)",
+      [cp, t, t],
+    );
+    db.run(
+      "INSERT INTO logs(cp_id, timestamp, level, log_type, message) VALUES (?, ?, 'info', 'ocpp', 'hello')",
       [cp, t],
     );
     db.run(
@@ -78,6 +82,14 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
     );
     db.run(
       "INSERT INTO charging_sessions (cp_id, session_id, connector_id, started_at, outcome, session_json) VALUES (?, 's1', 1, ?, 'active', '{}')",
+      [cp, t],
+    );
+    db.run(
+      "INSERT INTO variable_monitors (cp_id, monitor_id, monitor) VALUES (?, 1, '{}')",
+      [cp],
+    );
+    db.run(
+      "INSERT INTO certificates (cp_id, seq, kind, certificate_use, body, installed_at) VALUES (?, 1, 'root', 'CsmsRootCertificate', '{}', ?)",
       [cp, t],
     );
   }

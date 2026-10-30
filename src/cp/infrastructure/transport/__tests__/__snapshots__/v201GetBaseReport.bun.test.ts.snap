@@ -165,6 +165,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "SignReadings",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": false,
+          },
+        },
+        {
+          "component": {
             "name": "AlignedDataCtrlr",
           },
           "variable": {

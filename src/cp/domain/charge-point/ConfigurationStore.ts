@@ -16,6 +16,10 @@ import {
   defaultConfiguration,
 } from "./Configuration";
 import type { ChargePoint } from "./ChargePoint";
+import {
+  isSignedMeterMode,
+  type SignedMeterMode,
+} from "../connector/SignedMeterData";
 import type { Database } from "../persistence/Database";
 
 /**
@@ -220,6 +224,33 @@ export class ConfigurationStore {
     return this.getBoolean("AuthorizeBeforeLocalStart") ?? true;
   }
 
+  /** Custom key `SampledDataSignReadings`; default `false` (#315). */
+  signReadings(): boolean {
+    return this.getBoolean("SampledDataSignReadings") ?? false;
+  }
+
+  /** Custom key `SignedMeterDataMode`; default `valid` (#315). */
+  signedMeterDataMode(): SignedMeterMode {
+    const mode = this.getString("SignedMeterDataMode");
+    return isSignedMeterMode(mode) ? mode : "valid";
+  }
+
+  /**
+   * Publish a read-only key whose value the station makes at runtime, such as
+   * `MeterPublicKey<connectorId>` once that connector's signing key exists
+   * (#315). Not persisted: the value is only true for this process.
+   */
+  defineRuntimeKey(name: string, value: string): void {
+    const key: StringConfigurationKey = {
+      name,
+      required: false,
+      readonly: true,
+      type: "string",
+    };
+    this.values.set(name, { key, value });
+    this.emit(name, value);
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;
@@ -398,6 +429,8 @@ function isConfigurationValueValid(
   key: ConfigurationKey,
   value: ConfigurationValueType,
 ): boolean {
+  if (typeof value === "string" && key.allowed)
+    return key.allowed.includes(value);
   if (typeof value !== "number") return true;
   return (
     (key.min === undefined || value >= key.min) &&

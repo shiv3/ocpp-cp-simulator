@@ -20,6 +20,7 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["TxCtrlr/EVConnectionTimeOut", "ConnectionTimeOut"],
   ["SampledDataCtrlr/TxUpdatedInterval", "MeterValueSampleInterval"],
   ["SampledDataCtrlr/TxUpdatedMeasurands", "MeterValuesSampledData"],
+  ["SampledDataCtrlr/SignReadings", "SampledDataSignReadings"],
   ["AlignedDataCtrlr/Interval", "ClockAlignedDataInterval"],
   ["AlignedDataCtrlr/Measurands", "MeterValuesAlignedData"],
   ["LocalAuthListCtrlr/Enabled", "LocalAuthListEnabled"],

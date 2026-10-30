@@ -131,7 +131,8 @@ async function handleCommand(
     case "meter": {
       const connectorId = parseConnectorId(args[0]);
       const value = parseInt(args[1], 10);
-      if (isNaN(value)) {
+      // Not just NaN: an overflowing digit string parses to Infinity.
+      if (!Number.isFinite(value)) {
         process.stderr.write("Usage: meter <connector> <value>\n");
         return;
       }

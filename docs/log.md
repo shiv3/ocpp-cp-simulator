@@ -1896,3 +1896,21 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Testing strategy](analyses/testing-strategy.md): a Bun file outside both runner filters.
 - [GitHub issues](sources/github-issues.md): #330, #523.
 - Raw sources changed in the same PR: `scripts/bench/lib.ts`, `scripts/bench/fleet-bench.ts`, `scripts/bench/lib.bun.test.ts`, `scripts/bench/fleetBench.smoke.bun.test.ts`, `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/README.md`, `package.json`, `.github/workflows/ci.yml`.
+
+## [2026-10-29] ingest | OCMF signed meter values (#315)
+
+- New `src/cp/domain/connector/SignedMeterData.ts`: an OCMF 1.4 generator (ECDSA-secp256r1-SHA256 via `@noble/curves`, synchronous so signing never reorders messages) with no OCPP knowledge, mapped to 1.6 `format: "SignedData"` samples and 2.x `signedMeterValue`. Off by default (`SampledDataSignReadings`, 2.x `SampledDataCtrlr.SignReadings`); one ephemeral key per connector, made on first use and published read-only as `MeterPublicKey<id>`; `SignedMeterDataMode` picks `valid`, `tampered_payload`, `wrong_key` or `invalid_signature`. 1.6 signs the begin reading at StartTransaction and sends it with the end reading in `StopTransaction.transactionData`, so page numbers stay in time order. String configuration keys can now list `allowed` values.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): new section (keys, carriers per version, test modes, what is not implemented).
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md#4b-signed-meter-values-optional): 4b shipped under #315.
+- [GitHub issues](sources/github-issues.md): #315.
+
+## [2026-10-29] ingest | OCMF signed meter values review fixes (#315)
+
+- Review of #521: a `|` in the idTag or a serial is escaped as `\u007C` in the OCMF payload; a negative register is signed as it is instead of clamped to 0; a restored 1.6 transaction drops its begin record (the ephemeral key that signed it is gone); a stored begin record is still sent at the stop when signing was turned off since; the 2.x fallback energy sample carries the requested `context`, and `MeterValues` with an empty measurand list still sends the signed energy sample. The REPL `meter` command refuses an overflowing value (`Infinity`) as well as `NaN`.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): restart, signing-off-mid-transaction, escaping and negative registers.
+
+## [2026-10-29] ingest | OCMF signed meter values, second review round (#315)
+
+- Second review of #521: clock-aligned (`Sample.Clock`) samples carry no signed record on 1.6 or 2.x, as the documented scope excludes aligned records; signed 2.x samples on `TransactionEvent(Started)` / `(Ended)` carry `context` `Transaction.Begin` / `Transaction.End`; the records claim no identification detail (`IF` empty), since the station does not record how a tag was authorized; a register too large to write as plain decimal digits is not signed; `tampered_payload` with no reading throws instead of corrupting the header.
+- Not changed: a message signed before a restart and still queued offline is resent as it was. Keys are ephemeral by design (#315), so its records fail against the new key, which is what a station that lost its key sends. Documented.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): the above, and `ChangeConfiguration` as a way to set the mode scoped to 1.6J.

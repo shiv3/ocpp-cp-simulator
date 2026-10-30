@@ -200,6 +200,30 @@ const rawFrameOutcomeSchema = z.object({
   closed: z.string().nullable(),
 });
 /**
+ * Base64 text (RFC 4648, padded, no whitespace): `get_15118_ev_certificate`'s
+ * `exiRequest` (#537). One character class and a bounded tail, so the check
+ * stays linear on a long input.
+ */
+const BASE64_STR = NON_EMPTY_STR.regex(/^[A-Za-z0-9+/]*={0,2}$/, {
+  message: "must be base64",
+}).refine((value) => value.length % 4 === 0, {
+  message: "base64 length must be a multiple of 4",
+});
+/** `get_15118_ev_certificate`'s result (#537): every CALLRESULT payload, as
+ *  the CSMS sent it; a CALLERROR answering the last request; or `noAnswer`
+ *  when a repeated request got none. */
+const get15118EVCertificateResultSchema = z.object({
+  responses: z.array(z.unknown()),
+  callError: z
+    .object({
+      errorCode: z.string(),
+      errorDescription: z.string(),
+      errorDetails: z.unknown(),
+    })
+    .optional(),
+  noAnswer: z.enum(["timeout", "dropped"]).optional(),
+});
+/**
  * `extend_scenario_wait`'s `seconds` (#240): a whole number of seconds,
  * 1–3600. Exported for the same reason as `dataTransferDataSchema`.
  */
@@ -829,6 +853,36 @@ export const METHODS = {
     // SignCertificateRequest.csr is string[0..5500] (1.6, 2.0.1, 2.1).
     params: z.object({ csr: NON_EMPTY_STR.max(5500).optional() }),
     result: ANY,
+  },
+  // #537: 2.0.1 / 2.1 Get15118EVCertificate (M01 / M02). The caller stands
+  // in for the EV: the station relays the EXI request and the result is the
+  // CSMS's answers. Bounds are 2.1's; a 2.0.1 station refuses what its own
+  // schema does not admit (the 2.1 fields, exiRequest over 5600).
+  get_15118_ev_certificate: {
+    params: z.object({
+      iso15118SchemaVersion: NON_EMPTY_STR.max(50).describe(
+        "ISO 15118 schema version of the EV session, e.g. urn:iso:15118:2:2013:MsgDef",
+      ),
+      action: z.enum(["Install", "Update"]),
+      exiRequest: BASE64_STR.max(11000).describe(
+        "The EV's CertificateInstallationReq / CertificateUpdateReq, EXI, base64",
+      ),
+      maximumContractCertificateChains: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe(
+          "OCPP 2.1, ISO 15118-20 sessions only; the station then repeats the request while remainingContracts > 0",
+        ),
+      prioritizedEMAIDs: z
+        .array(NON_EMPTY_STR.max(255))
+        .min(1)
+        .max(8)
+        .optional()
+        .describe("OCPP 2.1, ISO 15118-20 sessions only"),
+    }),
+    result: get15118EVCertificateResultSchema,
   },
 
   // -- connector --

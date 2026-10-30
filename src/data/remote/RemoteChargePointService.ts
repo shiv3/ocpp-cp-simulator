@@ -19,6 +19,10 @@ import type {
   RawFrameOutcome,
   RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
+import type {
+  Get15118EVCertificateRequest,
+  Get15118EVCertificateResult,
+} from "../../cp/domain/security/get15118EVCertificate";
 
 import type {
   ChargePointEvent,
@@ -959,6 +963,19 @@ export class RemoteChargePointService implements ChargePointService {
       "send_raw_frame",
       request,
     )) as RawFrameOutcome;
+  }
+
+  async get15118EVCertificate(
+    id: string,
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult> {
+    const { prioritizedEMAIDs, ...rest } = request;
+    return (await this.runCpRpc(id, "get_15118_ev_certificate", {
+      ...rest,
+      ...(prioritizedEMAIDs !== undefined
+        ? { prioritizedEMAIDs: [...prioritizedEMAIDs] }
+        : {}),
+    })) as Get15118EVCertificateResult;
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {

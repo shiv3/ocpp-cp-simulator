@@ -23,6 +23,7 @@ import type {
   OcppCallRequest,
   RawFrameRequest,
 } from "../cp/domain/types/OcppCall";
+import type { Get15118EVCertificateRequest } from "../cp/domain/security/get15118EVCertificate";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -298,6 +299,12 @@ export async function handleJsonCommand(
     case "send_raw_frame":
       // #393: same schema as the control plane's.
       return ops.sendRawFrame(rawFrameRequest(params));
+
+    case "get_15118_ev_certificate":
+      // #537: the station relays the EXI request as the EV would; the
+      // CSMS's answers are the result line. Validated against the daemon's
+      // own schema, like send_ocpp_call.
+      return ops.get15118EVCertificate(get15118EVCertificateRequest(params));
 
     // #452: the Authorization Cache test seam. Seed and clear act whatever
     // the cache switch says.
@@ -713,6 +720,19 @@ function seedEntries(
 }
 
 /** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
+function get15118EVCertificateRequest(
+  params: Record<string, unknown>,
+): Get15118EVCertificateRequest {
+  const parsed = METHODS.get_15118_ev_certificate.params.safeParse(params);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
+  }
+  return parsed.data;
+}
+
 function ocppCallRequest(params: Record<string, unknown>): OcppCallRequest {
   const parsed = METHODS.send_ocpp_call.params.safeParse(params);
   if (!parsed.success) {

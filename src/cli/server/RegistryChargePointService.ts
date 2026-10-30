@@ -14,6 +14,10 @@ import type {
   RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
 import type {
+  Get15118EVCertificateRequest,
+  Get15118EVCertificateResult,
+} from "../../cp/domain/security/get15118EVCertificate";
+import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
@@ -321,6 +325,13 @@ export class RegistryChargePointService implements ChargePointService {
     request: RawFrameRequest,
   ): Promise<RawFrameOutcome> {
     return this.requireService(id).sendRawFrame(request);
+  }
+
+  async get15118EVCertificate(
+    id: string,
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult> {
+    return this.requireService(id).get15118EVCertificate(request);
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {

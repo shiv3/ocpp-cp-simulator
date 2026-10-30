@@ -97,6 +97,28 @@ describe("LocalChargePointService A1.1d port methods", () => {
     expect(spy).toHaveBeenCalledWith(request);
   });
 
+  it("relays Get15118EVCertificate through the local charge point (#537)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const answer = {
+      responses: [{ status: "Accepted", exiResponse: "BBBB" }],
+    };
+    const spy = vi
+      .spyOn(setup.chargePoint, "get15118EVCertificate")
+      .mockResolvedValue(answer);
+    const request = {
+      iso15118SchemaVersion: "urn:iso:15118:2:2013:MsgDef",
+      action: "Update" as const,
+      exiRequest: "AAAA",
+    };
+
+    await expect(
+      service.get15118EVCertificate("CP-PORT", request),
+    ).resolves.toBe(answer);
+
+    expect(spy).toHaveBeenCalledWith(request);
+  });
+
   it("sends FirmwareStatusNotification through the local charge point", async () => {
     const setup = await serviceWithChargePoint();
     service = setup.service;

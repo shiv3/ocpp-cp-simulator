@@ -24,17 +24,17 @@
 // acts late, after the bench may have given up, which is what a slow handler
 // looks like (#523). That is what reaches the RPC stage of `cycleBoundMs`, the
 // wait for an in-flight `cp.create_many`, and the `not_found` reconciliation.
-import { Server as SocketIoBunEngine } from "@socket.io/bun-engine";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Server as SocketIoServer } from "socket.io";
 import { io } from "socket.io-client";
 
 import {
+  cpIdsVia,
   listCpIds,
   RELAY_UPSTREAM_CLOSED,
+  serveSocketIo,
   startBench,
   startDaemon,
   startMockCsms,
@@ -49,6 +49,53 @@ import {
 
 /** Exit code of the bench's SIGINT path: `cleanup()` ran, then `exit(130)`. */
 const SIGINT_EXIT = 130;
+
+/** One charge point on the active axis, against `csmsUrl`, with no
+ *  measurement window short enough to end the run before the SIGINT the case
+ *  sends. A 30s heartbeat keeps Heartbeats out of the 1.6 serial queue while
+ *  a conf is held back, so nothing but the cycle under test is queued behind
+ *  it. */
+function benchArgs(
+  csmsUrl: string,
+  daemonUrl: string,
+  outDir: string,
+  txIntervalSec: number,
+): string[] {
+  return [
+    "--csms-url",
+    csmsUrl,
+    "--daemon-url",
+    daemonUrl,
+    "--counts",
+    "1",
+    "--tx-interval",
+    String(txIntervalSec),
+    "--duration",
+    "60",
+    "--heartbeat-interval",
+    "30",
+    "--warmup",
+    "0",
+    "--settle-timeout",
+    "10",
+    "--out",
+    join(outDir, "unused.json"),
+  ];
+}
+
+/** A mock or relay hook that interrupts the bench the first time `name` is
+ *  seen. `getBench` is read at call time: the bench starts after the hook is
+ *  registered. */
+function sigintOnFirst(
+  name: string,
+  getBench: () => RunningBench | null,
+): (call: { action?: string; method?: string; nth: number }) => void {
+  return ({ action, method, nth }) => {
+    if ((action ?? method) === name && nth === 1) {
+      getBench()?.proc.kill("SIGINT");
+    }
+  };
+}
 
 describe("the slow mock CSMS itself (#330)", () => {
   it("delays one action and stalls another after N calls", async () => {
@@ -97,21 +144,12 @@ describe("the slow control-plane relay itself (#523)", () => {
     // A stand-in daemon that drops the socket on every RPC instead of
     // answering. socket.io-client never calls an ack on a disconnected
     // socket, so without the relay's synthetic ack `drained()` would hang.
-    const fake = new SocketIoServer({ serveClient: false });
-    const engine = new SocketIoBunEngine({ path: "/socket.io/" });
-    fake.bind(engine);
-    fake.on("connection", (socket) => {
+    const fake = serveSocketIo();
+    fake.io.on("connection", (socket) => {
       socket.on("rpc", () => socket.disconnect(true));
     });
-    const handler = engine.handler();
-    const server = Bun.serve({
-      port: 0,
-      idleTimeout: handler.idleTimeout,
-      websocket: handler.websocket,
-      fetch: (req, srv) => engine.handleRequest(req, srv as never),
-    });
     const relay = startSlowControlPlane({
-      daemonUrl: `http://127.0.0.1:${server.port}`,
+      daemonUrl: `http://127.0.0.1:${fake.port}`,
     });
     const client = io(relay.url, { path: "/socket.io/" });
     try {
@@ -136,8 +174,7 @@ describe("the slow control-plane relay itself (#523)", () => {
     } finally {
       client.disconnect();
       relay.stop();
-      void fake.close();
-      server.stop(true);
+      fake.stop();
     }
   }, 30_000);
 });
@@ -156,33 +193,8 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
     if (outDir) rmSync(outDir, { recursive: true, force: true });
   });
 
-  /** One charge point on the active axis, against `csms`, with no
-   *  measurement window short enough to end the run before the SIGINT the
-   *  case sends. A 30s heartbeat keeps Heartbeats out of the 1.6 serial queue
-   *  while a conf is held back, so nothing but the cycle under test is queued
-   *  behind it. */
-  function activeArgs(csms: MockCsms, txIntervalSec: number): string[] {
-    return [
-      "--csms-url",
-      csms.wsUrl,
-      "--daemon-url",
-      daemon.url,
-      "--counts",
-      "1",
-      "--tx-interval",
-      String(txIntervalSec),
-      "--duration",
-      "60",
-      "--heartbeat-interval",
-      "30",
-      "--warmup",
-      "0",
-      "--settle-timeout",
-      "10",
-      "--out",
-      join(outDir, "unused.json"),
-    ];
-  }
+  const activeArgs = (csms: MockCsms, txIntervalSec: number): string[] =>
+    benchArgs(csms.wsUrl, daemon.url, outDir, txIntervalSec);
 
   it("waits out an in-flight cycle's own bound before closing its transaction", async () => {
     // Guards 4 and 5 of #330: teardown settles in-flight cycles first, and
@@ -205,11 +217,7 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
     let bench: RunningBench | null = null;
     const csms = startMockCsms({
       behaviour: { StartTransaction: { delayMs: 12_000 } },
-      onCall: ({ action, nth }) => {
-        if (action === "StartTransaction" && nth === 1) {
-          bench?.proc.kill("SIGINT");
-        }
-      },
+      onCall: sigintOnFirst("StartTransaction", () => bench),
     });
     try {
       bench = startBench(activeArgs(csms, 2), {
@@ -366,11 +374,7 @@ describe("fleet-bench teardown under a slow CSMS (#330)", () => {
     let bench: RunningBench | null = null;
     const csms = startMockCsms({
       behaviour: { StopTransaction: { delayMs: 5_000 } },
-      onCall: ({ action, nth }) => {
-        if (action === "StopTransaction" && nth === 1) {
-          bench?.proc.kill("SIGINT");
-        }
-      },
+      onCall: sigintOnFirst("StopTransaction", () => bench),
     });
     try {
       bench = startBench(activeArgs(csms, 4));
@@ -410,47 +414,26 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
     if (outDir) rmSync(outDir, { recursive: true, force: true });
   });
 
-  function relayArgs(
+  const relayArgs = (
     csms: MockCsms,
     relay: SlowControlPlane,
     txIntervalSec: number,
-  ): string[] {
-    return [
-      "--csms-url",
-      csms.wsUrl,
-      "--daemon-url",
-      relay.url,
-      "--counts",
-      "1",
-      "--tx-interval",
-      String(txIntervalSec),
-      "--duration",
-      "60",
-      "--heartbeat-interval",
-      "30",
-      "--warmup",
-      "0",
-      "--settle-timeout",
-      "10",
-      "--out",
-      join(outDir, "unused.json"),
-    ];
-  }
+  ): string[] => benchArgs(csms.wsUrl, relay.url, outDir, txIntervalSec);
 
   /** The daemon's charge points once every held request has landed, read
    *  from the daemon itself rather than through the relay; then whatever is
    *  left is deleted, so a red case does not leak into the next one. */
   async function daemonCpIdsAfter(relay: SlowControlPlane): Promise<string[]> {
     await relay.drained();
-    const ids = await listCpIds(daemon.url);
-    await withControlPlane(daemon.url, async (rpc) => {
+    return withControlPlane(daemon.url, async (rpc) => {
+      const ids = await cpIdsVia(rpc);
       for (const cpId of ids) await rpc("cp.delete", { cpId });
+      return ids;
     });
-    return ids;
   }
 
-  const deletesOf = (relay: SlowControlPlane): RelayedRpc[] =>
-    relay.rpcs().filter((c) => c.method === "cp.delete");
+  const rpcsOf = (relay: SlowControlPlane, method: string): RelayedRpc[] =>
+    relay.rpcs().filter((c) => c.method === method);
 
   it("reconciles charge points a cp.create_many registered after its client deadline", async () => {
     // #523. The relay holds `cp.create_many` until the daemon has answered
@@ -476,11 +459,7 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
       onAnswer: ({ method }) => {
         if (method === "cp.delete") releaseCreate();
       },
-      onRpc: ({ method, nth }) => {
-        if (method === "cp.create_many" && nth === 1) {
-          bench?.proc.kill("SIGINT");
-        }
-      },
+      onRpc: sigintOnFirst("cp.create_many", () => bench),
     });
     try {
       bench = startBench(relayArgs(csms, relay, 4), {
@@ -499,13 +478,13 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
       // Preconditions: the create really did land after the client deadline,
       // and the charge point was first answered `not_found`, then deleted.
       expect(run.stderr).toContain("TEST-ONLY timing overrides in effect");
-      const creates = relay.rpcs().filter((c) => c.method === "cp.create_many");
+      const creates = rpcsOf(relay, "cp.create_many");
       expect(creates).toHaveLength(1);
       expect(creates[0]!.ack?.ok).toBe(true);
       expect(
         creates[0]!.answeredAtMs! - creates[0]!.receivedAtMs,
       ).toBeGreaterThan(3_000);
-      const deletes = deletesOf(relay);
+      const deletes = rpcsOf(relay, "cp.delete");
       expect(deletes.map((c) => c.ack?.error?.code ?? "ok")).toEqual([
         "not_found",
         "ok",
@@ -533,11 +512,7 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
     const relay = startSlowControlPlane({
       daemonUrl: daemon.url,
       holdRequestMs: ({ method }) => (method === "cp.create_many" ? 2_000 : 0),
-      onRpc: ({ method, nth }) => {
-        if (method === "cp.create_many" && nth === 1) {
-          bench?.proc.kill("SIGINT");
-        }
-      },
+      onRpc: sigintOnFirst("cp.create_many", () => bench),
     });
     try {
       bench = startBench(relayArgs(csms, relay, 4), {
@@ -548,14 +523,14 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
 
       expect(run.timedOut).toBe(false);
       expect(run.exitCode).toBe(SIGINT_EXIT);
-      expect(deletesOf(relay).map((c) => c.ack?.error?.code ?? "ok")).toEqual([
-        "ok",
-      ]);
+      expect(
+        rpcsOf(relay, "cp.delete").map((c) => c.ack?.error?.code ?? "ok"),
+      ).toEqual(["ok"]);
       expect(run.stderr).not.toContain("reconciliation");
       expect(leftOnDaemon).toEqual([]);
       // Preconditions: the create was held, answered, and answered before the
       // delete was sent.
-      const creates = relay.rpcs().filter((c) => c.method === "cp.create_many");
+      const creates = rpcsOf(relay, "cp.create_many");
       expect(creates).toHaveLength(1);
       expect(creates[0]!.ack?.ok).toBe(true);
       expect(
@@ -586,11 +561,7 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
       daemonUrl: daemon.url,
       holdRequestMs: ({ method, nth }) =>
         method === "stop_transaction" && nth === 1 ? 8_000 : 0,
-      onRpc: ({ method, nth }) => {
-        if (method === "stop_transaction" && nth === 1) {
-          bench?.proc.kill("SIGINT");
-        }
-      },
+      onRpc: sigintOnFirst("stop_transaction", () => bench),
     });
     try {
       bench = startBench(relayArgs(csms, relay, 2), {
@@ -603,8 +574,8 @@ describe("fleet-bench teardown under a slow control plane (#523, #330)", () => {
 
       expect(run.timedOut).toBe(false);
       expect(run.exitCode).toBe(SIGINT_EXIT);
-      const stops = relay.rpcs().filter((c) => c.method === "stop_transaction");
-      const deletes = deletesOf(relay);
+      const stops = rpcsOf(relay, "stop_transaction");
+      const deletes = rpcsOf(relay, "cp.delete");
       expect(deletes).toHaveLength(1);
       // The discriminating pair: the cycle's stop was carried out, and the
       // charge point was deleted only after the daemon had answered it.

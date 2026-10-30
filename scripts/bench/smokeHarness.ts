@@ -5,8 +5,9 @@
 //
 // Used by `fleetBench.smoke.bun.test.ts` (#302), which needs a CSMS that
 // answers at once, and by `fleetBench.slowpath.test-bun.ts` (#330, #523),
-// which needs a CSMS and a control plane that can be told to be slow. Both drive the same processes, so
-// the helpers live here once rather than drifting apart in two copies.
+// which needs a CSMS and a control plane that can be told to be slow. Both
+// drive the same processes, so the helpers live here once rather than
+// drifting apart in two copies.
 import { Server as SocketIoBunEngine } from "@socket.io/bun-engine";
 import type { Subprocess } from "bun";
 import { join } from "node:path";
@@ -407,14 +408,56 @@ export interface SlowControlPlane {
   stop(): void;
 }
 
+export interface SocketIoEndpoint {
+  readonly io: SocketIoServer;
+  readonly port: number;
+  stop(): void;
+}
+
+/** A socket.io server on an ephemeral port, at the `/socket.io/` path the
+ *  daemon uses. Any other request goes to `fallback`, or is answered 404. */
+export function serveSocketIo(
+  fallback?: (req: Request) => Response | Promise<Response>,
+): SocketIoEndpoint {
+  const io = new SocketIoServer({ serveClient: false });
+  const engine = new SocketIoBunEngine({ path: "/socket.io/" });
+  io.bind(engine);
+  const handler = engine.handler();
+  const server = Bun.serve({
+    port: 0,
+    idleTimeout: handler.idleTimeout,
+    websocket: handler.websocket,
+    fetch(req, srv) {
+      if (!fallback || new URL(req.url).pathname.startsWith("/socket.io/")) {
+        return engine.handleRequest(req, srv as never);
+      }
+      return fallback(req);
+    },
+  });
+  return {
+    io,
+    port: server.port!,
+    stop: () => {
+      void io.close();
+      server.stop(true);
+    },
+  };
+}
+
 export function startSlowControlPlane(
   options: SlowControlPlaneOptions,
 ): SlowControlPlane {
   const daemonUrl = options.daemonUrl.replace(/\/$/, "");
-  const relay = new SocketIoServer({ serveClient: false });
-  const engine = new SocketIoBunEngine({ path: "/socket.io/" });
-  relay.bind(engine);
-  const handler = engine.handler();
+  const endpoint = serveSocketIo((req) => {
+    const url = new URL(req.url);
+    return fetch(`${daemonUrl}${url.pathname}${url.search}`, {
+      method: req.method,
+      headers: req.headers,
+      body:
+        req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+    });
+  });
+  const relay = endpoint.io;
   const log: RelayedRpc[] = [];
   const counts = new Map<string, number>();
   const holds = new Set<ReturnType<typeof setTimeout>>();
@@ -546,26 +589,8 @@ export function startSlowControlPlane(
     });
   });
 
-  const server = Bun.serve({
-    port: 0,
-    idleTimeout: handler.idleTimeout,
-    websocket: handler.websocket,
-    async fetch(req, srv) {
-      const url = new URL(req.url);
-      if (url.pathname.startsWith("/socket.io/")) {
-        return engine.handleRequest(req, srv as never);
-      }
-      return fetch(`${daemonUrl}${url.pathname}${url.search}`, {
-        method: req.method,
-        headers: req.headers,
-        body:
-          req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
-      });
-    },
-  });
-
   return {
-    url: `http://127.0.0.1:${server.port}`,
+    url: `http://127.0.0.1:${endpoint.port}`,
     rpcs: () => [...log],
     drained: () =>
       pending === 0
@@ -578,8 +603,7 @@ export function startSlowControlPlane(
       // each daemon socket's `disconnect` handler.
       for (const upstream of upstreams) upstream.disconnect();
       upstreams.clear();
-      void relay.close();
-      server.stop(true);
+      endpoint.stop();
     },
   };
 }
@@ -634,13 +658,18 @@ export async function withControlPlane<T>(
   }
 }
 
+/** The daemon's charge point ids, through an open control-plane `rpc`. */
+export async function cpIdsVia(
+  rpc: (method: string, params: unknown) => Promise<unknown>,
+): Promise<string[]> {
+  const result = (await rpc("cp.list", {})) as
+    { cps?: { cpId: string }[] } | { cpId: string }[];
+  const cps = Array.isArray(result) ? result : (result.cps ?? []);
+  return cps.map((c) => c.cpId);
+}
+
 export async function listCpIds(daemonUrl: string): Promise<string[]> {
-  return withControlPlane(daemonUrl, async (rpc) => {
-    const result = (await rpc("cp.list", {})) as
-      { cps?: { cpId: string }[] } | { cpId: string }[];
-    const cps = Array.isArray(result) ? result : (result.cps ?? []);
-    return cps.map((c) => c.cpId);
-  });
+  return withControlPlane(daemonUrl, cpIdsVia);
 }
 
 // ---------------------------------------------------------------------------

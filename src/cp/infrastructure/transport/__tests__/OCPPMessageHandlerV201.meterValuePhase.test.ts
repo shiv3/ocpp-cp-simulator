@@ -70,6 +70,8 @@ function createMockChargePoint(connector: unknown): ChargePoint {
     signedMeterFor: vi.fn(() => null),
     configuration: {
       meterValuesSampledData: vi.fn(() => ["Current.Import"]),
+      // #529: a written TransactionEvent arms its MessageTimeout.
+      messageTimeout: vi.fn(() => 30),
     },
   } as unknown as ChargePoint;
 }

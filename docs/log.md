@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Log
@@ -2035,3 +2035,99 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI](entities/cli.md): `--tx-updated-meter-values`. Not daemon-only, so `daemon.md` is unchanged.
 - [State persistence](concepts/state-persistence.md): the new column and schema version 22.
 - [GitHub issues](sources/github-issues.md): #347.
+
+## [2026-10-30] ingest | Text redactor: escaped JSON and nested quoted assignments (#531)
+
+- A value opened by an escaped quote (`{\"privateKey\":\"S1\"}`, JSON logged inside a string, up to three serializations) is redacted up to the quote after the same backslash run, keeping the escape so the string still parses; an escaped bare number becomes `\"[redacted]\"`. On a quoted value's opening line, a secret-named assignment before the closing quote makes the value fail closed to the end of the line (`password="a privateKey='S1 x" y S2'`).
+- An object or array held by an escaped-JSON member is redacted to the end of the string holding it (else of the line), and a PEM behind an escaped quote follows the PEM rule across lines.
+- [Log format → Redaction](concepts/log-format.md#redaction): the first-line rule and the escaped-JSON paragraph, with its limits (more than seven backslashes; the `{ key, value }`, `variable` and `vpn.key` shapes still need unescaped JSON; a fail-closed value cuts the JSON inside the string).
+- [GitHub issues](sources/github-issues.md): #531.
+
+## [2026-10-30] ingest | Long quoted secrets fail closed under Bun (#547)
+
+- Under Bun a quoted secret of some 50k characters or more was logged in clear: JavaScriptCore gives up on the quoted-value regex where V8 completes it. A quoted secret-named assignment the regex left unredacted is now cut in code (first unescaped matching quote on its line; a PEM, or no such quote, to the end of the message). No change where the regex completed (old vs new identical on the production secret names, Node and Bun).
+- The redaction tests also run under `bun test` (`redaction.bun.test.ts`), so the #519 timing row now runs on both runtimes.
+- [Log format → Redaction](concepts/log-format.md#redaction): the fallback.
+
+## [2026-10-30] ingest | EVConnectionTimeOut ends a started 2.x transaction (#549)
+
+- On OCPP 2.0.1 / 2.1, when `TxCtrlr.EVConnectionTimeOut` elapses with the connector still `Preparing` and a transaction started, the station sends `TransactionEvent(Ended)` with `triggerReason` `EVConnectTimeout` and `stoppedReason` `Timeout` (E03.FR.05). Without a transaction, and on 1.6, the Preparing → Finishing move is unchanged.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): new "EV connection timeout" item.
+
+## [2026-10-30] ingest | Expert raw frames, level C of #389 (#393)
+
+- `ChargePoint.sendRawFrame` / `send_raw_frame` (control plane, JSON-Lines, MCP): one text frame written as given, through the normal pipeline and log but outside the 1.6 serial CALL queue; replies correlated best effort (frame id, or a CALLERROR with id `""` / `"-1"`) and kept from the station's handlers; a close is reported and the next session is unaffected. SOAP and a closed socket are refused.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): new section; the "malformed frames are out of scope" note now points to it.
+- [Control plane](concepts/control-plane.md#cp-command-methods): `send_raw_frame` row.
+- [MCP endpoint](entities/mcp-endpoint.md): `send_raw_frame` tool (30 curated tools).
+
+## [2026-10-30] ingest | Raw frames: review follow-ups (#393)
+
+- A reply counts only once the frame is written; the wait runs from the moment the transport takes the frame, so a network-sim delay counts against it and the call returns under the RPC deadline.
+- `closed` is set at once for every end of the connection (CSMS / network close, disconnect, reset, simulated drop, removal), with its cause.
+- A frame dropped while the socket stays open (full network-sim queue, failed write) is a `disconnected` error rather than a `closed` result.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): the above.
+
+## [2026-10-30] ingest | Bench teardown under a slow control plane (#523, #330)
+
+- New in `scripts/bench/smokeHarness.ts`: `startSlowControlPlane`, a socket.io relay the bench reaches through `--daemon-url`. It opens one daemon socket per bench socket with the same handshake `auth`, re-emits every event both ways (acks included), proxies HTTP (`/v1/healthz`, `/metrics`), and holds chosen RPC **requests** (for a time, or until a promise settles), so the daemon acts after the bench may have given up. A closed daemon socket reaches the bench as a dropped transport and its unanswered RPCs get a `relay_upstream_closed` ack; no other outage is modelled. No production code changed.
+- Three cases in `scripts/bench/fleetBench.slowpath.test-bun.ts`, each red under its mutation: a `cp.create_many` registered after its client deadline is reconciled (removing the `reconcileMissingIds` call leaks the charge point); teardown waits for an in-flight create before its first delete sweep (removing the wait gets a `not_found` first); a cycle's slow `stop_transaction` is answered before its charge point is deleted (dropping the RPC term from `cycleBoundMs` deletes it first). The last is asserted on RPC order, since teardown's re-stop leaves the CSMS identical either way. `test:bench-slow` now takes about 56s locally (was 36s).
+- [Source: bench README](sources/bench-readme.md): slow-path suite, harness, "Not covered by a run-level test".
+- [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): what the slow job pins, and its wall-clock.
+- [Testing strategy](analyses/testing-strategy.md): the slow job's scope and wall-clock.
+- [GitHub issues](sources/github-issues.md): #330, #523.
+- Raw sources changed in the same PR: `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/fleet-bench.ts` (comment only), `scripts/bench/README.md`.
+
+## [2026-10-30] ingest | Composite limits floored to 0.1 when converted (#524)
+
+- The 1.6 `GetCompositeScheduleResponse` schema requires `chargingSchedulePeriod[].limit` to be a multiple of 0.1, but a converted limit went out unrounded: a 3000 W / 1-phase `ChargePointMaxProfile` asked in A read 13.043478… A. `compositeLimitInUnit` now floors a converted limit (W → A and A → W) to 0.1, never below 0, with a 1e-9 tolerance so float noise (4.1 A × 230 V = 942.9999999999999 W) is not pushed a step down. A limit returned in its own unit stays as the CSMS set it.
+- The helper is shared, so 2.0.1 and 2.1 round the same way, though their schemas declare no `multipleOf`.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence states the rounding.
+- [GitHub issues](sources/github-issues.md): #524.
+
+## [2026-10-30] ingest | 2.x TransactionEvent message timeout (#529)
+
+- E13 also counts a TransactionEvent left without a CALLRESULT or CALLERROR within `OCPPCommCtrlr.MessageTimeout[Default]` (2.0.1 / 2.1 §2.1.3, ReadOnly, default 30 s, 2.x-only key) as a failed transmission: resent and discarded under the same `MessageAttempts` / `MessageAttemptInterval` rules as a CALLERROR (#490). Late answers: the first CALLRESULT of any transmission settles the message and cancels a waiting resend; later answers, and a CALLERROR for an already timed-out transmission, change nothing; a late answer after the discard is ignored.
+- `transactionMessageRejected` / `transactionMessageDiscarded` gain `action` and `reason` (`callError` / `timeout`); `errorCode` is set for `callError` only. Timeline format `1.3`.
+- [OCPP versions and transports → Transaction message retries](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x), [Operational timeline](concepts/operational-timeline.md#kinds), [Charging sessions](concepts/charging-sessions.md), [GitHub issues](sources/github-issues.md): #529.
+
+## [2026-10-30] ingest | 2.x offline TransactionEvent queue (#528)
+
+- E11.FR.01/02/07 (2.0.1 and 2.1 Part 2): the 2.x handler queues the TransactionEvents it cannot deliver — produced offline, dropped on close, written but unanswered at the close, or an E13 resend still waiting — once each, in production order, in the `pending_messages` table 1.6 uses (in memory without `--state-db`). After the next Boot Accepted they are replayed in order with `offline: true`, set at replay time, and their original `seqNo`; E13 applies to a replay with fresh counters. A new event joins the queue while it waits for its replay. Other 2.x messages are still dropped offline (`QueueAllMessages` false, not implemented).
+- [OCPP versions and transports → E11 offline queue](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): new section; the E13 limitation paragraph no longer says a close drops the resend.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): 2.x connection loss; the "no 2.x offline queue" limit is replaced by the E14 `messagesInQueue` one.
+- [State persistence](concepts/state-persistence.md): `pending_messages` is no longer 1.6-only.
+- [GitHub issues](sources/github-issues.md): #528.
+- Review follow-up: a replay the socket refuses while the connection stays up (`not_accepted`, network-sim overflow) is put back at the head of the queue with its original row and a `warn`, instead of being lost; the replay stops there. Each handler drops, with a `warn`, a `pending_messages` row of the other protocol (`cp.update` can switch `ocppVersion` over the same `--state-db`). New events are held back by an explicit "awaiting replay" state rather than a non-empty queue. Wording: a queued payload carries `offline: true` when a replay is queued again, and only an event sent directly, not through the queue, never carries `offline`.
+
+## [2026-10-30] ingest | 2.x offline queue cleanups (#528)
+
+- A `pending_messages` row of the other protocol is now deleted when the handler's queue loads, with one `warn` listing the dropped actions, instead of being skipped at replay; a station holding only such rows no longer starts by holding new TransactionEvents back. A replay the socket refuses stays at the head of the queue (the queue's `flush`) instead of being put back.
+- [OCPP versions and transports → E11 offline queue](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): both points.
+
+## [2026-10-30] ingest | Variable monitoring follow-ups, part 1 (#538)
+
+- Hardwired and preconfigured monitors from a static catalog (`src/cp/domain/monitoring/monitorCatalog.ts`, ids from 1000001): reported by `GetMonitoringReport` (a fresh 2.x station answers `Accepted`), hardwired ones neither cleared (N06.FR.03) nor replaced (N04.FR.18), a replaced preconfigured one becomes custom (N04.FR.15). `SetMonitoringBase` is complete (N03.FR.03-FR.05); the base is stored in the `variable_monitors` row with id 0, without a schema change.
+- `MonitoringCtrlr` variables: `ItemsPerMessage` / `BytesPerMessage` with instances `SetVariableMonitoring` / `ClearVariableMonitoring` (advertised, not enforced), `ActiveMonitoringLevel`, `ActiveMonitoringBase`; runtime keys of 2.x stations only. `GetBaseReport` publishes `minLimit` / `maxLimit` of bounded integers (N04.FR.06) and `OptionList` + `valuesList`.
+- `SetVariableMonitoring` resolves `variable.instance` and refuses an unknown EVSE (`UnknownComponent`, N04.FR.03); events carry the `transactionId` of the monitor's EVSE (or of the only transaction for a `transaction` monitor); `cause` declined (N07.FR.05). `NotifyEvent` / `NotifyMonitoringReport` go out in parts of up to 100 items (`seqNo` / `tbc`): the spec's per-message variables bound CSMS requests, not station reports.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new sections (station's own monitors, MonitoringCtrlr variables, reports in parts), SetMonitoringBase, targets, events, persistence and limits rewritten.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [State persistence](concepts/state-persistence.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.
+
+## [2026-10-30] ingest | Variable monitoring follow-ups, part 2 (#538)
+
+- `Periodic` / `PeriodicClockAligned` monitors (N08): accepted on every mapped variable (an interval of at least 1 s, else `Rejected` `IntervalTooShort`), one `NotifyEvent` with trigger `Periodic` per tick (N08.FR.04-FR.07), on the `AlignedDataCtrlr.Interval` clock grid for the aligned type; timers run only while reporting is on. `GetMonitoringReport` selects them with `PeriodicMonitoring` (N02.FR.14), which no longer answers `NotSupported`; persisted ones are restored.
+- Runtime values as device-model variables: `EVSE.Power`, `EVSE.AvailabilityState`, `Connector.AvailabilityState` per EVSE and `ChargingStation.AvailabilityState`, redefined on change only; `EVSE` / `Connector` variables need an EVSE the station has in `GetVariables` / `SetVariables` too; `GetBaseReport` lists them per EVSE.
+- 2.1 `TargetDelta` / `TargetDeltaRelative` (N07.FR.22, FR.23) on `EVSE.Power`, which gets a `Target` attribute on 2.1 (B05 / B06); threshold semantics for `cleared`. N02.FR.23's `TargetDeltaMonitoring` criterion is absent from the 2.1 schema.
+- Offline queuing (N07.FR.04, N08.FR.03) stays pending for slice 538c.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): runtime values, Target attribute, monitor types, report criteria, periodic and TargetDelta evaluation, persistence, limits, and the #538 items table.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [State persistence](concepts/state-persistence.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.
+
+## [2026-10-30] ingest | Variable monitoring follow-ups, part 3 (#538)
+
+- Offline `NotifyEvent` queuing (N07.FR.04, N08.FR.03): new persisted 2.x key `OfflineQueuingSeverity` (`MonitoringCtrlr.OfflineQueuingSeverity`, ReadWrite, 0-9, default 0). From a close (or before the first connection) until the next `Accepted` boot, events of monitors at or below it go to the E11 queue (#528) as one row per report, count as told, and replay in production order among the TransactionEvents, cut into parts at send time, without `offline`; the others are held for the re-check of the `Accepted` boot, which runs after the replay. Periodic timers keep running offline and keep their period. Queued NotifyEvents alone never hold a live TransactionEvent back; a refused NotifyEvent replay at the head delays the TransactionEvents behind it, as a refused TransactionEvent would.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new "Offline queuing" section; periodic timers, MonitoringCtrlr variables, persistence, limits and the #538 items table updated.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) (E11), [State persistence](concepts/state-persistence.md): NotifyEvent rows in `pending_messages`.
+- Review fix: the offline queue keeps at most 1000 `NotifyEvent` reports per charge point (`MAX_QUEUED_NOTIFY_EVENTS`); past it the oldest report is dropped, never a TransactionEvent, with a `warn` at the first drop of an outage and one with the count at the replay. Pages: [OCPP 2.x variable monitoring](concepts/variable-monitoring.md) (offline queuing, limits), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) (E11).
+- Review fixes: a `PeriodicClockAligned` interval above a day fires on the grid of `value` seconds from the Unix epoch, not at every midnight (N08.FR.07); a `GetReport` `componentVariable` with an `evse` (and `connectorId`) keeps that EVSE only (B08.FR.11); removing a connector withdraws its EVSE's runtime keys and `EVSE.Power` target; a `Target` value must be a plain decimal; a stored hardwired monitor missing from the catalog is ignored and deleted; the `All`-after-`HardWiredOnly` duplicate and the `OfflineQueuingSeverity` default rationale are documented. Page: [OCPP 2.x variable monitoring](concepts/variable-monitoring.md) (runtime values, Target attribute, periodic monitors, offline queuing, SetMonitoringBase, persistence).
+- Review fixes: a `cp.update` stops the periodic timers of the instance it replaces (they kept queuing rows under its id); a `cp.delete` no longer leaves a `NotifyEvent` row for the deleted charge point; at the cap, the oldest report made only of `Periodic` events is dropped first, so a threshold crossing survives until no such report is left; after a restart, `eventId` continues past the highest one still queued; a queued report logs at `debug`, not `warn`. Pages: [OCPP 2.x variable monitoring](concepts/variable-monitoring.md) (offline queuing, NotifyEvent fields, limits), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) (E11).
+- Maintainer review (#541): an object or array behind an escaped name whose members were not escaped (`password\":{"d":"S1"}`) leaked past its first plain quote; the value is now read by bracket depth, strings of either quote style (escaped or not) not counted, and the redacted member keeps the closing bracket of its holder. Under Bun the `after a quoted name` and `escaped and nested values` timing rows take seconds because of `SENSITIVE_ASSIGNMENT` on `password="___…` — `main`'s pattern, not this change's — so the second gets a Bun budget like the first ([Log format](concepts/log-format.md)).

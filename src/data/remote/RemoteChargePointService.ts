@@ -16,6 +16,8 @@ import type {
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
 
 import type {
@@ -946,6 +948,17 @@ export class RemoteChargePointService implements ChargePointService {
       "send_ocpp_call",
       request,
     )) as OcppCallOutcome;
+  }
+
+  async sendRawFrame(
+    id: string,
+    request: RawFrameRequest,
+  ): Promise<RawFrameOutcome> {
+    return (await this.runCpRpc(
+      id,
+      "send_raw_frame",
+      request,
+    )) as RawFrameOutcome;
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {

@@ -13,6 +13,7 @@ sources:
   - "issue #490"
   - "issue #488"
   - "issue #528"
+  - "issue #549"
   - src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
 related:
   - operational-timeline.md
@@ -24,7 +25,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Charging sessions
@@ -124,8 +125,11 @@ or `Ended`) is not a failed start, unlike 1.6 (#490). OCPP E13 treats it as a
 failure to process the message: the station keeps the transaction running,
 resends the message and finally discards it (see
 [Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)).
-`transactionMessageRejected` and `transactionMessageDiscarded` report it.
-The recorder does not listen to them, so the session stays `active`.
+A TransactionEvent left unanswered within `MessageTimeout` is handled the
+same way (#529). `transactionMessageRejected` and
+`transactionMessageDiscarded` report both, with `reason` `callError` or
+`timeout`. The recorder does not listen to them, so the session stays
+`active`.
 
 ## Recording
 
@@ -219,23 +223,40 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   StatusNotification `Available`, as before, while a scenario plug-out stays a
   no-op.
 
+- **EV connection timeout.** Starting a transaction before the cable is in
+  puts the connector in `Preparing` and starts the `ConnectionTimeOut` timer
+  (2.x `TxCtrlr.EVConnectionTimeOut`, default 60 s; `0` disables it). If the
+  connector is still `Preparing` when it fires:
+
+  | Situation              | OCPP 1.6                       | OCPP 2.0.1 / 2.1                                                                                                                                                                         |
+  | ---------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | No transaction started | §4.9 B6: Preparing → Finishing | Preparing → Finishing (StatusNotification `Occupied`)                                                                                                                                    |
+  | Transaction started    | Preparing → Finishing          | E03.FR.05: `Ended`, `triggerReason` `EVConnectTimeout`, `stoppedReason` `Timeout`; then Available while auto-reset is on ([#549](https://github.com/shiv3/ocpp-cp-simulator/issues/549)) |
+
+  On 1.6 an accepted StartTransaction moves the connector to `Charging`, so
+  the timer is cleared before it can fire on a started transaction.
+
 - **Connection loss.** A WebSocket close never ends a transaction, on any
   version, and no setting makes it (1.6 §3.7, 2.x E11). On OCPP-J 1.6 the
   transaction-related messages produced offline (StartTransaction,
   StopTransaction, MeterValues with a transaction) are queued (in
   [`pending_messages`](state-persistence.md) with `--state-db`, in memory
   otherwise) and replayed after the next accepted boot, at most
-  `TransactionMessageAttempts` times. On 2.x there is
-  no offline queue: a TransactionEvent produced offline is dropped, not
-  replayed with `offline: true` as E11.FR.01/FR.02 require; the transaction
-  itself survives, and its later events carry the same `transactionId`.
+  `TransactionMessageAttempts` times. On 2.x the TransactionEvents
+  (`Started`, `Updated`, `Ended`) go to the same queue (E11.FR.01): those
+  produced offline, those written but unanswered when the socket closed, and
+  a pending E13 resend. After the next accepted boot they are replayed in the
+  order they were produced, with `offline: true` and the `seqNo` they were
+  built with (E11.FR.02); see
+  [E11 offline queue](ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent)
+  ([#528](https://github.com/shiv3/ocpp-cp-simulator/issues/528)). The
+  transaction itself survives, and its later events carry the same
+  `transactionId`.
 
 ## Limits
 
-- A 2.x TransactionEvent produced while offline is lost: there is no 2.x
-  offline queue, so nothing is replayed with `offline: true` (E11.FR.02); see
-  [EV-side disconnect and connection loss](#ev-side-disconnect-and-connection-loss)
-  ([#528](https://github.com/shiv3/ocpp-cp-simulator/issues/528)).
+- 2.x `GetTransactionStatus` still answers `messagesInQueue: false`, even
+  while the E11 queue holds TransactionEvents of the transaction (E14).
 - The E10 resume is not modelled: plugging the cable back in during a
   transaction suspended by an EV-side disconnect sends `Preparing`, not a
   TransactionEvent `Updated` with `triggerReason` `CablePluggedIn` followed by

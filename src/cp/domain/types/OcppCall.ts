@@ -43,10 +43,42 @@ export type OcppCallRejection =
   /** Fails the outgoing schema check and `skipValidation` is not set. */
   | "invalid_payload"
   /** OCPP 1.6 §4.2: BootNotification not yet Accepted. */
-  | "boot_gate";
+  | "boot_gate"
+  /** #393: a raw frame needs an open socket. */
+  | "not_connected";
 
 /** How long an expert call waits for the answer. Kept under the Socket.IO
  *  client's RPC timeout (`RPC_TIMEOUT_MS`, 30 s), like
  *  `DATA_TRANSFER_RESPONSE_TIMEOUT_MS`, so a remote caller sees this error
  *  rather than the client's generic timeout. */
 export const OCPP_CALL_RESPONSE_TIMEOUT_MS = 25_000;
+
+/**
+ * #393, level C of #389: one raw text frame written to the station's
+ * WebSocket exactly as given, valid OCPP-J or not (a wrong message type, a
+ * missing element, a non-string id, invalid JSON, any text). OCPP-J only.
+ */
+export type RawFrameRequest = {
+  readonly frame: string;
+  /** How long to wait for a reply, in milliseconds; default
+   *  {@link RAW_FRAME_DEFAULT_WAIT_MS}, at most
+   *  {@link OCPP_CALL_RESPONSE_TIMEOUT_MS}. */
+  readonly waitMs?: number;
+};
+
+/**
+ * What came back, best effort. `messageId` is index 1 of the frame when it
+ * parses as an array holding a string there, else null. `reply` is the first
+ * incoming CALLRESULT or CALLERROR with that id, or a CALLERROR with id `""`
+ * or `"-1"` (how a CSMS answers a frame it cannot read), within the wait; it
+ * never reaches the station's own handlers. `closed` is the close cause when
+ * the socket closed during the wait.
+ */
+export type RawFrameOutcome = {
+  readonly sentFrame: string;
+  readonly messageId: string | null;
+  readonly reply: unknown[] | null;
+  readonly closed: string | null;
+};
+
+export const RAW_FRAME_DEFAULT_WAIT_MS = 5_000;

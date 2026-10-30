@@ -14,6 +14,7 @@ import type {
   SetVariableMonitoringResponseV201,
 } from "../../../../ocpp";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
+import type { DeviceModelContext } from "./getVariablesV201";
 import type {
   InstallOutcome,
   InstallRejectionReason,
@@ -26,7 +27,8 @@ import {
   type SupportedMonitorType,
   type VariableMonitor,
 } from "../../../domain/monitoring/VariableMonitor";
-import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
+import { resolveDeviceModelVariable } from "./deviceModelMap";
+import { MONITORING_ITEMS_PER_PART, splitIntoParts } from "./reportParts";
 import type {
   V201HandlerResult,
   V201InboundContext,
@@ -54,12 +56,15 @@ const REJECTION_INFO: Record<InstallRejectionReason, string> = {
   ValueOutOfRange: "N04.FR.06: threshold is outside the variable's range",
   NegativeDelta: "N04.FR.14: a Delta value cannot be negative",
   SeverityOutOfRange: "severity range is 0-9",
+  IntervalTooShort: "a Periodic interval is at least 1 second",
+  NegativeTargetDelta: "a TargetDelta value cannot be negative",
 };
 
 export function handleSetVariableMonitoringV201(
   req: SetVariableMonitoringRequestV201,
   monitoring: MonitoringStore,
   configuration: ConfigurationStore,
+  { evseExists = () => false, targets }: DeviceModelContext,
 ): SetVariableMonitoringResponseV201 {
   // N04.FR.01 / FR.02: one result per item, echoing its target. Items are
   // applied in order, so a later item sees the monitors of earlier ones.
@@ -71,13 +76,21 @@ export function handleSetVariableMonitoringV201(
       variable: data.variable,
     };
 
-    if (!KNOWN_V201_COMPONENTS.has(data.component.name)) {
-      return { status: "UnknownComponent", ...echo }; // N04.FR.03
+    // N04.FR.03: a component is its name plus its EVSE scope, so an EVSE
+    // (or a connector on it) the station does not have is unknown too.
+    // An EVSE-scoped component (#538) also needs an EVSE (below).
+    if (data.component.evse !== undefined && !evseExists(data.component.evse)) {
+      return { status: "UnknownComponent", ...echo };
     }
-    const valueKey = lookupV16Key(data.component.name, data.variable.name);
-    if (valueKey === undefined) {
-      return { status: "UnknownVariable", ...echo }; // N04.FR.04
+    const resolved = resolveDeviceModelVariable(
+      data.component,
+      data.variable,
+      evseExists,
+    );
+    if (resolved.status !== "Found") {
+      return { status: resolved.status, ...echo }; // N04.FR.03, FR.04
     }
+    const { valueKey } = resolved;
     const entry = configuration.get(valueKey);
     if (entry === undefined) {
       // Same answer as GetVariables for a mapped key the store lacks.
@@ -95,7 +108,11 @@ export function handleSetVariableMonitoringV201(
       component: data.component,
       variable: data.variable,
       valueKey,
-      valueType: valueTypeOf(entry.key),
+      valueType: {
+        ...valueTypeOf(entry.key),
+        // 2.1 TargetDelta monitors need a Target attribute (#538).
+        ...(targets?.supports(valueKey) === true && { hasTarget: true }),
+      },
     });
     return toSetMonitoringResult(outcome, echo);
   });
@@ -180,26 +197,29 @@ const CRITERION_TYPES: Record<
 > = {
   ThresholdMonitoring: ["UpperThreshold", "LowerThreshold"], // N02.FR.12
   DeltaMonitoring: ["Delta"], // N02.FR.13
-  // N02.FR.14: Periodic monitors are not implemented, so none can match.
-  PeriodicMonitoring: [],
+  PeriodicMonitoring: ["Periodic", "PeriodicClockAligned"], // N02.FR.14
 };
 
 export interface MonitoringReport {
   readonly response: GetMonitoringReportResponseV201;
-  /** The NotifyMonitoringReport to send after an Accepted response. */
-  readonly report?: NotifyMonitoringReportPayload;
+  /** The NotifyMonitoringReport parts to send, in order, after an Accepted
+   *  response; empty otherwise. */
+  readonly reports: readonly NotifyMonitoringReportPayload[];
 }
 
 export function buildMonitoringReportV201(
   req: GetMonitoringReportRequestV201,
   monitoring: MonitoringStore,
   dialect: MonitoringReportDialect,
+  itemsPerPart: number = MONITORING_ITEMS_PER_PART,
 ): MonitoringReport {
   let types: Set<SupportedMonitorType> | undefined;
   if (req.monitoringCriteria !== undefined) {
     types = new Set(req.monitoringCriteria.flatMap((c) => CRITERION_TYPES[c]));
     // N02.FR.02: every requested criterion is one the station lacks.
-    if (types.size === 0) return { response: { status: "NotSupported" } };
+    if (types.size === 0) {
+      return { response: { status: "NotSupported" }, reports: [] };
+    }
   }
 
   const selected = selectMonitors(monitoring.list(), {
@@ -211,20 +231,26 @@ export function buildMonitoringReportV201(
   const monitor = groupByTarget(selected, dialect);
   const first = monitor[0];
   if (first === undefined) {
-    return { response: { status: "EmptyResultSet" } }; // N02.FR.10
+    // N02.FR.10
+    return { response: { status: "EmptyResultSet" }, reports: [] };
   }
 
-  // N02.FR.03 / FR.04 / FR.09: one message (GetBaseReport does not split
-  // either), the request's requestId, seqNo 0.
+  // N02.FR.03 / FR.04 / FR.09: one or more parts with the request's
+  // requestId, seqNo from 0 and tbc on every part but the last (#538). A
+  // component/variable group is never split across two parts.
+  const generatedAt = new Date().toISOString();
   return {
     response: { status: "Accepted" }, // N02.FR.01
-    report: {
-      requestId: req.requestId,
-      generatedAt: new Date().toISOString(),
-      seqNo: 0,
-      tbc: false,
-      monitor: [first, ...monitor.slice(1)],
-    } as NotifyMonitoringReportPayload,
+    reports: splitIntoParts([first, ...monitor.slice(1)], itemsPerPart).map(
+      ({ items, seqNo, tbc }) =>
+        ({
+          requestId: req.requestId,
+          generatedAt,
+          seqNo,
+          tbc,
+          monitor: [...items],
+        }) as NotifyMonitoringReportPayload,
+    ),
   };
 }
 
@@ -246,7 +272,9 @@ function groupByTarget(
       id: m.id,
       transaction: m.transaction,
       value: m.value,
-      type: m.type,
+      // The 2.1 TargetDelta types only exist on a 2.1 station: the 2.0.1
+      // schema refuses them in SetVariableMonitoring.
+      type: m.type as VariableMonitoringEntry["type"],
       severity: m.severity,
       // 2.1 N02.FR.22; the 2.0.1 schema forbids the field.
       ...(dialect === "v21" && { eventNotificationType: m.origin }),
@@ -270,16 +298,20 @@ export function createGetMonitoringReportHandlerV201(
   dialect: MonitoringReportDialect,
 ): (payload: unknown, ctx: V201InboundContext) => V201HandlerResult {
   return (payload, ctx) => {
-    const { response, report } = buildMonitoringReportV201(
+    const { response, reports } = buildMonitoringReportV201(
       payload as GetMonitoringReportRequestV201,
       ctx.chargePoint.monitoring,
       dialect,
     );
-    return report === undefined
+    return reports.length === 0
       ? { response }
       : {
           response,
-          afterResult: () => ctx.sendCall("NotifyMonitoringReport", report),
+          afterResult: () => {
+            for (const report of reports) {
+              ctx.sendCall("NotifyMonitoringReport", report);
+            }
+          },
         };
   };
 }

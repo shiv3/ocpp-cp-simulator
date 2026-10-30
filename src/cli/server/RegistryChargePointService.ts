@@ -10,6 +10,8 @@ import type {
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
 import type {
   DiagnosticsStatus,
@@ -312,6 +314,13 @@ export class RegistryChargePointService implements ChargePointService {
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
     return this.requireService(id).sendOcppCall(request);
+  }
+
+  async sendRawFrame(
+    id: string,
+    request: RawFrameRequest,
+  ): Promise<RawFrameOutcome> {
+    return this.requireService(id).sendRawFrame(request);
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {

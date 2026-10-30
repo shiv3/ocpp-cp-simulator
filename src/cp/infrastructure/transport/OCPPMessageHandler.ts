@@ -123,6 +123,16 @@ import {
   DataTransferHandler,
 } from "./handlers";
 
+/** Actions the 1.6 handler queues offline and replays (§4.7 / §4.8 /
+ *  §4.10). Any other row in `pending_messages` was queued by the 2.x
+ *  handler under the same charge point id: the queue deletes it on load
+ *  (#528). */
+const QUEUED_ON_OCPP16: ReadonlySet<OCPPAction> = new Set([
+  OCPPAction.StartTransaction,
+  OCPPAction.StopTransaction,
+  OCPPAction.MeterValues,
+]);
+
 type CoreOcppMessagePayloadCall =
   | ChangeAvailabilityRequestV16
   | ChangeConfigurationRequestV16
@@ -208,11 +218,7 @@ interface OCPPRequest {
  * id are informational and intentionally NOT queued — see §4.7.
  */
 function isTransactionRelated(action: OCPPAction): boolean {
-  return (
-    action === OCPPAction.StartTransaction ||
-    action === OCPPAction.StopTransaction ||
-    action === OCPPAction.MeterValues
-  );
+  return QUEUED_ON_OCPP16.has(action);
 }
 
 class RequestHistory {
@@ -322,7 +328,17 @@ export class OCPPMessageHandler {
     this._pendingQueue = new PendingMessageQueue(
       chargePoint.id,
       chargePoint.database,
+      QUEUED_ON_OCPP16,
     );
+    // #528: `cp.update` can switch ocppVersion over the same --state-db,
+    // leaving rows (e.g. TransactionEvent) a 1.6 CSMS does not know.
+    const dropped = this._pendingQueue.droppedOnLoad;
+    if (dropped.length > 0) {
+      this._logger.warn(
+        `Dropped ${dropped.length} queued message(s) not replayed on OCPP 1.6: ${dropped.join(", ")}`,
+        LogType.OCPP,
+      );
+    }
 
     // Initialize response effect queue with deps
     this._responseEffectQueue = new ResponseEffectQueue({
@@ -776,6 +792,15 @@ export class OCPPMessageHandler {
       "NotifyEvent is OCPP 2.x only; ignoring it on OCPP 1.6",
       LogType.OCPP,
     );
+  }
+
+  /** Same as above: nothing to queue on 1.6 (#538). */
+  public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
+    this.sendNotifyEvent(events);
+  }
+
+  public highestQueuedNotifyEventId(): number {
+    return 0;
   }
 
   /**

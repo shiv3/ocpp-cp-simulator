@@ -60,3 +60,40 @@ describe("JSON-Lines send_ocpp_call (#389)", () => {
     expect(sendOcppCall).not.toHaveBeenCalled();
   });
 });
+
+// #393: the raw frame command, same schema as the daemon's.
+describe("JSON-Lines send_raw_frame (#393)", () => {
+  it("forwards the frame and returns the outcome", async () => {
+    const outcome = {
+      sentFrame: '[2,"r1"]',
+      messageId: "r1",
+      reply: [4, "r1", "FormationViolation", "", {}],
+      closed: null,
+    };
+    const sendRawFrame = vi.fn().mockResolvedValue(outcome);
+    const result = await handleJsonCommand(facadeTarget({ sendRawFrame }), {
+      command: "send_raw_frame",
+      params: { frame: '[2,"r1"]', waitMs: 100 },
+    });
+    expect(sendRawFrame).toHaveBeenCalledWith(CP_ID, {
+      frame: '[2,"r1"]',
+      waitMs: 100,
+    });
+    expect(result).toEqual(outcome);
+  });
+
+  it.each([
+    ["a missing frame", {}, /frame/],
+    ["a frame that is not a string", { frame: [2, "r1"] }, /frame/],
+    ["a wait over 25 s", { frame: "x", waitMs: 25_001 }, /waitMs/],
+  ])("refuses %s", async (_label, params, message) => {
+    const sendRawFrame = vi.fn();
+    await expect(
+      handleJsonCommand(facadeTarget({ sendRawFrame }), {
+        command: "send_raw_frame",
+        params,
+      }),
+    ).rejects.toThrow(message);
+    expect(sendRawFrame).not.toHaveBeenCalled();
+  });
+});

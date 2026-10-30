@@ -317,7 +317,10 @@ CREATE TABLE IF NOT EXISTS certificates (
 -- persistent across reboots (N07.FR.13). \`monitor\` is the domain
 -- VariableMonitor as JSON; \`triggered\` is whether a threshold monitor's
 -- value is beyond its threshold, so a value back in range after a restart
--- still sends the cleared event (N07.FR.14).
+-- still sends the cleared event (N07.FR.14). The station's hardwired and
+-- preconfigured monitors are stored the same way (#538); the row with
+-- \`monitor_id\` 0 holds \`{"activeMonitoringBase": …}\`, the base last set
+-- by SetMonitoringBase, and is not a monitor.
 CREATE TABLE IF NOT EXISTS variable_monitors (
   cp_id       TEXT NOT NULL,
   monitor_id  INTEGER NOT NULL,

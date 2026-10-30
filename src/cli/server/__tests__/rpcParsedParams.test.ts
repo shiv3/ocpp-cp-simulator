@@ -291,3 +291,61 @@ describe("send_ocpp_call (#389)", () => {
     expect(error).toEqual({ code, message });
   });
 });
+
+describe("send_raw_frame (#393)", () => {
+  it("passes the parsed request through and returns the outcome", async () => {
+    const outcome = {
+      sentFrame: "not json",
+      messageId: null,
+      reply: null,
+      closed: "network",
+    };
+    const sendRawFrame = vi.fn().mockResolvedValue(outcome);
+    await expect(
+      runRpc(depsWith({ sendRawFrame }), {
+        cpId: "cp-alpha",
+        method: "send_raw_frame",
+        params: { frame: "not json", waitMs: 0 },
+      }),
+    ).resolves.toEqual(outcome);
+    expect(sendRawFrame).toHaveBeenCalledWith("cp-alpha", {
+      frame: "not json",
+      waitMs: 0,
+    });
+  });
+
+  it("refuses a negative wait as invalid_params", async () => {
+    const sendRawFrame = vi.fn();
+    const error = await rpcError(
+      { sendRawFrame },
+      {
+        cpId: "cp-alpha",
+        method: "send_raw_frame",
+        params: { frame: "[]", waitMs: -1 },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(sendRawFrame).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new OcppCallRejectedError("unsupported_transport", "OCPP-1.6S is SOAP"),
+      "OCPP-1.6S is SOAP",
+    ],
+    [
+      new OcppCallRejectedError("not_connected", "needs an open WebSocket"),
+      "needs an open WebSocket",
+    ],
+  ])("maps %s to invalid_params", async (thrown, message) => {
+    const error = await rpcError(
+      { sendRawFrame: vi.fn().mockRejectedValue(thrown) },
+      {
+        cpId: "cp-alpha",
+        method: "send_raw_frame",
+        params: { frame: "[]" },
+      },
+    );
+    expect(error).toEqual({ code: "invalid_params", message });
+  });
+});

@@ -6,6 +6,8 @@ import type {
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
 } from "../cp/domain/types/OcppCall";
 import type {
   DiagnosticsStatus,
@@ -111,6 +113,7 @@ export interface SingleCpCommandOps {
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
+  sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome>;
   getAuthorizationCache(): Promise<AuthorizationCacheView>;
   seedAuthorizationCache(
     entries: readonly AuthorizationCacheSeedEntry[],
@@ -304,6 +307,7 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(request),
+    sendRawFrame: (request) => service.sendRawFrame(request),
     getAuthorizationCache: async () => service.getAuthorizationCache(),
     seedAuthorizationCache: async (entries) =>
       service.seedAuthorizationCache(entries),
@@ -460,6 +464,7 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(cpId, vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),
+    sendRawFrame: (request) => service.sendRawFrame(cpId, request),
     getAuthorizationCache: () => service.getAuthorizationCache(cpId),
     seedAuthorizationCache: (entries) =>
       service.seedAuthorizationCache(cpId, entries),

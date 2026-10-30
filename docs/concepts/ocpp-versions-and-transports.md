@@ -11,7 +11,8 @@ sources:
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
   - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
-  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries)
+  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
+  - src/cp/domain/transport/PendingMessageQueue.ts
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -46,9 +47,13 @@ Message types and validators for the JSON versions are generated from the
 
 On 2.0.1 and 2.1, `SetVariableMonitoring`, `ClearVariableMonitoring`,
 `GetMonitoringReport`, `SetMonitoringLevel` and `SetMonitoringBase` act on a
-stored, persisted monitor catalog, and the monitors report through
-`NotifyEvent`: see [OCPP 2.x variable monitoring](variable-monitoring.md)
-(#457).
+stored, persisted monitor catalog that includes the station's own
+hardwired and preconfigured monitors, and the monitors report through
+`NotifyEvent`, periodic ones on a timer: see
+[OCPP 2.x variable monitoring](variable-monitoring.md) (#457, #538). A 2.x
+station also publishes runtime values as device-model variables
+(`EVSE.Power`, `AvailabilityState`), and on 2.1 a `Target` attribute on
+`EVSE.Power` for TargetDelta monitors, which 2.0.1 does not have.
 
 ## Version-agnostic scenarios
 
@@ -110,16 +115,26 @@ WebSockets, at the cost of a control frame instead of a Heartbeat round trip.
 
 ## Transaction message retries (OCPP 2.x)
 
-On 2.0.1 and 2.1 a CALLERROR answering a TransactionEvent (`Started`,
-`Updated` or `Ended`) means the CSMS failed to process it (E13, #490). It
-used to be ignored. The station now:
+On 2.0.1 and 2.1 a transmission of a TransactionEvent (`Started`, `Updated`
+or `Ended`) fails in two ways (E13):
+
+- a CALLERROR answers it: the CSMS failed to process it (#490);
+- no CALLRESULT or CALLERROR comes within
+  `OCPPCommCtrlr.MessageTimeout[Default]` seconds (default 30, #529). E13
+  names this trigger in its description and remark (2.0.1 Table 120 / 2.1
+  E13 use case); OCPP-J
+  Part 4 §4.1.1 calls such a CALL timed out.
+
+On either failure the station:
 
 - **keeps the transaction running.** The connector stays as it was, the
   station does not end the transaction on the error, and the
   [charging session](charging-sessions.md) stays `active`. This differs from 1.6, where a StartTransaction CALLERROR
   abandons the transaction (#447);
 - **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
-  `eventType`, `errorCode`, `attempt`) on every CALLERROR;
+  `action`, `eventType`, `reason`, `errorCode`, `attempt`) on every failed
+  transmission. `action` is `TransactionEvent`; `reason` is `callError` or
+  `timeout`, and `errorCode` is set for `callError` only;
 - **resends the same payload** (same `seqNo`, same `transactionId`) under a
   new message id, as OCPP-J requires for a retry (Part 4 §4.1.4). It waits
   `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]` seconds times the
@@ -127,40 +142,156 @@ used to be ignored. The station now:
   default of 60;
 - **discards the message after `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`
   transmissions in all** (default 3, E13.FR.04) and emits
-  `transactionMessageDiscarded` (`attempts` instead of `attempt`).
+  `transactionMessageDiscarded` (`attempts` instead of `attempt`; `reason`
+  and `errorCode` describe the last failure).
 
 A CALLRESULT ends the retries; an answer to a resend goes through the normal
 `idTokenInfo` handling. Both settings are the 1.6 keys
 `TransactionMessageAttempts` and `TransactionMessageRetryInterval` under
 their 2.x names, so `SetVariables`, `GetVariables` and `GetBaseReport` see
-them and a change applies to the next CALLERROR. An attempts value below 1
+them and a change applies to the next failure. An attempts value below 1
 counts as 1; a negative interval counts as 0.
 
-Those two are instanced variables: the CSMS names them `MessageAttempts` /
-`MessageAttemptInterval` with `variableInstance = "TransactionEvent"`
+A timed-out transmission stays matched to its message, so a late answer is
+still handled. The rule (#529) is that each message is applied once and
+each transmission counts as failed once:
+
+- the **first CALLRESULT** for any transmission of the message settles it.
+  The station applies that answer, cancels a resend still waiting, and
+  forgets every other transmission of the message;
+- an answer to a forgotten transmission is ignored: a second CALLRESULT
+  applies nothing twice, and a CALLERROR triggers no resend;
+- a CALLERROR for a transmission that already timed out is not counted
+  again: the resend already scheduled stays the only one;
+- once the message is discarded, every transmission is forgotten, and a
+  CALLRESULT arriving later is ignored.
+
+`MessageTimeout` is a 2.x-only key (default 30, like the 1.6 serial queue's
+30 s CALL timeout), read at each transmission. The CSMS addresses it as
+`OCPPCommCtrlr.MessageTimeout` with `variableInstance = "Default"` (2.0.1
+and 2.1 §2.1.3 "DefaultMessageTimeout"). The spec makes it ReadOnly: the
+CSMS sets it through a NetworkConnectionProfile, and this simulator answers
+`SetNetworkProfile` with `Rejected`. So `SetVariables` answers `Rejected`
+too, and `GetBaseReport` reports it as ReadOnly. No other 2.x CALL is resent
+on a timeout. 1.6 `GetConfiguration` does not list the key.
+
+The two retry settings are instanced variables: the CSMS names them
+`MessageAttempts` / `MessageAttemptInterval` with
+`variableInstance = "TransactionEvent"`
 (2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12); "MessageAttemptsTransactionEvent" is
 only the title of the spec section. Without that instance, or under the
 flat name, `GetVariables` / `SetVariables` answer `UnknownVariable`. The
-results echo the `variable` the CSMS sent, instance included, and
-`GetBaseReport` reports `variable: { name, instance }` for them. Every
-other mapped variable has no instance and answers whatever instance the
-CSMS names, as before.
+same holds for `MessageTimeout` with instance `Default`. The results echo
+the `variable` the CSMS sent, instance included, and `GetBaseReport`
+reports `variable: { name, instance }` for them. The
+`MonitoringCtrlr.ItemsPerMessage` / `BytesPerMessage` variables are
+instanced the same way (`SetVariableMonitoring`, `ClearVariableMonitoring`;
+see [variable monitoring](variable-monitoring.md#monitoringctrlr-variables),
+#538). Every other mapped variable has no instance and answers whatever
+instance the CSMS names, as before.
 
 Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
 resend does not hold back the next transaction message. E13 (Figure 62)
 describes sequential delivery; this station may deliver `Ended` before the
-resent `Started`, and the CSMS has to order the messages by `seqNo`. A
-resend still waiting when the WebSocket closes
-(network loss, disconnect, reset, delete) is dropped: 2.x has no offline
-queue to hand it to. So is a resend that finds the station offline when it
-falls due. Either way the station logs a `warn` (category `TRANSACTION`)
-naming the event type, transaction and attempt; no event is emitted. Only TransactionEvents the station builds are retried;
-one sent as an [expert call](expert-ocpp-calls.md) is not. E13 also retries
-a message left unanswered within `MessageTimeout`; that trigger is not
-implemented.
+resent `Started`, and the CSMS has to order the messages by `seqNo`. When
+the WebSocket closes (network loss, disconnect, reset, delete), a resend
+still waiting and a written TransactionEvent still waiting for its answer
+are not dropped: they go to the
+[E11 offline queue](#e11-offline-queue-for-transactionevent) (#528), and
+their timers are cleared. So does a resend that finds the station offline
+when it falls due. A transmission the socket drops while the connection
+stays up (a network-sim queue overflow) is lost: a resend is logged as a
+`warn` (category `TRANSACTION`) naming the event type, transaction and
+attempt; no event is emitted. Only TransactionEvents the station builds are
+retried, time out or are queued; one sent as an
+[expert call](expert-ocpp-calls.md) is not.
 
 The [operational timeline](operational-timeline.md) records both events as
 `transaction_message_rejected` and `transaction_message_discarded`.
+
+## E11 offline queue for TransactionEvent
+
+On 2.0.1 and 2.1 the station queues the TransactionEvents (`Started`,
+`Updated`, `Ended`) it cannot deliver and replays them once the connection
+is restored (E11 "Connection Loss During Transaction", #528):
+
+- **What is queued** (E11.FR.01: "all TransactionEventRequest messages,
+  that it would have sent to the CSMS if the Charging Station had been
+  online"): an event produced while the WebSocket is down, an event the
+  socket drops on close, an event written but still unanswered when the
+  socket closes, and an E13 resend still waiting. Each message is queued
+  once, in the order the events were produced, with the payload as last
+  sent or built: no `offline` field for an event not yet replayed,
+  `offline: true` for a replay a new close queues again. An event produced
+  while the queue still waits for its replay (socket back, BootNotification
+  not yet Accepted, or a restart that found persisted rows) joins the
+  queue too, so the order holds.
+- **Where**: the `pending_messages` table that 1.6 uses (action
+  `TransactionEvent`), with [`--state-db`](state-persistence.md); in memory
+  otherwise. A restart with state persistence replays what was queued.
+- **Replay** (E11.FR.02): after the next BootNotification `Accepted`, every
+  queued event is sent in order with `offline: true`, under a new message
+  id, with the `seqNo` it was built with. E11.FR.07 ("every message that is
+  still in the queue SHALL be set Offline") is why an event that was
+  written before the close also carries `offline: true` on replay.
+  The replay sets `offline: true`; an event sent directly, not through the
+  queue, never carries it.
+- **E13 still applies to a replayed event**, with fresh counters: its
+  `MessageAttempts[TransactionEvent]` budget and `transactionMessageRejected`
+  `attempt` restart at 1, as a 1.6 replay goes through the serial queue
+  anew. A row leaves the queue when its replay is handed to the socket; a
+  close before the answer queues the event again. A replay the socket
+  refuses while the connection stays up (a network-sim refusal or
+  overflow) stays at the head of the queue, with a `warn` (category
+  `TRANSACTION`); the replay stops there, and that row, the rows behind it
+  and any new TransactionEvent wait for the next BootNotification
+  `Accepted`.
+- **Rows of the other protocol are dropped.** 1.6 and 2.x share
+  `pending_messages` by charge point id, and `cp.update` can switch
+  `ocppVersion` over the same `--state-db`. When a handler starts, its
+  queue deletes every row it does not replay, with one `warn` (category
+  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`
+  and `NotifyEvent`, the 1.6 handler anything but StartTransaction,
+  StopTransaction and MeterValues. Such a row never holds back a new
+  TransactionEvent.
+- **NotifyEvent** (#538): monitor events at or below
+  `MonitoringCtrlr.OfflineQueuingSeverity` are queued too (N07.FR.04,
+  N08.FR.03) and replayed in the same pass, in production order, without
+  `offline` (the request has no such field). Queued NotifyEvents alone
+  never hold a live TransactionEvent back: only queued TransactionEvents
+  do. A refused NotifyEvent replay stays at the head and delays the
+  TransactionEvents behind it, as a refused TransactionEvent would. The
+  queue keeps at most 1000 NotifyEvent reports per charge point: past
+  that, the oldest report made only of `Periodic` events is dropped, else
+  the oldest report, never a TransactionEvent, with one `warn` at the
+  first drop of an outage and one with the count at the replay.
+  See [variable monitoring](variable-monitoring.md#offline-queuing).
+- **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
+  MeterValues, the NotifyEvents above the severity and the rest are
+  dropped while offline, as before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is
+  what would queue them; when it is false the spec queues only
+  transaction-related messages "as required in: E04.FR.01" (2.0.1
+  §2.1.9, 2.1 §2.1.10). The spec sets no order between the replay and the
+  other messages sent after reconnecting. The station sends its post-boot
+  StatusNotifications first, then the replay, as on 1.6
+  (`ChargePoint.markBootAccepted` defers the flush to a microtask).
+
+Limits:
+
+- The queue has no size cap for TransactionEvents (only the NotifyEvent
+  reports are capped, #538), so the E11.FR.04/FR.05 memory-pressure drop
+  of `Updated` events is not modelled.
+- The replay goes out as a burst: 2.x has no serial queue (see the known
+  limitation above), so the station does not wait for one answer before
+  sending the next replayed event.
+- A row leaves the table when its replay is handed to the socket, as on
+  1.6. A process crash before the answer loses it, where the E04 failure
+  postcondition keeps an unanswered event in the queue.
+- A restart replays the queued events, but the 2.x `transactionId` and
+  `seqNo` counter of a transaction restored after the restart are not
+  persisted, so its later events do not continue the replayed ones.
+- `GetTransactionStatus` answers `messagesInQueue: false` whatever the
+  queue holds (E14).
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

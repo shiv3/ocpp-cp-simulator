@@ -422,9 +422,9 @@ describe("OCPP 2.0.1 SetNetworkProfile secrets (#401)", () => {
   });
 
   // Text-redactor rule: a quoted value ends at its first unescaped closing
-  // quote on the same line, else at the end of that line; only a PEM
-  // (`-----BEGIN`) value may span lines, up to its closing quote, else to the
-  // end of the text.
+  // quote, else at the end of its first line; a closing quote on a later
+  // line must be followed by a delimiter (#519), and a PEM (`-----BEGIN`)
+  // value ends only after its END marker, else at the end of the text.
   it.each([
     [
       "an escaped double quote",
@@ -949,37 +949,45 @@ describe("text redactor parity with the structured redactor (#515)", () => {
   });
 
   // #519: the quoted-value and PEM patterns scan across lines; none of them
-  // may backtrack quadratically on a long run.
-  it("stays linear on long runs after a quoted name", { timeout: 2000 }, () => {
-    const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
-      char.repeat(200_000),
-    );
-    const pemBody = "A".repeat(200_000);
-    const texts = [
-      ...runs,
-      ...runs.map((run) => `password=${run}`),
-      ...runs.map((run) => `password="${run}`),
-      `password="${"a\n".repeat(100_000)}`,
-      'password="a\n'.repeat(20_000),
-      `password="${"\nx".repeat(100_000)}`,
-      `password="a\n${"passwor".repeat(30_000)}`,
-      `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
-      `password="a\n${"\\p".repeat(100_000)}`,
-      `password="a\n${"\\passwor".repeat(25_000)}`,
-      `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
-      `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
-      `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
-      `privateKey="-----BEGIN K-----\n${pemBody}`,
-      `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
-      `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
-    ];
-    for (const text of texts) {
-      expect(typeof redactSensitiveText(text)).toBe("string");
-    }
-    expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
-      `privateKey="${REDACTED_VALUE}"`,
-    );
-  });
+  // may backtrack quadratically on a long run. #547: under Bun this row
+  // also runs, and JavaScriptCore spends ~100 ms per long value before it
+  // gives up a match (2-3 s for the list, over 5 s on CI, `main` included),
+  // so it gets its own budget. A quadratic run at 200k characters takes
+  // minutes on either engine, so both budgets still catch one.
+  it(
+    "stays linear on long runs after a quoted name",
+    { timeout: "Bun" in globalThis ? 15_000 : 2000 },
+    () => {
+      const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
+        char.repeat(200_000),
+      );
+      const pemBody = "A".repeat(200_000);
+      const texts = [
+        ...runs,
+        ...runs.map((run) => `password=${run}`),
+        ...runs.map((run) => `password="${run}`),
+        `password="${"a\n".repeat(100_000)}`,
+        'password="a\n'.repeat(20_000),
+        `password="${"\nx".repeat(100_000)}`,
+        `password="a\n${"passwor".repeat(30_000)}`,
+        `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
+        `password="a\n${"\\p".repeat(100_000)}`,
+        `password="a\n${"\\passwor".repeat(25_000)}`,
+        `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
+        `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
+        `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
+        `privateKey="-----BEGIN K-----\n${pemBody}`,
+        `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
+        `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
+      ];
+      for (const text of texts) {
+        expect(typeof redactSensitiveText(text)).toBe("string");
+      }
+      expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
+        `privateKey="${REDACTED_VALUE}"`,
+      );
+    },
+  );
 
   it("keeps a longer name in the structured redactor", () => {
     // The text redactor is stricter here: the structured one drops a field
@@ -1016,5 +1024,351 @@ describe("text redactor parity with the structured redactor (#515)", () => {
     expect(redacted).toBe(expected);
     const json = redacted.replace(/^Received: /, "");
     expect(() => JSON.parse(json)).not.toThrow();
+  });
+});
+
+describe("escaped JSON and nested assignments (#531)", () => {
+  const R = REDACTED_VALUE;
+  /** `payload` serialized `levels` times: 2 is JSON logged inside a string. */
+  const nested = (payload: unknown, levels: number): string => {
+    let text = JSON.stringify(payload);
+    for (let level = 1; level < levels; level += 1) {
+      text = JSON.stringify(text);
+    }
+    return text;
+  };
+
+  it.each<[string, string, string[], string]>([
+    [
+      "an escaped JSON member",
+      String.raw`{\"privateKey\":\"S1\"}`,
+      ["S1"],
+      String.raw`{\"privateKey\":\"${R}\"}`,
+    ],
+    [
+      "several secret names in escaped JSON",
+      String.raw`{\"password\":\"S1\",\"user\":\"u\",\"apiKey\":\"S2\",\"tls_key\":\"S3\"}`,
+      ["S1", "S2", "S3"],
+      String.raw`{\"password\":\"${R}\",\"user\":\"u\",\"apiKey\":\"${R}\",\"tls_key\":\"${R}\"}`,
+    ],
+    [
+      "a nested escaped member",
+      String.raw`{\"connectionData\":{\"apn\":{\"apnPassword\":\"S1\"}},\"n\":1}`,
+      ["S1"],
+      String.raw`{\"connectionData\":{\"apn\":{\"apnPassword\":\"${R}\"}},\"n\":1}`,
+    ],
+    [
+      "spaces around the escaped colon",
+      String.raw`{\"password\" : \"a b S1\" , \"user\":\"u\"}`,
+      ["S1"],
+      String.raw`{\"password\" : \"${R}\" , \"user\":\"u\"}`,
+    ],
+    [
+      "a double-escaped member",
+      String.raw`{\\\"password\\\":\\\"S1\\\",\\\"user\\\":\\\"u\\\"}`,
+      ["S1"],
+      String.raw`{\\\"password\\\":\\\"${R}\\\",\\\"user\\\":\\\"u\\\"}`,
+    ],
+    [
+      "an escaped quote inside an escaped value",
+      String.raw`{\"password\":\"a\\\"S1\",\"user\":\"u\"}`,
+      ["S1"],
+      String.raw`{\"password\":\"${R}\",\"user\":\"u\"}`,
+    ],
+    [
+      "an escaped backslash ending an escaped value",
+      String.raw`{\"password\":\"S1\\\\\",\"user\":\"u\"}`,
+      ["S1"],
+      String.raw`{\"password\":\"${R}\",\"user\":\"u\"}`,
+    ],
+    [
+      "an unterminated escaped value (fail closed)",
+      String.raw`\"password\":\"a\\\"S1`,
+      ["S1"],
+      String.raw`\"password\":\"${R}\"`,
+    ],
+    [
+      "escaped JSON on two lines",
+      'a {\\"password\\":\\"S1\\"}\nb {\\"tlsKey\\":\\"S2\\"} c',
+      ["S1", "S2"],
+      `a {\\"password\\":\\"${R}\\"}\nb {\\"tlsKey\\":\\"${R}\\"} c`,
+    ],
+    [
+      "pretty-printed escaped JSON",
+      String.raw`"{\n  \"password\": \"S1\",\n  \"n\": 1\n}"`,
+      ["S1"],
+      String.raw`"{\n  \"password\": \"${R}\",\n  \"n\": 1\n}"`,
+    ],
+    [
+      "an object whose name is escaped and whose members are not",
+      String.raw`x password\" : {"d":"S1"} y`,
+      ["S1"],
+      String.raw`x password\" : \"${R}\" y`,
+    ],
+    [
+      "an array whose name is escaped and whose members are not",
+      String.raw`password\":["S1","S2"], n`,
+      ["S1", "S2"],
+      String.raw`password\":\"${R}\", n`,
+    ],
+    [
+      "a bracket inside a string of the value does not end it early",
+      String.raw`{\"password\":{\"d\":\"}S1{\"},\"n\":1}`,
+      ["S1"],
+      String.raw`{\"password\":\"${R}\",\"n\":1}`,
+    ],
+    [
+      "an escaped JSON number",
+      String.raw`{\"simPin\":1234,\"n\":1}`,
+      ["1234"],
+      String.raw`{\"simPin\":\"${R}\",\"n\":1}`,
+    ],
+    [
+      "an escaped-quoted assignment",
+      String.raw`password=\"S1 x\" y`,
+      ["S1", " x"],
+      String.raw`password=\"${R}\" y`,
+    ],
+    [
+      "an assignment in the other quote inside an escaped value (fail closed)",
+      String.raw`password=\"a privateKey='S1 x\" y S2'`,
+      ["S1", "S2"],
+      String.raw`password=\"${R}\"`,
+    ],
+    [
+      "an assignment in the other quote holding the closing quote",
+      "password=\"a privateKey='S1 x\" y S2'",
+      ["S1", "S2"],
+      `password="${R}"`,
+    ],
+    [
+      "an assignment in double quotes inside a single-quoted value",
+      "password='a privateKey=\"S1 x' y S2\"",
+      ["S1", "S2"],
+      `password='${R}'`,
+    ],
+    [
+      "an assignment in the same quote inside a value",
+      'password="a privateKey="S1"',
+      ["S1"],
+      `password="${R}"`,
+    ],
+    [
+      "a bare assignment inside a value",
+      'password="a api_key=S1 x" y',
+      ["S1"],
+      `password="${R}"`,
+    ],
+    [
+      "a non-secret assignment inside a value",
+      'password="a token=S1 x" y',
+      ["S1"],
+      `password="${R}" y`,
+    ],
+    [
+      "an assignment right after the closing quote",
+      'password="S1"privateKey="S2"',
+      ["S1", "S2"],
+      `password="${R}"privateKey="${R}"`,
+    ],
+    [
+      "two assignments on one line",
+      'password="S1" x privateKey="S2"',
+      ["S1", "S2"],
+      `password="${R}" x privateKey="${R}"`,
+    ],
+    [
+      "an unterminated value followed by a secret on the next line (#401)",
+      'password="a\nprivateKey="SECRET1"',
+      ["SECRET1"],
+      `password="${R}"\nprivateKey="${R}"`,
+    ],
+    [
+      "an escaped JSON object value (JWK) inside a JSON string",
+      String.raw`{"data":"{\"privateKey\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"SECRETD\"}}","n":1}`,
+      ["SECRETD", "P-256"],
+      String.raw`{"data":"{\"privateKey\":\"${R}\"}","n":1}`,
+    ],
+    [
+      "an escaped JSON array value",
+      String.raw`{\"password\":[\"S1\",\"S2\"]}` + "\nnext=1",
+      ["S1", "S2"],
+      String.raw`{\"password\":\"${R}\"}` + "\nnext=1",
+    ],
+    [
+      "a double-escaped JSON object value",
+      String.raw`{\\\"password\\\":{\\\"a\\\":\\\"S1\\\",\\\"b\\\":\\\"S2\\\"}}`,
+      ["S1", "S2"],
+      String.raw`{\\\"password\\\":\\\"${R}\\\"}`,
+    ],
+    [
+      "a multi-line value holding an escaped name on its first line",
+      'password="line1 \\"apiKey\\": x\nline2secret" y',
+      ["line2secret"],
+      `password="${R}" y`,
+    ],
+    [
+      "a multi-line value holding a backslash after a name on its first line",
+      'password="line1 apiKey\\: x\nline2secret" y',
+      ["line2secret"],
+      `password="${R}" y`,
+    ],
+    [
+      "a PEM body holding an escaped name",
+      'privateKey="-----BEGIN K-----\n\\"apiKey\\": x\nS1\n-----END K-----" y',
+      ["S1"],
+      `privateKey="${R}" y`,
+    ],
+    [
+      "a PEM behind an escaped quote spanning lines",
+      'privateKey=\\"-----BEGIN PRIVATE KEY-----\nMIIEsecretbody\n-----END PRIVATE KEY-----\\" next=1',
+      ["MIIEsecretbody"],
+      `privateKey=\\"${R}\\" next=1`,
+    ],
+    [
+      "an unterminated PEM behind an escaped quote (fail closed)",
+      'privateKey=\\"-----BEGIN K-----\nSECRET1\nSECRET2',
+      ["SECRET1", "SECRET2"],
+      `privateKey=\\"${R}\\"`,
+    ],
+    [
+      "an escaped name with a plain-quoted value",
+      String.raw`{\"privateKey\":"S1 S2"}`,
+      ["S1", "S2"],
+      String.raw`{\"privateKey\":"${R}"}`,
+    ],
+    [
+      "a double-escaped JSON PEM ending in an escaped newline",
+      String.raw`{"m":"{\\\"privateKey\\\":\\\"-----BEGIN PRIVATE KEY-----\\nMIIE\\n-----END PRIVATE KEY-----\\n\\\",\\\"x\\\":\\\"visible\\\"}","n":"visible2"}`,
+      ["MIIE"],
+      String.raw`{"m":"{\\\"privateKey\\\":\\\"${R}\\\",\\\"x\\\":\\\"visible\\\"}","n":"visible2"}`,
+    ],
+    [
+      "an escaped-JSON PEM with escaped newlines",
+      String.raw`{\"privateKey\":\"-----BEGIN K-----\nSECRET1\n-----END K-----\n\",\"n\":1}`,
+      ["SECRET1"],
+      String.raw`{\"privateKey\":\"${R}\",\"n\":1}`,
+    ],
+  ])("text redactor: %s", (_case, text, absent, expected) => {
+    const redacted = redactSensitiveText(text);
+    for (const secret of absent) expect(redacted).not.toContain(secret);
+    expect(redacted).toBe(expected);
+  });
+
+  it.each([2, 3])(
+    "keeps JSON serialized %i times parseable and redacted",
+    (levels) => {
+      const payload = {
+        password: 'a"b\\S1',
+        connectionData: { apn: { apnPassword: "S2", simPin: 1234 } },
+        user: "u",
+      };
+      const redacted = redactSensitiveText(nested(payload, levels));
+      for (const secret of ["S1", "S2", "1234"]) {
+        expect(redacted).not.toContain(secret);
+      }
+      let parsed: unknown = JSON.parse(redacted);
+      for (let level = 1; level < levels; level += 1) {
+        parsed = JSON.parse(parsed as string);
+      }
+      expect(parsed).toEqual({
+        password: R,
+        connectionData: { apn: { apnPassword: R, simPin: R } },
+        user: "u",
+      });
+    },
+  );
+
+  // Under Bun (`redaction.bun.test.ts`) JavaScriptCore spends seconds on a
+  // quoted value behind a name followed by `_` runs (`password="___…`), as it
+  // does on `main`: the pre-existing pass, not this one (#547). So it gets its
+  // own budget, as the list above does; a quadratic run at 200k characters
+  // takes minutes on either engine, so both budgets still catch one.
+  it(
+    "stays linear on long runs inside escaped and nested values",
+    {
+      timeout: "Bun" in globalThis ? 60_000 : 2000,
+    },
+    () => {
+      const runs = ["_", "-", '"', "'", "\\", '\\"', "\\\\", "a'\"\\-_ "].map(
+        (chars) => chars.repeat(Math.ceil(200_000 / chars.length)),
+      );
+      const texts = [
+        ...runs,
+        ...runs.map((run) => `password="${run}`),
+        ...runs.map((run) => `password='${run}`),
+        ...runs.map((run) => `password\\":\\"${run}`),
+        ...runs.map((run) => `password=\\"${run}`),
+        ...runs.map((run) => `password\\":{${run}`),
+        ...runs.map((run) => `password=\\"-----BEGIN K-----\n${run}`),
+        `password="${"passwor".repeat(30_000)}`,
+        `password=\\"${"passwor".repeat(30_000)}`,
+        `password="${"password=".repeat(20_000)}`,
+        `password=\\"${'password=\\"'.repeat(15_000)}`,
+        `{\\"password\\":\\"a\\"}`.repeat(10_000),
+      ];
+      for (const text of texts) {
+        expect(typeof redactSensitiveText(text)).toBe("string");
+      }
+    },
+  );
+});
+
+// #547: JavaScriptCore (Bun) gives up on a long quoted value that V8 (Node)
+// matches; the redactor must not then return the value in clear. These rows
+// also run under Bun (`redaction.bun.test.ts`).
+describe("long quoted values on every runtime (#547)", () => {
+  const body = "A".repeat(100_000);
+  it.each([
+    [
+      "an unterminated PEM value",
+      `privateKey="-----BEGIN K-----\n${body}`,
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      "a closed PEM value",
+      `privateKey="-----BEGIN K-----\n${body}\n-----END K-----"`,
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      "an unterminated value",
+      `password="${body}`,
+      `password="${REDACTED_VALUE}"`,
+    ],
+    [
+      "a closed value followed by text",
+      `password="${body}" x`,
+      `password="${REDACTED_VALUE}" x`,
+    ],
+    ["a bare value", `password=${body}`, `password=${REDACTED_VALUE}`],
+    [
+      "a JSON member",
+      JSON.stringify({ password: body }),
+      `{"password":"${REDACTED_VALUE}"}`,
+    ],
+  ])("redacts %s", (_name, text, expected) => {
+    expect(redactSensitiveText(text)).toBe(expected);
+  });
+
+  it("redacts a long value continued on the next line", () => {
+    const redacted = redactSensitiveText(`password="a\n${body}`);
+    expect(redacted.startsWith(`password="${REDACTED_VALUE}"`)).toBe(true);
+    // Node ends the value at its first line and keeps the next line; Bun's
+    // fallback fails closed and drops it. Neither keeps a quoted secret.
+    expect(redacted.includes(`"a\n`)).toBe(false);
+  });
+
+  it("leaves a value the regex already redacted alone", () => {
+    const text = `password="[redacted]" privateKey='${REDACTED_VALUE}' x`;
+    expect(redactSensitiveText(text)).toBe(text);
+  });
+
+  it("redacts every missed value on one text", () => {
+    const redacted = redactSensitiveText(
+      `password="${body}" apiKey="${body}" tail`,
+    );
+    expect(redacted).toBe(
+      `password="${REDACTED_VALUE}" apiKey="${REDACTED_VALUE}" tail`,
+    );
   });
 });

@@ -322,6 +322,10 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       tool: "security_event_notification",
       method: "security_event_notification",
     },
+    {
+      tool: "get_15118_ev_certificate",
+      method: "get_15118_ev_certificate",
+    },
     { tool: "set_connector_status", method: "update_connector_status" },
     { tool: "ev_disconnected", method: "ev_disconnected" },
     { tool: "set_meter_value", method: "set_meter_value" },

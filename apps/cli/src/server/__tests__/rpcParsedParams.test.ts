@@ -349,3 +349,63 @@ describe("send_raw_frame (#393)", () => {
     expect(error).toEqual({ code: "invalid_params", message });
   });
 });
+
+describe("get_15118_ev_certificate (#537)", () => {
+  const params = {
+    iso15118SchemaVersion: "urn:iso:15118:2:2013:MsgDef",
+    action: "Install",
+    exiRequest: "AAAA",
+  };
+
+  it("passes the parsed request through and returns the answers", async () => {
+    const answer = {
+      responses: [],
+      callError: {
+        errorCode: "InternalError",
+        errorDescription: "pool down",
+        errorDetails: {},
+      },
+    };
+    const get15118EVCertificate = vi.fn().mockResolvedValue(answer);
+    await expect(
+      runRpc(depsWith({ get15118EVCertificate }), {
+        cpId: "cp-alpha",
+        method: "get_15118_ev_certificate",
+        params,
+      }),
+    ).resolves.toEqual(answer);
+    expect(get15118EVCertificate).toHaveBeenCalledWith("cp-alpha", params);
+  });
+
+  it("refuses a non-base64 exiRequest as invalid_params", async () => {
+    const get15118EVCertificate = vi.fn();
+    const error = await rpcError(
+      { get15118EVCertificate },
+      {
+        cpId: "cp-alpha",
+        method: "get_15118_ev_certificate",
+        params: { ...params, exiRequest: "<exi/>" },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(get15118EVCertificate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new OcppCallRejectedError(
+        "unsupported_action",
+        "Get15118EVCertificate is an OCPP 2.0.1 / 2.1 message; OCPP-1.6J has none",
+      ),
+      "invalid_params",
+    ],
+    [new OcppCallNoAnswerError("timeout", "no answer"), "timeout"],
+    [new OcppCallNoAnswerError("dropped", "dropped"), "disconnected"],
+  ])("maps %s to %s", async (thrown, code) => {
+    const error = await rpcError(
+      { get15118EVCertificate: vi.fn().mockRejectedValue(thrown) },
+      { cpId: "cp-alpha", method: "get_15118_ev_certificate", params },
+    );
+    expect(error).toEqual({ code, message: thrown.message });
+  });
+});

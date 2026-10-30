@@ -8,6 +8,8 @@ import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
 import type {
   DataTransferData,
@@ -518,6 +520,9 @@ export interface ChargePointService {
    *  resolves with the CALLRESULT or CALLERROR. See
    *  `ChargePoint.sendOcppCall`. */
   sendOcppCall(id: string, request: OcppCallRequest): Promise<OcppCallOutcome>;
+  /** Expert raw frame (#393): one text frame as given, valid OCPP-J or
+   *  not. See `ChargePoint.sendRawFrame`. */
+  sendRawFrame(id: string, request: RawFrameRequest): Promise<RawFrameOutcome>;
   /** The Authorization Cache and its switch (#452 test seam). */
   getAuthorizationCache(id: string): Promise<AuthorizationCacheView>;
   /** Write cache entries whatever the switch says (#452 test seam);

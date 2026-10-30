@@ -87,12 +87,19 @@ export function startMockCsms(): MockCsms {
       },
       message(_ws, message) {
         const raw = typeof message === "string" ? message : message.toString();
-        const frame = JSON.parse(raw) as OcppFrame;
-        received.push(frame);
         // Add frame to current connection's transcript if a connection is open
         if (currentConnection) {
           currentConnection.frames.push({ raw, receivedAt: Date.now() });
         }
+        // #393: a raw expert frame may not be JSON; it is kept in the
+        // transcript only.
+        let frame: OcppFrame;
+        try {
+          frame = JSON.parse(raw) as OcppFrame;
+        } catch {
+          return;
+        }
+        received.push(frame);
         for (const w of [...waiters]) {
           if (w.pred(frame)) {
             w.resolve(frame); // resolve() removes the waiter and clears its timer

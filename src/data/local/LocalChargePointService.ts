@@ -21,6 +21,8 @@ import type {
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
 import { RpcFailure } from "../../protocol/errors";
 import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
@@ -483,6 +485,13 @@ export class LocalChargePointService implements ChargePointService {
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
     return this.getExistingChargePointOrThrow(id).sendOcppCall(request);
+  }
+
+  async sendRawFrame(
+    id: string,
+    request: RawFrameRequest,
+  ): Promise<RawFrameOutcome> {
+    return this.getExistingChargePointOrThrow(id).sendRawFrame(request);
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {

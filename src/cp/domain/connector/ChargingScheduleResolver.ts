@@ -337,6 +337,10 @@ export interface CompositePeriod {
  *   used to compare it, so a W profile on 1 phase reads back as `W / 230`
  *   amperes, not `W / 690`.
  *
+ *   A converted limit is floored to one decimal ({@link floorToTenth}):
+ *   the 1.6 schema requires `limit` to be a multiple of 0.1, and a
+ *   composite must not announce more than the profiles allow (#524).
+ *
  * `numberPhases` is emitted only when a profile restricts the phase count;
  * none is invented.
  */
@@ -351,11 +355,31 @@ export function compositeLimitInUnit(
   if (source && source.unit === unit) {
     return { limit: Math.max(0, source.limit), ...extra };
   }
-  if (unit === ChargingRateUnitType.W) return { limit: period.watts, ...extra };
+  // A finite slice always has a source (an uncapped one is skipped by the
+  // callers), so reaching here with a W request means an A source: the
+  // watts are a conversion too.
+  if (unit === ChargingRateUnitType.W) {
+    return { limit: floorToTenth(period.watts), ...extra };
+  }
   return {
-    limit: period.watts / REFERENCE_PHASE_VOLTAGE / (phases ?? 3),
+    limit: floorToTenth(period.watts / REFERENCE_PHASE_VOLTAGE / (phases ?? 3)),
     ...extra,
   };
+}
+
+/**
+ * `value` rounded down to a multiple of 0.1, never below 0 (#524). The
+ * 1e-9 absorbs float noise, so a value that is a multiple of 0.1 up to
+ * binary representation (0.7, 6.1 × 230) is not pushed one step down; the
+ * division by 10 returns the double nearest the decimal (7 / 10 is 0.7).
+ * Non-finite values pass through.
+ */
+export function floorToTenth(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  const scaled = value * 10;
+  // Past ~1.8e307 the product overflows; such a double is already an integer.
+  if (!Number.isFinite(scaled)) return Math.max(0, value);
+  return Math.max(0, Math.floor(scaled + 1e-9) / 10);
 }
 
 function sameComposite(a: CompositePeriod, b: CompositePeriod): boolean {

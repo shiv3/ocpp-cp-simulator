@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/cli.md
   - vehicle-profiles.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Scenario File Format (v1.4)
@@ -594,7 +594,12 @@ across the Tx-layer profile and the `ChargePointMaxProfile`, 3 when neither
 states a positive integer — and the lower wattage wins each period. Asked in
 the winning profile's own unit, the limit comes back verbatim (a negative
 limit reads 0); asked in the other unit, it converts at 230 V on the joint
-count. `numberPhases` is the joint count, emitted only when a profile states
+count and is rounded down to a multiple of 0.1 — the step the 1.6
+`GetCompositeScheduleResponse` schema requires, applied on 2.0.1 and 2.1 too —
+so it never announces more than the profiles allow (#524): a
+3000 W / 1-phase `ChargePointMaxProfile` asked in A reads 13 A, not
+13.04… A, and 6.123 A on one phase asked in W reads 1408.2 W. A limit
+returned in its own unit is never rounded. `numberPhases` is the joint count, emitted only when a profile states
 one (none is invented). So a single 6 A profile on `numberPhases: 1` reads
 6 A or 1380 W on one phase, and a 10 A / 3-phase `TxProfile` under a
 3000 W / 1-phase `ChargePointMaxProfile` reads 10 A or 2300 W on one phase,

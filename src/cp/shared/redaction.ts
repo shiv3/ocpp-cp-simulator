@@ -33,8 +33,16 @@ const SENSITIVE_KEY_NAMES = new Set([
 const SENSITIVE_NAME_VARIANTS = [...SENSITIVE_KEY_NAMES]
   .map((name) => name.split("").join("[-_]*"))
   .join("|");
-const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
-const SENSITIVE_ESCAPABLE_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*\\\\{0,7}"?`;
+/** Cheap precheck: none of the assignment passes matches without it. */
+const SENSITIVE_NAME_PRESENT = new RegExp(SENSITIVE_NAME_VARIANTS, "i");
+const SENSITIVE_NAME_CORE = `(?:${SENSITIVE_NAME_VARIANTS})[-_]*`;
+/** The longest backslash run before a quote that the escaped forms take. */
+const MAX_ESCAPES = 7;
+const escapeRun = (min: 0 | 1): string => `\\\\{${min},${MAX_ESCAPES}}`;
+const sensitiveName = (escape = ""): string =>
+  `"?${SENSITIVE_NAME_CORE}${escape}"?`;
+const SENSITIVE_ASSIGNMENT_NAME = sensitiveName();
+const SENSITIVE_ESCAPABLE_NAME = sensitiveName(escapeRun(0));
 /**
  * A quoted value ends at its first unescaped matching quote (`"ab\"cd"` is
  * one value). On the opening line any such quote ends it, unless a
@@ -51,8 +59,9 @@ const SENSITIVE_ESCAPABLE_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*\\\\{0,7}
  *
  * A PEM value (`-----BEGIN`, after optional whitespace) ends only at a quote
  * after its `-----END …-----` marker (whitespace or a `\n` / `\r` escape,
- * at any escaping depth such as `\\n`, between) with no sensitive assignment before it, else at the end of the
- * text, whatever quotes its body holds (#519). All fail closed.
+ * at any escaping depth such as `\\n`, between) with no sensitive
+ * assignment before it, else at the end of the text, whatever quotes its
+ * body holds (#519). All fail closed.
  *
  * The `:` / `=` lookbehind comes after the quote it checks: placed before
  * it, V8 runs it at every backtrack position of a long whitespace run
@@ -64,8 +73,11 @@ const SENSITIVE_ESCAPABLE_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*\\\\{0,7}
  * PEM labels, `X9.42 DH PARAMETERS` included), so it cannot carry an
  * assignment either.
  */
-const NO_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=])`;
-const NO_ESCAPABLE_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ESCAPABLE_NAME}\\s*[:=])`;
+const noAssignmentAhead = (name: string): string => `(?!\\\\?${name}\\s*[:=])`;
+const NO_ASSIGNMENT_AHEAD = noAssignmentAhead(SENSITIVE_ASSIGNMENT_NAME);
+const NO_ESCAPABLE_ASSIGNMENT_AHEAD = noAssignmentAhead(
+  SENSITIVE_ESCAPABLE_NAME,
+);
 /** A PEM value up to `close`, its closing quote. */
 const pemValue = (close: string): string =>
   `(?=\\s*-----BEGIN)` +
@@ -91,13 +103,13 @@ const SENSITIVE_ASSIGNMENT = new RegExp(
  * longer odd run is an escaped quote of the value (`\\\"`). Like a quoted
  * value's opening line, it does not run over a sensitive assignment, and
  * fails closed to the end of its line. A PEM behind it follows the PEM
- * rule above, across lines. The run is capped at seven backslashes (three
- * serializations); with a longer one the name itself no longer matches,
- * so a deeper-serialized value is not redacted at all.
+ * rule above, across lines. The run is capped at `MAX_ESCAPES` backslashes
+ * (three serializations); with a longer one the name itself no longer
+ * matches, so a deeper-serialized value is not redacted at all.
  */
 const ESCAPED_QUOTE_CLOSE = `(?<!\\\\)(?:\\2\\\\\\2\\\\)*\\2\\3`;
 const SENSITIVE_ESCAPED_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*(\\\\{1,7}))(["'])` +
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*(${escapeRun(1)}))(["'])` +
     `(?:${pemValue(ESCAPED_QUOTE_CLOSE)}` +
     `|(?:${NO_ESCAPABLE_ASSIGNMENT_AHEAD}(?!${ESCAPED_QUOTE_CLOSE})[^\\n])*` +
     `${ESCAPED_QUOTE_CLOSE}|[^\\n]*)`,
@@ -111,12 +123,12 @@ const SENSITIVE_ESCAPED_ASSIGNMENT = new RegExp(
  * outer JSON frame parseable but cuts the JSON inside the string.
  */
 const SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT = new RegExp(
-  `((?:${SENSITIVE_NAME_VARIANTS})[-_]*(\\\\{1,7})"\\s*[:=]\\s*)` +
+  `(${SENSITIVE_NAME_CORE}(${escapeRun(1)})"\\s*[:=]\\s*)` +
     `[{[](?:\\\\[^\\n]|[^"\\\\\\n])*`,
   "gi",
 );
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(?!\\\\{0,7}["'])([^\\s,}\\]]+)`,
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(?!${escapeRun(0)}["'])([^\\s,}\\]]+)`,
   "gi",
 );
 
@@ -195,17 +207,31 @@ const URL_SECRET_QUERY =
   /([?&](?:ocpp_ws_secret|password|passwd|secret|token|access_token|api[-_]?key|auth(?:orization)?[-_]?key)=)([^&#\s"'<>]+)/gi;
 
 export function redactSensitiveText(text: string): string {
-  return redactOcppKeyValueText(text)
-    .replace(
-      SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT,
-      `$1$2"${REDACTED_VALUE}$2"`,
-    )
-    .replace(SENSITIVE_ESCAPED_ASSIGNMENT, `$1$3${REDACTED_VALUE}$2$3`)
-    .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
-    .replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue)
+  return redactAssignments(redactOcppKeyValueText(text))
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
     .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`)
     .replace(BEARER_TOKEN, `$1${REDACTED_VALUE}`);
+}
+
+/**
+ * The `name: value` passes, in order. Each needs a sensitive name, and the
+ * escaped ones a backslash too, so most log lines skip them all: a pass
+ * that cannot match leaves the text as it is.
+ */
+function redactAssignments(text: string): string {
+  if (!SENSITIVE_NAME_PRESENT.test(text)) return text;
+  let redacted = text;
+  if (redacted.includes("\\")) {
+    redacted = redacted
+      .replace(
+        SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT,
+        `$1$2"${REDACTED_VALUE}$2"`,
+      )
+      .replace(SENSITIVE_ESCAPED_ASSIGNMENT, `$1$3${REDACTED_VALUE}$2$3`);
+  }
+  return redacted
+    .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
+    .replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue);
 }
 
 /**

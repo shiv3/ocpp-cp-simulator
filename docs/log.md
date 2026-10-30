@@ -2161,3 +2161,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-10-30] ingest | Certificate follow-ups, third review round (#537)
 
 - `get_15118_ev_certificate` answers `disconnected` when its first CALL is dropped, like `send_ocpp_call`. [MCP endpoint](entities/mcp-endpoint.md), [Control plane](concepts/control-plane.md#rpc).
+- A `CertificateSigned` refused for exceeding `MaxCertificateChainSize` now ends its CSR's resend back-off too. [Security profiles](concepts/security-profiles.md).

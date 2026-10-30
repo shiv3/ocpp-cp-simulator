@@ -404,6 +404,31 @@ describe.each(VERSIONS)(
       expect(atLimit.response).toEqual({ status: "Accepted" });
     });
 
+    // #537 A02.FR.17: the CSMS answered the CSR, so its resends stop.
+    it("stops the CSR's resend back-off on an over-limit chain too", async () => {
+      const certificateSignedAnswered = vi.fn();
+      const ctx: V201InboundContext = {
+        ...context(new CertificateStore(), 10, 10).ctx,
+        certificateSigning: {
+          requestSignature: vi.fn(),
+          certificateSignedAnswered,
+          certificateInstalled: vi.fn(),
+        },
+      };
+
+      const overLimit = await handlers.CertificateSigned(
+        {
+          certificateChain: "x".repeat(11),
+          certificateType: "ChargingStationCertificate",
+        },
+        ctx,
+      );
+      expect(overLimit.response).toEqual({ status: "Rejected" });
+      expect(certificateSignedAnswered).toHaveBeenCalledWith(
+        "ChargingStationCertificate",
+      );
+    });
+
     it("sends a schema-valid SecurityEventNotification for a rejected chain", async () => {
       const store = new CertificateStore();
       const { ctx, sendCall } = context(store);

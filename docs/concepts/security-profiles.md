@@ -350,7 +350,7 @@ CALLERROR.
   `Rejected` before it is parsed, with no security event (A02.FR.16: SHALL
   on 2.0.1, MAY on 2.1, applied on both). Any `CertificateSigned` for a use
   ends the resend back-off of that use's CSR, accepted (A02.FR.17) or
-  rejected as invalid (A02.FR.20); one refused for its size does not. An
+  rejected: as invalid (A02.FR.20) or for its size (the CSMS did answer). An
   accepted V2G chain is followed by `GetCertificateStatus` (M06.FR.07); an
   accepted Charging Station certificate, on a security-profile-3 station, by
   a reconnection that presents it

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isValidCertificateSignedResponseV201,
   isValidCertificateSignedResponseV21,
+  isValidGetCertificateStatusRequestV201,
+  isValidGetCertificateStatusRequestV21,
   isValidSecurityEventNotificationRequestV201,
   isValidSecurityEventNotificationRequestV21,
   isValidSignCertificateRequestV201,
@@ -19,7 +21,9 @@ import { CertificateStore } from "../../../domain/security/CertificateStore";
 import {
   leafForCsr,
   selfSignedRoot,
+  subCa,
 } from "../../../domain/security/__tests__/certificateFixtures";
+import { OCSP_RESPONSE_GOOD_BASE64 } from "../../../domain/security/__tests__/ocspFixtures";
 import type { Logger } from "../../../shared/Logger";
 import type { GenerationToken, Settlement } from "../network-sim";
 import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
@@ -379,5 +383,137 @@ describe.each([
     const [event] = socket.calls("SecurityEventNotification");
     expect(event.payload).not.toHaveProperty("techInfo");
     expect(validEvent(event.payload)).toBe(true);
+  });
+});
+
+// #537 M06: GetCertificateStatus for the station's V2G certificates.
+describe.each([
+  ["OCPP-2.0.1", isValidGetCertificateStatusRequestV201, 512],
+  ["OCPP-2.1", isValidGetCertificateStatusRequestV21, 2000],
+] as const)("%s GetCertificateStatus", (version, validRequest, maxUrl) => {
+  beforeEach(() => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A V2G chain (leaf + sub-CA) signed for a triggered CSR. */
+  async function installV2gChain(
+    env: ReturnType<typeof setup>,
+    leafUrl = "http://ocsp.example.com/leaf",
+  ): Promise<unknown> {
+    await trigger(env.socket, "SignV2GCertificate");
+    await settle(env.socket, 1);
+    const [sign] = env.socket.calls("SignCertificate");
+    const root = await selfSignedRoot("01", "V2G Root");
+    const sub = await subCa("02", "V2G Sub-CA", root, {
+      ocspUrl: "http://ocsp.example.com/sub",
+    });
+    const leaf = await leafForCsr("0a1b", sign.payload.csr as string, sub, {
+      ocspUrl: leafUrl,
+    });
+    return deliverSigned(env.socket, {
+      certificateChain: `${leaf}\n${sub.pem}`,
+      certificateType: "V2GCertificate",
+    });
+  }
+
+  it("asks for the new V2G certificate and its sub-CA once installed (M06.FR.07)", async () => {
+    const env = setup(version);
+    expect(await installV2gChain(env)).toEqual({ status: "Accepted" });
+
+    const requests = env.socket.calls("GetCertificateStatus");
+    const chain = env.certificateStore.listSignedChains("V2GCertificate")[0];
+    expect(requests.map((r) => r.payload)).toEqual([
+      {
+        ocspRequestData: {
+          ...chain.hashData[0],
+          responderURL: "http://ocsp.example.com/leaf",
+        },
+      },
+      {
+        ocspRequestData: {
+          ...chain.hashData[1],
+          responderURL: "http://ocsp.example.com/sub",
+        },
+      },
+    ]);
+    expect(requests[0].payload.ocspRequestData).toMatchObject({
+      serialNumber: "a1b",
+    });
+    for (const request of requests) {
+      expect(validRequest(request.payload)).toBe(true);
+    }
+  });
+
+  it("caches an Accepted ocspResult and keeps nothing for Failed (M06.FR.02-04, FR.06)", async () => {
+    const env = setup(version);
+    await installV2gChain(env);
+    const [leafRequest, subRequest] = env.socket.calls("GetCertificateStatus");
+    env.socket.deliverResult(leafRequest.messageId, {
+      status: "Accepted",
+      ocspResult: OCSP_RESPONSE_GOOD_BASE64,
+    });
+    env.socket.deliverResult(subRequest.messageId, { status: "Failed" });
+
+    const [leafHash, subHash] =
+      env.certificateStore.listSignedChains("V2GCertificate")[0].hashData;
+    expect(env.certificateStore.cachedOcspResponse(leafHash)?.ocspResult).toBe(
+      OCSP_RESPONSE_GOOD_BASE64,
+    );
+    expect(env.certificateStore.cachedOcspResponse(subHash)).toBeUndefined();
+  });
+
+  it("asks again at boot and then every week (M06.FR.06, FR.10)", async () => {
+    const env = setup(version);
+    await installV2gChain(env);
+    expect(env.socket.calls("GetCertificateStatus")).toHaveLength(2);
+
+    env.handler.setBootStatus({ status: "Accepted" });
+    expect(env.socket.calls("GetCertificateStatus")).toHaveLength(4);
+
+    vi.advanceTimersByTime(7 * 24 * 3600 * 1000 - 1);
+    expect(env.socket.calls("GetCertificateStatus")).toHaveLength(4);
+    vi.advanceTimersByTime(1);
+    expect(env.socket.calls("GetCertificateStatus")).toHaveLength(6);
+
+    env.handler.onWebSocketClosed();
+    vi.advanceTimersByTime(7 * 24 * 3600 * 1000);
+    expect(env.socket.calls("GetCertificateStatus")).toHaveLength(6);
+  });
+
+  it("sends nothing for a Charging Station certificate or without a responder URL", async () => {
+    const env = setup(version);
+    env.handler.setBootStatus({ status: "Accepted" });
+    await trigger(env.socket, "SignChargingStationCertificate");
+    await settle(env.socket, 1);
+    const [sign] = env.socket.calls("SignCertificate");
+    const root = await selfSignedRoot("01", "Root");
+    const sub = await subCa("02", "Sub", root, {
+      ocspUrl: "http://ocsp.example.com/sub",
+    });
+    await deliverSigned(env.socket, {
+      certificateChain: `${await leafForCsr("03", sign.payload.csr as string, sub)}\n${sub.pem}`,
+      certificateType: "ChargingStationCertificate",
+    });
+    expect(env.socket.calls("GetCertificateStatus")).toEqual([]);
+  });
+
+  it(`leaves out a responderURL longer than ${maxUrl} characters`, async () => {
+    const env = setup(version);
+    const long = `http://ocsp.example.com/${"x".repeat(maxUrl)}`;
+    await installV2gChain(env, long);
+    expect(
+      env.socket
+        .calls("GetCertificateStatus")
+        .map(
+          (r) =>
+            (r.payload.ocspRequestData as { responderURL: string })
+              .responderURL,
+        ),
+    ).toEqual(["http://ocsp.example.com/sub"]);
   });
 });

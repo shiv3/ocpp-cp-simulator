@@ -9,9 +9,8 @@ import {
   isValidNotifyEventRequestV21,
   isValidSetVariablesResponseV21,
 } from "../../../../ocpp/v21";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import { answerTo, startMockCsms, type MockCsms } from "./mockCsms";
+import { bootedChargePoint, callOf } from "./stationHarness";
 
 /**
  * #538, OCPP 2.0.1 / 2.1 N07.FR.04: while offline, a monitor at or below
@@ -42,24 +41,6 @@ const OFFLINE_QUEUING_SEVERITY = {
   variable: { name: "OfflineQueuingSeverity" },
 };
 
-function makeChargePoint(csms: MockCsms, id: string, version: string) {
-  const cp = new ChargePoint(
-    id,
-    DefaultBootNotification,
-    1,
-    csms.url,
-    null,
-    null,
-    null,
-    {},
-    [],
-    version,
-    {},
-  );
-  cp.events.on("error", () => undefined);
-  return cp;
-}
-
 /** Answer the next BootNotification after `from` frames with Accepted. */
 async function bootAccepted(csms: MockCsms, from: number): Promise<void> {
   const boot = await csms.waitForFrame(
@@ -82,9 +63,7 @@ async function call(
   payload: unknown,
 ): Promise<Record<string, unknown>> {
   csms.send([2, messageId, action, payload]);
-  const frame = await csms.waitForFrame(
-    (f: OcppFrame) => f[0] === 3 && f[1] === messageId,
-  );
+  const frame = await csms.waitForFrame(answerTo(messageId));
   return frame[2] as Record<string, unknown>;
 }
 
@@ -96,16 +75,18 @@ interface EventData {
 }
 
 const notifyEventsFrom = (csms: MockCsms, from: number) =>
-  csms.received.slice(from).filter((f) => f[0] === 2 && f[2] === "NotifyEvent");
+  csms.received.slice(from).filter(callOf("NotifyEvent"));
 
 describe("OCPP 2.x offline NotifyEvent queuing (#538, N07.FR.04)", () => {
   for (const v of VERSIONS) {
     it(`${v.version}: publishes OfflineQueuingSeverity as a ReadWrite 0-9 variable`, async () => {
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, `CP-OQS-${v.version}`, v.version);
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-OQS-${v.version}`,
+        v.version,
+      );
       try {
-        cp.connect();
-        await bootAccepted(csms, 0);
         const initial = await call(csms, "gv-1", "GetVariables", {
           getVariableData: [OFFLINE_QUEUING_SEVERITY],
         });
@@ -135,10 +116,12 @@ describe("OCPP 2.x offline NotifyEvent queuing (#538, N07.FR.04)", () => {
 
     it(`${v.version}: queues the events at or below the severity offline and replays them before the re-check`, async () => {
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, `CP-OFFLINE-NE-${v.version}`, v.version);
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-OFFLINE-NE-${v.version}`,
+        v.version,
+      );
       try {
-        cp.connect();
-        await bootAccepted(csms, 0);
         await call(csms, "sv-oqs", "SetVariables", {
           setVariableData: [
             { attributeValue: "5", ...OFFLINE_QUEUING_SEVERITY },

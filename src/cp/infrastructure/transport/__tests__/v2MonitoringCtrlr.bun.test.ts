@@ -11,9 +11,8 @@ import {
   isValidNotifyReportRequestV21,
   isValidSetVariablesResponseV21,
 } from "../../../../ocpp/v21";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import { answerTo, startMockCsms, type MockCsms } from "./mockCsms";
+import { bootedChargePoint, callOf } from "./stationHarness";
 
 /**
  * #538: the MonitoringCtrlr variables of the device model —
@@ -44,34 +43,6 @@ const VERSIONS = [
 
 const MONITORING_CTRLR = { name: "MonitoringCtrlr" };
 
-function makeChargePoint(csms: MockCsms, id: string, version: string) {
-  const cp = new ChargePoint(
-    id,
-    DefaultBootNotification,
-    1,
-    csms.url,
-    null,
-    null,
-    null,
-    {},
-    [],
-    version,
-    {},
-  );
-  cp.events.on("error", () => undefined);
-  return cp;
-}
-
-async function bootAccepted(csms: MockCsms): Promise<void> {
-  const boot = await csms.waitForCall("BootNotification");
-  csms.replyCallResult(boot.messageId, {
-    status: "Accepted",
-    currentTime: "2026-10-30T00:00:00.000Z",
-    interval: 300,
-  });
-  await csms.waitForFrame((f) => f[0] === 2 && f[2] === "StatusNotification");
-}
-
 async function call(
   csms: MockCsms,
   messageId: string,
@@ -80,9 +51,7 @@ async function call(
   valid?: Validator,
 ): Promise<Record<string, unknown>> {
   csms.send([2, messageId, action, payload]);
-  const frame = await csms.waitForFrame(
-    (f: OcppFrame) => f[0] === 3 && f[1] === messageId,
-  );
+  const frame = await csms.waitForFrame(answerTo(messageId));
   const response = frame[2] as Record<string, unknown>;
   if (valid) expect(valid(response)).toBe(true);
   return response;
@@ -110,11 +79,12 @@ describe("OCPP 2.x MonitoringCtrlr variables (#538)", () => {
   for (const v of VERSIONS) {
     it(`${v.version}: publishes ItemsPerMessage / BytesPerMessage per instance and ActiveMonitoringLevel`, async () => {
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, `CP-MCTRLR-${v.version}`, v.version);
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-MCTRLR-${v.version}`,
+        v.version,
+      );
       try {
-        cp.connect();
-        await bootAccepted(csms);
-
         const read = async (messageId: string) => {
           const response = await call(
             csms,
@@ -189,10 +159,12 @@ describe("OCPP 2.x MonitoringCtrlr variables (#538)", () => {
 
     it(`${v.version}: a monitor on ActiveMonitoringLevel reports SetMonitoringLevel changes`, async () => {
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, `CP-MLEVEL-${v.version}`, v.version);
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-MLEVEL-${v.version}`,
+        v.version,
+      );
       try {
-        cp.connect();
-        await bootAccepted(csms);
         const set = await call(csms, "svm-1", "SetVariableMonitoring", {
           setMonitoringData: [
             {
@@ -218,9 +190,7 @@ describe("OCPP 2.x MonitoringCtrlr variables (#538)", () => {
         ).toEqual(["Accepted", "Rejected"]);
 
         await call(csms, "sml-5", "SetMonitoringLevel", { severity: 5 });
-        const frame = await csms.waitForFrame(
-          (f) => f[0] === 2 && f[2] === "NotifyEvent",
-        );
+        const frame = await csms.waitForFrame(callOf("NotifyEvent"));
         expect(v.notifyEvent(frame[3])).toBe(true);
         expect(
           (frame[3] as { eventData: Record<string, unknown>[] }).eventData[0],
@@ -238,17 +208,17 @@ describe("OCPP 2.x MonitoringCtrlr variables (#538)", () => {
 
     it(`${v.version}: GetBaseReport publishes the MonitoringCtrlr variables and the bounds of integer variables (N04.FR.06)`, async () => {
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, `CP-MBASE-${v.version}`, v.version);
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-MBASE-${v.version}`,
+        v.version,
+      );
       try {
-        cp.connect();
-        await bootAccepted(csms);
         await call(csms, "gbr-1", "GetBaseReport", {
           requestId: 1,
           reportBase: "FullInventory",
         });
-        const frame = await csms.waitForFrame(
-          (f) => f[0] === 2 && f[2] === "NotifyReport",
-        );
+        const frame = await csms.waitForFrame(callOf("NotifyReport"));
         expect(v.notifyReport(frame[3])).toBe(true);
         const data = (frame[3] as { reportData: ReportDatum[] }).reportData;
         const find = (component: string, variable: string, instance?: string) =>

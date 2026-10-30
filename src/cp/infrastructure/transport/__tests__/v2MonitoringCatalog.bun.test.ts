@@ -15,11 +15,9 @@ import {
   isValidSetMonitoringBaseResponseV21,
   isValidSetVariableMonitoringResponseV21,
 } from "../../../../ocpp/v21";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import { answerTo, startMockCsms, type MockCsms } from "./mockCsms";
+import { bootedChargePoint, callOf, stationFor } from "./stationHarness";
 import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
-import type { Database } from "../../../domain/persistence/Database";
 import { DEFAULT_MONITOR_CATALOG } from "../../../domain/monitoring/monitorCatalog";
 
 /**
@@ -56,39 +54,6 @@ const VERSIONS = [
 
 const [HARDWIRED, PRECONFIGURED, PRECONFIGURED_2] = DEFAULT_MONITOR_CATALOG;
 
-function makeChargePoint(
-  csms: MockCsms,
-  id: string,
-  version: string,
-  database: Database | null = null,
-): ChargePoint {
-  const cp = new ChargePoint(
-    id,
-    DefaultBootNotification,
-    1,
-    csms.url,
-    null,
-    null,
-    database,
-    {},
-    [],
-    version,
-    {},
-  );
-  cp.events.on("error", () => undefined);
-  return cp;
-}
-
-async function bootAccepted(csms: MockCsms): Promise<void> {
-  const boot = await csms.waitForCall("BootNotification");
-  csms.replyCallResult(boot.messageId, {
-    status: "Accepted",
-    currentTime: "2026-10-30T00:00:00.000Z",
-    interval: 300,
-  });
-  await csms.waitForFrame((f) => f[0] === 2 && f[2] === "StatusNotification");
-}
-
 async function call(
   csms: MockCsms,
   messageId: string,
@@ -97,9 +62,7 @@ async function call(
   valid: Validator,
 ): Promise<Record<string, unknown>> {
   csms.send([2, messageId, action, payload]);
-  const frame = await csms.waitForFrame(
-    (f: OcppFrame) => f[0] === 3 && f[1] === messageId,
-  );
+  const frame = await csms.waitForFrame(answerTo(messageId));
   const response = frame[2] as Record<string, unknown>;
   expect(valid(response)).toBe(true);
   return response;
@@ -127,11 +90,12 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
   for (const v of VERSIONS) {
     it(`${v.version}: reports, protects and restores the station's own monitors`, async () => {
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, `CP-CATALOG-${v.version}`, v.version);
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-CATALOG-${v.version}`,
+        v.version,
+      );
       try {
-        cp.connect();
-        await bootAccepted(csms);
-
         // A fresh station reports its own monitors (N02.FR.11).
         expect(
           await call(
@@ -257,9 +221,7 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
         expect(cp.monitoring.list()).toEqual([HARDWIRED]);
         expect(await activeBase("gv-3")).toBe("HardWiredOnly");
         // The station's own monitors never fired a NotifyEvent.
-        expect(
-          csms.received.filter((f) => f[0] === 2 && f[2] === "NotifyEvent"),
-        ).toEqual([]);
+        expect(csms.received.filter(callOf("NotifyEvent"))).toEqual([]);
       } finally {
         cp.disconnect();
         await csms.stop();
@@ -272,10 +234,10 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
       const db = BunSqliteDatabase.open(":memory:");
       const cpId = `CP-CATALOG-RESTART-${v.version}`;
       const first = startMockCsms();
-      const before = makeChargePoint(first, cpId, v.version, db);
+      const before = await bootedChargePoint(first, cpId, v.version, {
+        database: db,
+      });
       try {
-        before.connect();
-        await bootAccepted(first);
         await call(
           first,
           "smb-hw",
@@ -289,7 +251,7 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
       }
 
       const second = startMockCsms();
-      const after = makeChargePoint(second, cpId, v.version, db);
+      const after = stationFor(second, cpId, v.version, { database: db });
       try {
         expect(after.monitoring.list()).toEqual([HARDWIRED]);
         expect(after.monitoring.activeMonitoringBase).toBe("HardWiredOnly");
@@ -311,7 +273,7 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
         [cpId, JSON.stringify({ ...HARDWIRED, id: 999 })],
       );
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, cpId, v.version, db);
+      const cp = stationFor(csms, cpId, v.version, { database: db });
       try {
         expect(cp.monitoring.get(999)).toBeUndefined();
         expect(
@@ -349,7 +311,7 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
         ],
       );
       const csms = startMockCsms();
-      const cp = makeChargePoint(csms, cpId, v.version, db);
+      const cp = stationFor(csms, cpId, v.version, { database: db });
       try {
         expect(cp.monitoring.list().map((m) => [m.id, m.origin])).toEqual([
           [1, "CustomMonitor"],

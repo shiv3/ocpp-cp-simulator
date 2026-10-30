@@ -331,6 +331,9 @@ function formatPowerFactor(value: number): string {
  * a schedule crossing (see `Connector.scheduleLimitWattsNow`).
  */
 export function reportedActivePowerW(connector: Connector): number {
+  // Not charging draws nothing (as in derivedInstantaneousPowerW), and a
+  // schedule limit is never negative: skip resolving the schedule.
+  if (connector.status !== "Charging") return 0;
   const limitW = connector.scheduleLimitWattsNow();
   return Number(
     formatBounded(derivedInstantaneousPowerW(connector, limitW), limitW, 0),

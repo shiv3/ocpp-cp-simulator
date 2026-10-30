@@ -557,6 +557,16 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    // §5.2: a CP-level Unavailable set previously must survive a reboot.
+    // We don't actually transition status here (no WebSocket yet); the
+    // saved flag is reapplied when ChangeAvailability runs or when the
+    // operator inspects the persisted state. Read before the 2.x runtime
+    // values are first published, so ChargingStation.AvailabilityState
+    // starts from it (#538).
+    const persistedCp = this.loadAvailability(0);
+    if (persistedCp === "Inoperative") {
+      this._status = OCPPStatus.Unavailable;
+    }
     if (isOcpp2Version(this._ocppVersion)) this.wireVariableMonitoring();
     // A persisted override never fires onChange; the scheduler only runs
     // once a boot is Accepted (#454).
@@ -567,16 +577,6 @@ export class ChargePoint {
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
     );
-
-    // §5.2: a CP-level Unavailable set previously must survive a reboot.
-    // We don't actually transition status here (no WebSocket yet); the
-    // saved flag is reapplied when ChangeAvailability runs or when the
-    // operator inspects the persisted state.
-    const persistedCp = this.loadAvailability(0);
-    if (persistedCp === "Inoperative") {
-      this._status = OCPPStatus.Unavailable;
-      if (this._monitorEvaluation) this.publishStationAvailability();
-    }
   }
 
   /** Read a persisted Operative/Inoperative flag from the DB for the given
@@ -759,6 +759,10 @@ export class ChargePoint {
       connector.events.on("scheduleLimitChange", publish);
     }
     this.publishStationAvailability();
+    this._events.on("statusChange", () => this.publishStationAvailability());
+    this._events.on("connectorRemoved", ({ connectorId }) =>
+      this.withdrawConnectorValues(connectorId),
+    );
   }
 
   /** `EVSE.Power`, `EVSE.AvailabilityState` and
@@ -2290,8 +2294,6 @@ export class ChargePoint {
         });
       });
     }
-    // #538: ChargingStation.AvailabilityState on a 2.x station.
-    if (this._monitorEvaluation) this.publishStationAvailability();
     this._events.emit("statusChange", { status: newStatus, previousStatus });
     this._stateManager.transitionChargePointStatus(newStatus, {
       source: "boundary-setter",
@@ -2689,7 +2691,6 @@ export class ChargePoint {
     connector.dispose();
     const removed = this._connectors.delete(connectorId);
     if (removed) {
-      this.withdrawConnectorValues(connectorId);
       this._events.emit("connectorRemoved", { connectorId });
     }
     return removed;
@@ -2716,8 +2717,6 @@ export class ChargePoint {
       }
       const previousStatus = this._status;
       this._status = status;
-      // #538: ChargingStation.AvailabilityState on a 2.x station.
-      if (this._monitorEvaluation) this.publishStationAvailability();
       this._events.emit("statusChange", { status, previousStatus });
       this._stateManager.transitionChargePointStatus(status, {
         source: "connector-0-update",

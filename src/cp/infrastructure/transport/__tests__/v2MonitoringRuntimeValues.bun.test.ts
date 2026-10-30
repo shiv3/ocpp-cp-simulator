@@ -10,9 +10,13 @@ import {
   isValidSetVariableMonitoringResponseV21,
   isValidSetVariablesResponseV21,
 } from "../../../../ocpp/v21";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import {
+  answerTo,
+  startMockCsms,
+  type MockCsms,
+  type OcppFrame,
+} from "./mockCsms";
+import { bootedChargePoint, callOf } from "./stationHarness";
 
 /**
  * #538 over the wire: the runtime device-model values (EVSE.Power) resolve
@@ -32,34 +36,8 @@ async function withStation(
   body: (csms: MockCsms) => Promise<void>,
 ): Promise<void> {
   const csms = startMockCsms();
-  const cp = new ChargePoint(
-    `CP-RUNTIME-${version}`,
-    DefaultBootNotification,
-    1,
-    csms.url,
-    null,
-    null,
-    null,
-    {},
-    [],
-    version,
-    {},
-  );
-  cp.events.on("error", () => undefined);
+  const cp = await bootedChargePoint(csms, `CP-RUNTIME-${version}`, version);
   try {
-    cp.connect();
-    const boot = await csms.waitForCall("BootNotification");
-    csms.replyCallResult(boot.messageId, {
-      status: "Accepted",
-      currentTime: "2026-10-30T00:00:00.000Z",
-      interval: 300,
-    });
-    await csms.waitForFrame(
-      (frame) =>
-        frame[0] === 2 &&
-        frame[2] === "StatusNotification" &&
-        (frame[3] as { evseId?: number }).evseId === 1,
-    );
     await body(csms);
   } finally {
     cp.disconnect();
@@ -74,9 +52,7 @@ async function reply(
   payload: unknown,
 ): Promise<OcppFrame> {
   csms.send([2, messageId, action, payload]);
-  return csms.waitForFrame(
-    (frame) => (frame[0] === 3 || frame[0] === 4) && frame[1] === messageId,
-  );
+  return csms.waitForFrame(answerTo(messageId));
 }
 
 async function call(
@@ -196,9 +172,7 @@ describe("OCPP 2.x runtime device-model values (#538)", () => {
           isValidGetMonitoringReportResponseV21,
         ),
       ).toEqual({ status: "Accepted" });
-      const report = await csms.waitForFrame(
-        (f) => f[0] === 2 && f[2] === "NotifyMonitoringReport",
-      );
+      const report = await csms.waitForFrame(callOf("NotifyMonitoringReport"));
       expect(isValidNotifyMonitoringReportRequestV21(report[3])).toBe(true);
       expect((report[3] as { monitor: unknown[] }).monitor).toEqual([
         {

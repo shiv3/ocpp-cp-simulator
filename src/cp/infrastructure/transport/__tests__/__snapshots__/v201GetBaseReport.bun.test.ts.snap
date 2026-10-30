@@ -44,6 +44,8 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -103,6 +105,27 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "instance": "Default",
+            "name": "MessageTimeout",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "30",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 1,
             "supportsMonitoring": true,
           },
         },
@@ -198,6 +221,8 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "maxLimit": 86400,
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -369,6 +394,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -408,6 +434,238 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "boolean",
             "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "SetVariableMonitoring",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "SetVariableMonitoring",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "ClearVariableMonitoring",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "ClearVariableMonitoring",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "name": "ActiveMonitoringLevel",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "9",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 9,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "name": "ActiveMonitoringBase",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "All",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "All,FactoryDefault,HardWiredOnly",
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "name": "OfflineQueuingSeverity",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 9,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "ChargingStation",
+          },
+          "variable": {
+            "name": "AvailabilityState",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Available",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Available,Occupied,Reserved,Unavailable,Faulted",
+          },
+        },
+        {
+          "component": {
+            "evse": {
+              "id": 1,
+            },
+            "name": "EVSE",
+          },
+          "variable": {
+            "name": "Power",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "decimal",
+            "supportsMonitoring": true,
+            "unit": "W",
+          },
+        },
+        {
+          "component": {
+            "evse": {
+              "id": 1,
+            },
+            "name": "EVSE",
+          },
+          "variable": {
+            "name": "AvailabilityState",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Available",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Available,Occupied,Reserved,Unavailable,Faulted",
+          },
+        },
+        {
+          "component": {
+            "evse": {
+              "connectorId": 1,
+              "id": 1,
+            },
+            "name": "Connector",
+          },
+          "variable": {
+            "name": "AvailabilityState",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Available",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Available,Occupied,Reserved,Unavailable,Faulted",
           },
         },
       ],

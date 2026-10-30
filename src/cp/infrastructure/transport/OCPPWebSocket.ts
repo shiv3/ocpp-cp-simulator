@@ -58,7 +58,18 @@ export interface TransportObserverEvents {
   /** A reconnect was scheduled; emitted once the close that caused it has
    *  been handed to the `onclose` callback. */
   reconnectScheduled: { attempt: number; delayMs: number };
+  /** #393: the current generation ended, whatever the cause (a close, a
+   *  disconnect, a reset, a simulated drop), or the transport was disposed.
+   *  Emitted once per generation, before any replacement socket opens. */
+  closed: { cause: CloseCause | "disposed" };
 }
+
+/**
+ * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
+ * before the message handler. Returning true consumes it: the station's
+ * domain handlers never see it.
+ */
+export type IncomingFrameInterceptor = (frame: unknown[]) => boolean;
 
 export type OcppMessagePayload =
   | OcppMessageRequestPayload
@@ -142,6 +153,7 @@ export class OCPPWebSocket {
   private _chargePointId: string;
   private _logger: Logger;
   private _messageHandler: MessageHandler | null = null;
+  private _incomingInterceptor: IncomingFrameInterceptor | null = null;
   private _pingInterval: ReturnType<typeof setInterval> | null = null;
   /** #406: `WebSocketPingInterval` in seconds; 0 sends no client ping. */
   private _pingIntervalSeconds: number = 0;
@@ -431,6 +443,7 @@ export class OCPPWebSocket {
 
     // Shut down controller with reason 'disposed'
     this._controller.shutdownPipelines({ reason: "disposed" });
+    this.observers.emit("closed", { cause: "disposed" });
 
     // Clear the reconnect reservation
     this._reconnectNotBefore = null;
@@ -571,6 +584,43 @@ export class OCPPWebSocket {
     }
   }
 
+  /**
+   * #393: an expert raw text frame, written as given. Shares the network-sim
+   * pipeline, the `Sent:` log line and settlement with normal traffic; the
+   * same generation and socket-open gates as `sendResult`.
+   */
+  public sendRaw(
+    raw: string,
+    gen: GenerationToken,
+    onSettled?: (s: Settlement) => void,
+  ): void {
+    if (gen.gen !== this._currentGeneration.gen || !this.isConnected()) {
+      onSettled?.({
+        outcome: "socket_closed",
+        closeCause:
+          (gen.gen !== this._currentGeneration.gen
+            ? gen.closeCause
+            : this._currentGeneration.closeCause) ?? "network",
+      });
+      return;
+    }
+    const accepted = this._controller.sendUpstream(raw, onSettled);
+    if (!accepted && onSettled) {
+      try {
+        onSettled({ outcome: "queue_overflow" });
+      } catch {
+        // Custody callback exception isolation
+      }
+    }
+  }
+
+  /** #393: see {@link IncomingFrameInterceptor}; null removes it. */
+  public setIncomingInterceptor(
+    interceptor: IncomingFrameInterceptor | null,
+  ): void {
+    this._incomingInterceptor = interceptor;
+  }
+
   /** True when the underlying socket is open and ready to transmit. */
   public isConnected(): boolean {
     return this._ws !== null && this._ws.readyState === WebSocket.OPEN;
@@ -693,6 +743,8 @@ export class OCPPWebSocket {
         return;
       }
 
+      if (this._incomingInterceptor?.(messageArray)) return;
+
       if (this._messageHandler) {
         if (messageArray.length === 3) {
           // CALLRESULT: [messageType, messageId, payload]
@@ -801,6 +853,7 @@ export class OCPPWebSocket {
         // Callback exception isolation
       }
     }
+    this.observers.emit("closed", { cause: closeCause });
   }
 
   /**

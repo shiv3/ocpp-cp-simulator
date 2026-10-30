@@ -18,10 +18,9 @@ import { OCPPStatus } from "../../../domain/types/OcppTypes";
  * or on 2.x (E11: the transaction continues). No configuration key ends a
  * transaction on connection loss, and the simulator offers none.
  *
- * 2.x has no offline queue yet: a TransactionEvent produced while offline is
- * dropped, not replayed with `offline: true` (E11.FR.01/FR.02). These tests
- * pin what exists — the transaction survives and its later events carry the
- * same transaction id — not the replay.
+ * #528: on 2.x a TransactionEvent produced while offline is queued and
+ * replayed after the next Boot Accepted with `offline: true`
+ * (E11.FR.01/FR.02), with the seqNo it was built with.
  */
 
 const RECONNECT_TIMEOUT_MS = 10_000;
@@ -148,4 +147,52 @@ describe("Transaction across a WebSocket close (#488)", () => {
       await csms.stop();
     }
   }, 20_000);
+
+  for (const version of ["OCPP-2.0.1", "OCPP-2.1"] as const) {
+    it(`${version}: an Ended event produced offline is replayed after Boot Accepted with offline=true (#528)`, async () => {
+      const csms = startMockCsms();
+      const cp = await bootedChargePoint(csms, `CP-528-${version}`, version);
+      cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+      const stopAnswering = answerEverythingElse(csms, []);
+      try {
+        await cp.startTransaction("TAG-CLOSE", 1);
+        const started = (
+          await csms.waitForFrame(
+            (frame) =>
+              callOf("TransactionEvent")(frame) &&
+              (frame[3] as TransactionEventRequestV201).eventType === "Started",
+          )
+        )[3] as TransactionEventRequestV201;
+
+        const closed = closedOnce(cp);
+        csms.closeCurrentConnection(1011);
+        await closed;
+
+        // Produced while offline: queued, not lost (E11.FR.01).
+        const beforeStop = csms.received.length - 1;
+        cp.stopTransaction(1);
+
+        await acceptNextBoot(csms);
+        const ended = (
+          await csms.waitForFrame(
+            (frame) =>
+              callOf("TransactionEvent")(frame) &&
+              (frame[3] as TransactionEventRequestV201).eventType === "Ended" &&
+              indexAfter(csms, beforeStop)(frame),
+            RECONNECT_TIMEOUT_MS,
+          )
+        )[3] as TransactionEventRequestV201;
+        expect(ended.offline).toBe(true);
+        expect(ended.transactionInfo.transactionId).toBe(
+          started.transactionInfo.transactionId,
+        );
+        expect(ended.seqNo).toBeGreaterThan(started.seqNo);
+        expect(started.offline).toBeUndefined();
+      } finally {
+        stopAnswering();
+        cp.disconnect();
+        await csms.stop();
+      }
+    }, 20_000);
+  }
 });

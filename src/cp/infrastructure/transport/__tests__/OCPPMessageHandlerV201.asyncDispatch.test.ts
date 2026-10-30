@@ -101,6 +101,8 @@ function setup(entries: Record<string, V201InboundHandler>) {
   const chargePoint = {
     id: "cp-test",
     configuration,
+    // #538: GetBaseReport lists the per-EVSE variables of each connector.
+    connectors: new Map(),
     notifyIncomingCall: vi.fn(),
     notifyIncomingCallCompleted: vi.fn(),
     notifyOutgoingCall: vi.fn(),

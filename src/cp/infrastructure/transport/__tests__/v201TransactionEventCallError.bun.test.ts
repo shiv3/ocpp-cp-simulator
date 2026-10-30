@@ -109,14 +109,18 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           {
             connectorId: 1,
             transactionId,
+            action: "TransactionEvent",
             eventType: "Started",
+            reason: "callError",
             errorCode: "InternalError",
             attempt: 1,
           },
           {
             connectorId: 1,
             transactionId,
+            action: "TransactionEvent",
             eventType: "Started",
+            reason: "callError",
             errorCode: "FormationViolation",
             attempt: 2,
           },
@@ -125,7 +129,9 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           {
             connectorId: 1,
             transactionId,
+            action: "TransactionEvent",
             eventType: "Started",
+            reason: "callError",
             errorCode: "FormationViolation",
             attempts: 2,
           },
@@ -208,7 +214,9 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     });
 
-    it("drops a waiting resend when the charge point disconnects", async () => {
+    // #528 (E11): the waiting resend is queued on disconnect, not dropped,
+    // and replayed once with offline=true after the next Boot Accepted.
+    it("queues a waiting resend when the charge point disconnects and replays it once", async () => {
       const csms = startMockCsms();
       const cp = await bootedChargePoint(csms, `CP-490-CLOSE`, version);
       cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
@@ -220,7 +228,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         await sentinel(cp, csms);
         cp.disconnect();
         // Back online before the 1 s resend is due: only a cancelled timer
-        // keeps the old Started off the new connection.
+        // keeps a second copy of the Started off the new connection.
         const oldBoots = new Set(
           csms.received.filter(callOf("BootNotification")).map((f) => f[1]),
         );
@@ -233,10 +241,18 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           currentTime: new Date().toISOString(),
           interval: 300,
         });
+        const replay = await csms.waitForFrame(
+          (f) => started(f) && f[1] !== first[1],
+        );
+        expect(replay[3]).toEqual({
+          ...(first[3] as TransactionEventRequestV201),
+          offline: true,
+        });
+        csms.replyCallResult(replay[1] as string, {});
         await new Promise((r) => setTimeout(r, 1_300));
         // Still online: a Heartbeat goes through after the deadline.
         await sentinel(cp, csms);
-        expect(csms.received.filter(started)).toHaveLength(1);
+        expect(csms.received.filter(started)).toHaveLength(2);
       } finally {
         cp.disconnect();
         await csms.stop();

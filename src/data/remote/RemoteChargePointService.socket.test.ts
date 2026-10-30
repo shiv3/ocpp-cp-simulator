@@ -636,6 +636,21 @@ describe("RemoteChargePointService socket.io rpc", () => {
         ],
       },
       {
+        name: "sendRawFrame",
+        invoke: (service) =>
+          service.sendRawFrame("cp-1", { frame: '[2,"r1"]', waitMs: 100 }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "send_raw_frame",
+            params: { frame: '[2,"r1"]', waitMs: 100 },
+          },
+        ],
+        results: [
+          { sentFrame: '[2,"r1"]', messageId: "r1", reply: null, closed: null },
+        ],
+      },
+      {
         name: "startTransaction",
         invoke: (service) => service.startTransaction("cp-1", 1, "TAG-1"),
         expected: [

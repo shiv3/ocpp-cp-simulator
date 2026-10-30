@@ -1,13 +1,17 @@
-// Shared harness for the run-level bench tests: a mock CSMS, the real daemon
-// as a subprocess, control-plane helpers, and the real `fleet-bench.ts` as a
-// subprocess under a hard wall-clock bound.
+// Shared harness for the run-level bench tests: a mock CSMS, a slow
+// control-plane relay, the real daemon as a subprocess, control-plane
+// helpers, and the real `fleet-bench.ts` as a subprocess under a hard
+// wall-clock bound.
 //
 // Used by `fleetBench.smoke.bun.test.ts` (#302), which needs a CSMS that
-// answers at once, and by `fleetBench.slowpath.test-bun.ts` (#330), which
-// needs one that can be told to be slow. Both drive the same processes, so
-// the helpers live here once rather than drifting apart in two copies.
+// answers at once, and by `fleetBench.slowpath.test-bun.ts` (#330, #523),
+// which needs a CSMS and a control plane that can be told to be slow. Both
+// drive the same processes, so the helpers live here once rather than
+// drifting apart in two copies.
+import { Server as SocketIoBunEngine } from "@socket.io/bun-engine";
 import type { Subprocess } from "bun";
 import { join } from "node:path";
+import { Server as SocketIoServer } from "socket.io";
 import { io, type Socket } from "socket.io-client";
 
 /** Generous on purpose. The assertion is "it terminates at all", not "it is
@@ -332,6 +336,279 @@ async function freePort(): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// A slow control plane: a socket.io relay in front of the real daemon.
+//
+// The mock CSMS can slow the CSMS-side stages of a cycle, never a
+// control-plane RPC: the daemon acks `start_transaction` before Authorize is
+// answered and `stop_transaction` once the frame is queued, and its
+// `cp.create_many` handler does not wait for a charge point to connect. This
+// relay is the other half (#330, #523). The bench is pointed at it with
+// `--daemon-url`; it accepts the bench's sockets, opens one socket to the
+// daemon per bench socket — with the same handshake `auth`, so the daemon's
+// own check decides — and re-emits every event both ways, acks included.
+// Anything that is not socket.io (`/v1/healthz`, `/metrics`) is proxied over
+// HTTP unchanged. A daemon socket that closes closes the bench's transport,
+// which the bench reconnects after; its unanswered RPCs get a synthetic
+// `relay_upstream_closed` ack. Nothing else about a real outage is modelled.
+//
+// It delays the **request**, not the answer: a held RPC reaches the daemon
+// late, which is what a slow handler looks like from the bench — the work
+// happens after the client may have given up. Holding the answer instead
+// would let the daemon act at once, and nothing the bench does afterwards
+// could then race it.
+// ---------------------------------------------------------------------------
+
+/** One `rpc` event the relay received from the bench. */
+export interface RelayedRpc {
+  readonly method: string;
+  /** The target charge point: the envelope's `cpId`, or `params.cpId` for a
+   *  daemon-level method such as `cp.delete`. */
+  readonly cpId: string | undefined;
+  /** 1-based count of this method across every bench socket. */
+  readonly nth: number;
+  readonly receivedAtMs: number;
+  /** When it was emitted to the daemon; `null` while held. */
+  forwardedAtMs: number | null;
+  /** When the daemon's ack came back; `null` until then. */
+  answeredAtMs: number | null;
+  /** The daemon's ack, as received. */
+  ack: { ok: boolean; error?: { code: string } } | null;
+}
+
+export interface SlowControlPlaneOptions {
+  readonly daemonUrl: string;
+  /** How long to hold this RPC before forwarding it to the daemon: a number
+   *  of milliseconds (`0`, or absent, forwards at once), or a promise the
+   *  request is held until — so a case can release it on an event rather
+   *  than race a timer against another process. */
+  readonly holdRequestMs?: (call: RelayedRpc) => number | Promise<unknown>;
+  /** Called on receipt of every RPC, before any hold. */
+  readonly onRpc?: (call: RelayedRpc) => void;
+  /** Called once the daemon's ack for an RPC is in (or the relay's synthetic
+   *  one, if the daemon's socket closed first). */
+  readonly onAnswer?: (call: RelayedRpc) => void;
+}
+
+/** The ack the relay gives an RPC whose daemon socket closed before the
+ *  daemon answered it: socket.io-client never calls an ack on a disconnected
+ *  socket, so without it `drained()` would wait forever. */
+export const RELAY_UPSTREAM_CLOSED = "relay_upstream_closed";
+
+export interface SlowControlPlane {
+  /** What to pass the bench as `--daemon-url`. */
+  readonly url: string;
+  /** Every RPC received so far, in arrival order. */
+  rpcs(): readonly RelayedRpc[];
+  /** Resolves once every RPC received so far has been forwarded and answered
+   *  by the daemon — including those whose bench socket is gone — or settled
+   *  with {@link RELAY_UPSTREAM_CLOSED} because the daemon's socket closed. A test must
+   *  await this before reading the daemon's state, or a request the relay
+   *  still holds lands after the assertion. */
+  drained(): Promise<void>;
+  stop(): void;
+}
+
+export interface SocketIoEndpoint {
+  readonly io: SocketIoServer;
+  readonly port: number;
+  stop(): void;
+}
+
+/** A socket.io server on an ephemeral port, at the `/socket.io/` path the
+ *  daemon uses. Any other request goes to `fallback`, or is answered 404. */
+export function serveSocketIo(
+  fallback?: (req: Request) => Response | Promise<Response>,
+): SocketIoEndpoint {
+  const io = new SocketIoServer({ serveClient: false });
+  const engine = new SocketIoBunEngine({ path: "/socket.io/" });
+  io.bind(engine);
+  const handler = engine.handler();
+  const server = Bun.serve({
+    port: 0,
+    idleTimeout: handler.idleTimeout,
+    websocket: handler.websocket,
+    fetch(req, srv) {
+      if (!fallback || new URL(req.url).pathname.startsWith("/socket.io/")) {
+        return engine.handleRequest(req, srv as never);
+      }
+      return fallback(req);
+    },
+  });
+  return {
+    io,
+    port: server.port!,
+    stop: () => {
+      void io.close();
+      server.stop(true);
+    },
+  };
+}
+
+export function startSlowControlPlane(
+  options: SlowControlPlaneOptions,
+): SlowControlPlane {
+  const daemonUrl = options.daemonUrl.replace(/\/$/, "");
+  const endpoint = serveSocketIo((req) => {
+    const url = new URL(req.url);
+    return fetch(`${daemonUrl}${url.pathname}${url.search}`, {
+      method: req.method,
+      headers: req.headers,
+      body:
+        req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+    });
+  });
+  const relay = endpoint.io;
+  const log: RelayedRpc[] = [];
+  const counts = new Map<string, number>();
+  const holds = new Set<ReturnType<typeof setTimeout>>();
+  const upstreams = new Set<Socket>();
+  let pending = 0;
+  let waiters: Array<() => void> = [];
+  const settleOne = (): void => {
+    pending--;
+    if (pending === 0) {
+      const ready = waiters;
+      waiters = [];
+      for (const resolve of ready) resolve();
+    }
+  };
+
+  // The daemon's socket is opened during the handshake, so a refusal there —
+  // bad credentials, a daemon that is down — refuses the bench's socket too.
+  relay.use((socket, next) => {
+    const upstream = io(daemonUrl, {
+      path: "/socket.io/",
+      auth: socket.handshake.auth,
+      reconnection: false,
+    });
+    upstream.once("connect", () => {
+      socket.data.upstream = upstream;
+      upstreams.add(upstream);
+      next();
+    });
+    upstream.once("connect_error", (err: Error) => {
+      upstream.disconnect();
+      next(err);
+    });
+  });
+
+  relay.on("connection", (socket) => {
+    const upstream = socket.data.upstream as Socket;
+    /** Settles each RPC of this socket not yet answered, held ones included. */
+    const unsettled = new Set<(answer: RelayedRpc["ack"]) => void>();
+    let downstreamGone = false;
+    const closeUpstreamIfIdle = (): void => {
+      if (downstreamGone && unsettled.size === 0) {
+        upstreams.delete(upstream);
+        upstream.disconnect();
+      }
+    };
+    upstream.onAny((event: string, ...args: unknown[]) => {
+      socket.emit(event, ...args);
+    });
+    upstream.on("disconnect", () => {
+      for (const settle of [...unsettled]) {
+        settle({ ok: false, error: { code: RELAY_UPSTREAM_CLOSED } });
+      }
+      // A transport close, not `socket.disconnect(true)`: a server-initiated
+      // disconnect is one socket.io-client never reconnects after, while the
+      // bench's pool reconnects after a dropped transport — which is what a
+      // daemon going away looks like. The relay's next handshake then opens a
+      // fresh daemon socket, or refuses the bench if the daemon is gone.
+      socket.conn.close();
+    });
+    socket.on("disconnect", () => {
+      // The daemon keeps running whatever the bench gave up on, so a held
+      // request is still delivered after its bench socket has closed — that
+      // late delivery is the case under test.
+      downstreamGone = true;
+      closeUpstreamIfIdle();
+    });
+    socket.onAny((event: string, ...args: unknown[]) => {
+      const last = args[args.length - 1];
+      const ack = typeof last === "function" ? last : null;
+      const payload = ack ? args.slice(0, -1) : args;
+      if (event !== "rpc") {
+        if (ack) upstream.emit(event, ...payload, ack);
+        else upstream.emit(event, ...payload);
+        return;
+      }
+      const request = (payload[0] ?? {}) as {
+        method?: unknown;
+        cpId?: unknown;
+        params?: { cpId?: unknown };
+      };
+      const method = String(request.method);
+      const nth = (counts.get(method) ?? 0) + 1;
+      counts.set(method, nth);
+      const target = request.cpId ?? request.params?.cpId;
+      const call: RelayedRpc = {
+        method,
+        cpId: typeof target === "string" ? target : undefined,
+        nth,
+        receivedAtMs: Date.now(),
+        forwardedAtMs: null,
+        answeredAtMs: null,
+        ack: null,
+      };
+      log.push(call);
+      pending++;
+      const settle = (answer: RelayedRpc["ack"]): void => {
+        if (!unsettled.delete(settle)) return;
+        call.answeredAtMs = Date.now();
+        call.ack = answer;
+        // A send on a closed socket is a no-op, and the bench drops an ack
+        // for a call it already timed out.
+        ack?.(answer);
+        options.onAnswer?.(call);
+        settleOne();
+        closeUpstreamIfIdle();
+      };
+      unsettled.add(settle);
+      options.onRpc?.(call);
+      const forward = (): void => {
+        // Settled already when the daemon's socket closed during the hold.
+        if (!unsettled.has(settle)) return;
+        call.forwardedAtMs = Date.now();
+        upstream.emit("rpc", ...payload, settle);
+      };
+      const hold = options.holdRequestMs?.(call) ?? 0;
+      if (typeof hold !== "number") {
+        void hold.then(forward, forward);
+        return;
+      }
+      if (hold <= 0) {
+        forward();
+        return;
+      }
+      const timer = setTimeout(() => {
+        holds.delete(timer);
+        forward();
+      }, hold);
+      holds.add(timer);
+    });
+  });
+
+  return {
+    url: `http://127.0.0.1:${endpoint.port}`,
+    rpcs: () => [...log],
+    drained: () =>
+      pending === 0
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => waiters.push(resolve)),
+    stop: () => {
+      for (const timer of holds) clearTimeout(timer);
+      holds.clear();
+      // Disconnecting settles every RPC still held or unanswered, through
+      // each daemon socket's `disconnect` handler.
+      for (const upstream of upstreams) upstream.disconnect();
+      upstreams.clear();
+      endpoint.stop();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Control-plane helpers, for arranging and inspecting daemon state.
 // ---------------------------------------------------------------------------
 
@@ -381,13 +658,18 @@ export async function withControlPlane<T>(
   }
 }
 
+/** The daemon's charge point ids, through an open control-plane `rpc`. */
+export async function cpIdsVia(
+  rpc: (method: string, params: unknown) => Promise<unknown>,
+): Promise<string[]> {
+  const result = (await rpc("cp.list", {})) as
+    { cps?: { cpId: string }[] } | { cpId: string }[];
+  const cps = Array.isArray(result) ? result : (result.cps ?? []);
+  return cps.map((c) => c.cpId);
+}
+
 export async function listCpIds(daemonUrl: string): Promise<string[]> {
-  return withControlPlane(daemonUrl, async (rpc) => {
-    const result = (await rpc("cp.list", {})) as
-      { cps?: { cpId: string }[] } | { cpId: string }[];
-    const cps = Array.isArray(result) ? result : (result.cps ?? []);
-    return cps.map((c) => c.cpId);
-  });
+  return withControlPlane(daemonUrl, cpIdsVia);
 }
 
 // ---------------------------------------------------------------------------

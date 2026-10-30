@@ -1789,6 +1789,15 @@ async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "send_raw_frame": {
+      const { params } = call;
+      // #393: no reply is a result too (reply null), as is a close.
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.sendRawFrame(id, params),
+        ),
+      );
+    }
     // #452: the Authorization Cache test seam.
     case "get_auth_cache":
       return handled(

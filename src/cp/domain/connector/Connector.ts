@@ -554,6 +554,15 @@ export class Connector {
   }
 
   /**
+   * The schedule's watt cap now, side-effect-free like
+   * {@link activePhaseCount}: reading it announces no crossing. For a reader
+   * that is not a sampling path, such as the 2.x `EVSE.Power` value (#538).
+   */
+  scheduleLimitWattsNow(): number {
+    return this.resolveScheduleConstraints(new Date()).watts;
+  }
+
+  /**
    * Snapshot of the last resolved "paused" state, used to detect crossings of
    * the limit=0 boundary across schedule periods. `null` means nothing has
    * been announced yet.

@@ -6,39 +6,58 @@ import type {
   ConfigurationChangeStatus,
   ConfigurationStore,
 } from "../../../domain/charge-point/ConfigurationStore";
-import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
+import type { DeviceModelContext } from "./getVariablesV201";
+import { resolveDeviceModelVariable } from "./deviceModelMap";
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
+
+/** A plain decimal number: optional minus sign, digits, optional fraction. */
+const DECIMAL = /^-?\d+(\.\d+)?$/;
 
 export function handleSetVariablesV201(
   req: SetVariablesRequestV201,
   store: ConfigurationStore,
+  context: DeviceModelContext = {},
 ): SetVariablesResponseV201 {
   const results = req.setVariableData.map((data): SetVariableResult => {
-    const componentName = data.component.name;
-    const variableName = data.variable.name;
-
-    if (!KNOWN_V201_COMPONENTS.has(componentName)) {
-      return {
-        attributeStatus: "UnknownComponent",
-        component: data.component,
-        variable: data.variable,
-      };
-    }
-
-    const v16Key = lookupV16Key(
-      componentName,
-      variableName,
-      data.variable.instance,
+    const resolved = resolveDeviceModelVariable(
+      data.component,
+      data.variable,
+      context.evseExists,
     );
-    if (v16Key === undefined) {
+    if (resolved.status !== "Found") {
       return {
-        attributeStatus: "UnknownVariable",
+        attributeStatus: resolved.status,
         component: data.component,
         variable: data.variable,
       };
     }
+    const v16Key = resolved.valueKey;
 
+    if (
+      data.attributeType === "Target" &&
+      context.targets?.supports(v16Key) === true
+    ) {
+      // #538: a decimal target; anything else (hex, exponent, padding) is
+      // badly formatted (B05.FR.07).
+      const target = DECIMAL.test(data.attributeValue)
+        ? Number(data.attributeValue)
+        : NaN;
+      if (!Number.isFinite(target)) {
+        return {
+          attributeStatus: "Rejected",
+          component: data.component,
+          variable: data.variable,
+        };
+      }
+      context.targets.set(v16Key, target);
+      return {
+        attributeStatus: "Accepted",
+        attributeType: "Target", // B05.FR.03
+        component: data.component,
+        variable: data.variable,
+      };
+    }
     if (data.attributeType !== undefined && data.attributeType !== "Actual") {
       return {
         attributeStatus: "NotSupportedAttributeType",

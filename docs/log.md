@@ -2021,6 +2021,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Not changed: a message signed before a restart and still queued offline is resent as it was. Keys are ephemeral by design (#315), so its records fail against the new key, which is what a station that lost its key sends. Documented.
 - [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): the above, and `ChangeConfiguration` as a way to set the mode scoped to 1.6J.
 
+## [2026-10-30] ingest | Web console tour moved to its own page
+
+- The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
+- Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
+
 ## [2026-10-30] ingest | Text redactor: escaped JSON and nested quoted assignments (#531)
 
 - A value opened by an escaped quote (`{\"privateKey\":\"S1\"}`, JSON logged inside a string, up to three serializations) is redacted up to the quote after the same backslash run, keeping the escape so the string still parses; an escaped bare number becomes `\"[redacted]\"`. On a quoted value's opening line, a secret-named assignment before the closing quote makes the value fail closed to the end of the line (`password="a privateKey='S1 x" y S2'`).

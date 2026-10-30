@@ -49,8 +49,11 @@ On 2.0.1 and 2.1, `SetVariableMonitoring`, `ClearVariableMonitoring`,
 `GetMonitoringReport`, `SetMonitoringLevel` and `SetMonitoringBase` act on a
 stored, persisted monitor catalog that includes the station's own
 hardwired and preconfigured monitors, and the monitors report through
-`NotifyEvent`: see [OCPP 2.x variable monitoring](variable-monitoring.md)
-(#457, #538).
+`NotifyEvent`, periodic ones on a timer: see
+[OCPP 2.x variable monitoring](variable-monitoring.md) (#457, #538). A 2.x
+station also publishes runtime values as device-model variables
+(`EVSE.Power`, `AvailabilityState`), and on 2.1 a `Target` attribute on
+`EVSE.Power` for TargetDelta monitors, which 2.0.1 does not have.
 
 ## Version-agnostic scenarios
 

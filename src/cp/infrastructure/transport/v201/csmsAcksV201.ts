@@ -7,8 +7,6 @@ import type {
   GetDisplayMessagesResponseV201,
   GetLocalListVersionResponseV201,
   GetLogResponseV201,
-  InstallCertificateResponseV201,
-  GetMonitoringReportResponseV201,
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
   SendLocalListResponseV201,

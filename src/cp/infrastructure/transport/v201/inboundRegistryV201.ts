@@ -83,8 +83,6 @@ import {
   handleGetDisplayMessagesAckV201,
   handleGetLocalListVersionAckV201,
   handleGetLogAckV201,
-  handleInstallCertificateAckV201,
-  handleGetMonitoringReportAckV201,
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
   handleSetDisplayMessageAckV201,

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Log
@@ -2020,3 +2020,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Second review of #521: clock-aligned (`Sample.Clock`) samples carry no signed record on 1.6 or 2.x, as the documented scope excludes aligned records; signed 2.x samples on `TransactionEvent(Started)` / `(Ended)` carry `context` `Transaction.Begin` / `Transaction.End`; the records claim no identification detail (`IF` empty), since the station does not record how a tag was authorized; a register too large to write as plain decimal digits is not signed; `tampered_payload` with no reading throws instead of corrupting the header.
 - Not changed: a message signed before a restart and still queued offline is resent as it was. Keys are ephemeral by design (#315), so its records fail against the new key, which is what a station that lost its key sends. Documented.
 - [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): the above, and `ChangeConfiguration` as a way to set the mode scoped to 1.6J.
+
+## [2026-10-30] ingest | Text redactor: escaped JSON and nested quoted assignments (#531)
+
+- A value opened by an escaped quote (`{\"privateKey\":\"S1\"}`, JSON logged inside a string, up to three serializations) is redacted up to the quote after the same backslash run, keeping the escape so the string still parses; an escaped bare number becomes `\"[redacted]\"`. On a quoted value's opening line, a secret-named assignment before the closing quote makes the value fail closed to the end of the line (`password="a privateKey='S1 x" y S2'`).
+- An object or array held by an escaped-JSON member is redacted to the end of the string holding it (else of the line), and a PEM behind an escaped quote follows the PEM rule across lines.
+- [Log format → Redaction](concepts/log-format.md#redaction): the first-line rule and the escaped-JSON paragraph, with its limits (more than seven backslashes; the `{ key, value }`, `variable` and `vpn.key` shapes still need unescaped JSON; a fail-closed value cuts the JSON inside the string).
+- [GitHub issues](sources/github-issues.md): #531.

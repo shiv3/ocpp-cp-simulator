@@ -14,7 +14,7 @@ related:
   - trace-format.md
   - ../entities/analyze.md
   - ../entities/cli.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Log format
@@ -96,7 +96,9 @@ object or array held by a secret-named member is replaced whole by the same
 (#515). Outside a complete JSON object (non-JSON text, a truncated frame), a
 quoted value ends at its first unescaped matching quote (an escaped quote,
 `"ab\"cd"`, does not end it). On the value's first line any such quote ends
-it. On a later line (after a raw newline, or a backslash before the line
+it, unless a secret-named assignment comes before it: the value then fails
+closed to the end of that line, so `password="a privateKey='S1 x" y S2'`
+logs `password="[redacted]"` (#531). On a later line (after a raw newline, or a backslash before the line
 end) it ends the value only when whitespace, `,`, `}`, `]` or the end of the
 text follows it and no `:` / `=` (optionally followed by whitespace) precedes
 it, so `password="line1\nline2" x` logs `password="[redacted]" x` while the
@@ -107,7 +109,7 @@ such a quote, or across such an assignment, the value is redacted to the end
 of its first line and the next line's assignments are matched on their own.
 A value starting with `-----BEGIN` (a PEM, after optional whitespace) ends
 only at a quote that follows its `-----END …-----` marker (a label of
-letters, digits, spaces and dots; whitespace or a `\n` / `\r` escape before the
+letters, digits, spaces and dots; whitespace or a `\n` / `\r` escape, at any escaping depth, before the
 quote) with no secret-named assignment before it, even after a backslash,
 whatever quotes its body holds; otherwise the rest of the message is
 redacted (#519). Both rules fail closed, so they over-redact: a truncated
@@ -120,6 +122,29 @@ longer parses for the trace adapter. Limit: when the quote on a later line is fo
 character (`;`, `)`, a letter) or preceded by `=` / `:`, the value is
 redacted only to the end of its first line and its later lines stay
 readable.
+
+JSON logged inside a string, such as a `DataTransfer` `data` field or an
+error message quoting a payload, has escaped quotes:
+`{\"privateKey\":\"S1\"}`. A value opened by an escaped quote (one to seven
+backslashes, so up to three serializations: `\\\"` included) ends at the
+first quote after the same backslash run; an escaped quote of the value
+(`\\\"` inside `\"…\"`) does not end it. It keeps the escape when redacted
+(`{\"privateKey\":\"[redacted]\"}`, and a number:
+`{\"simPin\":\"[redacted]\"}`), so the string holding it still parses. Like a
+value's first line, it does not run over a secret-named assignment and
+fails closed to the end of its line; a PEM behind an escaped quote follows
+the PEM rule above, across lines. An object or array value
+(`{\"privateKey\":{\"kty\":…}}`) is redacted up to the end of the string
+holding it, else to the end of the line, so
+`{"data":"{\"privateKey\":{…}}"}` logs
+`{"data":"{\"privateKey\":\"[redacted]\""}` (#531). When a value fails
+closed like this, the outer frame still parses but the JSON inside the
+string is cut. Limits: a run of more than seven backslashes is not matched
+at all, and only secret-named members get this: the 1.6 `{ key, value }`, 2.0.1
+`variable` / `attributeValue` and `vpn.key` shapes are matched on unescaped
+JSON objects only. Escaped JSON indented with raw newlines
+(`"{\"privateKey\": {\n  \"d\": \"S1\"…`, which `JSON.stringify` never
+emits) leaves the members after the first line readable.
 
 ## WebSocket close lines
 

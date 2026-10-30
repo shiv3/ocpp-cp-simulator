@@ -23,14 +23,23 @@ const SENSITIVE_KEY_NAMES = new Set([
  * replaces matched (#515): `api_password` and `OED_API_KEY` are secrets.
  * No leading `[-_]*`: the match is unanchored, so it adds nothing, and on a
  * long `_` run it backtracks from every position (quadratic).
+ *
+ * The escapable form also takes an escaped closing quote, in JSON logged
+ * inside a string (`\"password\":`, #531). The assignment names and the
+ * opening-line guard use it; the multi-line and PEM guards keep the plain
+ * form: there it would end a value early and leave its later lines
+ * readable.
  */
 const SENSITIVE_NAME_VARIANTS = [...SENSITIVE_KEY_NAMES]
   .map((name) => name.split("").join("[-_]*"))
   .join("|");
 const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
+const SENSITIVE_ESCAPABLE_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*\\\\{0,7}"?`;
 /**
  * A quoted value ends at its first unescaped matching quote (`"ab\"cd"` is
- * one value). On the opening line any such quote ends it. When it is on a
+ * one value). On the opening line any such quote ends it, unless a
+ * sensitive assignment comes first (`password="a privateKey='S1 x" y S2'`):
+ * the value then runs to the end of the line (#531). When it is on a
  * later line (a raw newline, or a backslash before the line end), it ends
  * the value only if a delimiter follows it (whitespace, `,`, `}`, `]`, end
  * of text) and no `:` / `=` precedes it: the quote opening the next line's
@@ -41,8 +50,8 @@ const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
  * next line's own assignment is still seen.
  *
  * A PEM value (`-----BEGIN`, after optional whitespace) ends only at a quote
- * after its `-----END …-----` marker (whitespace or a `\n` / `\r` escape
- * between) with no sensitive assignment before it, else at the end of the
+ * after its `-----END …-----` marker (whitespace or a `\n` / `\r` escape,
+ * at any escaping depth such as `\\n`, between) with no sensitive assignment before it, else at the end of the
  * text, whatever quotes its body holds (#519). All fail closed.
  *
  * The `:` / `=` lookbehind comes after the quote it checks: placed before
@@ -56,21 +65,58 @@ const SENSITIVE_ASSIGNMENT_NAME = `"?(?:${SENSITIVE_NAME_VARIANTS})[-_]*"?`;
  * assignment either.
  */
 const NO_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=])`;
-const QUOTED_PEM_VALUE =
+const NO_ESCAPABLE_ASSIGNMENT_AHEAD = `(?!\\\\?${SENSITIVE_ESCAPABLE_NAME}\\s*[:=])`;
+/** A PEM value up to `close`, its closing quote. */
+const pemValue = (close: string): string =>
   `(?=\\s*-----BEGIN)` +
   `(?:(?:${NO_ASSIGNMENT_AHEAD}[\\s\\S])*?` +
-  `-----END[A-Z0-9 .]*-----(?:\\s|\\\\[nr])*\\2|[\\s\\S]*)`;
+  `-----END[A-Z0-9 .]*-----(?:\\s|\\\\+[nr])*${close}|[\\s\\S]*)`;
+const QUOTED_PEM_VALUE = pemValue("\\2");
 const QUOTED_MULTILINE_VALUE =
   `(?:${NO_ASSIGNMENT_AHEAD}(?:\\\\[\\s\\S]|(?!\\2)[^\\\\]))*` +
   `\\2(?<![:=]\\s*\\2)(?=[\\s,}\\]]|$)`;
-const QUOTED_LINE_VALUE = `(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n])*\\2|[^\\n]*`;
+const QUOTED_LINE_VALUE =
+  `(?:${NO_ESCAPABLE_ASSIGNMENT_AHEAD}(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n]))*` +
+  `\\2|[^\\n]*`;
 const SENSITIVE_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(["'])` +
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(["'])` +
     `(?:${QUOTED_PEM_VALUE}|${QUOTED_MULTILINE_VALUE}|${QUOTED_LINE_VALUE})`,
   "gi",
 );
+/**
+ * A value opened by an escaped quote (#531): JSON logged inside a string
+ * (`{\"privateKey\":\"S1\"}`), or serialized again (`\\\"`). It ends at the
+ * first quote after the same backslash run, or after that run plus an even
+ * number of escaped backslashes (`\"S1\\\\\"`, a value ending in `\`); a
+ * longer odd run is an escaped quote of the value (`\\\"`). Like a quoted
+ * value's opening line, it does not run over a sensitive assignment, and
+ * fails closed to the end of its line. A PEM behind it follows the PEM
+ * rule above, across lines. The run is capped at seven backslashes (three
+ * serializations); with a longer one the name itself no longer matches,
+ * so a deeper-serialized value is not redacted at all.
+ */
+const ESCAPED_QUOTE_CLOSE = `(?<!\\\\)(?:\\2\\\\\\2\\\\)*\\2\\3`;
+const SENSITIVE_ESCAPED_ASSIGNMENT = new RegExp(
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*(\\\\{1,7}))(["'])` +
+    `(?:${pemValue(ESCAPED_QUOTE_CLOSE)}` +
+    `|(?:${NO_ESCAPABLE_ASSIGNMENT_AHEAD}(?!${ESCAPED_QUOTE_CLOSE})[^\\n])*` +
+    `${ESCAPED_QUOTE_CLOSE}|[^\\n]*)`,
+  "gi",
+);
+/**
+ * An object or array held by an escaped-JSON member (`\"privateKey\":{…}`,
+ * #531): replaced up to the end of the string holding that JSON (the first
+ * unescaped `"`), else to the end of the line, so none of its members is
+ * left. The holding string then ends with `\"[redacted]\"`, which keeps an
+ * outer JSON frame parseable but cuts the JSON inside the string.
+ */
+const SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT = new RegExp(
+  `((?:${SENSITIVE_NAME_VARIANTS})[-_]*(\\\\{1,7})"\\s*[:=]\\s*)` +
+    `[{[](?:\\\\[^\\n]|[^"\\\\\\n])*`,
+  "gi",
+);
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(?!["'])([^\\s,}\\]]+)`,
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(?!\\\\{0,7}["'])([^\\s,}\\]]+)`,
   "gi",
 );
 
@@ -150,6 +196,11 @@ const URL_SECRET_QUERY =
 
 export function redactSensitiveText(text: string): string {
   return redactOcppKeyValueText(text)
+    .replace(
+      SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT,
+      `$1$2"${REDACTED_VALUE}$2"`,
+    )
+    .replace(SENSITIVE_ESCAPED_ASSIGNMENT, `$1$3${REDACTED_VALUE}$2$3`)
     .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
     .replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue)
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
@@ -161,11 +212,14 @@ export function redactSensitiveText(text: string): string {
  * A quoted name is a JSON member (`"simPin":1234`): quote the replacement so
  * the logged frame still parses for the trace adapter (#401). Elsewhere
  * (`api_key=…`) it stays bare. The match may start inside the name
- * (`password":` of `"api_password":`), so the closing quote decides.
+ * (`password":` of `"api_password":`), so the closing quote decides. An
+ * escaped one (`\"simPin\":1234`, #531) gets the same escape, so the string
+ * holding that JSON still parses.
  */
 function redactBareValue(_match: string, prefix: string): string {
-  return /"\s*[:=]/.test(prefix)
-    ? `${prefix}"${REDACTED_VALUE}"`
+  const quote = /(\\*)"\s*[:=]/.exec(prefix);
+  return quote
+    ? `${prefix}${quote[1]}"${REDACTED_VALUE}${quote[1]}"`
     : `${prefix}${REDACTED_VALUE}`;
 }
 

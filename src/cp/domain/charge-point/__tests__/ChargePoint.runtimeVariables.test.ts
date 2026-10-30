@@ -1,0 +1,166 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { isValidNotifyEventRequestV201 } from "../../../../ocpp/v201";
+import { isValidNotifyEventRequestV21 } from "../../../../ocpp/v21";
+import { OCPPStatus } from "../../types/OcppTypes";
+import type { ChargePoint } from "../ChargePoint";
+import { makeChargePoint } from "./chargePointFixtures";
+
+/**
+ * #538: a 2.x station publishes runtime values as device-model variables
+ * (EVSE.Power, EVSE / Connector / ChargingStation AvailabilityState), so a
+ * monitor on them reports through NotifyEvent as they change, and only
+ * when they change.
+ */
+
+const VERSIONS = [
+  { version: "OCPP-2.0.1", valid: isValidNotifyEventRequestV201 },
+  { version: "OCPP-2.1", valid: isValidNotifyEventRequestV21 },
+] as const;
+
+interface EventData {
+  trigger: string;
+  cleared?: boolean;
+  actualValue: string;
+  variableMonitoringId: number;
+  component: { name: string; evse?: { id: number } };
+}
+
+function captureNotifyEvents(cp: ChargePoint): Record<string, unknown>[] {
+  const handler = cp["_messageHandler"] as unknown as {
+    send: (action: string, id: string, payload: unknown) => void;
+  };
+  const sent: Record<string, unknown>[] = [];
+  vi.spyOn(handler, "send").mockImplementation((action, _id, payload) => {
+    if (action === "NotifyEvent") sent.push(payload as Record<string, unknown>);
+  });
+  return sent;
+}
+
+function bootAccepted(cp: ChargePoint): void {
+  cp.onBootNotificationResult({
+    status: "Accepted",
+    interval: 0,
+    currentTime: new Date().toISOString(),
+  });
+}
+
+const value = (cp: ChargePoint, key: string) =>
+  cp.configuration.get(key)?.value;
+
+/** Let the microtask that sends NotifyEvent run. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function startCharging(cp: ChargePoint, connectorId: number, kw: number) {
+  const connector = cp.connectors.get(connectorId);
+  if (!connector) throw new Error(`no connector ${connectorId}`);
+  connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: kw };
+  connector.status = OCPPStatus.Charging;
+  return connector;
+}
+
+describe.each(VERSIONS)("$version runtime device-model values (#538)", (v) => {
+  let cp: ChargePoint;
+
+  afterEach(() => {
+    cp.dispose();
+    vi.restoreAllMocks();
+  });
+
+  it("publishes EVSE.Power and the AvailabilityStates of every EVSE, read-only", () => {
+    cp = makeChargePoint({ ocppVersion: v.version, connectorCount: 2 });
+    bootAccepted(cp);
+    expect(value(cp, "EVSEPower1")).toBe(0);
+    expect(value(cp, "EVSEAvailabilityState2")).toBe("Available");
+    expect(value(cp, "ConnectorAvailabilityState2")).toBe("Available");
+    expect(value(cp, "ChargingStationAvailabilityState")).toBe("Available");
+    expect(cp.configuration.applyChange("EVSEPower1", "5")).toBe("Rejected");
+
+    startCharging(cp, 1, 7.4);
+    expect(value(cp, "EVSEPower1")).toBe(7400);
+    expect(value(cp, "EVSEAvailabilityState1")).toBe("Occupied");
+    expect(value(cp, "ConnectorAvailabilityState1")).toBe("Occupied");
+    expect(value(cp, "EVSEAvailabilityState2")).toBe("Available");
+
+    cp.connectors.get(1)!.status = OCPPStatus.Faulted;
+    expect(value(cp, "EVSEPower1")).toBe(0);
+    expect(value(cp, "EVSEAvailabilityState1")).toBe("Faulted");
+  });
+
+  it("fires monitors on the runtime values, with the monitor's EVSE (N07.FR.16, FR.19)", async () => {
+    cp = makeChargePoint({ ocppVersion: v.version, connectorCount: 2 });
+    const sent = captureNotifyEvents(cp);
+    bootAccepted(cp);
+    const power = cp.monitoring.install({
+      type: "UpperThreshold",
+      severity: 3,
+      value: 5000,
+      component: { name: "EVSE", evse: { id: 1 } },
+      variable: { name: "Power" },
+      valueKey: "EVSEPower1",
+      valueType: { numeric: true },
+    });
+    const state = cp.monitoring.install({
+      type: "Delta",
+      severity: 3,
+      value: 0,
+      component: { name: "EVSE", evse: { id: 1 } },
+      variable: { name: "AvailabilityState" },
+      valueKey: "EVSEAvailabilityState1",
+      valueType: { numeric: false },
+    });
+    expect([power.status, state.status]).toEqual(["Accepted", "Accepted"]);
+    await flush();
+    expect(sent).toEqual([]);
+
+    startCharging(cp, 1, 7.4);
+    await flush();
+    cp.connectors.get(1)!.status = OCPPStatus.Available;
+    await flush();
+
+    expect(sent.every((p) => v.valid(p))).toBe(true);
+    const events = sent.flatMap((p) => p.eventData as EventData[]);
+    expect(
+      events.map((e) => [
+        e.variableMonitoringId,
+        e.trigger,
+        e.actualValue,
+        e.cleared ?? false,
+      ]),
+    ).toEqual([
+      // The status change first moves the power (Charging), then the state.
+      [1, "Alerting", "7400", false],
+      [2, "Delta", "Occupied", false],
+      [1, "Alerting", "0", true],
+      [2, "Delta", "Available", false],
+    ]);
+    expect(events[0].component).toEqual({ name: "EVSE", evse: { id: 1 } });
+  });
+
+  it("evaluates only on change: meter ticks at the same power publish nothing", () => {
+    cp = makeChargePoint({ ocppVersion: v.version });
+    const connector = startCharging(cp, 1, 11);
+    const changes: string[] = [];
+    cp.configuration.onChange((key) => changes.push(key));
+    connector.meterValue = 100;
+    connector.meterValue = 200;
+    connector.status = OCPPStatus.Charging;
+    expect(changes).toEqual([]);
+
+    connector.evSettings = { ...connector.evSettings, maxChargingPowerKw: 7 };
+    expect(changes).toEqual(["EVSEPower1"]);
+  });
+});
+
+describe("OCPP 1.6 runtime values", () => {
+  it("publishes no 2.x device-model runtime value", () => {
+    const cp = makeChargePoint({ ocppVersion: "OCPP-1.6J" });
+    try {
+      expect(cp.configuration.get("EVSEPower1")).toBeUndefined();
+      expect(
+        cp.configuration.get("ChargingStationAvailabilityState"),
+      ).toBeUndefined();
+    } finally {
+      cp.dispose();
+    }
+  });
+});

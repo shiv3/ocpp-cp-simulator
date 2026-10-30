@@ -73,7 +73,16 @@ import type {
   TransactionStoppedReason,
   TransactionUpdateOptions,
 } from "../connector/Transaction";
-import type { ReadingContext } from "../connector/MeterValueBuilder";
+import {
+  reportedActivePowerW,
+  type ReadingContext,
+} from "../connector/MeterValueBuilder";
+import {
+  evseValueKey,
+  RUNTIME_VALUE_KEYS,
+  toV2ConnectorStatus,
+  V2_CONNECTOR_STATUSES,
+} from "./runtimeValueKeys";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
@@ -563,6 +572,7 @@ export class ChargePoint {
     const persistedCp = this.loadAvailability(0);
     if (persistedCp === "Inoperative") {
       this._status = OCPPStatus.Unavailable;
+      if (this._monitorEvaluation) this.publishStationAvailability();
     }
   }
 
@@ -648,6 +658,7 @@ export class ChargePoint {
       repository.saveActiveBase(this._monitoring.activeMonitoringBase);
     }
     this.publishMonitoringCtrlr();
+    this.publishRuntimeValues();
     // Registered before the evaluation's own listener, so a new row exists
     // when its triggered flag is first written.
     this._monitoring.onChange((event) => {
@@ -706,6 +717,60 @@ export class ChargePoint {
     }
     this.publishActiveMonitoringLevel();
     this.publishActiveMonitoringBase();
+  }
+
+  /**
+   * The runtime values of the 2.x device model (#538), as read-only runtime
+   * keys refreshed on every connector event that can move them (status,
+   * meter tick, SoC, EV settings, charging profiles, transaction). A key is
+   * redefined only when its value changes, so a monitor is evaluated on
+   * change only, never once per meter tick.
+   */
+  private publishRuntimeValues(): void {
+    for (const connector of this._connectors.values()) {
+      const publish = () => this.publishConnectorValues(connector);
+      publish();
+      connector.events.on("statusChange", publish);
+      connector.events.on("meterValueChange", publish);
+      connector.events.on("socChange", publish);
+      connector.events.on("evSettingsChange", publish);
+      connector.events.on("transactionChange", publish);
+      connector.events.on("chargingProfilesChange", publish);
+      connector.events.on("scheduleLimitChange", publish);
+    }
+    this.publishStationAvailability();
+  }
+
+  /** `EVSE.Power`, `EVSE.AvailabilityState` and
+   *  `Connector.AvailabilityState` of EVSE N (connector N). */
+  private publishConnectorValues(connector: Connector): void {
+    const keys = RUNTIME_VALUE_KEYS;
+    this.publishRuntimeInteger(
+      evseValueKey(keys.evsePower, connector.id),
+      reportedActivePowerW(connector),
+    );
+    const state = toV2ConnectorStatus(connector.status);
+    for (const prefix of [keys.evseState, keys.connectorState]) {
+      this.publishRuntimeString(evseValueKey(prefix, connector.id), state);
+    }
+  }
+
+  /** `ChargingStation.AvailabilityState`: the station-level status. */
+  private publishStationAvailability(): void {
+    this.publishRuntimeString(
+      RUNTIME_VALUE_KEYS.chargingStationAvailabilityState,
+      toV2ConnectorStatus(this._status),
+    );
+  }
+
+  private publishRuntimeInteger(key: string, value: number): void {
+    if (this._configuration.get(key)?.value === value) return;
+    this._configuration.defineRuntimeIntegerKey(key, value);
+  }
+
+  private publishRuntimeString(key: string, value: string): void {
+    if (this._configuration.get(key)?.value === value) return;
+    this._configuration.defineRuntimeKey(key, value, V2_CONNECTOR_STATUSES);
   }
 
   /** `ActiveMonitoringBase` follows SetMonitoringBase. */
@@ -2166,6 +2231,8 @@ export class ChargePoint {
         });
       });
     }
+    // #538: ChargingStation.AvailabilityState on a 2.x station.
+    if (this._monitorEvaluation) this.publishStationAvailability();
     this._events.emit("statusChange", { status: newStatus, previousStatus });
     this._stateManager.transitionChargePointStatus(newStatus, {
       source: "boundary-setter",

@@ -326,6 +326,18 @@ function formatPowerFactor(value: number): string {
 }
 
 /**
+ * #538: the instantaneous active power, in whole watts, exactly as a
+ * `Power.Active.Import` sample would report it now, but without announcing
+ * a schedule crossing (see `Connector.scheduleLimitWattsNow`).
+ */
+export function reportedActivePowerW(connector: Connector): number {
+  const limitW = connector.scheduleLimitWattsNow();
+  return Number(
+    formatBounded(derivedInstantaneousPowerW(connector, limitW), limitW, 0),
+  );
+}
+
+/**
  * Best-effort instantaneous power estimate based on whatever rate the
  * scheduler is currently driving. We don't expose the scheduler's tick
  * delta, so we fall back to the EV-settings max charging power when

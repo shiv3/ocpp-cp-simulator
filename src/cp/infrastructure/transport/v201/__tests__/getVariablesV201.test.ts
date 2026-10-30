@@ -232,3 +232,122 @@ describe("handleGetVariablesV201", () => {
     });
   });
 });
+
+describe("handleGetVariablesV201 EVSE-scoped runtime variables (#538)", () => {
+  /** A two-EVSE station's runtime values, as ChargePoint publishes them. */
+  function runtimeStore(): ConfigurationStore {
+    const store = storeWithDefaults();
+    store.defineRuntimeIntegerKey("EVSEPower1", 7400);
+    store.defineRuntimeIntegerKey("EVSEPower2", 0);
+    for (const n of [1, 2]) {
+      const state = n === 1 ? "Occupied" : "Available";
+      store.defineRuntimeKey(`EVSEAvailabilityState${n}`, state);
+      store.defineRuntimeKey(`ConnectorAvailabilityState${n}`, state);
+    }
+    store.defineRuntimeKey("ChargingStationAvailabilityState", "Available");
+    return store;
+  }
+  const twoEvses = (evse: { id: number; connectorId?: number }) =>
+    evse.id >= 1 && evse.id <= 2 && (evse.connectorId ?? 1) === 1;
+
+  function get(data: GetVariablesRequestV201["getVariableData"][number]) {
+    return handleGetVariablesV201({ getVariableData: [data] }, runtimeStore(), {
+      evseExists: twoEvses,
+    }).getVariableResult[0];
+  }
+
+  it("reads EVSE.Power, the AvailabilityStates and ChargingStation.AvailabilityState per EVSE", () => {
+    expect(
+      [
+        { component: { name: "EVSE", evse: { id: 1 } }, variable: "Power" },
+        { component: { name: "EVSE", evse: { id: 2 } }, variable: "Power" },
+        {
+          component: { name: "EVSE", evse: { id: 1 } },
+          variable: "AvailabilityState",
+        },
+        {
+          component: { name: "Connector", evse: { id: 2, connectorId: 1 } },
+          variable: "AvailabilityState",
+        },
+        {
+          component: { name: "ChargingStation" },
+          variable: "AvailabilityState",
+        },
+      ].map(({ component, variable }) =>
+        get({ component, variable: { name: variable } }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        attributeStatus: "Accepted",
+        attributeValue: "7400",
+      }),
+      expect.objectContaining({
+        attributeStatus: "Accepted",
+        attributeValue: "0",
+      }),
+      expect.objectContaining({
+        attributeStatus: "Accepted",
+        attributeValue: "Occupied",
+      }),
+      expect.objectContaining({
+        attributeStatus: "Accepted",
+        attributeValue: "Available",
+      }),
+      expect.objectContaining({
+        attributeStatus: "Accepted",
+        attributeValue: "Available",
+      }),
+    ]);
+    expect(
+      get({
+        component: { name: "EVSE", evse: { id: 1 } },
+        variable: { name: "Power" },
+      }),
+    ).toEqual({
+      attributeStatus: "Accepted",
+      attributeType: "Actual",
+      attributeValue: "7400",
+      component: { name: "EVSE", evse: { id: 1 } },
+      variable: { name: "Power" },
+    });
+  });
+
+  it("answers UnknownComponent for an EVSE-scoped component without an EVSE or with one the station lacks", () => {
+    for (const component of [
+      { name: "EVSE" },
+      { name: "EVSE", evse: { id: 3 } },
+      { name: "EVSE", evse: { id: 0 } },
+      { name: "Connector", evse: { id: 1, connectorId: 2 } },
+    ]) {
+      expect(
+        get({ component, variable: { name: "AvailabilityState" } })
+          .attributeStatus,
+      ).toBe("UnknownComponent");
+    }
+  });
+
+  it("answers UnknownVariable for a variable the EVSE does not publish", () => {
+    expect(
+      get({
+        component: { name: "EVSE", evse: { id: 1 } },
+        variable: { name: "EvseId" },
+      }).attributeStatus,
+    ).toBe("UnknownVariable");
+  });
+
+  it("does not find EVSE-scoped variables without the station's EVSE topology", () => {
+    expect(
+      handleGetVariablesV201(
+        {
+          getVariableData: [
+            {
+              component: { name: "EVSE", evse: { id: 1 } },
+              variable: { name: "Power" },
+            },
+          ],
+        },
+        runtimeStore(),
+      ).getVariableResult[0].attributeStatus,
+    ).toBe("UnknownComponent");
+  });
+});

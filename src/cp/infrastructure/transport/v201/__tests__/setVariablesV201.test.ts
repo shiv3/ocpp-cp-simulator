@@ -264,3 +264,33 @@ describe("handleSetVariablesV201", () => {
     ]);
   });
 });
+
+describe("handleSetVariablesV201 EVSE-scoped runtime variables (#538)", () => {
+  it("rejects writing a read-only runtime value and answers UnknownComponent for an EVSE it lacks (B05.FR.04, FR.09)", () => {
+    const store = storeWithDefaults();
+    store.defineRuntimeKey("EVSEAvailabilityState1", "Available");
+    const response = handleSetVariablesV201(
+      {
+        setVariableData: [
+          {
+            attributeValue: "Faulted",
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "AvailabilityState" },
+          },
+          {
+            attributeValue: "Faulted",
+            component: { name: "EVSE", evse: { id: 2 } },
+            variable: { name: "AvailabilityState" },
+          },
+        ],
+      },
+      store,
+      { evseExists: (evse) => evse.id === 1 },
+    );
+    expect(response.setVariableResult.map((r) => r.attributeStatus)).toEqual([
+      "Rejected",
+      "UnknownComponent",
+    ]);
+    expect(store.get("EVSEAvailabilityState1")?.value).toBe("Available");
+  });
+});

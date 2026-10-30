@@ -186,12 +186,23 @@ export interface V201InboundHandler {
 
 export type V201InboundRegistry = ReadonlyMap<string, V201InboundHandler>;
 
+/** Whether the charge point has this EVSE (and connector). */
+function evseOf(
+  ctx: V201InboundContext,
+  evse: { id: number; connectorId?: number },
+): boolean {
+  return v201EvseExists(evse, ctx.chargePoint.connectors.keys());
+}
+
 export function handleGetBaseReportV201(
   payload: unknown,
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetBaseReportRequestV201;
-  const reportData = buildBaseReportData(ctx.chargePoint.configuration);
+  const reportData = buildBaseReportData(
+    ctx.chargePoint.configuration,
+    ctx.chargePoint.connectors.keys(),
+  );
   const first = reportData[0];
   if (first === undefined) {
     return {
@@ -219,7 +230,10 @@ export function handleGetReportV201(
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetReportRequestV201;
-  let reportData = buildBaseReportData(ctx.chargePoint.configuration);
+  let reportData = buildBaseReportData(
+    ctx.chargePoint.configuration,
+    ctx.chargePoint.connectors.keys(),
+  );
 
   if (req.componentVariable && req.componentVariable.length > 0) {
     const wanted = req.componentVariable;
@@ -270,6 +284,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
           response: handleGetVariablesV201(
             p as GetVariablesRequestV201,
             ctx.chargePoint.configuration,
+            { evseExists: (evse) => evseOf(ctx, evse) },
           ),
         }),
       },
@@ -282,6 +297,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
           response: handleSetVariablesV201(
             p as SetVariablesRequestV201,
             ctx.chargePoint.configuration,
+            { evseExists: (evse) => evseOf(ctx, evse) },
           ),
         }),
       },
@@ -558,7 +574,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
             p as SetVariableMonitoringRequestV201,
             ctx.chargePoint.monitoring,
             ctx.chargePoint.configuration,
-            (evse) => v201EvseExists(evse, ctx.chargePoint.connectors.keys()),
+            (evse) => evseOf(ctx, evse),
           ),
         }),
       },

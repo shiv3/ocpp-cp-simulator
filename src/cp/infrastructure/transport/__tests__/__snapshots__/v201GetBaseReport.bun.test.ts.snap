@@ -556,6 +556,96 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "valuesList": "All,FactoryDefault,HardWiredOnly",
           },
         },
+        {
+          "component": {
+            "name": "ChargingStation",
+          },
+          "variable": {
+            "name": "AvailabilityState",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Available",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Available,Occupied,Reserved,Unavailable,Faulted",
+          },
+        },
+        {
+          "component": {
+            "evse": {
+              "id": 1,
+            },
+            "name": "EVSE",
+          },
+          "variable": {
+            "name": "Power",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "decimal",
+            "supportsMonitoring": true,
+            "unit": "W",
+          },
+        },
+        {
+          "component": {
+            "evse": {
+              "id": 1,
+            },
+            "name": "EVSE",
+          },
+          "variable": {
+            "name": "AvailabilityState",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Available",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Available,Occupied,Reserved,Unavailable,Faulted",
+          },
+        },
+        {
+          "component": {
+            "evse": {
+              "connectorId": 1,
+              "id": 1,
+            },
+            "name": "Connector",
+          },
+          "variable": {
+            "name": "AvailabilityState",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Available",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Available,Occupied,Reserved,Unavailable,Faulted",
+          },
+        },
       ],
       "requestId": 42,
       "seqNo": 0,

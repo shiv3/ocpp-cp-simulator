@@ -68,6 +68,7 @@ import {
   type OcmfReading,
 } from "../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import { toV2ConnectorStatus } from "../../domain/charge-point/runtimeValueKeys";
 import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
@@ -121,18 +122,7 @@ type V201MeterValuesSampledValue =
 function ocppStatusToV201(
   status: OCPPStatus,
 ): StatusNotificationRequestV201["connectorStatus"] {
-  switch (status) {
-    case OCPPStatus.Available:
-      return "Available";
-    case OCPPStatus.Reserved:
-      return "Reserved";
-    case OCPPStatus.Unavailable:
-      return "Unavailable";
-    case OCPPStatus.Faulted:
-      return "Faulted";
-    default:
-      return "Occupied";
-  }
+  return toV2ConnectorStatus(status);
 }
 
 function ocppStatusToTransactionChargingState(

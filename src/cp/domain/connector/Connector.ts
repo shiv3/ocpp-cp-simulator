@@ -218,6 +218,16 @@ export class Connector {
   private socPercent: number | null = null;
   private transactionValue: Transaction | null = null;
 
+  /**
+   * The EV side of the cable was unplugged during a transaction the station
+   * keeps (`StopTransactionOnEVSideDisconnect=false`, 2.0.1 E10: the energy
+   * offer stops, the transaction does not) (#488). While set, the meter cap is
+   * zero: the scheduler keeps ticking, so periodic MeterValues still go out,
+   * but the energy register does not rise. Cleared when the connector leaves
+   * `SuspendedEV` and when a transaction begins. Not persisted.
+   */
+  private energyOfferSuspendedValue = false;
+
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
   private incrementFallback: IncrementStrategyConfig | null = null;
   private onMeterSend: ((connectorId: number) => void) | null = null;
@@ -291,8 +301,10 @@ export class Connector {
     this.statusValue = snapshot.status;
     this.availabilityValue = snapshot.availability;
     this.scheduledAvailabilityValue = snapshot.scheduledAvailability;
+    // #315: the signing key is in memory only, so a begin reading signed
+    // before the restart no longer matches MeterPublicKey<id>; drop it.
     this.transactionValue = snapshot.transaction
-      ? { ...snapshot.transaction }
+      ? { ...snapshot.transaction, signedBeginOcmf: undefined }
       : null;
     this.meterValueWh = snapshot.meterValueWh;
     this.socPercent = snapshot.socPercent;
@@ -572,6 +584,8 @@ export class Connector {
    */
   private effectiveMeterCapWatts(): number {
     const scheduleW = this.currentScheduleLimitWatts();
+    // Resolved first so the schedule latch bookkeeping still runs (#301).
+    if (this.energyOfferSuspendedValue) return 0;
     const curve = this._evSettings.chargingCurve;
     const maxKw = this._evSettings.maxChargingPowerKw ?? 0;
     const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
@@ -625,6 +639,9 @@ export class Connector {
   set status(newStatus: OCPPStatus) {
     const previousStatus = this.statusValue;
     this.statusValue = newStatus;
+    if (newStatus !== OCPPStatus.SuspendedEV) {
+      this.energyOfferSuspendedValue = false;
+    }
     this.eventsEmitter.emit("statusChange", {
       status: newStatus,
       previousStatus,
@@ -756,6 +773,17 @@ export class Connector {
     return (
       this.transactionValue !== null && this.transactionValue.stopTime === null
     );
+  }
+
+  /** See {@link energyOfferSuspendedValue} (#488). */
+  get energyOfferSuspended(): boolean {
+    return this.energyOfferSuspendedValue;
+  }
+
+  /** Stop the energy offer of the running transaction after an EV-side
+   *  disconnect (#488): the register freezes, sampling goes on. */
+  suspendEnergyOffer(): void {
+    this.energyOfferSuspendedValue = true;
   }
 
   get transaction(): Transaction | null {
@@ -1070,6 +1098,7 @@ export class Connector {
     // attaches a transaction to this connector, and any resolve in the gap
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
+    this.energyOfferSuspendedValue = false;
     this.openSessionSoc(transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });

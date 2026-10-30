@@ -122,6 +122,100 @@ describe("handleSetVariablesV201", () => {
     ]);
   });
 
+  // #490: the E13 settings are instanced variables (OCPP 2.0.1
+  // §2.1.10/2.1.11, 2.1 §2.1.12); an instance-less entry still matches
+  // whatever instance the CSMS names.
+  it("writes instanced variables and keeps instance-less ones instance-agnostic", () => {
+    const store = new ConfigurationStore(
+      "cp-test",
+      [
+        { key: ConfigurationKeys.Core.HeartbeatInterval, value: 300 },
+        { key: ConfigurationKeys.Core.TransactionMessageAttempts, value: 3 },
+        {
+          key: ConfigurationKeys.Core.TransactionMessageRetryInterval,
+          value: 60,
+        },
+      ],
+      null,
+    );
+    const changes: Array<[string, ConfigurationValueType]> = [];
+    store.onChange((key, value) => changes.push([key, value]));
+
+    const request: SetVariablesRequestV201 = {
+      setVariableData: [
+        {
+          attributeValue: "2",
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttempts", instance: "TransactionEvent" },
+        },
+        {
+          attributeValue: "5",
+          component: { name: "OCPPCommCtrlr" },
+          variable: {
+            name: "MessageAttemptInterval",
+            instance: "TransactionEvent",
+          },
+        },
+        {
+          attributeValue: "9",
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttempts" },
+        },
+        {
+          attributeValue: "9",
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "MessageAttemptsTransactionEvent" },
+        },
+        {
+          attributeValue: "120",
+          component: { name: "OCPPCommCtrlr" },
+          variable: { name: "HeartbeatInterval", instance: "Anything" },
+        },
+      ],
+    };
+
+    const response = handleSetVariablesV201(request, store);
+
+    expect(response.setVariableResult).toEqual([
+      {
+        attributeStatus: "Accepted",
+        attributeType: "Actual",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttempts", instance: "TransactionEvent" },
+      },
+      {
+        attributeStatus: "Accepted",
+        attributeType: "Actual",
+        component: { name: "OCPPCommCtrlr" },
+        variable: {
+          name: "MessageAttemptInterval",
+          instance: "TransactionEvent",
+        },
+      },
+      {
+        attributeStatus: "UnknownVariable",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttempts" },
+      },
+      {
+        attributeStatus: "UnknownVariable",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "MessageAttemptsTransactionEvent" },
+      },
+      {
+        attributeStatus: "Accepted",
+        attributeType: "Actual",
+        component: { name: "OCPPCommCtrlr" },
+        variable: { name: "HeartbeatInterval", instance: "Anything" },
+      },
+    ]);
+    expect(changes).toEqual([
+      ["TransactionMessageAttempts", 2],
+      ["TransactionMessageRetryInterval", 5],
+      ["HeartbeatInterval", 120],
+    ]);
+  });
+
   // #454: AlignedDataCtrlr drives the clock-aligned scheduler through the
   // same 1.6 keys ChangeConfiguration writes.
   it("maps AlignedDataCtrlr Interval and Measurands, rejecting a negative interval", () => {

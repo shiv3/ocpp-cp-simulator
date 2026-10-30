@@ -93,6 +93,10 @@ import {
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
+import {
+  signReading,
+  toOcpp16SampledValue,
+} from "../../domain/connector/SignedMeterData";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import { Logger, LogType } from "../../shared/Logger";
@@ -416,6 +420,19 @@ export class OCPPMessageHandler {
         ? { reservationId: transaction.reservationId }
         : {}),
     };
+    // #315: 1.6 StartTransaction has no field for it, so the signed begin
+    // reading waits on the transaction for StopTransaction.transactionData.
+    const signedBegin = signReading(
+      this._chargePoint,
+      connectorId,
+      transaction.tagId,
+      {
+        reason: "B",
+        energyWh: transaction.meterStart,
+        at: transaction.startTime,
+      },
+    );
+    if (signedBegin) transaction.signedBeginOcmf = signedBegin.ocmf;
     this.sendRequest(
       OCPPAction.StartTransaction,
       messageId,
@@ -434,12 +451,17 @@ export class OCPPMessageHandler {
     // transaction.stopReason in non-default stop paths (Remote / Reset /
     // EVDisconnected / UnlockCommand / DeAuthorized / …).
     const reason = transaction.stopReason;
+    const transactionData = this.signedTransactionData(
+      transaction,
+      connectorId,
+    );
     const payload: StopTransactionRequestV16 = {
       transactionId: transaction.id,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
       timestamp: transaction.stopTime!.toISOString(),
       ...(reason && reason !== "Local" ? { reason } : {}),
+      ...(transactionData ? { transactionData } : {}),
     };
     this.sendRequest(
       OCPPAction.StopTransaction,
@@ -447,6 +469,51 @@ export class OCPPMessageHandler {
       payload,
       connectorId,
     );
+  }
+
+  /**
+   * #315: StopTransaction.transactionData carrying the signed begin reading
+   * (signed when the transaction started) and a freshly signed end reading,
+   * each as a `format: "SignedData"` sample. A stored begin reading is sent
+   * even if signing was turned off since; `undefined` when there is neither.
+   */
+  private signedTransactionData(
+    transaction: Transaction,
+    connectorId: number,
+  ): StopTransactionRequestV16["transactionData"] {
+    if (transaction.meterStop === null || transaction.stopTime === null)
+      return undefined;
+    const end = signReading(this._chargePoint, connectorId, transaction.tagId, {
+      reason: "E",
+      energyWh: transaction.meterStop,
+      at: transaction.stopTime,
+    });
+    if (!end && !transaction.signedBeginOcmf) return undefined;
+    const data = [
+      ...(transaction.signedBeginOcmf
+        ? [
+            {
+              timestamp: transaction.startTime.toISOString(),
+              sampledValue: [
+                toOcpp16SampledValue(
+                  transaction.signedBeginOcmf,
+                  "Transaction.Begin",
+                ),
+              ],
+            },
+          ]
+        : []),
+      ...(end
+        ? [
+            {
+              timestamp: transaction.stopTime.toISOString(),
+              sampledValue: [toOcpp16SampledValue(end.ocmf, "Transaction.End")],
+            },
+          ]
+        : []),
+    ];
+    // Same strict-unit-union cast as sendMeterValue below.
+    return data as unknown as StopTransactionRequestV16["transactionData"];
   }
 
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
@@ -728,13 +795,35 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
+    const timestamp = overrides.timestamp ?? new Date();
+    // #315: during a transaction, also send the energy register signed.
+    // Clock-aligned samples are not signed (no aligned/fiscal records yet).
+    const transaction = connector.transaction;
+    if (
+      context !== "Sample.Clock" &&
+      transactionId !== undefined &&
+      transaction &&
+      !transaction.stopTime
+    ) {
+      const signed = signReading(
+        this._chargePoint,
+        connectorId,
+        transaction.tagId,
+        {
+          reason: "C",
+          energyWh: connector.meterValue,
+          at: timestamp,
+        },
+      );
+      if (signed) sampledValue.push(toOcpp16SampledValue(signed.ocmf, context));
+    }
 
     const payload: MeterValuesRequestV16 = {
       transactionId,
       connectorId,
       meterValue: [
         {
-          timestamp: (overrides.timestamp ?? new Date()).toISOString(),
+          timestamp: timestamp.toISOString(),
           // The builder produces a structurally-compatible SampledValue
           // shape, but its `unit` is a plain `string` whereas ts-ocpp's
           // generated type is a strict union. Cast at this boundary

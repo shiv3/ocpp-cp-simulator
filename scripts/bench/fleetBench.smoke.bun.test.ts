@@ -24,342 +24,23 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { io, type Socket } from "socket.io-client";
 
 import { BENCH_ID_ROOT } from "./lib.ts";
-
-/** Generous on purpose. The assertion is "it terminates at all", not "it is
- *  fast": a tight bound would make this flaky on a loaded CI host and the
- *  flake would be indistinguishable from the hang it exists to catch. A run
- *  configured as below takes ~20s; anything past this is a hang. */
-const RUN_BUDGET_MS = 180_000;
-
-const BENCH_SCRIPT = join(import.meta.dir, "fleet-bench.ts");
-const DAEMON_SCRIPT = join(
-  import.meta.dir,
-  "..",
-  "..",
-  "src",
-  "cli",
-  "main.ts",
-);
-
-// ---------------------------------------------------------------------------
-// A mock CSMS that answers the whole transaction cycle.
-//
-// READ THIS BEFORE TRUSTING A PASS HERE. This mock is deliberately far more
-// forgiving than a real CSMS, and a green run says nothing about the things it
-// does not enforce:
-//
-//   * **No subprotocol negotiation.** `srv.upgrade(req)` accepts any client and
-//     echoes no `Sec-WebSocket-Protocol`, where gocpp uses
-//     `WithSubProtocols("ocpp1.6")` and rejects a mismatch. So the failure the
-//     README warns about most loudly — pointing a 1.6J fleet at a 2.x-only
-//     CSMS, which shows up as an unsettled fleet and an empty table — **cannot
-//     be reproduced here**. Against gocpp that fleet reports `Unavailable`;
-//     against this mock it reports `Available`. Version and handshake
-//     behaviour must be checked against a real CSMS, not against this file.
-//   * **No schema validation, and never a CALLERROR.** Every CALL is acked, so
-//     the table's `errors` column is structurally untestable here — it can only
-//     ever read 0, whatever the payload.
-//   * **Unknown actions get `{}`.** A CALL this mock has never heard of still
-//     succeeds, so a wrong or misspelled action passes silently.
-//
-// What it is good for is the two classes this file exists to cover: that the
-// run terminates, and that it composes correctly across sweep steps and
-// against pre-existing daemon state. Neither needs a strict CSMS.
-// ---------------------------------------------------------------------------
-
-interface MockCsms {
-  readonly wsUrl: string;
-  /** StartTransaction minus StopTransaction. A run must leave this at zero:
-   *  the CSMS is a third-party system whose state the benchmark cannot
-   *  enumerate, so the only way to leave it as found is to close what was
-   *  opened, before the charge point that could close it is deleted. */
-  openTransactions(): number;
-  /** Distinct idTags seen in Authorize/StartTransaction. */
-  idTags(): string[];
-  /** Stop answering entirely, while keeping the socket open — the "CSMS went
-   *  black" case the run has to survive rather than hang on. */
-  blackHole(): void;
-  /** How many WebSockets `cpId` has opened. `>= 2` is the only proof available
-   *  here that a reconnect really happened. */
-  connections(cpId: string): number;
-  /** Heartbeats `cpId` sent on its `n`-th connection (1-based). Counted at the
-   *  CSMS, off the wire, so it owes nothing to any state the benchmark keeps
-   *  about itself. */
-  heartbeatsOnConnection(cpId: string, n: number): number;
-  /** Every charge point id that has connected. */
-  chargePointIds(): string[];
-  stop(): void;
-}
-
-interface MockCsmsOptions {
-  /** Close each charge point's socket exactly once, right after answering its
-   *  first Heartbeat, so the reconnect → BootNotification → `Accepted` path
-   *  runs under a live benchmark. */
-  readonly dropOnFirstHeartbeat?: boolean;
-}
-
-/** Per-socket bookkeeping, so a Heartbeat can be attributed to the connection
- *  it arrived on rather than to the charge point in aggregate. */
-interface CsmsSocketData {
-  readonly cpId: string;
-  /** 1-based: the first connection is 1, the one after a reconnect is 2. */
-  readonly connection: number;
-}
-
-function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
-  let blackHoled = false;
-  let transactionId = 1;
-  let open = 0;
-  const seenIdTags = new Set<string>();
-  /** cpId -> how many sockets it has opened. */
-  const connectionCounts = new Map<string, number>();
-  /** cpId -> heartbeats per connection, indexed by `connection - 1`. */
-  const heartbeats = new Map<string, number[]>();
-  /** cpIds already dropped once, so the drop happens exactly once each. */
-  const alreadyDropped = new Set<string>();
-  const server = Bun.serve<CsmsSocketData, never>({
-    port: 0,
-    fetch(req, srv) {
-      // `wsUrlWithBasic.ts` appends the charge point id to the supervision
-      // URL's path (`url.pathname += params.chargePointId`), so this is who is
-      // connecting.
-      const cpId = decodeURIComponent(
-        new URL(req.url).pathname.replace(/^\//, ""),
-      );
-      const connection = (connectionCounts.get(cpId) ?? 0) + 1;
-      if (srv.upgrade(req, { data: { cpId, connection } })) {
-        connectionCounts.set(cpId, connection);
-        return undefined;
-      }
-      return new Response("upgrade required", { status: 426 });
-    },
-    websocket: {
-      message(ws, raw) {
-        if (blackHoled) return;
-        let frame: unknown;
-        try {
-          frame = JSON.parse(String(raw));
-        } catch {
-          return;
-        }
-        if (!Array.isArray(frame) || frame[0] !== 2) return;
-        const [, messageId, action, payload] = frame as [
-          number,
-          string,
-          string,
-          Record<string, unknown> | undefined,
-        ];
-        const idTag = payload?.idTag;
-        if (typeof idTag === "string") seenIdTags.add(idTag);
-        if (action === "StartTransaction") open++;
-        if (action === "StopTransaction") open--;
-        const { cpId, connection } = ws.data;
-        if (action === "Heartbeat") {
-          const perConnection = heartbeats.get(cpId) ?? [];
-          perConnection[connection - 1] =
-            (perConnection[connection - 1] ?? 0) + 1;
-          heartbeats.set(cpId, perConnection);
-        }
-        ws.send(JSON.stringify([3, messageId, confFor(action)]));
-        if (
-          options.dropOnFirstHeartbeat &&
-          action === "Heartbeat" &&
-          !alreadyDropped.has(cpId)
-        ) {
-          // After the conf, not before it: an unanswered CALL would put the
-          // charge point into its watchdog path and confuse what this is
-          // testing. A server-initiated close is not a manual disconnect, so
-          // `OCPPWebSocket.attemptReconnect` runs with its 1s first backoff.
-          alreadyDropped.add(cpId);
-          ws.close();
-        }
-      },
-    },
-  });
-
-  function confFor(action: string): Record<string, unknown> {
-    const now = new Date().toISOString();
-    switch (action) {
-      case "BootNotification":
-        return { status: "Accepted", currentTime: now, interval: 300 };
-      case "Heartbeat":
-        return { currentTime: now };
-      case "Authorize":
-        return { idTagInfo: { status: "Accepted" } };
-      case "StartTransaction":
-        return {
-          transactionId: transactionId++,
-          idTagInfo: { status: "Accepted" },
-        };
-      case "StopTransaction":
-        return { idTagInfo: { status: "Accepted" } };
-      default:
-        // StatusNotification, MeterValues, DataTransfer, ...
-        return {};
-    }
-  }
-
-  return {
-    wsUrl: server.url.toString().replace(/^http/, "ws"),
-    openTransactions: () => open,
-    idTags: () => [...seenIdTags],
-    blackHole: () => {
-      blackHoled = true;
-    },
-    connections: (cpId) => connectionCounts.get(cpId) ?? 0,
-    heartbeatsOnConnection: (cpId, n) => heartbeats.get(cpId)?.[n - 1] ?? 0,
-    chargePointIds: () => [...connectionCounts.keys()],
-    stop: () => server.stop(true),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// The real daemon, as a subprocess.
-// ---------------------------------------------------------------------------
-
-interface Daemon {
-  readonly url: string;
-  stop(): void;
-}
-
-async function startDaemon(): Promise<Daemon> {
-  const port = await freePort();
-  const proc = Bun.spawn(
-    [
-      "bun",
-      DAEMON_SCRIPT,
-      "--http-port",
-      String(port),
-      "--metrics",
-      "--metrics-no-auth",
-    ],
-    { stdout: "pipe", stderr: "pipe", cwd: join(import.meta.dir, "..", "..") },
-  );
-  const url = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    if (Date.now() > deadline) {
-      proc.kill();
-      throw new Error(`daemon did not become healthy on ${url}`);
-    }
-    try {
-      const res = await fetch(`${url}/v1/healthz`, {
-        signal: AbortSignal.timeout(1_000),
-      });
-      if (res.ok && ((await res.json()) as { ok?: boolean }).ok) break;
-    } catch {
-      // not up yet
-    }
-    await Bun.sleep(200);
-  }
-  return { url, stop: () => proc.kill() };
-}
-
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
-  const port = probe.port ?? 0;
-  probe.stop(true);
-  if (port === 0) throw new Error("could not reserve a port");
-  return port;
-}
-
-// ---------------------------------------------------------------------------
-// Control-plane helpers, for arranging and inspecting daemon state.
-// ---------------------------------------------------------------------------
-
-async function withControlPlane<T>(
-  daemonUrl: string,
-  fn: (
-    rpc: (method: string, params: unknown) => Promise<unknown>,
-  ) => Promise<T>,
-): Promise<T> {
-  const socket: Socket = io(daemonUrl, { path: "/socket.io/" });
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("no connect")), 10_000);
-      socket.once("connect", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      socket.once("connect_error", (err: Error) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-    });
-    return await fn(
-      (method, params) =>
-        new Promise((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error(`${method} timed out`)),
-            15_000,
-          );
-          socket.emit(
-            "rpc",
-            { method, params },
-            (
-              ack:
-                | { ok: true; result: unknown }
-                | { ok: false; error: { code: string; message: string } },
-            ) => {
-              clearTimeout(timer);
-              if (ack.ok) resolve(ack.result);
-              else reject(new Error(`${ack.error.code}: ${ack.error.message}`));
-            },
-          );
-        }),
-    );
-  } finally {
-    socket.disconnect();
-  }
-}
-
-async function listCpIds(daemonUrl: string): Promise<string[]> {
-  return withControlPlane(daemonUrl, async (rpc) => {
-    const result = (await rpc("cp.list", {})) as
-      { cps?: { cpId: string }[] } | { cpId: string }[];
-    const cps = Array.isArray(result) ? result : (result.cps ?? []);
-    return cps.map((c) => c.cpId);
-  });
-}
-
-interface RunOutcome {
-  readonly exitCode: number | null;
-  readonly elapsedMs: number;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly timedOut: boolean;
-}
-
-/** Run the real script as a subprocess, under a hard wall-clock bound. */
-async function runBench(args: readonly string[]): Promise<RunOutcome> {
-  const startedAt = Date.now();
-  const proc = Bun.spawn(["bun", BENCH_SCRIPT, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: join(import.meta.dir, "..", ".."),
-  });
-  let timedOut = false;
-  const killer = setTimeout(() => {
-    timedOut = true;
-    proc.kill("SIGKILL");
-  }, RUN_BUDGET_MS);
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  clearTimeout(killer);
-  return {
-    exitCode,
-    elapsedMs: Date.now() - startedAt,
-    stdout,
-    stderr,
-    timedOut,
-  };
-}
+// The mock CSMS, the daemon and bench subprocesses, and the control-plane
+// helpers are shared with the slow-path suite (#330). READ the mock's header
+// comment in smokeHarness.ts before trusting a pass here: it is far more
+// forgiving than a real CSMS.
+import {
+  listCpIds,
+  RUN_BUDGET_MS,
+  runBench,
+  startBench,
+  startDaemon,
+  startMockCsms,
+  withControlPlane,
+  type Daemon,
+  type MockCsms,
+} from "./smokeHarness.ts";
 
 // ---------------------------------------------------------------------------
 
@@ -723,50 +404,32 @@ describe("fleet-bench end to end (#302)", () => {
     const doomed = await startDaemon();
     const outFile = join(outDir, "daemon-death.json");
     const startedAt = Date.now();
-    const proc = Bun.spawn(
-      [
-        "bun",
-        BENCH_SCRIPT,
-        "--csms-url",
-        csms.wsUrl,
-        "--daemon-url",
-        doomed.url,
-        "--counts",
-        "2",
-        "--duration",
-        "30",
-        "--heartbeat-interval",
-        "1",
-        "--warmup",
-        "0",
-        "--settle-timeout",
-        "10",
-        "--out",
-        outFile,
-      ],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: join(import.meta.dir, "..", ".."),
-      },
-    );
-    let timedOut = false;
-    const killer = setTimeout(() => {
-      timedOut = true;
-      proc.kill("SIGKILL");
-    }, RUN_BUDGET_MS);
+    const { done } = startBench([
+      "--csms-url",
+      csms.wsUrl,
+      "--daemon-url",
+      doomed.url,
+      "--counts",
+      "2",
+      "--duration",
+      "30",
+      "--heartbeat-interval",
+      "1",
+      "--warmup",
+      "0",
+      "--settle-timeout",
+      "10",
+      "--out",
+      outFile,
+    ]);
     // Let the sweep get properly under way, then pull the daemon out from
     // under it, mid-measurement-window.
     await Bun.sleep(5_000);
     doomed.stop();
 
-    const exitCode = await proc.exited;
-    clearTimeout(killer);
-    // Drain the pipes so the subprocess is not left blocked on a full buffer.
-    await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
+    // `done` drains both pipes too, so the subprocess is never left blocked on
+    // a full buffer.
+    const { exitCode, timedOut } = await done;
 
     expect(timedOut).toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(RUN_BUDGET_MS);
@@ -810,4 +473,30 @@ describe("fleet-bench end to end (#302)", () => {
       blackHoled.stop();
     }
   }, 240_000);
+});
+
+describe("fleet-bench test-only timing overrides (#330)", () => {
+  it("refuses an invalid override the way it refuses a bad flag", async () => {
+    // The overrides are parsed at module load, before `main()` runs; a value
+    // they refuse used to escape as a raw stack trace instead of the
+    // `Error: …` line and usage every other invalid input gets. Nothing is
+    // contacted before the refusal, so the URLs need not answer.
+    const run = await runBench(
+      [
+        "--csms-url",
+        "ws://127.0.0.1:9/ocpp/",
+        "--daemon-url",
+        "http://127.0.0.1:9",
+        "--counts",
+        "1",
+      ],
+      { FLEET_BENCH_TEST_FOO: "1" },
+    );
+    expect(run.timedOut).toBe(false);
+    expect(run.exitCode).toBe(1);
+    expect(run.stderr).toContain(
+      "Error: unknown test-only override FLEET_BENCH_TEST_FOO",
+    );
+    expect(run.stderr).toContain("Usage: bun scripts/bench/fleet-bench.ts");
+  }, 60_000);
 });

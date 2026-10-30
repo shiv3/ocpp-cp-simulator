@@ -184,7 +184,7 @@ describe("ConnectorControls: what a real charger would not do by itself", () => 
     );
   });
 
-  it("Connector: plug in and unplug report Preparing and Available", async () => {
+  it("Connector: plug in reports Preparing; unplug is an EV-side disconnect (#488)", async () => {
     const { container, service } = await renderControls();
     const connector = group(container, "Connector");
     await click(button(connector, "Plug in"));
@@ -194,11 +194,10 @@ describe("ConnectorControls: what a real charger would not do by itself", () => 
       OCPPStatus.Preparing,
     );
     await click(button(connector, "Unplug"));
-    expect(service.sendStatusNotification).toHaveBeenLastCalledWith(
-      "CP-1",
-      1,
-      OCPPStatus.Available,
-    );
+    // The station decides what the unplug means (stop, suspend or
+    // Available); the console no longer sends Available itself.
+    expect(service.evDisconnected).toHaveBeenCalledWith("CP-1", 1);
+    expect(service.sendStatusNotification).toHaveBeenCalledTimes(1);
   });
 
   it("Connector: Remove asks first", async () => {

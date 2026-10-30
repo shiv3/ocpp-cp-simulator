@@ -198,6 +198,27 @@ export interface ChargePointEvents {
     connectorId: number;
     errorCode: string;
   };
+  /** OCPP 2.0.1 / 2.1 (#490, E13.FR.02): the CSMS answered a
+   *  TransactionEvent (any eventType) with a CALLERROR. `attempt` is the
+   *  1-based transmission that failed. The transaction keeps running; the
+   *  station resends the message unless this was its last attempt. */
+  transactionMessageRejected: {
+    connectorId: number;
+    transactionId: string;
+    eventType: string;
+    errorCode: string;
+    attempt: number;
+  };
+  /** OCPP 2.0.1 / 2.1 (#490, E13.FR.04): the last of
+   *  `MessageAttempts[TransactionEvent]` transmissions failed too, so the
+   *  message is dropped. The transaction keeps running. */
+  transactionMessageDiscarded: {
+    connectorId: number;
+    transactionId: string;
+    eventType: string;
+    errorCode: string;
+    attempts: number;
+  };
 
   // Message events
   messageSent: {

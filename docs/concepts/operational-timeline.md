@@ -1,7 +1,7 @@
 ---
 title: Operational timeline
 type: concept
-summary: Per-charge-point, in-memory projection of domain events (connection, injected network faults and their recovery, status changes, transactions, authorization rejections, scenario runs, smart-charging profiles applied / cleared / expired) with stable snake_case kinds, a monotonic `seq`, and incident / run correlation — read with `timeline.get`, the `get_timeline` MCP tool or the console's Operational events tab.
+summary: Per-charge-point, in-memory projection of domain events (connection, injected network faults and their recovery, status changes, transactions and their rejected or discarded 2.x TransactionEvents, authorization rejections, scenario runs, smart-charging profiles applied / cleared / expired) with stable snake_case kinds, a monotonic `seq`, and incident / run correlation — read with `timeline.get`, the `get_timeline` MCP tool or the console's Operational events tab.
 sources:
   - src/cp/application/services/OperationalTimeline.ts
   - src/cp/application/services/OperationalTimelineProjector.ts
@@ -10,6 +10,7 @@ sources:
   - src/cp/domain/charge-point/ChargePoint.ts (applyChargingProfile, clearChargingProfiles)
   - "issue #448"
   - "issue #469"
+  - "issue #490"
 related:
   - control-plane.md
   - network-simulation.md
@@ -17,7 +18,8 @@ related:
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
   - charging-sessions.md
-updated: 2026-10-28
+  - ocpp-versions-and-transports.md
+updated: 2026-10-29
 ---
 
 # Operational timeline
@@ -82,37 +84,40 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.1`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.2`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
-`charging_profile_*` kinds (#469).
+`charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
+`transaction_message_discarded` (#490).
 
 ## Kinds
 
 Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 
-| Kind                       | Scope     | `data`                                                               | Recorded when                                                                                                           |
-| -------------------------- | --------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `connected`                | CP        | —                                                                    | The socket opens (SOAP: on connect).                                                                                    |
-| `disconnected`             | CP        | `code`, `reason`                                                     | The socket closes, after the charge point's own teardown.                                                               |
-| `reconnecting`             | CP        | `attempt`, `delayMs`                                                 | The transport schedules a reconnect after an unrequested close.                                                         |
-| `boot_notification`        | CP        | `status`, `interval`                                                 | A BootNotification.conf is processed, whatever its status.                                                              |
-| `status_change`            | CP        | `from`, `to`                                                         | The charge point status changes; repeats of the same status are skipped.                                                |
-| `connector_status`         | connector | `from`, `to`                                                         | A connector status changes; repeats are skipped.                                                                        |
-| `network_fault_injected`   | CP        | `ruleId`, `ruleType`, `reconnectDelayMs`                             | A `manual-disconnect` or `periodic-disconnect` rule fires, before the socket closes. Opens an incident.                 |
-| `recovery_completed`       | CP        | `durationMs`, `ruleId`, `restored`, `unrestored` (when not restored) | The open incident's recovery condition holds, or its settle window runs out. Closes it.                                 |
-| `transaction_started`      | connector | `tagId`, `transactionId` (2.x only)                                  | A transaction starts. OCPP 2.x carries the CP-minted id; 1.6 has no id yet.                                             |
-| `transaction_id_assigned`  | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                         |
-| `transaction_stopped`      | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
-| `transaction_rejected`     | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
-| `authorization_rejected`   | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
-| `scenario_started`         | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
-| `scenario_wait_changed`    | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
-| `scenario_error`           | connector | `scenarioId`, `error` (redacted)                                     | (daemon) A scenario run reports an error.                                                                               |
-| `scenario_finished`        | connector | `verdict`, `stopped`, `executionState`                               | (daemon) A scenario run ends — completed, failed or stopped by an operator — with its run-history verdict.              |
-| `charging_profile_applied` | either    | profile fields, `source`, `replaced`                                 | A SetChargingProfile is accepted; an update of the same id is one entry with `replaced: true`.                          |
-| `charging_profile_cleared` | either    | `connectorId`, `reason`, `profiles`                                  | At least one profile is removed from one scope (see [Smart-charging profiles](#smart-charging-profiles)).               |
-| `charging_profile_expired` | either    | profile fields                                                       | A profile's `validTo` passes while it is still installed.                                                               |
+| Kind                            | Scope     | `data`                                                               | Recorded when                                                                                                           |
+| ------------------------------- | --------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `connected`                     | CP        | —                                                                    | The socket opens (SOAP: on connect).                                                                                    |
+| `disconnected`                  | CP        | `code`, `reason`                                                     | The socket closes, after the charge point's own teardown.                                                               |
+| `reconnecting`                  | CP        | `attempt`, `delayMs`                                                 | The transport schedules a reconnect after an unrequested close.                                                         |
+| `boot_notification`             | CP        | `status`, `interval`                                                 | A BootNotification.conf is processed, whatever its status.                                                              |
+| `status_change`                 | CP        | `from`, `to`                                                         | The charge point status changes; repeats of the same status are skipped.                                                |
+| `connector_status`              | connector | `from`, `to`                                                         | A connector status changes; repeats are skipped.                                                                        |
+| `network_fault_injected`        | CP        | `ruleId`, `ruleType`, `reconnectDelayMs`                             | A `manual-disconnect` or `periodic-disconnect` rule fires, before the socket closes. Opens an incident.                 |
+| `recovery_completed`            | CP        | `durationMs`, `ruleId`, `restored`, `unrestored` (when not restored) | The open incident's recovery condition holds, or its settle window runs out. Closes it.                                 |
+| `transaction_started`           | connector | `tagId`, `transactionId` (2.x only)                                  | A transaction starts. OCPP 2.x carries the CP-minted id; 1.6 has no id yet.                                             |
+| `transaction_id_assigned`       | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                         |
+| `transaction_stopped`           | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
+| `transaction_rejected`          | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
+| `transaction_message_rejected`  | connector | `transactionId`, `eventType`, `errorCode`, `attempt`                 | (2.x, #490) A CALLERROR answers a TransactionEvent; it is resent unless this was its last attempt.                      |
+| `transaction_message_discarded` | connector | `transactionId`, `eventType`, `errorCode`, `attempts`                | (2.x, #490) The last attempt failed too: the message is dropped, the transaction keeps running.                         |
+| `authorization_rejected`        | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
+| `scenario_started`              | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
+| `scenario_wait_changed`         | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
+| `scenario_error`                | connector | `scenarioId`, `error` (redacted)                                     | (daemon) A scenario run reports an error.                                                                               |
+| `scenario_finished`             | connector | `verdict`, `stopped`, `executionState`                               | (daemon) A scenario run ends — completed, failed or stopped by an operator — with its run-history verdict.              |
+| `charging_profile_applied`      | either    | profile fields, `source`, `replaced`                                 | A SetChargingProfile is accepted; an update of the same id is one entry with `replaced: true`.                          |
+| `charging_profile_cleared`      | either    | `connectorId`, `reason`, `profiles`                                  | At least one profile is removed from one scope (see [Smart-charging profiles](#smart-charging-profiles)).               |
+| `charging_profile_expired`      | either    | profile fields                                                       | A profile's `validTo` passes while it is still installed.                                                               |
 
 The 1.6 placeholder transaction id (`0` until StartTransaction.conf) is never
 recorded: `transaction_started` has no id on 1.6, and

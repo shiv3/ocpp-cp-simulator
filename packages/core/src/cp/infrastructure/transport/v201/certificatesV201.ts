@@ -122,8 +122,9 @@ function afterPendingOperations<T>(
 /**
  * M05: Accepted once installed (M05.FR.02); Rejected for a certificate that
  * does not parse (M05.FR.07) or when the store already holds
- * `CertificateStoreMaxLength` roots (M05.FR.06; the simulator has no
- * separate `SecurityCtrlr.CertificateEntries` limit). A certificate already
+ * `CertificateStoreMaxLength` roots (M05.FR.06: that key is the
+ * `CertificateEntries.maxLimit`, and `SecurityCtrlr.CertificateEntries`
+ * reports the same root count, #537). A certificate already
  * installed replaces the old copy and is Accepted, full store or not
  * (M05.FR.17; AdditionalRootCertificateCheck, M05.FR.10, is not
  * implemented). Failed when the state database refuses it (M05.FR.03).
@@ -330,6 +331,18 @@ async function certificateSigned(
   ctx: V201InboundContext,
 ): Promise<V201HandlerResult> {
   const req = payload as CertificateSignedRequestV201;
+  // #537 A02.FR.16: SHALL on 2.0.1, MAY on 2.1; the station applies it on
+  // both. A02.FR.16 asks for Rejected only, so no security event is sent.
+  const maxChainSize = ctx.chargePoint.configuration.maxCertificateChainSize();
+  if (req.certificateChain.length > maxChainSize) {
+    ctx.logger.warn(
+      `CertificateSigned rejected: certificateChain is ${req.certificateChain.length} characters, over MaxCertificateChainSize (${maxChainSize})`,
+      LogType.OCPP,
+    );
+    return {
+      response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
+    };
+  }
   const use =
     req.certificateType === undefined
       ? "ChargingStationCertificate"

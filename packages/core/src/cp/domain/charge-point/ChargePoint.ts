@@ -579,7 +579,10 @@ export class ChargePoint {
     if (persistedCp === "Inoperative") {
       this._status = OCPPStatus.Unavailable;
     }
-    if (isOcpp2Version(this._ocppVersion)) this.wireVariableMonitoring();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this.wireVariableMonitoring();
+      this.wireCertificateEntries();
+    }
     // A persisted override never fires onChange; the scheduler only runs
     // once a boot is Accepted (#454).
     this._clockAligned.setIntervalSeconds(
@@ -862,6 +865,24 @@ export class ChargePoint {
       (c) => c.hasRunningTransaction,
     );
     return active.length === 1 ? running(active[0]) : undefined;
+  }
+
+  /**
+   * #537: 2.x `SecurityCtrlr.CertificateEntries` is the number of installed
+   * trust anchors, the set M05.FR.06 limits. The certificate store stays
+   * the source; the configuration value follows it, so GetVariables,
+   * GetBaseReport and variable monitors read it like any other variable,
+   * and a change fires the configuration listeners monitors evaluate on.
+   */
+  private wireCertificateEntries(): void {
+    const sync = (): void => {
+      this._configuration.setRuntimeValue(
+        "CertificateEntries",
+        this._certificateStore.listRootCertificates().length,
+      );
+    };
+    sync();
+    this._certificateStore.onChange(sync);
   }
 
   /** A configuration value as a monitor sees it: GetVariables' rendering

@@ -66,6 +66,8 @@ function createMockChargePoint(connector: unknown): ChargePoint {
   return {
     getConnector: vi.fn(() => connector),
     notifyOutgoingCall: vi.fn(),
+    // Signed meter data (#315) off, as by default.
+    signedMeterFor: vi.fn(() => null),
     configuration: {
       meterValuesSampledData: vi.fn(() => ["Current.Import"]),
     },

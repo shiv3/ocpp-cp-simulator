@@ -1056,11 +1056,11 @@ describe("--watch over a startup scenario file (#314)", () => {
       expect(
         claimed({ ...base, scenarioTemplateFile: templateFile }, 2),
       ).toEqual(["startup-template-c1", "startup-template-c2"]);
-      // A built-in template still claims nothing: `loadScenarioTemplate` mints
-      // that id and prunes its own prior instances.
+      // A built-in template's instance id is stable too since #338, so it is
+      // claimed like a template file's.
       expect(
         claimed({ ...base, scenarioTemplate: "essential-cp-behavior" }, 1),
-      ).toEqual([]);
+      ).toEqual(["essential-cp-behavior-c1"]);
       // An unreadable file claims nothing rather than guessing: every row is
       // then restored in the first pass, exactly as with no flag at all.
       expect(

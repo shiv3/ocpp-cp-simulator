@@ -24,7 +24,11 @@ export function handleGetVariablesV201(
       };
     }
 
-    const v16Key = lookupV16Key(componentName, variableName);
+    const v16Key = lookupV16Key(
+      componentName,
+      variableName,
+      data.variable.instance,
+    );
     if (v16Key === undefined) {
       return {
         attributeStatus: "UnknownVariable",

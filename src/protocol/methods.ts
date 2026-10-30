@@ -44,6 +44,11 @@ import {
 } from "../cp/domain/connector/Transaction";
 import { OCPPStatus } from "../cp/domain/types/OcppTypes";
 import { CHARGING_SESSION_OUTCOMES } from "../cp/domain/session/ChargingSession";
+import {
+  AUTHORIZATION_CACHE_SEED_MAX,
+  AUTHORIZATION_STATUSES,
+} from "../cp/domain/auth/AuthorizationCacheSeed";
+import { idTokenKey } from "../cp/domain/auth/idTokenKey";
 import { MAX_SESSIONS_PER_CP } from "../cp/domain/persistence/ChargingSessionRepository";
 import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
 import {
@@ -123,6 +128,51 @@ const SCENARIO_OBJ = () => boundedObject(SCENARIO_MAX_BYTES);
  * schema rather than a copy of its bounds (#382).
  */
 export const dataTransferDataSchema = z.union([STR_64K, OBJ()]);
+/** An identifier, at the widest any version carries it: 2.1
+ *  IdTokenType.idToken is at most 255 characters (2.0.1: 36, 1.6 IdToken:
+ *  20). The charge point refuses one longer than its own version allows
+ *  (`idTokenMaxLength`, InvalidAuthorizationCacheSeedError →
+ *  invalid_params). */
+const ID_TOKEN = NON_EMPTY_STR.max(255);
+/**
+ * `seed_auth_cache`'s entries (#452): an array, not a record keyed
+ * by idToken, so an identifier never lands on a prototype key. Bounded by
+ * the cache capacity; one entry per idToken, compared case-insensitively
+ * like the cache does (`idTokenKey`). Exported so JSON-Lines mode
+ * validates against the same schema (#382).
+ */
+export const authorizationCacheSeedSchema = z
+  .array(
+    z.object({
+      idToken: ID_TOKEN,
+      status: z.enum(AUTHORIZATION_STATUSES),
+      // An ISO 8601 date-time with `Z` or an offset: Date.parse would also
+      // take "2026" or "soon 1", depending on the engine.
+      expiresAt: z.iso.datetime({ offset: true }).optional(),
+      parentId: ID_TOKEN.optional(),
+    }),
+  )
+  .min(1)
+  .max(AUTHORIZATION_CACHE_SEED_MAX)
+  .refine(
+    (entries) =>
+      new Set(entries.map((e) => idTokenKey(e.idToken))).size ===
+      entries.length,
+    { message: "each idToken may appear once" },
+  );
+const authorizationCacheViewSchema = z.object({
+  enabled: z.boolean(),
+  entries: z.array(
+    z.object({
+      idToken: z.string(),
+      status: z.string(),
+      expiresAt: z.string().optional(),
+      parentId: z.string().optional(),
+      insertedAt: z.string(),
+      updatedAt: z.string(),
+    }),
+  ),
+});
 /** `send_ocpp_call`'s result (#389): the CSMS's CALLRESULT or CALLERROR,
  *  with the frame exactly as it was written. */
 const ocppCallOutcomeSchema = z.discriminatedUnion("kind", [
@@ -688,6 +738,21 @@ export const METHODS = {
     }),
     result: ocppCallOutcomeSchema,
   },
+  // #452: the charge point's Authorization Cache, a test seam. Seed and
+  // clear act whatever AuthorizationCacheEnabled / AuthCacheCtrlr.Enabled
+  // says (get reports the switch); nothing goes on the wire.
+  get_auth_cache: {
+    params: EMPTY,
+    result: authorizationCacheViewSchema,
+  },
+  seed_auth_cache: {
+    params: z.object({ entries: authorizationCacheSeedSchema }),
+    result: z.object({ seeded: z.number().int() }),
+  },
+  clear_auth_cache: {
+    params: EMPTY,
+    result: z.object({ cleared: z.boolean() }),
+  },
 
   // -- status notifications --
   diagnostics_status_notification: {
@@ -725,7 +790,8 @@ export const METHODS = {
     result: ANY,
   },
   sign_certificate: {
-    params: z.object({ csr: NON_EMPTY_STR.optional() }),
+    // SignCertificateRequest.csr is string[0..5500] (1.6, 2.0.1, 2.1).
+    params: z.object({ csr: NON_EMPTY_STR.max(5500).optional() }),
     result: ANY,
   },
 
@@ -746,6 +812,12 @@ export const METHODS = {
       }).optional(),
       suppressChargingStateTransactionEvent: z.boolean().optional(),
     }),
+    result: ANY,
+  },
+  // #488: the EV side of the cable was unplugged. With a running
+  // transaction StopTransactionOnEVSideDisconnect stops or suspends it.
+  ev_disconnected: {
+    params: z.object({ connector: CONN_POS }),
     result: ANY,
   },
   set_meter_value: {

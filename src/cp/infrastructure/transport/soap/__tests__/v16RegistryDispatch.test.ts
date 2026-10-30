@@ -472,7 +472,10 @@ describe("dispatchSoapCallViaV16Registry", () => {
     const response = await dispatchSoapCallViaV16Registry({
       operation: "ClearCache",
       payload: {},
-      chargePoint: {} as unknown as ChargePoint,
+      // #452: ClearCache now clears the charge point's cache.
+      chargePoint: {
+        clearAuthorizationCache: () => true,
+      } as unknown as ChargePoint,
       logger: silentLogger(),
       dialect: OCPP16_DIALECT,
     });

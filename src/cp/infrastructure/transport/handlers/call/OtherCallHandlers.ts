@@ -155,7 +155,13 @@ export class ClearCacheHandler implements CallHandler<
       `Clear cache request received: ${JSON.stringify(payload)}`,
       LogType.OCPP,
     );
-    return { status: "Accepted" };
+    // #452, §5.4: clear the real Authorization Cache; the status says
+    // whether that worked. The cache is implemented (§9.1.2: the
+    // AuthorizationCacheEnabled key exists), so errata v4.0 §3.23's
+    // "not implemented → Rejected" does not apply, and clearing a disabled
+    // cache succeeds as well.
+    const cleared = context.chargePoint.clearAuthorizationCache();
+    return { status: cleared ? "Accepted" : "Rejected" };
   }
 }
 

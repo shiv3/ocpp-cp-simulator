@@ -1,3 +1,7 @@
+import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../../cp/domain/auth/AuthorizationCacheSeed";
 import {
   VehicleCatalogError,
   type VehicleCatalog,
@@ -943,6 +947,25 @@ export class RemoteChargePointService implements ChargePointService {
     )) as OcppCallOutcome;
   }
 
+  async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
+    return await this.runCpRpc(id, "get_auth_cache");
+  }
+
+  async seedAuthorizationCache(
+    id: string,
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number> {
+    const { seeded } = await this.runCpRpc(id, "seed_auth_cache", {
+      entries: [...entries],
+    });
+    return seeded;
+  }
+
+  async clearAuthorizationCache(id: string): Promise<boolean> {
+    const { cleared } = await this.runCpRpc(id, "clear_auth_cache");
+    return cleared;
+  }
+
   async startTransaction(
     id: string,
     connectorId: number,
@@ -991,6 +1014,10 @@ export class RemoteChargePointService implements ChargePointService {
         : {}),
       ...(options.context ? { context: options.context } : {}),
     });
+  }
+
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    await this.runCpRpc(id, "ev_disconnected", { connector: connectorId });
   }
 
   async sendStatusNotification(

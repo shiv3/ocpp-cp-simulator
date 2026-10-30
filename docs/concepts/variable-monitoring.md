@@ -206,7 +206,7 @@ state database.
 ## Persistence
 
 With `--state-db` (or the browser's database), the installed monitors are
-stored in the `variable_monitors` table (schema v18, see
+stored in the `variable_monitors` table (schema v21, see
 [State persistence](state-persistence.md)) and restored when the station is
 created again: monitors survive a reboot (N04 remarks, N07.FR.13). Ids
 resume after the highest restored one, so a CSMS that sends

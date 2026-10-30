@@ -65,6 +65,7 @@ import {
   type EVSettings,
   type EVSettingsPatch,
 } from "../../cp/domain/connector/EVSettings";
+import { InvalidAuthorizationCacheSeedError } from "../../cp/domain/auth/AuthorizationCacheSeed";
 import type { HistoryOptions } from "../../cp/application/services/types/StateSnapshot";
 import {
   hasStatusNotificationOptions,
@@ -1788,6 +1789,26 @@ async function dispatchFacadeCpCommand(
         ),
       );
     }
+    // #452: the Authorization Cache test seam.
+    case "get_auth_cache":
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.getAuthorizationCache(id),
+        ),
+      );
+    case "seed_auth_cache": {
+      const { params } = call;
+      const seeded = await runFacadeOperation(() =>
+        chargePointService.seedAuthorizationCache(id, params.entries),
+      );
+      return handled({ seeded });
+    }
+    case "clear_auth_cache": {
+      const cleared = await runFacadeOperation(() =>
+        chargePointService.clearAuthorizationCache(id),
+      );
+      return handled({ cleared });
+    }
     case "diagnostics_status_notification": {
       const { params } = call;
       await runFacadeOperation(() =>
@@ -1848,6 +1869,13 @@ async function dispatchFacadeCpCommand(
           params.status,
           readStatusNotificationOptions(params),
         ),
+      );
+      return handled(undefined);
+    }
+    case "ev_disconnected": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evDisconnected(id, params.connector),
       );
       return handled(undefined);
     }
@@ -2358,6 +2386,10 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   }
   // #458: a set_ev_settings patch that would remove a required field.
   if (err instanceof InvalidEvSettingsPatchError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  // #452: a cache seed refused before anything was written.
+  if (err instanceof InvalidAuthorizationCacheSeedError) {
     return new RpcFailure("invalid_params", err.message);
   }
   if (!(err instanceof Error)) return null;

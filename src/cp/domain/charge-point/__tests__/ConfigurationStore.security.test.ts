@@ -8,6 +8,7 @@ import { ConfigurationStore } from "../ConfigurationStore";
 const cpShape = {
   connectorNumber: 2,
   wsUrl: "ws://csms.example/ocpp/",
+  ocppVersion: "OCPP-1.6J",
 } as ChargePoint;
 
 function storeWithDefaults(

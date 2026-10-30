@@ -76,6 +76,13 @@ import type {
 import type { ReadingContext } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
+import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
+import { AuthorizationCache } from "../auth/AuthorizationCache";
+import {
+  StationAuthorization,
+  type CsmsAuthorizationResult,
+} from "../auth/StationAuthorization";
+import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
   type ProfileRemoveCriteria,
@@ -87,6 +94,7 @@ import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
 import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
 import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
+import { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
@@ -213,17 +221,20 @@ export class ChargePoint {
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
   private readonly _localAuthListManager: LocalAuthListManager;
+  private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
   // station-wide TxDefaultProfile) belong at the CP level, not duplicated
   // onto every connector. Connectors consult this store at composite time.
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
-  private readonly _certificateStore = new CertificateStore();
+  private readonly _certificateStore: CertificateStore;
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
   private readonly _monitoring = new MonitoringStore();
   // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
   private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
+  // #315: one simulated signing meter per connector, made on first use.
+  private readonly _signedMeters = new Map<number, OcmfMeter>();
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
   // The narrower type stops the rest of the code from accidentally setting
@@ -288,7 +299,7 @@ export class ChargePoint {
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
     /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
-     *  and per-connector availability. `null` keeps everything in-memory —
+     *  CertificateStore and per-connector availability. `null` keeps everything in-memory —
      *  used by the daemon's `:memory:` mode and by tests. */
     private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
@@ -307,6 +318,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
+    // #456: installed certificates survive a restart when state persists.
+    this._certificateStore = new CertificateStore(this._id, this._database);
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
     this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
@@ -445,6 +458,25 @@ export class ChargePoint {
       (connectorId) => this.onReservationExpired(connectorId),
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
+    // #452: the policy is read on every decision, so ChangeConfiguration
+    // applies at once. `_configuration` is assigned further down; nothing
+    // reads the policy before the constructor returns.
+    this._authorization = new StationAuthorization({
+      cache: new AuthorizationCache(this._id, this._database),
+      localList: this._localAuthListManager,
+      policy: () => ({
+        cacheEnabled: this._configuration.authorizationCacheEnabled(),
+        localListEnabled: this._configuration.localAuthListEnabled(),
+        localPreAuthorize: this._configuration.localPreAuthorize(),
+        localAuthorizeOffline: this._configuration.localAuthorizeOffline(),
+        allowOfflineTxForUnknownId:
+          this._configuration.allowOfflineTxForUnknownId(),
+        // 2.x AuthCacheCtrlr.LifeTime; a 1.6 store has no such key → null.
+        cacheLifetimeSeconds: this._configuration.authCacheLifeTimeSeconds(),
+        localListChecksExpiry: true,
+      }),
+      idTokenMaxLength: idTokenMaxLength(this._ocppVersion),
+    });
 
     this._stateManager = new StateManager(
       this._logger,
@@ -697,6 +729,31 @@ export class ChargePoint {
     return this._configuration;
   }
 
+  /**
+   * The connector's simulated OCMF signing meter while `SampledDataSignReadings`
+   * is true, else `null` (#315). The ephemeral key is made on first use, held
+   * in memory only, and published read-only as `MeterPublicKey<connectorId>`
+   * so a CSMS can validate against it (2.x stations also send it in every
+   * `signedMeterValue`).
+   */
+  signedMeterFor(connectorId: number): OcmfMeter | null {
+    if (!this._configuration.signReadings()) return null;
+    let meter = this._signedMeters.get(connectorId);
+    if (!meter) {
+      meter = new OcmfMeter({
+        meterSerial: `${this._id}-${connectorId}`,
+        gatewayId: "ocpp-cp-simulator",
+        gatewaySerial: this._id,
+      });
+      this._signedMeters.set(connectorId, meter);
+      this._configuration.defineRuntimeKey(
+        `MeterPublicKey${connectorId}`,
+        meter.publicKeyHex,
+      );
+    }
+    return meter;
+  }
+
   get certificateStore(): CertificateStore {
     return this._certificateStore;
   }
@@ -877,6 +934,42 @@ export class ChargePoint {
   /** OCPP 2.x variable monitors (SetVariableMonitoring, #457). */
   get monitoring(): MonitoringStore {
     return this._monitoring;
+  }
+
+  /** Local authorization (#452): Authorization Cache + Local Authorization
+   *  List, and the decision over them. */
+  get authorization(): StationAuthorization {
+    return this._authorization;
+  }
+
+  /** Whether the CSMS is reachable now (#452 offline authorization). A SOAP
+   *  charge point has no connection state and counts as online, which
+   *  keeps its local start flow as it was. */
+  isOnline(): boolean {
+    if (!this._webSocket) return true;
+    return this._webSocket.isConnected();
+  }
+
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452):
+   *  called by the Authorize / StartTransaction / StopTransaction result
+   *  handlers. A no-op while the cache is disabled or for an identifier of
+   *  the Local Authorization List (1.6 §3.5.3). */
+  recordAuthorizationResult(
+    idToken: string,
+    result: CsmsAuthorizationResult,
+  ): void {
+    if (this._authorization.recordCsmsResult(idToken, result)) {
+      this._logger.debug(
+        `Authorization cache updated: ${idToken} → ${result.status}`,
+        LogType.TRANSACTION,
+      );
+    }
+  }
+
+  /** ClearCache (1.6 §5.4): empty the Authorization Cache. Returns whether
+   *  it could be cleared. */
+  clearAuthorizationCache(): boolean {
+    return this._authorization.clearCache();
   }
 
   /** Read-only: install and remove profiles with `applyChargingProfile` /
@@ -1099,6 +1192,22 @@ export class ChargePoint {
     }
   }
 
+  /** Called by the 2.x handler on each CALLERROR answering a
+   *  TransactionEvent (#490). Reports only: the transaction is untouched. */
+  notifyTransactionMessageRejected(
+    event: ChargePointEvents["transactionMessageRejected"],
+  ): void {
+    this._events.emit("transactionMessageRejected", event);
+  }
+
+  /** Called by the 2.x handler when a TransactionEvent failed its last
+   *  attempt and is dropped (#490). Reports only, like the above. */
+  notifyTransactionMessageDiscarded(
+    event: ChargePointEvents["transactionMessageDiscarded"],
+  ): void {
+    this._events.emit("transactionMessageDiscarded", event);
+  }
+
   /** Called by AuthorizeResultHandler when Authorize.conf arrives
    *  (issue #181). Fans out to any in-flight `authorizeAndWait` callers
    *  tagId-matched via the `authorizeResult` event. */
@@ -1107,16 +1216,31 @@ export class ChargePoint {
   }
 
   /**
-   * Send Authorize.req for `tagId` and await the matching Authorize.conf
-   * (issue #181). Resolves with `idTagInfo.status` ("Accepted", "Invalid",
-   * "Expired", "Blocked", ...). Tag-matched against the `authorizeResult`
-   * event so concurrent Authorize calls for different tags don't cross
-   * streams. Bounded by `timeoutMs`; on timeout OR disconnect while
-   * waiting, warns and resolves as "Accepted" (warn-and-proceed — mirrors
-   * the boot-wait philosophy; a real LocalAuthorizeOffline cache is future
-   * work). Never rejects.
+   * Authorize `tagId` for a local start (issues #181, #452). Resolves with
+   * an idTagInfo/idTokenInfo status ("Accepted", "Invalid", "Expired",
+   * "Blocked", ...). Never rejects.
+   *
+   * The local decision comes first (see `auth/LocalAuthorizationResolver.ts`
+   * for the rules and their OCPP 1.6 §3.5 / 2.0.1 C12-C15 sources):
+   * - offline, it decides alone, at once, without Authorize.req;
+   * - online, a valid local-list or cache entry with `LocalPreAuthorize`
+   *   resolves "Accepted" without Authorize.req (§9.1.13);
+   * - otherwise Authorize.req goes out and the tag-matched
+   *   `authorizeResult` event resolves it, so concurrent Authorize calls
+   *   for different tags don't cross streams.
+   *
+   * While waiting, a disconnect hands the decision to the offline rules.
+   * A timeout while still connected falls back to what the station knows:
+   * a NOT-valid local-list or cache entry resolves its status (#452);
+   * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
+   * A timeout once the socket is gone applies the offline rules.
    */
   authorizeAndWait(tagId: string, timeoutMs = 10000): Promise<string> {
+    const decision = this._authorization.decide(tagId, this.isOnline());
+    if (decision.kind !== "askCsms") {
+      return Promise.resolve(this.localAuthorizationStatus(tagId, decision));
+    }
+
     this.authorize(tagId);
 
     return new Promise<string>((resolve) => {
@@ -1137,13 +1261,21 @@ export class ChargePoint {
         resolve(data.status);
       };
 
-      const disconnectHandler = () => {
-        cleanup();
+      const decideOffline = (why: string) => {
+        const status = this.localAuthorizationStatus(
+          tagId,
+          this._authorization.decideOffline(tagId),
+        );
         this._logger.warn(
-          `Disconnected while awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
+          `${why} while awaiting Authorize.conf for ${tagId}; offline authorization: ${status}`,
           LogType.TRANSACTION,
         );
-        resolve("Accepted");
+        resolve(status);
+      };
+
+      const disconnectHandler = () => {
+        cleanup();
+        decideOffline("Disconnected");
       };
 
       this._events.on("authorizeResult", handler);
@@ -1151,6 +1283,19 @@ export class ChargePoint {
 
       timeoutId = setTimeout(() => {
         cleanup();
+        if (!this.isOnline()) {
+          decideOffline(`Timeout (${timeoutMs}ms) and offline`);
+          return;
+        }
+        const refusal = this._authorization.decideUnanswered(tagId);
+        if (refusal) {
+          this._logger.warn(
+            `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; falling back to the local decision`,
+            LogType.TRANSACTION,
+          );
+          resolve(this.localAuthorizationStatus(tagId, refusal));
+          return;
+        }
         this._logger.warn(
           `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
           LogType.TRANSACTION,
@@ -1158,6 +1303,25 @@ export class ChargePoint {
         resolve("Accepted");
       }, timeoutMs);
     });
+  }
+
+  /** The status a local (no Authorize round trip) decision resolves to. */
+  private localAuthorizationStatus(
+    tagId: string,
+    decision: LocalOnlyDecision,
+  ): string {
+    if (decision.kind === "accept") {
+      this._logger.info(
+        `${tagId} authorized locally (${decision.source}); no Authorize.req sent`,
+        LogType.TRANSACTION,
+      );
+      return "Accepted";
+    }
+    this._logger.warn(
+      `${tagId} refused locally (${decision.source}): ${decision.status}`,
+      LogType.TRANSACTION,
+    );
+    return decision.status;
   }
 
   armResponseOverride(action: string, status: string): void {
@@ -1771,7 +1935,9 @@ export class ChargePoint {
     this._monitorEvaluation?.setReporting(false);
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
-    this._localAuthListManager.dispose();
+    // The Local Authorization List is kept: it is what authorizes while the
+    // connection is down (§3.5.3, LocalAuthorizeOffline), so a connection
+    // loss must not empty it (#534). Only dispose() drops it.
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // Cancel any pending firmware-update simulation so its status train
     // doesn't keep firing against a dead WebSocket.
@@ -1822,6 +1988,7 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its
     // handler logs "WebSocket closed" through this repository. Closing it
@@ -2115,6 +2282,75 @@ export class ChargePoint {
       this.persistAvailability();
     }
     connector.scheduledAvailability = null;
+  }
+
+  /**
+   * The EV side of the cable was unplugged (#488). With a running
+   * transaction, `StopTransactionOnEVSideDisconnect` (2.x
+   * `TxCtrlr.StopTxOnEVSideDisconnect`) decides:
+   * - true: the transaction stops with `EVDisconnected` (1.6 §4.9 / §4.10;
+   *   2.0.1 E09: Ended, triggerReason `EVCommunicationLost`);
+   * - false: the transaction is kept and the connector goes SuspendedEV
+   *   (1.6 §4.9 / §4.10) with its energy offer stopped: the register no
+   *   longer rises while periodic MeterValues keep going out, and the
+   *   derived power is zero outside Charging. On 2.x a
+   *   TransactionEvent(Updated) carries chargingState `SuspendedEV` and
+   *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
+   *   that follows is de-duplicated against it. A second unplug while so
+   *   suspended sends nothing.
+   * Without a transaction the connector goes Available, as an unplug did
+   * before.
+   */
+  evDisconnected(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (!connector.hasRunningTransaction) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      return;
+    }
+
+    if (
+      connector.energyOfferSuspended &&
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.debug(
+        `Connector ${connectorId} EV side already disconnected, ignoring`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (this._configuration.stopTransactionOnEVSideDisconnect()) {
+      this._logger.info(
+        `Connector ${connectorId} EV side disconnected, stopping the transaction (StopTransactionOnEVSideDisconnect=true)`,
+        LogType.TRANSACTION,
+      );
+      this.stopTransaction(connector, "EVDisconnected", {
+        triggerReason: "EVCommunicationLost",
+        stoppedReason: "EVDisconnected",
+      });
+      return;
+    }
+
+    this._logger.info(
+      `Connector ${connectorId} EV side disconnected, suspending the transaction (StopTransactionOnEVSideDisconnect=false)`,
+      LogType.TRANSACTION,
+    );
+    connector.suspendEnergyOffer();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this._outbox.sendTransactionUpdate(connectorId, {
+        triggerReason: "EVCommunicationLost",
+        chargingState: "SuspendedEV",
+      });
+    }
+    this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {

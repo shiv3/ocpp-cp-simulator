@@ -7,12 +7,42 @@ import type {
 import type { AuthorizeRequestV16 } from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
+import type { CsmsAuthorizationResult } from "../../../../domain/auth/StationAuthorization";
+
+/** OCPP 1.6 idTagInfo → the domain's CSMS verdict (#452). A missing or
+ *  unparseable expiryDate means no end date (§7.24). */
+export function authorizationResultFromIdTagInfo(idTagInfo: {
+  status: string;
+  expiryDate?: string;
+  parentIdTag?: string;
+}): CsmsAuthorizationResult {
+  const expiresAt =
+    idTagInfo.expiryDate !== undefined ? Date.parse(idTagInfo.expiryDate) : NaN;
+  return {
+    status: idTagInfo.status,
+    ...(Number.isFinite(expiresAt) ? { expiresAt } : {}),
+    ...(idTagInfo.parentIdTag !== undefined
+      ? { parentId: idTagInfo.parentIdTag }
+      : {}),
+  };
+}
 
 export class StartTransactionResultHandler implements CallResultHandler<StartTransactionResponseV16> {
-  constructor(private connectorId: number) {}
+  /** `idTag` is the one of the StartTransaction.req this conf answers; it
+   *  feeds the Authorization Cache (#452, §3.5.1). */
+  constructor(
+    private connectorId: number,
+    private idTag?: string,
+  ) {}
 
   handle(payload: StartTransactionResponseV16, context: HandlerContext): void {
     const { transactionId, idTagInfo } = payload;
+    if (this.idTag !== undefined) {
+      context.chargePoint.recordAuthorizationResult(
+        this.idTag,
+        authorizationResultFromIdTagInfo(idTagInfo),
+      );
+    }
     const connector = context.chargePoint.getConnector(this.connectorId);
 
     if (idTagInfo.status === "Accepted") {
@@ -83,9 +113,23 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
 }
 
 export class StopTransactionResultHandler implements CallResultHandler<StopTransactionResponseV16> {
-  constructor(private connectorId: number) {}
+  /** `idTag` is the optional one of the StopTransaction.req this conf
+   *  answers; with the conf's optional idTagInfo it feeds the
+   *  Authorization Cache (#452, §3.5.1). */
+  constructor(
+    private connectorId: number,
+    private idTag?: string,
+  ) {}
 
   handle(payload: StopTransactionResponseV16, context: HandlerContext): void {
+    // Before the #367 early return: the cache update concerns the idTag of
+    // the request, whatever now runs on the connector.
+    if (this.idTag !== undefined && payload.idTagInfo) {
+      context.chargePoint.recordAuthorizationResult(
+        this.idTag,
+        authorizationResultFromIdTagInfo(payload.idTagInfo),
+      );
+    }
     context.logger.info(
       `Transaction stopped successfully: ${JSON.stringify(payload)}`,
       LogType.TRANSACTION,
@@ -141,6 +185,11 @@ export class AuthorizeResultHandler implements CallResultHandler<AuthorizeRespon
       context.logger.warn("Authorization failed", LogType.TRANSACTION);
     }
     if (this.requestPayload) {
+      // §4.1: update the cache before waking the waiting start.
+      context.chargePoint.recordAuthorizationResult(
+        this.requestPayload.idTag,
+        authorizationResultFromIdTagInfo(idTagInfo),
+      );
       context.chargePoint.notifyAuthorizeResult(
         this.requestPayload.idTag,
         idTagInfo.status,

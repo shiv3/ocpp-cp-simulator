@@ -23,6 +23,7 @@ related:
   - open-ev-directory.md
   - ../concepts/charging-sessions.md
   - ../concepts/log-format.md
+  - ../concepts/local-authorization.md
 updated: 2026-10-29
 ---
 
@@ -575,6 +576,14 @@ ranked before, and the three places in the daemon that derive from these flags
 ranked them differently: see the startup rules in
 [Daemon](daemon.md#file-hot-reload).
 
+**Restarts with `--state-db`.** Each instance a startup flag loads keeps the
+same id across restarts, and one the flag creates records which flag
+generated it. A restart removes the startup instances the current flags no
+longer call for — a connector dropped from `--scenario-connector`, a file
+whose own `id` changed, a switched or dropped flag — and an older build's
+clock-suffixed instance of what it installs on the same connector, but never
+another scenario (#338). Details: [Daemon](daemon.md#file-hot-reload).
+
 ### 4. Client Modes (`--send` / `--events` / `--stop`)
 
 The same binary doubles as a TCP Socket.IO client for a running daemon. Client
@@ -661,6 +670,7 @@ difference is not discovered one at a time.
 | `SetChargingProfile` limits                                           | **No** — the auto-responder Accepts the call and the profile is never applied, so nothing caps the meter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | State of charge                                                       | **Arithmetic only** — SoC is computed inside the target-SoC stop condition. It is not tracked, sampled or persisted, so the SoC-ownership rules do not apply.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Persistence / restart resume                                          | **No** — a k6 VU is a fresh charge point each run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| EV-side disconnect (`connectorPlug` plug-out, #488)                   | **No** — a plug-out sends StatusNotification `Available`; `StopTransactionOnEVSideDisconnect` is not modelled, so only a `transaction` stop node ends the transaction.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 A scenario that relies on anything in the "No" rows still exports and runs; it
 simply generates traffic at the scenario's configured rate rather than the

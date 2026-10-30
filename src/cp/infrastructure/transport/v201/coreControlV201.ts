@@ -257,9 +257,25 @@ export const handleTriggerMessageV201 = (
   }
 };
 
-export const handleClearCacheV201 = (): V201HandlerResult => ({
-  response: { status: "Accepted" } satisfies ClearCacheResponseV201,
-});
+/**
+ * ClearCache (#452, 2.0.1 / 2.1 Part 2 C11). While `AuthCacheCtrlr.Enabled`
+ * is false the answer is Rejected (C11.FR.04) and the content is kept: the
+ * AuthCacheEnabled note says switching the cache off does not alter it, and
+ * the status reports whether it was cleared (C11.FR.02). Enabled, the cache
+ * is cleared: Accepted (C11.FR.03), or Rejected if that failed (C11.FR.05).
+ * 1.6 differs on purpose: see `ClearCacheHandler`.
+ */
+export const handleClearCacheV201 = (
+  _payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult => {
+  const cp = ctx.chargePoint;
+  const status: ClearCacheResponseV201["status"] =
+    cp.configuration.authorizationCacheEnabled() && cp.clearAuthorizationCache()
+      ? "Accepted"
+      : "Rejected";
+  return { response: { status } satisfies ClearCacheResponseV201 };
+};
 
 export const handleReserveNowV201 = (
   payload?: unknown,

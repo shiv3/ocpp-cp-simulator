@@ -395,6 +395,67 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  // #452: the Authorization Cache test seam, one tool per method.
+  mcp.tool("auth_cache_get", {
+    description:
+      "Read a charge point's Authorization Cache: whether it is enabled (1.6 AuthorizationCacheEnabled / 2.x AuthCacheCtrlr.Enabled) and every entry (idToken, status, expiresAt, parentId, insertedAt, updatedAt).",
+    inputSchema: METHODS.get_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "get_auth_cache",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("auth_cache_seed", {
+    description:
+      "Write entries into a charge point's Authorization Cache as if the CSMS had answered them, whether or not the cache is enabled; nothing is sent to the CSMS. One entry per idToken; an invalid entry refuses the whole seed.",
+    inputSchema: METHODS.seed_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "seed_auth_cache",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("auth_cache_clear", {
+    description:
+      "Empty a charge point's Authorization Cache, whether or not it is enabled; nothing is sent to the CSMS (the CSMS's ClearCache follows the OCPP rules instead).",
+    inputSchema: METHODS.clear_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "clear_auth_cache",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("set_connector_status", {
     description: "Update the status of a connector",
     inputSchema: z.object({
@@ -447,6 +508,29 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             suppressChargingStateTransactionEvent:
               args.suppressChargingStateTransactionEvent,
           },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("ev_disconnected", {
+    description:
+      "Unplug the cable on the EV side of a connector. With a running transaction, StopTransactionOnEVSideDisconnect stops it (EVDisconnected) or suspends it (SuspendedEV); without one the connector goes Available",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: METHODS.ev_disconnected.params.shape.connector.describe(
+        "Connector identifier",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "ev_disconnected",
+          params: { connector: args.connector },
         });
         return successResult(result);
       } catch (err) {
@@ -677,7 +761,8 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       "Retrieve a charge point's operational timeline (#448): normalized, " +
       "ordered events — connection loss and reconnect, injected network " +
       "faults and the recovery they caused, CP/connector status changes, " +
-      "transactions, authorization rejections, scenario runs and " +
+      "transactions and their rejected or discarded 2.x TransactionEvents, " +
+      "authorization rejections, scenario runs and " +
       "smart-charging profiles applied, cleared or expired. Entries " +
       "are ordered by `seq`; entries of one fault share an `incidentId` and " +
       "`recovery_completed` reports `durationMs`. Windowed like get_logs: " +

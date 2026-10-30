@@ -93,6 +93,10 @@ import {
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
+import {
+  signReading,
+  toOcpp16SampledValue,
+} from "../../domain/connector/SignedMeterData";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
@@ -417,6 +421,19 @@ export class OCPPMessageHandler {
         ? { reservationId: transaction.reservationId }
         : {}),
     };
+    // #315: 1.6 StartTransaction has no field for it, so the signed begin
+    // reading waits on the transaction for StopTransaction.transactionData.
+    const signedBegin = signReading(
+      this._chargePoint,
+      connectorId,
+      transaction.tagId,
+      {
+        reason: "B",
+        energyWh: transaction.meterStart,
+        at: transaction.startTime,
+      },
+    );
+    if (signedBegin) transaction.signedBeginOcmf = signedBegin.ocmf;
     this.sendRequest(
       OCPPAction.StartTransaction,
       messageId,
@@ -435,12 +452,17 @@ export class OCPPMessageHandler {
     // transaction.stopReason in non-default stop paths (Remote / Reset /
     // EVDisconnected / UnlockCommand / DeAuthorized / …).
     const reason = transaction.stopReason;
+    const transactionData = this.signedTransactionData(
+      transaction,
+      connectorId,
+    );
     const payload: StopTransactionRequestV16 = {
       transactionId: transaction.id,
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
       timestamp: transaction.stopTime!.toISOString(),
       ...(reason && reason !== "Local" ? { reason } : {}),
+      ...(transactionData ? { transactionData } : {}),
     };
     this.sendRequest(
       OCPPAction.StopTransaction,
@@ -448,6 +470,51 @@ export class OCPPMessageHandler {
       payload,
       connectorId,
     );
+  }
+
+  /**
+   * #315: StopTransaction.transactionData carrying the signed begin reading
+   * (signed when the transaction started) and a freshly signed end reading,
+   * each as a `format: "SignedData"` sample. A stored begin reading is sent
+   * even if signing was turned off since; `undefined` when there is neither.
+   */
+  private signedTransactionData(
+    transaction: Transaction,
+    connectorId: number,
+  ): StopTransactionRequestV16["transactionData"] {
+    if (transaction.meterStop === null || transaction.stopTime === null)
+      return undefined;
+    const end = signReading(this._chargePoint, connectorId, transaction.tagId, {
+      reason: "E",
+      energyWh: transaction.meterStop,
+      at: transaction.stopTime,
+    });
+    if (!end && !transaction.signedBeginOcmf) return undefined;
+    const data = [
+      ...(transaction.signedBeginOcmf
+        ? [
+            {
+              timestamp: transaction.startTime.toISOString(),
+              sampledValue: [
+                toOcpp16SampledValue(
+                  transaction.signedBeginOcmf,
+                  "Transaction.Begin",
+                ),
+              ],
+            },
+          ]
+        : []),
+      ...(end
+        ? [
+            {
+              timestamp: transaction.stopTime.toISOString(),
+              sampledValue: [toOcpp16SampledValue(end.ocmf, "Transaction.End")],
+            },
+          ]
+        : []),
+    ];
+    // Same strict-unit-union cast as sendMeterValue below.
+    return data as unknown as StopTransactionRequestV16["transactionData"];
   }
 
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
@@ -738,13 +805,35 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
+    const timestamp = overrides.timestamp ?? new Date();
+    // #315: during a transaction, also send the energy register signed.
+    // Clock-aligned samples are not signed (no aligned/fiscal records yet).
+    const transaction = connector.transaction;
+    if (
+      context !== "Sample.Clock" &&
+      transactionId !== undefined &&
+      transaction &&
+      !transaction.stopTime
+    ) {
+      const signed = signReading(
+        this._chargePoint,
+        connectorId,
+        transaction.tagId,
+        {
+          reason: "C",
+          energyWh: connector.meterValue,
+          at: timestamp,
+        },
+      );
+      if (signed) sampledValue.push(toOcpp16SampledValue(signed.ocmf, context));
+    }
 
     const payload: MeterValuesRequestV16 = {
       transactionId,
       connectorId,
       meterValue: [
         {
-          timestamp: (overrides.timestamp ?? new Date()).toISOString(),
+          timestamp: timestamp.toISOString(),
           // The builder produces a structurally-compatible SampledValue
           // shape, but its `unit` is a plain `string` whereas ts-ocpp's
           // generated type is a strict union. Cast at this boundary
@@ -1072,11 +1161,13 @@ export class OCPPMessageHandler {
     );
     switch (messageType) {
       case OCPPMessageType.CALL:
-        // Some handlers (e.g. GetInstalledCertificateIds/DeleteCertificate)
-        // compute certificate hashes via WebCrypto and are `async`; handleCall
-        // awaits `handler.handle()` internally. Not awaited here — CALL
-        // handling is fire-and-forget, matching the rest of this dispatch
-        // loop (nothing downstream depends on completion order).
+        // Not awaited: each CALL starts at once, without waiting for the
+        // previous one's answer; handleCall awaits `handler.handle()`
+        // internally. An async handler (InstallCertificate and
+        // CertificateSigned hash via WebCrypto) can therefore be overtaken
+        // by a later CALL. Handlers that need the order keep it themselves:
+        // the certificate handlers run through CertificateStore, which
+        // completes its operations one at a time (#456).
         void this.handleCall(
           messageId,
           action,
@@ -1239,9 +1330,15 @@ export class OCPPMessageHandler {
     // For transaction-related handlers that need connector info, create them dynamically
     if (!handler) {
       if (action === OCPPAction.StartTransaction) {
-        handler = new StartTransactionResultHandler(request.connectorId || 1);
+        handler = new StartTransactionResultHandler(
+          request.connectorId || 1,
+          (request.payload as StartTransactionRequestV16).idTag,
+        );
       } else if (action === OCPPAction.StopTransaction) {
-        handler = new StopTransactionResultHandler(request.connectorId || 1);
+        handler = new StopTransactionResultHandler(
+          request.connectorId || 1,
+          (request.payload as StopTransactionRequestV16).idTag,
+        );
       } else if (action === OCPPAction.MeterValues) {
         handler = new MeterValuesResultHandler(
           (request.payload as MeterValuesRequestV16).connectorId,
@@ -1320,12 +1417,14 @@ export class OCPPMessageHandler {
     }
 
     // Issue #181: a CALLERROR answering Authorize.req is a definite
-    // protocol failure (unlike the authorizeAndWait timeout/disconnect
-    // paths, which proceed fail-OPEN as "Accepted" because the CSMS said
-    // nothing at all). Here the CSMS *did* respond, and what it said was
-    // "I couldn't process this" — so treat it as fail-CLOSED: synthesize
-    // a denial ("Invalid") rather than let authorizeAndWait burn its full
-    // timeout waiting for a CALLRESULT that will never arrive.
+    // protocol failure, unlike the authorizeAndWait paths where the CSMS
+    // said nothing at all (#452: a disconnect applies the offline rules;
+    // a timeout refuses a tag known locally as NOT valid and otherwise
+    // proceeds as "Accepted"). Here the CSMS *did* respond, and what it
+    // said was "I couldn't process this" — so treat it as fail-CLOSED:
+    // synthesize a denial ("Invalid") rather than let authorizeAndWait
+    // burn its full timeout waiting for a CALLRESULT that will never
+    // arrive.
     if (request?.action === OCPPAction.Authorize) {
       const idTag = (request.payload as AuthorizeRequestV16).idTag;
       this._chargePoint.notifyAuthorizeResult(idTag, "Invalid");

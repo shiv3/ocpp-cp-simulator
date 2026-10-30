@@ -15,7 +15,7 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-09-29
+updated: 2026-10-29
 ---
 
 # Testing strategy
@@ -44,6 +44,15 @@ daemon goes into `tsconfig.cli.json`.
 - **Bun test** (`bun run test:bun`, `*.bun.test.ts`) is for behavior that
   needs the real Bun runtime: the CLI entry point, the Bun HTTP/socket
   server, `bun:sqlite`, and subprocess-spawning integration tests.
+- **Bench slow path** (`bun run test:bench-slow`) is one Bun file named to
+  match _neither_ filter, `scripts/bench/fleetBench.slowpath.test-bun.ts`
+  (#330): it drives the real benchmark against a deliberately slow mock CSMS,
+  costs about 36s by construction, and so runs only in its own CI job
+  (`bench-slow`) instead of lengthening `test:bun`. A new file meant to stay
+  out of `test:bun` must avoid the `bun.test` substring and Vitest's
+  `*.test.ts` pattern alike; `bun test` still runs it when given its path
+  with a leading `./` or `/` — a bare path is taken as a name filter, and
+  this name matches none of Bun's test-file patterns.
 
 Coverage (`bun run test:coverage` / `test:coverage:bun`, uploaded to Codecov
 in CI) merges both reports — `coverage/lcov.info` (Vitest) and
@@ -124,7 +133,7 @@ already covers all 7) and so would not have caught either defect.
 | Layer                                                                                        | Runs in CI? | What it proves                                                                                                                                          |
 | -------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Vitest / Bun test (above)                                                                    | yes         | Units, UI, CLI entry, socket server, `bun:sqlite`, protocol schemas, scenario schema conformance of every shipped JSON                                  |
-| [gocpp e2e](../sources/e2e-readme.md) (`bun run test:e2e`)                                   | no (local)  | Real WebSocket CP ↔ independent Go CSMS across OCPP 1.6 / 2.0.1 / 2.1; `all-cases.json` under every version                                             |
+| [gocpp e2e](../sources/e2e-readme.md) (`bun run test:e2e`)                                   | no (local)  | Real WebSocket CP ↔ independent Go CSMS across OCPP 1.6 / 2.0.1 / 2.1; `all-cases.json` under every version; 1.6 charging profiles (#323)               |
 | [steve-verify](../sources/steve-verify-readme.md)                                            | no (local)  | All 47 `cert16-*` templates against a real SteVe, CSMS-side actions driven over SteVe's REST API, uniqueId-correlated assertions                        |
 | [Testcontainers (Java)](../sources/testcontainers-java-readme.md)                            | no (proto)  | A CSMS project can embed the Docker image and assert a scenario verdict; the same RPC sequence is guarded in CI by `harnessScenarioVerdict.bun.test.ts` |
 | Scenario assertions ([Scenario format](../concepts/scenario-format.md#assertions--verdicts)) | at run time | Declarative pass/fail over the OCPP transcript of any scenario run, with conformance vs compatibility axes                                              |

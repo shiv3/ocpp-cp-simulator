@@ -26,6 +26,15 @@ function profile(
   };
 }
 
+/** A composite slice restating a W profile period of `watts`. */
+function wattSlice(startPeriod: number, watts: number) {
+  return {
+    startPeriod,
+    watts,
+    source: { limit: watts, unit: ChargingRateUnitType.W },
+  };
+}
+
 describe("resolveEffectiveLimitWatts", () => {
   const start = new Date("2026-01-01T00:00:00Z");
   const now = new Date("2026-01-01T00:00:30Z");
@@ -94,10 +103,7 @@ describe("buildCompositeWattsSchedule", () => {
       anchor,
       3600,
     );
-    expect(result).toEqual([
-      { startPeriod: 0, watts: 5000 },
-      { startPeriod: 1800, watts: 3000 },
-    ]);
+    expect(result).toEqual([wattSlice(0, 5000), wattSlice(1800, 3000)]);
   });
 
   it("takes the min across tx + ChargePointMaxProfile per slice", () => {
@@ -124,9 +130,9 @@ describe("buildCompositeWattsSchedule", () => {
     //   900  → min(10000, 4000) = 4000
     //   1800 → min( 2000, 4000) = 2000
     expect(result).toEqual([
-      { startPeriod: 0, watts: 6000 },
-      { startPeriod: 900, watts: 4000 },
-      { startPeriod: 1800, watts: 2000 },
+      wattSlice(0, 6000),
+      wattSlice(900, 4000),
+      wattSlice(1800, 2000),
     ]);
   });
 
@@ -142,7 +148,36 @@ describe("buildCompositeWattsSchedule", () => {
       anchor,
       3600,
     );
-    expect(result).toEqual([{ startPeriod: 0, watts: 5000 }]);
+    expect(result).toEqual([wattSlice(0, 5000)]);
+  });
+
+  it("does not collapse equal watts restated from different periods (#323)", () => {
+    // 6 A on 3 phases and 18 A on 1 phase are both 4140 W, but a composite
+    // restates each period in its own unit and phase count.
+    const tx = profile({
+      chargingRateUnit: ChargingRateUnitType.A,
+      chargingSchedulePeriods: [
+        { startPeriod: 0, limit: 6, numberPhases: 3 },
+        { startPeriod: 1800, limit: 18, numberPhases: 1 },
+      ],
+    });
+    const result = buildCompositeWattsSchedule(
+      { txProfile: tx, chargePointMaxProfile: null },
+      anchor,
+      3600,
+    );
+    expect(result).toEqual([
+      {
+        startPeriod: 0,
+        watts: 4140,
+        source: { limit: 6, unit: ChargingRateUnitType.A, numberPhases: 3 },
+      },
+      {
+        startPeriod: 1800,
+        watts: 4140,
+        source: { limit: 18, unit: ChargingRateUnitType.A, numberPhases: 1 },
+      },
+    ]);
   });
 
   it("expands a Recurring Daily profile across the window", () => {

@@ -29,6 +29,8 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
+  SignCertificateRequestV201,
+  SignCertificateResponseV201,
 } from "../../../ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
@@ -60,7 +62,13 @@ import {
   type ReadingContext,
   type SampledValue,
 } from "../../domain/connector/MeterValueBuilder";
+import {
+  signReading,
+  toOcpp2SignedMeterValue,
+  type OcmfReading,
+} from "../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { OCPP_2_1 } from "../../domain/types/OcppVersion";
@@ -73,8 +81,13 @@ import {
   v201TransactionEvse,
 } from "./v201/topologyWireV201";
 import {
+  authorizationResultFromIdTokenInfo,
+  cacheableIdToken,
+} from "./v201/authorizationCacheV201";
+import {
   buildV201InboundRegistry,
   type V201Action,
+  type V201HandlerResult,
   type V201InboundContext,
   type V201InboundRegistry,
   type V201RequestPayload,
@@ -92,6 +105,11 @@ type V201ResponsePayload =
   | TransactionEventResponseV201
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
+
+/** True for a promise or any other thenable a handler may return. */
+function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
 
 type V201MeterValuesSampledValue =
   MeterValuesRequestV201["meterValue"][number]["sampledValue"][number];
@@ -128,6 +146,13 @@ function ocppStatusToTransactionChargingState(
   }
 }
 
+/** Where a TransactionEvent CALL stands in its E13 delivery (#490). */
+interface TransactionEventDelivery {
+  readonly connectorId: number;
+  /** 1-based transmission number of this CALL. */
+  readonly attempt: number;
+}
+
 export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _chargePoint: ChargePoint;
   private readonly _webSocket: OCPPWebSocket;
@@ -143,7 +168,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  removed once the matching CALLRESULT/CALLERROR arrives. */
   private readonly _pendingRequests = new Map<
     string,
-    { action: V201Action; payload: V201RequestPayload }
+    {
+      action: V201Action;
+      payload: V201RequestPayload;
+      /** Set on the TransactionEvents this handler builds (#490). */
+      transactionEvent?: TransactionEventDelivery;
+    }
+  >();
+  /** Resends waiting out `MessageAttemptInterval[TransactionEvent]`
+   *  (#490), with what each one would send; cleared on WebSocket close. */
+  private readonly _transactionEventRetries = new Map<
+    ReturnType<typeof setTimeout>,
+    { payload: TransactionEventRequestV201; attempt: number }
   >();
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
@@ -254,6 +290,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: V201RequestPayload,
     /** Told when the CALL never reached the wire (#348 waiters). */
     onDropped?: (reason: string) => void,
+    transactionEvent?: TransactionEventDelivery,
   ): void {
     if (!this._webSocket.isConnected()) {
       this._logger.warn(
@@ -275,7 +312,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       gen,
       (settlement) => {
         if (settlement.outcome === "written") {
-          this._pendingRequests.set(messageId, { action, payload });
+          this._pendingRequests.set(messageId, {
+            action,
+            payload,
+            ...(transactionEvent ? { transactionEvent } : {}),
+          });
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
         } else {
           // On drop outcomes (socket_closed, disposed, write_failed,
@@ -402,10 +443,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
         };
-        let handled: ReturnType<typeof entry.handle>;
-        try {
-          handled = entry.handle(payload, ctx);
-        } catch (error) {
+        // An async answer that settles after the socket generation changed
+        // cannot reach the CSMS (`sendResult` / `sendError` drop it): report
+        // the CALL as unanswered and run no afterResult.
+        const droppedAfterReconnect = (): boolean => {
+          if (this._webSocket.currentGeneration().gen === gen.gen) return false;
+          this._logger.warn(
+            `[v2.0.1] ${action} answered after the connection changed; not sent`,
+            LogType.OCPP,
+          );
+          this.ignoreCall(action, messageId);
+          return true;
+        };
+        const fail = (error: unknown): void => {
+          if (droppedAfterReconnect()) return;
           // Same answer as the 1.6J handler: a failing handler is the
           // station's fault, so the CSMS gets InternalError instead of
           // waiting for its timeout (#399).
@@ -425,14 +476,38 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             ),
             gen,
           );
+        };
+        const finish = ({ response, afterResult }: V201HandlerResult): void => {
+          if (droppedAfterReconnect()) return;
+          // Register effect with queue if present, get settlement callback
+          const onSettled = afterResult
+            ? this._responseEffectQueue.register(gen, afterResult)
+            : undefined;
+          this.answerCall(action, messageId, response, gen, onSettled);
+        };
+        let handled: ReturnType<typeof entry.handle>;
+        try {
+          handled = entry.handle(payload, ctx);
+        } catch (error) {
+          fail(error);
           return;
         }
-        const { response, afterResult } = handled;
-        // Register effect with queue if present, get settlement callback
-        const onSettled = afterResult
-          ? this._responseEffectQueue.register(gen, afterResult)
-          : undefined;
-        this.answerCall(action, messageId, response, gen, onSettled);
+        // #456: await only a real thenable. An unconditional await would
+        // defer every CALLRESULT by a microtask and reorder it against the
+        // follow-up CALLs other code sends meanwhile. `Promise.resolve`
+        // adopts any thenable, including one whose `then` returns nothing.
+        if (isThenable(handled)) {
+          Promise.resolve(handled)
+            .then(finish, fail)
+            .catch((error: unknown) =>
+              this._logger.error(
+                `[v2.0.1] Error answering ${action}: ${error}`,
+                LogType.OCPP,
+              ),
+            );
+          return;
+        }
+        finish(handled);
         return;
       }
 
@@ -456,6 +531,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
       const error = payload as CallErrorFields;
       if (this._expertCalls.claimError(messageId, error)) return;
+      if (pending?.transactionEvent) {
+        this.onTransactionEventCallError(
+          pending.payload as TransactionEventRequestV201,
+          pending.transactionEvent,
+          error.errorCode ?? "GenericError",
+        );
+        return;
+      }
       if (pending?.action === "DataTransfer") {
         this._dataTransferWaiters.reject(
           messageId,
@@ -466,10 +549,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       }
 
       // Issue #181: a CALLERROR answering Authorize.req is a definite
-      // protocol failure (unlike the authorizeAndWait timeout/disconnect
-      // paths, which proceed fail-OPEN as "Accepted" because the CSMS
-      // said nothing at all). Here the CSMS *did* respond, and what it
-      // said was "I couldn't process this" — so treat it as fail-CLOSED:
+      // protocol failure, unlike the authorizeAndWait paths where the CSMS
+      // said nothing at all (#452: a disconnect applies the offline
+      // rules; a timeout refuses a tag known locally as NOT valid and
+      // otherwise proceeds as "Accepted"). Here the CSMS *did* respond,
+      // and what it said was "I couldn't process this" — so treat it as
+      // fail-CLOSED:
       // synthesize a denial ("Invalid") rather than let authorizeAndWait
       // burn its full timeout waiting for a CALLRESULT that will never
       // arrive.
@@ -515,6 +600,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const authorizeResult = payload as AuthorizeResponseV201;
       const authorizeRequest = pending.payload as AuthorizeRequestV201;
       const status = authorizeResult.idTokenInfo?.status;
+      this.recordIdTokenInfo(
+        authorizeRequest.idToken,
+        authorizeResult.idTokenInfo,
+      );
       if (status !== undefined) {
         this._logger.info(
           `[v2.0.1] Authorize response: ${status}`,
@@ -525,6 +614,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           status,
         );
       }
+      return;
+    }
+
+    if (pending?.action === "SignCertificate") {
+      this.applySignCertificateResult(payload as SignCertificateResponseV201);
       return;
     }
 
@@ -555,6 +649,46 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   /**
+   * #452: feed the CSMS's idTokenInfo on `idToken` to the Authorization
+   * Cache (C10.FR.04 AuthorizeResponse, C10.FR.05 TransactionEventResponse).
+   * Only real answers come here: the "Invalid" synthesized from a CALLERROR
+   * is not a verdict and is never cached.
+   */
+  private recordIdTokenInfo(
+    idToken: TransactionEventRequestV201["idToken"],
+    idTokenInfo: TransactionEventResponseV201["idTokenInfo"],
+  ): void {
+    const key = cacheableIdToken(idToken);
+    if (key === undefined || idTokenInfo === undefined) return;
+    this._chargePoint.recordAuthorizationResult(
+      key,
+      authorizationResultFromIdTokenInfo(idTokenInfo),
+    );
+  }
+
+  /**
+   * A02 SignCertificateResponse (#456), the 2.x twin of 1.6's #410 result
+   * handling: logged only. A Rejected answer (A02.FR.12) leaves the CSR
+   * pending: A02 has no rule to discard it, and a CertificateSigned that
+   * still arrives for it can be matched.
+   */
+  private applySignCertificateResult(
+    response: SignCertificateResponseV201,
+  ): void {
+    if (response.status === "Accepted") {
+      this._logger.info(
+        "[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned",
+        LogType.OCPP,
+      );
+      return;
+    }
+    this._logger.warn(
+      `[v2.0.1] SignCertificate not accepted by the CSMS (status ${response.status}); the CSR stays pending`,
+      LogType.OCPP,
+    );
+  }
+
+  /**
    * #447: the 2.x twin of 1.6's non-Accepted StartTransaction.conf (#181).
    * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
    * in `idTokenInfo`. When it is not Accepted and the transaction is still
@@ -566,6 +700,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     request: TransactionEventRequestV201,
     response: TransactionEventResponseV201,
   ): void {
+    this.recordIdTokenInfo(request.idToken, response.idTokenInfo);
     const status = response.idTokenInfo?.status;
     if (status === undefined || status === "Accepted") return;
     if (request.eventType === "Ended") return;
@@ -595,6 +730,99 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       connector.id,
       status,
       stopOnInvalid,
+    );
+  }
+
+  /** Send a TransactionEvent as transmission `attempt` (#490). Each
+   *  transmission is a new CALL with a new message id (OCPP-J Part 4 §4.1.4:
+   *  "This also applies to retries"); the payload, seqNo included, is the
+   *  same object every time. */
+  private sendTransactionEventCall(
+    connectorId: number,
+    payload: TransactionEventRequestV201,
+    attempt = 1,
+  ): void {
+    this.send(
+      "TransactionEvent",
+      this.generateMessageId(),
+      payload,
+      attempt > 1
+        ? (reason) =>
+            this.warnResendLost(payload, attempt, `dropped: ${reason}`)
+        : undefined,
+      { connectorId, attempt },
+    );
+  }
+
+  /**
+   * #490, OCPP 2.0.1 / 2.1 E13.FR.02-04: a CALLERROR answering a
+   * TransactionEvent means the CSMS failed to process it. The station
+   * resends it after `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`
+   * seconds times the number of transmissions so far, up to
+   * `MessageAttempts[TransactionEvent]` transmissions, then discards it.
+   * The transaction keeps running either way (unlike 1.6, #447).
+   *
+   * Known limitation: 2.x has no serial queue here (see `send`), so a
+   * waiting resend does not hold back the next transaction message. E13
+   * (Figure 62) describes sequential delivery; this station may deliver
+   * `Ended` before the resent `Started`, leaving the CSMS to reorder by
+   * `seqNo`. Both settings are read here, so a SetVariables applies to the
+   * next failure.
+   */
+  private onTransactionEventCallError(
+    payload: TransactionEventRequestV201,
+    delivery: TransactionEventDelivery,
+    errorCode: string,
+  ): void {
+    const { connectorId, attempt } = delivery;
+    const report = {
+      connectorId,
+      transactionId: payload.transactionInfo.transactionId,
+      eventType: payload.eventType,
+      errorCode,
+    };
+    const config = this._chargePoint.configuration;
+    const attempts = Math.max(1, config.transactionMessageAttempts());
+    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
+    if (attempt >= attempts) {
+      this._logger.warn(
+        `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
+        LogType.TRANSACTION,
+      );
+      this._chargePoint.notifyTransactionMessageDiscarded({
+        ...report,
+        attempts: attempt,
+      });
+      return;
+    }
+    const delayMs = Math.min(
+      Math.max(0, config.transactionMessageRetryInterval()) * attempt * 1000,
+      MAX_TIMER_MS,
+    );
+    this._logger.warn(
+      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${report.transactionId} answered with CALLERROR ${errorCode}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
+      LogType.TRANSACTION,
+    );
+    const timer = setTimeout(() => {
+      this._transactionEventRetries.delete(timer);
+      this.sendTransactionEventCall(connectorId, payload, attempt + 1);
+    }, delayMs);
+    unrefTimer(timer);
+    this._transactionEventRetries.set(timer, {
+      payload,
+      attempt: attempt + 1,
+    });
+  }
+
+  /** A resend that will never reach the CSMS: logged, no domain event. */
+  private warnResendLost(
+    payload: TransactionEventRequestV201,
+    attempt: number,
+    outcome: string,
+  ): void {
+    this._logger.warn(
+      `[v2.0.1] TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${payload.transactionInfo.transactionId}: attempt ${attempt} ${outcome}`,
+      LogType.TRANSACTION,
     );
   }
 
@@ -665,7 +893,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       transaction.cpTransactionId = crypto.randomUUID();
     }
     const transactionId = transaction.cpTransactionId;
-    const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
     // #335: a driven start may name the state the transaction opens in
@@ -693,17 +920,27 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       meterValue: [
         {
           timestamp: transaction.startTime.toISOString(),
-          sampledValue: [
+          sampledValue: this.withSignedEnergy(
+            [
+              {
+                value: transaction.meterStart / 1000,
+                measurand: "Energy.Active.Import.Register",
+                unitOfMeasure: { unit: "kWh" },
+              },
+            ],
+            connectorId,
+            transaction.tagId,
             {
-              value: transaction.meterStart / 1000,
-              measurand: "Energy.Active.Import.Register",
-              unitOfMeasure: { unit: "kWh" },
+              reason: "B",
+              energyWh: transaction.meterStart,
+              at: transaction.startTime,
             },
-          ],
+            "Transaction.Begin",
+          ),
         },
       ],
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   private sendChargingStateChanged(
@@ -724,7 +961,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (!transaction.cpTransactionId) {
       transaction.cpTransactionId = crypto.randomUUID();
     }
-    const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
     transaction.cpLastTransactionEventChargingState = chargingState;
@@ -743,7 +979,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         : {}),
       evse: v201TransactionEvse(connectorId),
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   private sendStopTransaction(
@@ -751,7 +987,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     connectorId: number,
   ): void {
     const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
-    const messageId = this.generateMessageId();
     const timestamp = (transaction.stopTime ?? new Date()).toISOString();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
@@ -778,18 +1013,28 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           ? [
               {
                 timestamp,
-                sampledValue: [
+                sampledValue: this.withSignedEnergy(
+                  [
+                    {
+                      value: transaction.meterStop / 1000,
+                      measurand: "Energy.Active.Import.Register",
+                      unitOfMeasure: { unit: "kWh" },
+                    },
+                  ],
+                  connectorId,
+                  transaction.tagId,
                   {
-                    value: transaction.meterStop / 1000,
-                    measurand: "Energy.Active.Import.Register",
-                    unitOfMeasure: { unit: "kWh" },
+                    reason: "E",
+                    energyWh: transaction.meterStop,
+                    at: transaction.stopTime ?? new Date(timestamp),
                   },
-                ],
+                  "Transaction.End",
+                ),
               },
             ]
           : undefined,
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
   }
 
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
@@ -823,7 +1068,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (!transaction.cpTransactionId) {
       transaction.cpTransactionId = crypto.randomUUID();
     }
-    const messageId = this.generateMessageId();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     transaction.cpNextSeqNo = seqNo + 1;
     if (options.chargingState) {
@@ -837,12 +1081,19 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const measurands =
         options.measurands ??
         this._chargePoint.configuration.meterValuesSampledData();
-      const sampledValue = this.toV201SampledValues(
-        buildSampledValues(
-          connector,
-          measurands,
-          options.context ?? "Sample.Periodic",
+      const context = options.context ?? "Sample.Periodic";
+      const sampledValue = this.withSignedEnergy(
+        this.toV201SampledValues(
+          buildSampledValues(connector, measurands, context),
         ),
+        connectorId,
+        transaction.tagId,
+        {
+          reason: "C",
+          energyWh: connector.meterValue,
+          at: new Date(timestamp),
+        },
+        context,
       );
       if (sampledValue.length > 0) {
         meterValue = [
@@ -879,7 +1130,53 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       evse: v201TransactionEvse(connectorId),
       ...(meterValue ? { meterValue } : {}),
     };
-    this.send("TransactionEvent", messageId, payload);
+    this.sendTransactionEventCall(connectorId, payload);
+  }
+
+  /**
+   * #315: while `SampledDataSignReadings` is on, sign `reading` and attach it
+   * as `signedMeterValue` to the energy register sample (adding one, with
+   * `context`, if the measurand list has none). Unchanged when signing is off.
+   */
+  private withSignedEnergy(
+    sampledValue: V201MeterValuesSampledValue[],
+    connectorId: number,
+    idTag: string,
+    reading: OcmfReading,
+    context?: ReadingContext,
+  ): [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]] {
+    const list = sampledValue as [
+      V201MeterValuesSampledValue,
+      ...V201MeterValuesSampledValue[],
+    ];
+    // Clock-aligned samples are not signed (no aligned/fiscal records yet).
+    if (context === "Sample.Clock") return list;
+    const signed = signReading(this._chargePoint, connectorId, idTag, reading);
+    if (!signed) return list;
+    const withContext = context
+      ? { context: context as V201MeterValuesSampledValue["context"] }
+      : {};
+    const signedMeterValue = toOcpp2SignedMeterValue(signed);
+    const energy = list.findIndex(
+      (sv) =>
+        (sv.measurand ?? "Energy.Active.Import.Register") ===
+          "Energy.Active.Import.Register" && !sv.phase,
+    );
+    if (energy >= 0) {
+      return list.map((sv, i) =>
+        i === energy ? { ...sv, ...withContext, signedMeterValue } : sv,
+      ) as typeof list;
+    }
+    return [
+      ...list,
+      {
+        value: reading.energyWh / 1000,
+        measurand: "Energy.Active.Import.Register",
+        unitOfMeasure: { unit: "kWh" },
+        ...withContext,
+        signedMeterValue,
+      },
+    ];
   }
 
   /** 1.6-shaped builder output → 2.0.1 SampledValueType. `context` is
@@ -923,7 +1220,24 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
-    if (sampledValues.length === 0) {
+    const timestamp = overrides.timestamp ?? new Date();
+    let sampledValue = this.toV201SampledValues(sampledValues) as [
+      V201MeterValuesSampledValue,
+      ...V201MeterValuesSampledValue[],
+    ];
+    // #315: during a transaction, sign the energy register too. Done before
+    // the empty check, so an empty measurand list still sends the signed one.
+    const transaction = connector.transaction;
+    if (transaction && !transaction.stopTime) {
+      sampledValue = this.withSignedEnergy(
+        sampledValue,
+        connectorId,
+        transaction.tagId,
+        { reason: "C", energyWh: connector.meterValue, at: timestamp },
+        context,
+      );
+    }
+    if (sampledValue.length === 0) {
       this._logger.debug(
         `[v2.0.1] sendMeterValue: no sampled values for connector ${connectorId}`,
         LogType.METER_VALUE,
@@ -931,16 +1245,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
 
-    const sampledValue = this.toV201SampledValues(sampledValues) as [
-      V201MeterValuesSampledValue,
-      ...V201MeterValuesSampledValue[],
-    ];
-
     const payload: MeterValuesRequestV201 = {
       evseId: v201MeterEvseId(connectorId),
       meterValue: [
         {
-          timestamp: (overrides.timestamp ?? new Date()).toISOString(),
+          timestamp: timestamp.toISOString(),
           sampledValue,
         },
       ],
@@ -1007,11 +1316,45 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  public async sendSignCertificate(_csr?: string): Promise<void> {
-    this._logger.warn(
-      "[v2.0.1] SignCertificate is not wired through this handler",
-      LogType.OCPP,
-    );
+  /**
+   * A02 SignCertificateRequest (#456): sends `csr` as given, or a CSR newly
+   * generated by the certificate store, and records it as the pending
+   * Charging Station certificate CSR that CertificateSigned is matched
+   * against. `certificateType` is omitted (the certificate serves every
+   * connection, A02.FR.13 does not apply), and so are the optional 2.1
+   * `requestId` / `hashRootCertificate`, which the station has no source
+   * for.
+   */
+  public async sendSignCertificate(csr?: string): Promise<void> {
+    const store = this._chargePoint.certificateStore;
+    let payloadCsr: string;
+    if (csr) {
+      payloadCsr = csr;
+      if (!store.recordPendingCsr("ChargingStationCertificate", csr)) {
+        this._logger.warn(
+          "[v2.0.1] SignCertificate: the given CSR is not a parseable PKCS#10 request; no CertificateSigned can match it",
+          LogType.OCPP,
+        );
+      }
+    } else {
+      const quirks = this._chargePoint.certificateQuirks;
+      if (quirks.csrKeyAlgorithm === "RSA") {
+        this._logger.info(
+          "[v2.0.1] SignCertificate: generating RSA CSR (certificate quirk)",
+          LogType.OCPP,
+        );
+      }
+      payloadCsr = await store.generateNewCsr(
+        this._chargePoint.id,
+        this._chargePoint.configuration.getString("CpoName") ?? "",
+        {
+          keyAlgorithm: quirks.csrKeyAlgorithm,
+          pemLineEndings: quirks.csrPemLineEndings,
+        },
+      );
+    }
+    const payload: SignCertificateRequestV201 = { csr: payloadCsr };
+    this.send("SignCertificate", this.generateMessageId(), payload);
   }
 
   public sendDiagnosticsStatusNotification(_status: DiagnosticsStatus): void {
@@ -1117,6 +1460,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
     this._expertCalls.onClosed();
+    // #490: a resend waiting for its interval dies with the connection (2.x
+    // has no offline queue to hand it to). Close, disconnect, reset and
+    // dispose all reach here through ChargePoint.teardownAfterClose.
+    for (const [timer, resend] of this._transactionEventRetries) {
+      clearTimeout(timer);
+      this.warnResendLost(
+        resend.payload,
+        resend.attempt,
+        "cancelled: WebSocket closed",
+      );
+    }
+    this._transactionEventRetries.clear();
   }
 
   public flushPendingQueue(): void {

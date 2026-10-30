@@ -27,6 +27,7 @@ export {
   blueprintSchema,
   createManyFromBlueprintSchema,
   createManyToolSchema,
+  authorizationCacheSeedSchema,
   dataTransferDataSchema,
   scenarioWaitExtensionSecondsSchema,
   serverInfoSchema,

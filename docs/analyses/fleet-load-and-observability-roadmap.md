@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Fleet, load and observability roadmap
@@ -56,19 +56,17 @@ runtime model.
 | 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped     | #299  |
 | 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300  |
 | 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped     | #301  |
-| 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | 4a         | not filed   | —     |
+| 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | —          | shipped     | #315  |
 | 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped     | #302  |
 | 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |
 | 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | shipped     | #314  |
 
-One item is **not filed** as an issue yet — 4b, the row whose payoff is
-narrowest, and it blocks nothing else.
-
-Two items are deliberately not unconditional. **5b** is gated on the number
+One item is deliberately not unconditional. **5b** is gated on the number
 that **5a** produces — building a worker model before knowing where the single
-event loop actually breaks is speculative. **4b** serves only CSMS
-implementations that validate German calibration-law (Eichrecht) meter data,
-which few do.
+event loop actually breaks is speculative. **4b** was optional for the same
+kind of reason (it serves only CSMS implementations that validate German
+calibration-law (Eichrecht) meter data) and shipped once that use was asked
+for (#315).
 
 ## Phase 1 — Fleet shape
 
@@ -419,15 +417,16 @@ above the knee SoC; a SetChargingProfile below the curve still caps.
 **Goal.** Serve CSMS implementations that validate German calibration-law
 (Eichrecht) meter data.
 
-**Shape.** The vendor-specific 1.6 configuration keys the ecosystem has
-settled on — `SigningMethod`, `MeterPublicKey[ConnectorID]`, `SampledDataSign*`,
-`AlignedDataSign*` — plus an OCMF-shaped payload emitted as
-`format: "SignedData"`. The
-`format: "SignedData"` enum member already exists in
-`src/cp/domain/connector/MeterValueBuilder.ts`; nothing generates it.
+**Shape (shipped, #315).** An OCMF generator that knows nothing about OCPP
+versions, mapped onto 1.6 `format: "SignedData"` and 2.x `signedMeterValue`;
+off by default, ephemeral per-connector P-256 keys, and four test modes
+(valid, tampered payload, wrong key, invalid signature), because a CSMS's
+Eichrecht path is mostly rejection logic. It did not depend on 4a: the
+synthetic register is enough to exercise parsing and signature checks. See
+[OCPP versions and transports → Signed meter values](../concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315).
 
-**Do this only on demand.** It is niche, it is the one item with no CI or
-agent-testing payoff, and signing keys add a key-management surface.
+**Still out of scope.** Key management beyond ephemeral keys, clock-aligned
+and fiscal records, SOAP, and scenario nodes that flip the mode mid-session.
 
 ## Phase 5 — Scale
 

@@ -1,16 +1,14 @@
 // Tier-3 schema-valid responses for the remaining CSMS-initiated 2.0.1 messages; honest non-Accepted statuses reflect features the simulator does not yet implement; deep behavior is a later fidelity phase.
 import type {
-  CertificateSignedResponseV201,
   ClearDisplayMessageResponseV201,
   CostUpdatedResponseV201,
   CustomerInformationResponseV201,
   DataTransferResponseV201,
-  DeleteCertificateResponseV201,
   GetDisplayMessagesResponseV201,
-  GetInstalledCertificateIdsResponseV201,
   GetLocalListVersionResponseV201,
   GetLogResponseV201,
   InstallCertificateResponseV201,
+  GetMonitoringReportResponseV201,
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
   SendLocalListResponseV201,
@@ -172,30 +170,6 @@ export const handleDataTransferAckV201 = (() => ({
   response: {
     status: "UnknownVendorId",
   } satisfies DataTransferResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleCertificateSignedAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies CertificateSignedResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleDeleteCertificateAckV201 = (() => ({
-  response: {
-    status: "NotFound",
-  } satisfies DeleteCertificateResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleGetInstalledCertificateIdsAckV201 = (() => ({
-  response: {
-    status: "NotFound",
-  } satisfies GetInstalledCertificateIdsResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleInstallCertificateAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies InstallCertificateResponseV201,
 })) satisfies V201AckHandler;
 
 /** L03 PublishFirmware.req is for a Local Controller that serves firmware to

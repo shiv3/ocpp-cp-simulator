@@ -124,15 +124,19 @@ export enum ActionNameV201 {
   UpdateFirmware = "UpdateFirmware",
 }
 
+/** OCPP 2.0.1 / 2.1 Part 4 RPC error codes: `FormationViolation` became
+ * `FormatViolation`, `OccurenceConstraintViolation` gained its second `r`. */
 export enum OCPPErrorCodeV201 {
   NotImplemented = "NotImplemented",
   NotSupported = "NotSupported",
   InternalError = "InternalError",
   ProtocolError = "ProtocolError",
   SecurityError = "SecurityError",
-  FormationViolation = "FormationViolation",
+  FormatViolation = "FormatViolation",
   PropertyConstraintViolation = "PropertyConstraintViolation",
-  OccurenceConstraintViolation = "OccurenceConstraintViolation",
+  OccurrenceConstraintViolation = "OccurrenceConstraintViolation",
   TypeConstraintViolation = "TypeConstraintViolation",
   GenericError = "GenericError",
+  MessageTypeNotSupported = "MessageTypeNotSupported",
+  RpcFrameworkError = "RpcFrameworkError",
 }

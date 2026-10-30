@@ -117,7 +117,7 @@ describe("OCPP 2.0.1 inbound CSMS CALL events (#396)", () => {
       const seen = record(cp);
       csms.send([2, "bad-1", "Reset", {}]);
       expect((await csms.waitForFrame(answerTo("bad-1")))[2]).toBe(
-        "FormationViolation",
+        "FormatViolation",
       );
       csms.send([2, "unk-1", "NoSuchAction", {}]);
       expect((await csms.waitForFrame(answerTo("unk-1")))[2]).toBe(
@@ -129,7 +129,7 @@ describe("OCPP 2.0.1 inbound CSMS CALL events (#396)", () => {
           action: "Reset",
           messageId: "bad-1",
           outcome: "CallError",
-          errorCode: "FormationViolation",
+          errorCode: "FormatViolation",
         },
         {
           action: "NoSuchAction",

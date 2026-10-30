@@ -111,7 +111,7 @@ describe("OCPP 2.1 inbound CSMS calls", () => {
       ).toEqual([
         4,
         "v21-set-der-malformed",
-        "FormationViolation",
+        "FormatViolation",
         "Invalid SetDERControl payload",
         {},
       ]);

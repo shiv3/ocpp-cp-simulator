@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -271,6 +271,21 @@ CREATE TABLE IF NOT EXISTS vehicle_profiles (
   body        TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+
+-- Installed certificates (#456): trust anchors from InstallCertificate
+-- (\`kind\` = 'root') and chains from CertificateSigned ('chain'), in the
+-- domain's version-neutral \`certificate_use\`. \`body\` holds the PEM(s) and
+-- their precomputed hash data; public material only. Pending CSRs and
+-- private keys are never stored.
+CREATE TABLE IF NOT EXISTS certificates (
+  cp_id           TEXT NOT NULL,
+  seq             INTEGER NOT NULL,
+  kind            TEXT NOT NULL,
+  certificate_use TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  installed_at    TEXT NOT NULL,
+  PRIMARY KEY (cp_id, seq)
+);
 `;
 
 /**
@@ -313,6 +328,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "scenario_runs", perCp: true, resetOnStateReset: true },
   { name: "charging_sessions", perCp: true, resetOnStateReset: true },
   { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
+  { name: "certificates", perCp: true, resetOnStateReset: true },
 ];
 
 /** Names of the tables `state.reset` truncates, in `TABLES` order. */
@@ -585,6 +601,9 @@ export function runMigrations(db: Database): void {
 
   // v16 → v17 (#447): the `charging_sessions` history table and its index,
   // `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
+
+  // v17 → v18 (#456): the `certificates` table (installed roots and signed
+  // chains), `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

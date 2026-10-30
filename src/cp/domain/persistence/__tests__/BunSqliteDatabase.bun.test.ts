@@ -631,8 +631,29 @@ describe("charging sessions schema, v17 (#447)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(Number(version?.value)).toBe(17);
-      expect(SCHEMA_VERSION).toBe(17);
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("certificates schema, v18 (#456)", () => {
+  it("creates certificates on a database stamped 17", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE certificates");
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("certificates");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("certificates");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(18);
+      expect(SCHEMA_VERSION).toBe(18);
     } finally {
       db.close();
     }

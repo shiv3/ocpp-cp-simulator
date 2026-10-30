@@ -1840,6 +1840,30 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | Certificate store shared by 1.6 and 2.x, persisted (#456)
+
+- The certificate store speaks version-neutral uses (`src/cp/domain/security/certificateUse.ts`); 1.6, 2.0.1 and 2.1 map onto them explicitly in `certificateUseMapping.ts` and refuse what a version does not define (`OEMRootCertificate` and `V2G20Certificate` are 2.1-only). Hash data is computed at install time; chain members are hashed against their issuer. Pending CSRs are tracked per signing use and matched to a returned chain by public key; the private key is never kept.
+- Trust anchors and signed chains persist in the new `certificates` table (schema v18); pending CSRs stay in memory. The 1.6 handlers run on the new store with no wire change; the 2.x handlers are unchanged so far.
+- [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): new section, use mapping table, 1.6 behaviour, persistence.
+- [State persistence → Tables](concepts/state-persistence.md#tables): `certificates` row, schema version 18, `cp.delete` list.
+- [Index](index.md): security profiles summary. [GitHub issues](sources/github-issues.md): #456.
+
+## [2026-10-29] ingest | Stateful OCPP 2.x certificate management (#456)
+
+- The 2.0.1 / 2.1 `InstallCertificate`, `GetInstalledCertificateIds`, `DeleteCertificate` and `CertificateSigned` handlers no longer answer fixed negative acknowledgements: they install, list and delete on the certificate store (M03-M05) and match a returned chain to the pending CSR by public key (A02.FR.06). A rejected chain raises `InvalidChargingStationCertificate` (A02.FR.07). 2.1 registers the same handlers with its own enum mapping.
+- `sign_certificate` sends a real `SignCertificateRequest` on 2.x and records its CSR as pending; the response status is logged and a `Rejected` keeps the CSR.
+- The 2.x dispatcher awaits a handler only when it returns a promise, so synchronous answers keep their ordering; a rejected promise is an `InternalError` CALLERROR.
+- [Security profiles → OCPP 2.0.1 and 2.1 behaviour](concepts/security-profiles.md#ocpp-201-and-21-behaviour): new section with statuses, limits and what is not covered.
+- [Log format](concepts/log-format.md): the 2.x `SignCertificateResponse` log lines. [GitHub issues](sources/github-issues.md): #456 row.
+
+## [2026-10-29] ingest | Certificate store ordering, reinstall and save failures (#456)
+
+- The certificate store runs its operations one at a time, so a `GetInstalledCertificateIds` or `DeleteCertificate` sent right after an `InstallCertificate` sees it, on 1.6 and 2.x.
+- 2.x replaces a reinstalled certificate and answers `Accepted`, even in a full store (M05.FR.17); 1.6 keeps duplicates. `InstallCertificate` answers `Failed` when the database refuses the row. A 1.6 `CertificateSigned` chain replaces the previous one.
+- A 2.x answer that settles after the connection changed is reported as unanswered; `sign_certificate`'s `csr` is bounded to 5500 characters.
+- [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): 1.6 and 2.x behaviour, ordering, limits (`V2G20Certificate` chains, `serialNumber` leading zero, whitepaper M04.FR.06), persistence failures.
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): `sign_certificate` bound.
+
 ## [2026-10-29] ingest | 2.x TransactionEvent CALLERROR follows E13 (#490)
 
 - A CALLERROR answering a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or `Ended`) was ignored. The station now keeps the transaction running, emits `transactionMessageRejected` on every CALLERROR, resends the same payload under a new message id after `MessageAttemptInterval[TransactionEvent]` × transmissions so far, and after `MessageAttempts[TransactionEvent]` transmissions discards it with `transactionMessageDiscarded`. A waiting resend is dropped on WebSocket close. 1.6 is unchanged (#447).

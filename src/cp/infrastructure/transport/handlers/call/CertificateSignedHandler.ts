@@ -18,10 +18,10 @@ export class CertificateSignedHandler implements CallHandler<
   CertificateSignedRequestV16,
   CertificateSignedResponseV16
 > {
-  handle(
+  async handle(
     payload: CertificateSignedRequestV16,
     context: HandlerContext,
-  ): CertificateSignedResponseV16 {
+  ): Promise<CertificateSignedResponseV16> {
     if (!isValidCertificateSignedRequestV16(payload)) {
       context.logger.warn(
         "CertificateSigned rejected: invalid request payload",
@@ -70,7 +70,8 @@ export class CertificateSignedHandler implements CallHandler<
       }
     }
 
-    context.chargePoint.certificateStore.storeSignedChain(chain);
+    // 1.6: stored unconditionally; the pending-CSR check is 2.x-only (#456).
+    await context.chargePoint.certificateStore.storeSignedChain(chain);
     context.logger.info(
       `CertificateSigned accepted: stored ${chain.length} certificate(s)`,
       LogType.OCPP,

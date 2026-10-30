@@ -192,7 +192,12 @@ at WARN. The status is only logged: the `sign_certificate` method and
 request is queued, without the answer. With it, each of the 14 station-initiated
 1.6J actions listed in [Expert OCPP calls](expert-ocpp-calls.md#what-is-sent)
 has a result handler, so none of them logs the warning on its answer. OCPP 2.x
-and the SOAP transports never log this line.
+and the SOAP transports never log this line. Since #456 the 2.x handler logs
+its own `SignCertificateResponse` lines:
+`[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned` at
+INFO, otherwise
+`[v2.0.1] SignCertificate not accepted by the CSMS (status <status>); the CSR stays pending`
+at WARN ([Security profiles](security-profiles.md#ocpp-201-and-21-behaviour)).
 
 ## Related RPC methods
 

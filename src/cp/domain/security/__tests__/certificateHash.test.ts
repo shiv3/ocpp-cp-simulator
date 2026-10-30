@@ -5,6 +5,7 @@ import {
   certificateHashDataEquals,
   computeCertificateHashData,
 } from "../certificateHash";
+import { selfSignedRoot, subCa } from "./certificateFixtures";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
@@ -140,5 +141,21 @@ describe("certificateHashDataEquals", () => {
         serialNumber: "ffffff",
       }),
     ).toBe(false);
+  });
+});
+
+describe("computeCertificateHashData with an issuer", () => {
+  it("hashes the issuer's public key, not the certificate's own, for an issued certificate", async () => {
+    const root = await selfSignedRoot("01", "Issuer Root");
+    const sub = await subCa("02", "Issued Sub-CA", root);
+    const rootHash = await computeCertificateHashData(root.pem);
+
+    const issued = await computeCertificateHashData(sub.pem, root.pem);
+    const selfKeyed = await computeCertificateHashData(sub.pem);
+
+    expect(issued.issuerKeyHash).toBe(rootHash.issuerKeyHash);
+    expect(issued.issuerNameHash).toBe(rootHash.issuerNameHash);
+    expect(issued.serialNumber).toBe("02");
+    expect(selfKeyed.issuerKeyHash).not.toBe(rootHash.issuerKeyHash);
   });
 });

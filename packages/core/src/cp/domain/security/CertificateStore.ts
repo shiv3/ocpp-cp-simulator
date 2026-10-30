@@ -344,18 +344,43 @@ export class CertificateStore {
    * store does not hold its key: a chain signed for a CSR the caller
    * supplied, one stored by 1.6 CertificateSigned, or any chain read back
    * after a restart. The key is exported for the TLS handshake only; the
-   * caller must not log or persist it.
+   * caller must not log or persist it. A chain replaced while its key is
+   * exported is not returned: the answer is the chain current once the
+   * export completes.
    */
   async tlsClientIdentity(): Promise<TlsClientIdentity | undefined> {
-    const [chain] = this.listSignedChains("ChargingStationCertificate");
-    const privateKey = chain && this.#chainKeys.get(chain.pems[0]);
-    if (!chain || !privateKey) return undefined;
-    const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
-    return {
-      cert: chain.pems.map((pem) => `${pem}\n`).join(""),
-      key: pemBlock("PRIVATE KEY", pkcs8),
-      notBefore: new x509.X509Certificate(chain.pems[0]).notBefore,
-    };
+    for (;;) {
+      const [chain] = this.listSignedChains("ChargingStationCertificate");
+      const privateKey = chain && this.#chainKeys.get(chain.pems[0]);
+      if (!chain || !privateKey) return undefined;
+      const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
+      const [current] = this.listSignedChains("ChargingStationCertificate");
+      if (current?.pems[0] !== chain.pems[0]) continue;
+      if (this.#chainKeys.get(chain.pems[0]) !== privateKey) continue;
+      return {
+        cert: current.pems.map((pem) => `${pem}\n`).join(""),
+        key: pemBlock("PRIVATE KEY", pkcs8),
+        notBefore: new x509.X509Certificate(chain.pems[0]).notBefore,
+      };
+    }
+  }
+
+  /**
+   * Drops every private key the store holds in memory (#537): those of
+   * accepted chains and of pending CSRs. Chains, roots and CSRs stay, as
+   * after a restart. Called when the charge point owning the store is
+   * replaced (`cp.update`), so a discarded instance keeps no key.
+   */
+  forgetPrivateKeys(): void {
+    this.#chainKeys.clear();
+    for (const [use, pending] of this.#pendingCsrs) {
+      if (pending.privateKey) {
+        this.#pendingCsrs.set(use, {
+          pem: pending.pem,
+          publicKey: pending.publicKey,
+        });
+      }
+    }
   }
 
   // ── OCSP (2.x M06, #537) ────────────────────────────────────────────────

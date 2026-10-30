@@ -2032,3 +2032,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): new section; the "malformed frames are out of scope" note now points to it.
 - [Control plane](concepts/control-plane.md#cp-command-methods): `send_raw_frame` row.
 - [MCP endpoint](entities/mcp-endpoint.md): `send_raw_frame` tool (30 curated tools).
+
+## [2026-10-30] ingest | Raw frames: review follow-ups (#393)
+
+- A reply counts only once the frame is written; the wait runs from the moment the transport takes the frame, so a network-sim delay counts against it and the call returns under the RPC deadline.
+- `closed` is set at once for every end of the connection (CSMS / network close, disconnect, reset, simulated drop, removal), with its cause.
+- A frame dropped while the socket stays open (full network-sim queue, failed write) is a `disconnected` error rather than a `closed` result.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): the above.

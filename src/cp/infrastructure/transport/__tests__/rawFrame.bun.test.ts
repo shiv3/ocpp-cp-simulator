@@ -182,6 +182,49 @@ describe("raw frames (#393)", () => {
     }
   });
 
+  it("a reset during the wait reports the reset's close at once (#393 review)", async () => {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP-RAW-RESET", "OCPP-1.6J");
+    const stopAnswering = answerEverythingElse(
+      csms,
+      (frame) => frame[1] === "raw-reset",
+    );
+    try {
+      const raw = '[2,"raw-reset"]';
+      const started = Date.now();
+      const sending = cp.sendRawFrame({ frame: raw, waitMs: 20_000 });
+      await waitForRaw(csms, raw);
+      cp.reset();
+      const outcome = await sending;
+      expect(outcome).toMatchObject({ reply: null, closed: "internal" });
+      // Settled by the reset, not by the 20 s wait.
+      expect(Date.now() - started).toBeLessThan(5000);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("a manual disconnect during the wait reports closed manual", async () => {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP-RAW-MANUAL", "OCPP-2.0.1");
+    const stopAnswering = answerEverythingElse(
+      csms,
+      (frame) => frame[1] === "raw-manual",
+    );
+    try {
+      const raw = '[2,"raw-manual"]';
+      const sending = cp.sendRawFrame({ frame: raw, waitMs: 20_000 });
+      await waitForRaw(csms, raw);
+      cp.disconnect();
+      await expect(sending).resolves.toMatchObject({ closed: "manual" });
+    } finally {
+      stopAnswering();
+      await csms.stop();
+    }
+  });
+
   it("SOAP stations are refused", async () => {
     const csms = startMockCsms();
     const cp = await bootedChargePoint(csms, "CP-RAW-SOAP", "OCPP-1.6S");

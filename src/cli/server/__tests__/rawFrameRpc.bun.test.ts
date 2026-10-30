@@ -131,6 +131,19 @@ describe("send_raw_frame over the daemon's surfaces (#393)", () => {
       closed: null,
     });
 
+    // Non-JSON text crosses the control plane untouched (#393 review).
+    const text = await rpc(
+      "send_raw_frame",
+      { frame: "not json at all", waitMs: 100 },
+      CP,
+    );
+    expect(text.result).toEqual({
+      sentFrame: "not json at all",
+      messageId: null,
+      reply: null,
+      closed: null,
+    });
+
     const refused = await rpc("send_raw_frame", { frame: 42 }, CP);
     expect(refused.ok).toBe(false);
     expect(refused.error.code).toBe("invalid_params");

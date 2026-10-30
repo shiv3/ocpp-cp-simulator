@@ -58,9 +58,10 @@ export interface TransportObserverEvents {
   /** A reconnect was scheduled; emitted once the close that caused it has
    *  been handed to the `onclose` callback. */
   reconnectScheduled: { attempt: number; delayMs: number };
-  /** #393: the socket closed, whatever the cause; emitted before any
-   *  reconnect is scheduled. */
-  closed: { cause: CloseCause };
+  /** #393: the current generation ended, whatever the cause (a close, a
+   *  disconnect, a reset, a simulated drop), or the transport was disposed.
+   *  Emitted once per generation, before any replacement socket opens. */
+  closed: { cause: CloseCause | "disposed" };
 }
 
 /**
@@ -442,6 +443,7 @@ export class OCPPWebSocket {
 
     // Shut down controller with reason 'disposed'
     this._controller.shutdownPipelines({ reason: "disposed" });
+    this.observers.emit("closed", { cause: "disposed" });
 
     // Clear the reconnect reservation
     this._reconnectNotBefore = null;
@@ -851,6 +853,7 @@ export class OCPPWebSocket {
         // Callback exception isolation
       }
     }
+    this.observers.emit("closed", { cause: closeCause });
   }
 
   /**
@@ -976,7 +979,6 @@ export class OCPPWebSocket {
     // Run the close transaction (idempotent per generation; a cause the
     // charge point latched itself is kept)
     this.runCloseTransaction(closeCause);
-    this.observers.emit("closed", { cause: closeCause });
 
     // Only attempt reconnect if not manually disconnected
     if (!this._isManualDisconnect) {

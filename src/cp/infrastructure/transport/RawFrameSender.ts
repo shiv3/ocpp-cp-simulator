@@ -4,13 +4,19 @@ import {
   type RawFrameOutcome,
   type RawFrameRequest,
 } from "../../domain/types/OcppCall";
-import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../domain/errors/OcppCallErrors";
 import { OCPPMessageType } from "../../domain/types/OcppTypes";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 
 type Waiter = {
   readonly messageId: string | null;
+  /** Set once the frame is on the wire; only then can a reply answer it. */
+  armed: boolean;
   readonly settle: (reply: unknown[] | null, closed: string | null) => void;
+  readonly fail: (error: Error) => void;
 };
 
 /** The ids a CSMS answers an unreadable frame with (OCPP-J §4.2.3 leaves it
@@ -25,7 +31,10 @@ const UNREADABLE_FRAME_IDS = new Set(["", "-1"]);
  * normal traffic. It may therefore overlap an in-flight CALL.
  *
  * Replies are correlated best effort and consumed here, so they never reach
- * the station's handlers.
+ * the station's handlers. The wait runs from the moment the transport takes
+ * the frame, so a network-sim delay counts against it and the call returns
+ * within `waitMs` (at most 25 s, under the 30 s RPC deadline). A frame still
+ * queued when the wait ends is written later; nothing cancels it.
  */
 export class RawFrameSender {
   private readonly _waiters = new Set<Waiter>();
@@ -61,31 +70,43 @@ export class RawFrameSender {
     );
     const messageId = messageIdOf(frame);
 
-    return new Promise((resolve) => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
+    return new Promise((resolve, reject) => {
+      const finish = (): boolean => {
+        if (!this._waiters.delete(waiter)) return false;
+        clearTimeout(timer);
+        return true;
+      };
       const waiter: Waiter = {
         messageId,
+        armed: false,
         settle: (reply, closed) => {
-          if (!this._waiters.delete(waiter)) return;
-          if (timer) clearTimeout(timer);
-          resolve({ sentFrame: frame, messageId, reply, closed });
+          if (finish()) resolve({ sentFrame: frame, messageId, reply, closed });
+        },
+        fail: (error) => {
+          if (finish()) reject(error);
         },
       };
+      const timer = setTimeout(() => waiter.settle(null, null), waitMs);
       this._waiters.add(waiter);
       this._webSocket.sendRaw(
         frame,
         this._webSocket.currentGeneration(),
         (settlement) => {
-          if (settlement.outcome !== "written") {
-            waiter.settle(
-              null,
-              settlement.outcome === "socket_closed"
-                ? (settlement.closeCause ?? "network")
-                : settlement.outcome,
+          if (settlement.outcome === "written") {
+            waiter.armed = true;
+          } else if (settlement.outcome === "socket_closed") {
+            waiter.settle(null, settlement.closeCause ?? "network");
+          } else {
+            // Not written while the socket stayed open (a full network-sim
+            // queue, a failed write) or the transport was disposed: not a
+            // close, so not reported in `closed`.
+            waiter.fail(
+              new OcppCallNoAnswerError(
+                "dropped",
+                `The raw frame was not written (${settlement.outcome})`,
+              ),
             );
-            return;
           }
-          timer = setTimeout(() => waiter.settle(null, null), waitMs);
         },
       );
     });
@@ -99,6 +120,7 @@ export class RawFrameSender {
     const isError = type === OCPPMessageType.CALLERROR && frame.length === 5;
     if (!isResult && !isError) return false;
     for (const waiter of this._waiters) {
+      if (!waiter.armed) continue;
       if (
         (waiter.messageId !== null && id === waiter.messageId) ||
         (isError && typeof id === "string" && UNREADABLE_FRAME_IDS.has(id))

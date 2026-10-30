@@ -156,17 +156,26 @@ do not expose it yet.
 - **Correlation, best effort.** When the frame parses as an array with a
   string at index 1, that is its `messageId`. The reply is the first incoming
   CALLRESULT or CALLERROR with that id, or a CALLERROR with id `""` or `"-1"`
-  (how a CSMS answers a frame it cannot read), within `waitMs` (default
-  5000, at most 25000). That reply is consumed: it never reaches the
-  station's own handlers. Pick an id no normal CALL uses; normal CALL ids are
-  UUIDs.
+  (how a CSMS answers a frame it cannot read), arriving after the frame is
+  written, within `waitMs` (default 5000, at most 25000). The wait runs from
+  the moment the transport takes the frame, so a network-simulation delay
+  counts against it and the call always returns under the 30 s RPC deadline;
+  a frame still queued when the wait ends is written later, and nothing
+  cancels it. The reply is consumed: it never reaches the station's own
+  handlers. Pick an id no normal CALL uses; normal CALL ids are UUIDs.
 - **Result.** `{ sentFrame, messageId, reply, closed }`: `reply` is the frame
-  as received, or `null` when nothing matched in time; `closed` is the close
-  cause (`network`, …) when the socket closed during the wait, else `null`.
-  No reply and a close are results, not errors. A close goes through the
-  normal close and reconnect path, and the next session is unaffected.
+  as received, or `null` when nothing matched in time; `closed` is set when
+  the connection ended during the wait, at once and with its cause:
+  `network` (the CSMS or the network closed it), `manual` (a disconnect),
+  `internal` (a reset), `simulated` (a network-simulation drop) or
+  `disposed` (the charge point was removed); else `null`. No reply and a
+  close are results, not errors. A close goes through the normal close and
+  reconnect path, and the next session is unaffected.
 - **Refusals** (`invalid_params`): a SOAP station (`unsupported_transport`),
   and a socket that is not open (`not_connected`); nothing is written.
+- **Not written** (`disconnected`): the socket stayed open but the frame was
+  dropped before the wire (a full network-simulation queue, a failed write).
+  It is an error, not a `closed` result, since no connection ended.
 - **Observability.** The frame appears in the log as `Sent: <frame>`. The
   trace export, the scenario verification transcript and `/metrics` read
   well-formed OCPP-J arrays only and skip a malformed frame.

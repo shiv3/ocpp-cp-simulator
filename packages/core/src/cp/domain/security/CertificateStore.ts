@@ -463,6 +463,15 @@ export class CertificateStore {
     });
   }
 
+  /** The first installed root matching `hash`, the one a delete removes. */
+  findRootCertificate(
+    hash: CertificateHashDataLike,
+  ): InstalledRootCertificate | undefined {
+    return this.listRootCertificates().find((root) =>
+      certificateHashDataEquals(root.hashData, hash),
+    );
+  }
+
   /**
    * Trust-store delete (the OCPP 1.6 DeleteCertificate scope): removes the
    * first installed root matching `hash`. Signed chains are not searched.

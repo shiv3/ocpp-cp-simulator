@@ -29,6 +29,21 @@ export function v201TransactionEvse(connectorId: number): {
   return { id: connectorId, connectorId: 1 };
 }
 
+/**
+ * Whether a wire `EVSEType` names an EVSE (and connector) of a station whose
+ * domain connectors are `connectorIds`: EVSE N is connector N, which has a
+ * single connector 1 (#538).
+ */
+export function v201EvseExists(
+  evse: { id: number; connectorId?: number },
+  connectorIds: Iterable<number>,
+): boolean {
+  if (evse.id < 1) return false;
+  if (evse.connectorId !== undefined && evse.connectorId !== 1) return false;
+  for (const id of connectorIds) if (id === evse.id) return true;
+  return false;
+}
+
 /** v201 MeterValues evseId. */
 export function v201MeterEvseId(connectorId: number): number {
   return connectorId;

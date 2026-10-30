@@ -18,6 +18,8 @@ export interface MonitoringEvent {
   readonly cleared: boolean;
   /** The value as GetVariables reports it; empty when write-only. */
   readonly actualValue: string;
+  /** The transaction the event is linked to, if any (#538). */
+  readonly transactionId?: string;
 }
 
 export interface MonitorEvaluationDeps {
@@ -33,6 +35,11 @@ export interface MonitorEvaluationDeps {
   emit(events: readonly MonitoringEvent[]): void;
   /** Whether a transaction is running on the charge point. */
   transactionActive(): boolean;
+  /**
+   * The id of the transaction an event of `monitor` is linked to, read when
+   * the event is created; `undefined` leaves the event unlinked (#538).
+   */
+  transactionIdOf?(monitor: VariableMonitor): string | undefined;
   now?: () => Date;
   /** Told whenever a threshold monitor's triggered flag flips. */
   onTriggeredChange?(id: number, triggered: boolean): void;
@@ -192,6 +199,7 @@ export class MonitorEvaluation {
     notice: MonitorNotice,
     reading: MonitoredReading,
   ): MonitoringEvent {
+    const transactionId = this.deps.transactionIdOf?.(monitor);
     return {
       eventId: this.nextEventId++,
       timestamp: this.deps.now?.() ?? new Date(),
@@ -199,6 +207,7 @@ export class MonitorEvaluation {
       trigger: notice.trigger,
       cleared: notice.cleared,
       actualValue: reading.text,
+      ...(transactionId !== undefined && { transactionId }),
     };
   }
 

@@ -72,7 +72,7 @@ import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { OCPP_2_1 } from "../../domain/types/OcppVersion";
-import { buildNotifyEventRequest } from "./v201/notifyEventV201";
+import { buildNotifyEventRequests } from "./v201/notifyEventV201";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import {
@@ -1642,18 +1642,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("FirmwareStatusNotification", id, payload);
   }
 
-  /** N07 NotifyEvent.req: the events of one monitor evaluation (#457).
-   *  Dropped like any 2.x CALL while offline: OfflineQueuingSeverity
+  /** N07 NotifyEvent.req: the events of one monitor evaluation (#457), in
+   *  as many parts as `buildNotifyEventRequests` makes, sent in order
+   *  (#538). Dropped like any 2.x CALL while offline: OfflineQueuingSeverity
    *  (N07.FR.04) is not modelled. */
   public sendNotifyEvent(events: readonly MonitoringEvent[]): void {
     const [first, ...rest] = events;
     if (first === undefined) return;
     const dialect = this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
-    this.send(
-      "NotifyEvent",
-      this.generateMessageId(),
-      buildNotifyEventRequest([first, ...rest], dialect),
-    );
+    for (const part of buildNotifyEventRequests([first, ...rest], dialect)) {
+      this.send("NotifyEvent", this.generateMessageId(), part);
+    }
   }
 
   /** N01 LogStatusNotification.req (#345); `requestId` as above, from the

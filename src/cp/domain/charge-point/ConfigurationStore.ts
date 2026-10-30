@@ -202,6 +202,12 @@ export class ConfigurationStore {
     return this.getInteger("MessageTimeout") ?? 30;
   }
 
+  /** 2.x key `OfflineQueuingSeverity` (0-9); default `0` (#538). 2.x reads
+   *  it as `MonitoringCtrlr.OfflineQueuingSeverity`. */
+  offlineQueuingSeverity(): number {
+    return this.getInteger("OfflineQueuingSeverity") ?? 0;
+  }
+
   /** Canonical key `AuthorizeRemoteTxRequests`; default `false`. */
   authorizeRemoteTxRequests(): boolean {
     return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;

@@ -2062,3 +2062,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Offline queuing (N07.FR.04, N08.FR.03) stays pending for slice 538c.
 - [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): runtime values, Target attribute, monitor types, report criteria, periodic and TargetDelta evaluation, persistence, limits, and the #538 items table.
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [State persistence](concepts/state-persistence.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.
+
+## [2026-10-30] ingest | Variable monitoring follow-ups, part 3 (#538)
+
+- Offline `NotifyEvent` queuing (N07.FR.04, N08.FR.03): new persisted 2.x key `OfflineQueuingSeverity` (`MonitoringCtrlr.OfflineQueuingSeverity`, ReadWrite, 0-9, default 0). From a close (or before the first connection) until the next `Accepted` boot, events of monitors at or below it go to the E11 queue (#528) as one row per report, count as told, and replay in production order among the TransactionEvents, cut into parts at send time, without `offline`; the others are held for the re-check of the `Accepted` boot, which runs after the replay. Periodic timers keep running offline and keep their period. Queued NotifyEvents alone never hold a live TransactionEvent back; a refused NotifyEvent replay at the head delays the TransactionEvents behind it, as a refused TransactionEvent would.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new "Offline queuing" section; periodic timers, MonitoringCtrlr variables, persistence, limits and the #538 items table updated.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) (E11), [State persistence](concepts/state-persistence.md): NotifyEvent rows in `pending_messages`.

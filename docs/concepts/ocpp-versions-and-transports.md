@@ -250,12 +250,21 @@ is restored (E11 "Connection Loss During Transaction", #528):
   `pending_messages` by charge point id, and `cp.update` can switch
   `ocppVersion` over the same `--state-db`. When a handler starts, its
   queue deletes every row it does not replay, with one `warn` (category
-  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`,
-  the 1.6 handler anything but StartTransaction, StopTransaction and
-  MeterValues. Such a row never holds back a new TransactionEvent.
+  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`
+  and `NotifyEvent`, the 1.6 handler anything but StartTransaction,
+  StopTransaction and MeterValues. Such a row never holds back a new
+  TransactionEvent.
+- **NotifyEvent** (#538): monitor events at or below
+  `MonitoringCtrlr.OfflineQueuingSeverity` are queued too (N07.FR.04,
+  N08.FR.03) and replayed in the same pass, in production order, without
+  `offline` (the request has no such field). Queued NotifyEvents alone
+  never hold a live TransactionEvent back: only queued TransactionEvents
+  do. A refused NotifyEvent replay stays at the head and delays the
+  TransactionEvents behind it, as a refused TransactionEvent would.
+  See [variable monitoring](variable-monitoring.md#offline-queuing).
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
-  MeterValues, NotifyEvent and the rest are dropped while offline, as
-  before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is
+  MeterValues, the NotifyEvents above the severity and the rest are
+  dropped while offline, as before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is
   what would queue them; when it is false the spec queues only
   transaction-related messages "as required in: E04.FR.01" (2.0.1
   §2.1.9, 2.1 §2.1.10). The spec sets no order between the replay and the

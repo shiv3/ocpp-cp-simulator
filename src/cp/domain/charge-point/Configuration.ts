@@ -459,6 +459,18 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
+    // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
+    // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
+    // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
+    // 2.x only.
+    OfflineQueuingSeverity: {
+      name: "OfflineQueuingSeverity",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: 9,
+    } as IntegerConfigurationKey,
     // #315: sign the energy register in OCMF (German Eichrecht format) and
     // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by
     // default; nothing is generated, and no key is made, while false. The
@@ -656,6 +668,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // 1.6 serial queue's CALL timeout.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
+      : []),
+    // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
+    // only Emergency events while offline.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.OfflineQueuingSeverity, 0)]
       : []),
     boolVal(ConfigurationKeys.Custom.SampledDataSignReadings, false),
     strVal(ConfigurationKeys.Custom.SignedMeterDataMode, "valid"),

@@ -10,7 +10,7 @@ import type { Database } from "../persistence/Database";
  */
 export interface PendingMessage<A extends string = OCPPAction> {
   /** Action name (1.6: StartTransaction / StopTransaction / MeterValues;
-   *  2.x: TransactionEvent). */
+   *  2.x: TransactionEvent, NotifyEvent). */
   action: A;
   /** Serialized request payload. */
   payload: unknown;
@@ -46,6 +46,8 @@ interface PendingRow<A extends string> extends PendingMessage<A> {
  * OCPP 2.0.1 / 2.1 (#528): the 2.x handler queues TransactionEvent requests
  * under E11.FR.01 and replays them with `offline = true` (E11.FR.02); it
  * flushes with no attempt limit, since E13 owns the attempt counting there.
+ * It also queues NotifyEvent reports (#538, N07.FR.04), replayed in the
+ * same pass without `offline`.
  *
  * OCPP 1.6: matches OCPP 1.6 §4.7 /
  * §4.8 / §4.10 + errata 3.18: "When the Central System fails to process

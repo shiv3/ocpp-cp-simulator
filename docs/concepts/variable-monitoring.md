@@ -1,7 +1,7 @@
 ---
 title: OCPP 2.x variable monitoring
 type: concept
-summary: How a 2.0.1 / 2.1 station stores custom variable monitors (SetVariableMonitoring, ClearVariableMonitoring) next to its own hardwired and preconfigured ones, reports them (GetMonitoringReport → NotifyMonitoringReport, in parts), evaluates them into NotifyEvent (thresholds, Delta, Periodic, 2.1 TargetDelta) filtered by the monitoring level, applies SetMonitoringBase, publishes the MonitoringCtrlr variables and the runtime values (EVSE.Power, AvailabilityState) and persists it all, with the statuses and their N-use-case requirement ids.
+summary: How a 2.0.1 / 2.1 station stores custom variable monitors (SetVariableMonitoring, ClearVariableMonitoring) next to its own hardwired and preconfigured ones, reports them (GetMonitoringReport → NotifyMonitoringReport, in parts), evaluates them into NotifyEvent (thresholds, Delta, Periodic, 2.1 TargetDelta) filtered by the monitoring level, queues them offline per OfflineQueuingSeverity, applies SetMonitoringBase, publishes the MonitoringCtrlr variables and the runtime values (EVSE.Power, AvailabilityState) and persists it all, with the statuses and their N-use-case requirement ids.
 sources:
   - src/cp/domain/monitoring/
   - src/cp/domain/monitoring/PeriodicMonitorScheduler.ts
@@ -245,19 +245,21 @@ The other types (#538):
 
 | Type                        | Fires when                                                                             | `trigger`  | Requirement      |
 | --------------------------- | -------------------------------------------------------------------------------------- | ---------- | ---------------- |
-| `Periodic`                  | Every `value` seconds from the time the monitor was set (or reporting resumed)         | `Periodic` | N08.FR.05, FR.06 |
+| `Periodic`                  | Every `value` seconds from the time the monitor was set (or Accepted after Pending)    | `Periodic` | N08.FR.05, FR.06 |
 | `PeriodicClockAligned`      | On the clock grid of `value` seconds: 900 fires at :00, :15, :30, :45                  | `Periodic` | N08.FR.05, FR.07 |
 | `TargetDelta` (2.1)         | \|Actual − Target\| goes above `value`; `cleared: true` when it comes back at or below | `Alerting` | 2.1 N07.FR.22    |
 | `TargetDeltaRelative` (2.1) | \|Actual − Target\| goes above `value` × \|Target\|; `cleared: true` when back within  | `Alerting` | 2.1 N07.FR.23    |
 
 - A periodic monitor reports the current value, whatever it is, in one
   `NotifyEvent` per tick (`seqNo` 0, N08.FR.04), filtered like any event
-  by the level and the `transaction` flag. Its timer runs only while
-  reporting is on (below): it stops on a disconnect, a boot not
-  `Accepted`, a clear, a replace by another type, a monitoring base that
-  deletes it, and when the station is disposed, and restarts with no
-  catch-up tick, a full interval later for a `Periodic` monitor. A replace
-  restarts it from the replace. The clock grid is the one of
+  by the level and the `transaction` flag. Its timer runs while reporting
+  is on and while the station is offline, where a tick at or below
+  `OfflineQueuingSeverity` is queued (N08.FR.03, [offline](#offline-queuing));
+  it keeps its period across a reconnection. It stops on a boot not
+  `Accepted` (`Pending`, `Rejected`), a clear, a replace by another type, a
+  monitoring base that deletes it, and when the station is disposed, and
+  restarts with no catch-up tick, a full interval later for a `Periodic`
+  monitor. A replace restarts it from the replace. The clock grid is the one of
   `AlignedDataCtrlr.Interval` ([clock-aligned meter
   values](ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval)):
   UTC, restarting each midnight, so an interval that does not divide a day
@@ -293,13 +295,57 @@ The other types (#538):
   a transaction runs on the station.
 - Nothing is sent until BootNotification is `Accepted` (B02.FR.02 allows no
   NotifyEvent while `Pending`), nor between a disconnect and the next
-  `Accepted` boot. Meanwhile a threshold keeps the state the CSMS was last
+  `Accepted` boot; offline, the events at or below `OfflineQueuingSeverity`
+  are queued instead ([offline](#offline-queuing)). Meanwhile a threshold
+  that is not queued keeps the state the CSMS was last
   told and a Delta keeps its baseline; on `Accepted` every threshold is
   re-checked against the current value, so a crossing in between sends its
   trigger or `cleared` then (a Delta waits for the next change). A
   triggered threshold replaced in that window by the other threshold sends
   its owed `cleared` with the replacement's type and severity; replaced by
   a Delta, it never sends it.
+
+### Offline queuing
+
+OCPP 2.0.1 / 2.1 N07.FR.04 (and N08.FR.03 for periodic monitors): while
+the station is offline, the `NotifyEvent` of a monitor whose severity is
+equal to or lower than `MonitoringCtrlr.OfflineQueuingSeverity` is queued
+and delivered once back online (#538).
+
+- **Offline** means from a close (or before the first connection) until
+  the next BootNotification `Accepted`, the window between the
+  reconnection and the boot answer included: nothing goes out live there
+  (B02.FR.02). A boot `Pending` or `Rejected` holds the events as before,
+  without queuing them.
+- **Queued** events are evaluated as if online and count as told: a
+  threshold records its trigger, a Delta moves its baseline. The monitors
+  above the severity are held (their evaluation is delayed, as the N07
+  Remark suggests) and re-checked at the `Accepted` boot. The monitoring
+  level and the `transaction` flag still apply. An event produced online
+  that finds the socket already down is queued under the same rule, the
+  others dropped.
+- **Where**: the [E11 queue](ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent)
+  (`pending_messages`, action `NotifyEvent`, with `--state-db`), one row
+  per report, in production order among the queued TransactionEvents. A
+  restart with state persistence still delivers them.
+- **Replay**: after the `Accepted` boot (after the post-boot
+  StatusNotifications), in queue order, each report cut into parts then
+  (`seqNo` from 0, `tbc`). `NotifyEventRequest` has no `offline` field, so
+  nothing marks a replayed event. The re-check of the `Accepted` boot runs
+  after the replay and reports only the held monitors: an event queued
+  offline is never sent twice. A queued report stores the 2.1 fields;
+  2.0.1 drops `severity`, so a `cp.update` between versions still replays
+  a valid payload.
+- **No hostage**: queued `NotifyEvent`s alone never make a live
+  TransactionEvent wait; only queued TransactionEvents do (#528). The
+  queue stays FIFO: a `NotifyEvent` replay the socket refuses stays at
+  the head and delays the TransactionEvents queued behind it until the
+  next `Accepted` boot, as a refused TransactionEvent would.
+
+`OfflineQueuingSeverity` is a persisted 2.x key, `ReadWrite`, 0-9
+(`SetVariables` outside the range is `Rejected`), default `0`: only
+Emergency events are queued until the CSMS raises it. The spec gives no
+default ("When set").
 
 The events of one value change (or one install, or one `Accepted` boot) are
 **one report**, sent after the answer to the message that caused them: one
@@ -367,7 +413,9 @@ until a `SetMonitoringBase`.
 The 2.x device model has these `MonitoringCtrlr` variables (#538; 2.0.1
 Part 2 §2.11, 2.1 Part 2 §2.13), all `ReadOnly`: `SetVariables` answers
 `Rejected`. They are runtime keys of the 2.x station only, never persisted,
-so a 1.6 `GetConfiguration` does not list them.
+so a 1.6 `GetConfiguration` does not list them. `OfflineQueuingSeverity`
+(§2.11.7, 2.1 §2.13.7) is the exception: `ReadWrite` and persisted, see
+[offline queuing](#offline-queuing).
 
 | Variable                                   | Value                                                     | Spec                |
 | ------------------------------------------ | --------------------------------------------------------- | ------------------- |
@@ -421,7 +469,8 @@ a value that returns within range after the reboot still sends
 `cleared: true` (N07.FR.14), at the first `Accepted` boot when the value
 is already back in range at start-up. A Delta baseline restarts at the
 restored value. Every monitor type is stored and restored (#538): a
-periodic monitor's timer starts at the first `Accepted` boot, and a
+periodic monitor's timer starts with the station (offline until the first
+`Accepted` boot, [offline](#offline-queuing)), and a
 TargetDelta keeps its triggered flag (2.1 N07.FR.14), but the
 [target](#target-attribute-21) itself is not stored, so its `cleared`
 waits until the CSMS sets a target again. The monitoring level is not
@@ -429,12 +478,15 @@ stored (above).
 
 ## Limits
 
-- **Offline.** No `NotifyEvent` is queued while the station is offline
-  yet: N07.FR.04 (and N08.FR.03 for periodic events) queue events at or
-  below `MonitoringCtrlr.OfflineQueuingSeverity`, which is pending (slice
-  538c, stacked on #528). Threshold and TargetDelta crossings meanwhile are
-  reported by the re-check at the next `Accepted` boot (above); Delta
-  events are not, and periodic timers do not run offline.
+- **Offline.** Events above `OfflineQueuingSeverity` are not queued:
+  threshold and TargetDelta crossings are reported by the re-check at the
+  next `Accepted` boot, Delta and periodic events are lost, and a
+  triggered-then-cleared threshold stays invisible (the N07 Remark). A
+  replayed `NotifyEvent` written, or still in the network-sim pipeline,
+  when the connection drops again is not queued again. A replay refused by
+  the socket stays at the head of the queue until the next `Accepted`
+  boot, while live `NotifyEvent`s go out directly; a refusal after the
+  first part loses the rest of that report.
 - **Value sources.** Events follow a CSMS `SetVariables` /
   `SetVariableMonitoring`, `SetMonitoringLevel` / `SetMonitoringBase` (on
   the `MonitoringCtrlr` variables), a scenario `configSet` node, a change
@@ -450,8 +502,8 @@ stored (above).
   current, voltage or energy variable, and `EVSE.Power` has no `maxLimit`.
   2.1-only appendix variables (`EVSE.ChargingState`,
   `ActiveTransactionId`) are not published.
-- **MonitoringCtrlr.** `Enabled`, `Available` and `OfflineQueuingSeverity`
-  (all optional) are not mapped. The request limits are advertised, not
+- **MonitoringCtrlr.** `Enabled` and `Available` (both optional) are not
+  mapped. The request limits are advertised, not
   enforced (above).
 - **Event fields.** No `cause` (N07.FR.05, a MAY): every event follows a
   change of its own variable, so no event causes another. No `techCode` /
@@ -469,7 +521,7 @@ Each item of #538, implemented or declined, with its requirement ids
 | `Periodic` / `PeriodicClockAligned` monitors                        | Implemented ([evaluation](#evaluation-and-notifyevent))          | N08.FR.04–FR.07; N02.FR.14          |
 | `TargetDelta` / `TargetDeltaRelative` (2.1)                         | Implemented, on `EVSE.Power` ([target](#target-attribute-21))    | 2.1 N07.FR.22, FR.23                |
 | `TargetDeltaMonitoring` report criterion (2.1)                      | Not applicable: absent from the 2.1 schema                       | 2.1 N02.FR.23                       |
-| Offline `NotifyEvent` queuing per `OfflineQueuingSeverity`          | Pending: slice 538c, stacked on #528                             | N07.FR.04; N08.FR.03                |
+| Offline `NotifyEvent` queuing per `OfflineQueuingSeverity`          | Implemented ([offline](#offline-queuing))                        | N07.FR.04; N08.FR.03                |
 | `MonitoringCtrlr` `ItemsPerMessage`, `BytesPerMessage` (instances)  | Implemented ([MonitoringCtrlr](#monitoringctrlr-variables))      | N04.FR.09; N06.FR.04                |
 | `MonitoringCtrlr.ActiveMonitoringLevel`                             | Implemented                                                      | §2.11 (2.1 §2.13)                   |
 | `NotifyEvent` / `NotifyMonitoringReport` in parts (`seqNo` / `tbc`) | Implemented ([parts](#reports-in-parts))                         | N02.FR.03, FR.04, FR.09; N07.FR.07  |

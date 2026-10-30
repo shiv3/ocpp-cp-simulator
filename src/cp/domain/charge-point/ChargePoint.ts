@@ -680,6 +680,11 @@ export class ChargePoint {
         read: (key) => this.readMonitoredValue(key),
         emit: (events) =>
           queueMicrotask(() => this._outbox.sendNotifyEvent(events)),
+        // N07.FR.04, N08.FR.03: queued at once, in production order with
+        // the TransactionEvents queued offline (#538).
+        queue: (events) => this._outbox.queueNotifyEvent(events),
+        offlineQueuingSeverity: () =>
+          this._configuration.offlineQueuingSeverity(),
         transactionActive: () =>
           [...this._connectors.values()].some((c) => c.hasRunningTransaction),
         transactionIdOf: (monitor) => this.monitoredTransactionId(monitor),
@@ -688,7 +693,8 @@ export class ChargePoint {
       },
       new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
     );
-    evaluation.setReporting(false);
+    // Not connected yet: offline until the first Boot Accepted (#538).
+    evaluation.setOffline();
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
     this._deviceModelTargets.onChange((key) => evaluation.valueChanged(key));
@@ -2119,8 +2125,9 @@ export class ChargePoint {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._clockAligned.disable();
-    // The next connection boots again; reporting resumes once Accepted.
-    this._monitorEvaluation?.setReporting(false);
+    // Offline: events at or below OfflineQueuingSeverity are queued
+    // (N07.FR.04, N08.FR.03) until the next boot is Accepted (#538).
+    this._monitorEvaluation?.setOffline();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     // The Local Authorization List is kept: it is what authorizes while the
@@ -2176,6 +2183,8 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    // Offline monitoring keeps the periodic timers running: stop them.
+    this._monitorEvaluation?.dispose();
     this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its

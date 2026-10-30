@@ -136,6 +136,12 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     this.record("sendNotifyEvent", args);
   }
 
+  queueNotifyEvent(
+    ...args: Parameters<IChargePointMessageHandler["queueNotifyEvent"]>
+  ): ReturnType<IChargePointMessageHandler["queueNotifyEvent"]> {
+    this.record("queueNotifyEvent", args);
+  }
+
   setBootStatus(
     ...args: Parameters<IChargePointMessageHandler["setBootStatus"]>
   ): ReturnType<IChargePointMessageHandler["setBootStatus"]> {
@@ -274,6 +280,9 @@ describe("Outbox", () => {
 
     outbox.sendNotifyEvent([]);
     expectCall(handler, "sendNotifyEvent", [[]]);
+
+    outbox.queueNotifyEvent([]);
+    expectCall(handler, "queueNotifyEvent", [[]]);
 
     outbox.sendSignedFirmwareStatusNotification("Downloading", 9);
     expectCall(handler, "sendSignedFirmwareStatusNotification", [

@@ -125,6 +125,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "minLimit": 1,
             "supportsMonitoring": true,
           },
         },
@@ -554,6 +555,27 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "dataType": "OptionList",
             "supportsMonitoring": true,
             "valuesList": "All,FactoryDefault,HardWiredOnly",
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "name": "OfflineQueuingSeverity",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 9,
+            "minLimit": 0,
+            "supportsMonitoring": true,
           },
         },
         {

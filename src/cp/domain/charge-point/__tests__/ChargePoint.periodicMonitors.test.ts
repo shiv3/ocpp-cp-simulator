@@ -6,8 +6,9 @@ import { makeChargePoint } from "./chargePointFixtures";
 
 /**
  * #538: Periodic and PeriodicClockAligned monitors (N08) on a 2.x charge
- * point: NotifyEvent with trigger Periodic, only while the boot is
- * Accepted, timers stopped on close and dispose.
+ * point: NotifyEvent with trigger Periodic, sent only while the boot is
+ * Accepted, timers stopped while Pending and on dispose. Offline the
+ * timers run (N08.FR.03): see ChargePoint.offlineMonitoring.test.ts.
  */
 
 const START = Date.parse("2026-10-28T12:00:17Z");
@@ -25,11 +26,14 @@ interface EventData {
   severity?: number;
 }
 
-/** NotifyEvent payloads the handler writes, in order. */
+/** NotifyEvent payloads the handler writes, in order. The socket reads as
+ *  connected: a NotifyEvent finding it down would be queued (#538). */
 function captureNotifyEvents(cp: ChargePoint): Record<string, unknown>[] {
   const handler = cp["_messageHandler"] as unknown as {
     send: (action: string, id: string, payload: unknown) => void;
+    _webSocket: { isConnected: () => boolean };
   };
+  vi.spyOn(handler._webSocket, "isConnected").mockReturnValue(true);
   const sent: Record<string, unknown>[] = [];
   vi.spyOn(handler, "send").mockImplementation((action, _id, payload) => {
     if (action === "NotifyEvent") sent.push(payload as Record<string, unknown>);

@@ -21,6 +21,23 @@ export const MONITORING_CTRLR_KEYS = {
 } as const;
 
 /**
+ * OCPP 2.0.1 / 2.1 N07.FR.04 and N08.FR.03: while offline, the station
+ * queues the NotifyEvent of a monitor whose severity number is equal to or
+ * lower than `MonitoringCtrlr.OfflineQueuingSeverity`; with the variable
+ * unset, nothing is queued ("When set", Part 2 §2.11.7 / 2.1 §2.13.7).
+ * That variable is the persisted ReadWrite configuration key
+ * `OfflineQueuingSeverity`, not one of the runtime keys above.
+ */
+export function isQueuedOffline(
+  severity: number,
+  offlineQueuingSeverity: number | undefined,
+): boolean {
+  return (
+    offlineQueuingSeverity !== undefined && severity <= offlineQueuingSeverity
+  );
+}
+
+/**
  * The most items (setMonitoringData, ids) the station advertises for one
  * SetVariableMonitoring / ClearVariableMonitoring request. They bound what
  * the CSMS sends (N04.FR.09, N06.FR.04); the station does not refuse a

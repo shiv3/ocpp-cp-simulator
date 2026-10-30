@@ -65,6 +65,11 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   /** Independent counter for the user-visible message id — keeping it apart
    *  from `nextSeq` stops an id allocation from perturbing the ordering key. */
   private nextIdSuffix = 0;
+  /** Rows `dequeue` handed out, so `putBack` can restore them as they were. */
+  private readonly dequeuedRows = new WeakMap<
+    PendingMessage<A>,
+    PendingRow<A>
+  >();
 
   constructor(
     private readonly chargePointId: string,
@@ -99,7 +104,22 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     const row = this.items.shift();
     if (!row) return undefined;
     this.deleteRow(row.messageId);
-    return toPendingMessage(row);
+    const message = toPendingMessage(row);
+    this.dequeuedRows.set(message, row);
+    return message;
+  }
+
+  /**
+   * Put a message `dequeue` returned back at the head, with its original
+   * row (id and `seq`), so a reload still reads it first. A message this
+   * queue did not hand out is ignored.
+   */
+  putBack(message: PendingMessage<A>): void {
+    const row = this.dequeuedRows.get(message);
+    if (!row) return;
+    this.dequeuedRows.delete(message);
+    this.items.unshift(row);
+    this.insertRow(row);
   }
 
   /**
@@ -169,8 +189,10 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
       );
       this.items = rows.map((r) => ({
         messageId: r.message_id,
-        // Stored by this protocol's handler; a row the handler does not
-        // know is refused when it is replayed.
+        // Unchecked cast: both handlers share the table by cp_id, and
+        // `cp.update` can switch ocppVersion over the same --state-db, so
+        // a row may hold the other protocol's action. Each handler drops
+        // such a row with a warning when it replays the queue (#528).
         action: r.action as A,
         payload: safeParse(r.payload),
         connectorId: r.connector_id ?? undefined,

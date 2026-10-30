@@ -123,6 +123,15 @@ import {
   DataTransferHandler,
 } from "./handlers";
 
+/** Actions the 1.6 handler queues offline and replays (§4.7 / §4.8 /
+ *  §4.10). Any other row in `pending_messages` was queued by the 2.x
+ *  handler under the same charge point id (#528). */
+const REPLAYED_ON_OCPP16: ReadonlySet<string> = new Set([
+  "StartTransaction",
+  "StopTransaction",
+  "MeterValues",
+]);
+
 type CoreOcppMessagePayloadCall =
   | ChangeAvailabilityRequestV16
   | ChangeConfigurationRequestV16
@@ -1131,7 +1140,19 @@ export class OCPPMessageHandler {
     // `flush` callback returns true for every entry (we're handing
     // delivery to the serializer); it'll re-enqueue on actual send
     // failure via the path in `pumpSerialQueue` below.
+    let dropped = 0;
     const delivered = this._pendingQueue.flush((message) => {
+      // #528: the table is shared with the 2.x handler; `cp.update` can
+      // switch ocppVersion over the same --state-db, leaving rows (e.g.
+      // TransactionEvent) a 1.6 CSMS does not know. Drop them.
+      if (!REPLAYED_ON_OCPP16.has(message.action)) {
+        this._logger.warn(
+          `Dropping queued ${message.action}: not replayed on OCPP 1.6`,
+          LogType.OCPP,
+        );
+        dropped += 1;
+        return true;
+      }
       const messageId = this.generateMessageId();
       this.sendRequest(
         message.action,
@@ -1141,9 +1162,9 @@ export class OCPPMessageHandler {
       );
       return true;
     }, maxAttempts);
-    if (delivered > 0) {
+    if (delivered - dropped > 0) {
       this._logger.info(
-        `Flushed ${delivered} queued transaction message(s)`,
+        `Flushed ${delivered - dropped} queued transaction message(s)`,
         LogType.OCPP,
       );
     }

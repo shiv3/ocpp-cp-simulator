@@ -223,6 +223,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   /** E11 offline queue (#528), persisted in `pending_messages` when the
    *  charge point has a database; replayed after Boot Accepted. */
   private readonly _pendingQueue: PendingMessageQueue<V201Action>;
+  /** True while TransactionEvents wait in the E11 queue for their replay
+   *  (#528): set when one is queued (or a restart finds persisted rows),
+   *  cleared when the replay after Boot Accepted has drained the queue.
+   *  While set, a new TransactionEvent joins the queue so the order holds.
+   *  An explicit flag, not the queue size, so another queued 2.x action
+   *  (#538) cannot hold TransactionEvents back. */
+  private _awaitingReplay: boolean;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -259,6 +266,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       chargePoint.id,
       chargePoint.database ?? null,
     );
+    this._awaitingReplay = this._pendingQueue.size() > 0;
 
     // Initialize response effect queue with deps
     this._responseEffectQueue = new ResponseEffectQueue({
@@ -816,7 +824,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: TransactionEventRequestV201,
   ): void {
     const message = this.newTransactionEventMessage(connectorId, payload);
-    if (this._pendingQueue.size() > 0) {
+    if (this._awaitingReplay) {
       this.queueTransactionEvents([message]);
       return;
     }
@@ -901,7 +909,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * not settled, in creation order, each once. Its transmissions are
    * forgotten (a late answer to one is ignored) and its waiting resend is
    * cancelled; the replay starts its E13 delivery anew. The payload is
-   * stored as built: `offline` is set at replay time only.
+   * stored as it was last sent or built: without `offline` for an event
+   * not yet replayed, with `offline: true` for a replay queued again by a
+   * new close. The replay sets `offline: true` either way.
    */
   private queueTransactionEvents(
     messages: Iterable<TransactionEventMessage>,
@@ -911,6 +921,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       .sort((a, b) => a.order - b.order);
     for (const message of pending) {
       this.forgetTransactionEvent(message);
+      this._awaitingReplay = true;
       this._pendingQueue.enqueue({
         action: "TransactionEvent",
         payload: message.payload,
@@ -1725,7 +1736,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * event was built with. Each replay is a fresh E13 delivery: its
    * transmission and failure counts restart at zero, as a 1.6 replay goes
    * through `sendRequest` anew. A row leaves the queue when its replay is
-   * handed to the socket; a close before the answer queues it again.
+   * handed to the socket; a close before the answer queues it again. A
+   * replay the socket refuses while it stays open (`not_accepted`, a
+   * network-sim overflow) is put back at the head and the replay stops
+   * there, so the order holds; it waits for the next Boot Accepted.
    */
   public flushPendingQueue(): void {
     if (!this._webSocket.isConnected()) return;
@@ -1736,8 +1750,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     while (this._webSocket.isConnected()) {
       const queued = this._pendingQueue.dequeue();
       if (queued === undefined) break;
-      if (this.replayQueued(queued)) replayed += 1;
+      const outcome = this.replayQueued(queued);
+      if (outcome === "held") break;
+      if (outcome === "replayed") replayed += 1;
     }
+    if (this._pendingQueue.size() === 0) this._awaitingReplay = false;
     if (replayed > 0) {
       this._logger.info(
         `[v2.0.1] Replayed ${replayed} queued message(s); ${this._pendingQueue.size()} left`,
@@ -1749,24 +1766,40 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   /** Send one queued message again. Each queued action gets its own case;
    *  a row the 2.x handler does not replay (one a 1.6 handler queued under
    *  the same charge point id) is dropped with a warning. */
-  private replayQueued(queued: PendingMessage<V201Action>): boolean {
+  private replayQueued(
+    queued: PendingMessage<V201Action>,
+  ): "replayed" | "dropped" | "held" {
     switch (queued.action) {
       case "TransactionEvent": {
         const payload: TransactionEventRequestV201 = {
           ...(queued.payload as TransactionEventRequestV201),
           offline: true,
         };
-        this.transmitTransactionEvent(
-          this.newTransactionEventMessage(queued.connectorId ?? 0, payload),
+        const message = this.newTransactionEventMessage(
+          queued.connectorId ?? 0,
+          payload,
         );
-        return true;
+        this.transmitTransactionEvent(message);
+        // Written, or dropped by a close (still tracked: that close queues
+        // it again), the message is open. Done right away means the socket
+        // refused it while staying up: keep the row instead of losing it.
+        if (message.done && this._webSocket.isConnected()) {
+          this._pendingQueue.putBack(queued);
+          this._awaitingReplay = true;
+          this._logger.warn(
+            `[v2.0.1] Replay of TransactionEvent ${payload.eventType} (seqNo ${payload.seqNo}) of transaction ${payload.transactionInfo.transactionId} refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
+            LogType.TRANSACTION,
+          );
+          return "held";
+        }
+        return "replayed";
       }
       default:
         this._logger.warn(
           `[v2.0.1] Dropping queued ${queued.action}: not replayed on OCPP 2.x`,
           LogType.OCPP,
         );
-        return false;
+        return "dropped";
     }
   }
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from "bun:test";
+import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
+import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
@@ -20,6 +22,8 @@ import type { TransactionEventRequestV201 } from "../../../../ocpp";
 class FakeSocket {
   calls: Array<{ action: string; payload: unknown }> = [];
   connected = false;
+  /** CALLs `sendAction` refuses next (network-sim refusal, not_accepted). */
+  refuseNext = 0;
   setMessageHandler(): void {}
   onCloseTransaction(): void {}
   isConnected(): boolean {
@@ -35,6 +39,10 @@ class FakeSocket {
     _gen: unknown,
     onSettled?: (s: { outcome: string }) => void,
   ): boolean {
+    if (this.refuseNext > 0) {
+      this.refuseNext -= 1;
+      return false;
+    }
     this.calls.push({ action, payload });
     onSettled?.({ outcome: "written" });
     return true;
@@ -124,7 +132,8 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           ["TransactionEvent", 1],
           ["TransactionEvent", 1],
         ]);
-        // `offline` is set at replay time, never in what is stored.
+        // An event not yet replayed is stored without `offline`; the
+        // replay sets it.
         for (const row of stored) {
           expect(JSON.parse(row.payload)).not.toHaveProperty("offline");
         }
@@ -151,6 +160,69 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     });
 
+    it("holds a live event back behind the rows persisted before a restart", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      let after: ReturnType<typeof station> | undefined;
+      try {
+        const before = station(db, version);
+        before.handler.sendTransactionEvent({
+          phase: "started",
+          transaction: before.tx,
+          connectorId: 1,
+        });
+        await Promise.resolve();
+
+        // Restart: the socket is open, BootNotification not yet Accepted.
+        after = station(db, version);
+        after.socket.connected = true;
+        after.tx.cpNextSeqNo = 1;
+        after.handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+        expect(after.socket.calls).toEqual([]);
+        expect(rows(db)).toHaveLength(2);
+
+        after.handler.flushPendingQueue();
+        const replayed = after.socket.calls.map(
+          (c) => c.payload as TransactionEventRequestV201,
+        );
+        expect(replayed.map((p) => [p.eventType, p.seqNo])).toEqual([
+          ["Started", 0],
+          ["Updated", 1],
+        ]);
+      } finally {
+        after?.handler.onWebSocketClosed();
+        db.close();
+      }
+    });
+
+    it("keeps a refused replay's row at the head of the persisted queue", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const before = station(db, version);
+        before.handler.sendTransactionEvent({
+          phase: "started",
+          transaction: before.tx,
+          connectorId: 1,
+        });
+        before.handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+        await Promise.resolve();
+        const stored = rows(db);
+
+        const after = station(db, version);
+        after.socket.connected = true;
+        after.socket.refuseNext = 1;
+        after.handler.flushPendingQueue();
+        expect(after.socket.calls).toEqual([]);
+        // Same rows, same order: a reload still replays Started first.
+        expect(rows(db)).toEqual(stored);
+      } finally {
+        db.close();
+      }
+    });
+
     it("drops a queued row the 2.x handler does not replay", () => {
       const db = BunSqliteDatabase.open(":memory:");
       try {
@@ -173,3 +245,58 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
     });
   },
 );
+
+describe("OCPP 1.6 replay of a persisted 2.x row (#528)", () => {
+  it("drops a TransactionEvent row with a warning and replays its own rows", () => {
+    // `cp.update` can switch ocppVersion over the same --state-db: the 1.6
+    // handler then finds the rows the 2.x handler queued.
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const at = new Date().toISOString();
+      db.run(
+        "INSERT INTO pending_messages (cp_id, message_id, action, payload, created_at, seq) VALUES ('CP-528', 'm1', 'TransactionEvent', '{}', ?, 1)",
+        [at],
+      );
+      db.run(
+        "INSERT INTO pending_messages (cp_id, message_id, action, payload, created_at, seq) VALUES ('CP-528', 'm2', 'MeterValues', '{\"connectorId\":1,\"meterValue\":[]}', ?, 2)",
+        [at],
+      );
+      const calls: string[] = [];
+      const socket = {
+        setMessageHandler() {},
+        onCloseTransaction() {},
+        isConnected: () => true,
+        currentGeneration: () => ({ gen: 1, closeCause: null }),
+        sendAction: (_id: string, action: string) => {
+          calls.push(action);
+          return true;
+        },
+      };
+      const cp = {
+        id: "CP-528",
+        database: db,
+        notifyOutgoingCall() {},
+        configuration: {
+          transactionMessageAttempts: () => 3,
+          meterValuesSampledData: () => [],
+        },
+      };
+      const logger = silentLogger();
+      const handler = new OCPPMessageHandler(
+        cp as unknown as ChargePoint,
+        socket as unknown as OCPPWebSocket,
+        logger as unknown as Logger,
+        { outgoingWarning: () => null } as unknown as ProtocolCodec,
+      );
+      handler.setBootStatus({ status: "Accepted" });
+      handler.flushPendingQueue();
+      expect(calls).toEqual(["MeterValues"]);
+      expect(rows(db)).toEqual([]);
+      expect(logger.warn.mock.calls.map((c) => c[0])).toContainEqual(
+        expect.stringMatching(/Dropping queued TransactionEvent/),
+      );
+    } finally {
+      db.close();
+    }
+  });
+});

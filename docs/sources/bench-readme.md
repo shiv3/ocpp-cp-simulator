@@ -6,11 +6,12 @@ sources:
   - scripts/bench/README.md
   - scripts/bench/fleet-bench.ts
   - scripts/bench/lib.ts
+  - scripts/bench/fleetBench.slowpath.test-bun.ts
 related:
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-09-30
+updated: 2026-10-29
 ---
 
 # Source: `scripts/bench/README.md`
@@ -256,9 +257,12 @@ batch.
 behind the teardown rules, and the one every teardown bug here has violated:
 _teardown may not consider an operation finished before the bound that operation
 itself uses._ A `stop_transaction` ack means the daemon queued
-`StopTransaction`, not that it sent it, so teardown watches
-`ocppcp_ocpp_messages_total` until the frames leave before deleting — otherwise
-a backlogged serializer has its queued CALL discarded with the charge point. A
+`StopTransaction`, not that it sent it, so a charge point whose stop was acked
+stays on teardown's re-stop list. Teardown does **not** wait for the frame to
+leave — an earlier wait on `ocppcp_ocpp_messages_total` was dropped because
+that counter cannot attribute a frame to a charge point — so a backlogged
+serializer can still have its queued CALL discarded with the charge point (see
+below). A
 `Promise.race` rejecting on abort does not cancel its loser, so teardown awaits
 the `cp.create_many` still running rather than deleting provisional ids whose
 charge points appear a moment later. And the wait for in-flight cycles uses the
@@ -682,9 +686,40 @@ arming.
   negotiation, no schema validation, never a CALLERROR — so a pass there says
   nothing about handshake or version behaviour, which the test file records in
   full.
+- `fleetBench.slowpath.test-bun.ts` — teardown under a **slow** CSMS (#330). The
+  mock is made slow on one action, teardown is entered by SIGINT at a known
+  point of the cycle, and the CSMS's own record of open transaction ids is
+  asserted empty. Each guard it pins turns it red when removed: settling
+  in-flight cycles before closing transactions, settling for each cycle's own
+  bound including its assigned-id stage, leaving a retired charge point's
+  transaction for teardown, re-stopping a transaction whose hold teardown
+  cancelled, and keeping a charge point whose stop was acked on the re-stop
+  list. Run by `bun run test:bench-slow` in its own CI job — the name avoids
+  the `bun.test` substring `test:bun` filters on — in about 36s locally.
+  Two cases shorten deadlines through **test-only** environment variables
+  (`FLEET_BENCH_TEST_RPC_DEADLINE_MS`, `_LOCAL_START_TIMEOUT_MS`,
+  `_ASSIGNED_ID_TIMEOUT_MS`; positive integer ms, unknown names refused,
+  defaults 35000 / 50000 / 95000), which are not flags and make the run say on
+  stderr that it is not a measurement.
+- `smokeHarness.ts` — the mock CSMS (per-action `delayMs` / `stallAfter`, hooks
+  on receipt and reply, open transactions tracked by id), the daemon and bench
+  subprocesses and the control-plane helpers, shared by both run-level suites.
+
 - `tsconfig.json` — this directory is outside `tsconfig.cli.json`'s
   `include`; typechecked separately, and referenced from the root
   `tsconfig.json` as a `composite` project so `tsc -b` covers it.
+
+**Not covered by a run-level test.** A mock CSMS cannot slow a
+control-plane RPC (the daemon acks `start_transaction` before Authorize is
+answered and `stop_transaction` once the frame is queued), so the RPC stages of
+the cycle bound are pinned only as arithmetic by `lib.bun.test.ts`, with no
+run-level test showing teardown needs them; it cannot make `cp.create_many` outlive its 35s
+client deadline either, because `createOneCp` does not await the connection —
+that needs a fake daemon and is #523, a follow-up to #330. Re-stopping a charge
+point whose stop was already acked sends nothing (`ChargePoint.stopTransaction`
+returns once the transaction is closed), so the CSMS cannot tell it happened;
+that the charge point stays on the re-stop list is pinned only by teardown's
+`closing N open transaction(s)` count on stderr.
 
 **No measured number ships with this tool.** Producing one needs a real CSMS
 and a stated machine — neither exists in this repository's CI or review

@@ -569,10 +569,13 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    has been one violation of it: _teardown may not consider an operation
    finished before the bound that operation itself uses._ A `stop_transaction`
    ack says the daemon **queued** `StopTransaction`, not that it sent it, so
-   teardown waits for the frame to actually leave (watching
-   `ocppcp_ocpp_messages_total`) before deleting — otherwise a backlogged
-   serializer, the condition this tool exists to create, has its queued CALL
-   discarded along with the charge point. A `Promise.race` that rejects on
+   teardown keeps a charge point whose stop was acked on its re-stop list
+   rather than treating it as closed. It does **not** wait for the frame to
+   leave: nothing available attributes a sent frame to a charge point (an
+   earlier wait on `ocppcp_ocpp_messages_total` was dropped for exactly that
+   reason), so a backlogged serializer, the condition this tool exists to
+   create, can still have its queued CALL discarded along with the charge
+   point — see "Known limitations". A `Promise.race` that rejects on
    abort does not cancel its loser, so teardown awaits the `cp.create_many`
    still running rather than deleting provisional ids whose charge points are
    registered a moment later. And the wait for in-flight cycles uses _the
@@ -1010,6 +1013,26 @@ a spare machine and a CSMS.
   which this benchmark does not require. So the limitation is stated rather
   than papered over with a check that looks like proof. The stderr line at
   teardown names how many stops were accepted and unverified.
+- **Some teardown guards still have no run-level test.** The
+  slow-path suite (`fleetBench.slowpath.test-bun.ts`, under "Directory
+  layout") pins the settle-before-close ordering, the assigned-id stage of the
+  cycle bound, the retirement branch, the re-stop of a cancelled hold and the
+  re-stop list keeping an acked stop. A mock CSMS cannot reach the rest:
+  - the **RPC stages** of the cycle bound — the daemon acks `start_transaction`
+    before Authorize is answered and `stop_transaction` once the frame is
+    queued, so no CSMS delay makes a control-plane RPC slow. Dropping the RPC
+    terms from `cycleBoundMs` fails only `lib.bun.test.ts`, which pins the
+    arithmetic; no run-level test shows teardown needs them;
+  - a **`cp.create_many` that outlives its 35s client deadline**, and the
+    reconciliation after it — `createOneCp` starts the connection without
+    awaiting it, so a slow CSMS never slows the create. That needs a fake
+    daemon or a daemon-side hook and is tracked as #523, a follow-up to #330;
+  - what the re-stop of a charge point whose stop was **already acked** does
+    on the wire — the daemon's `stopTransaction` returns without sending
+    anything once the first stop has closed the connector's transaction, so a
+    CSMS sees one stop either way. That such a charge point stays on the
+    re-stop list _is_ pinned, but only off teardown's own
+    `closing N open transaction(s)` count on stderr.
 - **The heartbeat override covers reconnects, not a CSMS that changes the
   interval by hand.** `ChangeConfiguration HeartbeatInterval` reaches
   `ChargePoint`'s configuration listener
@@ -1153,6 +1176,50 @@ a spare machine and a CSMS.
   _cannot_ be reproduced there: gocpp reports that fleet `Unavailable` while
   the mock reports it `Available`, and the `errors` column can only ever read 0. Version and handshake behaviour must be checked against a real CSMS.
 
+- `fleetBench.slowpath.test-bun.ts` — teardown under a **slow** CSMS (#330).
+  The smoke mock answers at once, and the teardown guards only engage when
+  something is slow, so removing one used to leave every test green. Each case
+  makes the mock slow on one action, enters teardown by SIGINT at a known point
+  of the transaction cycle, and asserts off the wire that every session the
+  CSMS opened was closed by a stop carrying its id. It pins, each by a
+  mutation that turns it red: settling in-flight cycles _before_ closing
+  transactions; settling for each cycle's own bound, including its assigned-id
+  stage; leaving a retired charge point's transaction for teardown;
+  re-stopping a transaction whose hold teardown cancelled; and keeping a
+  charge point whose stop was acked on the re-stop list. What it cannot pin
+  is listed under "Known limitations".
+
+  It runs with `bun run test:bench-slow`, in its own CI job beside the main
+  one, and **not** under `test:bun`: that script is the substring filter
+  `bun test bun.test`, which this file name avoids on purpose, so the default
+  suite does not pay for it. It takes about 36s locally (one daemon, five
+  cases, measured on an Apple M3 Pro), most of it the delays it injects.
+
+  **Test-only timing overrides.** Two cases need a stage of the cycle to
+  outlast a bound without waiting the real 95s, and the script runs as a
+  subprocess, so it reads these from the environment. They are **not** flags:
+  every default is derived from the daemon's own timers, and a run under an
+  override says so on stderr and is not a measurement. Each must be a positive
+  integer number of milliseconds; anything else, or an unknown
+  `FLEET_BENCH_TEST_*` name, refuses to start.
+
+  | Variable                                  | Default | Replaces                                        |
+  | ----------------------------------------- | ------- | ----------------------------------------------- |
+  | `FLEET_BENCH_TEST_RPC_DEADLINE_MS`        | 35000   | the pool's whole-call RPC deadline              |
+  | `FLEET_BENCH_TEST_LOCAL_START_TIMEOUT_MS` | 50000   | the local-start wait (`LOCAL_START_TIMEOUT_MS`) |
+  | `FLEET_BENCH_TEST_ASSIGNED_ID_TIMEOUT_MS` | 95000   | the assigned-id wait (`ASSIGNED_ID_TIMEOUT_MS`) |
+
+  `FLEET_BENCH_TEST_RPC_DEADLINE_MS` replaces `RPC_TIMEOUT_MS` itself, so it
+  also shortens everything derived from it: the default deadline of every pool
+  RPC, the RPC stages of the cycle bound, teardown's wait for an in-flight
+  `cp.create_many`, and `RECONCILE_DELAY_MS` before re-sweeping `not_found`
+  ids. Overrides are otherwise independent: shortening the RPC deadline does
+  not re-derive the local-start wait from it.
+
+- `smokeHarness.ts` — what both run-level suites share: the mock CSMS (with
+  per-action `delayMs` and `stallAfter`, hooks on receipt and on reply, and
+  open transactions tracked by id, so a placeholder stop does not count as a
+  close), the daemon and bench subprocesses, and the control-plane helpers.
 - `fleet-bench.ts` — the CLI entry point / orchestrator.
 - `lib.ts` — pure logic: flag validation, the Prometheus exposition parser,
   before/after histogram diffing, quantile interpolation, table formatting,

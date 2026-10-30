@@ -132,9 +132,11 @@ meanings. An error's `retryAfterSeconds` is not a separate field here; the
 wait survives only in the message text
 (`rate_limited: Open EV Directory rate limit reached; retry in 7 s`). `disconnected` is mostly absent: the Socket.IO client synthesises
 it when the socket drops before an ack arrives, and an HTTP request/response
-has no such state to report. The one exception is `send_ocpp_call`, which
+has no such state to report. The two exceptions are `send_ocpp_call`, which
 answers `disconnected` when its CALL was dropped before the CSMS could answer
-([Expert OCPP calls](../concepts/expert-ocpp-calls.md#errors), #389).
+([Expert OCPP calls](../concepts/expert-ocpp-calls.md#errors), #389), and
+`get_15118_ev_certificate`, which does so when its first CALL was
+([Get15118EVCertificate relay](../concepts/security-profiles.md#get15118evcertificate-relay), #537).
 
 Transport-level errors (malformed JSON-RPC, invalid auth, rate limit) are handled by the MCP
 protocol layer. Every call is subject to a 30-second deadline; timeout failures surface as

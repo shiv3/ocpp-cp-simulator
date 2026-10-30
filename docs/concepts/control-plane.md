@@ -62,7 +62,7 @@ upstream said how long to wait).
 | `internal`       | The daemon itself failed. If you see this for a connection problem, it is a bug.                                                                                                         |
 | `unauthorized`   | The web-console Basic Auth gate rejected the caller ([Access control](access-control.md)).                                                                                               |
 | `timeout`        | The 30 s deadline elapsed. The server returns it when a handler exceeds the deadline (`withRpcDeadline`), and the Socket.IO client also synthesises it when no ack arrives at all.       |
-| `disconnected`   | The socket dropped before the ack — client-synthesised. The daemon answers it too for a [`send_ocpp_call`](expert-ocpp-calls.md#errors) whose CALL was dropped.                          |
+| `disconnected`   | Client-synthesised: the socket dropped before the ack. The daemon answers it for a dropped [`send_ocpp_call`](expert-ocpp-calls.md#errors) or first `get_15118_ev_certificate` CALL.     |
 | `rate_limited`   | An upstream service the daemon calls for you (the [vehicle catalog](vehicle-profiles.md), #458) refused for now. The daemon's own RPC bucket answers `invalid_params`, not this.         |
 | `unavailable`    | That upstream service is not configured, unreachable, failed or answered nonsense (#458). The daemon is fine.                                                                            |
 

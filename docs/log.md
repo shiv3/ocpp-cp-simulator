@@ -2157,3 +2157,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - 2.x M06: deleting or replacing a stored chain drops the OCSP responses cached for its certificates.
 - [Security profiles](concepts/security-profiles.md): OCSP cache bullet.
+
+## [2026-10-30] ingest | Certificate follow-ups, third review round (#537)
+
+- `get_15118_ev_certificate` answers `disconnected` when its first CALL is dropped, like `send_ocpp_call`. [MCP endpoint](entities/mcp-endpoint.md), [Control plane](concepts/control-plane.md#rpc).

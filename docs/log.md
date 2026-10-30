@@ -2026,6 +2026,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
 
+## [2026-10-30] ingest | Composite limits floored to 0.1 when converted (#524)
+
+- The 1.6 `GetCompositeScheduleResponse` schema requires `chargingSchedulePeriod[].limit` to be a multiple of 0.1, but a converted limit went out unrounded: a 3000 W / 1-phase `ChargePointMaxProfile` asked in A read 13.043478… A. `compositeLimitInUnit` now floors a converted limit (W → A and A → W) to 0.1, never below 0, with a 1e-9 tolerance so float noise (4.1 A × 230 V = 942.9999999999999 W) is not pushed a step down. A limit returned in its own unit stays as the CSMS set it.
+- The helper is shared, so 2.0.1 and 2.1 round the same way, though their schemas declare no `multipleOf`.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence states the rounding.
+- [GitHub issues](sources/github-issues.md): #524.
+
 ## [2026-10-30] ingest | 2.x TransactionEvent message timeout (#529)
 
 - E13 also counts a TransactionEvent left without a CALLRESULT or CALLERROR within `OCPPCommCtrlr.MessageTimeout[Default]` (2.0.1 / 2.1 §2.1.3, ReadOnly, default 30 s, 2.x-only key) as a failed transmission: resent and discarded under the same `MessageAttempts` / `MessageAttemptInterval` rules as a CALLERROR (#490). Late answers: the first CALLRESULT of any transmission settles the message and cancels a waiting resend; later answers, and a CALLERROR for an already timed-out transmission, change nothing; a late answer after the discard is ignored.

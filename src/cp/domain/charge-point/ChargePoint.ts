@@ -1961,8 +1961,8 @@ export class ChargePoint {
     this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));
     this._connectionTimeoutTimers.clear();
     // §4.1.1 serializer: drop the in-flight CALL + queued CALLs since the
-    // WebSocket they target is gone. Transaction-related ones are already
-    // persisted via PendingMessageQueue on prior send failures.
+    // WebSocket they target is gone. Transaction-related ones go to the
+    // PendingMessageQueue (1.6 §3.7; 2.x E11 TransactionEvents, #528).
     this._outbox.onWebSocketClosed();
     // Flush any buffered log lines so the operator can still see the
     // last seconds of activity after the CP went down.

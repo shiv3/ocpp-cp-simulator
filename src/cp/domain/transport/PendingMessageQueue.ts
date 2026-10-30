@@ -2,13 +2,16 @@ import type { OCPPAction } from "../types/OcppTypes";
 import type { Database } from "../persistence/Database";
 
 /**
- * One queued transaction-related CALL waiting to be (re)delivered. Stored
- * verbatim — the payload is `unknown` because each action has its own
- * generated request type.
+ * One queued CALL waiting to be (re)delivered. Stored verbatim — the
+ * payload is `unknown` because each action has its own generated request
+ * type. `A` is the action vocabulary of the protocol that owns the queue:
+ * {@link OCPPAction} for 1.6, the 2.x handler's own action union for 2.0.1 /
+ * 2.1 (#528).
  */
-export interface PendingMessage {
-  /** Action name (StartTransaction / StopTransaction / MeterValues). */
-  action: OCPPAction;
+export interface PendingMessage<A extends string = OCPPAction> {
+  /** Action name (1.6: StartTransaction / StopTransaction / MeterValues;
+   *  2.x: TransactionEvent). */
+  action: A;
   /** Serialized request payload. */
   payload: unknown;
   /** Connector this message belongs to, for logging/diagnostics. */
@@ -25,21 +28,29 @@ export interface PendingMessage {
  * shape, so we keep it next to the payload here. `seq` is a monotonic
  * per-CP sequence number for stable ordering across restarts.
  */
-interface PendingRow extends PendingMessage {
+interface PendingRow<A extends string> extends PendingMessage<A> {
   messageId: string;
   seq: number;
 }
 
 /**
  * Persistent queue of transaction-related messages that failed to deliver
- * (typically because the WebSocket was offline). Matches OCPP 1.6 §4.7 /
+ * (typically because the WebSocket was offline). Each protocol handler owns
+ * one; both share the `pending_messages` table, keyed by charge point.
+ *
+ * OCPP 2.0.1 / 2.1 (#528): the 2.x handler queues TransactionEvent requests
+ * under E11.FR.01 and replays them with `offline = true` (E11.FR.02); it
+ * reads the queue with `dequeue`, not `flush`, since E13 owns the attempt
+ * counting there.
+ *
+ * OCPP 1.6: matches OCPP 1.6 §4.7 /
  * §4.8 / §4.10 + errata 3.18: "When the Central System fails to process
  * a transaction-related message, the Charge Point SHALL retry up to
  * `TransactionMessageAttempts` times at `TransactionMessageRetryInterval`
  * intervals." Queue contents persist across reboots so a power outage
  * during an active transaction doesn't lose StartTransaction.req.
  *
- * Only StartTransaction / StopTransaction / MeterValues(with
+ * On 1.6 only StartTransaction / StopTransaction / MeterValues(with
  * transactionId) belong here. Heartbeats, StatusNotifications, etc. are
  * informational and are fine to drop while offline.
  *
@@ -47,8 +58,8 @@ interface PendingRow extends PendingMessage {
  * is provided; falls back to an in-memory queue otherwise (tests / future
  * memory-only daemon mode).
  */
-export class PendingMessageQueue {
-  private items: PendingRow[] = [];
+export class PendingMessageQueue<A extends string = OCPPAction> {
+  private items: PendingRow<A>[] = [];
   /** Persisted FIFO ordering key; seeded from MAX(seq) for this cp on load. */
   private nextSeq = 0;
   /** Independent counter for the user-visible message id — keeping it apart
@@ -63,7 +74,7 @@ export class PendingMessageQueue {
   }
 
   /** Snapshot of the current queue (FIFO order). */
-  all(): PendingMessage[] {
+  all(): PendingMessage<A>[] {
     return this.items.map(toPendingMessage);
   }
 
@@ -71,8 +82,8 @@ export class PendingMessageQueue {
     return this.items.length;
   }
 
-  enqueue(message: Omit<PendingMessage, "queuedAt" | "attempts">): void {
-    const row: PendingRow = {
+  enqueue(message: Omit<PendingMessage<A>, "queuedAt" | "attempts">): void {
+    const row: PendingRow<A> = {
       ...message,
       queuedAt: Date.now(),
       attempts: 0,
@@ -84,7 +95,7 @@ export class PendingMessageQueue {
   }
 
   /** Remove the head and persist. Returns the dequeued message or undefined. */
-  dequeue(): PendingMessage | undefined {
+  dequeue(): PendingMessage<A> | undefined {
     const row = this.items.shift();
     if (!row) return undefined;
     this.deleteRow(row.messageId);
@@ -98,7 +109,7 @@ export class PendingMessageQueue {
    * so retries respect order. Returns the count delivered.
    */
   flush(
-    send: (message: PendingMessage) => boolean,
+    send: (message: PendingMessage<A>) => boolean,
     maxAttempts: number,
   ): number {
     let delivered = 0;
@@ -158,7 +169,9 @@ export class PendingMessageQueue {
       );
       this.items = rows.map((r) => ({
         messageId: r.message_id,
-        action: r.action as OCPPAction,
+        // Stored by this protocol's handler; a row the handler does not
+        // know is refused when it is replayed.
+        action: r.action as A,
         payload: safeParse(r.payload),
         connectorId: r.connector_id ?? undefined,
         queuedAt: Date.parse(r.created_at) || Date.now(),
@@ -182,7 +195,7 @@ export class PendingMessageQueue {
     }
   }
 
-  private insertRow(row: PendingRow): void {
+  private insertRow(row: PendingRow<A>): void {
     if (!this.database) return;
     try {
       this.database.run(
@@ -240,7 +253,9 @@ export class PendingMessageQueue {
 
 /** Strip the persistence-only columns so callers see exactly the declared
  *  {@link PendingMessage} shape — `messageId` and `seq` are storage details. */
-function toPendingMessage(row: PendingRow): PendingMessage {
+function toPendingMessage<A extends string>(
+  row: PendingRow<A>,
+): PendingMessage<A> {
   const { messageId: _id, seq: _seq, ...msg } = row;
   return msg;
 }

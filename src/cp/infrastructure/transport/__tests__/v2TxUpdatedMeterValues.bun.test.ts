@@ -87,6 +87,8 @@ describe("OCPP 2.x scheduled meter samples in TransactionEvent (#347)", () => {
           triggerReason: "MeterValuePeriodic",
           evse: { id: 1, connectorId: 1 },
         });
+        // Started took seqNo 0: the sample is the next event.
+        expect(updated.seqNo).toBe(1);
         const samples = updated.meterValue!.flatMap((m) => m.sampledValue);
         expect(samples.length).toBeGreaterThan(0);
         expect(samples.every((s) => s.context === "Sample.Periodic")).toBe(
@@ -210,13 +212,20 @@ describe("OCPP 2.x scheduled meter samples in TransactionEvent (#347)", () => {
         cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
         cp.configuration.applyChange("MeterValuesSampledData", "");
         cp.startTransaction("TAG-347", 1);
-        await csms.waitForFrame(event("Started"));
+        const started = (await csms.waitForFrame(event("Started")))[3];
 
         cp.sendScheduledMeterValue(1);
         await settle(csms);
 
         expect(updates(csms)).toHaveLength(0);
         expect(callsOf(csms, "MeterValues")).toHaveLength(0);
+
+        // A skipped sample takes no seqNo: Ended follows Started directly.
+        cp.stopTransaction(1);
+        const ended = (await csms.waitForFrame(event("Ended")))[3];
+        expect((ended as TransactionEventRequestV201).seqNo).toBe(
+          (started as TransactionEventRequestV201).seqNo + 1,
+        );
         cp.disconnect();
       } finally {
         stop();

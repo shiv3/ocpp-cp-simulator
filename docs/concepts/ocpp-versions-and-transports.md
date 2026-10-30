@@ -288,8 +288,8 @@ A register too large to write as plain decimal digits is not signed. The
 records claim no identification detail (`IF` is empty): the station does not
 record whether a tag came from an Authorize result, the cache or a timeout.
 Clock-aligned (`Sample.Clock`) samples carry no signed record on any version.
-Signed 2.x samples carry `context` `Transaction.Begin` / `Transaction.End` on
-the Started / Ended events.
+Every 2.x Started / Ended register reading, signed or not, carries `context`
+`Transaction.Begin` / `Transaction.End` (#347).
 
 **Test modes** (`SignedMeterDataMode`) apply to every record signed while
 set; the advertised key is always the connector's own:

@@ -119,5 +119,35 @@ describe.each(VERSIONS)(
       await vi.advanceTimersByTimeAsync(60_000);
       expect(sent).toEqual([]);
     });
+
+    it("queues nothing for the events of its own disposal (cp.delete)", async () => {
+      const sent = online(cp);
+      bootAccepted(cp);
+      const installed = cp.monitoring.install({
+        type: "Delta",
+        severity: 0,
+        value: 0,
+        component: { name: "ChargingStation" },
+        variable: { name: "AvailabilityState" },
+        valueKey: "ChargingStationAvailabilityState",
+        valueType: { numeric: false },
+      });
+      expect(installed.status).toBe("Accepted");
+      await vi.advanceTimersByTimeAsync(0);
+      const handler = cp["_messageHandler"] as unknown as {
+        _webSocket: { isConnected: () => boolean };
+        queueNotifyEvent: (events: unknown[]) => void;
+      };
+      vi.mocked(handler._webSocket.isConnected).mockReturnValue(false);
+      const queued = vi.spyOn(handler, "queueNotifyEvent");
+
+      // The teardown cascades Unavailable onto the station while reporting
+      // is on; its NotifyEvent goes out on a microtask, after dispose.
+      cp.dispose();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(queued).not.toHaveBeenCalled();
+      expect(sent).toEqual([]);
+    });
   },
 );

@@ -1051,6 +1051,10 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     this.sendNotifyEvent(events);
   }
 
+  public highestQueuedNotifyEventId(): number {
+    return 0;
+  }
+
   public sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
       `${this._dialect.version} SOAP has no security extension; ignoring SignCertificate`,

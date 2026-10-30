@@ -688,8 +688,14 @@ export class ChargePoint {
       {
         store: this._monitoring,
         read: (key) => this.readMonitoredValue(key),
+        // Sent after the answer to the message that caused them. A
+        // disposal in between (cp.delete, the instance a cp.update
+        // replaces) drops them: queued now, they would be a row for a
+        // charge point that is gone (#538).
         emit: (events) =>
-          queueMicrotask(() => this._outbox.sendNotifyEvent(events)),
+          queueMicrotask(() => {
+            if (!evaluation.disposed) this._outbox.sendNotifyEvent(events);
+          }),
         // N07.FR.04, N08.FR.03: queued at once, in production order with
         // the TransactionEvents queued offline (#538).
         queue: (events) => this._outbox.queueNotifyEvent(events),
@@ -700,6 +706,8 @@ export class ChargePoint {
         transactionIdOf: (monitor) => this.monitoredTransactionId(monitor),
         onTriggeredChange: (id, triggered) =>
           repository.setTriggered(id, triggered),
+        // The reports a previous run queued keep their eventIds (#538).
+        lastQueuedEventId: () => this._outbox.highestQueuedNotifyEventId(),
       },
       new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
     );
@@ -2205,6 +2213,17 @@ export class ChargePoint {
   }
 
   /**
+   * Stop variable monitoring for good: its periodic timers, which run
+   * offline too (N08.FR.03), and any event still in flight. For an
+   * instance being discarded without {@link dispose} — the one a
+   * `cp.update` replaces — whose timers would otherwise keep it alive and
+   * queue NotifyEvents under its id (#538).
+   */
+  stopMonitoring(): void {
+    this._monitorEvaluation?.dispose();
+  }
+
+  /**
    * Terminal teardown: permanently releases the charge point.
    * Shuts down the network-sim controller and closes the socket,
    * then runs final CP-side teardown.
@@ -2213,7 +2232,7 @@ export class ChargePoint {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
     // Offline monitoring keeps the periodic timers running: stop them.
-    this._monitorEvaluation?.dispose();
+    this.stopMonitoring();
     this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its

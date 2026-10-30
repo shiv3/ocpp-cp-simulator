@@ -792,6 +792,10 @@ export class OCPPMessageHandler {
     this.sendNotifyEvent(events);
   }
 
+  public highestQueuedNotifyEventId(): number {
+    return 0;
+  }
+
   /**
    * §4.7 MeterValues.req. The measurand list is driven by the
    * `MeterValuesSampledData` Configuration key (defaults to

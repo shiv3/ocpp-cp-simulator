@@ -260,9 +260,9 @@ is restored (E11 "Connection Loss During Transaction", #528):
   do. A refused NotifyEvent replay stays at the head and delays the
   TransactionEvents behind it, as a refused TransactionEvent would. The
   queue keeps at most 1000 NotifyEvent reports per charge point: past
-  that, the oldest report is dropped, never a TransactionEvent, with one
-  `warn` at the first drop of an outage and one with the count at the
-  replay.
+  that, the oldest report made only of `Periodic` events is dropped, else
+  the oldest report, never a TransactionEvent, with one `warn` at the
+  first drop of an outage and one with the count at the replay.
   See [variable monitoring](variable-monitoring.md#offline-queuing).
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, the NotifyEvents above the severity and the rest are

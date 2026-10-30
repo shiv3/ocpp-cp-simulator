@@ -1840,6 +1840,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | Retire the manual desktop release workflow (#516)
+
+- `.github/workflows/manual-release.yml` created a draft `v<version>` release and built the desktop bundles without `npm version`, so the bundle, the web console and the sidecar daemon reported the `0.0.0` placeholder. It never ran, and publishing its draft would have fired `release.yml` on the new tag and uploaded the bundles a second time. It is removed rather than stamped: publishing the release-drafter draft is the only release path.
+- [Desktop app → Download](entities/desktop-app.md#download): the tag path stamps the version; the manual workflow is gone; a branch dispatch of `release.yml` uploads nothing.
+- [GitHub issues](sources/github-issues.md): #516.
+
 ## [2026-10-29] ingest | Bench teardown slow paths tested against a slow mock CSMS (#330)
 
 - The bench smoke suite's mock CSMS answered every CALL at once, so the teardown guards that only engage when something is slow could be removed with every test green. `scripts/bench/smokeHarness.ts` now holds the mock (per-action `delayMs` / `stallAfter`, receipt and reply hooks, open transactions tracked by id), the daemon and bench subprocesses and the control-plane helpers, shared with the smoke file.

@@ -66,6 +66,25 @@ describe("ChargePoint ConnectionTimeOut (§4.9)", () => {
     vi.advanceTimersByTime(60_000);
     expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
   });
+
+  it("a start on a plugged-in connector arms no new timer (#527)", async () => {
+    const cp = chargePoint();
+    cp.updateConnectorStatus(1, OCPPStatus.Preparing);
+    vi.advanceTimersByTime(2_000);
+    const outcome = await cp.startTransaction(
+      "TAG-CT",
+      1,
+      undefined,
+      undefined,
+      {
+        triggerReason: "RemoteStart",
+      },
+    );
+    expect(outcome).toEqual({ started: true });
+
+    vi.advanceTimersByTime(60_000);
+    expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
+  });
 });
 
 /**
@@ -137,7 +156,7 @@ describe.each([OCPP_2_0_1, OCPP_2_1])(
       vi.advanceTimersByTime(4_999);
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
       vi.advanceTimersByTime(1);
-      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Finishing);
+      expectTimedOut(cp);
     });
   },
 );

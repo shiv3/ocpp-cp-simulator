@@ -2272,9 +2272,7 @@ export class ChargePoint {
       return;
     }
     const reason = type === "Hard" ? "HardReset" : "SoftReset";
-    // #527: a StartTransaction.req waiting for its resend would go out after
-    // the StopTransaction.req below (Soft), or be replayed after the reboot
-    // (Hard): the reset ends its transaction, so it is dropped.
+    // #527: see IChargePointMessageHandler.cancelStartTransactionResends.
     this._outbox.cancelStartTransactionResends();
     for (const connector of this.connectors.values()) {
       if (connector.transaction) {
@@ -2439,15 +2437,11 @@ export class ChargePoint {
     // than an accident of scenario node ordering (#176). A connector already
     // in Preparing (plugged in first) has sent it: a second
     // StatusNotification(Preparing) is a Preparing → Preparing transition
-    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut is cleared on 1.6:
-    // the transaction now runs, so the timeout no longer applies (#527). On
-    // 2.x it restarts: EVConnectionTimeOut targets this very transaction.
+    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts; on 1.x
+    // the transaction set above now runs, so the restart only clears it
+    // (#527). On 2.x EVConnectionTimeOut targets this very transaction.
     if (connector.status === OCPPStatus.Preparing) {
-      if (isOcpp2Version(this._ocppVersion)) {
-        this.startConnectionTimeout(connectorId);
-      } else {
-        this.clearConnectionTimeout(connectorId);
-      }
+      this.startConnectionTimeout(connectorId);
     } else {
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     }

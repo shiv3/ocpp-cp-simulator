@@ -1188,9 +1188,8 @@ export class OCPPMessageHandler {
     this._serialQueue = [];
   }
 
-  /** #527: a Reset stops the transactions whose StartTransaction.req waits
-   *  for a resend; that resend is dropped, not salvaged to the offline
-   *  queue. The other resends (StopTransaction, MeterValues) carry on. */
+  /** #527: see `IChargePointMessageHandler.cancelStartTransactionResends`.
+   *  The other resends (StopTransaction, MeterValues) carry on. */
   public cancelStartTransactionResends(): void {
     for (const [timer, resend] of this._transactionMessageRetries) {
       if (resend.action !== OCPPAction.StartTransaction) continue;
@@ -1589,9 +1588,7 @@ export class OCPPMessageHandler {
       request.action === OCPPAction.StartTransaction && !startedTransaction;
     if (attempt >= attempts || startOutlived) {
       this._logger.warn(
-        startOutlived
-          ? `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}; its transaction no longer runs`
-          : `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
+        `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}${startOutlived ? "; its transaction no longer runs" : ""}`,
         LogType.TRANSACTION,
       );
       this._chargePoint.notifyTransactionMessageDiscarded({

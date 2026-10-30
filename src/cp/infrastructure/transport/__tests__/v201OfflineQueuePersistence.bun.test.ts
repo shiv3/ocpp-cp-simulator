@@ -223,7 +223,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     });
 
-    it("drops a queued row the 2.x handler does not replay", () => {
+    it("drops on load a queued row the 2.x handler does not replay", () => {
       const db = BunSqliteDatabase.open(":memory:");
       try {
         db.run(
@@ -232,13 +232,15 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         );
         const logger = silentLogger();
         const { socket, handler } = station(db, version, logger);
+        expect(rows(db)).toEqual([]);
+        expect(logger.warn.mock.calls.map((c) => c[0])).toEqual([
+          expect.stringMatching(
+            /Dropped 1 queued message\(s\) not replayed on OCPP 2\.x: StartTransaction$/,
+          ),
+        ]);
         socket.connected = true;
         handler.flushPendingQueue();
         expect(socket.calls).toEqual([]);
-        expect(rows(db)).toEqual([]);
-        expect(logger.warn.mock.calls.map((c) => c[0])).toContainEqual(
-          expect.stringMatching(/Dropping queued StartTransaction/),
-        );
       } finally {
         db.close();
       }
@@ -247,7 +249,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 );
 
 describe("OCPP 1.6 replay of a persisted 2.x row (#528)", () => {
-  it("drops a TransactionEvent row with a warning and replays its own rows", () => {
+  it("drops a TransactionEvent row on load with a warning and replays its own rows", () => {
     // `cp.update` can switch ocppVersion over the same --state-db: the 1.6
     // handler then finds the rows the 2.x handler queued.
     const db = BunSqliteDatabase.open(":memory:");
@@ -288,13 +290,16 @@ describe("OCPP 1.6 replay of a persisted 2.x row (#528)", () => {
         logger as unknown as Logger,
         { outgoingWarning: () => null } as unknown as ProtocolCodec,
       );
+      expect(rows(db).map((r) => r.action)).toEqual(["MeterValues"]);
+      expect(logger.warn.mock.calls.map((c) => c[0])).toEqual([
+        expect.stringMatching(
+          /Dropped 1 queued message\(s\) not replayed on OCPP 1\.6: TransactionEvent$/,
+        ),
+      ]);
       handler.setBootStatus({ status: "Accepted" });
       handler.flushPendingQueue();
       expect(calls).toEqual(["MeterValues"]);
       expect(rows(db)).toEqual([]);
-      expect(logger.warn.mock.calls.map((c) => c[0])).toContainEqual(
-        expect.stringMatching(/Dropping queued TransactionEvent/),
-      );
     } finally {
       db.close();
     }

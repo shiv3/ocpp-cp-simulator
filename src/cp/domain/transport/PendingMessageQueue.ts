@@ -38,10 +38,14 @@ interface PendingRow<A extends string> extends PendingMessage<A> {
  * (typically because the WebSocket was offline). Each protocol handler owns
  * one; both share the `pending_messages` table, keyed by charge point.
  *
+ * Each handler names the actions it queues. The table is shared by charge
+ * point id and `cp.update` can switch ocppVersion over the same
+ * --state-db, so a row of any other action (the other protocol's) is
+ * deleted when the queue loads and listed in {@link droppedOnLoad} (#528).
+ *
  * OCPP 2.0.1 / 2.1 (#528): the 2.x handler queues TransactionEvent requests
  * under E11.FR.01 and replays them with `offline = true` (E11.FR.02); it
- * reads the queue with `dequeue`, not `flush`, since E13 owns the attempt
- * counting there.
+ * flushes with no attempt limit, since E13 owns the attempt counting there.
  *
  * OCPP 1.6: matches OCPP 1.6 §4.7 /
  * §4.8 / §4.10 + errata 3.18: "When the Central System fails to process
@@ -65,16 +69,17 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   /** Independent counter for the user-visible message id — keeping it apart
    *  from `nextSeq` stops an id allocation from perturbing the ordering key. */
   private nextIdSuffix = 0;
-  /** Rows `dequeue` handed out, so `putBack` can restore them as they were. */
-  private readonly dequeuedRows = new WeakMap<
-    PendingMessage<A>,
-    PendingRow<A>
-  >();
+  /** Actions of the persisted rows `load` deleted: not queued by this
+   *  handler (#528). */
+  readonly droppedOnLoad: string[] = [];
+  private readonly queuedActions: ReadonlySet<string>;
 
   constructor(
     private readonly chargePointId: string,
-    private readonly database: Database | null = null,
+    private readonly database: Database | null,
+    queuedActions: ReadonlySet<A>,
   ) {
+    this.queuedActions = queuedActions;
     this.load();
   }
 
@@ -104,22 +109,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     const row = this.items.shift();
     if (!row) return undefined;
     this.deleteRow(row.messageId);
-    const message = toPendingMessage(row);
-    this.dequeuedRows.set(message, row);
-    return message;
-  }
-
-  /**
-   * Put a message `dequeue` returned back at the head, with its original
-   * row (id and `seq`), so a reload still reads it first. A message this
-   * queue did not hand out is ignored.
-   */
-  putBack(message: PendingMessage<A>): void {
-    const row = this.dequeuedRows.get(message);
-    if (!row) return;
-    this.dequeuedRows.delete(message);
-    this.items.unshift(row);
-    this.insertRow(row);
+    return toPendingMessage(row);
   }
 
   /**
@@ -187,24 +177,26 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
           "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
         [this.chargePointId],
       );
-      this.items = rows.map((r) => ({
-        messageId: r.message_id,
-        // Unchecked cast: both handlers share the table by cp_id, and
-        // `cp.update` can switch ocppVersion over the same --state-db, so
-        // a row may hold the other protocol's action. Each handler drops
-        // such a row with a warning when it replays the queue (#528).
-        action: r.action as A,
-        payload: safeParse(r.payload),
-        connectorId: r.connector_id ?? undefined,
-        queuedAt: Date.parse(r.created_at) || Date.now(),
-        attempts: r.attempts,
-        seq: r.seq ?? 0,
-      }));
+      this.items = [];
+      for (const r of rows) {
+        const action = r.action;
+        if (!this.isQueued(action)) {
+          this.droppedOnLoad.push(action);
+          this.deleteRow(r.message_id);
+          continue;
+        }
+        this.items.push({
+          messageId: r.message_id,
+          action,
+          payload: safeParse(r.payload),
+          connectorId: r.connector_id ?? undefined,
+          queuedAt: Date.parse(r.created_at) || Date.now(),
+          attempts: r.attempts,
+          seq: r.seq ?? 0,
+        });
+      }
       // Initialize seq counter to 1 + MAX(seq) to avoid collisions.
-      const maxSeq = this.items.reduce(
-        (max, item) => Math.max(max, item.seq),
-        0,
-      );
+      const maxSeq = rows.reduce((max, r) => Math.max(max, r.seq ?? 0), 0);
       this.nextSeq = maxSeq + 1;
       // The id suffix rides the same high-water mark so a queue reopened
       // within the same millisecond cannot mint an id that collides with a
@@ -215,6 +207,10 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
       this.nextSeq = 1;
       this.nextIdSuffix = 0;
     }
+  }
+
+  private isQueued(action: string): action is A {
+    return this.queuedActions.has(action);
   }
 
   private insertRow(row: PendingRow<A>): void {

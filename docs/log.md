@@ -2040,3 +2040,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [State persistence](concepts/state-persistence.md): `pending_messages` is no longer 1.6-only.
 - [GitHub issues](sources/github-issues.md): #528.
 - Review follow-up: a replay the socket refuses while the connection stays up (`not_accepted`, network-sim overflow) is put back at the head of the queue with its original row and a `warn`, instead of being lost; the replay stops there. Each handler drops, with a `warn`, a `pending_messages` row of the other protocol (`cp.update` can switch `ocppVersion` over the same `--state-db`). New events are held back by an explicit "awaiting replay" state rather than a non-empty queue. Wording: a queued payload carries `offline: true` when a replay is queued again, and only an event sent directly, not through the queue, never carries `offline`.
+
+## [2026-10-30] ingest | 2.x offline queue cleanups (#528)
+
+- A `pending_messages` row of the other protocol is now deleted when the handler's queue loads, with one `warn` listing the dropped actions, instead of being skipped at replay; a station holding only such rows no longer starts by holding new TransactionEvents back. A replay the socket refuses stays at the head of the queue (the queue's `flush`) instead of being put back.
+- [OCPP versions and transports → E11 offline queue](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): both points.

@@ -235,16 +235,17 @@ is restored (E11 "Connection Loss During Transaction", #528):
   anew. A row leaves the queue when its replay is handed to the socket; a
   close before the answer queues the event again. A replay the socket
   refuses while the connection stays up (a network-sim refusal or
-  overflow) is put back at the head of the queue, with a `warn` (category
+  overflow) stays at the head of the queue, with a `warn` (category
   `TRANSACTION`); the replay stops there, and that row, the rows behind it
   and any new TransactionEvent wait for the next BootNotification
   `Accepted`.
 - **Rows of the other protocol are dropped.** 1.6 and 2.x share
   `pending_messages` by charge point id, and `cp.update` can switch
-  `ocppVersion` over the same `--state-db`. Each handler drops, with a
-  `warn`, a row it does not replay: the 2.x handler anything but
-  `TransactionEvent`, the 1.6 handler anything but StartTransaction,
-  StopTransaction and MeterValues.
+  `ocppVersion` over the same `--state-db`. When a handler starts, its
+  queue deletes every row it does not replay, with one `warn` (category
+  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`,
+  the 1.6 handler anything but StartTransaction, StopTransaction and
+  MeterValues. Such a row never holds back a new TransactionEvent.
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, NotifyEvent and the rest are dropped while offline, as
   before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is

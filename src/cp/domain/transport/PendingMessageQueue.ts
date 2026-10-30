@@ -100,6 +100,23 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     this.insertRow(row);
   }
 
+  /** How many queued messages carry `action`. */
+  countOf(action: A): number {
+    return this.items.filter((item) => item.action === action).length;
+  }
+
+  /**
+   * Remove the oldest queued message carrying `action` and persist; the
+   * other actions are never touched. Returns whether one was removed.
+   */
+  removeOldest(action: A): boolean {
+    const index = this.items.findIndex((item) => item.action === action);
+    if (index < 0) return false;
+    const [row] = this.items.splice(index, 1);
+    this.deleteRow(row.messageId);
+    return true;
+  }
+
   /** Remove the head and persist. Returns the dequeued message or undefined. */
   dequeue(): PendingMessage<A> | undefined {
     const row = this.items.shift();

@@ -179,6 +179,14 @@ type TransactionEventFailure =
   | { reason: "callError"; errorCode: string }
   | { reason: "timeout"; seconds: number };
 
+/**
+ * #538: most NotifyEvent reports the offline queue keeps per charge point.
+ * A Periodic monitor ticking through a long outage would otherwise grow the
+ * persisted queue without bound; past the cap the oldest reports go. The
+ * TransactionEvents queued under E11 are not counted and never dropped.
+ */
+export const MAX_QUEUED_NOTIFY_EVENTS = 1000;
+
 export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _chargePoint: ChargePoint;
   private readonly _webSocket: OCPPWebSocket;
@@ -226,6 +234,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  Queued NotifyEvents (#538) never set it, so they cannot hold
    *  TransactionEvents back. */
   private _awaitingReplay: boolean;
+  /** NotifyEvent reports dropped from the full queue since the last
+   *  replay (#538); reported and reset by `flushPendingQueue`. */
+  private _droppedNotifyEvents = 0;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -1678,6 +1689,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
     const [first, ...rest] = events;
     if (first === undefined) return;
+    this.makeRoomForNotifyEvent();
     this._pendingQueue.enqueue({
       action: "NotifyEvent",
       payload: buildNotifyEventReport([first, ...rest]),
@@ -1686,6 +1698,27 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       `[v2.0.1] NotifyEvent with ${events.length} event(s) queued while offline; queue size=${this._pendingQueue.size()}`,
       LogType.OCPP,
     );
+  }
+
+  /**
+   * #538: keep the queued NotifyEvent reports under
+   * {@link MAX_QUEUED_NOTIFY_EVENTS} by dropping the oldest ones; a
+   * TransactionEvent row is never dropped. The first drop of an outage
+   * warns; `flushPendingQueue` reports the total once the station is back.
+   */
+  private makeRoomForNotifyEvent(): void {
+    while (
+      this._pendingQueue.countOf("NotifyEvent") >= MAX_QUEUED_NOTIFY_EVENTS &&
+      this._pendingQueue.removeOldest("NotifyEvent")
+    ) {
+      if (this._droppedNotifyEvents === 0) {
+        this._logger.warn(
+          `[v2.0.1] Offline NotifyEvent queue full (${MAX_QUEUED_NOTIFY_EVENTS} reports): dropping the oldest reports until the connection is back`,
+          LogType.OCPP,
+        );
+      }
+      this._droppedNotifyEvents += 1;
+    }
   }
 
   private notifyEventDialect(): "v21" | "v201" {
@@ -1790,6 +1823,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // The connection is live: a replay dropped from here on waits for the
     // next close to be queued again, so this loop never feeds itself.
     this._outageHandled = false;
+    if (this._droppedNotifyEvents > 0) {
+      this._logger.warn(
+        `[v2.0.1] Dropped ${this._droppedNotifyEvents} queued NotifyEvent report(s) during the outage (cap ${MAX_QUEUED_NOTIFY_EVENTS})`,
+        LogType.OCPP,
+      );
+      this._droppedNotifyEvents = 0;
+    }
     let replayed = 0;
     while (this._webSocket.isConnected()) {
       const queued = this._pendingQueue.dequeue();

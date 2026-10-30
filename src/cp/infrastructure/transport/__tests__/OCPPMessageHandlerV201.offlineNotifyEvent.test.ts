@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
+import {
+  MAX_QUEUED_NOTIFY_EVENTS,
+  OCPPMessageHandlerV201,
+} from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
@@ -289,6 +292,54 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         "TransactionEvent",
         "TransactionEvent",
       ]);
+    });
+
+    it("caps the queued NotifyEvent reports, dropping the oldest, never a TransactionEvent", () => {
+      const { socket, handler, start, update, close, reconnect } =
+        setup(version);
+      const overflow = 5;
+      const fullWarnings = () =>
+        vi
+          .mocked(logger.warn)
+          .mock.calls.filter(([message]) =>
+            String(message).includes("Offline NotifyEvent queue full"),
+          );
+      close();
+      start();
+      for (let i = 1; i <= MAX_QUEUED_NOTIFY_EVENTS + overflow; i += 1) {
+        handler.queueNotifyEvent([event(i)]);
+      }
+      update();
+      expect(fullWarnings()).toHaveLength(1);
+
+      reconnect();
+
+      const actions = socket.actions();
+      expect(actions.filter((a) => a === "TransactionEvent")).toHaveLength(2);
+      expect(actions[0]).toBe("TransactionEvent");
+      expect(actions.at(-1)).toBe("TransactionEvent");
+      const replayed = socket
+        .notifyEvents()
+        .map((p) => (p.eventData as { eventId: number }[])[0].eventId);
+      expect(replayed).toHaveLength(MAX_QUEUED_NOTIFY_EVENTS);
+      expect(replayed[0]).toBe(overflow + 1);
+      expect(replayed.at(-1)).toBe(MAX_QUEUED_NOTIFY_EVENTS + overflow);
+      expect(
+        vi
+          .mocked(logger.warn)
+          .mock.calls.some(([message]) =>
+            String(message).includes(
+              `Dropped ${overflow} queued NotifyEvent report(s)`,
+            ),
+          ),
+      ).toBe(true);
+
+      // A new outage warns again.
+      close();
+      for (let i = 0; i <= MAX_QUEUED_NOTIFY_EVENTS; i += 1) {
+        handler.queueNotifyEvent([event(i)]);
+      }
+      expect(fullWarnings()).toHaveLength(2);
     });
 
     it("queues a NotifyEvent the socket is down for, per OfflineQueuingSeverity", () => {

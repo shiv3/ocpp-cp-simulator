@@ -195,6 +195,43 @@ describe("CertificateStore V2G certificate chain (M03.FR.05)", () => {
     );
   });
 
+  it("lists only the chain uses it is given, V2GCertificate by default (#537)", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "V2G Root");
+    const v2gCsr = await generateCsr("CP-V2G", "Example CPO");
+    const v2g20Csr = await generateCsr("CP-V2G20", "Example CPO");
+    const v2gLeaf = await leafForCsr("03", v2gCsr.pem, root);
+    const v2g20Leaf = await leafForCsr("04", v2g20Csr.pem, root);
+    await store.storeSignedChain([v2gLeaf], "V2GCertificate");
+    await store.storeSignedChain([v2g20Leaf], "V2G20Certificate");
+
+    // 2.0.1 has no V2G20Certificate: only the V2G chain is a V2G chain.
+    expect(
+      store
+        .installedCertificateIds(["V2GCertificateChain"])
+        .map((entry) => entry.hashData.serialNumber),
+    ).toEqual(["3"]);
+    // 2.1 M03.FR.05: both kinds of V2G chain, in install order.
+    expect(
+      store
+        .installedCertificateIds(
+          ["V2GCertificateChain"],
+          ["V2GCertificate", "V2G20Certificate"],
+        )
+        .map((entry) => [entry.use, entry.hashData.serialNumber]),
+    ).toEqual([
+      ["V2GCertificateChain", "3"],
+      ["V2GCertificateChain", "4"],
+    ]);
+    // Without a query, every installed certificate: the same two chains.
+    expect(
+      store.installedCertificateIds(undefined, [
+        "V2GCertificate",
+        "V2G20Certificate",
+      ]),
+    ).toHaveLength(2);
+  });
+
   it("does not list ChargingStationCertificate chains under V2GCertificateChain", async () => {
     const store = new CertificateStore();
     const root = await selfSignedRoot("01", "Root");

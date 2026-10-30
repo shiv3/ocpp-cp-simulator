@@ -8,6 +8,9 @@ sources:
   - src/cp/domain/security/CertificateStore.ts (certificate store, issue #456)
   - src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
   - src/cp/infrastructure/transport/v201/certificatesV201.ts (2.x certificate handlers, issue #456)
+  - src/cp/domain/security/SignCertificateBackoff.ts (A02.FR.17-19 resend back-off, issue #537)
+  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (2.x SignCertificate, GetCertificateStatus, SecurityEventNotification, issue #537)
+  - src/cp/infrastructure/transport/handlers/call/CertificateManagementHandlers.ts (1.6 DeleteCertificate M04.FR.06, issue #537)
   - src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
   - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:
@@ -16,7 +19,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # OCPP 1.6 security profiles
@@ -189,6 +192,9 @@ ocpp-cp-sim --ws-url wss://steve.example.com/steve/websocket/CentralSystemServic
 Security extension configuration keys include `SecurityProfile`,
 `AuthorizationKey`, `AdditionalRootCertificateCheck`,
 `CertificateSignedMaxChainSize`, `CertificateStoreMaxLength`, and `CpoName`.
+`CertificateSignedMaxChainSize` is reported only: nothing enforces it.
+2.x stations also carry the
+[SecurityCtrlr variables](#securityctrlr-variables).
 The simulator can send `SecurityEventNotification` and `SignCertificate`,
 handle inbound `CertificateSigned`, and exposes the JSON-mode / RPC commands
 `security_event_notification` and `sign_certificate`
@@ -211,6 +217,14 @@ It holds three things:
   is hashed against its issuer: the next member of the chain, else an
   installed root with that subject, else the member itself.
 - **Pending CSRs**, one per signing use. They are kept in memory only.
+- **OCSP responses** (2.x M06), one per certificate asked about, in memory
+  only.
+
+`serialNumber` in hash data is the lower-case hex serial without leading
+zeroes (`a`, not `0a`), as the whitepaper and the 2.x
+`CertificateHashDataType` ask (#537). A CSMS may send either form: matching
+compares both sides without leading zeroes, and rows a state database
+holds from before #537 are read back in the new form.
 
 The store never retains a private key. `SignCertificate` discards the key it
 generates for the CSR (the simulator does not use it), so the key cannot leave
@@ -253,7 +267,12 @@ sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
   (hex compared case-insensitively) and answers `Accepted`. Otherwise it
   answers `NotFound`. Signed chains are not searched, so the hash of the
   Charge Point certificate answers `NotFound` and that certificate cannot be
-  deleted (whitepaper M04.FR.05).
+  deleted (whitepaper M04.FR.05). A `CentralSystemRootCertificate` that
+  validates the current connection answers `Failed` and stays installed
+  (whitepaper M04.FR.06, #537). That is one equal (DER) to a `--tls-ca`
+  certificate of a `wss://` connection that verifies the server. Over
+  `ws://`, without `--tls-ca` (the runtime's trust store validates) or with
+  verification off, no root is in use. 2.x has no such rule.
 - `CertificateSigned` stores a well-formed chain that passes the certificate
   quirks without checking it against the pending CSR, and leaves that CSR
   pending. The chain replaces the previous one, so a persisted store keeps
@@ -278,8 +297,10 @@ CALLERROR.
 - `InstallCertificate` answers `Accepted` once installed (M05.FR.02), or
   `Rejected` for a certificate that does not parse (M05.FR.07) or when the
   store already holds `CertificateStoreMaxLength` trust anchors (M05.FR.06).
-  The limit is the 1.6 key: `SecurityCtrlr.CertificateEntries` is not
-  modelled. A certificate already installed (same hash data) is replaced
+  The limit is the 1.6 key, which plays `CertificateEntries.maxLimit`;
+  `SecurityCtrlr.CertificateEntries` reports the same trust-anchor count
+  (#537, [SecurityCtrlr variables](#securityctrlr-variables)). A
+  certificate already installed (same hash data) is replaced
   and answered `Accepted`, even when the store is full (M05.FR.17). It
   answers `Failed` when the state database refuses the row (M05.FR.03): the
   store keeps what it held before, a replaced copy included.
@@ -312,8 +333,13 @@ CALLERROR.
   does not name the case of a chain without a pending CSR. Rejecting it is
   this simulator's reading: such a chain cannot be checked against a key
   the station generated. The certificate quirks
-  (`requiredCertificateSignatureAlgorithms`) and `MaxCertificateChainSize`
-  (A02.FR.16) are not applied on 2.x.
+  (`requiredCertificateSignatureAlgorithms`) are not applied on 2.x. A
+  `certificateChain` longer than `MaxCertificateChainSize` characters is
+  `Rejected` before it is parsed, with no security event (A02.FR.16: SHALL
+  on 2.0.1, MAY on 2.1, applied on both). Any `CertificateSigned` for a use
+  ends the resend back-off of that use's CSR, accepted (A02.FR.17) or
+  rejected as invalid (A02.FR.20); one refused for its size does not. An
+  accepted V2G chain is followed by `GetCertificateStatus` (M06.FR.07).
 - `sign_certificate` ([Control plane](control-plane.md#cp-command-methods))
   sends a `SignCertificateRequest`. It carries the `csr` given (at most 5500
   characters, the schema's bound; a longer one is refused as invalid
@@ -323,9 +349,65 @@ CALLERROR.
   CSR. `certificateType` is omitted, and so are the optional 2.1
   `requestId` and `hashRootCertificate`. A given CSR that does not parse is
   still sent, with a WARN log, but no `CertificateSigned` can match it.
-- The `SignCertificateResponse` status is only logged: `Accepted` at INFO,
-  any other status at WARN. A `Rejected` answer (A02.FR.12) leaves the CSR
+- `TriggerMessage` with `SignChargingStationCertificate` or
+  `SignV2GCertificate` answers `Accepted` (#537). Once the answer is written
+  (F06.FR.04) the station generates a new key pair and CSR (A02.FR.02) and
+  sends a `SignCertificateRequest` whose `certificateType` names the
+  triggered certificate (A02.FR.03, A02.FR.13). `SignCombinedCertificate`
+  and the 2.1 `SignV2G20Certificate` still answer `NotImplemented`
+  (F06.FR.08).
+- The `SignCertificateResponse` status is logged: `Accepted` at INFO, any
+  other status at WARN. A `Rejected` answer (A02.FR.12) leaves the CSR
   pending, since A02 has no rule to discard it.
+- **Resend back-off** (A02.FR.17-19, #537). After an `Accepted`
+  `SignCertificateResponse`, the station waits `CertSigningWaitMinimum`
+  seconds for `CertificateSigned`. When none came and the CSR is still
+  pending, it resends the same request (same CSR). Each accepted resend
+  doubles the wait: W, 2W, 4W… After `CertSigningRepeatTimes` resends it
+  stops until a `TriggerMessage` starts over (A02.FR.19). One sequence runs
+  per certificate use. It ends on any `CertificateSigned` for that use
+  (A02.FR.20 for a rejected one), on a non-`Accepted` answer and when the
+  connection closes. `sign_certificate` gets the same back-off.
+- **`GetCertificateStatus`** (M06, #537). The station asks the CSMS for the
+  OCSP status of its V2G certificates (`V2GCertificate`, 2.1
+  `V2G20Certificate`): after an accepted V2G `CertificateSigned`, for the
+  certificate and its sub-CAs (M06.FR.07); after every accepted boot
+  (M06.FR.06); then every week while connected (M06.FR.10). One request per
+  certificate. `ocspRequestData` is the certificate's hash data plus the
+  OCSP URL of its Authority Information Access extension. A certificate
+  without one is not asked about (OCPP requires a `responderURL`), and one
+  longer than the schema allows (512 characters on 2.0.1, 2000 on 2.1) is
+  skipped with a WARN. An `Accepted` answer's `ocspResult` is cached for
+  that certificate, in memory (M06.FR.02/03); `Failed` keeps the previous
+  entry and logs a WARN (M06.FR.04). The cached response is not used
+  elsewhere: the simulator has no ISO 15118 stack to hand it to.
+- `security_event_notification` ([Control plane](control-plane.md#cp-command-methods))
+  sends an A04 `SecurityEventNotificationRequest` with the given `type`,
+  the current `timestamp` and the optional `techInfo` (#537; before, a WARN
+  only). Like every 2.x CALL it is dropped while offline: the A04.FR.02
+  queue is not modelled. The automatic `StartupOfTheDevice` event stays
+  1.6-only.
+
+#### SecurityCtrlr variables
+
+2.x-only keys (#537), read and written through `GetVariables`,
+`SetVariables` and `GetBaseReport`; a 1.6 station has none of them.
+
+| Variable                  | Access | Default | Meaning                                                                     |
+| ------------------------- | ------ | ------- | --------------------------------------------------------------------------- |
+| `CertificateEntries`      | R      | `0`     | Installed trust anchors, the set M05.FR.06 limits (signed chains excluded)  |
+| `MaxCertificateChainSize` | R      | `10000` | Longest `CertificateSigned` `certificateChain` accepted, in characters      |
+| `CertSigningWaitMinimum`  | RW     | `60`    | Seconds before the first SignCertificate resend (min 1); doubled every time |
+| `CertSigningRepeatTimes`  | RW     | `3`     | Resends before waiting for a `TriggerMessage`; `0` = never resend           |
+
+`CertificateEntries` follows the certificate store: the charge point
+copies the count into the configuration on every store change, so a
+variable monitor on it fires too. `MaxCertificateChainSize` defaults to
+the spec's `maxLimit`, also the schema's `maxLength`, so it refuses nothing
+a valid frame holds. Both are ReadOnly, so a CSMS cannot change them.
+Mapping `SecurityCtrlr` makes it a known component: its other variables
+(`SecurityProfile`, `BasicAuthPassword`, …) now answer `UnknownVariable`
+instead of `UnknownComponent`.
 
 The dispatcher of 2.x inbound CALLs awaits a handler only when it returns a
 promise. A synchronous handler still answers in the same tick, so a
@@ -342,33 +424,21 @@ tick of their CALL.
 
 Not covered yet, on 2.x:
 
-- `GetCertificateStatus` and OCSP;
 - the ISO 15118 flows (`Get15118EVCertificate`, the V2G certificate as a
   TLS identity);
-- `TriggerMessage` for `SignChargingStationCertificate` or
-  `SignV2GCertificate`, which still answers `NotImplemented`;
-- the A02.FR.17-19 resend back-off;
-- the control-plane `security_event_notification` method, which only logs a
-  WARN on 2.x;
 - `V2G20Certificate` chains (2.1) in `GetInstalledCertificateIds`: 2.1 has
   no query value for them, and the simulator lists only `V2GCertificate`
   chains under `V2GCertificateChain` (its reading of M03.FR.05). A stored
   `V2G20Certificate` chain is therefore not reported.
 
-Not covered yet, on 1.6 and 2.x:
-
-- `serialNumber` in `certificateHashData` is the hex of the certificate's
-  serial bytes, so it can start with `0` (`0a`), where the field
-  description asks for no leading zeroes;
-- whitepaper M04.FR.06 (1.6): deleting the `CentralSystemRootCertificate`
-  that the current connection uses is not refused.
-
 ### Persistence
 
 With [state persistence](state-persistence.md) on, trust anchors and signed
 chains survive a restart (`certificates` table, schema v18). Pending CSRs do
-not: the key pair behind a CSR is gone after a restart, and 2.x A02.FR.17
-already has the station send a new CSR when no `CertificateSigned` arrives.
+not: the key pair behind a CSR is gone after a restart, and neither does the
+A02.FR.17 resend back-off; a CSMS gets a new CSR through `TriggerMessage`.
+Cached OCSP responses do not either: every accepted boot asks again
+(M06.FR.06).
 `cp.delete` and `state.reset` remove the rows. A trust anchor whose row the
 database refuses is not installed (`InstallCertificate` answers `Failed`).
 A signed chain whose row is refused is logged and kept in memory only:

@@ -1,5 +1,13 @@
 import type { Database, SqlParam } from "../persistence/Database";
+import { parseMonitoringBase, type MonitoringBase } from "./MonitoringStore";
 import type { VariableMonitor } from "./VariableMonitor";
+
+/**
+ * The row holding the charge point's monitoring base (#538). Monitor ids
+ * start at 1, so id 0 is free; an older simulator skips the row, whose JSON
+ * is not a monitor.
+ */
+const BASE_ROW_ID = 0;
 
 export interface PersistedMonitor {
   readonly monitor: VariableMonitor;
@@ -10,8 +18,10 @@ export interface PersistedMonitor {
 /**
  * Installed variable monitors of one charge point in the
  * `variable_monitors` table, so they survive a restart (N07.FR.13). The
- * monitor is stored as JSON, like the other domain DTO columns. Without a
- * {@link Database} every call is a no-op.
+ * monitor is stored as JSON, like the other domain DTO columns. The row
+ * with id 0 holds the monitoring base last set (#538), which also tells a
+ * station whose preconfigured monitors were deleted from one that never
+ * stored them. Without a {@link Database} every call is a no-op.
  */
 export class VariableMonitorRepository {
   constructor(
@@ -25,8 +35,8 @@ export class VariableMonitorRepository {
     try {
       const rows = this.database.all<{ monitor: string; triggered: number }>(
         "SELECT monitor, triggered FROM variable_monitors " +
-          "WHERE cp_id = ? ORDER BY monitor_id ASC",
-        [this.chargePointId],
+          "WHERE cp_id = ? AND monitor_id <> ? ORDER BY monitor_id ASC",
+        [this.chargePointId, BASE_ROW_ID],
       );
       const out: PersistedMonitor[] = [];
       for (const row of rows) {
@@ -47,6 +57,39 @@ export class VariableMonitorRepository {
         "VALUES (?, ?, ?, 0) " +
         "ON CONFLICT (cp_id, monitor_id) DO UPDATE SET monitor = excluded.monitor",
       [this.chargePointId, monitor.id, JSON.stringify(monitor)],
+    );
+  }
+
+  /** The monitoring base last stored; `undefined` when none (or unreadable). */
+  loadActiveBase(): MonitoringBase | undefined {
+    if (!this.database) return undefined;
+    try {
+      const row = this.database.get<{ monitor: string }>(
+        "SELECT monitor FROM variable_monitors WHERE cp_id = ? AND monitor_id = ?",
+        [this.chargePointId, BASE_ROW_ID],
+      );
+      if (!row) return undefined;
+      const value = JSON.parse(row.monitor) as {
+        activeMonitoringBase?: unknown;
+      } | null;
+      const raw = value?.activeMonitoringBase;
+      return (typeof raw === "string" && parseMonitoringBase(raw)) || undefined;
+    } catch (err) {
+      console.error("Failed to load the monitoring base:", err);
+      return undefined;
+    }
+  }
+
+  saveActiveBase(base: MonitoringBase): void {
+    this.run(
+      "INSERT INTO variable_monitors (cp_id, monitor_id, monitor, triggered) " +
+        "VALUES (?, ?, ?, 0) " +
+        "ON CONFLICT (cp_id, monitor_id) DO UPDATE SET monitor = excluded.monitor",
+      [
+        this.chargePointId,
+        BASE_ROW_ID,
+        JSON.stringify({ activeMonitoringBase: base }),
+      ],
     );
   }
 

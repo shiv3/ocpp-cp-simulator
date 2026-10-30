@@ -53,6 +53,7 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
     ],
   ),
   ["MonitoringCtrlr/ActiveMonitoringLevel", "ActiveMonitoringLevel"],
+  ["MonitoringCtrlr/ActiveMonitoringBase", "ActiveMonitoringBase"],
 ]);
 
 // Components that appear in the table - used to distinguish UnknownComponent vs UnknownVariable.

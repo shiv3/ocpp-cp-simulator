@@ -279,12 +279,17 @@ export class ConfigurationStore {
    * `MeterPublicKey<connectorId>` once that connector's signing key exists
    * (#315). Not persisted: the value is only true for this process.
    */
-  defineRuntimeKey(name: string, value: string): void {
+  defineRuntimeKey(
+    name: string,
+    value: string,
+    allowed?: readonly string[],
+  ): void {
     const key: StringConfigurationKey = {
       name,
       required: false,
       readonly: true,
       type: "string",
+      ...(allowed !== undefined && { allowed }),
     };
     this.values.set(name, { key, value });
     this.emit(name, value);

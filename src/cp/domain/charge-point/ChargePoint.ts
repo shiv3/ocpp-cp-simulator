@@ -89,7 +89,11 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
-import { MonitoringStore } from "../monitoring/MonitoringStore";
+import {
+  MONITORING_BASES,
+  MonitoringStore,
+} from "../monitoring/MonitoringStore";
+import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
 import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
@@ -239,7 +243,7 @@ export class ChargePoint {
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
-  private readonly _monitoring = new MonitoringStore();
+  private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
   private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
@@ -623,7 +627,26 @@ export class ChargePoint {
   private wireVariableMonitoring(): void {
     const repository = new VariableMonitorRepository(this._id, this._database);
     const persisted = repository.load();
-    this._monitoring.restore(persisted.map((p) => p.monitor));
+    const storedBase = repository.loadActiveBase();
+    // #538: the hardwired monitors, the persisted ones, and on a station
+    // that never stored its catalog state, the preconfigured ones. The
+    // station's own monitors are stored too, so they keep their triggered
+    // flag (N07.FR.14) and a later start knows which were deleted.
+    this._monitoring.initialize(
+      persisted.map((p) => p.monitor),
+      storedBase,
+    );
+    for (const monitor of this._monitoring.list()) {
+      if (
+        monitor.origin === "HardWiredMonitor" ||
+        (storedBase === undefined && monitor.origin === "PreconfiguredMonitor")
+      ) {
+        repository.save(monitor);
+      }
+    }
+    if (storedBase === undefined) {
+      repository.saveActiveBase(this._monitoring.activeMonitoringBase);
+    }
     this.publishMonitoringCtrlr();
     // Registered before the evaluation's own listener, so a new row exists
     // when its triggered flag is first written.
@@ -632,6 +655,9 @@ export class ChargePoint {
       else if (event.kind === "cleared") repository.delete(event.monitor.id);
       else if (event.kind === "levelChanged") {
         this.publishActiveMonitoringLevel();
+      } else {
+        repository.saveActiveBase(event.base);
+        this.publishActiveMonitoringBase();
       }
     });
     const evaluation = new MonitorEvaluation(
@@ -679,6 +705,16 @@ export class ChargePoint {
       );
     }
     this.publishActiveMonitoringLevel();
+    this.publishActiveMonitoringBase();
+  }
+
+  /** `ActiveMonitoringBase` follows SetMonitoringBase. */
+  private publishActiveMonitoringBase(): void {
+    this._configuration.defineRuntimeKey(
+      MONITORING_CTRLR_KEYS.activeMonitoringBase,
+      this._monitoring.activeMonitoringBase,
+      MONITORING_BASES,
+    );
   }
 
   /** `ActiveMonitoringLevel` follows SetMonitoringLevel (0-9). */

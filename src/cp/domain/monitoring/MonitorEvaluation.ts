@@ -162,6 +162,7 @@ export class MonitorEvaluation {
         this.states.delete(event.monitor.id);
         return;
       case "levelChanged":
+      case "baseChanged":
         return;
     }
   }

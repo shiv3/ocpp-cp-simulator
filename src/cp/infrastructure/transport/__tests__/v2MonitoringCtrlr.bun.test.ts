@@ -101,6 +101,7 @@ interface ReportDatum {
     dataType: string;
     minLimit?: number;
     maxLimit?: number;
+    valuesList?: string;
     supportsMonitoring: boolean;
   };
 }
@@ -264,6 +265,13 @@ describe("OCPP 2.x MonitoringCtrlr variables (#538)", () => {
             dataType: "integer",
             minLimit: 0,
             maxLimit: 9,
+          },
+        });
+        expect(find("MonitoringCtrlr", "ActiveMonitoringBase")).toMatchObject({
+          variableAttribute: [{ value: "All", mutability: "ReadOnly" }],
+          variableCharacteristics: {
+            dataType: "OptionList",
+            valuesList: "All,FactoryDefault,HardWiredOnly",
           },
         });
         for (const instance of [

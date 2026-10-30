@@ -95,6 +95,11 @@ function setHeartbeat(csms: MockCsms, messageId: string, value: number) {
   });
 }
 
+/** Every monitor of the charge point as [id, origin], by id. */
+function origins(cp: ChargePoint): [number, string][] {
+  return cp.monitoring.list().map((m) => [m.id, m.origin]);
+}
+
 function notifyEvents(csms: MockCsms): OcppFrame[] {
   return csms.received.filter((f) => f[0] === 2 && f[2] === "NotifyEvent");
 }
@@ -291,7 +296,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
       }
     });
 
-    it(`${v.version}: SetMonitoringBase keeps or deletes the custom monitors (N03)`, async () => {
+    it(`${v.version}: SetMonitoringBase keeps or deletes the custom monitors and restores the station's own (N03)`, async () => {
       const csms = startMockCsms();
       const cp = makeChargePoint(csms, `CP-BASE-${v.version}`, v.version);
       try {
@@ -310,7 +315,12 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
         });
         expect(v.baseResponse(all)).toBe(true);
         expect(all).toEqual({ status: "Accepted" });
-        expect(cp.monitoring.list().map((m) => m.id)).toEqual([1]);
+        expect(origins(cp)).toEqual([
+          [1, "CustomMonitor"],
+          [1000001, "HardWiredMonitor"],
+          [1000002, "PreconfiguredMonitor"],
+          [1000003, "PreconfiguredMonitor"],
+        ]);
 
         for (const base of ["FactoryDefault", "HardWiredOnly"]) {
           await call(csms, `svm-${base}`, "SetVariableMonitoring", {
@@ -328,7 +338,17 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
           );
           expect(v.baseResponse(response)).toBe(true);
           expect(response).toEqual({ status: "Accepted" });
-          expect(cp.monitoring.list()).toEqual([]);
+          // N03.FR.04: the preconfigured monitors come back; N03.FR.05:
+          // only the hardwired one stays.
+          expect(origins(cp).map(([, origin]) => origin)).toEqual(
+            base === "FactoryDefault"
+              ? [
+                  "HardWiredMonitor",
+                  "PreconfiguredMonitor",
+                  "PreconfiguredMonitor",
+                ]
+              : ["HardWiredMonitor"],
+          );
         }
 
         // The deleted, triggered monitor sends no cleared event (N07.FR.12).
@@ -541,7 +561,12 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
     const third = startMockCsms();
     const reopened = makeChargePoint(third, cpId, "OCPP-2.0.1", db);
     try {
-      expect(reopened.monitoring.list().map((m) => m.id)).toEqual([2, 3]);
+      expect(
+        reopened.monitoring
+          .list()
+          .filter((m) => m.origin === "CustomMonitor")
+          .map((m) => m.id),
+      ).toEqual([2, 3]);
     } finally {
       reopened.disconnect();
       await third.stop();

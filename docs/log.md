@@ -2032,6 +2032,42 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The redaction tests also run under `bun test` (`redaction.bun.test.ts`), so the #519 timing row now runs on both runtimes.
 - [Log format → Redaction](concepts/log-format.md#redaction): the fallback.
 
+## [2026-10-30] ingest | EVConnectionTimeOut ends a started 2.x transaction (#549)
+
+- On OCPP 2.0.1 / 2.1, when `TxCtrlr.EVConnectionTimeOut` elapses with the connector still `Preparing` and a transaction started, the station sends `TransactionEvent(Ended)` with `triggerReason` `EVConnectTimeout` and `stoppedReason` `Timeout` (E03.FR.05). Without a transaction, and on 1.6, the Preparing → Finishing move is unchanged.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): new "EV connection timeout" item.
+
+## [2026-10-30] ingest | Expert raw frames, level C of #389 (#393)
+
+- `ChargePoint.sendRawFrame` / `send_raw_frame` (control plane, JSON-Lines, MCP): one text frame written as given, through the normal pipeline and log but outside the 1.6 serial CALL queue; replies correlated best effort (frame id, or a CALLERROR with id `""` / `"-1"`) and kept from the station's handlers; a close is reported and the next session is unaffected. SOAP and a closed socket are refused.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): new section; the "malformed frames are out of scope" note now points to it.
+- [Control plane](concepts/control-plane.md#cp-command-methods): `send_raw_frame` row.
+- [MCP endpoint](entities/mcp-endpoint.md): `send_raw_frame` tool (30 curated tools).
+
+## [2026-10-30] ingest | Raw frames: review follow-ups (#393)
+
+- A reply counts only once the frame is written; the wait runs from the moment the transport takes the frame, so a network-sim delay counts against it and the call returns under the RPC deadline.
+- `closed` is set at once for every end of the connection (CSMS / network close, disconnect, reset, simulated drop, removal), with its cause.
+- A frame dropped while the socket stays open (full network-sim queue, failed write) is a `disconnected` error rather than a `closed` result.
+- [Expert OCPP calls → Raw frames](concepts/expert-ocpp-calls.md#raw-frames-level-c-393): the above.
+
+## [2026-10-30] ingest | Bench teardown under a slow control plane (#523, #330)
+
+- New in `scripts/bench/smokeHarness.ts`: `startSlowControlPlane`, a socket.io relay the bench reaches through `--daemon-url`. It opens one daemon socket per bench socket with the same handshake `auth`, re-emits every event both ways (acks included), proxies HTTP (`/v1/healthz`, `/metrics`), and holds chosen RPC **requests** (for a time, or until a promise settles), so the daemon acts after the bench may have given up. A closed daemon socket reaches the bench as a dropped transport and its unanswered RPCs get a `relay_upstream_closed` ack; no other outage is modelled. No production code changed.
+- Three cases in `scripts/bench/fleetBench.slowpath.test-bun.ts`, each red under its mutation: a `cp.create_many` registered after its client deadline is reconciled (removing the `reconcileMissingIds` call leaks the charge point); teardown waits for an in-flight create before its first delete sweep (removing the wait gets a `not_found` first); a cycle's slow `stop_transaction` is answered before its charge point is deleted (dropping the RPC term from `cycleBoundMs` deletes it first). The last is asserted on RPC order, since teardown's re-stop leaves the CSMS identical either way. `test:bench-slow` now takes about 56s locally (was 36s).
+- [Source: bench README](sources/bench-readme.md): slow-path suite, harness, "Not covered by a run-level test".
+- [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): what the slow job pins, and its wall-clock.
+- [Testing strategy](analyses/testing-strategy.md): the slow job's scope and wall-clock.
+- [GitHub issues](sources/github-issues.md): #330, #523.
+- Raw sources changed in the same PR: `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/fleet-bench.ts` (comment only), `scripts/bench/README.md`.
+
+## [2026-10-30] ingest | Composite limits floored to 0.1 when converted (#524)
+
+- The 1.6 `GetCompositeScheduleResponse` schema requires `chargingSchedulePeriod[].limit` to be a multiple of 0.1, but a converted limit went out unrounded: a 3000 W / 1-phase `ChargePointMaxProfile` asked in A read 13.043478… A. `compositeLimitInUnit` now floors a converted limit (W → A and A → W) to 0.1, never below 0, with a 1e-9 tolerance so float noise (4.1 A × 230 V = 942.9999999999999 W) is not pushed a step down. A limit returned in its own unit stays as the CSMS set it.
+- The helper is shared, so 2.0.1 and 2.1 round the same way, though their schemas declare no `multipleOf`.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence states the rounding.
+- [GitHub issues](sources/github-issues.md): #524.
+
 ## [2026-10-30] ingest | 2.x TransactionEvent message timeout (#529)
 
 - E13 also counts a TransactionEvent left without a CALLRESULT or CALLERROR within `OCPPCommCtrlr.MessageTimeout[Default]` (2.0.1 / 2.1 §2.1.3, ReadOnly, default 30 s, 2.x-only key) as a failed transmission: resent and discarded under the same `MessageAttempts` / `MessageAttemptInterval` rules as a CALLERROR (#490). Late answers: the first CALLRESULT of any transmission settles the message and cancels a waiting resend; later answers, and a CALLERROR for an already timed-out transmission, change nothing; a late answer after the discard is ignored.

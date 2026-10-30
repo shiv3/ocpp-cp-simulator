@@ -191,6 +191,14 @@ const ocppCallOutcomeSchema = z.discriminatedUnion("kind", [
     errorDetails: z.unknown(),
   }),
 ]);
+/** `send_raw_frame`'s result (#393): best-effort correlation of what came
+ *  back for one raw frame. */
+const rawFrameOutcomeSchema = z.object({
+  sentFrame: z.string(),
+  messageId: z.string().nullable(),
+  reply: z.array(z.unknown()).nullable(),
+  closed: z.string().nullable(),
+});
 /**
  * `extend_scenario_wait`'s `seconds` (#240): a whole number of seconds,
  * 1–3600. Exported for the same reason as `dataTransferDataSchema`.
@@ -737,6 +745,28 @@ export const METHODS = {
         ),
     }),
     result: ocppCallOutcomeSchema,
+  },
+  // #393: expert raw frame (level C of #389): one text frame written to the
+  // WebSocket as given, valid OCPP-J or not. SOAP stations and a closed
+  // socket are refused (invalid_params); no reply is a result, not an error.
+  send_raw_frame: {
+    params: z.object({
+      frame: z
+        .string()
+        .describe(
+          "The text frame, written as given (e.g. a wrong message type, a missing element, invalid JSON)",
+        ),
+      waitMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(25_000)
+        .optional()
+        .describe(
+          "How long to wait for a reply, in milliseconds (default 5000)",
+        ),
+    }),
+    result: rawFrameOutcomeSchema,
   },
   // #452: the charge point's Authorization Cache, a test seam. Seed and
   // clear act whatever AuthorizationCacheEnabled / AuthCacheCtrlr.Enabled

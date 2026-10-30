@@ -19,7 +19,10 @@ import {
   METHODS,
   scenarioWaitExtensionSecondsSchema,
 } from "../protocol";
-import type { OcppCallRequest } from "../cp/domain/types/OcppCall";
+import type {
+  OcppCallRequest,
+  RawFrameRequest,
+} from "../cp/domain/types/OcppCall";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -291,6 +294,10 @@ export async function handleJsonCommand(
       // #389: validated against the daemon's own schema, so JSON-Lines mode
       // admits exactly what the control plane admits.
       return ops.sendOcppCall(ocppCallRequest(params));
+
+    case "send_raw_frame":
+      // #393: same schema as the control plane's.
+      return ops.sendRawFrame(rawFrameRequest(params));
 
     // #452: the Authorization Cache test seam. Seed and clear act whatever
     // the cache switch says.
@@ -708,6 +715,18 @@ function seedEntries(
 /** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
 function ocppCallRequest(params: Record<string, unknown>): OcppCallRequest {
   const parsed = METHODS.send_ocpp_call.params.safeParse(params);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
+  }
+  return parsed.data;
+}
+
+/** `send_raw_frame`'s params (#393), checked by `METHODS.send_raw_frame`. */
+function rawFrameRequest(params: Record<string, unknown>): RawFrameRequest {
+  const parsed = METHODS.send_raw_frame.params.safeParse(params);
   if (!parsed.success) {
     const fields = [
       ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),

@@ -15,6 +15,8 @@ import type {
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
 } from "../cp/domain/types/OcppCall";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type {
@@ -1193,6 +1195,11 @@ export class CLIChargePointService {
   /** Expert OCPP call (#389); see `ChargePoint.sendOcppCall`. */
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
     return this._chargePoint.sendOcppCall(request);
+  }
+
+  /** Expert raw frame (#393); see `ChargePoint.sendRawFrame`. */
+  sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
+    return this._chargePoint.sendRawFrame(request);
   }
 
   /** #452 test seam: the Authorization Cache and its switch. */

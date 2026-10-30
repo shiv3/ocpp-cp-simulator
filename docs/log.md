@@ -2056,4 +2056,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 - 2.1 `TargetDelta` / `TargetDeltaRelative` (N07.FR.22, FR.23) on `EVSE.Power`, which gets a `Target` attribute on 2.1 (B05 / B06); threshold semantics for `cleared`. N02.FR.23's `TargetDeltaMonitoring` criterion is absent from the 2.1 schema.
 - Offline queuing (N07.FR.04, N08.FR.03) stays pending for slice 538c.
 - [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): runtime values, Target attribute, monitor types, report criteria, periodic and TargetDelta evaluation, persistence, limits, and the #538 items table.
-- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [State persistence](concepts/state-persistence.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.

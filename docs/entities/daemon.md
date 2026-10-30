@@ -20,7 +20,7 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Daemon (server mode)
@@ -533,6 +533,17 @@ already carries the counters that would settle it. The
 same README also states the teardown ceiling an operator meets on Ctrl-C:
 about ten and a half minutes worst case on OCPP 1.6, and only against a daemon
 that is answering but has not finished creating.
+
+Teardown's ordering is tested against a **slow** mock CSMS by
+`scripts/bench/fleetBench.slowpath.test-bun.ts` (#330), run by
+`bun run test:bench-slow` in its own CI job (`bench-slow`, beside `test`; about
+36s locally) rather than inside `test:bun`. It pins settling in-flight cycles
+before closing transactions, for each cycle's own bound, the retirement branch
+the re-stop of a cancelled hold and the re-stop list keeping an acked stop;
+two cases shorten deadlines through
+test-only `FLEET_BENCH_TEST_*` variables that are not flags. The RPC stages of
+the cycle bound (pinned only as arithmetic, by the unit tests) and a
+`cp.create_many` past its 35s deadline (#523) have no run-level test — see [Source: bench README](../sources/bench-readme.md).
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review

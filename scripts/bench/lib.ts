@@ -554,10 +554,93 @@ export interface StartWaitBudget {
  * genuinely stuck, while one that is too small loses transactions — so where
  * stages cannot be proven disjoint they are summed.
  */
-export function cycleBoundMs(budget: StartWaitBudget, holdMs: number): number {
+export function cycleBoundMs(
+  budget: StartWaitBudget,
+  holdMs: number,
+  rpcDeadlineMs: number = RPC_DEADLINE_MS,
+): number {
   return (
-    budget.localStartMs + (budget.assignedIdMs ?? 0) + holdMs + RPC_DEADLINE_MS
+    budget.localStartMs + (budget.assignedIdMs ?? 0) + holdMs + rpcDeadlineMs
   );
+}
+
+/**
+ * The deadlines a run works to that the slow-path tests need to shorten.
+ *
+ * **Test-only, and not a flag.** Every value here is derived from the daemon's
+ * own timers (the CALL watchdog, the authorization wait), so choosing a
+ * different number in a real run only makes the benchmark disagree with the
+ * system it measures. They exist because `fleetBench.slowpath.test-bun.ts`
+ * has to drive a cycle past one stage of {@link cycleBoundMs} without waiting
+ * the full 95s, and `fleet-bench.ts` runs as a subprocess, so the environment
+ * is the only channel into it (#330).
+ */
+export interface BenchTimings {
+  /** The pool's whole-call RPC deadline; {@link RPC_DEADLINE_MS} by default. */
+  readonly rpcDeadlineMs: number;
+  /** {@link LOCAL_START_TIMEOUT_MS} by default. */
+  readonly localStartTimeoutMs: number;
+  /** {@link ASSIGNED_ID_TIMEOUT_MS} by default. */
+  readonly assignedIdTimeoutMs: number;
+}
+
+export const DEFAULT_BENCH_TIMINGS: BenchTimings = {
+  rpcDeadlineMs: RPC_DEADLINE_MS,
+  localStartTimeoutMs: LOCAL_START_TIMEOUT_MS,
+  assignedIdTimeoutMs: ASSIGNED_ID_TIMEOUT_MS,
+};
+
+/** Prefix every test-only override carries. */
+export const TEST_TIMING_ENV_PREFIX = "FLEET_BENCH_TEST_";
+
+const TEST_TIMING_ENV: Readonly<Record<string, keyof BenchTimings>> = {
+  [`${TEST_TIMING_ENV_PREFIX}RPC_DEADLINE_MS`]: "rpcDeadlineMs",
+  [`${TEST_TIMING_ENV_PREFIX}LOCAL_START_TIMEOUT_MS`]: "localStartTimeoutMs",
+  [`${TEST_TIMING_ENV_PREFIX}ASSIGNED_ID_TIMEOUT_MS`]: "assignedIdTimeoutMs",
+};
+
+/**
+ * Read the test-only overrides out of an environment.
+ *
+ * Each value must be a positive integer number of milliseconds written in
+ * plain decimal; anything else is refused rather than coerced, and so is an
+ * unknown name under {@link TEST_TIMING_ENV_PREFIX} — a misspelt override
+ * that was ignored would run a slow-path test at the defaults and make its
+ * discriminating case vacuous. Overrides are independent: shortening the RPC
+ * deadline does not re-derive the local-start timeout from it.
+ *
+ * `overridden` lists `NAME=value` for what was applied, so the run can say on
+ * stderr that it is not running at its real deadlines.
+ */
+export function parseTestTimingOverrides(
+  env: Readonly<Record<string, string | undefined>>,
+): { timings: BenchTimings; overridden: string[] } {
+  const timings: Record<keyof BenchTimings, number> = {
+    ...DEFAULT_BENCH_TIMINGS,
+  };
+  const overridden: string[] = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith(TEST_TIMING_ENV_PREFIX) || value === undefined) {
+      continue;
+    }
+    const field = TEST_TIMING_ENV[name];
+    if (field === undefined) {
+      throw new BenchValidationError(
+        `unknown test-only override ${name}; expected one of ` +
+          `${Object.keys(TEST_TIMING_ENV).join(", ")}`,
+      );
+    }
+    const ms = /^[1-9][0-9]*$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(ms)) {
+      throw new BenchValidationError(
+        `${name} must be a positive integer number of milliseconds, got ` +
+          `${JSON.stringify(value)}`,
+      );
+    }
+    timings[field] = ms;
+    overridden.push(`${name}=${ms}`);
+  }
+  return { timings, overridden };
 }
 
 export interface DaemonBasicAuth {

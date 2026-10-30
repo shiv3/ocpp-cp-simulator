@@ -13,6 +13,7 @@ sources:
   - "issue #490"
   - "issue #488"
   - "issue #528"
+  - "issue #549"
   - src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
 related:
   - operational-timeline.md
@@ -24,7 +25,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Charging sessions
@@ -218,6 +219,19 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   modelled. Without a running transaction, the console's **Unplug** sends
   StatusNotification `Available`, as before, while a scenario plug-out stays a
   no-op.
+
+- **EV connection timeout.** Starting a transaction before the cable is in
+  puts the connector in `Preparing` and starts the `ConnectionTimeOut` timer
+  (2.x `TxCtrlr.EVConnectionTimeOut`, default 60 s; `0` disables it). If the
+  connector is still `Preparing` when it fires:
+
+  | Situation              | OCPP 1.6                       | OCPP 2.0.1 / 2.1                                                                                                                                                                         |
+  | ---------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | No transaction started | §4.9 B6: Preparing → Finishing | Preparing → Finishing (StatusNotification `Occupied`)                                                                                                                                    |
+  | Transaction started    | Preparing → Finishing          | E03.FR.05: `Ended`, `triggerReason` `EVConnectTimeout`, `stoppedReason` `Timeout`; then Available while auto-reset is on ([#549](https://github.com/shiv3/ocpp-cp-simulator/issues/549)) |
+
+  On 1.6 an accepted StartTransaction moves the connector to `Charging`, so
+  the timer is cleared before it can fire on a started transaction.
 
 - **Connection loss.** A WebSocket close never ends a transaction, on any
   version, and no setting makes it (1.6 §3.7, 2.x E11). On OCPP-J 1.6 the

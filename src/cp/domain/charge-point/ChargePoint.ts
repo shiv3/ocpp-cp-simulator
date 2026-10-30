@@ -2542,6 +2542,26 @@ export class ChargePoint {
       this._connectionTimeoutTimers.delete(connectorId);
       const connector = this.getConnector(connectorId);
       if (!connector || connector.status !== OCPPStatus.Preparing) return;
+      // E03.FR.05: on 2.x a transaction already started without the EV
+      // connecting in time is ended (stoppedReason Timeout, triggerReason
+      // EVConnectTimeout). 1.6 keeps the B6 Preparing → Finishing move.
+      if (
+        isOcpp2Version(this._ocppVersion) &&
+        connector.hasRunningTransaction
+      ) {
+        this._logger.info(
+          `Connector ${connectorId} EVConnectionTimeOut elapsed; ending the transaction (E03.FR.05)`,
+          LogType.TRANSACTION,
+        );
+        this.stopTransaction(connector, undefined, {
+          triggerReason: "EVConnectTimeout",
+          stoppedReason: "Timeout",
+        });
+        if (connector.status === OCPPStatus.Preparing) {
+          this.updateConnectorStatus(connectorId, OCPPStatus.Finishing);
+        }
+        return;
+      }
       this._logger.info(
         `Connector ${connectorId} ConnectionTimeOut elapsed; transitioning Preparing → Finishing (§4.9 B6)`,
         LogType.OCPP,

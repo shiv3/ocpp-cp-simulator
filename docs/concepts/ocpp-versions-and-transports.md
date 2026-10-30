@@ -47,9 +47,10 @@ Message types and validators for the JSON versions are generated from the
 
 On 2.0.1 and 2.1, `SetVariableMonitoring`, `ClearVariableMonitoring`,
 `GetMonitoringReport`, `SetMonitoringLevel` and `SetMonitoringBase` act on a
-stored, persisted monitor catalog, and the monitors report through
+stored, persisted monitor catalog that includes the station's own
+hardwired and preconfigured monitors, and the monitors report through
 `NotifyEvent`: see [OCPP 2.x variable monitoring](variable-monitoring.md)
-(#457).
+(#457, #538).
 
 ## Version-agnostic scenarios
 
@@ -179,9 +180,12 @@ only the title of the spec section. Without that instance, or under the
 flat name, `GetVariables` / `SetVariables` answer `UnknownVariable`. The
 same holds for `MessageTimeout` with instance `Default`. The results echo
 the `variable` the CSMS sent, instance included, and `GetBaseReport`
-reports `variable: { name, instance }` for them. Every other mapped
-variable has no instance and answers whatever instance the CSMS names, as
-before.
+reports `variable: { name, instance }` for them. The
+`MonitoringCtrlr.ItemsPerMessage` / `BytesPerMessage` variables are
+instanced the same way (`SetVariableMonitoring`, `ClearVariableMonitoring`;
+see [variable monitoring](variable-monitoring.md#monitoringctrlr-variables),
+#538). Every other mapped variable has no instance and answers whatever
+instance the CSMS names, as before.
 
 Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
 resend does not hold back the next transaction message. E13 (Figure 62)

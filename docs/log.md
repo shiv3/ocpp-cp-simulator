@@ -2045,3 +2045,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `pending_messages` row of the other protocol is now deleted when the handler's queue loads, with one `warn` listing the dropped actions, instead of being skipped at replay; a station holding only such rows no longer starts by holding new TransactionEvents back. A replay the socket refuses stays at the head of the queue (the queue's `flush`) instead of being put back.
 - [OCPP versions and transports → E11 offline queue](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): both points.
+
+## [2026-10-30] ingest | Variable monitoring follow-ups, part 1 (#538)
+
+- Hardwired and preconfigured monitors from a static catalog (`src/cp/domain/monitoring/monitorCatalog.ts`, ids from 1000001): reported by `GetMonitoringReport` (a fresh 2.x station answers `Accepted`), hardwired ones neither cleared (N06.FR.03) nor replaced (N04.FR.18), a replaced preconfigured one becomes custom (N04.FR.15). `SetMonitoringBase` is complete (N03.FR.03-FR.05); the base is stored in the `variable_monitors` row with id 0, without a schema change.
+- `MonitoringCtrlr` variables: `ItemsPerMessage` / `BytesPerMessage` with instances `SetVariableMonitoring` / `ClearVariableMonitoring` (advertised, not enforced), `ActiveMonitoringLevel`, `ActiveMonitoringBase`; runtime keys of 2.x stations only. `GetBaseReport` publishes `minLimit` / `maxLimit` of bounded integers (N04.FR.06) and `OptionList` + `valuesList`.
+- `SetVariableMonitoring` resolves `variable.instance` and refuses an unknown EVSE (`UnknownComponent`, N04.FR.03); events carry the `transactionId` of the monitor's EVSE (or of the only transaction for a `transaction` monitor); `cause` declined (N07.FR.05). `NotifyEvent` / `NotifyMonitoringReport` go out in parts of up to 100 items (`seqNo` / `tbc`): the spec's per-message variables bound CSMS requests, not station reports.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new sections (station's own monitors, MonitoringCtrlr variables, reports in parts), SetMonitoringBase, targets, events, persistence and limits rewritten.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [State persistence](concepts/state-persistence.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.

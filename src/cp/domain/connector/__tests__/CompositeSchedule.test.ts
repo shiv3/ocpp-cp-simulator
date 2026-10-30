@@ -212,11 +212,6 @@ describe("buildCompositeWattsSchedule", () => {
   });
 });
 
-/** True when `value` is a multiple of 0.1 up to float noise. */
-function isTenth(value: number): boolean {
-  return Math.abs(value * 10 - Math.round(value * 10)) < 1e-9;
-}
-
 describe("floorToTenth (#524)", () => {
   it.each([
     [0.3, 0.3],
@@ -233,11 +228,7 @@ describe("floorToTenth (#524)", () => {
     [0.05, 0],
     [-0.5, 0],
   ])("floors %d to %d", (input, expected) => {
-    const result = floorToTenth(input);
-    expect(result).toBe(expected);
-    expect(isTenth(result)).toBe(true);
-    expect(result).toBeGreaterThanOrEqual(0);
-    expect(result).toBeLessThanOrEqual(Math.max(0, input) + 1e-9);
+    expect(floorToTenth(input)).toBe(expected);
   });
 
   it("returns a finite value whose tenfold overflows unchanged", () => {

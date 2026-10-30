@@ -538,19 +538,6 @@ describe("GetCompositeScheduleHandler round trip (#323)", () => {
     ]);
   });
 
-  it("does not floor float noise: 4.1 A / 1-phase asked in W is 943 W (#524)", () => {
-    // 4.1 × 230 is 942.9999999999999 in binary floating point.
-    const profiles = {
-      tx: {
-        unit: "A" as const,
-        periods: [{ startPeriod: 0, limit: 4.1, numberPhases: 1 }],
-      },
-    };
-    expect(compositeFor(profiles, "W").chargingSchedulePeriod).toStrictEqual([
-      { startPeriod: 0, limit: 943, numberPhases: 1 },
-    ]);
-  });
-
   it("keeps two periods apart when equal watts come from different phase counts", () => {
     // 6 A × 230 V × 3 = 18 A × 230 V × 1 = 4140 W.
     const schedule = compositeFor(

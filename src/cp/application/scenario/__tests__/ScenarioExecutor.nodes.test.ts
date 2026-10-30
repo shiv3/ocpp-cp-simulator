@@ -71,6 +71,7 @@ function createRuntimeMocks(connectorIds = [1]) {
     id,
     status: OCPPStatus.Available,
     meterValue: 0,
+    hasRunningTransaction: false,
     unlockResponse: "UnlockFailed" as
       "Unlocked" | "UnlockFailed" | "NotSupported",
     evSettings: {
@@ -102,6 +103,7 @@ function createRuntimeMocks(connectorIds = [1]) {
     }),
     startTransaction: vi.fn(),
     stopTransaction: vi.fn(),
+    evDisconnected: vi.fn(),
     setMeterValue: vi.fn((connectorId: number, value: number) => {
       const connector = connectorsById.get(connectorId);
       if (connector) {
@@ -522,7 +524,7 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
     );
   });
 
-  it("documents the runtime connectorPlug callback as a no-op that still advances the flow", async () => {
+  it("documents the runtime plug-in callback as a no-op that still advances the flow", async () => {
     const { chargePoint, chargePointShape, connector } = createRuntimeMocks();
     const callbacks = createScenarioExecutorCallbacks({
       chargePoint,
@@ -543,13 +545,43 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
       callbacks,
     );
 
-    // Runtime onConnectorPlug is intentionally a no-op today: connector plug
-    // state is not represented in the domain model, but the scenario flow must
-    // keep advancing so authored plug nodes do not stall production scenarios.
+    // A plug-in is a no-op: cable state is not represented in the domain
+    // model, but the scenario flow must keep advancing so authored plug nodes
+    // do not stall production scenarios.
     await expect(executor.start()).resolves.toBeUndefined();
 
     expect(executor.getContext().state).toBe("completed");
     expect(chargePointShape.setMeterValue).toHaveBeenCalledWith(1, 42);
+    expect(chargePointShape.evDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("routes a plug-out during a transaction to ChargePoint.evDisconnected (#488)", async () => {
+    const { chargePoint, chargePointShape, connector, connectorShape } =
+      createRuntimeMocks();
+    connectorShape.hasRunningTransaction = true;
+    const callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector,
+    });
+
+    await callbacks.onConnectorPlug?.("plugout");
+
+    expect(chargePointShape.evDisconnected).toHaveBeenCalledWith(1);
+  });
+
+  it("keeps a plug-out without a transaction a no-op (#488)", async () => {
+    const { chargePoint, chargePointShape, connector } = createRuntimeMocks();
+    const callbacks = createScenarioExecutorCallbacks({
+      chargePoint,
+      connector,
+    });
+
+    await callbacks.onConnectorPlug?.("plugout");
+
+    // Templates follow a plug-out with their own status nodes; sending
+    // Available here would duplicate them.
+    expect(chargePointShape.evDisconnected).not.toHaveBeenCalled();
+    expect(chargePointShape.updateConnectorStatus).not.toHaveBeenCalled();
   });
 
   it("routes scenario reservation status changes through ChargePoint status updates", async () => {

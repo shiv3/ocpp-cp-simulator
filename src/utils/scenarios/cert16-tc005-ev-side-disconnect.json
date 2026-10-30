@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc005-ev-side-disconnect",
   "name": "Cert 1.6 Core: TC_005 EV Side Disconnected",
-  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req; EV-side disconnect (plugout) → StopTransaction.req with EVDisconnected reason → StatusNotification(Available).",
+  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req; EV-side disconnect (plugout) → StopTransaction.req with EVDisconnected reason → StatusNotification(Finishing, Available). The plugout stops the transaction itself while StopTransactionOnEVSideDisconnect=true (the default); with false it reports SuspendedEV and the Stop Transaction node ends it with EVDisconnected.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

@@ -455,6 +455,29 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  mcp.tool("ev_disconnected", {
+    description:
+      "Unplug the cable on the EV side of a connector. With a running transaction, StopTransactionOnEVSideDisconnect stops it (EVDisconnected) or suspends it (SuspendedEV); without one the connector goes Available",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: METHODS.ev_disconnected.params.shape.connector.describe(
+        "Connector identifier",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "ev_disconnected",
+          params: { connector: args.connector },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("set_meter_value", {
     description: "Set the meter value for a connector",
     inputSchema: z.object({

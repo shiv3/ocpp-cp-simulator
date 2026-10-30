@@ -16,7 +16,10 @@ import type {
   ActiveChargingProfile,
   Connector,
 } from "../../../domain/connector/Connector";
-import { buildCompositeWattsSchedule } from "../../../domain/connector/ChargingScheduleResolver";
+import {
+  buildCompositeWattsSchedule,
+  compositeLimitInUnit,
+} from "../../../domain/connector/ChargingScheduleResolver";
 import {
   ChargingProfileKindType,
   ChargingProfilePurposeType,
@@ -29,8 +32,6 @@ import type {
   V201InboundContext,
 } from "./inboundRegistryV201";
 
-const REFERENCE_PHASE_VOLTAGE = 230;
-const DEFAULT_PHASES = 3;
 const REPORT_SOURCE = "CSO";
 const REPRESENTABLE_PERIOD_KEYS = new Set([
   "startPeriod",
@@ -206,11 +207,6 @@ function domainProfileToV201(
       },
     ],
   };
-}
-
-function wattsToUnit(watts: number, unit: ChargingRateUnitType): number {
-  if (unit === ChargingRateUnitType.W) return watts;
-  return watts / REFERENCE_PHASE_VOLTAGE / DEFAULT_PHASES;
 }
 
 function affectedConnectors(
@@ -475,9 +471,11 @@ export function handleGetCompositeScheduleV201(
     req.duration,
   )
     .filter((period) => Number.isFinite(period.watts))
+    // Restated in the winning profile's own unit, with the joint phase
+    // count as `numberPhases`, the same rule as 1.6 (#323).
     .map((period) => ({
       startPeriod: period.startPeriod,
-      limit: wattsToUnit(period.watts, unit),
+      ...compositeLimitInUnit(period, unit),
     }));
 
   if (finitePeriods.length === 0) {

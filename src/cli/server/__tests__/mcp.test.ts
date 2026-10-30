@@ -169,6 +169,7 @@ describe("MCP server", () => {
       "stop_transaction",
       "authorize",
       "set_connector_status",
+      "ev_disconnected",
       "set_meter_value",
       "send_meter_value",
       "scenario_templates",

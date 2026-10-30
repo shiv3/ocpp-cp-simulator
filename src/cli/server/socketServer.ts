@@ -1851,6 +1851,13 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "ev_disconnected": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evDisconnected(id, params.connector),
+      );
+      return handled(undefined);
+    }
     case "set_meter_value": {
       const { params } = call;
       await runFacadeOperation(() =>

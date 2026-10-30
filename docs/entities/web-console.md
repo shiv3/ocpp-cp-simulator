@@ -440,12 +440,16 @@ bottom:
   (**Charging (faulted)** with a transaction) with nothing to press;
   `Unavailable` disables every step and says _Unavailable: send Available in
   Controls to plug in_. Start calls `startTransaction(cp, n, tag)`, Stop
-  `stopTransaction`. **Plug in** and **Unplug** send a StatusNotification
-  `Preparing` / `Available` (`sendStatusNotification`): the simulator's
-  `connectorPlug` scenario node runs a no-op callback, and the exported k6
-  runtime sends exactly these, so the card does what the node means on the
-  wire. A start on a connector already in `Preparing` does not send it again
-  (#496). While a step's call runs the stepper waits; a failure shows under it.
+  `stopTransaction`. **Plug in** sends a StatusNotification `Preparing`
+  (`sendStatusNotification`), as the exported k6 runtime does for a
+  `connectorPlug` plug-in. **Unplug** is an EV-side disconnect
+  (`evDisconnected`, #488): the station sends `Available` without a
+  transaction; with one, `StopTransactionOnEVSideDisconnect` stops it with
+  `EVDisconnected` or keeps it as `SuspendedEV` (see
+  [Charging sessions](../concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss)).
+  The stepper offers Unplug only in `Finishing` or, without a transaction,
+  as the alternative to Start. A start on a connector already in `Preparing`
+  does not send it again (#496). While a step's call runs the stepper waits; a failure shows under it.
 - **EV and battery**: an SVG battery whose fill follows the SoC (accent with a
   bolt while `Charging`, green once the SoC reaches the target, red when
   `Faulted`, the foreground grey otherwise), a dashed line at the EV's target SoC, and the
@@ -552,7 +556,8 @@ failure (`role="alert"`) and wait for their own call:
   `NoError`, `InternalError` by default (before #434 the console sent none, so
   the charge point reported the connector's current error code). The
   availability line says the CSMS sets it with ChangeAvailability.
-- **Connector**: **Plug in** / **Unplug** (the stepper's calls) and **Remove
+- **Connector**: **Plug in** / **Unplug** (the stepper's calls; Unplug is
+  pressable during a transaction, which makes it an EV-side disconnect) and **Remove
   connector** (#419), which asks first. The removal is not saved: the
   connector comes back when the charge point is created again (a reload in
   Local mode, a daemon restart).

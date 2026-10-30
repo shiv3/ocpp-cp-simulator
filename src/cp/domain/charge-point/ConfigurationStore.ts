@@ -204,6 +204,14 @@ export class ConfigurationStore {
     return this.getBoolean("StopTransactionOnInvalidId") ?? true;
   }
 
+  /** Canonical key `StopTransactionOnEVSideDisconnect` (2.x
+   *  `TxCtrlr.StopTxOnEVSideDisconnect`); default `true`. Whether an EV-side
+   *  cable disconnect stops the running transaction (1.6 §4.10, 2.0.1 E09) or
+   *  only suspends it as SuspendedEV (2.0.1 E10) (#488). */
+  stopTransactionOnEVSideDisconnect(): boolean {
+    return this.getBoolean("StopTransactionOnEVSideDisconnect") ?? true;
+  }
+
   /** Custom key `AuthorizeBeforeLocalStart`; default `true`. Gates whether
    *  `ChargePoint.startTransaction` sends Authorize.req and awaits the
    *  result before a LOCAL (non-remote-start) transaction start

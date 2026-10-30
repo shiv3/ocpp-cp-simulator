@@ -2021,6 +2021,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Not changed: a message signed before a restart and still queued offline is resent as it was. Keys are ephemeral by design (#315), so its records fail against the new key, which is what a station that lost its key sends. Documented.
 - [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): the above, and `ChangeConfiguration` as a way to set the mode scoped to 1.6J.
 
+## [2026-10-30] ingest | Web console tour moved to its own page
+
+- The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
+- Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
+
 ## [2026-10-30] ingest | Composite limits floored to 0.1 when converted (#524)
 
 - The 1.6 `GetCompositeScheduleResponse` schema requires `chargingSchedulePeriod[].limit` to be a multiple of 0.1, but a converted limit went out unrounded: a 3000 W / 1-phase `ChargePointMaxProfile` asked in A read 13.043478… A. `compositeLimitInUnit` now floors a converted limit (W → A and A → W) to 0.1, never below 0, with a 1e-9 tolerance so float noise (4.1 A × 230 V = 942.9999999999999 W) is not pushed a step down. A limit returned in its own unit stays as the CSMS set it.

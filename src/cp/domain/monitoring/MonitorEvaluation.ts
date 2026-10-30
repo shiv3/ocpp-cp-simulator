@@ -5,7 +5,13 @@ import {
   type MonitorState,
 } from "./evaluateMonitor";
 import type { MonitoringStore, MonitoringStoreEvent } from "./MonitoringStore";
-import type { VariableMonitor } from "./VariableMonitor";
+import { PeriodicMonitorScheduler } from "./PeriodicMonitorScheduler";
+import {
+  isAlertMonitorType,
+  isPeriodicMonitorType,
+  monitorBehaviour,
+  type VariableMonitor,
+} from "./VariableMonitor";
 
 /** One monitor event, ready to be reported by NotifyEvent (N07). */
 export interface MonitoringEvent {
@@ -14,7 +20,7 @@ export interface MonitoringEvent {
   readonly timestamp: Date;
   /** The monitor that fired (N07.FR.06). */
   readonly monitor: VariableMonitor;
-  readonly trigger: "Alerting" | "Delta";
+  readonly trigger: MonitorNotice["trigger"];
   readonly cleared: boolean;
   /** The value as GetVariables reports it; empty when write-only. */
   readonly actualValue: string;
@@ -29,8 +35,8 @@ export interface MonitorEvaluationDeps {
   /**
    * Called with the events that pass the monitoring level, once per
    * evaluation pass (one value change, one install, one resumption of
-   * reporting), by increasing monitor id. Never called with an empty list
-   * and never while reporting is off.
+   * reporting, one periodic tick), by increasing monitor id. Never called
+   * with an empty list and never while reporting is off.
    */
   emit(events: readonly MonitoringEvent[]): void;
   /** Whether a transaction is running on the charge point. */
@@ -56,9 +62,14 @@ export interface MonitorEvaluationDeps {
  * While reporting is off (BootNotification not Accepted, B02.FR.02) nothing
  * is emitted and the thresholds keep the state the CSMS was last told;
  * turning it on re-checks every threshold against the current value.
+ *
+ * Periodic and PeriodicClockAligned monitors (N08, #538) ignore value
+ * changes: their timers run while reporting is on, each tick reporting the
+ * current value with trigger `Periodic` (N08.FR.05).
  */
 export class MonitorEvaluation {
   private readonly states = new Map<number, MonitorState>();
+  private readonly periodic: PeriodicMonitorScheduler;
   private nextEventId = 1;
   private reporting = true;
 
@@ -70,12 +81,17 @@ export class MonitorEvaluation {
     private readonly deps: MonitorEvaluationDeps,
     restoredTriggered: ReadonlyMap<number, boolean> = new Map(),
   ) {
+    this.periodic = new PeriodicMonitorScheduler((id) => this.periodicTick(id));
     for (const monitor of deps.store.list()) {
+      if (isPeriodicMonitorType(monitor.type)) {
+        this.periodic.arm(monitor);
+        continue;
+      }
       const reading = deps.read(monitor.valueKey);
       if (reading === undefined) continue;
       this.states.set(monitor.id, {
         triggered:
-          monitor.type !== "Delta" &&
+          isAlertMonitorType(monitor.type) &&
           (restoredTriggered.get(monitor.id) ?? false),
         baseline: reading,
       });
@@ -87,6 +103,7 @@ export class MonitorEvaluation {
   valueChanged(valueKey: string): void {
     const events: MonitoringEvent[] = [];
     for (const monitor of this.deps.store.byValueKey(valueKey)) {
+      if (isPeriodicMonitorType(monitor.type)) continue;
       const event = this.step(monitor, this.states.get(monitor.id));
       if (event) events.push(event);
     }
@@ -103,18 +120,42 @@ export class MonitorEvaluation {
    * current value, so a trigger or a `cleared` the CSMS has not been told
    * about goes out now, including a restored trigger whose value returned
    * within range before the station started (N07.FR.14).
+   *
+   * The periodic monitors' timers stop with reporting and restart from
+   * scratch with it: a Periodic monitor's next tick is a full interval
+   * after reporting resumes.
    */
   setReporting(enabled: boolean): void {
     if (enabled === this.reporting) return;
     this.reporting = enabled;
-    if (!enabled) return;
+    if (!enabled) {
+      this.periodic.disarmAll();
+      return;
+    }
     const events: MonitoringEvent[] = [];
     for (const monitor of this.deps.store.list()) {
-      if (monitor.type === "Delta") continue;
+      if (isPeriodicMonitorType(monitor.type)) {
+        this.periodic.arm(monitor);
+        continue;
+      }
+      if (!isAlertMonitorType(monitor.type)) continue;
       const event = this.step(monitor, this.states.get(monitor.id));
       if (event) events.push(event);
     }
     this.flush(events);
+  }
+
+  /** N08.FR.05-FR.07: report the current value of a periodic monitor. */
+  private periodicTick(id: number): void {
+    const monitor = this.deps.store.get(id);
+    if (monitor === undefined || !isPeriodicMonitorType(monitor.type)) return;
+    const reading = this.deps.read(monitor.valueKey);
+    // #538 538c: a tick that is not sent because the station is offline is
+    // where N08.FR.03 would queue it; the timers do not run offline yet.
+    if (reading === undefined || !this.sendable(monitor)) return;
+    this.flush([
+      this.event(monitor, { trigger: "Periodic", cleared: false }, reading),
+    ]);
   }
 
   private onStore(event: MonitoringStoreEvent): void {
@@ -126,7 +167,12 @@ export class MonitorEvaluation {
         const keepsState =
           replaced !== undefined &&
           replaced.type === monitor.type &&
-          monitor.type !== "Delta";
+          isAlertMonitorType(monitor.type);
+        if (isPeriodicMonitorType(monitor.type)) {
+          if (this.reporting) this.periodic.arm(monitor);
+        } else if (replaced !== undefined) {
+          this.periodic.disarm(monitor.id);
+        }
         const wasTriggered = this.isTriggered(monitor.id);
         const events: MonitoringEvent[] = [];
         const result = this.step(
@@ -160,6 +206,7 @@ export class MonitorEvaluation {
       case "cleared":
         // N07.FR.12: removing a triggered monitor sends nothing.
         this.states.delete(event.monitor.id);
+        this.periodic.disarm(event.monitor.id);
         return;
       case "levelChanged":
       case "baseChanged":
@@ -177,10 +224,10 @@ export class MonitorEvaluation {
     const { state, notice } = evaluateMonitor(monitor, previous, reading);
     const sent = notice !== undefined && this.sendable(monitor);
     let next = state;
-    if (monitor.type === "Delta") {
+    if (monitorBehaviour(monitor.type) === "delta") {
       // N07.FR.18: the step counts from the last notice sent.
       if (notice !== undefined && !sent && previous) next = previous;
-    } else if (!this.reporting) {
+    } else if (isAlertMonitorType(monitor.type) && !this.reporting) {
       // Keep what the CSMS was last told; setReporting(true) re-checks it.
       // A monitor starting afresh (new, or replacing one of another type)
       // that is exceeded owes its trigger: hold it as not triggered.

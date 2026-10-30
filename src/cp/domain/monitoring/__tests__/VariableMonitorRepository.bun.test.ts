@@ -80,12 +80,23 @@ describe("VariableMonitorRepository", () => {
     expect(b.load()).toEqual([]);
   });
 
+  it.each(["Delta", "Periodic", "PeriodicClockAligned"] as const)(
+    "restores a %s monitor (#538)",
+    (type) => {
+      const repo = new VariableMonitorRepository("CP-A", openDb());
+      repo.save(monitor({ type, value: 900 }));
+      expect(repo.load()).toEqual([
+        { monitor: monitor({ type, value: 900 }), triggered: false },
+      ]);
+    },
+  );
+
   it("skips rows it cannot read instead of failing", () => {
     const db = openDb();
     for (const [id, raw] of [
       [1, "not json"],
       [2, "null"],
-      [3, JSON.stringify({ ...monitor({ id: 3 }), type: "Periodic" })],
+      [3, JSON.stringify({ ...monitor({ id: 3 }), type: "Bogus" })],
       [4, JSON.stringify({ ...monitor({ id: 4 }), component: undefined })],
       [5, JSON.stringify(monitor({ id: 5 }))],
     ] as const) {

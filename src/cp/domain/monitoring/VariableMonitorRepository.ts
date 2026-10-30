@@ -1,6 +1,9 @@
 import type { Database, SqlParam } from "../persistence/Database";
 import { parseMonitoringBase, type MonitoringBase } from "./MonitoringStore";
-import type { VariableMonitor } from "./VariableMonitor";
+import {
+  parseSupportedMonitorType,
+  type VariableMonitor,
+} from "./VariableMonitor";
 
 /**
  * The row holding the charge point's monitoring base (#538). Monitor ids
@@ -127,9 +130,8 @@ function parseMonitor(raw: string): VariableMonitor | null {
       typeof value.valueKey !== "string" ||
       typeof value.component?.name !== "string" ||
       typeof value.variable?.name !== "string" ||
-      (value.type !== "UpperThreshold" &&
-        value.type !== "LowerThreshold" &&
-        value.type !== "Delta")
+      typeof value.type !== "string" ||
+      parseSupportedMonitorType(value.type) === null
     ) {
       return null;
     }

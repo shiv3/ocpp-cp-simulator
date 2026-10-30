@@ -1,4 +1,4 @@
-import type { VariableMonitor } from "./VariableMonitor";
+import { monitorBehaviour, type VariableMonitor } from "./VariableMonitor";
 
 /**
  * The watched device-model value at one point in time: `text` as
@@ -19,7 +19,7 @@ export interface MonitorState {
 }
 
 export interface MonitorNotice {
-  readonly trigger: "Alerting" | "Delta";
+  readonly trigger: "Alerting" | "Delta" | "Periodic";
   /** `true` when a threshold monitor returns within range (N07.FR.02). */
   readonly cleared: boolean;
 }
@@ -32,14 +32,19 @@ export interface MonitorEvaluationStep {
 /**
  * One N07 evaluation step. `previous` is `undefined` when the monitor has
  * just been set: a threshold the value already exceeds triggers at once,
- * and a Delta takes the current value as its baseline.
+ * and a Delta takes the current value as its baseline. A periodic monitor
+ * never fires on a value: its timer does (N08).
  */
 export function evaluateMonitor(
   monitor: Pick<VariableMonitor, "type" | "value">,
   previous: MonitorState | undefined,
   reading: MonitoredReading,
 ): MonitorEvaluationStep {
-  if (monitor.type === "Delta") {
+  const behaviour = monitorBehaviour(monitor.type);
+  if (behaviour === "periodic") {
+    return { state: { triggered: false, baseline: reading } };
+  }
+  if (behaviour === "delta") {
     if (previous === undefined) {
       return { state: { triggered: false, baseline: reading } };
     }

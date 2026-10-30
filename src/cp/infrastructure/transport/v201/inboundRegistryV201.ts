@@ -15,7 +15,9 @@ import type {
   MeterValuesRequestV201,
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
+  SecurityEventNotificationRequestV201,
   SetVariablesRequestV201,
+  SignCertificateRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
 } from "../../../../ocpp";
@@ -65,19 +67,19 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import {
-  handleCertificateSignedAckV201,
+  buildCertificateHandlersV2x,
+  V201_CERTIFICATE_MAPPING,
+} from "./certificatesV201";
+import {
   handleClearDisplayMessageAckV201,
   handleClearVariableMonitoringAckV201,
   handleCostUpdatedAckV201,
   handleCustomerInformationAckV201,
   handleDataTransferAckV201,
-  handleDeleteCertificateAckV201,
   handleGetDisplayMessagesAckV201,
-  handleGetInstalledCertificateIdsAckV201,
   handleGetLocalListVersionAckV201,
   handleGetLogAckV201,
   handleGetMonitoringReportAckV201,
-  handleInstallCertificateAckV201,
   handlePublishFirmwareAckV201,
   handleSendLocalListAckV201,
   handleSetDisplayMessageAckV201,
@@ -123,7 +125,10 @@ export type V201Action =
   | "ReportChargingProfiles"
   // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
   | "FirmwareStatusNotification"
-  | "LogStatusNotification";
+  | "LogStatusNotification"
+  // #456: A02 certificate signing and its security event (A02.FR.07).
+  | "SignCertificate"
+  | "SecurityEventNotification";
 
 export type V201RequestPayload =
   | BootNotificationRequestV201
@@ -136,7 +141,9 @@ export type V201RequestPayload =
   | NotifyReportRequestV201
   | ReportChargingProfilesRequestV201
   | FirmwareStatusNotificationRequestV201
-  | LogStatusNotificationRequestV201;
+  | LogStatusNotificationRequestV201
+  | SignCertificateRequestV201
+  | SecurityEventNotificationRequestV201;
 
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
@@ -151,10 +158,15 @@ export interface V201HandlerResult {
 
 export interface V201InboundHandler {
   readonly validate: (data: unknown) => boolean;
+  /**
+   * A handler may answer asynchronously (#456: certificate hashing). The
+   * dispatcher awaits only a real promise, so a synchronous handler still
+   * answers in the same tick as its CALL.
+   */
   readonly handle: (
     payload: unknown,
     ctx: V201InboundContext,
-  ) => V201HandlerResult;
+  ) => V201HandlerResult | Promise<V201HandlerResult>;
 }
 
 export type V201InboundRegistry = ReadonlyMap<string, V201InboundHandler>;
@@ -231,6 +243,9 @@ export function handleGetReportV201(
 }
 
 export function buildV201InboundRegistry(): V201InboundRegistry {
+  const certificateHandlers = buildCertificateHandlersV2x(
+    V201_CERTIFICATE_MAPPING,
+  );
   return new Map<string, V201InboundHandler>([
     [
       "GetVariables",
@@ -449,28 +464,28 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "CertificateSigned",
       {
         validate: isValidCertificateSignedRequestV201,
-        handle: handleCertificateSignedAckV201,
+        handle: certificateHandlers.CertificateSigned,
       },
     ],
     [
       "DeleteCertificate",
       {
         validate: isValidDeleteCertificateRequestV201,
-        handle: handleDeleteCertificateAckV201,
+        handle: certificateHandlers.DeleteCertificate,
       },
     ],
     [
       "GetInstalledCertificateIds",
       {
         validate: isValidGetInstalledCertificateIdsRequestV201,
-        handle: handleGetInstalledCertificateIdsAckV201,
+        handle: certificateHandlers.GetInstalledCertificateIds,
       },
     ],
     [
       "InstallCertificate",
       {
         validate: isValidInstallCertificateRequestV201,
-        handle: handleInstallCertificateAckV201,
+        handle: certificateHandlers.InstallCertificate,
       },
     ],
     [

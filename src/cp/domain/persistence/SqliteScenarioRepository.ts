@@ -199,6 +199,10 @@ export class SqliteScenarioRepository implements ScenarioRepository {
   ): void {
     if (!this.db) return;
     const updatedAt = scenario.updatedAt ?? new Date().toISOString();
+    // `startup_source` is left out on purpose (#338): a new row starts
+    // user-authored (NULL), and a re-save under the same key — a `--watch`
+    // reload, a charge-point update re-attaching its scenarios — keeps
+    // whatever the daemon's startup install recorded for it.
     this.db.run(
       "INSERT INTO scenarios " +
         "(cp_id, connector_id, scenario_id, name, enabled, updated_at, definition) " +

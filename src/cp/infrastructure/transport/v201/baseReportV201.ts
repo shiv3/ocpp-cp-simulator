@@ -8,7 +8,10 @@ import type {
   VariableAttributeType,
   VariableCharacteristicsType,
 } from "../../../../ocpp/types/v201/notify-report";
-import { V201_VARIABLE_TO_V16_KEY } from "./deviceModelMap";
+import {
+  parseV201VariableKey,
+  V201_VARIABLE_TO_V16_KEY,
+} from "./deviceModelMap";
 import { renderConfigValue } from "./renderConfigValue";
 
 function toCharacteristicDataType(
@@ -35,9 +38,7 @@ export function buildBaseReportData(
     const entry = store.get(v16Key);
     if (!entry) continue;
 
-    const separatorIndex = v201Key.indexOf("/");
-    const componentName = v201Key.slice(0, separatorIndex);
-    const variableName = v201Key.slice(separatorIndex + 1);
+    const { component, variable, instance } = parseV201VariableKey(v201Key);
     const mutability = isWriteOnlyConfigurationKey(entry.key)
       ? "WriteOnly"
       : entry.key.readonly
@@ -45,8 +46,11 @@ export function buildBaseReportData(
         : "ReadWrite";
 
     reportData.push({
-      component: { name: componentName },
-      variable: { name: variableName },
+      component: { name: component },
+      variable: {
+        name: variable,
+        ...(instance !== undefined ? { instance } : {}),
+      },
       variableAttribute: [
         {
           type: "Actual",

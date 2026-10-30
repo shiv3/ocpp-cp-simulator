@@ -20,7 +20,7 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Daemon (server mode)
@@ -368,6 +368,36 @@ The rules, in the order they bite:
   and `--scenario-template-file` each load a definition onto every selected
   connector, so passing two is refused — at parse time, with a message naming
   the flags it cannot reconcile — rather than silently ranked.
+- **A startup scenario never outlives its configuration** (#338). With
+  `--state-db`, each row a startup flag creates records what generated it —
+  `--scenario=<path>`, `--scenario-template-file=<path>` or
+  `--scenario-template=<id>` in `scenarios.startup_source` (schema v18). On
+  every boot, before the watches are restored and before any charge point
+  dials, each restored charge point loses the marked rows this boot's flags do
+  not call for: a connector `--scenario-connector` no longer names, a file
+  whose own `id` changed, a switched or dropped flag, a charge point no longer
+  in the bootstrap fleet. When the flag's file cannot be read, or the template
+  id is unknown, nothing is removed on the fleet's charge points.
+  - **A row without provenance is never removed**: anything loaded over the
+    control plane or the console under an id no flag created, a console
+    upload replacing a connector's set, and a row written before v18. A flag
+    that loads over such a row — a charge point's seeded
+    `essential-cp-behavior-c<n>`, an operator's scenario under the same id —
+    replaces its definition but leaves it user-authored, so a later boot
+    without the flag keeps it. The flip side: a stable startup row written by
+    a pre-v18 build (`<base>-c<n>`, #314) stays user-authored too, and is not
+    pruned when a later boot narrows the flags; remove it once with
+    `remove_scenario`.
+  - **Clock-suffixed instances of older builds are replaced, not kept beside**:
+    the v18 migration records `<base>-c<n>-<epoch ms>` (`--scenario`, through
+    `0f6f951`) and `<template>-<cpId>-c<n>-<epoch ms>-<suffix>` (template
+    instances, through v0.9.0) as `legacy:<base>`, matched exactly on a 13+
+    digit epoch. Such a row goes on the first boot whose flags install
+    `<base>-c<n>` or `<base>` on that connector, and stays while nothing
+    replaces it.
+  - A marked row keeps its provenance through a re-save under the same id (a
+    `--watch` reload, a `load_scenario` over it) and loses it only with the
+    row: an id a flag created is the flag's.
 - **Blueprints are not watched; the file a blueprint names is.** A blueprint
   lives in the `blueprints` table (#297 declined a watched blueprint file
   deliberately), so a `blueprint.save` edit never reaches a charge point that
@@ -533,6 +563,17 @@ already carries the counters that would settle it. The
 same README also states the teardown ceiling an operator meets on Ctrl-C:
 about ten and a half minutes worst case on OCPP 1.6, and only against a daemon
 that is answering but has not finished creating.
+
+Teardown's ordering is tested against a **slow** mock CSMS by
+`scripts/bench/fleetBench.slowpath.test-bun.ts` (#330), run by
+`bun run test:bench-slow` in its own CI job (`bench-slow`, beside `test`; about
+36s locally) rather than inside `test:bun`. It pins settling in-flight cycles
+before closing transactions, for each cycle's own bound, the retirement branch
+the re-stop of a cancelled hold and the re-stop list keeping an acked stop;
+two cases shorten deadlines through
+test-only `FLEET_BENCH_TEST_*` variables that are not flags. The RPC stages of
+the cycle bound (pinned only as arithmetic, by the unit tests) and a
+`cp.create_many` past its 35s deadline (#523) have no run-level test — see [Source: bench README](../sources/bench-readme.md).
 
 **No number is recorded here yet.** Producing one requires a real CSMS and a
 stated machine, neither of which exists in this repository's CI or review

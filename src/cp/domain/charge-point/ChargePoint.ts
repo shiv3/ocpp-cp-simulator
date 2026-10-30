@@ -89,6 +89,7 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
@@ -221,8 +222,10 @@ export class ChargePoint {
   // onto every connector. Connectors consult this store at composite time.
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
-  private readonly _certificateStore = new CertificateStore();
+  private readonly _certificateStore: CertificateStore;
   private readonly _configuration: ConfigurationStore;
+  // #315: one simulated signing meter per connector, made on first use.
+  private readonly _signedMeters = new Map<number, OcmfMeter>();
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
   // The narrower type stops the rest of the code from accidentally setting
@@ -287,7 +290,7 @@ export class ChargePoint {
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
     /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
-     *  and per-connector availability. `null` keeps everything in-memory —
+     *  CertificateStore and per-connector availability. `null` keeps everything in-memory —
      *  used by the daemon's `:memory:` mode and by tests. */
     private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
@@ -306,6 +309,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
+    // #456: installed certificates survive a restart when state persists.
+    this._certificateStore = new CertificateStore(this._id, this._database);
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
     this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
@@ -665,6 +670,31 @@ export class ChargePoint {
   /** Standard OCPP Configuration Keys store. */
   get configuration(): ConfigurationStore {
     return this._configuration;
+  }
+
+  /**
+   * The connector's simulated OCMF signing meter while `SampledDataSignReadings`
+   * is true, else `null` (#315). The ephemeral key is made on first use, held
+   * in memory only, and published read-only as `MeterPublicKey<connectorId>`
+   * so a CSMS can validate against it (2.x stations also send it in every
+   * `signedMeterValue`).
+   */
+  signedMeterFor(connectorId: number): OcmfMeter | null {
+    if (!this._configuration.signReadings()) return null;
+    let meter = this._signedMeters.get(connectorId);
+    if (!meter) {
+      meter = new OcmfMeter({
+        meterSerial: `${this._id}-${connectorId}`,
+        gatewayId: "ocpp-cp-simulator",
+        gatewaySerial: this._id,
+      });
+      this._signedMeters.set(connectorId, meter);
+      this._configuration.defineRuntimeKey(
+        `MeterPublicKey${connectorId}`,
+        meter.publicKeyHex,
+      );
+    }
+    return meter;
   }
 
   get certificateStore(): CertificateStore {
@@ -1098,6 +1128,22 @@ export class ChargePoint {
     if (connector && failed && connector.transaction === failed) {
       connector.stopTransaction();
     }
+  }
+
+  /** Called by the 2.x handler on each CALLERROR answering a
+   *  TransactionEvent (#490). Reports only: the transaction is untouched. */
+  notifyTransactionMessageRejected(
+    event: ChargePointEvents["transactionMessageRejected"],
+  ): void {
+    this._events.emit("transactionMessageRejected", event);
+  }
+
+  /** Called by the 2.x handler when a TransactionEvent failed its last
+   *  attempt and is dropped (#490). Reports only, like the above. */
+  notifyTransactionMessageDiscarded(
+    event: ChargePointEvents["transactionMessageDiscarded"],
+  ): void {
+    this._events.emit("transactionMessageDiscarded", event);
   }
 
   /** Called by AuthorizeResultHandler when Authorize.conf arrives
@@ -2167,6 +2213,75 @@ export class ChargePoint {
       this.persistAvailability();
     }
     connector.scheduledAvailability = null;
+  }
+
+  /**
+   * The EV side of the cable was unplugged (#488). With a running
+   * transaction, `StopTransactionOnEVSideDisconnect` (2.x
+   * `TxCtrlr.StopTxOnEVSideDisconnect`) decides:
+   * - true: the transaction stops with `EVDisconnected` (1.6 §4.9 / §4.10;
+   *   2.0.1 E09: Ended, triggerReason `EVCommunicationLost`);
+   * - false: the transaction is kept and the connector goes SuspendedEV
+   *   (1.6 §4.9 / §4.10) with its energy offer stopped: the register no
+   *   longer rises while periodic MeterValues keep going out, and the
+   *   derived power is zero outside Charging. On 2.x a
+   *   TransactionEvent(Updated) carries chargingState `SuspendedEV` and
+   *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
+   *   that follows is de-duplicated against it. A second unplug while so
+   *   suspended sends nothing.
+   * Without a transaction the connector goes Available, as an unplug did
+   * before.
+   */
+  evDisconnected(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (!connector.hasRunningTransaction) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      return;
+    }
+
+    if (
+      connector.energyOfferSuspended &&
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.debug(
+        `Connector ${connectorId} EV side already disconnected, ignoring`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+
+    if (this._configuration.stopTransactionOnEVSideDisconnect()) {
+      this._logger.info(
+        `Connector ${connectorId} EV side disconnected, stopping the transaction (StopTransactionOnEVSideDisconnect=true)`,
+        LogType.TRANSACTION,
+      );
+      this.stopTransaction(connector, "EVDisconnected", {
+        triggerReason: "EVCommunicationLost",
+        stoppedReason: "EVDisconnected",
+      });
+      return;
+    }
+
+    this._logger.info(
+      `Connector ${connectorId} EV side disconnected, suspending the transaction (StopTransactionOnEVSideDisconnect=false)`,
+      LogType.TRANSACTION,
+    );
+    connector.suspendEnergyOffer();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this._outbox.sendTransactionUpdate(connectorId, {
+        triggerReason: "EVCommunicationLost",
+        chargingState: "SuspendedEV",
+      });
+    }
+    this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {

@@ -11,7 +11,7 @@ related:
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-09-29
+updated: 2026-10-29
 ---
 
 # Built-in scenario templates
@@ -84,8 +84,9 @@ The [steve-verify](../sources/steve-verify-readme.md) harness drives all 47
 ## Template instances
 
 Loading a template does not hand you the template file: it produces an
-_instance_ with its own `id`
-(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`) and a
-`templateId` field naming what it came from. On the daemon, instantiating a
-template is idempotent per (template, connector). Details:
+_instance_ with its own `id` and a `templateId` field naming what it came
+from. On the daemon the id is stable, `<templateId>-c<connectorId>` (#338), so
+instantiating a template is idempotent per (template, connector); in the
+browser it stays unique per load
+(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`). Details:
 [Scenario format → Template instances](../concepts/scenario-format.md#template-instances).

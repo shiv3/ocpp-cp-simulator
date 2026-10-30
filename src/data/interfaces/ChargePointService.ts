@@ -549,6 +549,11 @@ export interface ChargePointService {
     connectorId: number,
     options: TransactionUpdateOptions,
   ): Promise<void>;
+  /** The EV side of the cable was unplugged (#488): with a running
+   *  transaction, StopTransactionOnEVSideDisconnect stops it
+   *  (`EVDisconnected`) or suspends it (SuspendedEV); without one the
+   *  connector goes Available. */
+  evDisconnected(id: string, connectorId: number): Promise<void>;
   sendStatusNotification(
     id: string,
     connectorId: number,

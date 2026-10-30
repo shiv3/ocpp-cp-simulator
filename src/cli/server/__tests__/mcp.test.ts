@@ -172,6 +172,7 @@ describe("MCP server", () => {
       "auth_cache_seed",
       "auth_cache_clear",
       "set_connector_status",
+      "ev_disconnected",
       "set_meter_value",
       "send_meter_value",
       "scenario_templates",

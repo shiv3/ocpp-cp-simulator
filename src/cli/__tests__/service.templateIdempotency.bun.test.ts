@@ -6,16 +6,19 @@ import type { Database } from "../../cp/domain/persistence/Database";
 import { testCpInit } from "./testCpInit";
 
 /**
- * Template instances get a `${templateId}-${cpId}-c${connectorId}-${Date.now()}
- * -${suffix}` id, are persisted, and are all rehydrated on the next boot. So
- * every pod restart and every template re-run added one more copy per
- * connector: the field report found three Essential CP Behavior entries with
- * weeks-old timestamps sitting in `list_scenarios`, and nothing ever cleaned
- * them up.
+ * Template instances used to get a `${templateId}-${cpId}-c${connectorId}-
+ * ${Date.now()}-${suffix}` id, were persisted, and were all rehydrated on the
+ * next boot. So every pod restart and every template re-run added one more copy
+ * per connector: the field report found three Essential CP Behavior entries
+ * with weeks-old timestamps sitting in `list_scenarios`, and nothing ever
+ * cleaned them up.
  *
- * Instantiating a template on a connector now replaces any earlier instance of
+ * Instantiating a template on a connector replaces any earlier instance of
  * THAT template on THAT connector — a different template on the same connector
- * is untouched, and so is the same template on another connector.
+ * is untouched, and so is the same template on another connector. Since #338
+ * that is a property of the id, `<templateId>-c<connector>`, rather than of a
+ * per-template cleanup pass (deleted): the daemon has one
+ * prune, for startup-generated rows only.
  */
 const TEMPLATE = "essential-cp-behavior";
 const OTHER_TEMPLATE = "full-charging-cycle";
@@ -36,32 +39,36 @@ function idsOn(service: CLIChargePointService, connectorId: number): string[] {
 }
 
 describe("template instantiation is idempotent per (template, connector)", () => {
-  it("replaces the previous instance instead of accumulating", () => {
+  it("replaces the previous instance under a stable id instead of accumulating", () => {
     const service = newService();
 
     const first = service.loadScenarioTemplate(TEMPLATE, 1);
+    expect(first).toBe(`${TEMPLATE}-c1`);
     expect(idsOn(service, 1)).toEqual([first]);
 
     const second = service.loadScenarioTemplate(TEMPLATE, 1);
     const third = service.loadScenarioTemplate(TEMPLATE, 1);
 
-    // Still exactly one, and it is the newest instance.
+    // Still exactly one, under the same key every time.
     expect(idsOn(service, 1)).toEqual([third]);
-    expect(third).not.toBe(first);
-    expect(third).not.toBe(second);
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it("replaces the definition, not just the key", () => {
+    const service = newService();
+    service.loadScenarioTemplate(TEMPLATE, 1, undefined, { enabled: false });
+    const id = service.loadScenarioTemplate(TEMPLATE, 1);
+    expect(service.getScenario(1, id)?.enabled).not.toBe(false);
   });
 
   it("leaves a different template on the same connector alone", () => {
     const service = newService();
     const other = service.loadScenarioTemplate(OTHER_TEMPLATE, 1);
-    const first = service.loadScenarioTemplate(TEMPLATE, 1);
+    service.loadScenarioTemplate(TEMPLATE, 1);
     const second = service.loadScenarioTemplate(TEMPLATE, 1);
 
-    const ids = idsOn(service, 1);
-    expect(ids).toContain(other);
-    expect(ids).toContain(second);
-    expect(ids).not.toContain(first);
-    expect(ids).toHaveLength(2);
+    expect(idsOn(service, 1).sort()).toEqual([other, second].sort());
   });
 
   it("leaves the same template on another connector alone", () => {
@@ -70,9 +77,9 @@ describe("template instantiation is idempotent per (template, connector)", () =>
     const onC2 = service.loadScenarioTemplate(TEMPLATE, 2);
     service.loadScenarioTemplate(TEMPLATE, 1);
 
+    expect(onC2).not.toBe(onC1);
     expect(idsOn(service, 2)).toEqual([onC2]);
-    expect(idsOn(service, 1)).not.toContain(onC1);
-    expect(idsOn(service, 1)).toHaveLength(1);
+    expect(idsOn(service, 1)).toEqual([onC1]);
   });
 
   it("stamps templateId on the instance", () => {
@@ -91,7 +98,7 @@ describe("template instantiation is idempotent per (template, connector)", () =>
     expect(idsOn(service, 2)).toHaveLength(1);
   });
 
-  it("drops the replaced instance from the database, not just memory", () => {
+  it("keeps a single row in the database, not just in memory", () => {
     const db = BunSqliteDatabase.open(":memory:");
     const service = newService(db);
     service.loadScenarioTemplate(TEMPLATE, 1);
@@ -103,29 +110,42 @@ describe("template instantiation is idempotent per (template, connector)", () =>
     expect(idsOn(restarted, 1)).toEqual([kept]);
   });
 
-  it("cleans up instances left behind by older builds, which have no templateId", () => {
+  it("does not remove instances older builds left behind when loading a template at runtime", () => {
+    // The check the per-template cleanup pass made, moved (#338). It matched
+    // the old clock-suffixed id format and any instance carrying this
+    // `templateId`, whatever its id. A runtime load no longer removes
+    // anything; the schema v18 migration records the clock-suffixed shape as
+    // `legacy:<template>`, and the daemon's one startup prune removes it on
+    // the first boot whose `--scenario-template` installs the stable
+    // successor. An instance under another id is the operator's and stays.
     const db = BunSqliteDatabase.open(":memory:");
     const service = newService(db);
-
-    // Two accumulated rows in the pre-fix id format, no templateId field.
-    for (const stamp of [1750000000000, 1760000000000]) {
-      service.loadScenario(1, {
-        ...service.getScenario(1, service.loadScenarioTemplate(TEMPLATE, 1))!,
-        id: `${TEMPLATE}-${CP_ID}-c1-${stamp}-abc123`,
+    const template = service.getScenario(
+      1,
+      service.loadScenarioTemplate(TEMPLATE, 1),
+    )!;
+    const legacy = [
+      {
+        ...template,
+        id: `${TEMPLATE}-${CP_ID}-c1-1750000000000-abc123`,
         templateId: undefined,
-      });
-    }
-    expect(idsOn(service, 1).length).toBeGreaterThan(1);
+      },
+      { ...template, id: `${TEMPLATE}-${CP_ID}-c1-1760000000000-def456` },
+    ];
+    for (const definition of legacy) service.loadScenario(1, definition);
 
     const fresh = service.loadScenarioTemplate(TEMPLATE, 1);
-    expect(idsOn(service, 1)).toEqual([fresh]);
+
+    expect(idsOn(service, 1).sort()).toEqual(
+      [fresh, ...legacy.map((d) => d.id)].sort(),
+    );
   });
 
   it("does not mistake a different template whose id shares this one's prefix", () => {
     const service = newService();
     // `essential-cp-behavior-extended` starts with the template id under test;
     // a bare prefix match would wrongly delete it.
-    const lookalike = `${TEMPLATE}-extended-${CP_ID}-c1-1750000000000-abc123`;
+    const lookalike = `${TEMPLATE}-extended-c1`;
     const template = service.loadScenarioTemplate(TEMPLATE, 1);
     service.loadScenario(1, {
       ...service.getScenario(1, template)!,

@@ -790,7 +790,8 @@ export const METHODS = {
     result: ANY,
   },
   sign_certificate: {
-    params: z.object({ csr: NON_EMPTY_STR.optional() }),
+    // SignCertificateRequest.csr is string[0..5500] (1.6, 2.0.1, 2.1).
+    params: z.object({ csr: NON_EMPTY_STR.max(5500).optional() }),
     result: ANY,
   },
 
@@ -811,6 +812,12 @@ export const METHODS = {
       }).optional(),
       suppressChargingStateTransactionEvent: z.boolean().optional(),
     }),
+    result: ANY,
+  },
+  // #488: the EV side of the cable was unplugged. With a running
+  // transaction StopTransactionOnEVSideDisconnect stops or suspends it.
+  ev_disconnected: {
+    params: z.object({ connector: CONN_POS }),
     result: ANY,
   },
   set_meter_value: {

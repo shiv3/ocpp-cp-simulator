@@ -94,6 +94,8 @@ export interface SingleCpCommandOps {
     connectorId: number,
     options: TransactionUpdateOptions,
   ): Promise<void>;
+  /** #488: an EV-side disconnect on `connectorId`. */
+  evDisconnected(connectorId: number): Promise<void>;
   setMeterValue(connectorId: number, value: number): Promise<void>;
   sendMeterValue(
     connectorId: number,
@@ -278,6 +280,9 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendTransactionUpdate: async (connectorId, options) => {
       service.sendTransactionUpdate(connectorId, options);
     },
+    evDisconnected: async (connectorId) => {
+      service.evDisconnected(connectorId);
+    },
     setMeterValue: async (connectorId, value) => {
       service.setMeterValue(connectorId, value);
     },
@@ -442,6 +447,7 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.stopTransaction(cpId, connectorId, options),
     sendTransactionUpdate: (connectorId, options) =>
       service.sendTransactionUpdate(cpId, connectorId, options),
+    evDisconnected: (connectorId) => service.evDisconnected(cpId, connectorId),
     setMeterValue: (connectorId, value) =>
       service.setMeterValue(cpId, connectorId, value),
     sendMeterValue: (connectorId, context) =>

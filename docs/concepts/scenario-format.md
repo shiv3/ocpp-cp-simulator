@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/cli.md
   - vehicle-profiles.md
-updated: 2026-10-11
+updated: 2026-10-29
 ---
 
 # Scenario File Format (v1.4)
@@ -120,7 +120,7 @@ shape depends on `type`).
 | `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`            |
 | `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                       |
 | `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                       |
-| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             |                                                                                                                                                                                       |
+| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             | See [note](#connectorplug-notes) below.                                                                                                                                               |
 | `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                             |
 | `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                             |
 | `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                             |
@@ -246,6 +246,23 @@ pre-#240 behavior) matches any payload.
   }
 }
 ```
+
+### `connectorPlug` notes
+
+A plug-in is a no-op in the simulator: it sends nothing (a `transaction`
+start drives `Preparing` itself, #176). A plug-out **during a transaction** is an
+EV-side disconnect (`ChargePoint.evDisconnected`, #488):
+`StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`,
+default `true`) stops the transaction with `EVDisconnected`, or with `false`
+keeps it as `SuspendedEV` (2.x: `TransactionEvent(Updated)`, `triggerReason`
+`EVCommunicationLost`). A later `transaction` stop node then finds no running
+transaction under `true` and does nothing. A plug-out without a transaction is
+still a no-op. The full matrix is in
+[Charging sessions](charging-sessions.md#ev-side-disconnect-and-connection-loss).
+
+The exported k6 runtime keeps no configuration: its plug-in sends
+StatusNotification `Preparing` and its plug-out `Available`, with or without a
+transaction, and only its `transaction` stop node sends StopTransaction.
 
 ### `connectionTrigger` notes
 
@@ -434,19 +451,26 @@ the new graph. Anything else is run explicitly, as before.
 ## Template instances
 
 Loading a built-in template does not hand you the template file: it produces an
-_instance_ with its own `id`
-(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`) and a `templateId`
-field naming what it came from. Two loads of the same template are independent
-scenarios, so editing one never touches the other.
+_instance_ with its own `id` and a `templateId` field naming what it came from.
+In the browser the id is unique per load
+(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`), so two loads of
+the same template are independent scenarios and editing one never touches the
+other.
 
 On the **daemon**, instantiating a template is idempotent per
-(template, connector): the earlier instance of that template on that connector
-is replaced rather than added to. Without that, every pod restart and every
-`run_scenario_template` left one more copy behind in `--state-db` forever. A
-different template on the same connector, or the same template on another
-connector, is untouched. Instances persisted before `templateId` existed are
-recognised by their id format, so an existing state DB tidies itself on the
-next boot.
+(template, connector): the instance id is stable, `<templateId>-c<connectorId>`
+(#338), so loading the template again replaces the earlier instance under the
+same key, and discards its run if one is in flight. Without that, every pod
+restart and every `run_scenario_template` left one more copy behind in
+`--state-db` forever. A different template on the same connector, or the same
+template on another connector, is untouched. An instance an older build
+persisted under the clock-suffixed id above is recorded as such by the schema
+v18 migration and removed on the first boot whose `--scenario-template`
+installs its successor on that connector; a runtime load does not remove it,
+and nothing removes one that no boot replaces (a seeded default, a template
+loaded over the control plane). A `--scenario-template` instance from a
+configuration no longer in force is removed at boot — see
+[Daemon → File hot-reload](../entities/daemon.md#file-hot-reload).
 
 ## Charging curve (v1.2)
 
@@ -562,8 +586,21 @@ way: a `voltageV` that is not positive and finite reads as 230, and a
 `powerFactor` outside `(0, 1]` reads as unity, so no divisor in the electrical
 model can reach zero from an accepted input. This guarantee is about connectors that describe their electrics.
 `GetCompositeSchedule` is deliberately outside it: that response restates the
-CSMS's own profiles rather than metering a connector, so both directions there
-stay on the 230 V reference and remain each other's inverse.
+CSMS's own profiles rather than metering a connector, so it never reads the
+connector's electrical fields. On 1.6 (JSON and SOAP), 2.0.1 and 2.1 it
+restates the cap metering applies at the 230 V reference (#323). Every
+profile converts on the joint phase count — the tightest `numberPhases`
+across the Tx-layer profile and the `ChargePointMaxProfile`, 3 when neither
+states a positive integer — and the lower wattage wins each period. Asked in
+the winning profile's own unit, the limit comes back verbatim (a negative
+limit reads 0); asked in the other unit, it converts at 230 V on the joint
+count. `numberPhases` is the joint count, emitted only when a profile states
+one (none is invented). So a single 6 A profile on `numberPhases: 1` reads
+6 A or 1380 W on one phase, and a 10 A / 3-phase `TxProfile` under a
+3000 W / 1-phase `ChargePointMaxProfile` reads 10 A or 2300 W on one phase,
+the cap the meter enforces. Consecutive periods merge only when they restate
+the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
+18 A / 1 phase stays two periods though both are 4140 W.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with

@@ -1742,6 +1742,18 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
 
+## [2026-10-29] ingest | Startup scenarios from a configuration no longer in force (#338)
+
+- A startup instance's stable id (#314) only recognised the instance the boot was about to create: a boot that narrowed `--scenario-connector`, or a file whose own `id` changed, left the previous boot's copy loaded, unwatched and auto-startable. Each row a startup flag creates now records what generated it (`scenarios.startup_source`, schema v18, NULL = user-authored); a flag loading over an existing user-authored row (a seeded default) leaves it so. One prune runs at restore, before the first watch pass and before anything dials: every marked row the boot's flags do not call for goes. It replaces the `-<epoch ms>` prune for `--scenario` and `loadScenarioTemplate`'s per-template cleanup; a built-in template instance now has the stable id `<templateId>-c<connector>`, and re-instantiating one discards its in-flight run. The v18 migration records the clock-suffixed ids older builds generated, matched exactly, as `legacy:<base>`; the same prune removes one once the boot installs its stable successor on that connector. Every other row written before v18 stays NULL.
+- [Daemon → File hot-reload](entities/daemon.md#file-hot-reload): the rule, what it keeps, and what it never removes.
+- [File hot-reload](concepts/file-hot-reload.md): the two residual cases are closed; the upgrade prune is gone.
+- [State persistence](concepts/state-persistence.md): schema version 18; the `scenarios` row describes `startup_source`.
+- [Scenario format → Template instances](concepts/scenario-format.md#template-instances), [Scenario templates](entities/scenario-templates.md): daemon instance id, legacy instances kept.
+- [CLI](entities/cli.md): restarts with `--state-db`.
+- [Control plane](concepts/control-plane.md): `load_scenario_template` loads under the stable id. `schema/scenario.schema.json`: `templateId` is informational.
+- [GitHub issues](sources/github-issues.md): #338.
+- Maintainer review: a scenario the operator saves through the control plane or the web console (`load_scenario`, `load_scenario_template`, `scenario.definitions.save` / `.replace`) loses its startup provenance, so a later boot without the flag no longer prunes an edited scenario; a template loaded at run time also replaces an older build's epoch-stamped instance of it on that connector, as the builds that minted it did.
+
 ## [2026-10-29] ingest | Collapsible console sidebar
 
 - [Web console → Layout](entities/web-console.md#layout-route-prefixes): the sidebar folds into an icon rail (navigation icons with tooltips, mode dot, theme toggle) with a **Collapse sidebar** / **Expand sidebar** button beside the logo; the server URL and version line are hidden while collapsed. The state is kept in `localStorage` (`ocpp-cp.console.sidebar.collapsed`).
@@ -1871,3 +1883,102 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [State persistence](concepts/state-persistence.md#tables): one `authorization_cache` row per case-folded identifier.
 - [GitHub issues](sources/github-issues.md): #452 row covers 2.x and the seam. `related:` back-links on [CLI](entities/cli.md), [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md).
 - Maintainer review: a closed connection no longer empties the Local Authorization List (`teardownAfterClose` disposed it before `disconnected`, so offline the list was always empty and listed tags were refused); only deleting the charge point drops it, pinned with a real socket close ([Local authorization](concepts/local-authorization.md)). Browser cache seed / clear wait for the database flush. Behaviour changes to note in the release: an unknown tag started offline is refused at once (no 10 s wait) unless `AllowOfflineTxForUnknownId`; 2.x `ClearCache` answers `Rejected` while `AuthCacheCtrlr.Enabled` is false (C11.FR.04).
+
+## [2026-10-29] ingest | Certificate store shared by 1.6 and 2.x, persisted (#456)
+
+- The certificate store speaks version-neutral uses (`src/cp/domain/security/certificateUse.ts`); 1.6, 2.0.1 and 2.1 map onto them explicitly in `certificateUseMapping.ts` and refuse what a version does not define (`OEMRootCertificate` and `V2G20Certificate` are 2.1-only). Hash data is computed at install time; chain members are hashed against their issuer. Pending CSRs are tracked per signing use and matched to a returned chain by public key; the private key is never kept.
+- Trust anchors and signed chains persist in the new `certificates` table (schema v18); pending CSRs stay in memory. The 1.6 handlers run on the new store with no wire change; the 2.x handlers are unchanged so far.
+- [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): new section, use mapping table, 1.6 behaviour, persistence.
+- [State persistence → Tables](concepts/state-persistence.md#tables): `certificates` row, schema version 18, `cp.delete` list.
+- [Index](index.md): security profiles summary. [GitHub issues](sources/github-issues.md): #456.
+
+## [2026-10-29] ingest | Stateful OCPP 2.x certificate management (#456)
+
+- The 2.0.1 / 2.1 `InstallCertificate`, `GetInstalledCertificateIds`, `DeleteCertificate` and `CertificateSigned` handlers no longer answer fixed negative acknowledgements: they install, list and delete on the certificate store (M03-M05) and match a returned chain to the pending CSR by public key (A02.FR.06). A rejected chain raises `InvalidChargingStationCertificate` (A02.FR.07). 2.1 registers the same handlers with its own enum mapping.
+- `sign_certificate` sends a real `SignCertificateRequest` on 2.x and records its CSR as pending; the response status is logged and a `Rejected` keeps the CSR.
+- The 2.x dispatcher awaits a handler only when it returns a promise, so synchronous answers keep their ordering; a rejected promise is an `InternalError` CALLERROR.
+- [Security profiles → OCPP 2.0.1 and 2.1 behaviour](concepts/security-profiles.md#ocpp-201-and-21-behaviour): new section with statuses, limits and what is not covered.
+- [Log format](concepts/log-format.md): the 2.x `SignCertificateResponse` log lines. [GitHub issues](sources/github-issues.md): #456 row.
+
+## [2026-10-29] ingest | Certificate store ordering, reinstall and save failures (#456)
+
+- The certificate store runs its operations one at a time, so a `GetInstalledCertificateIds` or `DeleteCertificate` sent right after an `InstallCertificate` sees it, on 1.6 and 2.x.
+- 2.x replaces a reinstalled certificate and answers `Accepted`, even in a full store (M05.FR.17); 1.6 keeps duplicates. `InstallCertificate` answers `Failed` when the database refuses the row. A 1.6 `CertificateSigned` chain replaces the previous one.
+- A 2.x answer that settles after the connection changed is reported as unanswered; `sign_certificate`'s `csr` is bounded to 5500 characters.
+- [Security profiles → Certificate store](concepts/security-profiles.md#certificate-store): 1.6 and 2.x behaviour, ordering, limits (`V2G20Certificate` chains, `serialNumber` leading zero, whitepaper M04.FR.06), persistence failures.
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): `sign_certificate` bound.
+
+## [2026-10-29] ingest | 2.x TransactionEvent CALLERROR follows E13 (#490)
+
+- A CALLERROR answering a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or `Ended`) was ignored. The station now keeps the transaction running, emits `transactionMessageRejected` on every CALLERROR, resends the same payload under a new message id after `MessageAttemptInterval[TransactionEvent]` × transmissions so far, and after `MessageAttempts[TransactionEvent]` transmissions discards it with `transactionMessageDiscarded`. A waiting resend is dropped on WebSocket close. 1.6 is unchanged (#447).
+- `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` and `MessageAttemptInterval[TransactionEvent]` (variable instance `TransactionEvent`, 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12) map to `TransactionMessageAttempts` and `TransactionMessageRetryInterval`, so GetBaseReport now lists them with their instance. The device-model map takes an optional instance: an exact instanced entry first, else the instance-less entry, so no existing variable changes when a CSMS names an instance.
+- A resend cancelled by a WebSocket close, or dropped because the station is offline when it falls due, is logged as a `warn`. Not holding back the next transaction message while a resend waits is documented as a known limitation (E13 Figure 62 describes sequential delivery).
+- [OCPP versions and transports → Transaction message retries](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x): new section.
+- [Charging sessions](concepts/charging-sessions.md): the session stays `active`; the Limits entry states the E13 behaviour.
+- [Operational timeline](concepts/operational-timeline.md): `transaction_message_rejected` and `transaction_message_discarded` kinds, format `1.2`.
+- [Index](index.md): Operational timeline and OCPP versions and transports summaries.
+- [GitHub issues](sources/github-issues.md): #490.
+
+## [2026-10-29] ingest | EV-side disconnect follows StopTransactionOnEVSideDisconnect (#488)
+
+- New domain operation `ChargePoint.evDisconnected(connectorId)`, reached by the `ev_disconnected` method (JSON Lines, Socket.IO, the new curated `ev_disconnected` MCP tool — 26 curated tools), the console's **Unplug** and a scenario `connectorPlug` plug-out during a transaction. With a running transaction, `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`, default `true`, new `ConfigurationStore.stopTransactionOnEVSideDisconnect()`) stops it with `EVDisconnected` (2.0.1 E09: `Ended`, `triggerReason` `EVCommunicationLost`) or, with `false`, keeps it as `SuspendedEV` (2.0.1 E10: `Updated`, `chargingState` `SuspendedEV`, `triggerReason` `EVCommunicationLost`). Without a transaction the console's Unplug still sends `Available`; a scenario plug-out stays a no-op.
+- A WebSocket close keeps the transaction on 1.6 and 2.x, now pinned by tests; no option ends a transaction on connection loss. OCPP-J 1.6 replays the transaction messages queued offline; 2.x has no offline queue, so a TransactionEvent produced offline is dropped rather than replayed with `offline: true` (E11.FR.02) — recorded as a limit, follow-up #528.
+- With `false` the energy offer stops: the register freezes while periodic MeterValues go on, and a second unplug while suspended sends nothing.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): new section; the "Limits" entry for #488 is replaced by the 2.x offline-queue gap (#528), the unmodelled E10 resume and the 1.6 Unplug before StartTransaction.conf (`transactionId: 0`).
+- [Control plane](concepts/control-plane.md): `ev_disconnected` row. [MCP endpoint](entities/mcp-endpoint.md): `ev_disconnected` tool, 26 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)).
+- [Scenario format → `connectorPlug` notes](concepts/scenario-format.md#connectorplug-notes): what a plug-in and a plug-out do, and the k6 runtime's difference, also a row in [CLI → What the exported runtime models](entities/cli.md#what-the-exported-runtime-models).
+- [Web console](entities/web-console.md): Unplug is an EV-side disconnect. [State persistence](concepts/state-persistence.md): `pending_messages` is OCPP-J 1.6 only.
+- Template `cert16-tc005-ev-side-disconnect`: its plug-out now stops the transaction itself; description updated.
+- [GitHub issues](sources/github-issues.md): #488, #528.
+
+## [2026-10-29] ingest | Text redactor: quoted secrets across lines and unterminated PEMs (#519)
+
+- In non-JSON log text, a quoted secret with a raw newline or a backslash line continuation was redacted only to the end of its first line, and a PEM value without its closing quote ended at the next quote, so the text after that quote — the rest of the truncated PEM and anything following it (`x="y" tail=SECRET`) — was logged in clear.
+- A quoted value whose first unescaped quote is on a later line now ends there when a delimiter (whitespace, `,`, `}`, `]`, end of text) follows it and no `:` / `=` precedes it, so the #401 case (`password="a` then `privateKey="SECRET"`) still stops at the line end. Neither may it run over another secret-named assignment, whose own closing quote would come later (`password="a\nprivateKey='S1 x" y S2'` would otherwise log `S2`). A PEM value ends only at a quote after its `-----END …-----` marker with no such assignment before it, else at the end of the text.
+- Fail-closed side effects stated: `password="a\nuser=bob" x` logs `password="[redacted]" x`; a PEM without `-----END …-----"` hides the rest of the message, and inside a single-quoted JSON string value it cuts the frame. Remaining limit stated: a later-line quote followed by `;`, `)` or a letter does not end the value.
+- [Log format → Redaction](concepts/log-format.md#redaction): the line-rule paragraph restated with its exceptions; the #519 limits sentence removed.
+- [GitHub issues](sources/github-issues.md): #519 row rewritten.
+
+## [2026-10-29] ingest | 1.6 charging profiles in e2e, composite round trip (#323)
+
+- The gocpp fixture's 1.6 dispatch gains `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule`, and marshals decimals as JSON numbers. `e2e/chargingProfile.gocpp.e2e.ts` (in `test:e2e`) pins a 6 A profile on an AC 230 V / 3-phase / cos φ 0.9 connector: `Power.Active.Import` 3726 W and `Current.Import` 6.0 A, or 1242 W and 6.0 A with `numberPhases: 1`. The issue's 2.0 A for one phase was the old divide-by-three artefact.
+- `GetCompositeSchedule` (1.6, 2.0.1 and 2.1) converted A → W on the period's `numberPhases` and back over 3 phases, so 6 A on one phase came back as 2.0 A, and it dropped `numberPhases`. Each period now restates the winning profile period: verbatim in its own unit, converted at 230 V on the joint phase count (3 when none) for the other unit, with that count as `numberPhases`; equal watts from different periods no longer merge. A stack is converted on the joint phase count, as metering does, so the composite restates the cap the meter enforces (16 A / 1 ph under a 10 A station cap reads 10 A on 1 phase).
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence rewritten; the composite now equals the metering cap at the 230 V reference.
+- [Source: e2e/README.md](sources/e2e-readme.md): six suites, the new suite, the CSMS→CP action list per version.
+- [Testing strategy](analyses/testing-strategy.md): the e2e row mentions 1.6 charging profiles.
+- [GitHub issues](sources/github-issues.md): #323.
+
+## [2026-10-29] ingest | Retire the manual desktop release workflow (#516)
+
+- `.github/workflows/manual-release.yml` created a draft `v<version>` release and built the desktop bundles without `npm version`, so the bundle, the web console and the sidecar daemon reported the `0.0.0` placeholder. It never ran, and publishing its draft would have fired `release.yml` on the new tag and uploaded the bundles a second time. It is removed rather than stamped: publishing the release-drafter draft is the only release path.
+- [Desktop app → Download](entities/desktop-app.md#download): the tag path stamps the version; the manual workflow is gone; a branch dispatch of `release.yml` uploads nothing.
+- [GitHub issues](sources/github-issues.md): #516.
+
+## [2026-10-29] ingest | Bench teardown slow paths tested against a slow mock CSMS (#330)
+
+- The bench smoke suite's mock CSMS answered every CALL at once, so the teardown guards that only engage when something is slow could be removed with every test green. `scripts/bench/smokeHarness.ts` now holds the mock (per-action `delayMs` / `stallAfter`, receipt and reply hooks, open transactions tracked by id), the daemon and bench subprocesses and the control-plane helpers, shared with the smoke file.
+- New `scripts/bench/fleetBench.slowpath.test-bun.ts`, run by `bun run test:bench-slow` in a separate `bench-slow` CI job (about 36s locally), not by `test:bun`. It pins settle-before-close, the assigned-id stage of the cycle bound, the retirement branch, the re-stop of a cancelled hold and the re-stop list keeping an acked stop (read off teardown's `closing N open transaction(s)` count, since the CSMS sees one stop either way), each by a mutation that turns it red. Two cases use test-only `FLEET_BENCH_TEST_*` deadline overrides, validated in `lib.ts` and refused like a bad flag (`Error: …`, usage, exit 1); defaults unchanged.
+- Stale text dropped: teardown no longer waits on `ocppcp_ocpp_messages_total` nor verifies each closing stop; it re-stops and counts acks. No run-level test for: the RPC stages of the cycle bound (pinned only as arithmetic by `lib.bun.test.ts`), `cp.create_many` past its 35s deadline (#523), and what the no-op re-stop of an already-acked stop does on the wire.
+- [Source: bench README](sources/bench-readme.md): teardown paragraph, layout, "Not covered by a run-level test".
+- [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): the slow-path suite and its CI job.
+- [Testing strategy](analyses/testing-strategy.md): a Bun file outside both runner filters.
+- [GitHub issues](sources/github-issues.md): #330, #523.
+- Raw sources changed in the same PR: `scripts/bench/lib.ts`, `scripts/bench/fleet-bench.ts`, `scripts/bench/lib.bun.test.ts`, `scripts/bench/fleetBench.smoke.bun.test.ts`, `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/README.md`, `package.json`, `.github/workflows/ci.yml`.
+
+## [2026-10-29] ingest | OCMF signed meter values (#315)
+
+- New `src/cp/domain/connector/SignedMeterData.ts`: an OCMF 1.4 generator (ECDSA-secp256r1-SHA256 via `@noble/curves`, synchronous so signing never reorders messages) with no OCPP knowledge, mapped to 1.6 `format: "SignedData"` samples and 2.x `signedMeterValue`. Off by default (`SampledDataSignReadings`, 2.x `SampledDataCtrlr.SignReadings`); one ephemeral key per connector, made on first use and published read-only as `MeterPublicKey<id>`; `SignedMeterDataMode` picks `valid`, `tampered_payload`, `wrong_key` or `invalid_signature`. 1.6 signs the begin reading at StartTransaction and sends it with the end reading in `StopTransaction.transactionData`, so page numbers stay in time order. String configuration keys can now list `allowed` values.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): new section (keys, carriers per version, test modes, what is not implemented).
+- [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md#4b-signed-meter-values-optional): 4b shipped under #315.
+- [GitHub issues](sources/github-issues.md): #315.
+
+## [2026-10-29] ingest | OCMF signed meter values review fixes (#315)
+
+- Review of #521: a `|` in the idTag or a serial is escaped as `\u007C` in the OCMF payload; a negative register is signed as it is instead of clamped to 0; a restored 1.6 transaction drops its begin record (the ephemeral key that signed it is gone); a stored begin record is still sent at the stop when signing was turned off since; the 2.x fallback energy sample carries the requested `context`, and `MeterValues` with an empty measurand list still sends the signed energy sample. The REPL `meter` command refuses an overflowing value (`Infinity`) as well as `NaN`.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): restart, signing-off-mid-transaction, escaping and negative registers.
+
+## [2026-10-29] ingest | OCMF signed meter values, second review round (#315)
+
+- Second review of #521: clock-aligned (`Sample.Clock`) samples carry no signed record on 1.6 or 2.x, as the documented scope excludes aligned records; signed 2.x samples on `TransactionEvent(Started)` / `(Ended)` carry `context` `Transaction.Begin` / `Transaction.End`; the records claim no identification detail (`IF` empty), since the station does not record how a tag was authorized; a register too large to write as plain decimal digits is not signed; `tampered_payload` with no reading throws instead of corrupting the header.
+- Not changed: a message signed before a restart and still queued offline is resent as it was. Keys are ephemeral by design (#315), so its records fail against the new key, which is what a station that lost its key sends. Documented.
+- [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): the above, and `ChangeConfiguration` as a way to set the mode scoped to 1.6J.

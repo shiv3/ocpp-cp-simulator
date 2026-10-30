@@ -82,6 +82,7 @@ import {
   isAutoStartKeyOf,
   matchAutoStart,
 } from "../cp/application/scenario/autoStart";
+import { legacyGeneratedBaseId } from "../cp/domain/persistence/legacyStartupInstances";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "../cp/domain/persistence/ScenarioRepository";
 import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
@@ -120,6 +121,7 @@ import type {
   TimelineQuery,
 } from "../cp/application/services/OperationalTimeline";
 import { scenarioTemplates, getTemplateById } from "../utils/scenarioTemplates";
+import { scenarioInstanceId } from "./scenarioInstanceId";
 import { TranscriptBuffer } from "../cp/application/verification/TranscriptBuffer";
 import {
   evaluateAssertions,
@@ -1121,6 +1123,11 @@ export class CLIChargePointService {
     this._chargePoint.sendTransactionUpdate(connectorId, options);
   }
 
+  /** #488: an EV-side disconnect on `connectorId`. */
+  evDisconnected(connectorId: number): void {
+    this._chargePoint.evDisconnected(connectorId);
+  }
+
   setMeterValue(connectorId: number, value: number): void {
     this._chargePoint.setMeterValue(connectorId, value);
   }
@@ -1442,46 +1449,37 @@ export class CLIChargePointService {
         ...evSettingsOverride,
       };
     }
-    // Instantiating a template is idempotent per (template, connector): drop
-    // any earlier instance of THIS template on THIS connector first. Instance
-    // ids embed Date.now(), so without this every boot and every re-run added
-    // one more copy — the field report found three weeks-old Essential CP
-    // Behavior entries stacked on one connector with nothing cleaning them up.
+    // Instantiating a template is idempotent per (template, connector): the
+    // instance id is stable (#338), so loading the template again replaces the
+    // previous instance under the same key instead of stacking one more copy —
+    // the field report found three weeks-old Essential CP Behavior entries on
+    // one connector when this id still embedded Date.now(). A startup
+    // `--scenario-template` instance from a configuration no longer in force is
+    // a different key, removed by the daemon's one startup prune.
+    definition.id = scenarioInstanceId(templateId, connectorId);
     if (options.enabled === false) definition.enabled = false;
-    this.removePriorTemplateInstances(templateId, connectorId);
+    // The instance an older build minted for the same template on this
+    // connector (`<templateId>-<cpId>-c<n>-<epoch>-<suffix>`) is the one this
+    // load replaces, as those builds removed it: left in place it would run
+    // alongside the stable instance (#338).
+    for (const [scenarioId, entry] of [...this._scenarios]) {
+      if (
+        entry.connectorId === connectorId &&
+        legacyGeneratedBaseId(this._chargePoint.id, connectorId, scenarioId) ===
+          templateId
+      ) {
+        this.removeScenario(connectorId, scenarioId);
+      }
+    }
+    // Replacing an instance discards its in-flight run, as removing the
+    // previous instance used to: a re-run must start the new definition, not
+    // find the old executor still holding the id.
+    this.discardScenarioRun(definition.id);
     return this.loadScenario(
       connectorId,
       definition,
       options.autoStart === undefined ? {} : { autoStart: options.autoStart },
     );
-  }
-
-  /**
-   * Remove scenarios on `connectorId` that are earlier instances of
-   * `templateId`, from memory and the DB both.
-   *
-   * Matches on the `templateId` field going forward. Instances persisted by
-   * builds before that field existed are matched on the exact id format
-   * `createScenario` produces, so an existing state.db self-cleans on the next
-   * boot. Deliberately NOT a bare `id.startsWith(templateId)`: that would also
-   * match a different template whose id happens to start with this one.
-   */
-  private removePriorTemplateInstances(
-    templateId: string,
-    connectorId: number,
-  ): void {
-    const legacyInstanceId = new RegExp(
-      `^${escapeRegExp(templateId)}-${escapeRegExp(this._chargePoint.id)}-c${connectorId}-\\d+-[0-9a-z]+$`,
-    );
-    for (const [scenarioId, entry] of [...this._scenarios]) {
-      if (entry.connectorId !== connectorId) continue;
-      const definitionTemplateId = entry.definition.templateId;
-      const matches =
-        definitionTemplateId !== undefined
-          ? definitionTemplateId === templateId
-          : legacyInstanceId.test(scenarioId);
-      if (matches) this.removeScenario(connectorId, scenarioId);
-    }
   }
 
   /**
@@ -3475,12 +3473,6 @@ export class CLIChargePointService {
       });
     });
   }
-}
-
-/** Escape a literal for embedding in a RegExp. Charge point ids and template
- *  ids are operator-supplied strings that can contain `.`, `+`, `(`, … */
-function escapeRegExp(literal: string): string {
-  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

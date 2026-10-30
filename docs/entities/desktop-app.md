@@ -13,7 +13,7 @@ related:
   - cli.md
   - ../concepts/local-vs-remote-mode.md
   - ../analyses/testing-strategy.md
-updated: 2026-09-05
+updated: 2026-10-29
 ---
 
 # Desktop app (Tauri)
@@ -86,7 +86,13 @@ Three things changed:
 
 Download the latest desktop version from the [Releases](https://github.com/shiv3/ocpp-cp-simulator/releases) page.
 Desktop releases are cut from `vX.Y.Z` git tags (the same tag that publishes
-semver [Docker image](docker-image.md#image-tags) tags).
+semver [Docker image](docker-image.md#image-tags) tags). Publishing the
+release-drafter draft creates that tag, and [`release.yml`](../../.github/workflows/release.yml)
+stamps the version into `package.json` before it builds, so the bundle, the
+web console footer and the sidecar daemon all report `X.Y.Z`. That is the only
+release path: the manual `workflow_dispatch` workflow that created its own
+draft without stamping the version was removed (#516). Dispatching
+`release.yml` from a branch only smoke-builds the bundles and uploads nothing.
 
 Available for:
 

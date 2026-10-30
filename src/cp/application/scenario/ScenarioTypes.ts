@@ -495,10 +495,10 @@ export interface ScenarioDefinition {
    * Set by `templateFromJson`'s `createScenario`; absent on hand-authored
    * scenarios and on instances persisted by builds before this field existed.
    *
-   * Lets the daemon recognise "the same template on the same connector" and
-   * replace the earlier instance instead of stacking a new one up on every
-   * boot. Instance ids embed `Date.now()`, so they can't answer that question
-   * themselves without parsing.
+   * Informational on the daemon since #338: its template instances have the
+   * stable id `<templateId>-c<connector>`, so "the same template on the same
+   * connector" is the same key and a reload replaces it. Browser instances
+   * still embed `Date.now()` in their id.
    */
   templateId?: string;
   /**

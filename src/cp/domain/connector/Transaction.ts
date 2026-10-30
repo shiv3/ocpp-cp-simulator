@@ -290,6 +290,13 @@ export interface Transaction {
   /** OCPP 2.x TransactionEvent chargingState for the Started event (#335).
    *  If absent the encoder sends `Charging`, the historical value. */
   startChargingState?: TransactionChargingState;
+  /** #315: the OCMF document signed for the begin reading when the
+   *  transaction started (only while `SampledDataSignReadings` is on). 1.6
+   *  has nowhere to send it at start, so it rides in StopTransaction's
+   *  `transactionData` next to the end reading; signing it at start keeps
+   *  the meter's page numbers in time order. Dropped when a transaction is
+   *  restored after a restart: the key that signed it is gone. */
+  signedBeginOcmf?: string;
   /** OCPP 2.x TransactionEvent triggerReason for the Ended event. If absent,
    *  the encoder defaults to the local StopAuthorized path. */
   stopTriggerReason?: TransactionStopTriggerReason;

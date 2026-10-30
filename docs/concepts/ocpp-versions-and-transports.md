@@ -10,6 +10,8 @@ sources:
   - src/cli/soapTunnel.ts
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
+  - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
+  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries)
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -22,7 +24,9 @@ related:
   - trace-format.md
   - scenario-format.md
   - charging-sessions.md
-updated: 2026-10-28
+  - operational-timeline.md
+  - expert-ocpp-calls.md
+updated: 2026-10-29
 ---
 
 # OCPP versions and transports
@@ -97,6 +101,60 @@ WebSockets, at the cost of a control frame instead of a Heartbeat round trip.
   2.x `SetVariables` answers `Rejected`. The CLI and daemon (Bun's client, or
   `ws` under Node) always send them.
 
+## Transaction message retries (OCPP 2.x)
+
+On 2.0.1 and 2.1 a CALLERROR answering a TransactionEvent (`Started`,
+`Updated` or `Ended`) means the CSMS failed to process it (E13, #490). It
+used to be ignored. The station now:
+
+- **keeps the transaction running.** The connector stays as it was, the
+  station does not end the transaction on the error, and the
+  [charging session](charging-sessions.md) stays `active`. This differs from 1.6, where a StartTransaction CALLERROR
+  abandons the transaction (#447);
+- **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
+  `eventType`, `errorCode`, `attempt`) on every CALLERROR;
+- **resends the same payload** (same `seqNo`, same `transactionId`) under a
+  new message id, as OCPP-J requires for a retry (Part 4 §4.1.4). It waits
+  `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]` seconds times the
+  number of transmissions so far (E13.FR.03): 60 s, then 120 s with the
+  default of 60;
+- **discards the message after `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`
+  transmissions in all** (default 3, E13.FR.04) and emits
+  `transactionMessageDiscarded` (`attempts` instead of `attempt`).
+
+A CALLRESULT ends the retries; an answer to a resend goes through the normal
+`idTokenInfo` handling. Both settings are the 1.6 keys
+`TransactionMessageAttempts` and `TransactionMessageRetryInterval` under
+their 2.x names, so `SetVariables`, `GetVariables` and `GetBaseReport` see
+them and a change applies to the next CALLERROR. An attempts value below 1
+counts as 1; a negative interval counts as 0.
+
+Those two are instanced variables: the CSMS names them `MessageAttempts` /
+`MessageAttemptInterval` with `variableInstance = "TransactionEvent"`
+(2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12); "MessageAttemptsTransactionEvent" is
+only the title of the spec section. Without that instance, or under the
+flat name, `GetVariables` / `SetVariables` answer `UnknownVariable`. The
+results echo the `variable` the CSMS sent, instance included, and
+`GetBaseReport` reports `variable: { name, instance }` for them. Every
+other mapped variable has no instance and answers whatever instance the
+CSMS names, as before.
+
+Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
+resend does not hold back the next transaction message. E13 (Figure 62)
+describes sequential delivery; this station may deliver `Ended` before the
+resent `Started`, and the CSMS has to order the messages by `seqNo`. A
+resend still waiting when the WebSocket closes
+(network loss, disconnect, reset, delete) is dropped: 2.x has no offline
+queue to hand it to. So is a resend that finds the station offline when it
+falls due. Either way the station logs a `warn` (category `TRANSACTION`)
+naming the event type, transaction and attempt; no event is emitted. Only TransactionEvents the station builds are retried;
+one sent as an [expert call](expert-ocpp-calls.md) is not. E13 also retries
+a message left unanswered within `MessageTimeout`; that trigger is not
+implemented.
+
+The [operational timeline](operational-timeline.md) records both events as
+`transaction_message_rejected` and `transaction_message_discarded`.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one
@@ -143,6 +201,75 @@ register and never advances it.
 - Not implemented: connector 0 / `evseId` 0 (main meter), `StopTxnAlignedData`
   in `StopTransaction`, `AlignedDataCtrlr.SendDuringIdle` and the `TxEnded*`
   variables, and per-period aggregation of `*.Interval` measurands.
+
+## Signed meter values (OCMF, #315)
+
+A charge point can sign its energy register in the Open Charge Metering
+Format (OCMF 1.4, from S.A.F.E. e.V.), the format German calibration-law
+(Eichrecht) charge points use, so a CSMS's signed-data path (parse the OCMF
+document, check the signature against the station's key, reject on mismatch)
+has something to test against. **It simulates the wire format, not a
+calibrated meter**: nothing it produces is legally valid metering data.
+
+- **Off by default, and free while off**: no record is built and no key is
+  made until `SampledDataSignReadings` is `true` (on 2.0.1 / 2.1 through
+  `SetVariables` on `SampledDataCtrlr.SignReadings`).
+- **One ephemeral key per connector**: ECDSA P-256
+  (`ECDSA-secp256r1-SHA256`), made on first use and held in memory only. There
+  is no key store, import or rotation; a restart makes new keys. A 1.6
+  transaction restored after a restart therefore drops its stored begin
+  record (the key that signed it is gone), and its `StopTransaction` carries
+  the end record only. A message signed before a restart and still queued
+  offline is resent as it was, so its records fail against the new key; that
+  is what a station that lost its key would send.
+- **Signing is synchronous** (`@noble/curves`), so turning it on never
+  reorders the messages a station sends.
+
+| Key (1.6 name)            | 2.x variable                    | Access | Default | Meaning                                                                                      |
+| ------------------------- | ------------------------------- | ------ | ------- | -------------------------------------------------------------------------------------------- |
+| `SampledDataSignReadings` | `SampledDataCtrlr.SignReadings` | RW     | `false` | Sign the energy register (custom key on 1.6; the name the ecosystem's vendors use)           |
+| `SignedMeterDataMode`     | —                               | RW     | `valid` | `valid`, `tampered_payload`, `wrong_key` or `invalid_signature`; anything else is `Rejected` |
+| `MeterPublicKey<id>`      | —                               | R      | —       | Connector `<id>`'s public key, hex DER SubjectPublicKeyInfo; appears once that key exists    |
+
+**What carries the record:**
+
+| Version    | Begin (`TX` `B`)                                                                              | During the transaction (`TX` `C`)                                                                              | End (`TX` `E`)                                        |
+| ---------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 1.6J       | Signed at `StartTransaction`, sent in `StopTransaction.transactionData` (`Transaction.Begin`) | An extra `format: "SignedData"` sample in every `MeterValues` with a `transactionId`                           | `StopTransaction.transactionData` (`Transaction.End`) |
+| 2.0.1, 2.1 | `signedMeterValue` on the energy sample of `TransactionEvent(Started)`                        | `signedMeterValue` on the energy sample of `TransactionEvent(Updated)` with meter values, and of `MeterValues` | `signedMeterValue` on `TransactionEvent(Ended)`       |
+
+The 2.x `signedMeterValue` always carries all four fields (`signedMeterData`
+base64 of the OCMF document, `signingMethod`, `encodingMethod` `OCMF`,
+`publicKey` base64 DER): 2.0.1 requires them and 2.1, where two became
+optional, accepts them. Records are signed in time order, so the OCMF
+transaction page counter (`PG` `T1`, `T2`…) runs begin, samples, end, and a
+CSMS that collects every record of a session sees no gap. A 1.6 begin record
+signed at `StartTransaction` is still sent at the stop if signing was turned
+off in between. A `|` inside an identifier (idTag, serial) is written as the
+JSON escape `\u007C`, so the record always splits into its three
+sections; a negative register is signed as it is (`-1.500`), not clamped.
+A register too large to write as plain decimal digits is not signed. The
+records claim no identification detail (`IF` is empty): the station does not
+record whether a tag came from an Authorize result, the cache or a timeout.
+Clock-aligned (`Sample.Clock`) samples carry no signed record on any version.
+Signed 2.x samples carry `context` `Transaction.Begin` / `Transaction.End` on
+the Started / Ended events.
+
+**Test modes** (`SignedMeterDataMode`) apply to every record signed while
+set; the advertised key is always the connector's own:
+
+| Mode                | Record                                                   | A conforming CSMS |
+| ------------------- | -------------------------------------------------------- | ----------------- |
+| `valid`             | Signed with the connector's key                          | accepts           |
+| `tampered_payload`  | A reading changed after signing                          | rejects           |
+| `wrong_key`         | Validly signed, but with a different key than advertised | rejects           |
+| `invalid_signature` | The signature block is garbage                           | rejects           |
+
+- Not implemented: SOAP versions, clock-aligned (`AlignedData*`) and fiscal
+  (`PG` `F…`) records, other OCMF curves, a stable or imported key, and
+  scenario nodes to switch the mode mid-session (set the key with a
+  `configSet` node or, on 1.6J, `ChangeConfiguration` instead). 2.x has no
+  `ChangeConfiguration` and no `SignedMeterDataMode` variable.
 
 ## SOAP versions (1.2, 1.5, 1.6S)
 

@@ -345,6 +345,36 @@ describe("OperationalTimelineProjector (#448)", () => {
       ["transaction_rejected", 1, { status: "Invalid", stopped: true }],
     ]);
   });
+
+  it("records a rejected and a discarded 2.x TransactionEvent (#490)", () => {
+    const cp = buildChargePoint("OCPP-2.0.1");
+    const report = {
+      connectorId: 1,
+      transactionId: "tx-490",
+      eventType: "Started",
+      errorCode: "InternalError",
+    };
+
+    cp.notifyTransactionMessageRejected({ ...report, attempt: 3 });
+    cp.notifyTransactionMessageDiscarded({ ...report, attempts: 3 });
+
+    const entries = cp.timeline.query({
+      kinds: ["transaction_message_rejected", "transaction_message_discarded"],
+    }).entries;
+    const data = {
+      transactionId: "tx-490",
+      eventType: "Started",
+      errorCode: "InternalError",
+    };
+    expect(entries.map((e) => [e.kind, e.connectorId, e.data])).toEqual([
+      ["transaction_message_rejected", 1, { ...data, attempt: 3 }],
+      ["transaction_message_discarded", 1, { ...data, attempts: 3 }],
+    ]);
+    expect(entries.map((e) => e.summary)).toEqual([
+      "TransactionEvent Started of transaction tx-490 rejected (InternalError), attempt 3",
+      "TransactionEvent Started of transaction tx-490 discarded after 3 attempts (InternalError)",
+    ]);
+  });
 });
 
 const PROFILE_KINDS: TimelineKind[] = [

@@ -67,9 +67,11 @@ export interface HandlerContext {
  * Interface for handling CALL messages (requests from central system to charge point).
  *
  * `handle()` may return its response synchronously or as a `Promise` — the
- * latter is needed by handlers that compute certificate hashes via
- * WebCrypto (GetInstalledCertificateIds/DeleteCertificate). The dispatch
- * loop (`OCPPMessageHandler.handleCall`) awaits the result either way.
+ * latter is needed by InstallCertificate and CertificateSigned, which hash
+ * certificates via WebCrypto, and by GetInstalledCertificateIds and
+ * DeleteCertificate, which wait for those operations in CertificateStore.
+ * `OCPPMessageHandler.handleCall` awaits the result of one CALL, but does
+ * not wait for one CALL to finish before starting the next.
  *
  * Handlers may also return a `HandlerOutcome` to schedule a post-response
  * side effect (running after the CALLRESULT settles, via the ResponseEffectQueue).

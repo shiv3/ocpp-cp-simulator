@@ -50,6 +50,7 @@ import type {
 } from "../../cp/domain/persistence/ChargingSessionRepository";
 import type { Database } from "../../cp/domain/persistence/Database";
 import type { ScenarioRepository } from "../../cp/domain/persistence/ScenarioRepository";
+import { clearStartupProvenance } from "./startupScenarioRows";
 import { resetSimulatorState } from "../../cp/domain/persistence/resetState";
 import type {
   OCPPAvailability,
@@ -353,6 +354,10 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).sendTransactionUpdate(connectorId, options);
   }
 
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).evDisconnected(connectorId);
+  }
+
   async sendStatusNotification(
     id: string,
     connectorId: number,
@@ -612,6 +617,10 @@ export class RegistryChargePointService implements ChargePointService {
     definition: ScenarioDefinition,
   ): Promise<ScenarioDefinition> {
     await this.deps.scenarioRepository.save(id, connectorId, definition);
+    // #338: a definition the operator saves is theirs, whatever generated it.
+    clearStartupProvenance(this.deps.database, id, connectorId, [
+      definition.id,
+    ]);
     await this.deps.database?.flush?.();
     return definition;
   }
@@ -625,6 +634,12 @@ export class RegistryChargePointService implements ChargePointService {
       id,
       connectorId,
       definitions,
+    );
+    clearStartupProvenance(
+      this.deps.database,
+      id,
+      connectorId,
+      definitions.map((definition) => definition.id),
     );
     await this.deps.database?.flush?.();
     // #209: the DB is now authoritative, but the daemon runtime scenario map
@@ -676,6 +691,7 @@ export class RegistryChargePointService implements ChargePointService {
       connectorId,
       evSettings,
     );
+    clearStartupProvenance(this.deps.database, id, connectorId, [scenarioId]);
     return { scenarioId };
   }
 
@@ -688,6 +704,7 @@ export class RegistryChargePointService implements ChargePointService {
       connectorId,
       definition,
     );
+    clearStartupProvenance(this.deps.database, id, connectorId, [scenarioId]);
     return { scenarioId };
   }
 

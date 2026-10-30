@@ -318,6 +318,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       method: "clear_auth_cache",
     },
     { tool: "set_connector_status", method: "update_connector_status" },
+    { tool: "ev_disconnected", method: "ev_disconnected" },
     { tool: "set_meter_value", method: "set_meter_value" },
     { tool: "send_meter_value", method: "send_meter_value" },
     { tool: "scenario_templates", method: "scenario.templates" },

@@ -1016,6 +1016,10 @@ export class RemoteChargePointService implements ChargePointService {
     });
   }
 
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    await this.runCpRpc(id, "ev_disconnected", { connector: connectorId });
+  }
+
   async sendStatusNotification(
     id: string,
     connectorId: number,

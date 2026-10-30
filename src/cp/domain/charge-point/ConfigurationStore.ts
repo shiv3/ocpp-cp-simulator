@@ -16,6 +16,10 @@ import {
   defaultConfiguration,
 } from "./Configuration";
 import type { ChargePoint } from "./ChargePoint";
+import {
+  isSignedMeterMode,
+  type SignedMeterMode,
+} from "../connector/SignedMeterData";
 import type { Database } from "../persistence/Database";
 
 /**
@@ -185,6 +189,13 @@ export class ConfigurationStore {
     return this.getInteger("TransactionMessageAttempts") ?? 3;
   }
 
+  /** Canonical key `TransactionMessageRetryInterval` (seconds); default
+   *  `60`. 2.x reads it as `OCPPCommCtrlr.MessageAttemptInterval`
+   *  with instance `TransactionEvent` (#490). */
+  transactionMessageRetryInterval(): number {
+    return this.getInteger("TransactionMessageRetryInterval") ?? 60;
+  }
+
   /** Canonical key `AuthorizeRemoteTxRequests`; default `false`. */
   authorizeRemoteTxRequests(): boolean {
     return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;
@@ -195,6 +206,14 @@ export class ConfigurationStore {
    *  carries a non-Accepted idTagInfo.status (issue #181). */
   stopTransactionOnInvalidId(): boolean {
     return this.getBoolean("StopTransactionOnInvalidId") ?? true;
+  }
+
+  /** Canonical key `StopTransactionOnEVSideDisconnect` (2.x
+   *  `TxCtrlr.StopTxOnEVSideDisconnect`); default `true`. Whether an EV-side
+   *  cable disconnect stops the running transaction (1.6 §4.10, 2.0.1 E09) or
+   *  only suspends it as SuspendedEV (2.0.1 E10) (#488). */
+  stopTransactionOnEVSideDisconnect(): boolean {
+    return this.getBoolean("StopTransactionOnEVSideDisconnect") ?? true;
   }
 
   /** Custom key `AuthorizeBeforeLocalStart`; default `true`. Gates whether
@@ -236,6 +255,33 @@ export class ConfigurationStore {
   authCacheLifeTimeSeconds(): number | null {
     const seconds = this.getInteger("AuthCacheLifeTime") ?? 0;
     return seconds > 0 ? seconds : null;
+  }
+
+  /** Custom key `SampledDataSignReadings`; default `false` (#315). */
+  signReadings(): boolean {
+    return this.getBoolean("SampledDataSignReadings") ?? false;
+  }
+
+  /** Custom key `SignedMeterDataMode`; default `valid` (#315). */
+  signedMeterDataMode(): SignedMeterMode {
+    const mode = this.getString("SignedMeterDataMode");
+    return isSignedMeterMode(mode) ? mode : "valid";
+  }
+
+  /**
+   * Publish a read-only key whose value the station makes at runtime, such as
+   * `MeterPublicKey<connectorId>` once that connector's signing key exists
+   * (#315). Not persisted: the value is only true for this process.
+   */
+  defineRuntimeKey(name: string, value: string): void {
+    const key: StringConfigurationKey = {
+      name,
+      required: false,
+      readonly: true,
+      type: "string",
+    };
+    this.values.set(name, { key, value });
+    this.emit(name, value);
   }
 
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
@@ -416,6 +462,8 @@ function isConfigurationValueValid(
   key: ConfigurationKey,
   value: ConfigurationValueType,
 ): boolean {
+  if (typeof value === "string" && key.allowed)
+    return key.allowed.includes(value);
   if (typeof value !== "number") return true;
   return (
     (key.min === undefined || value >= key.min) &&

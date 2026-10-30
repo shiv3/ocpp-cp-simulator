@@ -334,6 +334,10 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).sendTransactionUpdate(connectorId, options);
   }
 
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).evDisconnected(connectorId);
+  }
+
   async sendStatusNotification(
     id: string,
     connectorId: number,

@@ -1840,6 +1840,18 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | EV-side disconnect follows StopTransactionOnEVSideDisconnect (#488)
+
+- New domain operation `ChargePoint.evDisconnected(connectorId)`, reached by the `ev_disconnected` method (JSON Lines, Socket.IO, the new curated `ev_disconnected` MCP tool — 26 curated tools), the console's **Unplug** and a scenario `connectorPlug` plug-out during a transaction. With a running transaction, `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`, default `true`, new `ConfigurationStore.stopTransactionOnEVSideDisconnect()`) stops it with `EVDisconnected` (2.0.1 E09: `Ended`, `triggerReason` `EVCommunicationLost`) or, with `false`, keeps it as `SuspendedEV` (2.0.1 E10: `Updated`, `chargingState` `SuspendedEV`, `triggerReason` `EVCommunicationLost`). Without a transaction the console's Unplug still sends `Available`; a scenario plug-out stays a no-op.
+- A WebSocket close keeps the transaction on 1.6 and 2.x, now pinned by tests; no option ends a transaction on connection loss. OCPP-J 1.6 replays the transaction messages queued offline; 2.x has no offline queue, so a TransactionEvent produced offline is dropped rather than replayed with `offline: true` (E11.FR.02) — recorded as a limit, follow-up #528.
+- With `false` the energy offer stops: the register freezes while periodic MeterValues go on, and a second unplug while suspended sends nothing.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): new section; the "Limits" entry for #488 is replaced by the 2.x offline-queue gap (#528), the unmodelled E10 resume and the 1.6 Unplug before StartTransaction.conf (`transactionId: 0`).
+- [Control plane](concepts/control-plane.md): `ev_disconnected` row. [MCP endpoint](entities/mcp-endpoint.md): `ev_disconnected` tool, 26 curated tools (also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)).
+- [Scenario format → `connectorPlug` notes](concepts/scenario-format.md#connectorplug-notes): what a plug-in and a plug-out do, and the k6 runtime's difference, also a row in [CLI → What the exported runtime models](entities/cli.md#what-the-exported-runtime-models).
+- [Web console](entities/web-console.md): Unplug is an EV-side disconnect. [State persistence](concepts/state-persistence.md): `pending_messages` is OCPP-J 1.6 only.
+- Template `cert16-tc005-ev-side-disconnect`: its plug-out now stops the transaction itself; description updated.
+- [GitHub issues](sources/github-issues.md): #488, #528.
+
 ## [2026-10-29] ingest | Text redactor: quoted secrets across lines and unterminated PEMs (#519)
 
 - In non-JSON log text, a quoted secret with a raw newline or a backslash line continuation was redacted only to the end of its first line, and a PEM value without its closing quote ended at the next quote, so the text after that quote — the rest of the truncated PEM and anything following it (`x="y" tail=SECRET`) — was logged in clear.

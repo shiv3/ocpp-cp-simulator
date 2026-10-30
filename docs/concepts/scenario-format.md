@@ -120,7 +120,7 @@ shape depends on `type`).
 | `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`            |
 | `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                       |
 | `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                       |
-| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             |                                                                                                                                                                                       |
+| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             | See [note](#connectorplug-notes) below.                                                                                                                                               |
 | `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                             |
 | `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                             |
 | `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                             |
@@ -246,6 +246,23 @@ pre-#240 behavior) matches any payload.
   }
 }
 ```
+
+### `connectorPlug` notes
+
+A plug-in is a no-op in the simulator: it sends nothing (a `transaction`
+start drives `Preparing` itself, #176). A plug-out **during a transaction** is an
+EV-side disconnect (`ChargePoint.evDisconnected`, #488):
+`StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`,
+default `true`) stops the transaction with `EVDisconnected`, or with `false`
+keeps it as `SuspendedEV` (2.x: `TransactionEvent(Updated)`, `triggerReason`
+`EVCommunicationLost`). A later `transaction` stop node then finds no running
+transaction under `true` and does nothing. A plug-out without a transaction is
+still a no-op. The full matrix is in
+[Charging sessions](charging-sessions.md#ev-side-disconnect-and-connection-loss).
+
+The exported k6 runtime keeps no configuration: its plug-in sends
+StatusNotification `Preparing` and its plug-out `Available`, with or without a
+transaction, and only its `transaction` stop node sends StopTransaction.
 
 ### `connectionTrigger` notes
 

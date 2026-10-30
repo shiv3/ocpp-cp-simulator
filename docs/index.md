@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Index
@@ -21,7 +21,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Web console](entities/web-console.md)                        | React browser UI at `/`; Local vs Remote; the charge point page (connector cards as charging sessions, the docked bottom panel, the Config dialog with its curve editor); the Scenario Library and per-connector selection; the scenario editor (Steps, card Graph, side-panel edit mode); the Message Log page; what it can do; dev commands |
 | [Desktop app (Tauri)](entities/desktop-app.md)                | Tauri bundle running the daemon as a sidecar; installers per OS; state location; dev/build                                                                                                                                                                                                                                                    |
 | [Docker image](entities/docker-image.md)                      | `ghcr.io/shiv3/ocpp-cp-simulator`: tags, `/data` volume, compose variables, structured logs, custom health path                                                                                                                                                                                                                               |
-| [MCP endpoint](entities/mcp-endpoint.md)                      | `POST /mcp` tools-only MCP server: 25 curated + 3 network-sim tools, `list_methods` / `call_method`, limits                                                                                                                                                                                                                                   |
+| [MCP endpoint](entities/mcp-endpoint.md)                      | `POST /mcp` tools-only MCP server: 26 curated + 3 network-sim tools, `list_methods` / `call_method`, limits                                                                                                                                                                                                                                   |
 | [Built-in scenario templates](entities/scenario-templates.md) | Six general templates + 47 `cert16-*` certification templates + OCTT probe; where they are used; instance semantics                                                                                                                                                                                                                           |
 | [CSMS peers](entities/csms-peers.md)                          | SteVe (SOAP, security profiles, steve-verify) and gocpp (e2e) — URL conventions and known quirks                                                                                                                                                                                                                                              |
 | [OCPP DebugKit](entities/ocpp-debugkit.md)                    | The pinned third-party analysis engine behind `analyze`; version policy; limits                                                                                                                                                                                                                                                               |

@@ -176,6 +176,11 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "ev_disconnected": {
+      await ops.evDisconnected(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
     case "set_meter_value": {
       const connectorId = requirePositiveInt(params, "connector");
       const value = requireNumber(params, "value");

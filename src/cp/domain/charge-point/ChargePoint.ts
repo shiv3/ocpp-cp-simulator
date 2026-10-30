@@ -93,7 +93,16 @@ import { MonitoringStore } from "../monitoring/MonitoringStore";
 import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
 import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
-import type { VariableMonitor } from "../monitoring/VariableMonitor";
+import {
+  MAX_MONITOR_SEVERITY,
+  MIN_MONITOR_SEVERITY,
+  type VariableMonitor,
+} from "../monitoring/VariableMonitor";
+import {
+  MONITORING_CTRLR_KEYS,
+  MONITORING_REQUEST_MAX_BYTES,
+  MONITORING_REQUEST_MAX_ITEMS,
+} from "../monitoring/monitoringCtrlrKeys";
 import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
@@ -615,11 +624,15 @@ export class ChargePoint {
     const repository = new VariableMonitorRepository(this._id, this._database);
     const persisted = repository.load();
     this._monitoring.restore(persisted.map((p) => p.monitor));
+    this.publishMonitoringCtrlr();
     // Registered before the evaluation's own listener, so a new row exists
     // when its triggered flag is first written.
     this._monitoring.onChange((event) => {
       if (event.kind === "installed") repository.save(event.monitor);
       else if (event.kind === "cleared") repository.delete(event.monitor.id);
+      else if (event.kind === "levelChanged") {
+        this.publishActiveMonitoringLevel();
+      }
     });
     const evaluation = new MonitorEvaluation(
       {
@@ -638,6 +651,43 @@ export class ChargePoint {
     evaluation.setReporting(false);
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /**
+   * The read-only MonitoringCtrlr variables of the 2.x device model (#538),
+   * as runtime configuration keys: the request limits it advertises for
+   * Set/ClearVariableMonitoring, and the monitoring level in force.
+   */
+  private publishMonitoringCtrlr(): void {
+    const keys = MONITORING_CTRLR_KEYS;
+    for (const items of [
+      keys.itemsPerSetVariableMonitoring,
+      keys.itemsPerClearVariableMonitoring,
+    ]) {
+      this._configuration.defineRuntimeIntegerKey(
+        items,
+        MONITORING_REQUEST_MAX_ITEMS,
+      );
+    }
+    for (const bytes of [
+      keys.bytesPerSetVariableMonitoring,
+      keys.bytesPerClearVariableMonitoring,
+    ]) {
+      this._configuration.defineRuntimeIntegerKey(
+        bytes,
+        MONITORING_REQUEST_MAX_BYTES,
+      );
+    }
+    this.publishActiveMonitoringLevel();
+  }
+
+  /** `ActiveMonitoringLevel` follows SetMonitoringLevel (0-9). */
+  private publishActiveMonitoringLevel(): void {
+    this._configuration.defineRuntimeIntegerKey(
+      MONITORING_CTRLR_KEYS.activeMonitoringLevel,
+      this._monitoring.monitoringLevel,
+      { min: MIN_MONITOR_SEVERITY, max: MAX_MONITOR_SEVERITY },
+    );
   }
 
   /**

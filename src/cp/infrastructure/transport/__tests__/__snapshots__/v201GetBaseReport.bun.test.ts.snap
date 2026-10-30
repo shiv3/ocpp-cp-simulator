@@ -44,6 +44,8 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -218,6 +220,8 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "maxLimit": 86400,
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -389,6 +393,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -427,6 +432,107 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "SetVariableMonitoring",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "SetVariableMonitoring",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "ClearVariableMonitoring",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "instance": "ClearVariableMonitoring",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "MonitoringCtrlr",
+          },
+          "variable": {
+            "name": "ActiveMonitoringLevel",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "9",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 9,
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },

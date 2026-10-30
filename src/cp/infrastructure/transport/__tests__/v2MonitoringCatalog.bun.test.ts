@@ -267,85 +267,87 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
     });
   }
 
-  it("OCPP 2.0.1: the monitoring base and the deleted preconfigured monitors survive a restart", async () => {
-    const db = BunSqliteDatabase.open(":memory:");
-    const cpId = "CP-CATALOG-RESTART";
-    const first = startMockCsms();
-    const before = makeChargePoint(first, cpId, "OCPP-2.0.1", db);
-    try {
-      before.connect();
-      await bootAccepted(first);
-      await call(
-        first,
-        "smb-hw",
-        "SetMonitoringBase",
-        { monitoringBase: "HardWiredOnly" },
-        isValidSetMonitoringBaseResponseV201,
-      );
-    } finally {
-      before.disconnect();
-      await first.stop();
-    }
+  for (const v of VERSIONS) {
+    it(`${v.version}: the monitoring base and the deleted preconfigured monitors survive a restart`, async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      const cpId = `CP-CATALOG-RESTART-${v.version}`;
+      const first = startMockCsms();
+      const before = makeChargePoint(first, cpId, v.version, db);
+      try {
+        before.connect();
+        await bootAccepted(first);
+        await call(
+          first,
+          "smb-hw",
+          "SetMonitoringBase",
+          { monitoringBase: "HardWiredOnly" },
+          v.base,
+        );
+      } finally {
+        before.disconnect();
+        await first.stop();
+      }
 
-    const second = startMockCsms();
-    const after = makeChargePoint(second, cpId, "OCPP-2.0.1", db);
-    try {
-      expect(after.monitoring.list()).toEqual([HARDWIRED]);
-      expect(after.monitoring.activeMonitoringBase).toBe("HardWiredOnly");
-      expect(after.configuration.getString("ActiveMonitoringBase")).toBe(
-        "HardWiredOnly",
-      );
-    } finally {
-      after.disconnect();
-      await second.stop();
-      db.close();
-    }
-  });
+      const second = startMockCsms();
+      const after = makeChargePoint(second, cpId, v.version, db);
+      try {
+        expect(after.monitoring.list()).toEqual([HARDWIRED]);
+        expect(after.monitoring.activeMonitoringBase).toBe("HardWiredOnly");
+        expect(after.configuration.getString("ActiveMonitoringBase")).toBe(
+          "HardWiredOnly",
+        );
+      } finally {
+        after.disconnect();
+        await second.stop();
+        db.close();
+      }
+    });
 
-  it("OCPP 2.0.1: a database from before #538 keeps its custom ids and gains the catalog", async () => {
-    const db = BunSqliteDatabase.open(":memory:");
-    const cpId = "CP-CATALOG-UPGRADE";
-    // A v21 row: custom monitor 1, no monitoring base stored.
-    db.run(
-      "INSERT INTO variable_monitors (cp_id, monitor_id, monitor) VALUES (?, 1, ?)",
-      [
-        cpId,
-        JSON.stringify({
-          id: 1,
+    it(`${v.version}: a database from before #538 keeps its custom ids and gains the catalog`, async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      const cpId = `CP-CATALOG-UPGRADE-${v.version}`;
+      // A v21 row: custom monitor 1, no monitoring base stored.
+      db.run(
+        "INSERT INTO variable_monitors (cp_id, monitor_id, monitor) VALUES (?, 1, ?)",
+        [
+          cpId,
+          JSON.stringify({
+            id: 1,
+            type: "Delta",
+            severity: 4,
+            value: 10,
+            transaction: false,
+            component: { name: "OCPPCommCtrlr" },
+            variable: { name: "HeartbeatInterval" },
+            valueKey: "HeartbeatInterval",
+            origin: "CustomMonitor",
+          }),
+        ],
+      );
+      const csms = startMockCsms();
+      const cp = makeChargePoint(csms, cpId, v.version, db);
+      try {
+        expect(cp.monitoring.list().map((m) => [m.id, m.origin])).toEqual([
+          [1, "CustomMonitor"],
+          [HARDWIRED.id, "HardWiredMonitor"],
+          [PRECONFIGURED.id, "PreconfiguredMonitor"],
+          [PRECONFIGURED_2.id, "PreconfiguredMonitor"],
+        ]);
+        const next = cp.monitoring.install({
           type: "Delta",
-          severity: 4,
+          severity: 5,
           value: 10,
-          transaction: false,
           component: { name: "OCPPCommCtrlr" },
           variable: { name: "HeartbeatInterval" },
           valueKey: "HeartbeatInterval",
-          origin: "CustomMonitor",
-        }),
-      ],
-    );
-    const csms = startMockCsms();
-    const cp = makeChargePoint(csms, cpId, "OCPP-2.0.1", db);
-    try {
-      expect(cp.monitoring.list().map((m) => [m.id, m.origin])).toEqual([
-        [1, "CustomMonitor"],
-        [HARDWIRED.id, "HardWiredMonitor"],
-        [PRECONFIGURED.id, "PreconfiguredMonitor"],
-        [PRECONFIGURED_2.id, "PreconfiguredMonitor"],
-      ]);
-      const next = cp.monitoring.install({
-        type: "Delta",
-        severity: 5,
-        value: 10,
-        component: { name: "OCPPCommCtrlr" },
-        variable: { name: "HeartbeatInterval" },
-        valueKey: "HeartbeatInterval",
-        valueType: { numeric: true },
-      });
-      expect(next.status === "Accepted" && next.monitor.id).toBe(2);
-    } finally {
-      cp.disconnect();
-      await csms.stop();
-      db.close();
-    }
-  });
+          valueType: { numeric: true },
+        });
+        expect(next.status === "Accepted" && next.monitor.id).toBe(2);
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+        db.close();
+      }
+    });
+  }
 });

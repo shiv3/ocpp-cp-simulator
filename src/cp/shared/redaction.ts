@@ -148,9 +148,68 @@ const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*):[^/\s@]*@/gi;
 const URL_SECRET_QUERY =
   /([?&](?:ocpp_ws_secret|password|passwd|secret|token|access_token|api[-_]?key|auth(?:orization)?[-_]?key)=)([^&#\s"'<>]+)/gi;
 
+/** The opening of a quoted sensitive assignment, value not included. */
+const SENSITIVE_QUOTED_OPENER = new RegExp(
+  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(["'])`,
+  "gi",
+);
+
+/**
+ * #547: a regex engine may give up on a long match and report none, where
+ * another completes it: JavaScriptCore (Bun) does on a quoted value of some
+ * 50k characters that V8 (Node) redacts. `SENSITIVE_ASSIGNMENT` then leaves
+ * the value in clear. Every quoted opener it handled is followed by the
+ * redacted value, so one that is not was missed: its value is cut here, in
+ * code, without a regex over its length. It ends at the first unescaped
+ * matching quote on its line; a PEM value, or one with no such quote, runs
+ * to the end of the text. Fails closed; a no-op where the regex completed.
+ */
+function redactMissedQuotedValues(text: string): string {
+  let out = "";
+  let from = 0;
+  SENSITIVE_QUOTED_OPENER.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SENSITIVE_QUOTED_OPENER.exec(text)) !== null) {
+    const quote = match[2];
+    const valueStart = match.index + match[0].length;
+    if (text.startsWith(`${REDACTED_VALUE}${quote}`, valueStart)) continue;
+    out +=
+      text.slice(from, match.index) + match[1] + quote + REDACTED_VALUE + quote;
+    const end = quotedValueEndOnLine(text, valueStart, quote);
+    if (end === null) return out;
+    from = end;
+    SENSITIVE_QUOTED_OPENER.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
+
+/** Just past the closing quote on the value's first line; `null` for a PEM
+ *  value or when the line holds none. */
+function quotedValueEndOnLine(
+  text: string,
+  start: number,
+  quote: string,
+): number | null {
+  if (/^\s*-----BEGIN/.test(text.slice(start, start + 64))) return null;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\n") return null;
+    if (char === "\\") {
+      index += 1;
+    } else if (char === quote) {
+      return index + 1;
+    }
+  }
+  return null;
+}
+
 export function redactSensitiveText(text: string): string {
-  return redactOcppKeyValueText(text)
-    .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
+  return redactMissedQuotedValues(
+    redactOcppKeyValueText(text).replace(
+      SENSITIVE_ASSIGNMENT,
+      `$1$2${REDACTED_VALUE}$2`,
+    ),
+  )
     .replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue)
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
     .replace(URL_SECRET_QUERY, `$1${REDACTED_VALUE}`)

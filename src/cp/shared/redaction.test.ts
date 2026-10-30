@@ -1018,3 +1018,62 @@ describe("text redactor parity with the structured redactor (#515)", () => {
     expect(() => JSON.parse(json)).not.toThrow();
   });
 });
+
+// #547: JavaScriptCore (Bun) gives up on a long quoted value that V8 (Node)
+// matches; the redactor must not then return the value in clear. These rows
+// also run under Bun (`redaction.bun.test.ts`).
+describe("long quoted values on every runtime (#547)", () => {
+  const body = "A".repeat(100_000);
+  it.each([
+    [
+      "an unterminated PEM value",
+      `privateKey="-----BEGIN K-----\n${body}`,
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      "a closed PEM value",
+      `privateKey="-----BEGIN K-----\n${body}\n-----END K-----"`,
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      "an unterminated value",
+      `password="${body}`,
+      `password="${REDACTED_VALUE}"`,
+    ],
+    [
+      "a closed value followed by text",
+      `password="${body}" x`,
+      `password="${REDACTED_VALUE}" x`,
+    ],
+    ["a bare value", `password=${body}`, `password=${REDACTED_VALUE}`],
+    [
+      "a JSON member",
+      JSON.stringify({ password: body }),
+      `{"password":"${REDACTED_VALUE}"}`,
+    ],
+  ])("redacts %s", (_name, text, expected) => {
+    expect(redactSensitiveText(text)).toBe(expected);
+  });
+
+  it("redacts a long value continued on the next line", () => {
+    const redacted = redactSensitiveText(`password="a\n${body}`);
+    expect(redacted.startsWith(`password="${REDACTED_VALUE}"`)).toBe(true);
+    // Node ends the value at its first line and keeps the next line; Bun's
+    // fallback fails closed and drops it. Neither keeps a quoted secret.
+    expect(redacted.includes(`"a\n`)).toBe(false);
+  });
+
+  it("leaves a value the regex already redacted alone", () => {
+    const text = `password="[redacted]" privateKey='${REDACTED_VALUE}' x`;
+    expect(redactSensitiveText(text)).toBe(text);
+  });
+
+  it("redacts every missed value on one text", () => {
+    const redacted = redactSensitiveText(
+      `password="${body}" apiKey="${body}" tail`,
+    );
+    expect(redacted).toBe(
+      `password="${REDACTED_VALUE}" apiKey="${REDACTED_VALUE}" tail`,
+    );
+  });
+});

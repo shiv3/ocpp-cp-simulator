@@ -14,7 +14,7 @@ related:
   - trace-format.md
   - ../entities/analyze.md
   - ../entities/cli.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Log format
@@ -120,6 +120,16 @@ longer parses for the trace adapter. Limit: when the quote on a later line is fo
 character (`;`, `)`, a letter) or preceded by `=` / `:`, the value is
 redacted only to the end of its first line and its later lines stay
 readable.
+
+A regex engine may give up on a very long value and report no match where
+another completes it: under Bun (JavaScriptCore) a quoted value of some 50k
+characters was logged in clear while Node (V8) redacted it (#547). A quoted
+secret-named assignment the patterns above left unredacted is therefore cut
+again in code, failing closed: the value ends at the first unescaped matching
+quote on its first line, and a PEM value, or one with no such quote, is
+redacted to the end of the message. Where the patterns completed this changes
+nothing. The redaction tests run under both vitest and `bun test`
+(`src/cp/shared/redaction.bun.test.ts`).
 
 ## WebSocket close lines
 

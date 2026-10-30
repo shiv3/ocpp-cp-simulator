@@ -276,6 +276,11 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   `TransactionMessageAttempts`) times, then discarded
   ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490),
   [#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)).
+- On 1.6 the CALLERROR count restarts at each reconnect: a resend waiting
+  when the link drops is replayed from the offline queue as a fresh
+  delivery. With a flapping link and a CSMS that always answers with a
+  CALLERROR, the resends never stop
+  ([#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet
   ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
 - Local mode does not drop a removed charge point's sessions until

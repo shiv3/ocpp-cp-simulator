@@ -147,6 +147,21 @@ const TRANSACTION_STOPPED_REASON_SET: ReadonlySet<string> = new Set(
  * `GroundFault`, … — sets `stoppedReason` and falls back to `Other` for a
  * 1.6 StopTransaction.req, which has no closer value.
  */
+/** OCPP 1.6: whether `transaction` is the running one a StartTransaction.req
+ *  with this `idTag` and `timestamp` started. A resent or replayed request
+ *  carries the same payload, so its answer still finds it (#527). */
+export function isRunningTransactionStartedBy(
+  transaction: Transaction | null | undefined,
+  request: { idTag: string; timestamp: string },
+): transaction is Transaction {
+  return (
+    !!transaction &&
+    transaction.stopTime === null &&
+    transaction.tagId === request.idTag &&
+    transaction.startTime.toISOString() === request.timestamp
+  );
+}
+
 export function splitStopReason(reason: StopReason | undefined): {
   stopReason?: StopTransactionReason;
   stoppedReason?: TransactionStoppedReason;
@@ -264,6 +279,11 @@ export interface Transaction {
   /** CSMS-assigned (OCPP 1.x); `0` until StartTransaction.conf assigns it.
    *  No transaction is `connector.transaction === null`, never a null id. */
   id: number;
+  /** OCPP 1.6: set when a CALLERROR answered this transaction's
+   *  StartTransaction.req, until a StartTransaction.conf assigns `id`. Its
+   *  `0` is then a placeholder the CSMS failed to process, not an id it
+   *  issued: RemoteStopTransaction does not match it (#491, #527). */
+  startCallError?: boolean;
   connectorId: number;
   tagId: string;
   meterStart: number;

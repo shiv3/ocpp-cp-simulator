@@ -1964,4 +1964,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         return this.replayNotifyEvent(queued);
     }
   }
+
+  public cancelStartTransactionResends(): void {
+    // OCPP 2.x has no StartTransaction.req (#527 is 1.6 only).
+  }
 }

@@ -197,11 +197,12 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(chargePoint.updateConnectorStatus).not.toHaveBeenCalled();
 
-    // ConnectionTimeOut moved it on meanwhile: the discard does not undo it.
-    connector.status = OCPPStatus.Finishing;
+    // A scenario's statusChange moved it on meanwhile: the discard does not
+    // undo it.
+    connector.status = OCPPStatus.SuspendedEV;
     socket.callError(socket.last().id);
     expect(chargePoint.updateConnectorStatus).not.toHaveBeenCalled();
-    expect(connector.status).toBe(OCPPStatus.Finishing);
+    expect(connector.status).toBe(OCPPStatus.SuspendedEV);
   });
 
   it("resends StopTransaction with its transaction id and reports it", async () => {

@@ -1080,6 +1080,10 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     // HTTP request/response exchange.
   }
 
+  public cancelStartTransactionResends(): void {
+    // SOAP does not resend a StartTransaction.req after a fault (#527).
+  }
+
   private sendStartTransaction(
     transaction: Transaction,
     connectorId: number,

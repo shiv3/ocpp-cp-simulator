@@ -85,6 +85,7 @@ import {
 import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import {
+  isRunningTransactionStartedBy,
   Transaction,
   type TransactionUpdateOptions,
 } from "../../domain/connector/Transaction";
@@ -1187,6 +1188,21 @@ export class OCPPMessageHandler {
     this._serialQueue = [];
   }
 
+  /** #527: a Reset stops the transactions whose StartTransaction.req waits
+   *  for a resend; that resend is dropped, not salvaged to the offline
+   *  queue. The other resends (StopTransaction, MeterValues) carry on. */
+  public cancelStartTransactionResends(): void {
+    for (const [timer, resend] of this._transactionMessageRetries) {
+      if (resend.action !== OCPPAction.StartTransaction) continue;
+      clearTimeout(timer);
+      this._transactionMessageRetries.delete(timer);
+      this._logger.warn(
+        `StartTransaction resend for connector ${resend.connectorId ?? "?"} dropped: a Reset stops its transaction`,
+        LogType.TRANSACTION,
+      );
+    }
+  }
+
   /**
    * Re-attempt delivery of every queued transaction-related message.
    * Called from `ChargePoint.connect`'s onopen handler after a successful
@@ -1401,9 +1417,14 @@ export class OCPPMessageHandler {
     // For transaction-related handlers that need connector info, create them dynamically
     if (!handler) {
       if (action === OCPPAction.StartTransaction) {
+        const start = request.payload as StartTransactionRequestV16;
         handler = new StartTransactionResultHandler(
           request.connectorId || 1,
-          (request.payload as StartTransactionRequestV16).idTag,
+          start.idTag,
+          // #527: the station's own StartTransaction.req (it carries an
+          // attempt) answers for its transaction only. An expert call with
+          // applyResponse (#389) applies to the connector as before.
+          request.attempt !== undefined ? start.timestamp : undefined,
         );
       } else if (action === OCPPAction.StopTransaction) {
         handler = new StopTransactionResultHandler(
@@ -1540,6 +1561,17 @@ export class OCPPMessageHandler {
       reason: "callError" as const,
       errorCode,
     };
+    // The transaction this StartTransaction.req started, if it still runs:
+    // its `0` placeholder is now one the CSMS failed to process (#491).
+    let startedTransaction: Transaction | null = null;
+    if (request.action === OCPPAction.StartTransaction) {
+      const current = this._chargePoint.getConnector(connectorId)?.transaction;
+      const start = request.payload as StartTransactionRequestV16;
+      if (isRunningTransactionStartedBy(current, start)) {
+        startedTransaction = current;
+        startedTransaction.startCallError = true;
+      }
+    }
     const config = this._chargePoint.configuration;
     const attempts = Math.max(1, config.transactionMessageAttempts());
     this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
@@ -1552,9 +1584,7 @@ export class OCPPMessageHandler {
         ...report,
         attempts: attempt,
       });
-      if (request.action === OCPPAction.StartTransaction) {
-        this.proceedWithoutStartConf(connectorId);
-      }
+      if (startedTransaction) this.proceedWithoutStartConf(connectorId);
       return;
     }
     const delayMs = Math.min(
@@ -1588,12 +1618,11 @@ export class OCPPMessageHandler {
   }
 
   /** #527: the StartTransaction.req was discarded; the transaction it
-   *  started runs on without a StartTransaction.conf. */
+   *  started, still running on the connector, goes on without a
+   *  StartTransaction.conf. */
   private proceedWithoutStartConf(connectorId: number): void {
     const connector = this._chargePoint.getConnector(connectorId);
-    const transaction = connector?.transaction;
-    if (!connector || !transaction || transaction.stopTime !== null) return;
-    if (connector.status === OCPPStatus.Preparing) {
+    if (connector?.status === OCPPStatus.Preparing) {
       this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Charging);
     }
   }

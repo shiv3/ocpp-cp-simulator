@@ -188,7 +188,8 @@ export interface V201CertificateSigning {
   /**
    * A chain for `use` was installed: for a V2G certificate the station
    * asks the CSMS for the OCSP status of the certificate and its sub-CAs
-   * (M06.FR.07). Nothing happens for the Charging Station certificate.
+   * (M06.FR.07); a security-profile-3 station switches to a new Charging
+   * Station certificate as its TLS client certificate (A02.FR.08).
    */
   certificateInstalled(use: SignedCertificateUse): void;
 }

@@ -104,7 +104,15 @@ import {
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
 import { SignCertificateBackoff } from "../../domain/security/SignCertificateBackoff";
-import type { SignedCertificateUse } from "../../domain/security/certificateUse";
+import {
+  V2G_CERTIFICATE_USES,
+  type SignedCertificateUse,
+} from "../../domain/security/certificateUse";
+import {
+  V201_CERTIFICATE_MAPPING,
+  V21_CERTIFICATE_MAPPING,
+  type CertificateWireMapping,
+} from "./v201/certificatesV201";
 import {
   ResponseEffectQueue,
   type GenerationToken,
@@ -123,25 +131,8 @@ type V201ResponsePayload =
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
 
-/** The station's V2G certificates, whose OCSP status it requests and
- *  caches (M06.FR.06, #537). */
-const V2G_CERTIFICATE_USES: readonly SignedCertificateUse[] = [
-  "V2GCertificate",
-  "V2G20Certificate",
-];
-
 /** M06.FR.10: the cached OCSP data is refreshed at least once a week. */
 const CERTIFICATE_STATUS_REFRESH_MS = 7 * 24 * 3600 * 1000;
-
-/** The certificate use a SignCertificateRequest asks for: absent means
- *  the Charging Station certificate (#456). */
-function signRequestUse(
-  request: SignCertificateRequestV201,
-): SignedCertificateUse {
-  return request.certificateType === "V2GCertificate"
-    ? "V2GCertificate"
-    : "ChargingStationCertificate";
-}
 
 /** True for a promise or any other thenable a handler may return. */
 function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
@@ -318,6 +309,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       }
     },
   };
+  /** #537 2.1 A02.FR.29: a renewed certificate was discarded; reported
+   *  after the next accepted boot. */
+  private _renewedClientCertificateDiscarded = false;
   /** #537 M06.FR.10: the weekly OCSP refresh, running while booted. */
   private _certificateStatusRefresh: ReturnType<typeof setInterval> | null =
     null;
@@ -371,6 +365,32 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
+
+    // `?.`: the socket doubles of the handler's unit tests have no observers.
+    this._webSocket.observers?.on("renewedClientCertificateDiscarded", () => {
+      // DiscardedRenewedClientCertificate is a 2.1 security event only.
+      if (this._chargePoint.ocppVersion === OCPP_2_1) {
+        this._renewedClientCertificateDiscarded = true;
+      }
+    });
+  }
+
+  /** The certificate-use mapping of this station's OCPP version. */
+  private certificateMapping(): CertificateWireMapping {
+    return this._chargePoint.ocppVersion === OCPP_2_1
+      ? V21_CERTIFICATE_MAPPING
+      : V201_CERTIFICATE_MAPPING;
+  }
+
+  /** The certificate use a SignCertificateRequest asks for: absent means
+   *  the Charging Station certificate (#456). */
+  private signRequestUse(
+    request: SignCertificateRequestV201,
+  ): SignedCertificateUse {
+    return (
+      this.certificateMapping().signedUseFrom(request.certificateType ?? "") ??
+      "ChargingStationCertificate"
+    );
   }
 
   private generateMessageId(): string {
@@ -869,7 +889,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     request: SignCertificateRequestV201,
     response: SignCertificateResponseV201,
   ): void {
-    const use = signRequestUse(request);
+    const use = this.signRequestUse(request);
     if (response.status === "Accepted") {
       this._logger.info(
         "[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned",
@@ -1725,10 +1745,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const csr = await this.generateCsr(use);
     this.sendSignCertificateRequest(use, {
       csr,
-      certificateType:
-        use === "V2GCertificate"
-          ? "V2GCertificate"
-          : "ChargingStationCertificate",
+      // The 2.1 enum is a superset of the 2.0.1 one.
+      certificateType: (this.certificateMapping().signedUseTo(use) ??
+        "ChargingStationCertificate") as SignCertificateRequestV201["certificateType"],
     });
   }
 
@@ -2007,6 +2026,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       unrefTimer(refresh);
       this._certificateStatusRefresh = refresh;
+      // #537 2.1 A02.FR.29: the connection that discarded a renewed
+      // certificate is the one now booted.
+      if (this._renewedClientCertificateDiscarded) {
+        this._renewedClientCertificateDiscarded = false;
+        this._chargePoint.sendSecurityEventNotification(
+          "DiscardedRenewedClientCertificate",
+        );
+      }
     }
     if (
       this._bootStatus.status === status.status &&

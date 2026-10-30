@@ -162,7 +162,9 @@ calibrated meter**: nothing it produces is legally valid metering data.
   is no key store, import or rotation; a restart makes new keys. A 1.6
   transaction restored after a restart therefore drops its stored begin
   record (the key that signed it is gone), and its `StopTransaction` carries
-  the end record only.
+  the end record only. A message signed before a restart and still queued
+  offline is resent as it was, so its records fail against the new key; that
+  is what a station that lost its key would send.
 - **Signing is synchronous** (`@noble/curves`), so turning it on never
   reorders the messages a station sends.
 
@@ -189,6 +191,12 @@ signed at `StartTransaction` is still sent at the stop if signing was turned
 off in between. A `|` inside an identifier (idTag, serial) is written as the
 JSON escape `\u007C`, so the record always splits into its three
 sections; a negative register is signed as it is (`-1.500`), not clamped.
+A register too large to write as plain decimal digits is not signed. The
+records claim no identification detail (`IF` is empty): the station does not
+record whether a tag came from an Authorize result, the cache or a timeout.
+Clock-aligned (`Sample.Clock`) samples carry no signed record on any version.
+Signed 2.x samples carry `context` `Transaction.Begin` / `Transaction.End` on
+the Started / Ended events.
 
 **Test modes** (`SignedMeterDataMode`) apply to every record signed while
 set; the advertised key is always the connector's own:
@@ -203,7 +211,8 @@ set; the advertised key is always the connector's own:
 - Not implemented: SOAP versions, clock-aligned (`AlignedData*`) and fiscal
   (`PG` `F…`) records, other OCMF curves, a stable or imported key, and
   scenario nodes to switch the mode mid-session (set the key with a
-  `configSet` node or `ChangeConfiguration` instead).
+  `configSet` node or, on 1.6J, `ChangeConfiguration` instead). 2.x has no
+  `ChangeConfiguration` and no `SignedMeterDataMode` variable.
 
 ## SOAP versions (1.2, 1.5, 1.6S)
 

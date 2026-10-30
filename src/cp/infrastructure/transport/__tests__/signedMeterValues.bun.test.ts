@@ -55,7 +55,8 @@ async function run16(
   csms: MockCsms,
   id: string,
   setup: (cp: ChargePoint) => void,
-  beforeStop: (cp: ChargePoint) => void = () => {},
+  // May be async; awaited before the stop. Its return value is ignored.
+  beforeStop: (cp: ChargePoint) => unknown = () => {},
 ): Promise<ChargePoint> {
   const cp = await bootedChargePoint(csms, id, "OCPP-1.6J");
   cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
@@ -75,7 +76,7 @@ async function run16(
     );
     cp.sendMeterValue(1);
     await csms.waitForCall("MeterValues");
-    beforeStop(cp);
+    await beforeStop(cp);
     cp.stopTransaction(1);
     await csms.waitForCall("StopTransaction");
   } finally {
@@ -108,9 +109,25 @@ describe("OCPP 1.6 signed meter values (#315)", () => {
   it("signs MeterValues and StopTransaction begin/end against MeterPublicKey1", async () => {
     const csms = startMockCsms();
     try {
-      const cp = await run16(csms, "CP315-ON", (station) =>
-        station.configuration.applyChange("SampledDataSignReadings", "true"),
+      const cp = await run16(
+        csms,
+        "CP315-ON",
+        (station) =>
+          station.configuration.applyChange("SampledDataSignReadings", "true"),
+        async (station) => {
+          station.sendMeterValue(1, "Sample.Clock");
+          await csms.waitForFrame(
+            (f) =>
+              callOf("MeterValues")(f) &&
+              callsOf(csms, "MeterValues").length > 1,
+          );
+        },
       );
+      // A clock-aligned sample carries no signed record.
+      const clock = callsOf(csms, "MeterValues")[1][3] as MeterValuesRequestV16;
+      expect(
+        clock.meterValue[0].sampledValue.some((s) => s.format === "SignedData"),
+      ).toBe(false);
       const keyHex = cp.configuration.get("MeterPublicKey1")?.value as string;
       expect(keyHex).toMatch(/^3059301306072A8648CE3D0201/);
       const publicKeyDer = hex(keyHex);
@@ -239,6 +256,11 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"] as const)(
         await csms.waitForFrame(event("Updated"));
         cp.sendMeterValue(1);
         await csms.waitForCall("MeterValues");
+        cp.sendMeterValue(1, "Sample.Clock");
+        await csms.waitForFrame(
+          (f) =>
+            callOf("MeterValues")(f) && callsOf(csms, "MeterValues").length > 1,
+        );
         cp.stopTransaction(1);
         await csms.waitForFrame(event("Ended"));
 
@@ -274,6 +296,20 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"] as const)(
           reasons.push(reading(ocmf).RD[0].TX);
         }
         expect(reasons).toEqual(["B", "C", "C", "E"]);
+        // Boundary samples say which boundary they are.
+        const signedSample = (payload: {
+          meterValue?: TransactionEventRequestV201["meterValue"];
+        }) =>
+          (payload.meterValue ?? [])
+            .flatMap((m) => m.sampledValue)
+            .find((s) => s.signedMeterValue);
+        expect(signedSample(started)?.context).toBe("Transaction.Begin");
+        expect(signedSample(ended)?.context).toBe("Transaction.End");
+        // A clock-aligned sample carries no signed record.
+        const clock = callsOf(csms, "MeterValues")[1][3] as {
+          meterValue: TransactionEventRequestV201["meterValue"];
+        };
+        expect(signedOf(clock)).toBeUndefined();
         // 2.x reads the switch through its own variable name.
         expect(cp.configuration.get("MeterPublicKey1")?.value).toMatch(/^3059/);
         cp.disconnect();

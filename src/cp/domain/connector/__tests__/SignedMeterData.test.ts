@@ -3,6 +3,7 @@ import {
   OcmfMeter,
   SIGNED_METER_MODES,
   ocmfTime,
+  signReading,
   toOcpp16SampledValue,
   toOcpp2SignedMeterValue,
   type SignedMeterMode,
@@ -124,6 +125,35 @@ describe("OcmfMeter (#315)", () => {
     expect(record.mode).toBe(mode);
     expect(record.publicKeyDer).toEqual(m.publicKeyDer);
     expect(await verify(record.ocmf, record.publicKeyDer)).toBe(false);
+  });
+
+  it("claims no identification detail (IF is empty)", () => {
+    const payload = JSON.parse(
+      meter()
+        .sign([{ reason: "B", energyWh: 1, at }], "04A2B3")
+        .ocmf.split("|")[1],
+    );
+    expect(payload.IF).toEqual([]);
+  });
+
+  it("refuses tampered_payload with no reading to tamper", () => {
+    expect(() => meter().sign([], "T", "tampered_payload")).toThrow(
+      /at least one reading/,
+    );
+  });
+
+  it("signs nothing for a register too large to write as plain digits", () => {
+    const m = meter();
+    const cp = {
+      signedMeterFor: () => m,
+      configuration: { signedMeterDataMode: () => "valid" as const },
+    };
+    expect(
+      signReading(cp, 1, "T", { reason: "C", energyWh: 1e24, at }),
+    ).toBeNull();
+    expect(
+      signReading(cp, 1, "T", { reason: "C", energyWh: 1234500, at }),
+    ).not.toBeNull();
   });
 
   it("tampered_payload changes only the reading, after signing", () => {

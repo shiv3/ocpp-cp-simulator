@@ -710,6 +710,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
               energyWh: transaction.meterStart,
               at: transaction.startTime,
             },
+            "Transaction.Begin",
           ),
         },
       ],
@@ -804,6 +805,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
                     energyWh: transaction.meterStop,
                     at: transaction.stopTime ?? new Date(timestamp),
                   },
+                  "Transaction.End",
                 ),
               },
             ]
@@ -921,12 +923,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     reading: OcmfReading,
     context?: ReadingContext,
   ): [V201MeterValuesSampledValue, ...V201MeterValuesSampledValue[]] {
-    const signed = signReading(this._chargePoint, connectorId, idTag, reading);
     const list = sampledValue as [
       V201MeterValuesSampledValue,
       ...V201MeterValuesSampledValue[],
     ];
+    // Clock-aligned samples are not signed (no aligned/fiscal records yet).
+    if (context === "Sample.Clock") return list;
+    const signed = signReading(this._chargePoint, connectorId, idTag, reading);
     if (!signed) return list;
+    const withContext = context
+      ? { context: context as V201MeterValuesSampledValue["context"] }
+      : {};
     const signedMeterValue = toOcpp2SignedMeterValue(signed);
     const energy = list.findIndex(
       (sv) =>
@@ -935,7 +942,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
     if (energy >= 0) {
       return list.map((sv, i) =>
-        i === energy ? { ...sv, signedMeterValue } : sv,
+        i === energy ? { ...sv, ...withContext, signedMeterValue } : sv,
       ) as typeof list;
     }
     return [
@@ -944,9 +951,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         value: reading.energyWh / 1000,
         measurand: "Energy.Active.Import.Register",
         unitOfMeasure: { unit: "kWh" },
-        ...(context
-          ? { context: context as V201MeterValuesSampledValue["context"] }
-          : {}),
+        ...withContext,
         signedMeterValue,
       },
     ];

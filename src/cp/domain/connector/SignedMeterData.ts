@@ -139,7 +139,9 @@ export class OcmfMeter {
       MS: this.identity.meterSerial,
       IS: idTag !== "",
       IL: idTag !== "" ? "TRUSTED" : "NONE",
-      IF: ["OCPP_AUTH"],
+      // No identification detail is claimed: the record does not know whether
+      // the tag came from an Authorize result, the cache or a timeout path.
+      IF: [],
       IT: idTag !== "" ? "ISO14443" : "NONE",
       ...(idTag !== "" ? { ID: idTag } : {}),
     };
@@ -218,6 +220,7 @@ function kwh(energyWh: number): string {
 /** Change the last digit of the last `RV`, after signing. */
 function bumpLastReading(payload: string): string {
   const at = payload.lastIndexOf('"RV":');
+  if (at === -1) throw new Error("tampered_payload needs at least one reading");
   const end = payload.indexOf(",", at);
   const digit = Number(payload[end - 1]);
   return `${payload.slice(0, end - 1)}${(digit + 1) % 10}${payload.slice(end)}`;
@@ -269,5 +272,8 @@ export function signReading(
 ): SignedMeterRecord | null {
   const meter = cp.signedMeterFor(connectorId);
   if (!meter) return null;
+  // A register too large to write as plain decimal digits (1e+24 Wh) cannot be
+  // an OCMF `RV`, so nothing is signed for it.
+  if (!Number.isSafeInteger(Math.round(reading.energyWh))) return null;
   return meter.sign([reading], idTag, cp.configuration.signedMeterDataMode());
 }

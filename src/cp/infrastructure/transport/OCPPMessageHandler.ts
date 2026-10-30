@@ -797,8 +797,14 @@ export class OCPPMessageHandler {
     const sampledValue = buildSampledValues(connector, measurands, context);
     const timestamp = overrides.timestamp ?? new Date();
     // #315: during a transaction, also send the energy register signed.
+    // Clock-aligned samples are not signed (no aligned/fiscal records yet).
     const transaction = connector.transaction;
-    if (transactionId !== undefined && transaction && !transaction.stopTime) {
+    if (
+      context !== "Sample.Clock" &&
+      transactionId !== undefined &&
+      transaction &&
+      !transaction.stopTime
+    ) {
       const signed = signReading(
         this._chargePoint,
         connectorId,

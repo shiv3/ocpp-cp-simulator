@@ -73,7 +73,13 @@ import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { OCPP_2_1 } from "../../domain/types/OcppVersion";
-import { buildNotifyEventRequests } from "./v201/notifyEventV201";
+import {
+  buildNotifyEventReport,
+  buildNotifyEventRequests,
+  notifyEventReportParts,
+  type NotifyEventReport,
+} from "./v201/notifyEventV201";
+import { isQueuedOffline } from "../../domain/monitoring/monitoringCtrlrKeys";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import {
@@ -214,11 +220,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  charge point has a database; replayed after Boot Accepted. */
   private readonly _pendingQueue: PendingMessageQueue<V201Action>;
   /** True while TransactionEvents wait in the E11 queue for their replay
-   *  (#528): set when one is queued (or a restart finds persisted rows),
-   *  cleared when the replay after Boot Accepted has drained the queue.
+   *  (#528): set when one is queued (or a restart finds persisted ones),
+   *  re-derived from the queued TransactionEvent rows after each replay.
    *  While set, a new TransactionEvent joins the queue so the order holds.
-   *  An explicit flag, not the queue size, so another queued 2.x action
-   *  (#538) cannot hold TransactionEvents back. */
+   *  Queued NotifyEvents (#538) never set it, so they cannot hold
+   *  TransactionEvents back. */
   private _awaitingReplay: boolean;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
@@ -256,7 +262,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       chargePoint.id,
       chargePoint.database ?? null,
     );
-    this._awaitingReplay = this._pendingQueue.size() > 0;
+    this._awaitingReplay = this.hasQueuedTransactionEvents();
 
     // Initialize response effect queue with deps
     this._responseEffectQueue = new ResponseEffectQueue({
@@ -1634,15 +1640,62 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /** N07 NotifyEvent.req: the events of one monitor evaluation (#457), in
    *  as many parts as `buildNotifyEventRequests` makes, sent in order
-   *  (#538). Dropped like any 2.x CALL while offline: OfflineQueuingSeverity
-   *  (N07.FR.04) is not modelled. */
+   *  (#538). Events the monitor evaluation produced online but that find
+   *  the socket already down are queued per `OfflineQueuingSeverity`
+   *  (N07.FR.04), the others dropped. */
   public sendNotifyEvent(events: readonly MonitoringEvent[]): void {
     const [first, ...rest] = events;
     if (first === undefined) return;
-    const dialect = this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
-    for (const part of buildNotifyEventRequests([first, ...rest], dialect)) {
+    if (!this._webSocket.isConnected()) {
+      const threshold =
+        this._chargePoint.configuration.offlineQueuingSeverity();
+      const queued = events.filter((event) =>
+        isQueuedOffline(event.monitor.severity, threshold),
+      );
+      this.queueNotifyEvent(queued);
+      if (queued.length < events.length) {
+        this._logger.warn(
+          `[v2.0.1] Not connected, dropping ${events.length - queued.length} NotifyEvent event(s) above OfflineQueuingSeverity ${threshold}`,
+          LogType.WEBSOCKET,
+        );
+      }
+      return;
+    }
+    for (const part of buildNotifyEventRequests(
+      [first, ...rest],
+      this.notifyEventDialect(),
+    )) {
       this.send("NotifyEvent", this.generateMessageId(), part);
     }
+  }
+
+  /**
+   * #538, OCPP 2.0.1 / 2.1 N07.FR.04, N08.FR.03: queue the NotifyEvent of
+   * `events` while offline, as one whole report in the E11 queue (#528),
+   * cut into parts when it is replayed after the next Boot Accepted. The
+   * caller has applied `OfflineQueuingSeverity`.
+   */
+  public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
+    const [first, ...rest] = events;
+    if (first === undefined) return;
+    this._pendingQueue.enqueue({
+      action: "NotifyEvent",
+      payload: buildNotifyEventReport([first, ...rest]),
+    });
+    this._logger.warn(
+      `[v2.0.1] NotifyEvent with ${events.length} event(s) queued while offline; queue size=${this._pendingQueue.size()}`,
+      LogType.OCPP,
+    );
+  }
+
+  private notifyEventDialect(): "v21" | "v201" {
+    return this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
+  }
+
+  private hasQueuedTransactionEvents(): boolean {
+    return this._pendingQueue
+      .all()
+      .some((queued) => queued.action === "TransactionEvent");
   }
 
   /** N01 LogStatusNotification.req (#345); `requestId` as above, from the
@@ -1729,6 +1782,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * replay the socket refuses while it stays open (`not_accepted`, a
    * network-sim overflow) is put back at the head and the replay stops
    * there, so the order holds; it waits for the next Boot Accepted.
+   * Queued NotifyEvents (#538, N07.FR.04) replay in the same pass, in the
+   * order they were queued among the TransactionEvents.
    */
   public flushPendingQueue(): void {
     if (!this._webSocket.isConnected()) return;
@@ -1743,13 +1798,53 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       if (outcome === "held") break;
       if (outcome === "replayed") replayed += 1;
     }
-    if (this._pendingQueue.size() === 0) this._awaitingReplay = false;
+    this._awaitingReplay = this.hasQueuedTransactionEvents();
     if (replayed > 0) {
       this._logger.info(
         `[v2.0.1] Replayed ${replayed} queued message(s); ${this._pendingQueue.size()} left`,
         LogType.OCPP,
       );
     }
+  }
+
+  /**
+   * #538: send a queued NotifyEvent report, in parts cut now (seqNo from 0,
+   * N07.FR.07), with no offline marker: NotifyEventRequest has none. A
+   * first part the socket refuses keeps the whole row at the head, like a
+   * refused TransactionEvent; a later part refused loses the rest of the
+   * report, with a warning. A part written is not queued again by a later
+   * close.
+   */
+  private replayNotifyEvent(
+    queued: PendingMessage<V201Action>,
+  ): "replayed" | "held" {
+    const parts = notifyEventReportParts(
+      queued.payload as NotifyEventReport,
+      this.notifyEventDialect(),
+    );
+    for (const [index, part] of parts.entries()) {
+      let refused = false;
+      let sending = true;
+      this.send("NotifyEvent", this.generateMessageId(), part, () => {
+        if (sending) refused = true;
+      });
+      sending = false;
+      if (!refused) continue;
+      if (index === 0) {
+        this._pendingQueue.putBack(queued);
+        this._logger.warn(
+          `[v2.0.1] Replay of a queued NotifyEvent refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
+          LogType.OCPP,
+        );
+        return "held";
+      }
+      this._logger.warn(
+        `[v2.0.1] Replay of a queued NotifyEvent refused at part ${index + 1} of ${parts.length}; the rest of the report is lost`,
+        LogType.OCPP,
+      );
+      return "replayed";
+    }
+    return "replayed";
   }
 
   /** Send one queued message again. Each queued action gets its own case;
@@ -1783,6 +1878,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         }
         return "replayed";
       }
+      case "NotifyEvent":
+        return this.replayNotifyEvent(queued);
       default:
         this._logger.warn(
           `[v2.0.1] Dropping queued ${queued.action}: not replayed on OCPP 2.x`,

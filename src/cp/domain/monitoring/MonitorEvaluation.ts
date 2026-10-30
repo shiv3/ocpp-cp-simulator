@@ -5,6 +5,7 @@ import {
   type MonitorState,
 } from "./evaluateMonitor";
 import type { MonitoringStore, MonitoringStoreEvent } from "./MonitoringStore";
+import { isQueuedOffline } from "./monitoringCtrlrKeys";
 import { PeriodicMonitorScheduler } from "./PeriodicMonitorScheduler";
 import {
   isAlertMonitorType,
@@ -39,6 +40,15 @@ export interface MonitorEvaluationDeps {
    * with an empty list and never while reporting is off.
    */
   emit(events: readonly MonitoringEvent[]): void;
+  /**
+   * Called instead of `emit` while the station is offline, with the events
+   * to queue for delivery once back online (N07.FR.04, N08.FR.03, #538).
+   * Without it nothing is queued.
+   */
+  queue?(events: readonly MonitoringEvent[]): void;
+  /** `MonitoringCtrlr.OfflineQueuingSeverity`, read at each evaluation;
+   *  `undefined` (unset) queues nothing. */
+  offlineQueuingSeverity?(): number | undefined;
   /** Whether a transaction is running on the charge point. */
   transactionActive(): boolean;
   /**
@@ -66,12 +76,21 @@ export interface MonitorEvaluationDeps {
  * Periodic and PeriodicClockAligned monitors (N08, #538) ignore value
  * changes: their timers run while reporting is on, each tick reporting the
  * current value with trigger `Periodic` (N08.FR.05).
+ *
+ * Offline (#538, N07.FR.04, N08.FR.03): a monitor whose severity is at or
+ * below `OfflineQueuingSeverity` is evaluated as if online and its events
+ * go to `queue`; a queued event counts as told. The other monitors are
+ * held as while reporting is off, and reported by the re-check once
+ * reporting resumes (the "delayed evaluation" of the N07 Remark). The
+ * periodic timers keep running offline.
  */
 export class MonitorEvaluation {
   private readonly states = new Map<number, MonitorState>();
   private readonly periodic: PeriodicMonitorScheduler;
   private nextEventId = 1;
-  private reporting = true;
+  /** `on`: reporting; `held`: boot not Accepted while connected (B02.FR.02);
+   *  `offline`: no connection or no boot yet; `disposed`: terminal. */
+  private mode: "on" | "held" | "offline" | "disposed" = "on";
 
   /**
    * @param restoredTriggered triggered flags of monitors restored from
@@ -123,11 +142,14 @@ export class MonitorEvaluation {
    *
    * The periodic monitors' timers stop with reporting and restart from
    * scratch with it: a Periodic monitor's next tick is a full interval
-   * after reporting resumes.
+   * after reporting resumes. Coming back from offline, where they kept
+   * running (N08.FR.03), they keep their period.
    */
   setReporting(enabled: boolean): void {
-    if (enabled === this.reporting) return;
-    this.reporting = enabled;
+    const next = enabled ? "on" : "held";
+    if (this.mode === "disposed" || this.mode === next) return;
+    const timersRan = this.timersRun();
+    this.mode = next;
     if (!enabled) {
       this.periodic.disarmAll();
       return;
@@ -135,7 +157,7 @@ export class MonitorEvaluation {
     const events: MonitoringEvent[] = [];
     for (const monitor of this.deps.store.list()) {
       if (isPeriodicMonitorType(monitor.type)) {
-        this.periodic.arm(monitor);
+        if (!timersRan) this.periodic.arm(monitor);
         continue;
       }
       if (!isAlertMonitorType(monitor.type)) continue;
@@ -145,13 +167,34 @@ export class MonitorEvaluation {
     this.flush(events);
   }
 
-  /** N08.FR.05-FR.07: report the current value of a periodic monitor. */
+  /**
+   * The station is offline: no connection, or connected without a boot
+   * answer yet (#538). Events of the monitors at or below
+   * `OfflineQueuingSeverity` go to `queue` (N07.FR.04); the others are held
+   * as while reporting is off. The periodic timers run (N08.FR.03).
+   */
+  setOffline(): void {
+    if (this.mode === "disposed" || this.mode === "offline") return;
+    const timersRan = this.timersRun();
+    this.mode = "offline";
+    if (timersRan) return;
+    for (const monitor of this.deps.store.list()) {
+      if (isPeriodicMonitorType(monitor.type)) this.periodic.arm(monitor);
+    }
+  }
+
+  /** Terminal: stop every timer; later mode changes are ignored. */
+  dispose(): void {
+    this.mode = "disposed";
+    this.periodic.disarmAll();
+  }
+
+  /** N08.FR.05-FR.07: report the current value of a periodic monitor;
+   *  offline, queue it when its severity allows (N08.FR.03). */
   private periodicTick(id: number): void {
     const monitor = this.deps.store.get(id);
     if (monitor === undefined || !isPeriodicMonitorType(monitor.type)) return;
     const reading = this.deps.read(monitor.valueKey);
-    // #538 538c: a tick that is not sent because the station is offline is
-    // where N08.FR.03 would queue it; the timers do not run offline yet.
     if (reading === undefined || !this.sendable(monitor)) return;
     this.flush([
       this.event(monitor, { trigger: "Periodic", cleared: false }, reading),
@@ -169,7 +212,7 @@ export class MonitorEvaluation {
           replaced.type === monitor.type &&
           isAlertMonitorType(monitor.type);
         if (isPeriodicMonitorType(monitor.type)) {
-          if (this.reporting) this.periodic.arm(monitor);
+          if (this.timersRun()) this.periodic.arm(monitor);
         } else if (replaced !== undefined) {
           this.periodic.disarm(monitor.id);
         }
@@ -227,7 +270,7 @@ export class MonitorEvaluation {
     if (monitorBehaviour(monitor.type) === "delta") {
       // N07.FR.18: the step counts from the last notice sent.
       if (notice !== undefined && !sent && previous) next = previous;
-    } else if (isAlertMonitorType(monitor.type) && !this.reporting) {
+    } else if (isAlertMonitorType(monitor.type) && !this.live(monitor)) {
       // Keep what the CSMS was last told; setReporting(true) re-checks it.
       // A monitor starting afresh (new, or replacing one of another type)
       // that is exceeded owes its trigger: hold it as not triggered.
@@ -260,11 +303,36 @@ export class MonitorEvaluation {
   }
 
   private flush(events: readonly MonitoringEvent[]): void {
-    if (events.length > 0) this.deps.emit(events);
+    if (events.length === 0) return;
+    if (this.mode === "offline") this.deps.queue?.(events);
+    else this.deps.emit(events);
+  }
+
+  private timersRun(): boolean {
+    return this.mode === "on" || this.mode === "offline";
+  }
+
+  /** Whether the monitor's events are reported now: sent, or queued while
+   *  offline (N07.FR.04). A queued event counts as told. */
+  private live(monitor: VariableMonitor): boolean {
+    switch (this.mode) {
+      case "on":
+        return true;
+      case "offline":
+        return (
+          this.deps.queue !== undefined &&
+          isQueuedOffline(
+            monitor.severity,
+            this.deps.offlineQueuingSeverity?.(),
+          )
+        );
+      default:
+        return false;
+    }
   }
 
   private sendable(monitor: VariableMonitor): boolean {
-    if (!this.reporting) return false;
+    if (!this.live(monitor)) return false;
     if (monitor.severity > this.deps.store.monitoringLevel) return false;
     return !monitor.transaction || this.deps.transactionActive();
   }

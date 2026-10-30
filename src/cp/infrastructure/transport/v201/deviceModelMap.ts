@@ -59,6 +59,9 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ),
   ["MonitoringCtrlr/ActiveMonitoringLevel", "ActiveMonitoringLevel"],
   ["MonitoringCtrlr/ActiveMonitoringBase", "ActiveMonitoringBase"],
+  // #538: §2.11.7 / 2.1 §2.13.7 "OfflineMonitoringEventQueuingSeverity",
+  // ReadWrite, no variableInstance; a persisted key (2.x only).
+  ["MonitoringCtrlr/OfflineQueuingSeverity", "OfflineQueuingSeverity"],
   // #538: runtime value (2.x only), the station-level status, from the
   // standardized components of the Part 2 appendices (required there).
   [

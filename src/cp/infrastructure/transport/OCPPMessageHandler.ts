@@ -787,6 +787,11 @@ export class OCPPMessageHandler {
     );
   }
 
+  /** Same as above: nothing to queue on 1.6 (#538). */
+  public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
+    this.sendNotifyEvent(events);
+  }
+
   /**
    * §4.7 MeterValues.req. The measurand list is driven by the
    * `MeterValuesSampledData` Configuration key (defaults to

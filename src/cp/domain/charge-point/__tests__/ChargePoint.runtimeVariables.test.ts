@@ -25,10 +25,14 @@ interface EventData {
   component: { name: string; evse?: { id: number } };
 }
 
+/** NotifyEvent payloads the handler writes. The socket reads as connected:
+ *  a NotifyEvent finding it down would be queued (#538). */
 function captureNotifyEvents(cp: ChargePoint): Record<string, unknown>[] {
   const handler = cp["_messageHandler"] as unknown as {
     send: (action: string, id: string, payload: unknown) => void;
+    _webSocket: { isConnected: () => boolean };
   };
+  vi.spyOn(handler._webSocket, "isConnected").mockReturnValue(true);
   const sent: Record<string, unknown>[] = [];
   vi.spyOn(handler, "send").mockImplementation((action, _id, payload) => {
     if (action === "NotifyEvent") sent.push(payload as Record<string, unknown>);

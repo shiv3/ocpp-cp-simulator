@@ -80,6 +80,10 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
       "INSERT INTO charging_sessions (cp_id, session_id, connector_id, started_at, outcome, session_json) VALUES (?, 's1', 1, ?, 'active', '{}')",
       [cp, t],
     );
+    db.run(
+      "INSERT INTO certificates (cp_id, seq, kind, certificate_use, body, installed_at) VALUES (?, 1, 'root', 'CsmsRootCertificate', '{}', ?)",
+      [cp, t],
+    );
   }
   db.run("INSERT OR REPLACE INTO kv (key, value) VALUES ('pref', '1')");
   db.run(

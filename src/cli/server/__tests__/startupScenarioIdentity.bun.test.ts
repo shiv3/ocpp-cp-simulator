@@ -162,7 +162,7 @@ describe("startup scenario identity across a restart (#314)", () => {
 
   it("leaves an older build's clock-based instance to the boot prune", async () => {
     // Builds through 0f6f951 minted `<base>-c<connector>-<epoch ms>`. The
-    // install itself no longer removes such a row: the schema v18 migration
+    // install itself no longer removes such a row: the schema v19 migration
     // records it as `legacy:<base>` and the daemon's one startup prune removes
     // it at restore, once the boot installs its stable successor (#338, see
     // `startupScenarioProvenance.bun.test.ts`). Without a state DB nothing is

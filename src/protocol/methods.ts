@@ -725,7 +725,8 @@ export const METHODS = {
     result: ANY,
   },
   sign_certificate: {
-    params: z.object({ csr: NON_EMPTY_STR.optional() }),
+    // SignCertificateRequest.csr is string[0..5500] (1.6, 2.0.1, 2.1).
+    params: z.object({ csr: NON_EMPTY_STR.max(5500).optional() }),
     result: ANY,
   },
 
@@ -746,6 +747,12 @@ export const METHODS = {
       }).optional(),
       suppressChargingStateTransactionEvent: z.boolean().optional(),
     }),
+    result: ANY,
+  },
+  // #488: the EV side of the cable was unplugged. With a running
+  // transaction StopTransactionOnEVSideDisconnect stops or suspends it.
+  ev_disconnected: {
+    params: z.object({ connector: CONN_POS }),
     result: ANY,
   },
   set_meter_value: {
@@ -1137,7 +1144,9 @@ export const METHODS = {
   // Daemon-wide (not per-CP): pushes Default EV Settings onto every
   // connector of every registered CP, unless a connector currently has an
   // explicit/scenario override active (#105). Distinct from the per-CP
-  // `set_ev_settings`, which always marks an override.
+  // `set_ev_settings`, which always marks an override. `settings` may be
+  // partial: it is merged onto the built-in defaults, so an omitted field
+  // reads back as its default (#333).
   "ev_settings.apply_default": {
     params: z.object({ settings: OBJ() }),
     result: ANY,

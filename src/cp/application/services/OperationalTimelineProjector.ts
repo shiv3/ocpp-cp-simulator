@@ -185,6 +185,28 @@ export class OperationalTimelineProjector {
       });
     });
     on(
+      "transactionMessageRejected",
+      ({ connectorId, transactionId, eventType, errorCode, attempt }) => {
+        this.timeline.record({
+          kind: "transaction_message_rejected",
+          connectorId,
+          summary: `TransactionEvent ${eventType} of transaction ${transactionId} rejected (${errorCode}), attempt ${attempt}`,
+          data: { transactionId, eventType, errorCode, attempt },
+        });
+      },
+    );
+    on(
+      "transactionMessageDiscarded",
+      ({ connectorId, transactionId, eventType, errorCode, attempts }) => {
+        this.timeline.record({
+          kind: "transaction_message_discarded",
+          connectorId,
+          summary: `TransactionEvent ${eventType} of transaction ${transactionId} discarded after ${attempts} attempts (${errorCode})`,
+          data: { transactionId, eventType, errorCode, attempts },
+        });
+      },
+    );
+    on(
       "chargingProfileApplied",
       ({ connectorId, profile, replaced, source }) => {
         const { chargingProfileId: id, validTo } = profile;

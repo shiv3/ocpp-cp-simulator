@@ -39,16 +39,24 @@ function toHex(buffer: ArrayBuffer): string {
  *   precomputed with `openssl asn1parse` + `openssl dgst -sha256` for a
  *   fixed certificate.
  * - serialNumber: hex string, sign-padding byte stripped by @peculiar/x509.
+ *
+ * `issuerPem`, when given, is the certificate that signed `pem`: its public
+ * key feeds issuerKeyHash (a chain member, M03.FR.05). Omitted, the
+ * certificate is treated as self-signed, as above.
  */
 export async function computeCertificateHashData(
   pem: string,
+  issuerPem?: string,
 ): Promise<CertificateHashData> {
   const cert = new x509.X509Certificate(pem);
+  // An issued certificate (a chain member, #456) is identified by its
+  // issuer's key; without an issuer the certificate is taken as self-signed.
+  const keySource = issuerPem ? new x509.X509Certificate(issuerPem) : cert;
   const issuerNameHash = await crypto.subtle.digest(
     "SHA-256",
     cert.issuerName.toArrayBuffer(),
   );
-  const issuerKeyHash = await cert.publicKey.getKeyIdentifier("SHA-256");
+  const issuerKeyHash = await keySource.publicKey.getKeyIdentifier("SHA-256");
 
   return {
     hashAlgorithm: "SHA256",

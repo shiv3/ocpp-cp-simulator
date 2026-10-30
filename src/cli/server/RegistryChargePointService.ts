@@ -335,6 +335,10 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).sendTransactionUpdate(connectorId, options);
   }
 
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).evDisconnected(connectorId);
+  }
+
   async sendStatusNotification(
     id: string,
     connectorId: number,
@@ -420,7 +424,7 @@ export class RegistryChargePointService implements ChargePointService {
     return this.requireService(id).getEVSettings(connectorId);
   }
 
-  async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
+  async applyDefaultEVSettings(settings: EVSettingsPatch): Promise<void> {
     // Routes through the connector-level default path (#105) rather than
     // setEVSettings — setEVSettings marks an explicit override, which would
     // make this default propagation stick forever and defeat the very

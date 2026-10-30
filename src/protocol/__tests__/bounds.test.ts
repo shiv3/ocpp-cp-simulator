@@ -68,3 +68,13 @@ describe("scenario object size bound (B-2)", () => {
     ).toBe(false);
   });
 });
+
+describe("sign_certificate csr bound (#456)", () => {
+  // SignCertificateRequest.csr is string[0..5500] in 1.6 (whitepaper),
+  // 2.0.1 and 2.1.
+  it("accepts a CSR of 5500 characters and refuses one of 5501", () => {
+    const params = METHODS.sign_certificate.params;
+    expect(params.safeParse({ csr: "c".repeat(5500) }).success).toBe(true);
+    expect(params.safeParse({ csr: "c".repeat(5501) }).success).toBe(false);
+  });
+});

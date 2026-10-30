@@ -10,7 +10,7 @@
  * - a built-in template instance, through v0.9.0:
  *   `<templateId>-<cpId>-c<connector>-<epoch ms>-<base36 suffix>`.
  *
- * The schema v18 migration records such a row as
+ * The schema v19 migration records such a row as
  * `startup_source = 'legacy:<base>'`, where `<base>` is the file's or the
  * template's own id. The daemon's one startup prune removes it on the first
  * boot whose flags install its successor on the same connector — the stable

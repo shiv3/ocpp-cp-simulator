@@ -7,6 +7,7 @@ import type {
   LogStatusNotificationResponseV16,
   MeterValuesResponseV16,
   SecurityEventNotificationResponseV16,
+  SignCertificateResponseV16,
   SignedFirmwareStatusNotificationResponseV16,
   StatusNotificationResponseV16,
 } from "../../../../../ocpp";
@@ -80,5 +81,28 @@ export class EmptyConfirmationResultHandler implements CallResultHandler<EmptyCo
     context: HandlerContext,
   ): void {
     context.logger.debug(`${this.action} acknowledged`, LogType.OCPP);
+  }
+}
+
+/**
+ * SignCertificate.conf carries a `status`, so unlike the empty confirmations
+ * above it is not a plain acknowledgement (#410). Log only: the status is not
+ * surfaced to `sendSignCertificate` callers.
+ */
+export class SignCertificateResultHandler implements CallResultHandler<SignCertificateResponseV16> {
+  handle(payload: SignCertificateResponseV16, context: HandlerContext): void {
+    if (payload.status === "Accepted") {
+      // The CSMS is expected to follow up with CertificateSigned.req.
+      context.logger.info(
+        "SignCertificate accepted by the CSMS; awaiting CertificateSigned.req",
+        LogType.OCPP,
+      );
+      return;
+    }
+    // Rejected, or a status outside the spec: the CSR will not be signed.
+    context.logger.warn(
+      `SignCertificate not accepted by the CSMS (status ${payload.status}); certificate renewal will not happen`,
+      LogType.OCPP,
+    );
   }
 }

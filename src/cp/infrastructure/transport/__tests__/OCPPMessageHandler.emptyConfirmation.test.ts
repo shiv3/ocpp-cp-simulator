@@ -10,12 +10,12 @@ import {
   OCPPAction,
   OCPPMessageType,
 } from "../../../domain/types/OcppTypes";
-import { Logger, LogLevel } from "../../../shared/Logger";
+import { Logger, LogLevel, LogType } from "../../../shared/Logger";
 
 /**
  * #407: the CSMS acknowledging a CP-initiated notification whose `.conf` is
- * empty by spec is the whole exchange, not a missing handler. The
- * "No handler for action result" warning stays for actions that do lack one.
+ * empty by spec is the whole exchange, not a missing handler. #410: the same
+ * holds for SignCertificate.conf, whose status is logged instead.
  */
 
 type IncomingMessageHandler = (
@@ -66,6 +66,7 @@ function harness() {
   const logger = new Logger(LogLevel.DEBUG);
   const warn = vi.spyOn(logger, "warn");
   const debug = vi.spyOn(logger, "debug");
+  const info = vi.spyOn(logger, "info");
   const handler = new OCPPMessageHandler(cp, fakeSocket, logger, codec);
   handler.setBootStatus({ status: "Accepted" });
   const answer = (action: string, payload: unknown) => {
@@ -80,7 +81,7 @@ function harness() {
   };
   const warnedNoHandler = () =>
     warn.mock.calls.some(([message]) => message.includes(NO_HANDLER));
-  return { handler, debug, answer, warnedNoHandler };
+  return { handler, debug, info, warn, answer, warnedNoHandler };
 }
 
 describe("empty CALLRESULTs on OCPP 1.6 (#407)", () => {
@@ -117,13 +118,36 @@ describe("empty CALLRESULTs on OCPP 1.6 (#407)", () => {
       expect.anything(),
     );
   });
+});
 
-  it("still warns for a CALLRESULT no handler takes (SignCertificate)", async () => {
+describe("SignCertificate.conf on OCPP 1.6 (#410)", () => {
+  it("logs Accepted at INFO, not as a missing handler", async () => {
     const h = harness();
     await h.handler.sendSignCertificate("-----BEGIN CERTIFICATE REQUEST-----");
 
     h.answer(OCPPAction.SignCertificate, { status: "Accepted" });
 
-    expect(h.warnedNoHandler()).toBe(true);
+    expect(h.warnedNoHandler()).toBe(false);
+    expect(h.info).toHaveBeenCalledWith(
+      "SignCertificate accepted by the CSMS; awaiting CertificateSigned.req",
+      LogType.OCPP,
+    );
+    expect(h.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("SignCertificate"),
+      expect.anything(),
+    );
+  });
+
+  it("logs Rejected at WARN naming the status, not as a missing handler", async () => {
+    const h = harness();
+    await h.handler.sendSignCertificate("-----BEGIN CERTIFICATE REQUEST-----");
+
+    h.answer(OCPPAction.SignCertificate, { status: "Rejected" });
+
+    expect(h.warnedNoHandler()).toBe(false);
+    expect(h.warn).toHaveBeenCalledWith(
+      "SignCertificate not accepted by the CSMS (status Rejected); certificate renewal will not happen",
+      LogType.OCPP,
+    );
   });
 });

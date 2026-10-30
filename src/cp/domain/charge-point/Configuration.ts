@@ -1,6 +1,7 @@
 import { ChargePoint } from "./ChargePoint";
 import { OcppFeatureProfile } from "../types/OcppTypes";
 import { MAX_TIMER_MS } from "../../shared/timers";
+import { SIGNED_METER_MODES } from "../connector/SignedMeterData";
 
 export const ConfigurationKeys = {
   Core: {
@@ -433,6 +434,26 @@ export const ConfigurationKeys = {
       readonly: false,
       type: "boolean",
     } as BooleanConfigurationKey,
+    // #315: sign the energy register in OCMF (German Eichrecht format) and
+    // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by
+    // default; nothing is generated, and no key is made, while false. The
+    // name follows the ecosystem's vendor key; 2.x maps
+    // `SampledDataCtrlr.SignReadings` onto it.
+    SampledDataSignReadings: {
+      name: "SampledDataSignReadings",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
+    // #315: what the next signed record looks like. Anything but `valid` is
+    // deliberately wrong, to test a CSMS's rejection path.
+    SignedMeterDataMode: {
+      name: "SignedMeterDataMode",
+      required: false,
+      readonly: false,
+      type: "string",
+      allowed: SIGNED_METER_MODES,
+    } as StringConfigurationKey,
   },
 };
 
@@ -447,6 +468,8 @@ export type ConfigurationKey<T = ConfigurationKeyType> = {
   /** Inclusive bounds of an integer key; out of range → `Rejected`. */
   min?: number;
   max?: number;
+  /** The only values a string key accepts; anything else → `Rejected`. */
+  allowed?: readonly string[];
 };
 export type IntegerConfigurationKey = ConfigurationKey<"integer">;
 export type StringConfigurationKey = ConfigurationKey<"string">;
@@ -599,5 +622,7 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),
     strVal(ConfigurationKeys.Custom.SimulatedFirmwareUpdateFailure, ""),
     boolVal(ConfigurationKeys.Custom.AuthorizeBeforeLocalStart, true),
+    boolVal(ConfigurationKeys.Custom.SampledDataSignReadings, false),
+    strVal(ConfigurationKeys.Custom.SignedMeterDataMode, "valid"),
   ];
 };

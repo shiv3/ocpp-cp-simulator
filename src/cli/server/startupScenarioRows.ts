@@ -1,7 +1,7 @@
 import type { Database } from "../../cp/domain/persistence/Database";
 
 /**
- * `scenarios.startup_source` (schema v18, #338): which startup flag generated
+ * `scenarios.startup_source` (schema v19, #338): which startup flag generated
  * a stored scenario row. NULL means user-authored.
  *
  * Daemon-only SQL, like `watchedScenarioFiles.ts`: the browser shares the
@@ -50,7 +50,7 @@ function markStartupScenario(
  *
  * A flag that loads over an existing NULL row (a charge point's seeded
  * default, a scenario an operator loaded under the same id, a row written
- * before schema v18) leaves it user-authored: marking it would hand it to the
+ * before schema v19) leaves it user-authored: marking it would hand it to the
  * prune, and a later boot without the flag would delete a scenario the flag
  * never created. A row the flag creates, or one it marked before, carries the
  * flag. Returns the load's scenario id.

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import type { ActiveChargingProfile } from "../../../domain/connector/Connector";
+import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
+import type {
+  ActiveChargingProfile,
+  Connector,
+} from "../../../domain/connector/Connector";
 import {
   ChargingProfileKindType,
   ChargingProfilePurposeType,
@@ -8,8 +12,12 @@ import {
   DefaultBootNotification,
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
-import type { TimelineKind } from "../OperationalTimeline";
-import { RECOVERY_SETTLE_MS } from "../OperationalTimelineProjector";
+import { EventEmitter } from "../../../shared/EventEmitter";
+import { OperationalTimeline, type TimelineKind } from "../OperationalTimeline";
+import {
+  OperationalTimelineProjector,
+  RECOVERY_SETTLE_MS,
+} from "../OperationalTimelineProjector";
 
 /**
  * #448: the projector turns ChargePoint domain events into timeline entries
@@ -109,6 +117,49 @@ describe("OperationalTimelineProjector (#448)", () => {
     // The incident is closed: later entries are not attributed to it.
     cp.updateConnectorStatus(1, OCPPStatus.Preparing);
     expect(cp.timeline.query().entries.at(-1)?.incidentId).toBeUndefined();
+  });
+
+  it("reports a durationMs equal to the gap between the fault and recovery timestamps (#504)", () => {
+    // Each read advances the clock 1 ms more than the previous one, so two
+    // separate reads for one event always disagree (a constant step would not).
+    let now = T0;
+    let step = 0;
+    const timeline = new OperationalTimeline("CP-504", {
+      now: () => (now += ++step),
+    });
+    const events = new EventEmitter<ChargePointEvents>();
+    const projector = new OperationalTimelineProjector(
+      timeline,
+      events,
+      new Map<number, Connector>(),
+    );
+
+    events.emit("networkFaultInjected", {
+      ruleId: "cut",
+      ruleType: "manual-disconnect",
+      reconnectDelayMs: 40_000,
+    });
+    events.emit("connected", undefined);
+    events.emit("bootNotificationResult", {
+      status: "Accepted",
+      interval: 300,
+      currentTime: new Date(T0).toISOString(),
+    });
+
+    const entries = timeline.query().entries;
+    expect(entries.map((e) => e.kind)).toEqual([
+      "network_fault_injected",
+      "connected",
+      "boot_notification",
+      "recovery_completed",
+    ]);
+    const fault = entries[0]!;
+    const recovery = entries[3]!;
+    expect(recovery.data.durationMs).toBeGreaterThan(0);
+    expect(recovery.data.durationMs).toBe(
+      Date.parse(recovery.timestamp) - Date.parse(fault.timestamp),
+    );
+    projector.dispose();
   });
 
   it("does not recover before the boot is accepted and statuses are back", () => {
@@ -292,6 +343,36 @@ describe("OperationalTimelineProjector (#448)", () => {
         { tagId: "TAG-BAD", status: "Blocked" },
       ],
       ["transaction_rejected", 1, { status: "Invalid", stopped: true }],
+    ]);
+  });
+
+  it("records a rejected and a discarded 2.x TransactionEvent (#490)", () => {
+    const cp = buildChargePoint("OCPP-2.0.1");
+    const report = {
+      connectorId: 1,
+      transactionId: "tx-490",
+      eventType: "Started",
+      errorCode: "InternalError",
+    };
+
+    cp.notifyTransactionMessageRejected({ ...report, attempt: 3 });
+    cp.notifyTransactionMessageDiscarded({ ...report, attempts: 3 });
+
+    const entries = cp.timeline.query({
+      kinds: ["transaction_message_rejected", "transaction_message_discarded"],
+    }).entries;
+    const data = {
+      transactionId: "tx-490",
+      eventType: "Started",
+      errorCode: "InternalError",
+    };
+    expect(entries.map((e) => [e.kind, e.connectorId, e.data])).toEqual([
+      ["transaction_message_rejected", 1, { ...data, attempt: 3 }],
+      ["transaction_message_discarded", 1, { ...data, attempts: 3 }],
+    ]);
+    expect(entries.map((e) => e.summary)).toEqual([
+      "TransactionEvent Started of transaction tx-490 rejected (InternalError), attempt 3",
+      "TransactionEvent Started of transaction tx-490 discarded after 3 attempts (InternalError)",
     ]);
   });
 });

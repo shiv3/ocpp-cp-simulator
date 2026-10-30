@@ -17,7 +17,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Web console (browser UI)
@@ -110,6 +110,14 @@ the pill's dot follows the connection to the daemon (#423): amber while
 connecting, green once connected, red when the daemon cannot be reached, with
 the reason in its tooltip, as the classic navbar's badge did. Before #423 it
 was always green. Local mode has no daemon, so its dot carries no status.
+
+The button beside the logo (**Collapse sidebar** / **Expand sidebar**)
+folds the sidebar into a 52 px icon rail: the logo, the navigation icons
+(each label becomes the link's tooltip and accessible name), the mode dot
+and the theme toggle. The server URL and the version line are hidden while
+it is collapsed. The sidebar starts expanded; the collapsed state is kept in
+`localStorage` (`ocpp-cp.console.sidebar.collapsed`), so it survives a
+reload, and a browser without storage just does not keep it.
 
 ### Dashboard
 
@@ -425,17 +433,23 @@ bottom:
   else without a transaction) → **Plug in**; `Preparing`, or a charging status
   without a transaction → **Start charging**, with a TagID select beside it
   (the TagIDs from **Settings**; with none it reads _No TagIDs configured_ and
-  Start is disabled); a transaction → **Stop charging**, with `Tx #<id> · <tag>`
+  Start is disabled), and **Unplug** stays pressable as a secondary button
+  (outlined) to unplug without charging, even when Start is disabled; a
+  transaction → **Stop charging**, with `Tx #<id> · <tag>`
   at the right; `Finishing` → **Unplug**. `Faulted` marks the step it was at
   (**Charging (faulted)** with a transaction) with nothing to press;
   `Unavailable` disables every step and says _Unavailable: send Available in
   Controls to plug in_. Start calls `startTransaction(cp, n, tag)`, Stop
-  `stopTransaction`. **Plug in** and **Unplug** send a StatusNotification
-  `Preparing` / `Available` (`sendStatusNotification`): the simulator's
-  `connectorPlug` scenario node runs a no-op callback, and the exported k6
-  runtime sends exactly these, so the card does what the node means on the
-  wire. A start on a connector already in `Preparing` does not send it again
-  (#496). While a step's call runs the stepper waits; a failure shows under it.
+  `stopTransaction`. **Plug in** sends a StatusNotification `Preparing`
+  (`sendStatusNotification`), as the exported k6 runtime does for a
+  `connectorPlug` plug-in. **Unplug** is an EV-side disconnect
+  (`evDisconnected`, #488): the station sends `Available` without a
+  transaction; with one, `StopTransactionOnEVSideDisconnect` stops it with
+  `EVDisconnected` or keeps it as `SuspendedEV` (see
+  [Charging sessions](../concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss)).
+  The stepper offers Unplug only in `Finishing` or, without a transaction,
+  as the alternative to Start. A start on a connector already in `Preparing`
+  does not send it again (#496). While a step's call runs the stepper waits; a failure shows under it.
 - **EV and battery**: an SVG battery whose fill follows the SoC (accent with a
   bolt while `Charging`, green once the SoC reaches the target, red when
   `Faulted`, the foreground grey otherwise), a dashed line at the EV's target SoC, and the
@@ -542,7 +556,8 @@ failure (`role="alert"`) and wait for their own call:
   `NoError`, `InternalError` by default (before #434 the console sent none, so
   the charge point reported the connector's current error code). The
   availability line says the CSMS sets it with ChangeAvailability.
-- **Connector**: **Plug in** / **Unplug** (the stepper's calls) and **Remove
+- **Connector**: **Plug in** / **Unplug** (the stepper's calls; Unplug is
+  pressable during a transaction, which makes it an EV-side disconnect) and **Remove
   connector** (#419), which asks first. The removal is not saved: the
   connector comes back when the charge point is created again (a reload in
   Local mode, a daemon restart).

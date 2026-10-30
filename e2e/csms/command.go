@@ -16,7 +16,15 @@ import (
 	v201msg "github.com/shiv3/gocpp/v201/messages"
 	v21client "github.com/shiv3/gocpp/v21/client"
 	v21msg "github.com/shiv3/gocpp/v21/messages"
+	"github.com/shopspring/decimal"
 )
+
+// OCPP carries decimals (a charging schedule's `limit`) as JSON numbers;
+// shopspring/decimal quotes them by default, which the simulator's schema
+// validation rejects.
+func init() {
+	decimal.MarshalJSONWithoutQuotes = true
+}
 
 type controlHandler struct {
 	version         string
@@ -152,6 +160,36 @@ func (h *controlHandler) dispatch16(ctx context.Context, conn *csms.Conn, action
 		}
 		return client.CancelReservation(ctx, v16msg.CancelReservationRequest{
 			ReservationID: cmd.ReservationID,
+		})
+	case "SetChargingProfile":
+		cmd, err := decodeCommand[setChargingProfile16Command](body)
+		if err != nil {
+			return nil, err
+		}
+		return client.SetChargingProfile(ctx, v16msg.SetChargingProfileRequest{
+			ConnectorID:        cmd.ConnectorID,
+			CsChargingProfiles: cmd.CsChargingProfiles,
+		})
+	case "ClearChargingProfile":
+		cmd, err := decodeCommand[clearChargingProfile16Command](body)
+		if err != nil {
+			return nil, err
+		}
+		return client.ClearChargingProfile(ctx, v16msg.ClearChargingProfileRequest{
+			ChargingProfilePurpose: cmd.ChargingProfilePurpose,
+			ConnectorID:            cmd.ConnectorID,
+			ID:                     cmd.ID,
+			StackLevel:             cmd.StackLevel,
+		})
+	case "GetCompositeSchedule":
+		cmd, err := decodeCommand[getCompositeSchedule16Command](body)
+		if err != nil {
+			return nil, err
+		}
+		return client.GetCompositeSchedule(ctx, v16msg.GetCompositeScheduleRequest{
+			ChargingRateUnit: cmd.ChargingRateUnit,
+			ConnectorID:      cmd.ConnectorID,
+			Duration:         cmd.Duration,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported 1.6 action %q", action)
@@ -352,6 +390,27 @@ type reserveNow16Command struct {
 type cancelReservation16Command struct {
 	commandEnvelope
 	ReservationID int32 `json:"reservationId"`
+}
+
+type setChargingProfile16Command struct {
+	commandEnvelope
+	ConnectorID        int32                     `json:"connectorId"`
+	CsChargingProfiles v16msg.CsChargingProfiles `json:"csChargingProfiles"`
+}
+
+type clearChargingProfile16Command struct {
+	commandEnvelope
+	ChargingProfilePurpose *v16msg.ClearChargingProfileRequestChargingProfilePurpose `json:"chargingProfilePurpose,omitempty"`
+	ConnectorID            *int32                                                    `json:"connectorId,omitempty"`
+	ID                     *int32                                                    `json:"id,omitempty"`
+	StackLevel             *int32                                                    `json:"stackLevel,omitempty"`
+}
+
+type getCompositeSchedule16Command struct {
+	commandEnvelope
+	ChargingRateUnit *v16msg.GetCompositeScheduleRequestChargingRateUnit `json:"chargingRateUnit,omitempty"`
+	ConnectorID      int32                                               `json:"connectorId"`
+	Duration         int32                                               `json:"duration"`
 }
 
 type requestStartTransaction201Command struct {

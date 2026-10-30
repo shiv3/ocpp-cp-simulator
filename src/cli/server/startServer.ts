@@ -1682,7 +1682,7 @@ export function startupProvenance(mode: StartupScenarioMode): string {
  * and one whose claim is `null` (the boot cannot tell) is left as it is.
  *
  * A `legacy:<base>` row — a clock-suffixed id an older build generated, marked
- * by the v18 migration — is called for until the flags call for its stable
+ * by the v19 migration — is called for until the flags call for its stable
  * successor instead: it goes when this boot installs `<base>-c<connector>` or
  * `<base>` on the same connector, which is when the builds that minted it
  * removed it. One nothing replaces (a seeded default, a template loaded over

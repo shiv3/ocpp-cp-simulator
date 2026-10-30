@@ -639,7 +639,28 @@ describe("charging sessions schema, v17 (#447)", () => {
   });
 });
 
-describe("startup scenario provenance schema, v18 (#338)", () => {
+describe("certificates schema, v18 (#456)", () => {
+  it("creates certificates on a database stamped 17", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE certificates");
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("certificates");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("certificates");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("startup scenario provenance schema, v19 (#338)", () => {
   /** The v17 `scenarios` table, which has no `startup_source` column. */
   function rebuildV17Scenarios(db: BunSqliteDatabase): void {
     db.exec("DROP TABLE scenarios");
@@ -743,7 +764,6 @@ describe("startup scenario provenance schema, v18 (#338)", () => {
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
       expect(Number(version?.value)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(18);
 
       // Re-running the step on a migrated database is a no-op, not an error.
       db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");

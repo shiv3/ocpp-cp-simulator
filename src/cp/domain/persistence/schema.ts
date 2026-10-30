@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
   -- #338: which startup flag generated this row, e.g.
   -- \`--scenario=/abs/path.json\` or \`--scenario-template=<id>\`; or
   -- \`legacy:<base>\` for a clock-suffixed id an older build generated (set by
-  -- the v18 migration). NULL means user-authored, and a NULL row is never
+  -- the v19 migration). NULL means user-authored, and a NULL row is never
   -- pruned. Written by the daemon's startup install on a row it creates;
   -- a re-save under the same key keeps it, deleting the row drops it. Every boot removes the marked rows its flags no longer call
   -- for — see \`pruneStaleStartupScenarios\` in \`src/cli/server/startServer.ts\`.
@@ -279,6 +279,21 @@ CREATE TABLE IF NOT EXISTS vehicle_profiles (
   body        TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+
+-- Installed certificates (#456): trust anchors from InstallCertificate
+-- (\`kind\` = 'root') and chains from CertificateSigned ('chain'), in the
+-- domain's version-neutral \`certificate_use\`. \`body\` holds the PEM(s) and
+-- their precomputed hash data; public material only. Pending CSRs and
+-- private keys are never stored.
+CREATE TABLE IF NOT EXISTS certificates (
+  cp_id           TEXT NOT NULL,
+  seq             INTEGER NOT NULL,
+  kind            TEXT NOT NULL,
+  certificate_use TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  installed_at    TEXT NOT NULL,
+  PRIMARY KEY (cp_id, seq)
+);
 `;
 
 /**
@@ -321,6 +336,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "scenario_runs", perCp: true, resetOnStateReset: true },
   { name: "charging_sessions", perCp: true, resetOnStateReset: true },
   { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
+  { name: "certificates", perCp: true, resetOnStateReset: true },
 ];
 
 /** Names of the tables `state.reset` truncates, in `TABLES` order. */
@@ -598,7 +614,10 @@ export function runMigrations(db: Database): void {
   // v16 → v17 (#447): the `charging_sessions` history table and its index,
   // `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
 
-  // v17 → v18 (#338): `scenarios.startup_source`, what generated a startup
+  // v17 → v18 (#456): the `certificates` table (installed roots and signed
+  // chains), `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
+
+  // v18 → v19 (#338): `scenarios.startup_source`, what generated a startup
   // row. A row written before the column existed cannot say whether a flag or
   // an operator produced it, so it stays NULL — user-authored, the direction
   // in which the startup prune leaves it alone. The one exception is an id
@@ -606,7 +625,7 @@ export function runMigrations(db: Database): void {
   // builds, matched exactly (see `legacyStartupInstances.ts`) and recorded as
   // `legacy:<base>`. The prune removes such a row once a boot installs its
   // stable successor on the same connector, as the builds that minted it did.
-  if (stored < 18) {
+  if (stored < 19) {
     const cols = db.all<{ name: string }>("PRAGMA table_info(scenarios)");
     if (!new Set(cols.map((c) => c.name)).has("startup_source")) {
       db.exec("ALTER TABLE scenarios ADD COLUMN startup_source TEXT");

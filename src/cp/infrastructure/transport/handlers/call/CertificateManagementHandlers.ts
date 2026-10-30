@@ -14,7 +14,10 @@ import {
   isValidGetInstalledCertificateIdsRequestV16,
   isValidInstallCertificateRequestV16,
 } from "../../../../../ocpp";
-import type { CertificateHashData } from "../../../../domain/security/certificateHash";
+import {
+  isCertificateInBundle,
+  type CertificateHashData,
+} from "../../../../domain/security/certificateHash";
 import { LogType } from "../../../../shared/Logger";
 import { rootUseFromV16, rootUseToV16 } from "../../certificateUseMapping";
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
@@ -156,7 +159,10 @@ export class GetInstalledCertificateIdsHandler implements CallHandler<
  * against every stored root cert (across both types — the request itself
  * carries no `certificateType`) and deletes on the first match. Signed
  * chains are outside the 1.6 scope: their hashes answer NotFound, which
- * also keeps the Charge Point Certificate undeletable (M04.FR.05).
+ * also keeps the Charge Point Certificate undeletable (M04.FR.05). A
+ * CentralSystemRootCertificate that validates the current connection (one
+ * of the `--tls-ca` certificates of a `wss://` connection) answers Failed
+ * and stays installed (M04.FR.06, #537).
  */
 export class DeleteCertificateHandler implements CallHandler<
   DeleteCertificateRequestV16,
@@ -175,9 +181,26 @@ export class DeleteCertificateHandler implements CallHandler<
     }
 
     const store = context.chargePoint.certificateStore;
-    const deleted = await store.runExclusive(() =>
-      store.deleteRootCertificate(payload.certificateHashData),
-    );
+    const trustAnchors = context.chargePoint.connectionTrustAnchorsPem();
+    // One store operation: the root checked is the root deleted.
+    const deleted = await store.runExclusive(() => {
+      const root = store.findRootCertificate(payload.certificateHashData);
+      if (
+        root?.use === "CsmsRootCertificate" &&
+        trustAnchors !== undefined &&
+        isCertificateInBundle(root.pem, trustAnchors)
+      ) {
+        return "InUse" as const;
+      }
+      return store.deleteRootCertificate(payload.certificateHashData);
+    });
+    if (deleted === "InUse") {
+      context.logger.warn(
+        "DeleteCertificate refused: the CentralSystemRootCertificate validates the current connection (M04.FR.06)",
+        LogType.OCPP,
+      );
+      return { status: "Failed" };
+    }
     if (deleted) {
       context.logger.info(
         `DeleteCertificate accepted: removed type=${rootUseToV16(deleted.use) ?? deleted.use}`,

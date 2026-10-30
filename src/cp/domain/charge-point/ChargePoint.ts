@@ -243,6 +243,9 @@ export class ChargePoint {
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
+  /** `--tls-ca` / `--tls-cert` options of the CSMS connection (#537 reads
+   *  the trust anchors). */
+  private readonly _tls?: OcppTlsOptions;
   private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
@@ -351,6 +354,7 @@ export class ChargePoint {
     tls?: OcppTlsOptions,
   ) {
     this._autoMeterValueSetting = autoMeterValueSetting;
+    this._tls = tls;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
@@ -1134,6 +1138,19 @@ export class ChargePoint {
     if (!this._idTagPool || !this.canReplaceIdTags(tags)) return false;
     this._idTagPool.replaceTags(tags);
     return true;
+  }
+
+  /**
+   * The PEM bundle that validates the current CSMS connection: the
+   * `--tls-ca` certificates of a `wss://` connection that verifies the
+   * server (#537, 1.6 whitepaper M04.FR.06). `undefined` over `ws://`,
+   * without `--tls-ca` (the runtime's own trust store then validates) or
+   * with verification turned off.
+   */
+  connectionTrustAnchorsPem(): string | undefined {
+    if (!/^wss:/i.test(this.wsUrl)) return undefined;
+    if (this._tls?.rejectUnauthorized === false) return undefined;
+    return this._tls?.ca;
   }
 
   get wsUrl(): string {

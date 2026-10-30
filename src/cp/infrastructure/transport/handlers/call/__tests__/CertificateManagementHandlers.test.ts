@@ -63,6 +63,7 @@ function v16View(store: CertificateStore) {
 function buildContext(
   maxLength = 10,
   certificateStore = new CertificateStore(),
+  trustAnchorsPem?: string,
 ) {
   const chargePoint = {
     id: "CP-CERT-TEST",
@@ -70,6 +71,7 @@ function buildContext(
     configuration: {
       certificateStoreMaxLength: () => maxLength,
     },
+    connectionTrustAnchorsPem: () => trustAnchorsPem,
   };
   const ctx: HandlerContext = {
     chargePoint: chargePoint as unknown as ChargePoint,
@@ -171,6 +173,87 @@ describe("GetInstalledCertificateIdsHandler", () => {
 });
 
 describe("DeleteCertificateHandler", () => {
+  // #537 whitepaper M04.FR.06: the CentralSystemRootCertificate that
+  // validates the current TLS connection (one of the --tls-ca
+  // certificates of a wss:// connection) cannot be deleted.
+  describe("M04.FR.06", () => {
+    async function deleteInstalled(
+      type: V16RootType,
+      pem: string,
+      trustAnchorsPem: string | undefined,
+    ) {
+      const { ctx, certificateStore } = buildContext(
+        10,
+        new CertificateStore(),
+        trustAnchorsPem,
+      );
+      await installV16(certificateStore, type, pem);
+      const [hashData] = certificateStore
+        .listRootCertificates()
+        .map((c) => c.hashData);
+      const res = await new DeleteCertificateHandler().handle(
+        { certificateHashData: hashData },
+        ctx,
+      );
+      return { res, certificateStore };
+    }
+
+    it("refuses the CentralSystemRootCertificate of the current connection", async () => {
+      const pem = await selfSignedRootCert("01", "CSMS Root");
+      const { res, certificateStore } = await deleteInstalled(
+        "CentralSystemRootCertificate",
+        pem,
+        pem,
+      );
+      expect(res).toEqual({ status: "Failed" });
+      expect(v16View(certificateStore)).toHaveLength(1);
+    });
+
+    it("finds it anywhere in a --tls-ca bundle, line endings aside", async () => {
+      const other = await selfSignedRootCert("02", "Other CA");
+      const pem = await selfSignedRootCert("01", "CSMS Root");
+      const bundle = `# CSMS trust\n${other}\n${pem.replace(/\n/g, "\r\n")}\n`;
+      const { res } = await deleteInstalled(
+        "CentralSystemRootCertificate",
+        pem,
+        bundle,
+      );
+      expect(res).toEqual({ status: "Failed" });
+    });
+
+    it("deletes a CentralSystemRootCertificate the connection does not use", async () => {
+      const inUse = await selfSignedRootCert("01", "In Use");
+      const pem = await selfSignedRootCert("02", "Unused Root");
+      const { res, certificateStore } = await deleteInstalled(
+        "CentralSystemRootCertificate",
+        pem,
+        inUse,
+      );
+      expect(res).toEqual({ status: "Accepted" });
+      expect(v16View(certificateStore)).toEqual([]);
+    });
+
+    it("deletes the same certificate installed as a ManufacturerRootCertificate", async () => {
+      const pem = await selfSignedRootCert("01", "Manufacturer");
+      const { res } = await deleteInstalled(
+        "ManufacturerRootCertificate",
+        pem,
+        pem,
+      );
+      expect(res).toEqual({ status: "Accepted" });
+    });
+
+    it("deletes it when the connection has no --tls-ca trust anchors", async () => {
+      const pem = await selfSignedRootCert("01", "CSMS Root");
+      const { res } = await deleteInstalled(
+        "CentralSystemRootCertificate",
+        pem,
+        undefined,
+      );
+      expect(res).toEqual({ status: "Accepted" });
+    });
+  });
+
   it("returns NotFound when no stored cert matches the hash data", async () => {
     const { ctx } = buildContext();
     const handler = new DeleteCertificateHandler();

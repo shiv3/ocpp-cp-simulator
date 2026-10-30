@@ -122,3 +122,24 @@ export function ocspResponderUrl(pem: string): string | undefined {
   );
   return aia?.ocsp.find((name) => name.type === "url")?.value;
 }
+
+const PEM_CERTIFICATE_RE =
+  /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
+
+/**
+ * Whether `pem` is one of the certificates of `bundle`, a PEM file that may
+ * hold several certificates and text around them (a `--tls-ca` file).
+ * Compared on the DER encoding, so line endings and wrapping do not matter;
+ * a block that does not parse is ignored.
+ */
+export function isCertificateInBundle(pem: string, bundle: string): boolean {
+  const der = new Uint8Array(new x509.X509Certificate(pem).rawData);
+  return (bundle.match(PEM_CERTIFICATE_RE) ?? []).some((block) => {
+    try {
+      const other = new Uint8Array(new x509.X509Certificate(block).rawData);
+      return other.length === der.length && other.every((b, i) => b === der[i]);
+    } catch {
+      return false;
+    }
+  });
+}

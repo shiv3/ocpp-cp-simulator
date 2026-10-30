@@ -11,6 +11,9 @@ import { resolveDeviceModelVariable } from "./deviceModelMap";
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
 
+/** A plain decimal number: optional minus sign, digits, optional fraction. */
+const DECIMAL = /^-?\d+(\.\d+)?$/;
+
 export function handleSetVariablesV201(
   req: SetVariablesRequestV201,
   store: ConfigurationStore,
@@ -35,9 +38,11 @@ export function handleSetVariablesV201(
       data.attributeType === "Target" &&
       context.targets?.supports(v16Key) === true
     ) {
-      // #538: a decimal target; anything else is badly formatted (B05.FR.07).
-      const target =
-        data.attributeValue.trim() === "" ? NaN : Number(data.attributeValue);
+      // #538: a decimal target; anything else (hex, exponent, padding) is
+      // badly formatted (B05.FR.07).
+      const target = DECIMAL.test(data.attributeValue)
+        ? Number(data.attributeValue)
+        : NaN;
       if (!Number.isFinite(target)) {
         return {
           attributeStatus: "Rejected",

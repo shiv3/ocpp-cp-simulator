@@ -303,6 +303,30 @@ describe("OCPP 2.x hardwired and preconfigured monitors (#538)", () => {
       }
     });
 
+    it(`${v.version}: drops a persisted hardwired monitor the catalog no longer has`, async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      const cpId = `CP-CATALOG-STALE-${v.version}`;
+      db.run(
+        "INSERT INTO variable_monitors (cp_id, monitor_id, monitor, triggered) VALUES (?, 999, ?, 1)",
+        [cpId, JSON.stringify({ ...HARDWIRED, id: 999 })],
+      );
+      const csms = startMockCsms();
+      const cp = makeChargePoint(csms, cpId, v.version, db);
+      try {
+        expect(cp.monitoring.get(999)).toBeUndefined();
+        expect(
+          db.all(
+            "SELECT monitor_id FROM variable_monitors WHERE cp_id = ? AND monitor_id = 999",
+            [cpId],
+          ),
+        ).toEqual([]);
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+        db.close();
+      }
+    });
+
     it(`${v.version}: a database from before #538 keeps its custom ids and gains the catalog`, async () => {
       const db = BunSqliteDatabase.open(":memory:");
       const cpId = `CP-CATALOG-UPGRADE-${v.version}`;

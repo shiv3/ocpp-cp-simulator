@@ -69,6 +69,8 @@ export type ConfigurationChangeListener = (
 export class ConfigurationStore {
   private readonly values = new Map<string, ConfigurationValue>();
   private readonly listeners = new Set<ConfigurationChangeListener>();
+  /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
+  private readonly runtimeKeys = new Set<string>();
 
   constructor(
     private readonly chargePointId: string,
@@ -298,6 +300,7 @@ export class ConfigurationStore {
       ...(allowed !== undefined && { allowed }),
     };
     this.values.set(name, { key, value });
+    this.runtimeKeys.add(name);
     this.emit(name, value);
   }
 
@@ -320,7 +323,18 @@ export class ConfigurationStore {
       ...(bounds.max !== undefined && { max: bounds.max }),
     };
     this.values.set(name, { key, value });
+    this.runtimeKeys.add(name);
     this.emit(name, value);
+  }
+
+  /**
+   * Withdraw a runtime key, such as the per-EVSE values of a removed
+   * connector (#538). Silent: nothing changed value, the variable is gone.
+   * Returns false, touching nothing, for a configuration key.
+   */
+  removeRuntimeKey(name: string): boolean {
+    if (!this.runtimeKeys.delete(name)) return false;
+    return this.values.delete(name);
   }
 
   /** Canonical key `LocalAuthListEnabled`; default `true`. */

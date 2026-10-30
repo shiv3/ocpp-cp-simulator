@@ -114,7 +114,8 @@ export class MonitoringStore {
   /**
    * Start-up (silent, like {@link restore}): the persisted monitors, the
    * hardwired monitors of the catalog (always theirs, whatever was
-   * persisted), and the persisted monitoring base. `activeBase` undefined
+   * persisted; a persisted hardwired monitor the catalog lacks is
+   * ignored), and the persisted monitoring base. `activeBase` undefined
    * means the station never stored its catalog state (a first start, or a
    * database from before #538): the preconfigured monitors are activated
    * as under `All`, a persisted monitor with the same id winning.
@@ -128,7 +129,12 @@ export class MonitoringStore {
         this.monitors.set(monitor.id, monitor);
       }
     }
-    this.restore(persisted);
+    // A hardwired row the catalog no longer has would be undeletable.
+    this.restore(
+      persisted.filter(
+        (m) => m.origin !== "HardWiredMonitor" || this.catalogIds.has(m.id),
+      ),
+    );
     for (const monitor of this.catalog) {
       if (monitor.origin === "HardWiredMonitor") {
         this.monitors.set(monitor.id, monitor);

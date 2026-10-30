@@ -149,6 +149,46 @@ describe.each(VERSIONS)("$version runtime device-model values (#538)", (v) => {
     expect(events[0].component).toEqual({ name: "EVSE", evse: { id: 1 } });
   });
 
+  it("drops a removed connector's keys and target, and its periodic monitor reports nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      cp = makeChargePoint({ ocppVersion: v.version, connectorCount: 2 });
+      const sent = captureNotifyEvents(cp);
+      bootAccepted(cp);
+      const periodic = cp.monitoring.install({
+        type: "Periodic",
+        severity: 3,
+        value: 10,
+        component: { name: "EVSE", evse: { id: 2 } },
+        variable: { name: "Power" },
+        valueKey: "EVSEPower2",
+        valueType: { numeric: true },
+      });
+      expect(periodic.status).toBe("Accepted");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sent).toHaveLength(1);
+
+      expect(cp.removeConnector(2)).toBe(true);
+
+      for (const key of [
+        "EVSEPower2",
+        "EVSEAvailabilityState2",
+        "ConnectorAvailabilityState2",
+      ]) {
+        expect(cp.configuration.get(key)).toBeUndefined();
+      }
+      expect(value(cp, "EVSEPower1")).toBe(0);
+      expect(cp.deviceModelTargets.supports("EVSEPower2")).toBe(false);
+      expect(cp.deviceModelTargets.supports("EVSEPower1")).toBe(
+        v.version === "OCPP-2.1",
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("evaluates only on change: meter ticks at the same power publish nothing", () => {
     cp = makeChargePoint({ ocppVersion: v.version });
     const connector = startCharging(cp, 1, 11);

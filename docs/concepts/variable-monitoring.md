@@ -84,8 +84,12 @@ standardized components of the Part 2 appendices that track its state
 (#538). They are read-only runtime keys of 2.x stations only, never
 persisted: `GetVariables` reads them, `SetVariables` answers `Rejected`
 (B05.FR.09), `GetBaseReport` / `GetReport` list them (an `EVSE` or
-`Connector` variable once per EVSE), and a monitor watches them like any
-other variable.
+`Connector` variable once per EVSE; a `GetReport` `componentVariable`
+with an `evse` keeps that EVSE only, and its `connectorId` when given,
+B08.FR.11), and a monitor watches them like any other variable. Removing
+a connector removes its EVSE's keys and its `EVSE.Power` target; a
+monitor on them stays installed but reports nothing (a periodic tick finds
+no value).
 
 | Variable                            | Value                                                      | Appendix |
 | ----------------------------------- | ---------------------------------------------------------- | -------- |
@@ -112,8 +116,8 @@ other variable.
 
 On a 2.1 station `EVSE.Power` also has a `Target` attribute (#538), the
 value a TargetDelta monitor compares the power with. `SetVariables` with
-`attributeType` `Target` sets it (a decimal; anything else is `Rejected`,
-B05.FR.07) and answers with that `attributeType` (B05.FR.03); `GetVariables`
+`attributeType` `Target` sets it (a plain decimal such as `-2.5`; anything
+else, `0x10`, `1e3`, `+5` or padded with spaces, is `Rejected`, B05.FR.07) and answers with that `attributeType` (B05.FR.03); `GetVariables`
 reads it, an empty string until it is set (B06.FR.13). `GetBaseReport`
 lists it as a `ReadWrite` attribute next to the `Actual` one. It is the
 only variable with a target: a configuration variable's value is its
@@ -263,7 +267,11 @@ The other types (#538):
   `AlignedDataCtrlr.Interval` ([clock-aligned meter
   values](ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval)):
   UTC, restarting each midnight, so an interval that does not divide a day
-  has a shorter last slot and one above a day fires at each midnight.
+  has a shorter last slot. An interval above a day (86400 s) would fire at
+  every midnight, before `value` seconds have passed (N08.FR.07); it uses
+  the grid of `value` seconds counted from 1970-01-01T00:00Z instead, so a
+  whole number of days fires at UTC midnight every `value` / 86400 days,
+  and a restart of the timer keeps that grid.
 - A TargetDelta monitor follows the threshold rules (2.1 N07.FR.02, FR.11,
   FR.12, FR.14 name them together): one event per crossing, `cleared` on
   return, re-checked on replace and when reporting resumes, its triggered
@@ -352,7 +360,13 @@ and delivered once back online (#538).
 `OfflineQueuingSeverity` is a persisted 2.x key, `ReadWrite`, 0-9
 (`SetVariables` outside the range is `Rejected`), default `0`: only
 Emergency events are queued until the CSMS raises it. The spec gives no
-default ("When set").
+default: the station queues "When set" (2.0.1 §2.11.7, 2.1 §2.13.7), so
+an unset variable would queue nothing. The simulator always sets it,
+because a configuration key here always has a value (an integer key
+cannot be left unset, and `GetVariables` would have no value to read);
+`0` is the setting closest to unset that still keeps the most severe
+events across an outage. The consequence: 0 is the floor of the range,
+so the CSMS can narrow queuing to Emergency events but never turn it off.
 
 The events of one value change (or one install, or one `Accepted` boot) are
 **one report**, sent after the answer to the message that caused them: one
@@ -415,6 +429,15 @@ re-activated preconfigured monitor is evaluated like a newly set one. The
 base in force is `MonitoringCtrlr.ActiveMonitoringBase` (below), `All`
 until a `SetMonitoringBase`.
 
+A re-activation can leave two monitors of the same type and severity on
+one variable. After `HardWiredOnly`, a custom monitor set on a
+preconfigured monitor's variable, type and severity is no `Duplicate`
+(N04.FR.10): the preconfigured one is gone. `All` then re-activates the
+preconfigured monitor next to it, as N03.FR.03 requires ("activate all
+preconfigured monitoring", custom monitors left intact); N04.FR.10 governs
+a `SetVariableMonitoringRequest`, not a restore, so the station keeps
+both. `FactoryDefault` deletes the custom one instead.
+
 ## MonitoringCtrlr variables
 
 The 2.x device model has these `MonitoringCtrlr` variables (#538; 2.0.1
@@ -468,7 +491,9 @@ the monitoring base last set, so a preconfigured monitor deleted by
 `HardWiredOnly` or `ClearVariableMonitoring` stays deleted after a restart.
 A database without that row (a first start, or one written before #538)
 gets the hardwired and preconfigured monitors, its custom monitors keeping
-their ids; the hardwired monitors always come from the catalog. Ids
+their ids; the hardwired monitors always come from the catalog, and a
+stored hardwired monitor the catalog no longer has is ignored and its row
+deleted, so no undeletable monitor comes back from an older build. Ids
 resume after the highest restored one, so a CSMS that sends
 `GetMonitoringReport` after the reboot (N04.FR.19) sees the same ids. The
 triggered flag of a threshold monitor (as last reported) is stored too, so

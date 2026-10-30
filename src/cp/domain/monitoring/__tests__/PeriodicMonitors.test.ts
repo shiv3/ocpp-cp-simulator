@@ -87,6 +87,30 @@ describe("Periodic monitors (N08)", () => {
     expect(h.events.map(at)).toEqual(["12:15:00", "12:30:00", "12:45:00"]);
   });
 
+  it("waits value seconds between PeriodicClockAligned ticks above a day, on the UTC epoch grid (N08.FR.07)", () => {
+    const h = harness();
+    const twoDays = 2 * 86_400;
+    h.store.install(periodic({ type: "PeriodicClockAligned", value: twoDays }));
+    const day = (e: MonitoringEvent) => e.timestamp.toISOString().slice(0, 19);
+
+    // Not at the next midnight (2026-10-29): the grid has two-day steps.
+    vi.advanceTimersByTime(Date.parse("2026-10-30T00:00:00Z") - START - 1);
+    expect(h.events).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(h.events.map(day)).toEqual(["2026-10-30T00:00:00"]);
+
+    // A re-arm mid-period keeps the grid: the next tick is still two days
+    // after the last one, not a day.
+    vi.advanceTimersByTime(86_400_000);
+    h.evaluation.setReporting(false);
+    h.evaluation.setReporting(true);
+    vi.advanceTimersByTime(86_400_000);
+    expect(h.events.map(day)).toEqual([
+      "2026-10-30T00:00:00",
+      "2026-11-01T00:00:00",
+    ]);
+  });
+
   it("does not react to value changes", () => {
     const h = harness();
     h.store.install(periodic());

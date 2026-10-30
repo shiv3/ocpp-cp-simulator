@@ -243,6 +243,12 @@ export function handleGetReportV201(
       wanted.some(
         (cv) =>
           cv.component.name === rd.component.name &&
+          // B08.FR.11 (#538): an EVSE (and connector) in the filter.
+          (cv.component.evse === undefined ||
+            (cv.component.evse.id === rd.component.evse?.id &&
+              (cv.component.evse.connectorId === undefined ||
+                cv.component.evse.connectorId ===
+                  rd.component.evse?.connectorId))) &&
           (cv.variable?.name === undefined ||
             cv.variable.name === rd.variable?.name),
       ),

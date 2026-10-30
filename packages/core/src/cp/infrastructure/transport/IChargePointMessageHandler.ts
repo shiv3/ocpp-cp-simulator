@@ -110,4 +110,9 @@ export interface IChargePointMessageHandler {
   getDataTransferHandler(): DataTransferHandler;
   onWebSocketClosed(): void;
   flushPendingQueue(): void;
+  /** #527: drop the StartTransaction.req resends waiting out their retry
+   *  interval. Called by a Reset, which stops their transactions: a Start
+   *  sent after its StopTransaction.req would open on the CSMS a
+   *  transaction nothing stops. OCPP 1.6 only; a no-op elsewhere. */
+  cancelStartTransactionResends(): void;
 }

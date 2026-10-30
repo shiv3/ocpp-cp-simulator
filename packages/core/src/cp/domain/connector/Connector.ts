@@ -812,6 +812,7 @@ export class Connector {
   set transactionId(transactionId: number) {
     if (!this.transactionValue) return;
     this.transactionValue.id = transactionId;
+    delete this.transactionValue.startCallError;
     this.eventsEmitter.emit("transactionIdChange", { transactionId });
   }
 

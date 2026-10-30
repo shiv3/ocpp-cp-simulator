@@ -2272,6 +2272,10 @@ export class ChargePoint {
       return;
     }
     const reason = type === "Hard" ? "HardReset" : "SoftReset";
+    // #527: a StartTransaction.req waiting for its resend would go out after
+    // the StopTransaction.req below (Soft), or be replayed after the reboot
+    // (Hard): the reset ends its transaction, so it is dropped.
+    this._outbox.cancelStartTransactionResends();
     for (const connector of this.connectors.values()) {
       if (connector.transaction) {
         this.stopTransaction(connector, reason);
@@ -2435,9 +2439,10 @@ export class ChargePoint {
     // than an accident of scenario node ordering (#176). A connector already
     // in Preparing (plugged in first) has sent it: a second
     // StatusNotification(Preparing) is a Preparing → Preparing transition
-    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts as before.
+    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut is cleared: the
+    // transaction now runs, so the timeout no longer applies (#527).
     if (connector.status === OCPPStatus.Preparing) {
-      this.startConnectionTimeout(connectorId);
+      this.clearConnectionTimeout(connectorId);
     } else {
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     }
@@ -2847,10 +2852,18 @@ export class ChargePoint {
     });
   }
 
+  /** A connector whose transaction runs is past ConnectionTimeOut: it waits
+   *  in Preparing for StartTransaction.conf, which a CALLERROR resend can
+   *  hold back for longer than the timeout (#527). */
+  private hasRunningTransaction(connectorId: number): boolean {
+    const transaction = this.getConnector(connectorId)?.transaction;
+    return !!transaction && transaction.stopTime === null;
+  }
+
   private startConnectionTimeout(connectorId: number): void {
     this.clearConnectionTimeout(connectorId);
     const timeoutSec = this._configuration?.connectionTimeOut();
-    if (timeoutSec <= 0) return;
+    if (timeoutSec <= 0 || this.hasRunningTransaction(connectorId)) return;
     const handle = setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);
       const connector = this.getConnector(connectorId);
@@ -2875,6 +2888,7 @@ export class ChargePoint {
         }
         return;
       }
+      if (this.hasRunningTransaction(connectorId)) return;
       this._logger.info(
         `Connector ${connectorId} ConnectionTimeOut elapsed; transitioning Preparing → Finishing (§4.9 B6)`,
         LogType.OCPP,

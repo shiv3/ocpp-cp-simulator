@@ -336,16 +336,32 @@ placeholder `transactionId` `"0"`. Once it is discarded the transaction
 runs on under that placeholder: its MeterValues.req and StopTransaction.req
 carry `transactionId: 0`, as they do while a StartTransaction.conf is still
 pending, and a connector still in `Preparing` goes to `Charging`, as when
-`StopTransactionOnInvalidId` is false. Any other status is left alone: with
-the defaults, `ConnectionTimeOut` (60 s) has usually moved a connector left
-in `Preparing` to `Finishing` before the discard (60 s + 120 s). A
-RemoteStopTransaction for id `0` finds the transaction and stops it, where
-it used to be `Rejected` (#491).
+`StopTransactionOnInvalidId` is false. Any other status, such as one a
+scenario set meanwhile, is left alone. `ConnectionTimeOut` does not apply
+while the transaction runs, so it never moves a connector waiting in
+`Preparing` for the conf to `Finishing`. Once a CALLERROR answered its
+StartTransaction.req, while it is resent and after it is discarded, a
+RemoteStopTransaction for id `0` is `Rejected`, with no
+StopTransaction.req: the CSMS never issued that id (#491). A `0` the CSMS
+did assign in a StartTransaction.conf is stopped as any other id (#328).
+Unlock, Reset and the other stop paths stop the
+transaction with one StopTransaction.req carrying `transactionId: 0`, and a
+ChangeAvailability to `Inoperative` answers `Scheduled`.
+
+A StartTransaction.conf belongs to the transaction its request started,
+identified by the request's `idTag` and `timestamp`. When it answers a resend
+after that transaction stopped, or after another one began on the connector,
+it is logged and ignored: neither the transaction id nor the connector
+status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
+updates the Authorization Cache. A Reset drops a StartTransaction.req
+waiting for its resend: the reset ends that transaction.
 
 A resend still waiting when the WebSocket closes goes to the 1.6 offline
 queue (§3.7), ahead of the CALLs still queued, and is replayed after the
 next accepted boot like any queued transaction message. That replay is a
-fresh delivery: a CALLERROR answering it starts the count again.
+fresh delivery: a CALLERROR answering it starts the count again. With a
+link that keeps dropping and a CSMS that always answers with a CALLERROR,
+the resends therefore never stop.
 
 Known limitations, as on 2.x: a waiting resend does not hold back the next
 transaction-related message, so a StopTransaction.req can overtake the

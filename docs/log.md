@@ -2026,6 +2026,16 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
 
+## [2026-10-30] ingest | Bench teardown under a slow control plane (#523, #330)
+
+- New in `scripts/bench/smokeHarness.ts`: `startSlowControlPlane`, a socket.io relay the bench reaches through `--daemon-url`. It opens one daemon socket per bench socket with the same handshake `auth`, re-emits every event both ways (acks included), proxies HTTP (`/v1/healthz`, `/metrics`), and holds chosen RPC **requests** (for a time, or until a promise settles), so the daemon acts after the bench may have given up. A closed daemon socket reaches the bench as a dropped transport and its unanswered RPCs get a `relay_upstream_closed` ack; no other outage is modelled. No production code changed.
+- Three cases in `scripts/bench/fleetBench.slowpath.test-bun.ts`, each red under its mutation: a `cp.create_many` registered after its client deadline is reconciled (removing the `reconcileMissingIds` call leaks the charge point); teardown waits for an in-flight create before its first delete sweep (removing the wait gets a `not_found` first); a cycle's slow `stop_transaction` is answered before its charge point is deleted (dropping the RPC term from `cycleBoundMs` deletes it first). The last is asserted on RPC order, since teardown's re-stop leaves the CSMS identical either way. `test:bench-slow` now takes about 56s locally (was 36s).
+- [Source: bench README](sources/bench-readme.md): slow-path suite, harness, "Not covered by a run-level test".
+- [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): what the slow job pins, and its wall-clock.
+- [Testing strategy](analyses/testing-strategy.md): the slow job's scope and wall-clock.
+- [GitHub issues](sources/github-issues.md): #330, #523.
+- Raw sources changed in the same PR: `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/fleet-bench.ts` (comment only), `scripts/bench/README.md`.
+
 ## [2026-10-30] ingest | Composite limits floored to 0.1 when converted (#524)
 
 - The 1.6 `GetCompositeScheduleResponse` schema requires `chargingSchedulePeriod[].limit` to be a multiple of 0.1, but a converted limit went out unrounded: a 3000 W / 1-phase `ChargePointMaxProfile` asked in A read 13.043478… A. `compositeLimitInUnit` now floors a converted limit (W → A and A → W) to 0.1, never below 0, with a 1e-9 tolerance so float noise (4.1 A × 230 V = 942.9999999999999 W) is not pushed a step down. A limit returned in its own unit stays as the CSMS set it.

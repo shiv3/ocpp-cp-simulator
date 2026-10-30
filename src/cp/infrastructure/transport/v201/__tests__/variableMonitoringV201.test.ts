@@ -191,18 +191,37 @@ describe("handleSetVariableMonitoringV201", () => {
   );
 
   it.each(["Periodic", "PeriodicClockAligned"] as const)(
-    "answers UnsupportedMonitorType for %s (N04.FR.05)",
+    "accepts a %s monitor, its value an interval in seconds (N08, #538)",
     (type) => {
       const store = new MonitoringStore();
-      expect(set(store, heartbeat({ type })).setMonitoringResult[0]).toEqual({
-        status: "UnsupportedMonitorType",
+      expect(
+        set(store, heartbeat({ type, value: 900 })).setMonitoringResult[0],
+      ).toEqual({
+        id: 1,
+        status: "Accepted",
         type,
         severity: 5,
         component: { name: "OCPPCommCtrlr" },
         variable: { name: "HeartbeatInterval" },
       });
+      expect(store.get(1)).toMatchObject({ type, value: 900 });
     },
   );
+
+  it("rejects a Periodic interval under one second (IntervalTooShort, #538)", () => {
+    const store = new MonitoringStore();
+    expect(
+      set(store, heartbeat({ type: "Periodic", value: 0 }))
+        .setMonitoringResult[0],
+    ).toMatchObject({
+      status: "Rejected",
+      statusInfo: {
+        reasonCode: "IntervalTooShort",
+        additionalInfo: "a Periodic interval is at least 1 second",
+      },
+    });
+    expect(store.list()).toEqual([]);
+  });
 
   it("answers UnsupportedMonitorType for the 2.1 TargetDelta types (N04.FR.05)", () => {
     const store = new MonitoringStore();
@@ -483,12 +502,30 @@ describe("buildMonitoringReportV201", () => {
     expect(ids(["ThresholdMonitoring", "PeriodicMonitoring"])).toEqual([1, 2]);
   });
 
-  it("answers NotSupported when only unsupported criteria are requested (N02.FR.02)", () => {
-    const result = report(seeded(), {
+  it("selects Periodic and PeriodicClockAligned monitors with PeriodicMonitoring (N02.FR.14, #538)", () => {
+    const store = seeded();
+    expect(
+      report(store, { monitoringCriteria: ["PeriodicMonitoring"] }).response,
+    ).toEqual({ status: "EmptyResultSet" });
+
+    set(
+      store,
+      heartbeat({ type: "Periodic", value: 60 }),
+      heartbeat({ type: "PeriodicClockAligned", value: 900 }),
+    );
+    const result = report(store, {
       monitoringCriteria: ["PeriodicMonitoring"],
     });
-    expect(result.response).toEqual({ status: "NotSupported" });
-    expect(result.report).toBeUndefined();
+    expect(result.response).toEqual({ status: "Accepted" });
+    expect(isValidNotifyMonitoringReportRequestV201(result.report)).toBe(true);
+    expect(
+      result.report?.monitor?.flatMap((m) =>
+        m.variableMonitoring.map((v) => [v.id, v.type, v.value]),
+      ),
+    ).toEqual([
+      [5, "Periodic", 60],
+      [6, "PeriodicClockAligned", 900],
+    ]);
   });
 
   it("filters by componentVariable (N02.FR.05, FR.08, FR.16)", () => {

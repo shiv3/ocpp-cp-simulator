@@ -56,6 +56,7 @@ const REJECTION_INFO: Record<InstallRejectionReason, string> = {
   ValueOutOfRange: "N04.FR.06: threshold is outside the variable's range",
   NegativeDelta: "N04.FR.14: a Delta value cannot be negative",
   SeverityOutOfRange: "severity range is 0-9",
+  IntervalTooShort: "a Periodic interval is at least 1 second",
 };
 
 export function handleSetVariableMonitoringV201(
@@ -192,8 +193,7 @@ const CRITERION_TYPES: Record<
 > = {
   ThresholdMonitoring: ["UpperThreshold", "LowerThreshold"], // N02.FR.12
   DeltaMonitoring: ["Delta"], // N02.FR.13
-  // N02.FR.14: Periodic monitors are not implemented, so none can match.
-  PeriodicMonitoring: [],
+  PeriodicMonitoring: ["Periodic", "PeriodicClockAligned"], // N02.FR.14
 };
 
 export interface MonitoringReport {

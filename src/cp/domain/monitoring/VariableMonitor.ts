@@ -8,11 +8,16 @@
  * (the value `GetVariables` / `SetVariables` read and write).
  */
 
-/** Monitor types the simulator implements (N07.FR.16–FR.19). */
+/**
+ * Monitor types the simulator implements: thresholds and Delta (N07.FR.16–
+ * FR.19), Periodic and PeriodicClockAligned (N08, #538).
+ */
 export const SUPPORTED_MONITOR_TYPES = [
   "UpperThreshold",
   "LowerThreshold",
   "Delta",
+  "Periodic",
+  "PeriodicClockAligned",
 ] as const;
 
 export type SupportedMonitorType = (typeof SUPPORTED_MONITOR_TYPES)[number];
@@ -25,9 +30,47 @@ export function parseSupportedMonitorType(
     : null;
 }
 
+/**
+ * How a monitor type behaves:
+ * - `alert`: fires `Alerting` when the value goes beyond a bound and
+ *   `cleared` when it comes back (N07.FR.02, FR.11, FR.12, FR.14);
+ * - `delta`: fires `Delta` when the value moves by a step (N07.FR.18, FR.19);
+ * - `periodic`: fires `Periodic` on a timer, whatever the value (N08).
+ */
+export type MonitorBehaviour = "alert" | "delta" | "periodic";
+
+export function monitorBehaviour(type: SupportedMonitorType): MonitorBehaviour {
+  switch (type) {
+    case "UpperThreshold":
+    case "LowerThreshold":
+      return "alert";
+    case "Delta":
+      return "delta";
+    case "Periodic":
+    case "PeriodicClockAligned":
+      return "periodic";
+  }
+}
+
 export function isThresholdMonitorType(type: SupportedMonitorType): boolean {
   return type === "UpperThreshold" || type === "LowerThreshold";
 }
+
+/** A monitor with a triggered state: it fires, then fires `cleared`. */
+export function isAlertMonitorType(type: SupportedMonitorType): boolean {
+  return monitorBehaviour(type) === "alert";
+}
+
+export function isPeriodicMonitorType(type: SupportedMonitorType): boolean {
+  return monitorBehaviour(type) === "periodic";
+}
+
+/**
+ * The shortest Periodic / PeriodicClockAligned interval, in seconds. N08
+ * sets no lower bound; this one keeps a monitor from flooding the CSMS (or
+ * spinning on a zero interval).
+ */
+export const MIN_PERIODIC_INTERVAL_SECONDS = 1;
 
 /**
  * Where a monitor comes from; the values match OCPP's
@@ -79,7 +122,10 @@ export interface VariableMonitor {
   readonly id: number;
   readonly type: SupportedMonitorType;
   readonly severity: number;
-  /** Threshold for Upper/LowerThreshold, step for Delta. */
+  /**
+   * Threshold for Upper/LowerThreshold, step for Delta, interval in seconds
+   * for Periodic / PeriodicClockAligned.
+   */
   readonly value: number;
   /** Monitor only while a transaction is running. */
   readonly transaction: boolean;

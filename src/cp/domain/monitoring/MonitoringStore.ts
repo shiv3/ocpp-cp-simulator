@@ -1,9 +1,11 @@
 import {
-  isThresholdMonitorType,
   isValidMonitorSeverity,
   MAX_MONITOR_SEVERITY,
+  MIN_PERIODIC_INTERVAL_SECONDS,
+  monitorBehaviour,
   parseSupportedMonitorType,
   sameMonitorTarget,
+  type SupportedMonitorType,
   type MonitorComponent,
   type MonitoredValueType,
   type MonitorVariable,
@@ -40,7 +42,9 @@ export type InstallRejectionReason =
   /** N04.FR.14 */
   | "NegativeDelta"
   /** Severity outside 0-9 (the schemas only set a minimum). */
-  | "SeverityOutOfRange";
+  | "SeverityOutOfRange"
+  /** Periodic interval under one second (a simulator limit, #538). */
+  | "IntervalTooShort";
 
 export type InstallOutcome =
   | {
@@ -144,18 +148,8 @@ export class MonitoringStore {
 
     const type = parseSupportedMonitorType(draft.type);
     if (type === null) return { status: "UnsupportedMonitorType" };
-    if (isThresholdMonitorType(type)) {
-      if (!draft.valueType.numeric) return { status: "UnsupportedMonitorType" };
-      const { min, max } = draft.valueType;
-      if (
-        (min !== undefined && draft.value < min) ||
-        (max !== undefined && draft.value > max)
-      ) {
-        return rejected("ValueOutOfRange");
-      }
-    } else if (draft.value < 0) {
-      return rejected("NegativeDelta");
-    }
+    const refusal = checkValue(type, draft);
+    if (refusal !== undefined) return refusal;
     if (!isValidMonitorSeverity(draft.severity)) {
       return rejected("SeverityOutOfRange");
     }
@@ -305,6 +299,34 @@ export class MonitoringStore {
 
   private emit(event: MonitoringStoreEvent): void {
     for (const listener of this.listeners) listener(event);
+  }
+}
+
+/** N04.FR.05, FR.06, FR.14: the monitor value against its type. */
+function checkValue(
+  type: SupportedMonitorType,
+  draft: MonitorDraft,
+): InstallOutcome | undefined {
+  switch (monitorBehaviour(type)) {
+    case "alert": {
+      if (!draft.valueType.numeric) return { status: "UnsupportedMonitorType" };
+      const { min, max } = draft.valueType;
+      if (
+        (min !== undefined && draft.value < min) ||
+        (max !== undefined && draft.value > max)
+      ) {
+        return rejected("ValueOutOfRange");
+      }
+      return undefined;
+    }
+    case "delta":
+      return draft.value < 0 ? rejected("NegativeDelta") : undefined;
+    case "periodic":
+      // Any variable can be reported periodically (N08); the interval is
+      // in seconds.
+      return draft.value < MIN_PERIODIC_INTERVAL_SECONDS
+        ? rejected("IntervalTooShort")
+        : undefined;
   }
 }
 

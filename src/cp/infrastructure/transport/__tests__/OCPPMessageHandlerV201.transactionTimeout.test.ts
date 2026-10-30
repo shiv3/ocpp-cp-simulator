@@ -415,5 +415,34 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(socket.transactionEvents()).toHaveLength(2);
       expect(cp.stopTransaction).not.toHaveBeenCalled();
     });
+
+    it("forgets a timed-out transmission whose resend waits when the WebSocket closes", () => {
+      const { socket, start, handler, rejected, cp } = setup(version);
+      start();
+      // The first transmission timed out and stays pending; its resend
+      // waits out MessageAttemptInterval.
+      vi.advanceTimersByTime(30_000);
+      expect(rejected).toHaveLength(1);
+      const [first] = socket.transactionEvents();
+      vi.mocked(logger.warn).mockClear();
+      handler.onWebSocketClosed();
+      expect(vi.getTimerCount()).toBe(0);
+      const lost = vi
+        .mocked(logger.warn)
+        .mock.calls.filter(([text]) => String(text).includes("attempt 2"));
+      expect(lost).toEqual([
+        [
+          expect.stringContaining(
+            "attempt 2 cancelled: WebSocket closed",
+          ) as string,
+          expect.anything(),
+        ],
+      ]);
+      socket.callResult(first.messageId, INVALID);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(rejected).toHaveLength(1);
+      expect(socket.transactionEvents()).toHaveLength(1);
+      expect(cp.stopTransaction).not.toHaveBeenCalled();
+    });
   },
 );

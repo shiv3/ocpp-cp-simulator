@@ -173,6 +173,17 @@ interface TransactionEventDelivery {
   readonly attempt: number;
 }
 
+/** A written CP→CSMS CALL awaiting its answer. */
+interface PendingRequest {
+  action: V201Action;
+  payload: V201RequestPayload;
+  /** Set on the TransactionEvents this handler builds (#490). */
+  transactionEvent?: TransactionEventDelivery;
+  /** Its `MessageTimeout` timer (#529), armed when the CALL is written;
+   *  cleared on answer and WebSocket close. */
+  timeout?: ReturnType<typeof setTimeout>;
+}
+
 type TransactionEventFailure =
   | { reason: "callError"; errorCode: string }
   | { reason: "timeout"; seconds: number };
@@ -190,25 +201,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  #181) — e.g. Authorize.conf carries no idToken of its own, so the
    *  idToken has to come from the original Authorize.req. Entries are
    *  removed once the matching CALLRESULT/CALLERROR arrives. */
-  private readonly _pendingRequests = new Map<
-    string,
-    {
-      action: V201Action;
-      payload: V201RequestPayload;
-      /** Set on the TransactionEvents this handler builds (#490). */
-      transactionEvent?: TransactionEventDelivery;
-    }
-  >();
+  private readonly _pendingRequests = new Map<string, PendingRequest>();
   /** Messages whose resend waits out `MessageAttemptInterval[TransactionEvent]`
    *  (#490); cleared on WebSocket close. */
   private readonly _transactionEventRetries =
     new Set<TransactionEventMessage>();
-  /** `MessageTimeout` timers of the written, unanswered TransactionEvent
-   *  CALLs, by message id (#529); cleared on answer and WebSocket close. */
-  private readonly _transactionEventTimeouts = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -349,11 +346,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           this._pendingRequests.set(messageId, {
             action,
             payload,
-            ...(transactionEvent ? { transactionEvent } : {}),
+            ...(transactionEvent
+              ? {
+                  transactionEvent,
+                  timeout: this.armTransactionEventTimeout(transactionEvent),
+                }
+              : {}),
           });
-          if (transactionEvent) {
-            this.armTransactionEventTimeout(messageId, transactionEvent);
-          }
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
         } else {
           // On drop outcomes (socket_closed, disposed, write_failed,
@@ -569,7 +568,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const error = payload as CallErrorFields;
       if (this._expertCalls.claimError(messageId, error)) return;
       if (pending?.transactionEvent) {
-        this.endTransmission(messageId, pending.transactionEvent);
+        this.endTransmission(
+          messageId,
+          pending.transactionEvent,
+          pending.timeout,
+        );
         this.onTransactionEventFailure(pending.transactionEvent, {
           reason: "callError",
           errorCode: error.errorCode ?? "GenericError",
@@ -666,7 +669,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       // One written only after that (it sat in the socket's queue) finds
       // the message done, and its answer is ignored too.
       const { message } = pending.transactionEvent;
-      this.endTransmission(messageId, pending.transactionEvent);
+      this.endTransmission(
+        messageId,
+        pending.transactionEvent,
+        pending.timeout,
+      );
       if (message.done) return;
       this.forgetTransactionEvent(message);
       this.applyTransactionEventResult(
@@ -833,17 +840,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * within the MessageTimeout"; OCPP-J Part 4 §4.1.1 calls such a CALL timed
    * out. `OCPPCommCtrlr.MessageTimeout[Default]` is read at each
    * transmission. The pending entry stays, so a late answer can still
-   * settle the message.
+   * settle the message. Armed when the CALL is written (the caller has
+   * checked the message is not done); the timer lives in the pending entry.
    */
   private armTransactionEventTimeout(
-    messageId: string,
     delivery: TransactionEventDelivery,
-  ): void {
-    if (delivery.message.done) return;
+  ): ReturnType<typeof setTimeout> {
     const seconds = this._chargePoint.configuration.messageTimeout();
     const timer = setTimeout(
       () => {
-        this._transactionEventTimeouts.delete(messageId);
         this.onTransactionEventFailure(delivery, {
           reason: "timeout",
           seconds,
@@ -852,19 +857,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       Math.min(Math.max(1, seconds) * 1000, MAX_TIMER_MS),
     );
     unrefTimer(timer);
-    this._transactionEventTimeouts.set(messageId, timer);
+    return timer;
   }
 
   /** A transmission got its answer: its timeout no longer applies. */
   private endTransmission(
     messageId: string,
     { message }: TransactionEventDelivery,
+    timeout: ReturnType<typeof setTimeout> | undefined,
   ): void {
     message.inFlight.delete(messageId);
-    const timer = this._transactionEventTimeouts.get(messageId);
-    if (timer === undefined) return;
-    clearTimeout(timer);
-    this._transactionEventTimeouts.delete(messageId);
+    clearTimeout(timeout);
   }
 
   /** Settle or discard `message`: cancel its waiting resend and forget all
@@ -877,9 +880,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this._transactionEventRetries.delete(message);
     }
     for (const id of message.inFlight) {
-      const timer = this._transactionEventTimeouts.get(id);
-      if (timer !== undefined) clearTimeout(timer);
-      this._transactionEventTimeouts.delete(id);
+      clearTimeout(this._pendingRequests.get(id)?.timeout);
       this._pendingRequests.delete(id);
     }
     message.inFlight.clear();
@@ -1605,34 +1606,29 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   public onWebSocketClosed(): void {
-    // #529: a written, unanswered TransactionEvent is forgotten with its
-    // `MessageTimeout` timer, silently, like any other unanswered CALL.
-    for (const pending of this._pendingRequests.values()) {
-      if (pending.transactionEvent)
-        pending.transactionEvent.message.done = true;
-    }
-    for (const timer of this._transactionEventTimeouts.values()) {
-      clearTimeout(timer);
-    }
-    this._transactionEventTimeouts.clear();
-    // Clear written-but-unanswered correlation entries on disconnect.
-    // A disconnect must not leave stale correlation state.
-    this._pendingRequests.clear();
-    this._expertCalls.onClosed();
     // #490: a resend waiting for its interval dies with the connection (2.x
     // has no offline queue to hand it to). Close, disconnect, reset and
     // dispose all reach here through ChargePoint.teardownAfterClose.
-    for (const message of this._transactionEventRetries) {
-      clearTimeout(message.resend);
-      message.resend = undefined;
-      message.done = true;
+    // Warned first: its message may also have a timed-out transmission
+    // pending, which the loop below would forget silently.
+    for (const message of [...this._transactionEventRetries]) {
       this.warnResendLost(
         message.payload,
         message.sent + 1,
         "cancelled: WebSocket closed",
       );
+      this.forgetTransactionEvent(message);
     }
-    this._transactionEventRetries.clear();
+    // #529: a written, unanswered TransactionEvent is forgotten with its
+    // `MessageTimeout` timer, silently, like any other unanswered CALL.
+    for (const pending of [...this._pendingRequests.values()]) {
+      if (pending.transactionEvent)
+        this.forgetTransactionEvent(pending.transactionEvent.message);
+    }
+    // Clear written-but-unanswered correlation entries on disconnect.
+    // A disconnect must not leave stale correlation state.
+    this._pendingRequests.clear();
+    this._expertCalls.onClosed();
   }
 
   public flushPendingQueue(): void {

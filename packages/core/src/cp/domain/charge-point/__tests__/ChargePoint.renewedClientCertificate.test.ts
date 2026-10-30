@@ -134,12 +134,11 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
     const cp = profile3Station();
     const clear = vi.spyOn(transportOf(cp), "clearRenewedClientCertificate");
     const identity = vi
-      .spyOn(cp.certificateStore, "tlsClientIdentity")
-      .mockResolvedValue(IDENTITY);
+      .spyOn(cp.certificateStore, "hasTlsClientIdentity")
+      .mockReturnValue(true);
 
     cp.certificateStore.clearAll();
-    await vi.waitFor(() => expect(identity).toHaveBeenCalled());
-    await Promise.resolve();
+    expect(identity).toHaveBeenCalled();
     expect(clear).not.toHaveBeenCalled();
     cp.dispose();
   });

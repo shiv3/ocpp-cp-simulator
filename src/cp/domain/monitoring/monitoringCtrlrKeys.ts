@@ -16,6 +16,8 @@ export const MONITORING_CTRLR_KEYS = {
   bytesPerClearVariableMonitoring: "BytesPerMessageClearVariableMonitoring",
   /** `ActiveMonitoringLevel`: the SetMonitoringLevel severity in force. */
   activeMonitoringLevel: "ActiveMonitoringLevel",
+  /** `ActiveMonitoringBase`: the SetMonitoringBase value last set. */
+  activeMonitoringBase: "ActiveMonitoringBase",
 } as const;
 
 /**

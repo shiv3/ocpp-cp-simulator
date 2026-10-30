@@ -103,7 +103,36 @@ describe("VariableMonitorRepository", () => {
     repo.save(monitor());
     repo.setTriggered(1, true);
     repo.delete(1);
+    repo.saveActiveBase("HardWiredOnly");
     expect(repo.load()).toEqual([]);
+    expect(repo.loadActiveBase()).toBeUndefined();
+  });
+
+  it("stores the monitoring base per charge point, apart from the monitors (#538)", () => {
+    const db = openDb();
+    const repo = new VariableMonitorRepository("CP-A", db);
+    expect(repo.loadActiveBase()).toBeUndefined();
+
+    repo.save(monitor());
+    repo.saveActiveBase("All");
+    repo.saveActiveBase("HardWiredOnly");
+
+    expect(repo.loadActiveBase()).toBe("HardWiredOnly");
+    expect(repo.load().map((p) => p.monitor.id)).toEqual([1]);
+    expect(
+      new VariableMonitorRepository("CP-B", db).loadActiveBase(),
+    ).toBeUndefined();
+  });
+
+  it("ignores an unreadable monitoring base", () => {
+    const db = openDb();
+    db.run(
+      "INSERT INTO variable_monitors (cp_id, monitor_id, monitor) VALUES ('CP-A', 0, ?)",
+      [JSON.stringify({ activeMonitoringBase: "Everything" })],
+    );
+    expect(
+      new VariableMonitorRepository("CP-A", db).loadActiveBase(),
+    ).toBeUndefined();
   });
 });
 
@@ -145,6 +174,7 @@ describe("ChargePoint variable-monitor persistence", () => {
     expect(
       new VariableMonitorRepository("CP-PERSIST", db)
         .load()
+        .filter((p) => p.monitor.origin === "CustomMonitor")
         .map((p) => [p.monitor.id, p.triggered]),
     ).toEqual([[1, true]]);
   });

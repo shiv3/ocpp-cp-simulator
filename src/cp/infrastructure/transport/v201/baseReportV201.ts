@@ -59,7 +59,13 @@ export function buildBaseReportData(
         },
       ] as [VariableAttributeType],
       variableCharacteristics: {
-        dataType: toCharacteristicDataType(entry.key.type),
+        // #538: a string limited to a few values is an OptionList.
+        ...(entry.key.type === "string" && entry.key.allowed !== undefined
+          ? {
+              dataType: "OptionList" as const,
+              valuesList: entry.key.allowed.join(","),
+            }
+          : { dataType: toCharacteristicDataType(entry.key.type) }),
         // #538: the bounds SetVariables and SetVariableMonitoring enforce
         // (a threshold outside them is ValueOutOfRange, N04.FR.06).
         ...(entry.key.type === "integer" &&

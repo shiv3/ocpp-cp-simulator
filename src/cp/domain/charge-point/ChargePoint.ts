@@ -1882,8 +1882,10 @@ export class ChargePoint {
   /**
    * #537 A02.FR.08: after CertificateSigned accepted a new Charging Station
    * certificate, a security-profile-3 station switches to it by
-   * reconnecting with it as its TLS client certificate; 2.0.1 asks to wait
-   * until its notBefore has passed. Nothing happens on other profiles, or
+   * reconnecting with it as its TLS client certificate, once its notBefore
+   * has passed (2.0.1 asks for that; 2.1 gets the same wait). A station
+   * that is not connected presents it at its next connection instead of
+   * reconnecting. Nothing happens on other profiles, or
    * when the store holds no private key for the chain (a CSR the caller
    * supplied). A restart presents the configured `--tls-cert` again: the
    * key is never persisted.
@@ -1909,6 +1911,15 @@ export class ChargePoint {
       return;
     }
     webSocket.useRenewedClientCertificate(identity);
+    // A station that is not connected (back-off, simulated outage, manual
+    // disconnect) presents it at its next connection, on that one's timing.
+    if (!webSocket.isOpenOrConnecting()) {
+      this._logger.info(
+        "Renewed Charging Station certificate presented at the next connection (A02.FR.08)",
+        LogType.WEBSOCKET,
+      );
+      return;
+    }
     this._logger.info(
       "Reconnecting with the renewed Charging Station certificate (A02.FR.08)",
       LogType.WEBSOCKET,

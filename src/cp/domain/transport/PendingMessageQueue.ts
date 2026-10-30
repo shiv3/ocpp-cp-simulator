@@ -112,11 +112,15 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   }
 
   /**
-   * Remove the oldest queued message carrying `action` and persist; the
-   * other actions are never touched. Returns whether one was removed.
+   * Remove the oldest queued message carrying `action` (and whose payload
+   * `where` accepts, when given) and persist; the other actions are never
+   * touched. Returns whether one was removed.
    */
-  removeOldest(action: A): boolean {
-    const index = this.items.findIndex((item) => item.action === action);
+  removeOldest(action: A, where?: (payload: unknown) => boolean): boolean {
+    const index = this.items.findIndex(
+      (item) =>
+        item.action === action && (where === undefined || where(item.payload)),
+    );
     if (index < 0) return false;
     const [row] = this.items.splice(index, 1);
     this.deleteRow(row.messageId);

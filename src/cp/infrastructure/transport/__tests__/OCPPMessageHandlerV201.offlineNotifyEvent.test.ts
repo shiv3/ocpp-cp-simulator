@@ -342,6 +342,53 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(fullWarnings()).toHaveLength(2);
     });
 
+    it("drops a Periodic-only report before a threshold crossing at the cap", () => {
+      const { socket, handler, close, reconnect } = setup(version);
+      const periodic = (eventId: number): MonitoringEvent => ({
+        ...event(eventId),
+        trigger: "Periodic",
+      });
+      close();
+      handler.queueNotifyEvent([event(1)]);
+      handler.queueNotifyEvent([periodic(2), event(3)]);
+      for (let i = 4; i <= MAX_QUEUED_NOTIFY_EVENTS + 3; i += 1) {
+        handler.queueNotifyEvent([periodic(i)]);
+      }
+      reconnect();
+      const replayed = socket
+        .notifyEvents()
+        .map((p) => (p.eventData as { eventId: number }[])[0].eventId);
+      expect(replayed).toHaveLength(MAX_QUEUED_NOTIFY_EVENTS);
+      // The oldest Periodic-only reports (4, 5) went; the Alerting report 1
+      // and the mixed report 2 stayed.
+      expect(replayed.slice(0, 3)).toEqual([1, 2, 6]);
+    });
+
+    it("logs a queued report at debug, not one warn per report", () => {
+      const { handler, close } = setup(version);
+      close();
+      vi.mocked(logger.warn).mockClear();
+      handler.queueNotifyEvent([event(1)]);
+      handler.queueNotifyEvent([event(2)]);
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(
+        vi
+          .mocked(logger.debug)
+          .mock.calls.filter(([message]) =>
+            String(message).includes("queued while offline"),
+          ),
+      ).toHaveLength(2);
+    });
+
+    it("reports the highest eventId queued, 0 when none", () => {
+      const { handler, close } = setup(version);
+      expect(handler.highestQueuedNotifyEventId()).toBe(0);
+      close();
+      handler.queueNotifyEvent([event(4), event(9)]);
+      handler.queueNotifyEvent([event(2)]);
+      expect(handler.highestQueuedNotifyEventId()).toBe(9);
+    });
+
     it("queues a NotifyEvent the socket is down for, per OfflineQueuingSeverity", () => {
       const { socket, handler, close, reconnect } = setup(version, 4);
       close();

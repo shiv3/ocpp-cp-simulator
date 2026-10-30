@@ -152,6 +152,12 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.queueNotifyEvent(events);
   }
 
+  highestQueuedNotifyEventId(): ReturnType<
+    IChargePointMessageHandler["highestQueuedNotifyEventId"]
+  > {
+    return this.handler.highestQueuedNotifyEventId();
+  }
+
   setBootStatus(
     status: Parameters<IChargePointMessageHandler["setBootStatus"]>[0],
   ): ReturnType<IChargePointMessageHandler["setBootStatus"]> {

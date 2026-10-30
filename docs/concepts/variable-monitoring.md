@@ -339,8 +339,11 @@ and delivered once back online (#538).
 - **Cap**: at most 1000 `NotifyEvent` reports per charge point
   (`MAX_QUEUED_NOTIFY_EVENTS`), so a `Periodic` monitor ticking through a
   long outage cannot grow the queue without bound. A report queued at the
-  cap drops the oldest queued report; a TransactionEvent row is never
-  dropped nor counted. The first drop of an outage logs a `warn` (category
+  cap drops the oldest queued report made only of `Periodic` events, else
+  the oldest report: a threshold crossing queued offline counts as told,
+  so the re-check of the `Accepted` boot would not send it again. A
+  TransactionEvent row is never dropped nor counted. Each queued report
+  logs at `debug`; the first drop of an outage logs a `warn` (category
   `OCPP`), and the replay after the next `Accepted` boot logs one more with
   the number of reports dropped. Periodic ticks are not coalesced.
 - **Replay**: after the `Accepted` boot (after the post-boot
@@ -374,9 +377,12 @@ The events of one value change (or one install, or one `Accepted` boot) are
 with `seqNo` from 0 (N07.FR.07) and `tbc` true on every part but the last,
 and one `eventData` per monitor, by increasing monitor id:
 
-- `eventId` (increasing per station from 1, restarting at 1 after a
-  restart), `timestamp`, `trigger`, `actualValue` as `GetVariables` renders
-  it (empty for a write-only value, N07.FR.10), `cleared` only when true;
+- `eventId` (increasing per station from 1; after a restart or a
+  `cp.update`, from past the highest `eventId` still
+  [queued](#offline-queuing), else from 1 again, so an id the previous
+  run already sent can repeat), `timestamp`, `trigger`, `actualValue` as
+  `GetVariables` renders it (empty for a write-only value, N07.FR.10),
+  `cleared` only when true;
 - `component` (with its `evse`, if any), `variable` and
   `variableMonitoringId` of the monitor (N07.FR.06), and
   `eventNotificationType`, the monitor's origin (`CustomMonitor`,
@@ -519,7 +525,12 @@ stored (above).
   the socket stays at the head of the queue until the next `Accepted`
   boot, while live `NotifyEvent`s go out directly; a refusal after the
   first part loses the rest of that report. Past 1000 queued reports the
-  oldest are dropped ([cap](#offline-queuing)).
+  oldest `Periodic`-only reports are dropped first
+  ([cap](#offline-queuing)); once none is left, the oldest report goes,
+  and a threshold or TargetDelta crossing it held is lost for good: it
+  counts as told, so the re-check of the `Accepted` boot does not resend
+  it, and sends a `cleared` if the value is back in range, for a trigger
+  the CSMS never saw.
 - **Value sources.** Events follow a CSMS `SetVariables` /
   `SetVariableMonitoring`, `SetMonitoringLevel` / `SetMonitoringBase` (on
   the `MonitoringCtrlr` variables), a scenario `configSet` node, a change

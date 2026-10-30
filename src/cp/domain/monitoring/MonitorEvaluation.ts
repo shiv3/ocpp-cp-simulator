@@ -16,7 +16,8 @@ import {
 
 /** One monitor event, ready to be reported by NotifyEvent (N07). */
 export interface MonitoringEvent {
-  /** Increasing per charge point, from 1. */
+  /** Increasing per charge point, from 1, or from past the highest
+   *  eventId still queued when the station starts (#538). */
   readonly eventId: number;
   readonly timestamp: Date;
   /** The monitor that fired (N07.FR.06). */
@@ -56,6 +57,11 @@ export interface MonitorEvaluationDeps {
    * the event is created; `undefined` leaves the event unlinked (#538).
    */
   transactionIdOf?(monitor: VariableMonitor): string | undefined;
+  /**
+   * The highest eventId of the events still queued from a previous run,
+   * read once at construction: the new events are numbered past it (#538).
+   */
+  lastQueuedEventId?(): number;
   now?: () => Date;
   /** Told whenever a threshold monitor's triggered flag flips. */
   onTriggeredChange?(id: number, triggered: boolean): void;
@@ -87,7 +93,7 @@ export interface MonitorEvaluationDeps {
 export class MonitorEvaluation {
   private readonly states = new Map<number, MonitorState>();
   private readonly periodic: PeriodicMonitorScheduler;
-  private nextEventId = 1;
+  private nextEventId: number;
   /** `on`: reporting; `held`: boot not Accepted while connected (B02.FR.02);
    *  `offline`: no connection or no boot yet; `disposed`: terminal. */
   private mode: "on" | "held" | "offline" | "disposed" = "on";
@@ -100,6 +106,7 @@ export class MonitorEvaluation {
     private readonly deps: MonitorEvaluationDeps,
     restoredTriggered: ReadonlyMap<number, boolean> = new Map(),
   ) {
+    this.nextEventId = (deps.lastQueuedEventId?.() ?? 0) + 1;
     this.periodic = new PeriodicMonitorScheduler((id) => this.periodicTick(id));
     for (const monitor of deps.store.list()) {
       if (isPeriodicMonitorType(monitor.type)) {
@@ -187,6 +194,11 @@ export class MonitorEvaluation {
   dispose(): void {
     this.mode = "disposed";
     this.periodic.disarmAll();
+  }
+
+  /** Whether {@link dispose} ran: an event still in flight is dropped. */
+  get disposed(): boolean {
+    return this.mode === "disposed";
   }
 
   /** N08.FR.05-FR.07: report the current value of a periodic monitor;

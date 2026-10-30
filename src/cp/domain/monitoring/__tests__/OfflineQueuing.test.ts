@@ -213,3 +213,36 @@ describe("MonitorEvaluation offline periodic monitors (N08.FR.03)", () => {
     expect(h.sent).toEqual([]);
   });
 });
+
+describe("MonitorEvaluation eventId across a restart (#538)", () => {
+  it("continues past the highest eventId still queued", () => {
+    const store = new MonitoringStore();
+    let value = 40;
+    const queued: MonitoringEvent[] = [];
+    const evaluation = new MonitorEvaluation({
+      store,
+      read: () => num(value),
+      emit: () => undefined,
+      queue: (batch) => queued.push(...batch),
+      offlineQueuingSeverity: () => 9,
+      transactionActive: () => false,
+      lastQueuedEventId: () => 7,
+    });
+    store.install(draft());
+    evaluation.setOffline();
+    value = 60;
+    evaluation.valueChanged("HeartbeatInterval");
+    value = 45;
+    evaluation.valueChanged("HeartbeatInterval");
+    expect(queued.map((e) => e.eventId)).toEqual([8, 9]);
+  });
+});
+
+describe("MonitorEvaluation dispose", () => {
+  it("reports whether it is disposed", () => {
+    const h = harness(5);
+    expect(h.evaluation.disposed).toBe(false);
+    h.evaluation.dispose();
+    expect(h.evaluation.disposed).toBe(true);
+  });
+});

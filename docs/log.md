@@ -2026,6 +2026,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
 
+## [2026-10-30] ingest | EVConnectionTimeOut ends a started 2.x transaction (#549)
+
+- On OCPP 2.0.1 / 2.1, when `TxCtrlr.EVConnectionTimeOut` elapses with the connector still `Preparing` and a transaction started, the station sends `TransactionEvent(Ended)` with `triggerReason` `EVConnectTimeout` and `stoppedReason` `Timeout` (E03.FR.05). Without a transaction, and on 1.6, the Preparing → Finishing move is unchanged.
+- [Charging sessions → EV-side disconnect and connection loss](concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss): new "EV connection timeout" item.
+
 ## [2026-10-30] ingest | Expert raw frames, level C of #389 (#393)
 
 - `ChargePoint.sendRawFrame` / `send_raw_frame` (control plane, JSON-Lines, MCP): one text frame written as given, through the normal pipeline and log but outside the 1.6 serial CALL queue; replies correlated best effort (frame id, or a CALLERROR with id `""` / `"-1"`) and kept from the station's handlers; a close is reported and the next session is unaffected. SOAP and a closed socket are refused.

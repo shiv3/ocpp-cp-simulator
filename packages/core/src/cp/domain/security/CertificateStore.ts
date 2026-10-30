@@ -433,11 +433,13 @@ export class CertificateStore {
   /**
    * GetInstalledCertificateIds, version-neutral. `queries` absent means
    * every installed certificate (2.x omits `certificateType` for "all").
-   * `V2GCertificateChain` lists each stored `V2GCertificate` chain as its
-   * leaf with the sub-CAs as children (M03.FR.05).
+   * `V2GCertificateChain` lists each stored chain of a `v2gChainUses` use
+   * as its leaf with the sub-CAs as children (M03.FR.05). The default is
+   * 2.0.1's single V2G certificate; 2.1 adds `V2G20Certificate` (#537).
    */
   installedCertificateIds(
     queries?: readonly InstalledCertificateQuery[],
+    v2gChainUses: readonly SignedCertificateUse[] = ["V2GCertificate"],
   ): InstalledCertificateIds[] {
     const wants = (q: InstalledCertificateQuery) =>
       queries === undefined || queries.includes(q);
@@ -453,7 +455,10 @@ export class CertificateStore {
             ]
           : [];
       }
-      if (e.value.use !== "V2GCertificate" || !wants("V2GCertificateChain")) {
+      if (
+        !v2gChainUses.includes(e.value.use) ||
+        !wants("V2GCertificateChain")
+      ) {
         return [];
       }
       const [leaf, ...children] = e.value.hashData;

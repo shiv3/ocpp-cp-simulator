@@ -53,6 +53,8 @@ export interface CertificateWireMapping {
   readonly queryFrom: (value: string) => InstalledCertificateQuery | undefined;
   readonly queryTo: (query: InstalledCertificateQuery) => string | undefined;
   readonly signedUseFrom: (value: string) => SignedCertificateUse | undefined;
+  /** The chains a `V2GCertificateChain` query lists (M03.FR.05). */
+  readonly v2gChainUses: readonly SignedCertificateUse[];
 }
 
 export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -60,6 +62,7 @@ export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
   queryFrom: installedCertificateQueryFromV201,
   queryTo: installedCertificateQueryToV201,
   signedUseFrom: signedUseFromV201,
+  v2gChainUses: ["V2GCertificate"],
 };
 
 export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -67,6 +70,9 @@ export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
   queryFrom: installedCertificateQueryFromV21,
   queryTo: installedCertificateQueryToV21,
   signedUseFrom: signedUseFromV21,
+  // #537 M03.FR.05: 2.1 has no query value of its own for ISO 15118-20
+  // certificates, so its V2G chains are listed under V2GCertificateChain.
+  v2gChainUses: ["V2GCertificate", "V2G20Certificate"],
 };
 
 /** `childCertificateHashData` is 0..4 in both 2.0.1 and 2.1. */
@@ -207,7 +213,11 @@ function getInstalledCertificateIds(
   });
   return afterPendingOperations(
     ctx,
-    () => ctx.chargePoint.certificateStore.installedCertificateIds(queries),
+    () =>
+      ctx.chargePoint.certificateStore.installedCertificateIds(
+        queries,
+        mapping.v2gChainUses,
+      ),
     (installed) => answerInstalledCertificateIds(mapping, installed, ctx),
   );
 }

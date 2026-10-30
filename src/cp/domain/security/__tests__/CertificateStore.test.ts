@@ -705,3 +705,109 @@ describe("CertificateStore OCSP (#537, M06)", () => {
     expect(store.cachedOcspResponse(leafHash)).toBeUndefined();
   });
 });
+
+describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
+  async function importKey(pem: string): Promise<CryptoKey> {
+    const der = Buffer.from(
+      pem.replace(/-----[A-Z ]+-----/g, "").replace(/\s+/g, ""),
+      "base64",
+    );
+    return crypto.subtle.importKey(
+      "pkcs8",
+      der,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+  }
+
+  async function signedChargingStationChain(store: CertificateStore) {
+    const root = await selfSignedRoot("01", "CPO Root");
+    const sub = await subCa("02", "CPO Sub-CA", root);
+    const csr = await store.generateNewCsr("CP-TLS", "Example CPO");
+    const leaf = await leafForCsr("03", csr, sub);
+    await store.applySignedChain("ChargingStationCertificate", [leaf, sub.pem]);
+    return { root, sub, leaf };
+  }
+
+  it("binds the CSR's private key to the accepted chain", async () => {
+    const store = new CertificateStore();
+    const { sub, leaf } = await signedChargingStationChain(store);
+
+    const identity = await store.tlsClientIdentity();
+
+    expect(identity?.cert).toBe(`${leaf.trim()}\n${sub.pem.trim()}\n`);
+    expect(identity?.key).toMatch(/^-----BEGIN PRIVATE KEY-----\n/);
+    // The key is the one the leaf certifies: a signature made with it
+    // verifies against the leaf's public key.
+    const data = new TextEncoder().encode("A02.FR.08");
+    const signature = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      await importKey(identity!.key),
+      data,
+    );
+    const { X509Certificate } = await import("@peculiar/x509");
+    const leafKey = await new X509Certificate(leaf).publicKey.export();
+    expect(
+      await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        leafKey,
+        signature,
+        data,
+      ),
+    ).toBe(true);
+    expect(identity?.notBefore).toBeInstanceOf(Date);
+  });
+
+  it("has none for a chain signed for a CSR it did not generate, nor for a V2G chain", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CPO Root");
+    const forwarded = await generateCsr("CP-TLS", "Example CPO");
+    expect(
+      store.recordPendingCsr("ChargingStationCertificate", forwarded.pem),
+    ).toBe(true);
+    await store.applySignedChain("ChargingStationCertificate", [
+      await leafForCsr("03", forwarded.pem, root),
+    ]);
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+
+    const v2gCsr = await store.generateNewCsr(
+      "CP-TLS",
+      "Example CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    await store.applySignedChain("V2GCertificate", [
+      await leafForCsr("04", v2gCsr, root),
+    ]);
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+  });
+
+  it("drops the identity once its chain is replaced or deleted", async () => {
+    const store = new CertificateStore();
+    const { root } = await signedChargingStationChain(store);
+    expect(await store.tlsClientIdentity()).toBeDefined();
+
+    // A 1.6 CertificateSigned replaces the chain without a matching key.
+    const other = await generateCsr("CP-TLS", "Example CPO");
+    await store.storeSignedChain([await leafForCsr("05", other.pem, root)]);
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+
+    // state.reset / cp.delete
+    const again = new CertificateStore();
+    await signedChargingStationChain(again);
+    again.clearAll();
+    expect(await again.tlsClientIdentity()).toBeUndefined();
+  });
+
+  it("keeps the key out of JSON and toString", async () => {
+    const store = new CertificateStore();
+    await signedChargingStationChain(store);
+    await store.tlsClientIdentity();
+
+    for (const text of [JSON.stringify(store), String(store)]) {
+      expect(text).not.toContain("PRIVATE KEY");
+      expect(text).not.toMatch(/"privateKey"\s*:/i);
+    }
+  });
+});

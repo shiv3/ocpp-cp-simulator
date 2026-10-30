@@ -196,6 +196,18 @@ export class OCPPWebSocket {
   private _authorizationKey?: string;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
+  /**
+   * #537 A02.FR.08: a renewed Charging Station certificate presented in
+   * place of the configured `cert` / `key`. Memory-only. `confirmed` once a
+   * connection presenting it opened; until then failed attempts alternate
+   * between it and the configured one (2.1 A02.FR.28 with B10.FR.08).
+   */
+  private _renewedClientCertificate: {
+    readonly cert: string;
+    readonly key: string;
+    confirmed: boolean;
+    presentNext: boolean;
+  } | null = null;
 
   // Network simulation
   private _controller: NetworkSimController;
@@ -270,6 +282,81 @@ export class OCPPWebSocket {
    * carries eleven positional arguments, and a charge point with one URL —
    * every charge point until now — should not have to pass anything.
    */
+  /** Whether the CSMS link authenticates with a client certificate
+   *  (security profile 3), the one a renewed certificate replaces. */
+  public usesClientCertificate(): boolean {
+    return this._securityProfile === 3;
+  }
+
+  /**
+   * #537 A02.FR.08: presents `identity` (a renewed Charging Station
+   * certificate chain and its key) from the next connection on, instead of
+   * the configured client certificate. The caller reconnects. Ignored
+   * unless {@link usesClientCertificate}.
+   */
+  public useRenewedClientCertificate(identity: {
+    readonly cert: string;
+    readonly key: string;
+  }): void {
+    if (!this.usesClientCertificate()) return;
+    this._renewedClientCertificate = {
+      cert: identity.cert,
+      key: identity.key,
+      confirmed: false,
+      presentNext: true,
+    };
+  }
+
+  /** The TLS options of the next attempt, and whether it presents the
+   *  renewed certificate. */
+  private nextTlsOptions(): {
+    tls: OcppTlsOptions | undefined;
+    renewed: boolean;
+  } {
+    const renewed = this._renewedClientCertificate;
+    if (!renewed || !(renewed.confirmed || renewed.presentNext)) {
+      return { tls: this._tls, renewed: false };
+    }
+    return {
+      tls: { ...(this._tls ?? {}), cert: renewed.cert, key: renewed.key },
+      renewed: true,
+    };
+  }
+
+  /** A connection opened: settles which client certificate the station
+   *  keeps while the renewed one is unconfirmed (A02.FR.10). */
+  private onClientCertificateOpened(presentedRenewed: boolean): void {
+    const renewed = this._renewedClientCertificate;
+    if (!renewed || renewed.confirmed) return;
+    if (presentedRenewed) {
+      renewed.confirmed = true;
+      this._logger.info(
+        "Connected with the renewed Charging Station certificate (A02.FR.08)",
+        LogType.WEBSOCKET,
+      );
+      return;
+    }
+    this._renewedClientCertificate = null;
+    this._logger.warn(
+      "Connected with the configured client certificate after the renewed one failed; discarding the renewed certificate (A02.FR.10)",
+      LogType.WEBSOCKET,
+    );
+  }
+
+  /** An attempt closed before it opened: the next one presents the other
+   *  certificate while the renewed one is unconfirmed (A02.FR.28). */
+  private onClientCertificateFailed(presentedRenewed: boolean): void {
+    const renewed = this._renewedClientCertificate;
+    if (!renewed || renewed.confirmed) return;
+    renewed.presentNext = !presentedRenewed;
+    if (presentedRenewed) {
+      this._logger.warn(
+        "Could not connect with the renewed Charging Station certificate; the next attempt presents the configured one (A02.FR.28)",
+        LogType.WEBSOCKET,
+      );
+    }
+  }
+
   public setSupervisionUrlPool(pool: SupervisionUrlPool | null): void {
     this._urlPool = pool;
     if (pool) this._url = pool.current();
@@ -305,7 +392,11 @@ export class OCPPWebSocket {
     this._isManualDisconnect = false;
     this._selfRequestedClose = false;
 
+    const attempt = this.nextTlsOptions();
+    let opened = false;
     const onopenHandler = () => {
+      opened = true;
+      this.onClientCertificateOpened(attempt.renewed);
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
       this._lastRefusalProbeAt = 0;
@@ -336,6 +427,11 @@ export class OCPPWebSocket {
       );
       // Generation guard: only process close if this socket belongs to the current generation
       if (socketGeneration === this._generationCounter) {
+        // Only a failed connection attempt counts, not one the station
+        // closed itself before it opened.
+        if (!opened && closeCause === "network") {
+          this.onClientCertificateFailed(attempt.renewed);
+        }
         this.handleClose(ev, closeCause);
       }
       this.reportClose(socketToken, ev);
@@ -363,7 +459,7 @@ export class OCPPWebSocket {
       securityProfile: this._securityProfile,
       authorizationKey: this._authorizationKey,
       cpoName: this._cpoName,
-      tls: this._tls,
+      tls: attempt.tls,
       warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
       onConnectOptions: (options) => {
         this._lastConnectOptions = options;

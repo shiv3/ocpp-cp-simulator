@@ -143,6 +143,8 @@ import {
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
+/** The longest delay setTimeout honours (2^31 - 1 ms, about 24.8 days). */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 interface BasicAuthSettings {
   username: string;
@@ -252,6 +254,9 @@ export class ChargePoint {
   /** `--tls-ca` / `--tls-cert` options of the CSMS connection (#537 reads
    *  the trust anchors). */
   private readonly _tls?: OcppTlsOptions;
+  /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08). */
+  private _clientCertificateSwitchTimer: ReturnType<typeof setTimeout> | null =
+    null;
   private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
@@ -1874,6 +1879,50 @@ export class ChargePoint {
     );
   }
 
+  /**
+   * #537 A02.FR.08: after CertificateSigned accepted a new Charging Station
+   * certificate, a security-profile-3 station switches to it by
+   * reconnecting with it as its TLS client certificate; 2.0.1 asks to wait
+   * until its notBefore has passed. Nothing happens on other profiles, or
+   * when the store holds no private key for the chain (a CSR the caller
+   * supplied). A restart presents the configured `--tls-cert` again: the
+   * key is never persisted.
+   */
+  async useRenewedClientCertificate(): Promise<void> {
+    this.cancelClientCertificateSwitch();
+    const webSocket = this._webSocket;
+    if (!webSocket?.usesClientCertificate()) return;
+    const identity = await this._certificateStore.tlsClientIdentity();
+    if (!identity) return;
+    const wait = identity.notBefore.getTime() - Date.now();
+    if (wait > 0) {
+      this._logger.info(
+        `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
+        LogType.WEBSOCKET,
+      );
+      // Capped: a longer setTimeout delay fires at once. The check runs
+      // again when it does.
+      this._clientCertificateSwitchTimer = setTimeout(
+        () => void this.useRenewedClientCertificate(),
+        Math.min(wait, MAX_TIMER_DELAY_MS),
+      );
+      return;
+    }
+    webSocket.useRenewedClientCertificate(identity);
+    this._logger.info(
+      "Reconnecting with the renewed Charging Station certificate (A02.FR.08)",
+      LogType.WEBSOCKET,
+    );
+    this.reset();
+  }
+
+  private cancelClientCertificateSwitch(): void {
+    if (this._clientCertificateSwitchTimer) {
+      clearTimeout(this._clientCertificateSwitchTimer);
+      this._clientCertificateSwitchTimer = null;
+    }
+  }
+
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */
   sendSecurityEventNotification(type: string, techInfo?: string): void {
     this._outbox.sendSecurityEventNotification(type, techInfo);
@@ -2243,6 +2292,7 @@ export class ChargePoint {
         : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
+    this.cancelClientCertificateSwitch();
     this._webSocket?.disconnect(); // drains network-sim pipelines synchronously (spec 2.6 step 1)
     this.teardownAfterClose(); // handler teardown incl. serializer _serialQueue salvage (step 2)
   }
@@ -2344,6 +2394,7 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    this.cancelClientCertificateSwitch();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
     // Offline monitoring keeps the periodic timers running: stop them.

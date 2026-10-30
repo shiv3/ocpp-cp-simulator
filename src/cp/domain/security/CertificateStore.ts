@@ -96,7 +96,7 @@ export type ApplySignedChainOutcome =
 
 /**
  * Safe snapshot of the store. Holds public material only (certificates and
- * CSRs); the store never retains a private key, so there is none to leak.
+ * CSRs): the private keys the store holds in memory (#537) are left out.
  */
 export interface CertificateStoreJson {
   pendingCsrs: { use: SignedCertificateUse; pem: string }[];
@@ -109,6 +109,20 @@ interface PendingCsr {
   readonly pem: string;
   /** DER SubjectPublicKeyInfo of the CSR, compared with a returned leaf. */
   readonly publicKey: Uint8Array;
+  /** The key pair's private half, when the store generated the CSR (#537).
+   *  Memory-only; absent for a CSR forwarded by the caller. */
+  readonly privateKey?: CryptoKey;
+}
+
+/** A signed Charging Station certificate the station can present as its
+ *  TLS client identity (#537, A02.FR.08). */
+export interface TlsClientIdentity {
+  /** The stored chain, leaf first, as PEM. */
+  readonly cert: string;
+  /** The leaf's PKCS#8 private key, as PEM. */
+  readonly key: string;
+  /** The leaf's `notBefore`: the station switches once it has passed. */
+  readonly notBefore: Date;
 }
 
 type Entry =
@@ -135,9 +149,12 @@ interface CertificateRow {
  * does not survive a restart, and A02.FR.17 has the station send a new CSR
  * when no CertificateSigned arrives for the previous one.
  *
- * Private keys: `generateNewCsr` drops the generated private key (A02.FR.05,
- * it never leaves the station, and the simulator does not use it). A
- * returned chain is matched to its CSR by public key only.
+ * Private keys (A02.FR.05: they never leave the station): `generateNewCsr`
+ * keeps the generated private key in memory with the pending CSR. When the
+ * signed chain is accepted, the key stays bound to that chain's leaf, so
+ * the station can present it as its TLS client identity (#537,
+ * {@link tlsClientIdentity}). Neither is ever persisted or serialized; a
+ * restart loses both. A returned chain is matched to its CSR by public key.
  *
  * Ordering: installs and signed-chain updates hash asynchronously, so they
  * run one at a time through {@link runExclusive}. A transport handler that
@@ -148,6 +165,8 @@ interface CertificateRow {
 export class CertificateStore {
   #entries: Entry[] = [];
   #pendingCsrs = new Map<SignedCertificateUse, PendingCsr>();
+  /** Private keys of accepted chains, by leaf PEM (#537). Memory-only. */
+  #chainKeys = new Map<string, CryptoKey>();
   #nextSeq = 1;
   /** Settles once every operation queued so far has completed. */
   #tail: Promise<void> = Promise.resolve();
@@ -225,6 +244,7 @@ export class CertificateStore {
     this.#pendingCsrs.set(use, {
       pem: generated.pem,
       publicKey: new Uint8Array(generated.csr.publicKey.rawData),
+      privateKey: generated.privateKey,
     });
     return generated.pem;
   }
@@ -309,7 +329,30 @@ export class CertificateStore {
 
     this.replaceChains(use, chain);
     this.#pendingCsrs.delete(use);
+    if (pending.privateKey) {
+      this.#chainKeys.set(chain.pems[0], pending.privateKey);
+    }
     return { status: "Accepted", chain };
+  }
+
+  /**
+   * The current Charging Station certificate chain with its private key
+   * (#537, A02.FR.08), or `undefined` when there is no such chain or the
+   * store does not hold its key: a chain signed for a CSR the caller
+   * supplied, one stored by 1.6 CertificateSigned, or any chain read back
+   * after a restart. The key is exported for the TLS handshake only; the
+   * caller must not log or persist it.
+   */
+  async tlsClientIdentity(): Promise<TlsClientIdentity | undefined> {
+    const [chain] = this.listSignedChains("ChargingStationCertificate");
+    const privateKey = chain && this.#chainKeys.get(chain.pems[0]);
+    if (!chain || !privateKey) return undefined;
+    const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
+    return {
+      cert: chain.pems.map((pem) => `${pem}\n`).join(""),
+      key: pemBlock("PRIVATE KEY", pkcs8),
+      notBefore: new x509.X509Certificate(chain.pems[0]).notBefore,
+    };
   }
 
   // ── OCSP (2.x M06, #537) ────────────────────────────────────────────────
@@ -519,6 +562,7 @@ export class CertificateStore {
 
   clearAll(): void {
     this.#pendingCsrs.clear();
+    this.#chainKeys.clear();
     this.#ocspResponses = [];
     this.#entries = [];
     this.runSafely("clear certificates", () =>
@@ -624,6 +668,7 @@ export class CertificateStore {
 
   private remove(entry: Entry): void {
     this.#entries = this.#entries.filter((e) => e !== entry);
+    if (entry.kind === "chain") this.#chainKeys.delete(entry.value.pems[0]);
     this.runSafely("delete certificate", () =>
       this.database?.run(
         "DELETE FROM certificates WHERE cp_id = ? AND seq = ?",
@@ -739,4 +784,11 @@ function isHashData(value: unknown): value is CertificateHashData {
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
+
+function pemBlock(label: string, der: ArrayBuffer): string {
+  // btoa, not Buffer: the store also runs in the browser (local mode).
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
+  const lines = base64.match(/.{1,64}/g) ?? [];
+  return `-----BEGIN ${label}-----\n${lines.join("\n")}\n-----END ${label}-----\n`;
 }

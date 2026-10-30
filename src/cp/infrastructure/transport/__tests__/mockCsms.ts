@@ -50,7 +50,19 @@ export interface MockCsms {
   closeCount: () => number;
 }
 
-export function startMockCsms(): MockCsms {
+export interface MockCsmsOptions {
+  /** Serve `wss://` with these TLS settings (#537: mutual TLS tests). */
+  readonly tls?: {
+    readonly cert: string;
+    readonly key: string;
+    /** Client CAs; with it the server requires a client certificate. */
+    readonly clientCa?: string | readonly string[];
+  };
+  /** A fixed port, so a test can restart the CSMS where a station looks. */
+  readonly port?: number;
+}
+
+export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
   const received: OcppFrame[] = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
@@ -61,8 +73,24 @@ export function startMockCsms(): MockCsms {
   let socket: ServerWebSocket<unknown> | null = null;
   let stopPromise: Promise<void> | null = null;
 
+  const tls = options.tls;
   const server = Bun.serve({
-    port: 0,
+    port: options.port ?? 0,
+    ...(tls
+      ? {
+          tls: {
+            cert: tls.cert,
+            key: tls.key,
+            ...(tls.clientCa
+              ? {
+                  ca: [tls.clientCa].flat(),
+                  requestCert: true,
+                  rejectUnauthorized: true,
+                }
+              : {}),
+          },
+        }
+      : {}),
     fetch(req, srv) {
       if (srv.upgrade(req)) {
         return undefined;
@@ -152,7 +180,7 @@ export function startMockCsms(): MockCsms {
   }
 
   return {
-    url: `ws://localhost:${port}/`,
+    url: `${tls ? "wss" : "ws"}://localhost:${port}/`,
     port,
     received,
     waitForConnection(timeoutMs = 2000) {

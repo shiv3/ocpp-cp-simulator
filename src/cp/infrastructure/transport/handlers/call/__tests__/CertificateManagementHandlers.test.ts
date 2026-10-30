@@ -162,7 +162,8 @@ describe("GetInstalledCertificateIdsHandler", () => {
     expect(res.certificateHashData).toHaveLength(1);
     expect(res.certificateHashData?.[0]).toMatchObject({
       hashAlgorithm: "SHA256",
-      serialNumber: "01",
+      // #537: no leading zero.
+      serialNumber: "1",
     });
     expect(res.certificateHashData?.[0].issuerNameHash).toHaveLength(64);
     expect(res.certificateHashData?.[0].issuerKeyHash).toHaveLength(64);

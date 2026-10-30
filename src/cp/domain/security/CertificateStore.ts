@@ -5,6 +5,7 @@ import type { Database } from "../persistence/Database";
 import {
   certificateHashDataEquals,
   computeCertificateHashData,
+  normalizeSerialNumber,
   type CertificateHashData,
 } from "./certificateHash";
 import {
@@ -593,7 +594,7 @@ function rowToEntry(row: CertificateRow): Entry | null {
       value: {
         use: row.certificate_use,
         pem: body.pem,
-        hashData: body.hashData,
+        hashData: normalizeHashData(body.hashData),
         installedAt: row.installed_at,
       },
     };
@@ -616,12 +617,21 @@ function rowToEntry(row: CertificateRow): Entry | null {
       value: {
         use: row.certificate_use,
         pems: pems as string[],
-        hashData: hashData as CertificateHashData[],
+        hashData: (hashData as CertificateHashData[]).map(normalizeHashData),
         storedAt: row.installed_at,
       },
     };
   }
   return null;
+}
+
+/**
+ * Rows written before #537 hold the serialNumber with its leading zero;
+ * they are read back in the current form, so GetInstalledCertificateIds
+ * reports one form whatever the row's age.
+ */
+function normalizeHashData(hash: CertificateHashData): CertificateHashData {
+  return { ...hash, serialNumber: normalizeSerialNumber(hash.serialNumber) };
 }
 
 function isHashData(value: unknown): value is CertificateHashData {

@@ -145,7 +145,7 @@ describe.skipIf(!canBindBunServe())(
           const chain = listed.certificateHashDataChain as HashDataChain[];
           expect(chain).toHaveLength(1);
           expect(chain[0].certificateType).toBe("CSMSRootCertificate");
-          expect(chain[0].certificateHashData.serialNumber).toBe("0a");
+          expect(chain[0].certificateHashData.serialNumber).toBe("a");
           expect(chain[0].childCertificateHashData).toBeUndefined();
 
           expect(
@@ -318,9 +318,9 @@ describe.skipIf(!canBindBunServe())(
           expect(listed.status).toBe("Accepted");
           const [entry] = listed.certificateHashDataChain as HashDataChain[];
           expect(entry.certificateType).toBe("V2GCertificateChain");
-          expect(entry.certificateHashData.serialNumber).toBe("03");
+          expect(entry.certificateHashData.serialNumber).toBe("3");
           expect(entry.childCertificateHashData).toHaveLength(1);
-          expect(entry.childCertificateHashData?.[0].serialNumber).toBe("02");
+          expect(entry.childCertificateHashData?.[0].serialNumber).toBe("2");
         });
       });
 
@@ -405,7 +405,7 @@ describe.skipIf(!canBindBunServe())(
             const chain = listed.certificateHashDataChain as HashDataChain[];
             expect(
               chain.map((c) => c.certificateHashData.serialNumber),
-            ).toEqual(["0b"]);
+            ).toEqual(["b"]);
           },
           db,
           id,

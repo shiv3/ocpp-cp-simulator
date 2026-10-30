@@ -38,7 +38,9 @@ function toHex(buffer: ArrayBuffer): string {
  *   content with no ASN.1 framing), and against known-answer hashes
  *   precomputed with `openssl asn1parse` + `openssl dgst -sha256` for a
  *   fixed certificate.
- * - serialNumber: hex string, sign-padding byte stripped by @peculiar/x509.
+ * - serialNumber: lower-case hex without leading zeroes (#537), as the
+ *   1.6 whitepaper and the 2.x CertificateHashDataType require; the
+ *   sign-padding byte is already stripped by @peculiar/x509.
  *
  * `issuerPem`, when given, is the certificate that signed `pem`: its public
  * key feeds issuerKeyHash (a chain member, M03.FR.05). Omitted, the
@@ -62,11 +64,25 @@ export async function computeCertificateHashData(
     hashAlgorithm: "SHA256",
     issuerNameHash: toHex(issuerNameHash),
     issuerKeyHash: toHex(issuerKeyHash),
-    serialNumber: cert.serialNumber,
+    serialNumber: normalizeSerialNumber(cert.serialNumber),
   };
 }
 
-/** Case-insensitive field comparison — CSMS implementations vary on hex casing. */
+/**
+ * A hex serialNumber in its wire form (#537): lower case, no leading
+ * zeroes, and `"0"` for an all-zero value. An empty string stays empty.
+ */
+export function normalizeSerialNumber(hex: string): string {
+  const lower = hex.toLowerCase();
+  const stripped = lower.replace(/^0+/, "");
+  return stripped === "" && lower !== "" ? "0" : stripped;
+}
+
+/**
+ * Case-insensitive field comparison — CSMS implementations vary on hex
+ * casing. serialNumber is compared without leading zeroes (#537), so a
+ * CSMS sending `0a` or `a` matches either stored form.
+ */
 export function certificateHashDataEquals(
   a: CertificateHashData,
   b: {
@@ -80,6 +96,7 @@ export function certificateHashDataEquals(
     a.hashAlgorithm === b.hashAlgorithm &&
     a.issuerNameHash.toLowerCase() === b.issuerNameHash.toLowerCase() &&
     a.issuerKeyHash.toLowerCase() === b.issuerKeyHash.toLowerCase() &&
-    a.serialNumber.toLowerCase() === b.serialNumber.toLowerCase()
+    normalizeSerialNumber(a.serialNumber) ===
+      normalizeSerialNumber(b.serialNumber)
   );
 }

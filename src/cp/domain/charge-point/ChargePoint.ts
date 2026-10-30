@@ -1820,7 +1820,9 @@ export class ChargePoint {
     this._clockAligned.disable();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
-    this._localAuthListManager.dispose();
+    // The Local Authorization List is kept: it is what authorizes while the
+    // connection is down (§3.5.3, LocalAuthorizeOffline), so a connection
+    // loss must not empty it (#534). Only dispose() drops it.
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // Cancel any pending firmware-update simulation so its status train
     // doesn't keep firing against a dead WebSocket.
@@ -1871,6 +1873,7 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its
     // handler logs "WebSocket closed" through this repository. Closing it

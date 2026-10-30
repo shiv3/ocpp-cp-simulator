@@ -148,7 +148,9 @@ update time.
 
 The Local Authorization List keeps each entry's `expiryDate` and
 `parentIdTag` when SendLocalList carries them, because the offline rules
-need the expiry. The list itself still lives in memory only.
+need the expiry. The list itself still lives in memory only: it survives a
+connection loss (it is what authorizes offline) but not a restart or a
+deletion of the charge point.
 
 ## OCPP 2.x
 

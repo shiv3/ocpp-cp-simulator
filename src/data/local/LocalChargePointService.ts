@@ -493,13 +493,17 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     entries: readonly AuthorizationCacheSeedEntry[],
   ): Promise<number> {
-    return this.getExistingChargePointOrThrow(id).authorization.seedCache(
-      entries,
-    );
+    const seeded =
+      this.getExistingChargePointOrThrow(id).authorization.seedCache(entries);
+    await this.database?.flush?.();
+    return seeded;
   }
 
   async clearAuthorizationCache(id: string): Promise<boolean> {
-    return this.getExistingChargePointOrThrow(id).clearAuthorizationCache();
+    const cleared =
+      this.getExistingChargePointOrThrow(id).clearAuthorizationCache();
+    await this.database?.flush?.();
+    return cleared;
   }
 
   async startTransaction(

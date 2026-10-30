@@ -1840,6 +1840,17 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | Bench teardown slow paths tested against a slow mock CSMS (#330)
+
+- The bench smoke suite's mock CSMS answered every CALL at once, so the teardown guards that only engage when something is slow could be removed with every test green. `scripts/bench/smokeHarness.ts` now holds the mock (per-action `delayMs` / `stallAfter`, receipt and reply hooks, open transactions tracked by id), the daemon and bench subprocesses and the control-plane helpers, shared with the smoke file.
+- New `scripts/bench/fleetBench.slowpath.test-bun.ts`, run by `bun run test:bench-slow` in a separate `bench-slow` CI job (about 36s locally), not by `test:bun`. It pins settle-before-close, the assigned-id stage of the cycle bound, the retirement branch, the re-stop of a cancelled hold and the re-stop list keeping an acked stop (read off teardown's `closing N open transaction(s)` count, since the CSMS sees one stop either way), each by a mutation that turns it red. Two cases use test-only `FLEET_BENCH_TEST_*` deadline overrides, validated in `lib.ts` and refused like a bad flag (`Error: …`, usage, exit 1); defaults unchanged.
+- Stale text dropped: teardown no longer waits on `ocppcp_ocpp_messages_total` nor verifies each closing stop; it re-stops and counts acks. No run-level test for: the RPC stages of the cycle bound (pinned only as arithmetic by `lib.bun.test.ts`), `cp.create_many` past its 35s deadline (#523), and what the no-op re-stop of an already-acked stop does on the wire.
+- [Source: bench README](sources/bench-readme.md): teardown paragraph, layout, "Not covered by a run-level test".
+- [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): the slow-path suite and its CI job.
+- [Testing strategy](analyses/testing-strategy.md): a Bun file outside both runner filters.
+- [GitHub issues](sources/github-issues.md): #330, #523.
+- Raw sources changed in the same PR: `scripts/bench/lib.ts`, `scripts/bench/fleet-bench.ts`, `scripts/bench/lib.bun.test.ts`, `scripts/bench/fleetBench.smoke.bun.test.ts`, `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/README.md`, `package.json`, `.github/workflows/ci.yml`.
+
 ## [2026-10-29] ingest | OCMF signed meter values (#315)
 
 - New `src/cp/domain/connector/SignedMeterData.ts`: an OCMF 1.4 generator (ECDSA-secp256r1-SHA256 via `@noble/curves`, synchronous so signing never reorders messages) with no OCPP knowledge, mapped to 1.6 `format: "SignedData"` samples and 2.x `signedMeterValue`. Off by default (`SampledDataSignReadings`, 2.x `SampledDataCtrlr.SignReadings`); one ephemeral key per connector, made on first use and published read-only as `MeterPublicKey<id>`; `SignedMeterDataMode` picks `valid`, `tampered_payload`, `wrong_key` or `invalid_signature`. 1.6 signs the begin reading at StartTransaction and sends it with the end reading in `StopTransaction.transactionData`, so page numbers stay in time order. String configuration keys can now list `allowed` values.

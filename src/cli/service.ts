@@ -78,6 +78,7 @@ import {
   isAutoStartKeyOf,
   matchAutoStart,
 } from "../cp/application/scenario/autoStart";
+import { legacyGeneratedBaseId } from "../cp/domain/persistence/legacyStartupInstances";
 import { SqliteScenarioRepository } from "../cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "../cp/domain/persistence/ScenarioRepository";
 import { SqliteConnectorRuntimeRepository } from "../cp/domain/persistence/SqliteConnectorRuntimeRepository";
@@ -1431,6 +1432,19 @@ export class CLIChargePointService {
     // a different key, removed by the daemon's one startup prune.
     definition.id = scenarioInstanceId(templateId, connectorId);
     if (options.enabled === false) definition.enabled = false;
+    // The instance an older build minted for the same template on this
+    // connector (`<templateId>-<cpId>-c<n>-<epoch>-<suffix>`) is the one this
+    // load replaces, as those builds removed it: left in place it would run
+    // alongside the stable instance (#338).
+    for (const [scenarioId, entry] of [...this._scenarios]) {
+      if (
+        entry.connectorId === connectorId &&
+        legacyGeneratedBaseId(this._chargePoint.id, connectorId, scenarioId) ===
+          templateId
+      ) {
+        this.removeScenario(connectorId, scenarioId);
+      }
+    }
     // Replacing an instance discards its in-flight run, as removing the
     // previous instance used to: a re-run must start the new definition, not
     // find the old executor still holding the id.

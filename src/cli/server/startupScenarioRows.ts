@@ -70,6 +70,36 @@ export function loadWithStartupProvenance(
   return scenarioId;
 }
 
+/**
+ * Hand rows back to the user: a scenario saved or loaded through the control
+ * plane or the web console is what the operator wants kept, even when a
+ * startup flag first generated it, so it loses its provenance and the prune
+ * leaves it alone. A failed write is reported and swallowed, like a failed
+ * mark: the row then stays the flag's, as before the save.
+ */
+export function clearStartupProvenance(
+  database: Database | null | undefined,
+  cpId: string,
+  connectorId: number | null,
+  scenarioIds: readonly string[],
+): void {
+  if (!database || scenarioIds.length === 0) return;
+  try {
+    database.run(
+      "UPDATE scenarios SET startup_source = NULL " +
+        `WHERE cp_id = ? AND connector_id = ? AND scenario_id IN (${scenarioIds
+          .map(() => "?")
+          .join(", ")}) AND startup_source IS NOT NULL`,
+      [cpId, connectorId ?? 0, ...scenarioIds],
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[server] could not clear startup provenance for ${cpId}/${connectorId ?? 0}: ` +
+        `${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
+}
+
 /** Ids of the rows on this connector that carry no provenance, or `null` when
  *  they cannot be read — the load then marks nothing, the direction in which
  *  no row is ever handed to the prune by mistake. */

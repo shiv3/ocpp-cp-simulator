@@ -13,6 +13,7 @@ import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 import type { ChargePointInitOptions } from "../../types";
 import { CPRegistry } from "../CPRegistry";
+import { clearStartupProvenance } from "../startupScenarioRows";
 import { EventBus } from "../eventBus";
 import {
   installStartupScenario,
@@ -704,4 +705,60 @@ describe("startServer prunes before anything dials (#338)", () => {
       db.close();
     }
   }, 20_000);
+});
+
+describe("an operator's save hands a startup scenario back (#338)", () => {
+  it("a startup instance saved over the control plane survives a boot without the flag", () => {
+    // RegistryChargePointService clears the provenance on every control-plane
+    // or console save (load_scenario[_template], scenario.definitions.save /
+    // .replace): the operator's edit is theirs, whatever generated the row.
+    const db = memoryDb();
+    track(
+      boot(db, { ...NO_FLAGS, scenarioTemplate: "essential-cp-behavior" }, 1),
+    ).cleanup(false);
+    expect(rows(db)).toEqual([
+      {
+        connector_id: 1,
+        scenario_id: "essential-cp-behavior-c1",
+        startup_source: expect.any(String),
+      },
+    ]);
+
+    clearStartupProvenance(db, CP, 1, ["essential-cp-behavior-c1"]);
+
+    const later = track(boot(db, NO_FLAGS, 1));
+    expect(idsOn(later, 1)).toEqual(["essential-cp-behavior-c1"]);
+    expect(rows(db)).toEqual([
+      {
+        connector_id: 1,
+        scenario_id: "essential-cp-behavior-c1",
+        startup_source: null,
+      },
+    ]);
+  });
+
+  it("a template loaded at run time replaces an older build's instance of it on that connector", () => {
+    const db = memoryDb();
+    const svc = track(boot(db, NO_FLAGS, 2));
+    const legacy = `essential-cp-behavior-${CP}-c1-1730000000000-k3x9`;
+    const other = `essential-cp-behavior-${CP}-c2-1730000000000-k3x9`;
+    svc.loadScenario(
+      1,
+      {
+        ...JSON.parse(scenarioJson(legacy)),
+        targetId: 1,
+      } as ScenarioDefinition,
+      { autoStart: false },
+    );
+    svc.loadScenario(
+      2,
+      { ...JSON.parse(scenarioJson(other)), targetId: 2 } as ScenarioDefinition,
+      { autoStart: false },
+    );
+
+    svc.loadScenarioTemplate("essential-cp-behavior", 1);
+
+    expect(idsOn(svc, 1)).toEqual(["essential-cp-behavior-c1"]);
+    expect(idsOn(svc, 2)).toEqual([other]);
+  });
 });

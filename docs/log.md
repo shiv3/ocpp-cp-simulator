@@ -1752,3 +1752,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI](entities/cli.md): restarts with `--state-db`.
 - [Control plane](concepts/control-plane.md): `load_scenario_template` loads under the stable id. `schema/scenario.schema.json`: `templateId` is informational.
 - [GitHub issues](sources/github-issues.md): #338.
+- Maintainer review: a scenario the operator saves through the control plane or the web console (`load_scenario`, `load_scenario_template`, `scenario.definitions.save` / `.replace`) loses its startup provenance, so a later boot without the flag no longer prunes an edited scenario; a template loaded at run time also replaces an older build's epoch-stamped instance of it on that connector, as the builds that minted it did.

@@ -153,7 +153,45 @@ describe("MonitoringStore.install", () => {
     expect(store.get(1)?.variable).toEqual({ name: "HeartbeatInterval" });
   });
 
-  it.each(["Periodic", "PeriodicClockAligned", "TargetDelta", "Bogus"])(
+  it.each(["Periodic", "PeriodicClockAligned"] as const)(
+    "accepts a %s monitor on any variable, numeric or not (N08, #538)",
+    (type) => {
+      const store = new MonitoringStore();
+      expect(store.install(draft({ type, value: 900 }))).toMatchObject({
+        status: "Accepted",
+        monitor: { id: 1, type, value: 900 },
+      });
+      expect(
+        store.install(
+          draft({
+            type,
+            value: 60,
+            component: { name: "LocalAuthListCtrlr" },
+            variable: { name: "Enabled" },
+            valueKey: "LocalAuthListEnabled",
+            valueType: BOOLEAN,
+          }),
+        ).status,
+      ).toBe("Accepted");
+    },
+  );
+
+  it.each([
+    ["Periodic", 0],
+    ["Periodic", -5],
+    ["PeriodicClockAligned", 0.5],
+  ] as const)(
+    "rejects a %s interval of %d s: below one second (#538)",
+    (type, value) => {
+      const store = new MonitoringStore();
+      expect(store.install(draft({ type, value }))).toEqual({
+        status: "Rejected",
+        reason: "IntervalTooShort",
+      });
+    },
+  );
+
+  it.each(["TargetDelta", "Bogus"])(
     "returns UnsupportedMonitorType for %s (N04.FR.05)",
     (type) => {
       const store = new MonitoringStore();

@@ -33,27 +33,39 @@ export function selectMonitors(
       (types === undefined || types.has(m.type)) &&
       (targets === undefined ||
         targets.length === 0 ||
-        targets.some((t) => matches(m, t))),
+        targets.some((t) => matchesComponentVariable(m, t))),
   );
 }
 
-function matches(m: VariableMonitor, t: MonitorTargetSelector): boolean {
-  const c = t.component;
-  if (c.name !== m.component.name) return false;
-  if (c.instance !== undefined && c.instance !== m.component.instance) {
+/**
+ * Whether a component/variable pair falls under a componentVariable
+ * selector: the component name must match, and a missing variable,
+ * instance, evse or connectorId is a wildcard. The same rule selects
+ * monitors (N02.FR.16–FR.21) and GetReport variables (B08.FR.20–FR.25).
+ */
+export function matchesComponentVariable(
+  target: {
+    readonly component: MonitorComponent;
+    readonly variable: MonitorVariable;
+  },
+  selector: MonitorTargetSelector,
+): boolean {
+  const c = selector.component;
+  if (c.name !== target.component.name) return false;
+  if (c.instance !== undefined && c.instance !== target.component.instance) {
     return false;
   }
   if (c.evse !== undefined) {
-    if (c.evse.id !== m.component.evse?.id) return false;
+    if (c.evse.id !== target.component.evse?.id) return false;
     if (
       c.evse.connectorId !== undefined &&
-      c.evse.connectorId !== m.component.evse?.connectorId
+      c.evse.connectorId !== target.component.evse?.connectorId
     ) {
       return false;
     }
   }
-  const v = t.variable;
+  const v = selector.variable;
   if (v === undefined) return true;
-  if (v.name !== m.variable.name) return false;
-  return v.instance === undefined || v.instance === m.variable.instance;
+  if (v.name !== target.variable.name) return false;
+  return v.instance === undefined || v.instance === target.variable.instance;
 }

@@ -116,17 +116,80 @@ const SENSITIVE_ESCAPED_ASSIGNMENT = new RegExp(
   "gi",
 );
 /**
- * An object or array held by an escaped-JSON member (`\"privateKey\":{…}`,
- * #531): replaced up to the end of the string holding that JSON (the first
- * unescaped `"`), else to the end of the line, so none of its members is
- * left. The holding string then ends with `\"[redacted]\"`, which keeps an
- * outer JSON frame parseable but cuts the JSON inside the string.
+ * The head of an object or array held by a member whose name is followed by an
+ * escaped quote (`\"privateKey\":{…}`, #531): up to and including the opening
+ * bracket. Its extent is not a regex's to find: the value inside may be
+ * escaped like the name (`{\"d\":\"S1\"}`), plain (`{"d":"S1"}`) or a mix
+ * of both, so {@link redactEscapedStructuredValues} reads it by bracket depth.
  */
-const SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_NAME_CORE}(${escapeRun(1)})"\\s*[:=]\\s*)` +
-    `[{[](?:\\\\[^\\n]|[^"\\\\\\n])*`,
+const SENSITIVE_ESCAPED_STRUCTURED_OPENER = new RegExp(
+  `(${SENSITIVE_NAME_CORE}(${escapeRun(1)})"\\s*[:=]\\s*)[{[]`,
   "gi",
 );
+
+/**
+ * Replace each object or array held by an escaped-JSON member (#531) with the
+ * quoted placeholder, so none of its members is left: it ends where its
+ * brackets balance, counting only those outside a string (of either quote
+ * style, escaped or not), and at the end of the line when they never do. The
+ * member then reads `\"[redacted]\"`, which keeps an outer JSON frame
+ * parseable but cuts the JSON inside the string.
+ */
+function redactEscapedStructuredValues(text: string): string {
+  let out = "";
+  let from = 0;
+  SENSITIVE_ESCAPED_STRUCTURED_OPENER.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SENSITIVE_ESCAPED_STRUCTURED_OPENER.exec(text)) !== null) {
+    const openAt = match.index + match[0].length - 1;
+    const end = structuredValueEnd(text, openAt);
+    out +=
+      text.slice(from, match.index) +
+      match[1] +
+      match[2] +
+      `"${REDACTED_VALUE}${match[2]}"`;
+    from = end;
+    SENSITIVE_ESCAPED_STRUCTURED_OPENER.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
+
+/**
+ * Just past the bracket closing the one at `open`, or the end of its line.
+ *
+ * A quote, escaped or not, opens or closes a string, and no bracket inside
+ * one counts: `{\"d\":\"}S1{\"}` holds a string `}S1{` whose braces are
+ * not the object's. A backslash run ahead of a quote belongs to that quote;
+ * the same run closes the string it opened.
+ */
+function structuredValueEnd(text: string, open: number): number {
+  let depth = 0;
+  let string: { quote: string; escapes: number } | null = null;
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\n") return index;
+    if (char === "\\") continue;
+    if (char === '"' || char === "'") {
+      let escapes = 0;
+      while (text[index - 1 - escapes] === "\\") escapes += 1;
+      if (string === null) {
+        string = { quote: char, escapes };
+      } else if (char === string.quote && escapes === string.escapes) {
+        string = null;
+      }
+      continue;
+    }
+    if (string !== null) continue;
+    if (char === "{" || char === "[") {
+      depth += 1;
+    } else if (char === "}" || char === "]") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return text.length;
+}
+
 const SENSITIVE_BARE_ASSIGNMENT = new RegExp(
   `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(?!${escapeRun(0)}["'])([^\\s,}\\]]+)`,
   "gi",
@@ -206,6 +269,61 @@ const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*):[^/\s@]*@/gi;
 const URL_SECRET_QUERY =
   /([?&](?:ocpp_ws_secret|password|passwd|secret|token|access_token|api[-_]?key|auth(?:orization)?[-_]?key)=)([^&#\s"'<>]+)/gi;
 
+/** The opening of a quoted sensitive assignment, value not included. */
+const SENSITIVE_QUOTED_OPENER = new RegExp(
+  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(["'])`,
+  "gi",
+);
+
+/**
+ * #547: a regex engine may give up on a long match and report none, where
+ * another completes it: JavaScriptCore (Bun) does on a quoted value of some
+ * 50k characters that V8 (Node) redacts. `SENSITIVE_ASSIGNMENT` then leaves
+ * the value in clear. Every quoted opener it handled is followed by the
+ * redacted value, so one that is not was missed: its value is cut here, in
+ * code, without a regex over its length. It ends at the first unescaped
+ * matching quote on its line; a PEM value, or one with no such quote, runs
+ * to the end of the text. Fails closed; a no-op where the regex completed.
+ */
+function redactMissedQuotedValues(text: string): string {
+  let out = "";
+  let from = 0;
+  SENSITIVE_QUOTED_OPENER.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SENSITIVE_QUOTED_OPENER.exec(text)) !== null) {
+    const quote = match[2];
+    const valueStart = match.index + match[0].length;
+    if (text.startsWith(`${REDACTED_VALUE}${quote}`, valueStart)) continue;
+    out +=
+      text.slice(from, match.index) + match[1] + quote + REDACTED_VALUE + quote;
+    const end = quotedValueEndOnLine(text, valueStart, quote);
+    if (end === null) return out;
+    from = end;
+    SENSITIVE_QUOTED_OPENER.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
+
+/** Just past the closing quote on the value's first line; `null` for a PEM
+ *  value or when the line holds none. */
+function quotedValueEndOnLine(
+  text: string,
+  start: number,
+  quote: string,
+): number | null {
+  if (/^\s*-----BEGIN/.test(text.slice(start, start + 64))) return null;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\n") return null;
+    if (char === "\\") {
+      index += 1;
+    } else if (char === quote) {
+      return index + 1;
+    }
+  }
+  return null;
+}
+
 export function redactSensitiveText(text: string): string {
   return redactAssignments(redactOcppKeyValueText(text))
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
@@ -222,16 +340,14 @@ function redactAssignments(text: string): string {
   if (!SENSITIVE_NAME_PRESENT.test(text)) return text;
   let redacted = text;
   if (redacted.includes("\\")) {
-    redacted = redacted
-      .replace(
-        SENSITIVE_ESCAPED_STRUCTURED_ASSIGNMENT,
-        `$1$2"${REDACTED_VALUE}$2"`,
-      )
-      .replace(SENSITIVE_ESCAPED_ASSIGNMENT, `$1$3${REDACTED_VALUE}$2$3`);
+    redacted = redactEscapedStructuredValues(redacted).replace(
+      SENSITIVE_ESCAPED_ASSIGNMENT,
+      `$1$3${REDACTED_VALUE}$2$3`,
+    );
   }
-  return redacted
-    .replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`)
-    .replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue);
+  return redactMissedQuotedValues(
+    redacted.replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`),
+  ).replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue);
 }
 
 /**

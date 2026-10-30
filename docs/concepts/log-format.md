@@ -134,17 +134,28 @@ first quote after the same backslash run; an escaped quote of the value
 value's first line, it does not run over a secret-named assignment and
 fails closed to the end of its line; a PEM behind an escaped quote follows
 the PEM rule above, across lines. An object or array value
-(`{\"privateKey\":{\"kty\":…}}`) is redacted up to the end of the string
-holding it, else to the end of the line, so
-`{"data":"{\"privateKey\":{…}}"}` logs
-`{"data":"{\"privateKey\":\"[redacted]\""}` (#531). When a value fails
-closed like this, the outer frame still parses but the JSON inside the
-string is cut. Limits: a run of more than seven backslashes is not matched
+(`{\"privateKey\":{\"kty\":…}}`) is redacted up to the bracket that closes
+it, so `{"data":"{\"privateKey\":{…}}","n":1}` logs
+`{"data":"{\"privateKey\":\"[redacted]\"}","n":1}` (#531). The closing
+bracket is found by counting brackets outside the strings of the value, whose
+quotes may be escaped like the name, plain, or a mix of both
+(`password\":{"d":"S1"}`); a bracket inside a string does not count. When the
+brackets never balance, the value fails closed to the end of its line. The
+outer frame then still parses but the JSON inside the string is cut. Limits: a run of more than seven backslashes is not matched
 at all, and only secret-named members get this: the 1.6 `{ key, value }`, 2.0.1
 `variable` / `attributeValue` and `vpn.key` shapes are matched on unescaped
 JSON objects only. Escaped JSON indented with raw newlines
 (`"{\"privateKey\": {\n  \"d\": \"S1\"…`, which `JSON.stringify` never
 emits) leaves the members after the first line readable.
+A regex engine may give up on a very long value and report no match where
+another completes it: under Bun (JavaScriptCore) a quoted value of some 50k
+characters was logged in clear while Node (V8) redacted it (#547). A quoted
+secret-named assignment the patterns above left unredacted is therefore cut
+again in code, failing closed: the value ends at the first unescaped matching
+quote on its first line, and a PEM value, or one with no such quote, is
+redacted to the end of the message. Where the patterns completed this changes
+nothing. The redaction tests run under both vitest and `bun test`
+(`src/cp/shared/redaction.bun.test.ts`).
 
 ## WebSocket close lines
 

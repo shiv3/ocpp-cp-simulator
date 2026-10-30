@@ -9,6 +9,7 @@ import {
   isValidGetMonitoringReportResponseV201,
   isValidNotifyMonitoringReportRequestV201,
   isValidSetMonitoringLevelResponseV201,
+  isValidSetVariableMonitoringRequestV201,
   isValidSetVariableMonitoringResponseV201,
 } from "../../../../../ocpp/v201";
 import {
@@ -23,6 +24,7 @@ import {
   ConfigurationStore,
   type ConfigurationValue,
 } from "../../../../domain/charge-point/ConfigurationStore";
+import { DeviceModelTargets } from "../../../../domain/charge-point/DeviceModelTargets";
 import { MonitoringStore } from "../../../../domain/monitoring/MonitoringStore";
 import {
   buildMonitoringReportV201,
@@ -38,6 +40,7 @@ function config(): ConfigurationStore {
     { key: ConfigurationKeys.Core.HeartbeatInterval, value: 300 },
     { key: ConfigurationKeys.Core.ClockAlignedDataInterval, value: 0 },
     { key: ConfigurationKeys.Core.WebSocketPingInterval, value: 0 },
+    { key: ConfigurationKeys.Core.TransactionMessageAttempts, value: 3 },
     {
       key: ConfigurationKeys.LocalAuthListManagement.LocalAuthListEnabled,
       value: true,
@@ -65,6 +68,7 @@ function set(
     { setMonitoringData: items as [MonitoringData, ...MonitoringData[]] },
     store,
     config(),
+    { evseExists: () => true },
   );
   expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
   expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
@@ -142,19 +146,84 @@ describe("handleSetVariableMonitoringV201", () => {
     expect(store.get(1)?.valueKey).toBe("LocalAuthListEnabled");
   });
 
+  it("resolves an instanced variable with its instance only (#538)", () => {
+    const store = new MonitoringStore();
+    const attempts = {
+      type: "Delta" as const,
+      value: 1,
+      component: { name: "OCPPCommCtrlr" },
+    };
+    const [withInstance, withoutInstance] = set(
+      store,
+      heartbeat({
+        ...attempts,
+        variable: { name: "MessageAttempts", instance: "TransactionEvent" },
+      }),
+      heartbeat({ ...attempts, variable: { name: "MessageAttempts" } }),
+    ).setMonitoringResult;
+
+    expect(withInstance).toMatchObject({ id: 1, status: "Accepted" });
+    expect(store.get(1)?.valueKey).toBe("TransactionMessageAttempts");
+    expect(withoutInstance.status).toBe("UnknownVariable"); // N04.FR.04
+  });
+
+  it.each([
+    [{ id: 2 }, "UnknownComponent"],
+    [{ id: 0 }, "UnknownComponent"],
+    [{ id: 1, connectorId: 2 }, "UnknownComponent"],
+    [{ id: 1 }, "Accepted"],
+    [{ id: 1, connectorId: 1 }, "Accepted"],
+  ])(
+    "answers %j on a one-EVSE station with %s (N04.FR.03, #538)",
+    (evse, status) => {
+      const store = new MonitoringStore();
+      const response = handleSetVariableMonitoringV201(
+        {
+          setMonitoringData: [
+            heartbeat({ component: { name: "OCPPCommCtrlr", evse } }),
+          ],
+        },
+        store,
+        config(),
+        { evseExists: (e) => e.id === 1 && (e.connectorId ?? 1) === 1 },
+      );
+      expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
+      expect(response.setMonitoringResult[0].status).toBe(status);
+    },
+  );
+
   it.each(["Periodic", "PeriodicClockAligned"] as const)(
-    "answers UnsupportedMonitorType for %s (N04.FR.05)",
+    "accepts a %s monitor, its value an interval in seconds (N08, #538)",
     (type) => {
       const store = new MonitoringStore();
-      expect(set(store, heartbeat({ type })).setMonitoringResult[0]).toEqual({
-        status: "UnsupportedMonitorType",
+      expect(
+        set(store, heartbeat({ type, value: 900 })).setMonitoringResult[0],
+      ).toEqual({
+        id: 1,
+        status: "Accepted",
         type,
         severity: 5,
         component: { name: "OCPPCommCtrlr" },
         variable: { name: "HeartbeatInterval" },
       });
+      expect(store.get(1)).toMatchObject({ type, value: 900 });
     },
   );
+
+  it("rejects a Periodic interval under one second (IntervalTooShort, #538)", () => {
+    const store = new MonitoringStore();
+    expect(
+      set(store, heartbeat({ type: "Periodic", value: 0 }))
+        .setMonitoringResult[0],
+    ).toMatchObject({
+      status: "Rejected",
+      statusInfo: {
+        reasonCode: "IntervalTooShort",
+        additionalInfo: "a Periodic interval is at least 1 second",
+      },
+    });
+    expect(store.list()).toEqual([]);
+  });
 
   it("answers UnsupportedMonitorType for the 2.1 TargetDelta types (N04.FR.05)", () => {
     const store = new MonitoringStore();
@@ -170,6 +239,7 @@ describe("handleSetVariableMonitoringV201", () => {
       request as SetVariableMonitoringRequestV201,
       store,
       config(),
+      { evseExists: () => true },
     );
     expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
     expect(response.setMonitoringResult.map((r) => r.status)).toEqual([
@@ -262,6 +332,116 @@ describe("handleSetVariableMonitoringV201", () => {
   });
 });
 
+describe("handleSetVariableMonitoringV201 on runtime values (#538)", () => {
+  function runtimeConfig(): ConfigurationStore {
+    const store = config();
+    store.defineRuntimeIntegerKey("EVSEPower1", 0);
+    store.defineRuntimeKey("EVSEAvailabilityState1", "Available");
+    return store;
+  }
+
+  it("monitors EVSE.Power and EVSE.AvailabilityState of an EVSE the station has (N04.FR.03)", () => {
+    const store = new MonitoringStore();
+    const response = handleSetVariableMonitoringV201(
+      {
+        setMonitoringData: [
+          {
+            value: 5000,
+            type: "UpperThreshold",
+            severity: 3,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "Power" },
+          },
+          {
+            value: 0,
+            type: "Delta",
+            severity: 3,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "AvailabilityState" },
+          },
+          {
+            value: 0,
+            type: "Delta",
+            severity: 3,
+            component: { name: "EVSE" },
+            variable: { name: "AvailabilityState" },
+          },
+          {
+            value: 0,
+            type: "Delta",
+            severity: 3,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "EvseId" },
+          },
+        ],
+      },
+      store,
+      runtimeConfig(),
+      { evseExists: (e) => e.id === 1 && (e.connectorId ?? 1) === 1 },
+    );
+    expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
+    expect(response.setMonitoringResult.map((r) => r.status)).toEqual([
+      "Accepted",
+      "Accepted",
+      "UnknownComponent",
+      "UnknownVariable",
+    ]);
+    expect(store.list().map((m) => [m.valueKey, m.component])).toEqual([
+      ["EVSEPower1", { name: "EVSE", evse: { id: 1 } }],
+      ["EVSEAvailabilityState1", { name: "EVSE", evse: { id: 1 } }],
+    ]);
+  });
+});
+
+describe("handleSetVariableMonitoringV201 TargetDelta (2.1, #538)", () => {
+  const item = (type: string) =>
+    ({
+      value: 500,
+      type,
+      severity: 3,
+      component: { name: "EVSE", evse: { id: 1 } },
+      variable: { name: "Power" },
+    }) as unknown as MonitoringData;
+
+  function setTargetDelta(targets?: DeviceModelTargets) {
+    const configuration = config();
+    configuration.defineRuntimeIntegerKey("EVSEPower1", 0);
+    const request = {
+      setMonitoringData: [item("TargetDelta"), item("TargetDeltaRelative")],
+    } as SetVariableMonitoringRequestV201;
+    expect(isValidSetVariableMonitoringRequestV21(request)).toBe(true);
+    const response = handleSetVariableMonitoringV201(
+      request,
+      new MonitoringStore(),
+      configuration,
+      { evseExists: (e) => e.id === 1, targets },
+    );
+    expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
+    return response.setMonitoringResult.map((r) => r.status);
+  }
+
+  it("accepts both types on a variable with a Target attribute (2.1 N07.FR.22, FR.23)", () => {
+    const targets = new DeviceModelTargets();
+    targets.declare("EVSEPower1");
+    expect(setTargetDelta(targets)).toEqual(["Accepted", "Accepted"]);
+  });
+
+  it("answers UnsupportedMonitorType where the variable has no Target (N04.FR.05)", () => {
+    expect(setTargetDelta()).toEqual([
+      "UnsupportedMonitorType",
+      "UnsupportedMonitorType",
+    ]);
+  });
+
+  it("is not a 2.0.1 monitor type: the 2.0.1 schema refuses the request", () => {
+    expect(
+      isValidSetVariableMonitoringRequestV201({
+        setMonitoringData: [item("TargetDelta")],
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("handleClearVariableMonitoringV201", () => {
   it("clears known ids and reports unknown ones per id (N06.FR.01, N06.FR.02, N06.FR.05)", () => {
     const store = new MonitoringStore();
@@ -324,25 +504,45 @@ describe("buildMonitoringReportV201", () => {
     store: MonitoringStore,
     req: Partial<GetMonitoringReportRequestV201>,
     dialect: "v201" | "v21" = "v201",
+    itemsPerPart?: number,
   ) {
     const result = buildMonitoringReportV201(
       { requestId: 7, ...req },
       store,
       dialect,
+      itemsPerPart,
     );
     expect(isValidGetMonitoringReportResponseV201(result.response)).toBe(true);
-    if (result.report) {
+    for (const part of result.reports) {
       if (dialect === "v201") {
-        expect(isValidNotifyMonitoringReportRequestV201(result.report)).toBe(
-          true,
-        );
+        expect(isValidNotifyMonitoringReportRequestV201(part)).toBe(true);
       } else {
-        expect(isValidNotifyMonitoringReportRequestV21(result.report)).toBe(
-          true,
-        );
+        expect(isValidNotifyMonitoringReportRequestV21(part)).toBe(true);
       }
     }
-    return result;
+    if (itemsPerPart === undefined) {
+      expect(result.reports.length).toBeLessThanOrEqual(1);
+    }
+    return { ...result, report: result.reports[0] };
+  }
+
+  for (const dialect of ["v201", "v21"] as const) {
+    it(`${dialect}: splits the report into parts with increasing seqNo and tbc on all but the last (N02.FR.03, FR.04, FR.09, #538)`, () => {
+      const { response, reports } = report(seeded(), {}, dialect, 1);
+
+      expect(response).toEqual({ status: "Accepted" });
+      expect(
+        reports.map((r) => [r.requestId, r.seqNo, r.tbc, r.monitor?.length]),
+      ).toEqual([
+        [7, 0, true, 1],
+        [7, 1, false, 1],
+      ]);
+      expect(reports.map((r) => r.monitor?.[0]?.component.name)).toEqual([
+        "OCPPCommCtrlr",
+        "LocalAuthListCtrlr",
+      ]);
+      expect(new Set(reports.map((r) => r.generatedAt)).size).toBe(1);
+    });
   }
 
   it("reports every monitor, grouped per component/variable (N02.FR.03, FR.04, FR.09, FR.11)", () => {
@@ -414,12 +614,30 @@ describe("buildMonitoringReportV201", () => {
     expect(ids(["ThresholdMonitoring", "PeriodicMonitoring"])).toEqual([1, 2]);
   });
 
-  it("answers NotSupported when only unsupported criteria are requested (N02.FR.02)", () => {
-    const result = report(seeded(), {
+  it("selects Periodic and PeriodicClockAligned monitors with PeriodicMonitoring (N02.FR.14, #538)", () => {
+    const store = seeded();
+    expect(
+      report(store, { monitoringCriteria: ["PeriodicMonitoring"] }).response,
+    ).toEqual({ status: "EmptyResultSet" });
+
+    set(
+      store,
+      heartbeat({ type: "Periodic", value: 60 }),
+      heartbeat({ type: "PeriodicClockAligned", value: 900 }),
+    );
+    const result = report(store, {
       monitoringCriteria: ["PeriodicMonitoring"],
     });
-    expect(result.response).toEqual({ status: "NotSupported" });
-    expect(result.report).toBeUndefined();
+    expect(result.response).toEqual({ status: "Accepted" });
+    expect(isValidNotifyMonitoringReportRequestV201(result.report)).toBe(true);
+    expect(
+      result.report?.monitor?.flatMap((m) =>
+        m.variableMonitoring.map((v) => [v.id, v.type, v.value]),
+      ),
+    ).toEqual([
+      [5, "Periodic", 60],
+      [6, "PeriodicClockAligned", 900],
+    ]);
   });
 
   it("filters by componentVariable (N02.FR.05, FR.08, FR.16)", () => {

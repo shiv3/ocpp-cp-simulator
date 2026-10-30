@@ -53,7 +53,8 @@ export interface ClearedChargingProfiles {
 /**
  * ChargePoint event types
  */
-/** The transaction-related message a `transactionMessage*` event is about. */
+/** The transaction-related message a `transactionMessage*` event is about
+ *  (#490 for 2.x TransactionEvent, #527 for the 1.6 messages). */
 export type TransactionMessageAction =
   "TransactionEvent" | "StartTransaction" | "StopTransaction" | "MeterValues";
 
@@ -197,22 +198,16 @@ export interface ChargePointEvents {
     status: string;
     stopped: boolean;
   };
-  /** Emitted when the CSMS answers StartTransaction.req with a CALLERROR
-   *  (#447), once the connector's transaction is closed (its stop time and
-   *  meter stamped): it never started on the CSMS side, and no
-   *  StopTransaction.req follows. Listeners still find it on the connector;
-   *  it is detached right after, so no stop path reaches it (#491). */
-  transactionStartFailed: {
-    connectorId: number;
-    errorCode: string;
-  };
-  /** OCPP 2.0.1 / 2.1 (E13.FR.02): a transmission of a transaction-related
-   *  message failed — the CSMS answered it with a CALLERROR (`reason:
-   *  "callError"`, #490, `errorCode` set) or left it unanswered for
-   *  `MessageTimeout` (`reason: "timeout"`, #529, no `errorCode`).
-   *  `attempt` is the 1-based transmission that failed; `eventType` is set
-   *  on a 2.x TransactionEvent only. The transaction keeps running; the
-   *  station resends the message unless this was its last attempt. */
+  /** A transmission of a transaction-related message failed. OCPP 2.0.1 /
+   *  2.1 TransactionEvent (E13.FR.02): the CSMS answered it with a CALLERROR
+   *  (`reason: "callError"`, #490, `errorCode` set) or left it unanswered for
+   *  `MessageTimeout` (`reason: "timeout"`, #529, no `errorCode`); `eventType`
+   *  is set. OCPP 1.6 StartTransaction / StopTransaction / MeterValues of a
+   *  transaction (#527, Part 2 §3.7.1) report `reason: "callError"` only.
+   *  `attempt` is the 1-based transmission that failed. The transaction keeps
+   *  running; the station resends the message unless this was its last
+   *  attempt. A 1.6 StartTransaction has no CSMS id yet: its `transactionId`
+   *  is the `"0"` placeholder. */
   transactionMessageRejected: {
     connectorId: number;
     transactionId: string;
@@ -222,10 +217,10 @@ export interface ChargePointEvents {
     errorCode?: string;
     attempt: number;
   };
-  /** OCPP 2.0.1 / 2.1 (E13.FR.04): the last of
-   *  `MessageAttempts[TransactionEvent]` transmissions failed too, so the
-   *  message is dropped. `reason` and `errorCode` describe that last
-   *  failure. The transaction keeps running. */
+  /** The last of the allowed transmissions failed too, so the message is
+   *  dropped: `MessageAttempts[TransactionEvent]` on 2.x (E13.FR.04), the
+   *  1.6 `TransactionMessageAttempts` (#527, §3.7.1). `reason` and
+   *  `errorCode` describe that last failure. The transaction keeps running. */
   transactionMessageDiscarded: {
     connectorId: number;
     transactionId: string;

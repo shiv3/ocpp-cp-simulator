@@ -2179,3 +2179,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI](entities/cli.md), [Docker image](entities/docker-image.md): the image now runs the `dist-cli/main.js` bundle with no `node_modules`; the tarball check also refuses workspace members and `workspace:` ranges and installs with npm.
 - Two files the single-project setup had hidden were placed correctly in `PACKAGE_MAP`: `k6-types.d.ts` belongs to `k6-runtime`, `domSmoke.dom.test.tsx` to `apps/web`.
 - `CLAUDE.md`, `conventions.md`: the raw-source layer names `packages/` and `apps/`.
+
+## [2026-10-30] ingest | OCPP 1.6 transaction message retries (#527)
+
+- OCPP 1.6 Part 2 §3.7.1 (and §4.8): a CALLERROR answering StartTransaction.req, StopTransaction.req or a MeterValues.req carrying a `transactionId` is now resent under a new message id after `TransactionMessageRetryInterval` × the transmissions so far, then discarded after `TransactionMessageAttempts` transmissions; the transaction keeps running and the charging session stays `active`. A StartTransaction CALLERROR used to abandon the transaction (#447, #491); `transactionStartFailed` is gone. Expert calls, transaction-less MeterValues and OCPP-S are not retried.
+- A discarded StartTransaction.req leaves the transaction on the `0` placeholder id (its later MeterValues / StopTransaction carry it, its session keeps `transactionId: null`); a connector still in `Preparing` goes to `Charging`. A resend waiting when the socket closes goes to the 1.6 offline queue and starts its count again on replay. A waiting resend does not hold back later transaction messages (same limitation as 2.x).
+- `transactionMessageRejected` / `transactionMessageDiscarded` now also report the 1.6 messages (`action` `StartTransaction` / `StopTransaction` / `MeterValues`, `reason` `callError`, no `eventType`); timeline format stays `1.3` (#529).
+- [OCPP versions and transports → Transaction message retries (OCPP-J 1.6)](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16): new section; the 2.x section no longer contrasts with 1.6.
+- [Charging sessions](concepts/charging-sessions.md): Outcomes `failed` row, "Rejections and failed starts", Recording, connection loss, Limits.
+- [Operational timeline](concepts/operational-timeline.md): `transaction_message_*` rows cover 1.6, format `1.3`.
+- [Index](index.md), [GitHub issues](sources/github-issues.md): #527.

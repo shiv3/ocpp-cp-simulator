@@ -135,46 +135,30 @@ describe.skipIf(!canBindBunServe())("ChargingSessionRecorder (#447)", () => {
       }
     });
 
-    it("records a StartTransaction CALLERROR as failed", async () => {
+    it("keeps a session active when its StartTransaction is discarded (#527)", async () => {
       const s = await station("CP16-ERROR", "OCPP-1.6J", ["StartTransaction"]);
       try {
+        // §3.7.1: one transmission, then the message is discarded and the
+        // transaction carries on without a CSMS transaction id.
+        s.cp.configuration.applyChange("TransactionMessageAttempts", "1");
+        const discarded = new Promise<void>((resolve) =>
+          s.cp.events.on("transactionMessageDiscarded", () => resolve()),
+        );
         void s.cp.startTransaction("TAG-16", 1);
         const start = await s.csms.waitForCall("StartTransaction");
         s.csms.send([4, start.messageId, "InternalError", "boom", {}]);
-        await until(() => s.sessions()[0]?.outcome === "failed", "failed");
+        await discarded;
 
-        const [session] = s.sessions();
-        expect(session).toMatchObject({
-          transactionId: null,
-          stopReason: null,
-          energyWh: 0,
-        });
-        expect(session!.endedAt).not.toBeNull();
-        expect(s.sessions()).toHaveLength(1);
-      } finally {
-        await s.stop();
-      }
-    });
+        expect(s.sessions()).toMatchObject([
+          { transactionId: null, outcome: "active", endedAt: null },
+        ]);
 
-    it("does not reopen a failed start that a later reset stops again", async () => {
-      const s = await station("CP16-ERROR-RESET", "OCPP-1.6J", [
-        "StartTransaction",
-      ]);
-      try {
-        void s.cp.startTransaction("TAG-16", 1);
-        const start = await s.csms.waitForCall("StartTransaction");
-        s.csms.send([4, start.messageId, "InternalError", "boom", {}]);
-        await until(() => s.sessions()[0]?.outcome === "failed", "failed");
+        s.cp.stopTransaction(1, "Local");
+        await s.csms.waitForCall("StopTransaction");
 
-        const [failed] = s.sessions();
-
-        // #491: the failed transaction is detached, so a reset (and a direct
-        // stop) finds nothing to stop and the failed session is left as is.
-        s.cp.applyRemoteReset("Soft");
-        s.cp.stopTransaction(1, "HardReset");
-
-        expect(s.cp.getConnector(1)?.transaction).toBeNull();
-        expect(s.sessions()).toEqual([failed]);
+        expect(s.sessions()).toMatchObject([
+          { transactionId: null, stopReason: "Local", outcome: "completed" },
+        ]);
       } finally {
         await s.stop();
       }

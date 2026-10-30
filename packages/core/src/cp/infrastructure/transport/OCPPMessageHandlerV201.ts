@@ -883,13 +883,22 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * pending: A02 has no rule to discard it, and a CertificateSigned that
    * still arrives for it can be matched. An Accepted answer starts, or
    * continues, the resend back-off of the request's certificate use
-   * (A02.FR.17/18, #537); any other answer ends it.
+   * (A02.FR.17/18, #537); any other answer ends it. An answer to a request
+   * a newer CSR replaced leaves the back-off alone: it belongs to the
+   * newer request.
    */
   private applySignCertificateResult(
     request: SignCertificateRequestV201,
     response: SignCertificateResponseV201,
   ): void {
     const use = this.signRequestUse(request);
+    if (this._signRequests.get(use)?.csr !== request.csr) {
+      this._logger.info(
+        `[v2.0.1] SignCertificate ${response.status} for a replaced ${use} CSR; ignored`,
+        LogType.OCPP,
+      );
+      return;
+    }
     if (response.status === "Accepted") {
       this._logger.info(
         "[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned",

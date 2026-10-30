@@ -374,6 +374,39 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     expect(socket.calls("SignCertificate")).toHaveLength(1);
   });
 
+  it("ignores a late answer to a request a newer CSR replaced", async () => {
+    const { socket } = setup(version);
+    await trigger(socket, "SignChargingStationCertificate");
+    await settle(socket, 1);
+    await trigger(socket, "SignChargingStationCertificate");
+    await settle(socket, 2);
+    const [stale, current] = socket.calls("SignCertificate");
+    socket.deliverResult(current.messageId, { status: "Accepted" });
+    vi.advanceTimersByTime(5_000);
+    // The old CSR's Rejected neither stops the current back-off…
+    socket.deliverResult(stale.messageId, { status: "Rejected" });
+    vi.advanceTimersByTime(5_000);
+    expect(socket.calls("SignCertificate")).toHaveLength(3);
+    expect(socket.calls("SignCertificate")[2].payload).toEqual(current.payload);
+  });
+
+  it("does not start the back-off on a replaced request's Accepted", async () => {
+    const { socket } = setup(version);
+    await trigger(socket, "SignChargingStationCertificate");
+    await settle(socket, 1);
+    await trigger(socket, "SignChargingStationCertificate");
+    await settle(socket, 2);
+    const [stale, current] = socket.calls("SignCertificate");
+    socket.deliverResult(stale.messageId, { status: "Accepted" });
+    vi.advanceTimersByTime(5_000);
+    // …nor starts it before the current request is accepted.
+    socket.deliverResult(current.messageId, { status: "Accepted" });
+    vi.advanceTimersByTime(5_000);
+    expect(socket.calls("SignCertificate")).toHaveLength(2);
+    vi.advanceTimersByTime(5_000);
+    expect(socket.calls("SignCertificate")).toHaveLength(3);
+  });
+
   it("drops the back-off when the connection closes", async () => {
     const { socket, handler } = setup(version);
     await trigger(socket, "SignChargingStationCertificate");

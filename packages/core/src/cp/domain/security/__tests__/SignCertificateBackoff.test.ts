@@ -79,6 +79,24 @@ describe("SignCertificateBackoff", () => {
     expect(resend).toHaveBeenCalledTimes(3);
   });
 
+  it("waits out a doubled wait longer than a timer can hold", () => {
+    const day = 24 * 3600;
+    const { backoff, resend } = setup(20 * day, 2);
+    const use = "ChargingStationCertificate";
+
+    backoff.accepted(use);
+    vi.advanceTimersByTime(20 * day * 1000);
+    expect(resend).toHaveBeenCalledTimes(1);
+    // The second wait, 40 days, is past MAX_TIMER_MS (about 24.8 days).
+    vi.advanceTimersByTime(30 * day * 1000);
+    expect(resend).toHaveBeenCalledTimes(1);
+    expect(backoff.isRunning(use)).toBe(true);
+    vi.advanceTimersByTime(10 * day * 1000 - 1);
+    expect(resend).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(resend).toHaveBeenCalledTimes(2);
+  });
+
   it("does not start over on the last resend's Accepted", () => {
     const { backoff, resend } = setup(10, 1);
     const use = "ChargingStationCertificate";

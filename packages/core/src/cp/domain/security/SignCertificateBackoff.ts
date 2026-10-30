@@ -22,6 +22,8 @@ interface Sequence {
   resends: number;
   /** The wait in progress; none once `CertSigningRepeatTimes` is reached. */
   timer?: ReturnType<typeof setTimeout>;
+  /** What the wait in progress has left beyond its armed timer, in ms. */
+  remainingMs: number;
 }
 
 /**
@@ -53,7 +55,7 @@ export class SignCertificateBackoff {
     // A resend's answer: the next wait already runs since the expiry.
     if (this.#sequences.has(use)) return;
     if (this.deps.settings().repeatTimes <= 0) return;
-    const sequence: Sequence = { resends: 0 };
+    const sequence: Sequence = { resends: 0, remainingMs: 0 };
     this.#sequences.set(use, sequence);
     this.schedule(use, sequence);
   }
@@ -87,10 +89,16 @@ export class SignCertificateBackoff {
   private schedule(use: SignedCertificateUse, sequence: Sequence): void {
     const seconds =
       this.deps.settings().waitMinimumSeconds * 2 ** sequence.resends;
-    const timer = setTimeout(
-      () => this.expire(use, sequence),
-      Math.min(seconds * 1000, MAX_TIMER_MS),
-    );
+    sequence.remainingMs = seconds * 1000;
+    this.arm(use, sequence);
+  }
+
+  /** Waits out the remaining time in timer-sized steps: a longer
+   *  `setTimeout` delay would fire at once. */
+  private arm(use: SignedCertificateUse, sequence: Sequence): void {
+    const step = Math.min(sequence.remainingMs, MAX_TIMER_MS);
+    sequence.remainingMs -= step;
+    const timer = setTimeout(() => this.expire(use, sequence), step);
     // A pending wait must not keep a CLI process alive on its own.
     unrefTimer(timer);
     sequence.timer = timer;
@@ -98,6 +106,10 @@ export class SignCertificateBackoff {
 
   private expire(use: SignedCertificateUse, sequence: Sequence): void {
     if (this.#sequences.get(use) !== sequence) return;
+    if (sequence.remainingMs > 0) {
+      this.arm(use, sequence);
+      return;
+    }
     sequence.timer = undefined;
     if (!this.deps.isPending(use)) {
       this.stop(use);

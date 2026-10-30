@@ -54,7 +54,7 @@ describe("CLIChargePointService.cleanup() and the renewed client certificate", (
       1,
     );
     // The store listener is detached: a change no longer reads the key.
-    const after = spyOn(store, "tlsClientIdentity");
+    const after = spyOn(store, "hasTlsClientIdentity");
     store.clearAll();
     await Bun.sleep(10);
     expect(after).not.toHaveBeenCalled();

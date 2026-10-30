@@ -3,6 +3,7 @@ import * as x509 from "@peculiar/x509";
 
 import type { Database } from "../persistence/Database";
 import {
+  bytesEqual,
   certificateHashDataEquals,
   computeCertificateHashData,
   normalizeSerialNumber,
@@ -350,8 +351,7 @@ export class CertificateStore {
    */
   async tlsClientIdentity(): Promise<TlsClientIdentity | undefined> {
     for (;;) {
-      const [chain] = this.listSignedChains("ChargingStationCertificate");
-      const privateKey = chain && this.#chainKeys.get(chain.pems[0]);
+      const { chain, privateKey } = this.currentClientChain();
       if (!chain || !privateKey) return undefined;
       const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
       const [current] = this.listSignedChains("ChargingStationCertificate");
@@ -359,10 +359,26 @@ export class CertificateStore {
       if (this.#chainKeys.get(chain.pems[0]) !== privateKey) continue;
       return {
         cert: current.pems.map((pem) => `${pem}\n`).join(""),
-        key: pemBlock("PRIVATE KEY", pkcs8),
+        key: `${x509.PemConverter.encode(pkcs8, "PRIVATE KEY")}\n`,
         notBefore: new x509.X509Certificate(chain.pems[0]).notBefore,
       };
     }
+  }
+
+  /** Whether {@link tlsClientIdentity} has an identity to export, without
+   *  exporting the key. */
+  hasTlsClientIdentity(): boolean {
+    return this.currentClientChain().privateKey !== undefined;
+  }
+
+  /** The current Charging Station certificate chain and the key bound to
+   *  its leaf, if the store holds one. */
+  private currentClientChain(): {
+    chain?: StoredCertificateChain;
+    privateKey?: CryptoKey;
+  } {
+    const [chain] = this.listSignedChains("ChargingStationCertificate");
+    return { chain, privateKey: chain && this.#chainKeys.get(chain.pems[0]) };
   }
 
   /**
@@ -401,7 +417,8 @@ export class CertificateStore {
   }
 
   /** Caches the OCSP response a CSMS returned for `hash` (M06.FR.06),
-   *  replacing an older one. Memory-only. */
+   *  replacing an older one. Memory-only; dropped with the chain holding
+   *  the certificate. */
   cacheOcspResponse(hash: CertificateHashDataLike, ocspResult: string): void {
     this.#ocspResponses = [
       ...this.#ocspResponses.filter(
@@ -696,7 +713,14 @@ export class CertificateStore {
 
   private remove(entry: Entry): void {
     this.#entries = this.#entries.filter((e) => e !== entry);
-    if (entry.kind === "chain") this.#chainKeys.delete(entry.value.pems[0]);
+    if (entry.kind === "chain") {
+      const { pems, hashData } = entry.value;
+      this.#chainKeys.delete(pems[0]);
+      this.#ocspResponses = this.#ocspResponses.filter(
+        (cached) =>
+          !hashData.some((h) => certificateHashDataEquals(h, cached.hash)),
+      );
+    }
     this.runSafely("delete certificate", () =>
       this.database?.run(
         "DELETE FROM certificates WHERE cp_id = ? AND seq = ?",
@@ -808,15 +832,4 @@ function isHashData(value: unknown): value is CertificateHashData {
     typeof v.issuerKeyHash === "string" &&
     typeof v.serialNumber === "string"
   );
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, i) => byte === b[i]);
-}
-
-function pemBlock(label: string, der: ArrayBuffer): string {
-  // btoa, not Buffer: the store also runs in the browser (local mode).
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
-  const lines = base64.match(/.{1,64}/g) ?? [];
-  return `-----BEGIN ${label}-----\n${lines.join("\n")}\n-----END ${label}-----\n`;
 }

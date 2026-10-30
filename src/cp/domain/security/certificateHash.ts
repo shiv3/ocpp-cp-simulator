@@ -123,8 +123,13 @@ export function ocspResponderUrl(pem: string): string | undefined {
   return aia?.ocsp.find((name) => name.type === "url")?.value;
 }
 
-const PEM_CERTIFICATE_RE =
+/** Every PEM certificate block of a text (global: use with `match`). */
+export const CERTIFICATE_PEM_RE =
   /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
+
+export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
 
 /**
  * Whether `pem` is one of the certificates of `bundle`, a PEM file that may
@@ -134,10 +139,12 @@ const PEM_CERTIFICATE_RE =
  */
 export function isCertificateInBundle(pem: string, bundle: string): boolean {
   const der = new Uint8Array(new x509.X509Certificate(pem).rawData);
-  return (bundle.match(PEM_CERTIFICATE_RE) ?? []).some((block) => {
+  return (bundle.match(CERTIFICATE_PEM_RE) ?? []).some((block) => {
     try {
-      const other = new Uint8Array(new x509.X509Certificate(block).rawData);
-      return other.length === der.length && other.every((b, i) => b === der[i]);
+      return bytesEqual(
+        new Uint8Array(new x509.X509Certificate(block).rawData),
+        der,
+      );
     } catch {
       return false;
     }

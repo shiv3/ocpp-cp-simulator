@@ -6,13 +6,11 @@ import type {
   CertificateSignedResponseV16,
 } from "../../../../../ocpp";
 import { isValidCertificateSignedRequestV16 } from "../../../../../ocpp";
+import { CERTIFICATE_PEM_RE } from "../../../../domain/security/certificateHash";
 import { LogType } from "../../../../shared/Logger";
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
-
-const CERTIFICATE_PEM_RE =
-  /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
 
 export class CertificateSignedHandler implements CallHandler<
   CertificateSignedRequestV16,

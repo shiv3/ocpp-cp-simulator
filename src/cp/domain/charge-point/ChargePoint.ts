@@ -945,16 +945,9 @@ export class ChargePoint {
     const webSocket = this._webSocket;
     if (!webSocket?.usesClientCertificate()) return;
     this._unwatchClientIdentity = this._certificateStore.onChange(() => {
-      void this._certificateStore.tlsClientIdentity().then(
-        (identity) => {
-          if (!identity) webSocket.clearRenewedClientCertificate();
-        },
-        (err: unknown) =>
-          this._logger.warn(
-            `Could not read the Charging Station certificate key: ${err}`,
-            LogType.WEBSOCKET,
-          ),
-      );
+      if (!this._certificateStore.hasTlsClientIdentity()) {
+        webSocket.clearRenewedClientCertificate();
+      }
     });
   }
 

@@ -704,6 +704,30 @@ describe("CertificateStore OCSP (#537, M06)", () => {
     store.clearAll();
     expect(store.cachedOcspResponse(leafHash)).toBeUndefined();
   });
+
+  it("drops the cached responses of a chain deleted or replaced", async () => {
+    const store = new CertificateStore();
+    const chain = await v2gChain(store);
+    for (const hash of chain.hashData) store.cacheOcspResponse(hash, "MIIB");
+
+    expect(store.deleteCertificate(chain.hashData[0]).status).toBe("Deleted");
+    for (const hash of chain.hashData) {
+      expect(store.cachedOcspResponse(hash)).toBeUndefined();
+    }
+
+    const replaced = await v2gChain(store);
+    store.cacheOcspResponse(replaced.hashData[0], "MIIB");
+    const csr = await store.generateNewCsr(
+      "CP",
+      "CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    await store.applySignedChain("V2GCertificate", [
+      await leafForCsr("0c", csr, await selfSignedRoot("09", "Other Root")),
+    ]);
+    expect(store.cachedOcspResponse(replaced.hashData[0])).toBeUndefined();
+  });
 });
 
 describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
@@ -770,6 +794,7 @@ describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
       await leafForCsr("03", forwarded.pem, root),
     ]);
     expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.hasTlsClientIdentity()).toBe(false);
 
     const v2gCsr = await store.generateNewCsr(
       "CP-TLS",
@@ -781,6 +806,7 @@ describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
       await leafForCsr("04", v2gCsr, root),
     ]);
     expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.hasTlsClientIdentity()).toBe(false);
   });
 
   it("drops the identity once its chain is replaced or deleted", async () => {
@@ -792,6 +818,7 @@ describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
     const other = await generateCsr("CP-TLS", "Example CPO");
     await store.storeSignedChain([await leafForCsr("05", other.pem, root)]);
     expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.hasTlsClientIdentity()).toBe(false);
 
     // state.reset / cp.delete
     const again = new CertificateStore();
@@ -824,6 +851,34 @@ describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("exports the key as PEM in 64-character lines ending with a newline", async () => {
+    const store = new CertificateStore();
+    await signedChargingStationChain(store);
+
+    const key = (await store.tlsClientIdentity())!.key;
+
+    const body = key
+      .replace("-----BEGIN PRIVATE KEY-----\n", "")
+      .replace("\n-----END PRIVATE KEY-----\n", "");
+    const base64 = body.replace(/\n/g, "");
+    expect(key).toBe(
+      `-----BEGIN PRIVATE KEY-----\n${(base64.match(/.{1,64}/g) ?? []).join("\n")}\n-----END PRIVATE KEY-----\n`,
+    );
+    expect(key).not.toContain("\r");
+    expect(base64.length).toBeGreaterThan(64);
+  });
+
+  it("tells synchronously whether it holds an identity", async () => {
+    const store = new CertificateStore();
+    expect(store.hasTlsClientIdentity()).toBe(false);
+
+    await signedChargingStationChain(store);
+    expect(store.hasTlsClientIdentity()).toBe(true);
+
+    store.forgetPrivateKeys();
+    expect(store.hasTlsClientIdentity()).toBe(false);
   });
 
   it("forgets its private keys but keeps the chains", async () => {

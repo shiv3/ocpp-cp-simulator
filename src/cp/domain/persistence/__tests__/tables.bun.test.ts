@@ -85,6 +85,10 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
       [cp, t],
     );
     db.run(
+      "INSERT INTO variable_monitors (cp_id, monitor_id, monitor) VALUES (?, 1, '{}')",
+      [cp],
+    );
+    db.run(
       "INSERT INTO certificates (cp_id, seq, kind, certificate_use, body, installed_at) VALUES (?, 1, 'root', 'CsmsRootCertificate', '{}', ?)",
       [cp, t],
     );

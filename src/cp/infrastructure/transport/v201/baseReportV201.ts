@@ -60,7 +60,8 @@ export function buildBaseReportData(
       ] as [VariableAttributeType],
       variableCharacteristics: {
         dataType: toCharacteristicDataType(entry.key.type),
-        supportsMonitoring: false,
+        // Every mapped variable accepts at least a Delta monitor (#457).
+        supportsMonitoring: true,
       },
     });
   }

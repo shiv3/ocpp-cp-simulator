@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -309,6 +309,19 @@ CREATE TABLE IF NOT EXISTS certificates (
   installed_at    TEXT NOT NULL,
   PRIMARY KEY (cp_id, seq)
 );
+
+-- OCPP 2.x variable monitors installed by SetVariableMonitoring (#457),
+-- persistent across reboots (N07.FR.13). \`monitor\` is the domain
+-- VariableMonitor as JSON; \`triggered\` is whether a threshold monitor's
+-- value is beyond its threshold, so a value back in range after a restart
+-- still sends the cleared event (N07.FR.14).
+CREATE TABLE IF NOT EXISTS variable_monitors (
+  cp_id       TEXT NOT NULL,
+  monitor_id  INTEGER NOT NULL,
+  monitor     TEXT NOT NULL,
+  triggered   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (cp_id, monitor_id)
+);
 `;
 
 /**
@@ -353,6 +366,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "charging_sessions", perCp: true, resetOnStateReset: true },
   { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
   { name: "certificates", perCp: true, resetOnStateReset: true },
+  { name: "variable_monitors", perCp: true, resetOnStateReset: true },
 ];
 
 /** Names of the tables `state.reset` truncates, in `TABLES` order. */
@@ -675,6 +689,9 @@ export function runMigrations(db: Database): void {
   }
 
   // v19 → v20 (#452): the `authorization_cache` table, `IF NOT EXISTS` in
+  // SCHEMA_SQL like the v14 step.
+
+  // v20 → v21 (#457): the `variable_monitors` table, `IF NOT EXISTS` in
   // SCHEMA_SQL like the v14 step.
 
   // (Place future forward migrations here, gated on `stored < N`.)

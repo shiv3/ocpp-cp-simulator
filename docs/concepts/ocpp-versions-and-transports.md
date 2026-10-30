@@ -26,6 +26,7 @@ related:
   - charging-sessions.md
   - operational-timeline.md
   - expert-ocpp-calls.md
+  - variable-monitoring.md
 updated: 2026-10-29
 ---
 
@@ -42,6 +43,12 @@ updated: 2026-10-29
 
 Message types and validators for the JSON versions are generated from the
 [vendored OCA schemas](../sources/vendored-ocpp-schemas.md).
+
+On 2.0.1 and 2.1, `SetVariableMonitoring`, `ClearVariableMonitoring`,
+`GetMonitoringReport`, `SetMonitoringLevel` and `SetMonitoringBase` act on a
+stored, persisted monitor catalog, and the monitors report through
+`NotifyEvent`: see [OCPP 2.x variable monitoring](variable-monitoring.md)
+(#457).
 
 ## Version-agnostic scenarios
 

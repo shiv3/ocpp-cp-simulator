@@ -89,6 +89,11 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import { MonitoringStore } from "../monitoring/MonitoringStore";
+import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
+import type { MonitoredReading } from "../monitoring/evaluateMonitor";
+import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
+import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,
@@ -223,6 +228,10 @@ export class ChargePoint {
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
+  // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
+  private readonly _monitoring = new MonitoringStore();
+  // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
+  private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
   // #315: one simulated signing meter per connector, made on first use.
   private readonly _signedMeters = new Map<number, OcmfMeter>();
@@ -522,6 +531,7 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    if (isOcpp2Version(this._ocppVersion)) this.wireVariableMonitoring();
     // A persisted override never fires onChange; the scheduler only runs
     // once a boot is Accepted (#454).
     this._clockAligned.setIntervalSeconds(
@@ -590,6 +600,53 @@ export class ChargePoint {
    *  running without --state-db (no SQLite to read from). */
   getInMemoryLogs(): import("../../shared/Logger").LogEntry[] {
     return this._logger.getLogEntries();
+  }
+
+  /**
+   * OCPP 2.x variable monitoring (#457): restore the persisted monitors
+   * (N07.FR.13), keep the table in step with the store, and evaluate the
+   * monitors whenever SetVariables or a scenario `configSet` node changes
+   * the value they watch (N07). Events go out after the answer that caused
+   * them, and only while the boot is Accepted (B02.FR.02): reporting starts
+   * off and `applyBootAccepted` turns it on.
+   */
+  private wireVariableMonitoring(): void {
+    const repository = new VariableMonitorRepository(this._id, this._database);
+    const persisted = repository.load();
+    this._monitoring.restore(persisted.map((p) => p.monitor));
+    // Registered before the evaluation's own listener, so a new row exists
+    // when its triggered flag is first written.
+    this._monitoring.onChange((event) => {
+      if (event.kind === "installed") repository.save(event.monitor);
+      else if (event.kind === "cleared") repository.delete(event.monitor.id);
+    });
+    const evaluation = new MonitorEvaluation(
+      {
+        store: this._monitoring,
+        read: (key) => this.readMonitoredValue(key),
+        emit: (events) =>
+          queueMicrotask(() => this._outbox.sendNotifyEvent(events)),
+        transactionActive: () =>
+          [...this._connectors.values()].some((c) => c.hasRunningTransaction),
+        onTriggeredChange: (id, triggered) =>
+          repository.setTriggered(id, triggered),
+      },
+      new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
+    );
+    evaluation.setReporting(false);
+    this._monitorEvaluation = evaluation;
+    this._configuration.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /** A configuration value as a monitor sees it: GetVariables' rendering
+   *  (empty when write-only, N07.FR.10) and its number, if it is one. */
+  private readMonitoredValue(key: string): MonitoredReading | undefined {
+    const entry = this._configuration.get(key);
+    if (entry === undefined) return undefined;
+    const text = renderConfigValue(entry);
+    return typeof entry.value === "number"
+      ? { numeric: entry.value, text }
+      : { text };
   }
 
   /** Hook up subsystems that react to live Configuration changes. */
@@ -872,6 +929,11 @@ export class ChargePoint {
 
   get localAuthListManager(): LocalAuthListManager {
     return this._localAuthListManager;
+  }
+
+  /** OCPP 2.x variable monitors (SetVariableMonitoring, #457). */
+  get monitoring(): MonitoringStore {
+    return this._monitoring;
   }
 
   /** Local authorization (#452): Authorization Cache + Local Authorization
@@ -1740,6 +1802,8 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
       this._clockAligned.disable();
+      // B02.FR.02: no NotifyEvent until the boot is Accepted.
+      this._monitorEvaluation?.setReporting(false);
     }
   }
 
@@ -1776,6 +1840,9 @@ export class ChargePoint {
     }
 
     this._clockAligned.enable();
+    // Re-checks the thresholds: what changed while Pending or offline, and
+    // a restored trigger already back in range (N07.FR.14).
+    this._monitorEvaluation?.setReporting(true);
   }
 
   /**
@@ -1864,6 +1931,8 @@ export class ChargePoint {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._clockAligned.disable();
+    // The next connection boots again; reporting resumes once Accepted.
+    this._monitorEvaluation?.setReporting(false);
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
     // The Local Authorization List is kept: it is what authorizes while the

@@ -25,7 +25,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -44,7 +44,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -63,7 +63,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -83,7 +83,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -103,7 +103,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -122,7 +122,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -141,7 +141,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -160,7 +160,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "MemberList",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -179,7 +179,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -198,7 +198,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -217,7 +217,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "MemberList",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -236,7 +236,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -255,7 +255,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -274,7 +274,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -293,7 +293,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -312,7 +312,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -331,7 +331,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -350,7 +350,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -369,7 +369,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -388,7 +388,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
         {
@@ -407,7 +407,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
-            "supportsMonitoring": false,
+            "supportsMonitoring": true,
           },
         },
       ],

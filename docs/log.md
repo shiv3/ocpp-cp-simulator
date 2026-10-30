@@ -1852,6 +1852,38 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | OCPP 2.x variable monitoring: store, statuses, report (#457)
+
+- `SetVariableMonitoring`, `ClearVariableMonitoring`, `GetMonitoringReport` and `SetMonitoringLevel` no longer answer fixed stubs on 2.0.1 / 2.1: the station keeps custom
+  `UpperThreshold` / `LowerThreshold` / `Delta` monitors on the device-model variables, answers per-item statuses with their N04 / N06 requirement ids, reports them through
+  one `NotifyMonitoringReport` (2.1 adds `eventNotificationType`) and stores the monitoring level. `GetBaseReport` / `GetReport` now say `supportsMonitoring: true`.
+- Not yet: `NotifyEvent` evaluation, level filtering, persistence; `SetMonitoringBase` stays `NotSupported`.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new page.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md): link to it.
+- [Index](index.md), [GitHub issues](sources/github-issues.md): #457.
+
+## [2026-10-29] ingest | OCPP 2.x variable monitoring: NotifyEvent, SetMonitoringBase, persistence (#457)
+
+- Monitors are evaluated when `SetVariables` or a scenario `configSet` changes the value they watch, and when they are installed or replaced: thresholds fire above / below
+  (not on) the value and send `cleared` on return (N07.FR.02, FR.16, FR.17), Delta fires past its step from the last notice (FR.18, FR.19). One `NotifyEvent` per change,
+  after the answer that caused it; 2.1 adds `severity`. The monitoring level filters what is sent (N05.FR.03), not the monitor state.
+- `SetMonitoringBase` answers `Accepted`: `All` keeps the custom monitors, `FactoryDefault` / `HardWiredOnly` delete them (N03.FR.03-05). It used to answer `NotSupported`.
+- Monitors and their triggered flag persist in the new `variable_monitors` table (schema v18, N07.FR.13, FR.14); the level does not. Offline events are dropped (N07.FR.04
+  needs the unmodelled `OfflineQueuingSeverity`).
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): evaluation, NotifyEvent, SetMonitoringBase, persistence, limits.
+- [State persistence](concepts/state-persistence.md): `variable_monitors` row, schema v18.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [Index](index.md), [GitHub issues](sources/github-issues.md): #457.
+
+## [2026-10-29] ingest | OCPP 2.x variable monitoring: boot gate, Delta baseline, type change (#457 review)
+
+- No `NotifyEvent` until BootNotification is `Accepted` (B02.FR.02), nor between a disconnect and the next `Accepted` boot; thresholds keep the state last reported
+  and are re-checked on `Accepted`, which also sends the `cleared` of a restored trigger already back in range (N07.FR.14).
+- A Delta filtered by the level or the `transaction` flag keeps its baseline (N07.FR.18: « since the last time this event notice was sent »).
+- A triggered threshold replaced by a monitor of another type that is not triggered sends `cleared` for the old monitor (N07.FR.11).
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): the above, the `Rejected` check for a mapped key the station lacks, and new limits (bounds not
+  published, `evse` / `instance` ignored to resolve the variable, one `NotifyEvent` per value change).
+- [State persistence](concepts/state-persistence.md): `variable_monitors.triggered` holds the flag as last reported.
+
 ## [2026-10-29] ingest | Authorization cache and offline authorization (#452)
 
 - A local start now consults the Local Authorization List, then a real Authorization Cache, before (or instead of) Authorize.req: `LocalPreAuthorize` starts a valid cached or listed identifier online without the round trip, and offline the charge point decides at once (`LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`), per OCPP 1.6 §3.5 and 2.0.1 C10–C15.

@@ -303,6 +303,24 @@ describe("PendingMessageQueue with seq", () => {
       expect(all[1].action).toBe(OCPPAction.MeterValues);
     });
 
+    it("removeOldest drops the oldest row of one action only, persisted (#538)", () => {
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      for (const [action, n] of [
+        [OCPPAction.StartTransaction, 1],
+        [OCPPAction.MeterValues, 2],
+        [OCPPAction.MeterValues, 3],
+      ] as const) {
+        queue1.enqueue({ action, payload: { n }, connectorId: 1 });
+      }
+      expect(queue1.countOf(OCPPAction.MeterValues)).toBe(2);
+      expect(queue1.removeOldest(OCPPAction.MeterValues)).toBe(true);
+      expect(queue1.removeOldest(OCPPAction.StopTransaction)).toBe(false);
+
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      expect(queue2.all().map((m) => m.payload)).toEqual([{ n: 1 }, { n: 3 }]);
+      expect(queue2.countOf(OCPPAction.MeterValues)).toBe(1);
+    });
+
     it("orders by seq on reload", () => {
       const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       const now = 1700000000000;

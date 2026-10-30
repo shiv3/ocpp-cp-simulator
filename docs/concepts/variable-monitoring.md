@@ -328,6 +328,13 @@ and delivered once back online (#538).
   (`pending_messages`, action `NotifyEvent`, with `--state-db`), one row
   per report, in production order among the queued TransactionEvents. A
   restart with state persistence still delivers them.
+- **Cap**: at most 1000 `NotifyEvent` reports per charge point
+  (`MAX_QUEUED_NOTIFY_EVENTS`), so a `Periodic` monitor ticking through a
+  long outage cannot grow the queue without bound. A report queued at the
+  cap drops the oldest queued report; a TransactionEvent row is never
+  dropped nor counted. The first drop of an outage logs a `warn` (category
+  `OCPP`), and the replay after the next `Accepted` boot logs one more with
+  the number of reports dropped. Periodic ticks are not coalesced.
 - **Replay**: after the `Accepted` boot (after the post-boot
   StatusNotifications), in queue order, each report cut into parts then
   (`seqNo` from 0, `tbc`). `NotifyEventRequest` has no `offline` field, so
@@ -486,7 +493,8 @@ stored (above).
   when the connection drops again is not queued again. A replay refused by
   the socket stays at the head of the queue until the next `Accepted`
   boot, while live `NotifyEvent`s go out directly; a refusal after the
-  first part loses the rest of that report.
+  first part loses the rest of that report. Past 1000 queued reports the
+  oldest are dropped ([cap](#offline-queuing)).
 - **Value sources.** Events follow a CSMS `SetVariables` /
   `SetVariableMonitoring`, `SetMonitoringLevel` / `SetMonitoringBase` (on
   the `MonitoringCtrlr` variables), a scenario `configSet` node, a change

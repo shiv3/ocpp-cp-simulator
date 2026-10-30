@@ -260,7 +260,11 @@ is restored (E11 "Connection Loss During Transaction", #528):
   `offline` (the request has no such field). Queued NotifyEvents alone
   never hold a live TransactionEvent back: only queued TransactionEvents
   do. A refused NotifyEvent replay stays at the head and delays the
-  TransactionEvents behind it, as a refused TransactionEvent would.
+  TransactionEvents behind it, as a refused TransactionEvent would. The
+  queue keeps at most 1000 NotifyEvent reports per charge point: past
+  that, the oldest report is dropped, never a TransactionEvent, with one
+  `warn` at the first drop of an outage and one with the count at the
+  replay.
   See [variable monitoring](variable-monitoring.md#offline-queuing).
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, the NotifyEvents above the severity and the rest are
@@ -274,7 +278,8 @@ is restored (E11 "Connection Loss During Transaction", #528):
 
 Limits:
 
-- The queue has no size cap, so the E11.FR.04/FR.05 memory-pressure drop
+- The queue has no size cap for TransactionEvents (only the NotifyEvent
+  reports are capped, #538), so the E11.FR.04/FR.05 memory-pressure drop
   of `Updated` events is not modelled.
 - The replay goes out as a burst: 2.x has no serial queue (see the known
   limitation above), so the station does not wait for one answer before

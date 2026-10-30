@@ -4,6 +4,7 @@ import type {
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
+import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type {
   DataTransferData,
   DataTransferResult,
@@ -144,8 +145,6 @@ import {
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
-/** The longest delay setTimeout honours (2^31 - 1 ms, about 24.8 days). */
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
 /**
  * #537: how long the reconnect that presents a renewed Charging Station
  * certificate waits for the transaction messages in flight (a
@@ -272,6 +271,13 @@ export class ChargePoint {
    *  then for the transaction messages in flight before reconnecting. */
   private _clientCertificateSwitchTimer: ReturnType<typeof setTimeout> | null =
     null;
+  /** #537: bumped by every switch request and every cancel, so a request
+   *  still reading the store when a newer one (or a cancel) arrives does
+   *  nothing once it resumes. */
+  private _clientCertificateSwitchSeq = 0;
+  /** #537: set by {@link releaseRenewedClientCertificate} (and dispose):
+   *  no switch is started any more. */
+  private _clientCertificateSwitchReleased = false;
   /** #537: stops following the certificate store (dispose). */
   private _unwatchClientIdentity: (() => void) | null = null;
   /** #537 2.1 A02.FR.29: a renewed certificate was discarded; reported
@@ -1941,14 +1947,21 @@ export class ChargePoint {
    * {@link RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS}, for the transaction
    * messages in flight. Nothing happens on other profiles; when the store
    * holds no private key for the chain (a CSR the caller supplied) the
-   * transport forgets any renewed identity. A restart presents the
-   * configured `--tls-cert` again: the key is never persisted.
+   * transport forgets any renewed identity. A restart or a `cp.update`
+   * presents the configured `--tls-cert` again: the key is never
+   * persisted. A call made while an earlier one still reads the store
+   * supersedes it.
    */
   async useRenewedClientCertificate(): Promise<void> {
+    if (this._clientCertificateSwitchReleased) return;
     this.cancelClientCertificateSwitch();
+    const request = this._clientCertificateSwitchSeq;
     const webSocket = this._webSocket;
     if (!webSocket?.usesClientCertificate()) return;
     const identity = await this._certificateStore.tlsClientIdentity();
+    // Superseded by a newer request, or cancelled (dispose, cp.update),
+    // while the store was read: that one decides, this one does nothing.
+    if (request !== this._clientCertificateSwitchSeq) return;
     if (!identity) {
       webSocket.clearRenewedClientCertificate();
       return;
@@ -1960,11 +1973,16 @@ export class ChargePoint {
         LogType.WEBSOCKET,
       );
       // Capped: a longer setTimeout delay fires at once. The check runs
-      // again when it does.
+      // again when it does. Unref'd: a wait of days must not keep the
+      // process alive.
       this._clientCertificateSwitchTimer = setTimeout(
-        () => void this.useRenewedClientCertificate(),
-        Math.min(wait, MAX_TIMER_DELAY_MS),
+        () => {
+          if (request !== this._clientCertificateSwitchSeq) return;
+          void this.useRenewedClientCertificate();
+        },
+        Math.min(wait, MAX_TIMER_MS),
       );
+      unrefTimer(this._clientCertificateSwitchTimer);
       return;
     }
     webSocket.useRenewedClientCertificate(identity);
@@ -2011,7 +2029,25 @@ export class ChargePoint {
     this.reset();
   }
 
+  /**
+   * #537: ends the renewed certificate switch for good on an instance being
+   * replaced (`cp.update`) or disposed: cancels the notBefore or in-flight
+   * wait, stops following the store, and drops every in-memory key — the
+   * transport's renewed identities and the store's private keys. The
+   * stored chains stay; the replacement presents the configured
+   * `--tls-cert`, as after a restart.
+   */
+  releaseRenewedClientCertificate(): void {
+    this._clientCertificateSwitchReleased = true;
+    this.cancelClientCertificateSwitch();
+    this._unwatchClientIdentity?.();
+    this._unwatchClientIdentity = null;
+    this._webSocket?.clearRenewedClientCertificate();
+    this._certificateStore.forgetPrivateKeys();
+  }
+
   private cancelClientCertificateSwitch(): void {
+    this._clientCertificateSwitchSeq++;
     if (this._clientCertificateSwitchTimer) {
       clearTimeout(this._clientCertificateSwitchTimer);
       this._clientCertificateSwitchTimer = null;
@@ -2498,9 +2534,7 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
-    this.cancelClientCertificateSwitch();
-    this._unwatchClientIdentity?.();
-    this._unwatchClientIdentity = null;
+    this.releaseRenewedClientCertificate();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
     // Offline monitoring keeps the periodic timers running: stop them.

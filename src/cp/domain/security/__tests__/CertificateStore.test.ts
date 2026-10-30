@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Database } from "../../persistence/Database";
 import { CertificateStore } from "../CertificateStore";
@@ -798,6 +798,44 @@ describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
     await signedChargingStationChain(again);
     again.clearAll();
     expect(await again.tlsClientIdentity()).toBeUndefined();
+  });
+
+  it("answers for the chain current once the key is exported", async () => {
+    const store = new CertificateStore();
+    const { root } = await signedChargingStationChain(store);
+    const exportKey = crypto.subtle.exportKey.bind(crypto.subtle);
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => (release = resolve));
+    const spy = vi
+      .spyOn(crypto.subtle, "exportKey")
+      .mockImplementationOnce(async (...args: Parameters<typeof exportKey>) => {
+        await stalled;
+        return exportKey(...args);
+      });
+
+    try {
+      const pending = store.tlsClientIdentity();
+      // Replaced by a keyless chain while the key is being exported.
+      const other = await generateCsr("CP-TLS", "Example CPO");
+      await store.storeSignedChain([await leafForCsr("06", other.pem, root)]);
+      release();
+
+      expect(await pending).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("forgets its private keys but keeps the chains", async () => {
+    const store = new CertificateStore();
+    await signedChargingStationChain(store);
+
+    store.forgetPrivateKeys();
+
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.listSignedChains("ChargingStationCertificate")).toHaveLength(
+      1,
+    );
   });
 
   it("keeps the key out of JSON and toString", async () => {

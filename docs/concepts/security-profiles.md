@@ -75,7 +75,7 @@ withdrawn by its author in #277.
 - `--security-profile <0|1|2|3>` selects transport security enforcement; `0` leaves transport/auth as configured, `1` adds Basic Auth without touching the scheme, `2`/`3` force `wss://` (see [Transport scheme rule](#transport-scheme-rule)).
 - `--authorization-key <hex>` sets the `AuthorizationKey` used as the Basic Auth password for profiles 1 and 2.
 - `--tls-ca <path>` loads a PEM CA bundle used to verify the CSMS server certificate. **Optional, and only for a private CA** — see below.
-- `--tls-cert <path>` loads the PEM client certificate for profile 3 mutual TLS. On 2.x a Charging Station certificate the CSMS renews replaces it until the next restart ([Renewed client certificate](#renewed-client-certificate)).
+- `--tls-cert <path>` loads the PEM client certificate for profile 3 mutual TLS. On 2.x a Charging Station certificate the CSMS renews replaces it until the next restart or `cp.update` ([Renewed client certificate](#renewed-client-certificate)).
 - `--tls-key <path>` loads the PEM client private key for profile 3 mutual TLS; the file must be mode `0600`.
 - `--cpo-name <name>` sets the CPO name used when generating certificate signing requests.
 - `--insecure-tls-key-perms` allows a `--tls-key` file readable by group/other for local testing.
@@ -467,10 +467,16 @@ connected.
   Charging Station chain is replaced by such a chain or removed: the
   station then forgets every renewed certificate, the confirmed one
   included, and presents `--tls-cert` again from its next connection.
+  The A02.FR.28 fallback below is the one exception: it presents the
+  previous certificate with its key although the renewal already replaced
+  that certificate's chain in the store. The spec imposes it.
 - 2.0.1 asks the station to switch once the certificate's `notBefore` has
   passed; the simulator waits for it on 2.1 too, so a certificate not yet
   valid is switched to at that time. A manual disconnect does not cancel
-  that wait; only a `cp.delete` (dispose) does.
+  that wait. A `cp.delete` does, and so does a `cp.update`, which replaces
+  the charge point: the replacement holds no key, and presents
+  `--tls-cert`, as after a restart. A second `CertificateSigned`
+  while the first is still being read supersedes it.
 - A station that is not connected then (reconnect back-off, a simulated
   outage, a manual disconnect) does not reconnect for it: it presents the
   renewed certificate at its next connection, on that connection's timing.
@@ -501,13 +507,16 @@ connected.
   too, whose A02 has no such rule.
   If the previous certificate connects first, the renewed one is
   discarded (A02.FR.10) and the station keeps the previous one until the
-  next `CertificateSigned`. The stored chain stays. On 2.1 the station
+  next `CertificateSigned`. The stored chain stays: the store then holds
+  the discarded certificate's chain, unused, while the connection presents
+  the previous one. On 2.1 the station
   then sends a `SecurityEventNotification` of type
   `DiscardedRenewedClientCertificate` once that connection's boot is
   `Accepted` (A02.FR.29). 2.0.1 defines neither the rule nor the event
   type, and sends none.
-- The key is memory-only, so a restart presents `--tls-cert` / `--tls-key`
-  again although the state database still holds the renewed chain.
+- The key is memory-only, so a restart or a `cp.update` presents
+  `--tls-cert` / `--tls-key` again although the state database still
+  holds the renewed chain.
 - 1.6 does not switch: its `CertificateSigned` stores the chain without
   matching it to a CSR.
 

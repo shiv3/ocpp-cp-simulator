@@ -47,6 +47,11 @@ function outboxOf(cp: ChargePoint): Outbox {
   return (cp as unknown as { _outbox: Outbox })._outbox;
 }
 
+function switchTimerOf(cp: ChargePoint): unknown {
+  return (cp as unknown as { _clientCertificateSwitchTimer: unknown })
+    ._clientCertificateSwitchTimer;
+}
+
 const IDENTITY = {
   cert: "RENEWED CERT",
   key: "RENEWED KEY",
@@ -186,6 +191,183 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
 
       await cp.useRenewedClientCertificate();
       expect(reset).toHaveBeenCalledTimes(1);
+      cp.dispose();
+    });
+
+    it("does not reconnect a connection opened again during the wait", async () => {
+      const { cp, reset, inFlight } = connectedStation();
+      inFlight.mockReturnValue(true);
+
+      await cp.useRenewedClientCertificate();
+      // Another connection (a reconnect after a drop) presents it already.
+      vi.spyOn(transportOf(cp), "currentGeneration").mockReturnValue({
+        gen: 99,
+        closeCause: null,
+      });
+      await vi.advanceTimersByTimeAsync(
+        RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      );
+
+      expect(reset).not.toHaveBeenCalled();
+      cp.dispose();
+    });
+
+    it("does not reconnect a station disconnected during the wait", async () => {
+      const { cp, reset, inFlight } = connectedStation();
+      inFlight.mockReturnValue(true);
+      let open = true;
+      vi.spyOn(transportOf(cp), "isOpenOrConnecting").mockImplementation(
+        () => open,
+      );
+
+      await cp.useRenewedClientCertificate();
+      cp.disconnect();
+      open = false;
+      await vi.advanceTimersByTimeAsync(
+        RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      );
+
+      expect(reset).not.toHaveBeenCalled();
+      cp.dispose();
+    });
+
+    it("leaves no timer behind once disposed during the wait", async () => {
+      const { cp, reset, inFlight } = connectedStation();
+      inFlight.mockReturnValue(true);
+
+      await cp.useRenewedClientCertificate();
+      cp.dispose();
+      expect(switchTimerOf(cp)).toBeNull();
+      await vi.advanceTimersByTimeAsync(
+        RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      );
+
+      expect(reset).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a switch superseded while reading the store", () => {
+    function deferredIdentities(cp: ChargePoint) {
+      const resolvers: ((identity: typeof IDENTITY) => void)[] = [];
+      vi.spyOn(cp.certificateStore, "tlsClientIdentity").mockImplementation(
+        () => new Promise((resolve) => resolvers.push(resolve)),
+      );
+      return resolvers;
+    }
+
+    const notYetValid = () => ({
+      ...IDENTITY,
+      notBefore: new Date(Date.now() + 60_000),
+    });
+
+    it("keeps a single notBefore wait when called twice", async () => {
+      vi.useFakeTimers();
+      const cp = profile3Station();
+      const resolvers = deferredIdentities(cp);
+      const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
+      const baseline = vi.getTimerCount();
+
+      const first = cp.useRenewedClientCertificate();
+      const second = cp.useRenewedClientCertificate();
+      resolvers[1](notYetValid());
+      await second;
+      resolvers[0](notYetValid());
+      await first;
+
+      expect(vi.getTimerCount() - baseline).toBe(1);
+      // The one left is the one dispose() cancels.
+      const before = vi.getTimerCount();
+      cp.dispose();
+      expect(switchTimerOf(cp)).toBeNull();
+      resolvers.length = 0;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(before).toBeGreaterThan(0);
+      expect(resolvers).toHaveLength(0);
+      expect(present).not.toHaveBeenCalled();
+    });
+
+    it("arms nothing once disposed while reading the store", async () => {
+      vi.useFakeTimers();
+      const cp = profile3Station();
+      const resolvers = deferredIdentities(cp);
+      const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
+
+      const pending = cp.useRenewedClientCertificate();
+      cp.dispose();
+      resolvers[0](notYetValid());
+      await pending;
+
+      expect(switchTimerOf(cp)).toBeNull();
+      resolvers.length = 0;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(resolvers).toHaveLength(0);
+      expect(present).not.toHaveBeenCalled();
+    });
+
+    it("presents nothing once disposed while reading a valid identity", async () => {
+      const cp = profile3Station();
+      const resolvers = deferredIdentities(cp);
+      const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
+
+      const pending = cp.useRenewedClientCertificate();
+      cp.dispose();
+      resolvers[0](IDENTITY);
+      await pending;
+
+      expect(present).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("releaseRenewedClientCertificate (cp.update replaces the instance)", () => {
+    it("cancels the wait, forgets the identity and the keys, keeps the chain", async () => {
+      vi.useFakeTimers();
+      const cp = profile3Station();
+      const root = await selfSignedRoot("01", "Root");
+      const csr = await cp.certificateStore.generateNewCsr(cp.id, "CPO");
+      await cp.certificateStore.applySignedChain("ChargingStationCertificate", [
+        await leafForCsr("02", csr, root),
+      ]);
+      const identity = vi
+        .spyOn(cp.certificateStore, "tlsClientIdentity")
+        .mockResolvedValue({
+          ...IDENTITY,
+          notBefore: new Date(Date.now() + 60_000),
+        });
+      await cp.useRenewedClientCertificate();
+      expect(switchTimerOf(cp)).not.toBeNull();
+      const clear = vi.spyOn(transportOf(cp), "clearRenewedClientCertificate");
+      const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
+
+      cp.releaseRenewedClientCertificate();
+
+      expect(switchTimerOf(cp)).toBeNull();
+      expect(clear).toHaveBeenCalledTimes(1);
+      identity.mockClear();
+      // The store listener is detached: a change reads nothing.
+      cp.certificateStore.clearAll();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(identity).not.toHaveBeenCalled();
+      expect(present).not.toHaveBeenCalled();
+      // A switch requested afterwards is ignored.
+      await cp.useRenewedClientCertificate();
+      expect(identity).not.toHaveBeenCalled();
+      cp.dispose();
+    });
+
+    it("drops the store's keys and keeps its chains", async () => {
+      const cp = profile3Station();
+      const root = await selfSignedRoot("01", "Root");
+      const csr = await cp.certificateStore.generateNewCsr(cp.id, "CPO");
+      await cp.certificateStore.applySignedChain("ChargingStationCertificate", [
+        await leafForCsr("02", csr, root),
+      ]);
+
+      cp.releaseRenewedClientCertificate();
+
+      expect(await cp.certificateStore.tlsClientIdentity()).toBeUndefined();
+      expect(
+        cp.certificateStore.listSignedChains("ChargingStationCertificate"),
+      ).toHaveLength(1);
       cp.dispose();
     });
   });

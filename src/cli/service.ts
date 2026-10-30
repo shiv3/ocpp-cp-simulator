@@ -2797,6 +2797,10 @@ export class CLIChargePointService {
       // first, so the disconnect does not re-arm them on an instance that
       // `CPRegistry.update` is about to replace.
       this._chargePoint.stopMonitoring();
+      // #537: a manual disconnect keeps the renewed certificate wait, but
+      // this instance is being replaced (`CPRegistry.update`) or the process
+      // is stopping: its wait, store listener and in-memory keys go too.
+      this._chargePoint.releaseRenewedClientCertificate();
       this._chargePoint.disconnect();
     }
     this.detachConnectorEventForwarders();

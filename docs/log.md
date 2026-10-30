@@ -2026,6 +2026,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The tour left the README for [Web console tour](entities/web-console-tour.md); the README links to it from under its screenshot, and [Web console](entities/web-console.md) and the [index](index.md) list it.
 - Recordings re-shot: each starts once its first page has rendered (the blank page before the first navigation is cut), uploaded again as MP4 attachments.
 
+## [2026-10-30] ingest | Long quoted secrets fail closed under Bun (#547)
+
+- Under Bun a quoted secret of some 50k characters or more was logged in clear: JavaScriptCore gives up on the quoted-value regex where V8 completes it. A quoted secret-named assignment the regex left unredacted is now cut in code (first unescaped matching quote on its line; a PEM, or no such quote, to the end of the message). No change where the regex completed (old vs new identical on the production secret names, Node and Bun).
+- The redaction tests also run under `bun test` (`redaction.bun.test.ts`), so the #519 timing row now runs on both runtimes.
+- [Log format → Redaction](concepts/log-format.md#redaction): the fallback.
+
 ## [2026-10-30] ingest | EVConnectionTimeOut ends a started 2.x transaction (#549)
 
 - On OCPP 2.0.1 / 2.1, when `TxCtrlr.EVConnectionTimeOut` elapses with the connector still `Preparing` and a transaction started, the station sends `TransactionEvent(Ended)` with `triggerReason` `EVConnectTimeout` and `stoppedReason` `Timeout` (E03.FR.05). Without a transaction, and on 1.6, the Preparing → Finishing move is unchanged.

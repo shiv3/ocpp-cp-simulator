@@ -949,37 +949,45 @@ describe("text redactor parity with the structured redactor (#515)", () => {
   });
 
   // #519: the quoted-value and PEM patterns scan across lines; none of them
-  // may backtrack quadratically on a long run.
-  it("stays linear on long runs after a quoted name", { timeout: 2000 }, () => {
-    const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
-      char.repeat(200_000),
-    );
-    const pemBody = "A".repeat(200_000);
-    const texts = [
-      ...runs,
-      ...runs.map((run) => `password=${run}`),
-      ...runs.map((run) => `password="${run}`),
-      `password="${"a\n".repeat(100_000)}`,
-      'password="a\n'.repeat(20_000),
-      `password="${"\nx".repeat(100_000)}`,
-      `password="a\n${"passwor".repeat(30_000)}`,
-      `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
-      `password="a\n${"\\p".repeat(100_000)}`,
-      `password="a\n${"\\passwor".repeat(25_000)}`,
-      `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
-      `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
-      `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
-      `privateKey="-----BEGIN K-----\n${pemBody}`,
-      `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
-      `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
-    ];
-    for (const text of texts) {
-      expect(typeof redactSensitiveText(text)).toBe("string");
-    }
-    expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
-      `privateKey="${REDACTED_VALUE}"`,
-    );
-  });
+  // may backtrack quadratically on a long run. #547: under Bun this row
+  // also runs, and JavaScriptCore spends ~100 ms per long value before it
+  // gives up a match (2-3 s for the list, over 5 s on CI, `main` included),
+  // so it gets its own budget. A quadratic run at 200k characters takes
+  // minutes on either engine, so both budgets still catch one.
+  it(
+    "stays linear on long runs after a quoted name",
+    { timeout: "Bun" in globalThis ? 15_000 : 2000 },
+    () => {
+      const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
+        char.repeat(200_000),
+      );
+      const pemBody = "A".repeat(200_000);
+      const texts = [
+        ...runs,
+        ...runs.map((run) => `password=${run}`),
+        ...runs.map((run) => `password="${run}`),
+        `password="${"a\n".repeat(100_000)}`,
+        'password="a\n'.repeat(20_000),
+        `password="${"\nx".repeat(100_000)}`,
+        `password="a\n${"passwor".repeat(30_000)}`,
+        `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
+        `password="a\n${"\\p".repeat(100_000)}`,
+        `password="a\n${"\\passwor".repeat(25_000)}`,
+        `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
+        `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
+        `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
+        `privateKey="-----BEGIN K-----\n${pemBody}`,
+        `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
+        `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
+      ];
+      for (const text of texts) {
+        expect(typeof redactSensitiveText(text)).toBe("string");
+      }
+      expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
+        `privateKey="${REDACTED_VALUE}"`,
+      );
+    },
+  );
 
   it("keeps a longer name in the structured redactor", () => {
     // The text redactor is stricter here: the structured one drops a field
@@ -1016,5 +1024,64 @@ describe("text redactor parity with the structured redactor (#515)", () => {
     expect(redacted).toBe(expected);
     const json = redacted.replace(/^Received: /, "");
     expect(() => JSON.parse(json)).not.toThrow();
+  });
+});
+
+// #547: JavaScriptCore (Bun) gives up on a long quoted value that V8 (Node)
+// matches; the redactor must not then return the value in clear. These rows
+// also run under Bun (`redaction.bun.test.ts`).
+describe("long quoted values on every runtime (#547)", () => {
+  const body = "A".repeat(100_000);
+  it.each([
+    [
+      "an unterminated PEM value",
+      `privateKey="-----BEGIN K-----\n${body}`,
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      "a closed PEM value",
+      `privateKey="-----BEGIN K-----\n${body}\n-----END K-----"`,
+      `privateKey="${REDACTED_VALUE}"`,
+    ],
+    [
+      "an unterminated value",
+      `password="${body}`,
+      `password="${REDACTED_VALUE}"`,
+    ],
+    [
+      "a closed value followed by text",
+      `password="${body}" x`,
+      `password="${REDACTED_VALUE}" x`,
+    ],
+    ["a bare value", `password=${body}`, `password=${REDACTED_VALUE}`],
+    [
+      "a JSON member",
+      JSON.stringify({ password: body }),
+      `{"password":"${REDACTED_VALUE}"}`,
+    ],
+  ])("redacts %s", (_name, text, expected) => {
+    expect(redactSensitiveText(text)).toBe(expected);
+  });
+
+  it("redacts a long value continued on the next line", () => {
+    const redacted = redactSensitiveText(`password="a\n${body}`);
+    expect(redacted.startsWith(`password="${REDACTED_VALUE}"`)).toBe(true);
+    // Node ends the value at its first line and keeps the next line; Bun's
+    // fallback fails closed and drops it. Neither keeps a quoted secret.
+    expect(redacted.includes(`"a\n`)).toBe(false);
+  });
+
+  it("leaves a value the regex already redacted alone", () => {
+    const text = `password="[redacted]" privateKey='${REDACTED_VALUE}' x`;
+    expect(redactSensitiveText(text)).toBe(text);
+  });
+
+  it("redacts every missed value on one text", () => {
+    const redacted = redactSensitiveText(
+      `password="${body}" apiKey="${body}" tail`,
+    );
+    expect(redacted).toBe(
+      `password="${REDACTED_VALUE}" apiKey="${REDACTED_VALUE}" tail`,
+    );
   });
 });

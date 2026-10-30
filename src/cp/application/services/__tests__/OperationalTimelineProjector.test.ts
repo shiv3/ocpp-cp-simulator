@@ -351,7 +351,9 @@ describe("OperationalTimelineProjector (#448)", () => {
     const report = {
       connectorId: 1,
       transactionId: "tx-490",
+      action: "TransactionEvent" as const,
       eventType: "Started",
+      reason: "callError" as const,
       errorCode: "InternalError",
     };
 
@@ -363,7 +365,9 @@ describe("OperationalTimelineProjector (#448)", () => {
     }).entries;
     const data = {
       transactionId: "tx-490",
+      action: "TransactionEvent",
       eventType: "Started",
+      reason: "callError",
       errorCode: "InternalError",
     };
     expect(entries.map((e) => [e.kind, e.connectorId, e.data])).toEqual([
@@ -373,6 +377,38 @@ describe("OperationalTimelineProjector (#448)", () => {
     expect(entries.map((e) => e.summary)).toEqual([
       "TransactionEvent Started of transaction tx-490 rejected (InternalError), attempt 3",
       "TransactionEvent Started of transaction tx-490 discarded after 3 attempts (InternalError)",
+    ]);
+  });
+
+  it("records an unanswered 2.x TransactionEvent without an errorCode (#529)", () => {
+    const cp = buildChargePoint("OCPP-2.1");
+    const report = {
+      connectorId: 1,
+      transactionId: "tx-529",
+      action: "TransactionEvent" as const,
+      eventType: "Updated",
+      reason: "timeout" as const,
+    };
+
+    cp.notifyTransactionMessageRejected({ ...report, attempt: 2 });
+    cp.notifyTransactionMessageDiscarded({ ...report, attempts: 2 });
+
+    const entries = cp.timeline.query({
+      kinds: ["transaction_message_rejected", "transaction_message_discarded"],
+    }).entries;
+    const data = {
+      transactionId: "tx-529",
+      action: "TransactionEvent",
+      eventType: "Updated",
+      reason: "timeout",
+    };
+    expect(entries.map((e) => [e.kind, e.data])).toEqual([
+      ["transaction_message_rejected", { ...data, attempt: 2 }],
+      ["transaction_message_discarded", { ...data, attempts: 2 }],
+    ]);
+    expect(entries.map((e) => e.summary)).toEqual([
+      "TransactionEvent Updated of transaction tx-529 got no answer, attempt 2",
+      "TransactionEvent Updated of transaction tx-529 discarded after 2 attempts (no answer)",
     ]);
   });
 });

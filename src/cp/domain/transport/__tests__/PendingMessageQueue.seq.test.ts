@@ -165,18 +165,25 @@ class MockSqliteDatabase implements Database {
 function readRows(
   db: Database,
   cpId: string,
-): { message_id: string; seq: number }[] {
-  return db.all<{ message_id: string; seq: number }>(
+): { message_id: string; action: string; seq: number }[] {
+  return db.all<{ message_id: string; action: string; seq: number }>(
     "SELECT message_id, action, connector_id, payload, attempts, created_at, seq " +
       "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
     [cpId],
   );
 }
 
+/** The 1.6 handler's queued actions. */
+const QUEUED: ReadonlySet<OCPPAction> = new Set([
+  OCPPAction.StartTransaction,
+  OCPPAction.StopTransaction,
+  OCPPAction.MeterValues,
+]);
+
 describe("PendingMessageQueue with seq", () => {
   describe("in-memory mode (no database)", () => {
     it("enqueues and dequeues with seq assignment", () => {
-      const queue = new PendingMessageQueue("cp-test");
+      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { foo: "bar" },
@@ -195,7 +202,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("maintains FIFO order for same-millisecond bursts", () => {
-      const queue = new PendingMessageQueue("cp-test");
+      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -224,7 +231,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("continues seq counter across multiple enqueue calls", () => {
-      const queue = new PendingMessageQueue("cp-test");
+      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: {},
@@ -241,7 +248,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("dequeues in FIFO order", () => {
-      const queue = new PendingMessageQueue("cp-test");
+      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { order: 1 },
@@ -276,7 +283,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("persists and loads messages with seq", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db);
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue1.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { tx: 123 },
@@ -289,15 +296,55 @@ describe("PendingMessageQueue with seq", () => {
       });
 
       // Create a new queue instance and load from DB
-      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       expect(queue2.size()).toBe(2);
       const all = queue2.all();
       expect(all[0].action).toBe(OCPPAction.StartTransaction);
       expect(all[1].action).toBe(OCPPAction.MeterValues);
     });
 
+    it("removeOldest drops the oldest row of one action only, persisted (#538)", () => {
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      for (const [action, n] of [
+        [OCPPAction.StartTransaction, 1],
+        [OCPPAction.MeterValues, 2],
+        [OCPPAction.MeterValues, 3],
+      ] as const) {
+        queue1.enqueue({ action, payload: { n }, connectorId: 1 });
+      }
+      expect(queue1.countOf(OCPPAction.MeterValues)).toBe(2);
+      expect(queue1.removeOldest(OCPPAction.MeterValues)).toBe(true);
+      expect(queue1.removeOldest(OCPPAction.StopTransaction)).toBe(false);
+
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      expect(queue2.all().map((m) => m.payload)).toEqual([{ n: 1 }, { n: 3 }]);
+      expect(queue2.countOf(OCPPAction.MeterValues)).toBe(1);
+    });
+
+    it("removeOldest with a predicate drops the oldest matching row only (#538)", () => {
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      for (const n of [1, 2, 3, 4]) {
+        queue1.enqueue({ action: OCPPAction.MeterValues, payload: { n } });
+      }
+      const even = (payload: unknown) => (payload as { n: number }).n % 2 === 0;
+      expect(queue1.removeOldest(OCPPAction.MeterValues, even)).toBe(true);
+      expect(
+        queue1.removeOldest(
+          OCPPAction.MeterValues,
+          (p) => (p as { n: number }).n > 9,
+        ),
+      ).toBe(false);
+
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      expect(queue2.all().map((m) => m.payload)).toEqual([
+        { n: 1 },
+        { n: 3 },
+        { n: 4 },
+      ]);
+    });
+
     it("orders by seq on reload", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db);
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -317,7 +364,7 @@ describe("PendingMessageQueue with seq", () => {
       vi.useRealTimers();
 
       // Reload and verify order is preserved
-      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       const all = queue2.all();
       expect(
         all.map((m) => (m.payload as Record<string, unknown>).order),
@@ -325,7 +372,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("allocator restarts with seq continuing above MAX", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db);
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue1.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { batch: 1 },
@@ -336,7 +383,7 @@ describe("PendingMessageQueue with seq", () => {
       });
 
       // Simulate restart: new queue loads from DB
-      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       expect(queue2.size()).toBe(2);
 
       // Enqueue a new message; it should get seq >= 3
@@ -346,14 +393,14 @@ describe("PendingMessageQueue with seq", () => {
       });
 
       // Verify order: original 2 messages, then the new one
-      const queue3 = new PendingMessageQueue("cp-db-test", db);
+      const queue3 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       expect(queue3.size()).toBe(3);
       const all = queue3.all();
       expect(all[2].action).toBe(OCPPAction.StopTransaction);
     });
 
     it("advances seq by exactly 1 per enqueue", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db);
+      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
       queue.enqueue({ action: OCPPAction.MeterValues, payload: {} });
       queue.enqueue({ action: OCPPAction.StopTransaction, payload: {} });
@@ -363,7 +410,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("does not leak persistence columns through the public shape", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db);
+      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
 
       const flushed: PendingMessage[] = [];
@@ -372,7 +419,7 @@ describe("PendingMessageQueue with seq", () => {
         return true;
       }, 3);
 
-      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue2.enqueue({ action: OCPPAction.MeterValues, payload: {} });
       const seen = [...queue2.all(), queue2.dequeue()!, ...flushed];
 
@@ -389,11 +436,11 @@ describe("PendingMessageQueue with seq", () => {
       // Two queue instances for the same cp, opened while the clock is
       // frozen: the second one loads the first one's rows and must not mint
       // an id that collides with them ((cp_id, message_id) is the PK).
-      const queue1 = new PendingMessageQueue("cp-db-test", db);
+      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue1.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
       queue1.enqueue({ action: OCPPAction.MeterValues, payload: {} });
 
-      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue2.enqueue({ action: OCPPAction.StopTransaction, payload: {} });
 
       vi.useRealTimers();
@@ -404,7 +451,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("flush() removes delivered messages and retries failed ones", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db);
+      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: {},
@@ -434,7 +481,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("clear() removes all messages for this CP", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db);
+      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
       queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
       queue.enqueue({ action: OCPPAction.MeterValues, payload: {} });
 
@@ -442,28 +489,28 @@ describe("PendingMessageQueue with seq", () => {
       expect(queue.size()).toBe(0);
 
       // Verify it's gone from DB too
-      const queue2 = new PendingMessageQueue("cp-db-test", db);
+      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
       expect(queue2.size()).toBe(0);
     });
 
     it("different CPs maintain separate seq counters", () => {
-      const queueA = new PendingMessageQueue("cp-a", db);
+      const queueA = new PendingMessageQueue("cp-a", db, QUEUED);
       queueA.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { cp: "a" },
       });
       queueA.enqueue({ action: OCPPAction.MeterValues, payload: { cp: "a" } });
 
-      const queueB = new PendingMessageQueue("cp-b", db);
+      const queueB = new PendingMessageQueue("cp-b", db, QUEUED);
       queueB.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { cp: "b" },
       });
 
-      const queueA2 = new PendingMessageQueue("cp-a", db);
+      const queueA2 = new PendingMessageQueue("cp-a", db, QUEUED);
       expect(queueA2.size()).toBe(2);
 
-      const queueB2 = new PendingMessageQueue("cp-b", db);
+      const queueB2 = new PendingMessageQueue("cp-b", db, QUEUED);
       expect(queueB2.size()).toBe(1);
 
       // Verify order within each CP
@@ -471,6 +518,29 @@ describe("PendingMessageQueue with seq", () => {
       const allB = queueB2.all();
       expect((allA[0].payload as Record<string, unknown>).cp).toBe("a");
       expect((allB[0].payload as Record<string, unknown>).cp).toBe("b");
+    });
+
+    it("deletes on load the rows of actions it does not queue (#528)", () => {
+      // The table is shared by the 1.6 and 2.x handlers of one charge point.
+      const v2 = new PendingMessageQueue(
+        "cp-db-test",
+        db,
+        new Set(["TransactionEvent"]),
+      );
+      v2.enqueue({ action: "TransactionEvent", payload: { seqNo: 0 } });
+      const before = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      before.enqueue({ action: OCPPAction.MeterValues, payload: {} });
+      // Deleted from the table at once, not only skipped.
+      expect(readRows(db, "cp-db-test").map((r) => r.action)).toEqual([
+        OCPPAction.MeterValues,
+      ]);
+      expect(before.droppedOnLoad).toEqual(["TransactionEvent"]);
+
+      const reloaded = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      expect(reloaded.droppedOnLoad).toEqual([]);
+      expect(reloaded.all().map((m) => m.action)).toEqual([
+        OCPPAction.MeterValues,
+      ]);
     });
   });
 
@@ -525,7 +595,7 @@ describe("PendingMessageQueue with seq", () => {
       db.run("UPDATE pending_messages SET seq = rowid WHERE seq IS NULL", []);
 
       // Load and verify order is preserved
-      const queue = new PendingMessageQueue("cp-legacy", db);
+      const queue = new PendingMessageQueue("cp-legacy", db, QUEUED);
       const all = queue.all();
 
       expect(all.length).toBe(3);
@@ -558,7 +628,7 @@ describe("PendingMessageQueue with seq", () => {
 
   describe("StartTransaction/StopTransaction ordering", () => {
     it("maintains Start before Stop when enqueued in same millisecond", () => {
-      const queue = new PendingMessageQueue("cp-tx-order");
+      const queue = new PendingMessageQueue("cp-tx-order", null, QUEUED);
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -583,7 +653,7 @@ describe("PendingMessageQueue with seq", () => {
 
     it("Start-Stop order preserved across restart", () => {
       const db = new MockSqliteDatabase();
-      const queue1 = new PendingMessageQueue("cp-tx-persist", db);
+      const queue1 = new PendingMessageQueue("cp-tx-persist", db, QUEUED);
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -601,7 +671,7 @@ describe("PendingMessageQueue with seq", () => {
       vi.useRealTimers();
 
       // Reload from DB
-      const queue2 = new PendingMessageQueue("cp-tx-persist", db);
+      const queue2 = new PendingMessageQueue("cp-tx-persist", db, QUEUED);
       const all = queue2.all();
       expect(all[0].action).toBe(OCPPAction.StartTransaction);
       expect(all[1].action).toBe(OCPPAction.StopTransaction);

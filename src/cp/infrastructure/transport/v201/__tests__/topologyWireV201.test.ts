@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  v201EvseExists,
   v201MeterEvseId,
   v201StatusEvse,
   v201TransactionEvse,
@@ -20,6 +21,17 @@ describe("topologyWireV201", () => {
 
     expect(evse).toEqual({ id: 3, connectorId: 1 });
     expect(Object.keys(evse)).toEqual(["id", "connectorId"]);
+  });
+
+  it.each([
+    [{ id: 1 }, true],
+    [{ id: 2, connectorId: 1 }, true],
+    [{ id: 0 }, false],
+    [{ id: 3 }, false],
+    [{ id: 1, connectorId: 0 }, false],
+    [{ id: 1, connectorId: 2 }, false],
+  ])("resolves EVSE %j on connectors 1-2 as %s", (evse, exists) => {
+    expect(v201EvseExists(evse, new Set([1, 2]))).toBe(exists);
   });
 
   it("renders MeterValues evseId", () => {

@@ -151,7 +151,20 @@ describe("handleGetCompositeScheduleV201 round trip (#323)", () => {
     const periods = res.schedule?.chargingSchedulePeriod ?? [];
     expect(periods).toHaveLength(1);
     expect(periods[0]?.numberPhases).toBe(1);
-    expect(periods[0]?.limit).toBeCloseTo(1000 / 230, 10);
+    // 1000 / 230 = 4.347… A, floored to 0.1 like 1.6 (#524).
+    expect(periods[0]?.limit).toBe(4.3);
+  });
+
+  it("floors a converted W limit to one decimal (#524)", () => {
+    // 6.123 A × 230 V × 1 phase = 1408.29 W.
+    const res = compositeFor(
+      ChargingRateUnitType.A,
+      [{ startPeriod: 0, limit: 6.123, numberPhases: 1 }],
+      "W",
+    );
+    expect(res.schedule?.chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 1408.2, numberPhases: 1 },
+    ]);
   });
 
   it("converts over 3 phases and emits no numberPhases when the period has none", () => {

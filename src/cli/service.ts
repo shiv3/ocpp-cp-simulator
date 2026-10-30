@@ -2771,6 +2771,10 @@ export class CLIChargePointService {
     if (permanent) {
       this._chargePoint.dispose();
     } else {
+      // #538: the periodic monitors keep their timers offline. Stopped
+      // first, so the disconnect does not re-arm them on an instance that
+      // `CPRegistry.update` is about to replace.
+      this._chargePoint.stopMonitoring();
       this._chargePoint.disconnect();
     }
     this.detachConnectorEventForwarders();

@@ -451,19 +451,26 @@ the new graph. Anything else is run explicitly, as before.
 ## Template instances
 
 Loading a built-in template does not hand you the template file: it produces an
-_instance_ with its own `id`
-(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`) and a `templateId`
-field naming what it came from. Two loads of the same template are independent
-scenarios, so editing one never touches the other.
+_instance_ with its own `id` and a `templateId` field naming what it came from.
+In the browser the id is unique per load
+(`<templateId>-<cpId>-c<connectorId>-<timestamp>-<suffix>`), so two loads of
+the same template are independent scenarios and editing one never touches the
+other.
 
 On the **daemon**, instantiating a template is idempotent per
-(template, connector): the earlier instance of that template on that connector
-is replaced rather than added to. Without that, every pod restart and every
-`run_scenario_template` left one more copy behind in `--state-db` forever. A
-different template on the same connector, or the same template on another
-connector, is untouched. Instances persisted before `templateId` existed are
-recognised by their id format, so an existing state DB tidies itself on the
-next boot.
+(template, connector): the instance id is stable, `<templateId>-c<connectorId>`
+(#338), so loading the template again replaces the earlier instance under the
+same key, and discards its run if one is in flight. Without that, every pod
+restart and every `run_scenario_template` left one more copy behind in
+`--state-db` forever. A different template on the same connector, or the same
+template on another connector, is untouched. An instance an older build
+persisted under the clock-suffixed id above is recorded as such by the schema
+v19 migration and removed on the first boot whose `--scenario-template`
+installs its successor on that connector, or when the same template is loaded
+on that connector at run time (`load_scenario_template`,
+`run_scenario_template`), so it never runs beside the stable instance. A `--scenario-template` instance from a
+configuration no longer in force is removed at boot — see
+[Daemon → File hot-reload](../entities/daemon.md#file-hot-reload).
 
 ## Charging curve (v1.2)
 

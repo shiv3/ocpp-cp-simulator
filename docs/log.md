@@ -1742,6 +1742,18 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `ChargePoint.startTransaction` drove the connector to `Preparing` (#176) even when it was already there, so the console's **Plug in → Start charging** sent `StatusNotification(Preparing)` twice — a Preparing → Preparing transition OCPP DebugKit reports as `STATUS_TRANSITION_VIOLATION`. A connector already in `Preparing` now keeps it without a new StatusNotification; its ConnectionTimeOut restarts as before ([Web console → Charge point page](entities/web-console.md#charge-point-page)).
 
+## [2026-10-29] ingest | Startup scenarios from a configuration no longer in force (#338)
+
+- A startup instance's stable id (#314) only recognised the instance the boot was about to create: a boot that narrowed `--scenario-connector`, or a file whose own `id` changed, left the previous boot's copy loaded, unwatched and auto-startable. Each row a startup flag creates now records what generated it (`scenarios.startup_source`, schema v18, NULL = user-authored); a flag loading over an existing user-authored row (a seeded default) leaves it so. One prune runs at restore, before the first watch pass and before anything dials: every marked row the boot's flags do not call for goes. It replaces the `-<epoch ms>` prune for `--scenario` and `loadScenarioTemplate`'s per-template cleanup; a built-in template instance now has the stable id `<templateId>-c<connector>`, and re-instantiating one discards its in-flight run. The v18 migration records the clock-suffixed ids older builds generated, matched exactly, as `legacy:<base>`; the same prune removes one once the boot installs its stable successor on that connector. Every other row written before v18 stays NULL.
+- [Daemon → File hot-reload](entities/daemon.md#file-hot-reload): the rule, what it keeps, and what it never removes.
+- [File hot-reload](concepts/file-hot-reload.md): the two residual cases are closed; the upgrade prune is gone.
+- [State persistence](concepts/state-persistence.md): schema version 18; the `scenarios` row describes `startup_source`.
+- [Scenario format → Template instances](concepts/scenario-format.md#template-instances), [Scenario templates](entities/scenario-templates.md): daemon instance id, legacy instances kept.
+- [CLI](entities/cli.md): restarts with `--state-db`.
+- [Control plane](concepts/control-plane.md): `load_scenario_template` loads under the stable id. `schema/scenario.schema.json`: `templateId` is informational.
+- [GitHub issues](sources/github-issues.md): #338.
+- Maintainer review: a scenario the operator saves through the control plane or the web console (`load_scenario`, `load_scenario_template`, `scenario.definitions.save` / `.replace`) loses its startup provenance, so a later boot without the flag no longer prunes an edited scenario; a template loaded at run time also replaces an older build's epoch-stamped instance of it on that connector, as the builds that minted it did.
+
 ## [2026-10-29] ingest | Collapsible console sidebar
 
 - [Web console → Layout](entities/web-console.md#layout-route-prefixes): the sidebar folds into an icon rail (navigation icons with tooltips, mode dot, theme toggle) with a **Collapse sidebar** / **Expand sidebar** button beside the logo; the server URL and version line are hidden while collapsed. The state is kept in `localStorage` (`ocpp-cp.console.sidebar.collapsed`).

@@ -575,6 +575,14 @@ ranked before, and the three places in the daemon that derive from these flags
 ranked them differently: see the startup rules in
 [Daemon](daemon.md#file-hot-reload).
 
+**Restarts with `--state-db`.** Each instance a startup flag loads keeps the
+same id across restarts, and one the flag creates records which flag
+generated it. A restart removes the startup instances the current flags no
+longer call for — a connector dropped from `--scenario-connector`, a file
+whose own `id` changed, a switched or dropped flag — and an older build's
+clock-suffixed instance of what it installs on the same connector, but never
+another scenario (#338). Details: [Daemon](daemon.md#file-hot-reload).
+
 ### 4. Client Modes (`--send` / `--events` / `--stop`)
 
 The same binary doubles as a TCP Socket.IO client for a running daemon. Client

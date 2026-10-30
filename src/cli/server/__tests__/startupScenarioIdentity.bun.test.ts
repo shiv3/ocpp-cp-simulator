@@ -9,15 +9,14 @@ import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
 import type { ScenarioDefinition } from "../../../cp/application/scenario/ScenarioTypes";
 import {
   installStartupScenario,
-  legacyStartupInstanceIds,
   readStartupScenarioFile,
   resolveStartupScenarioMode,
   runStartupScenario,
   startStartupScenario,
   startupClaimedScenarioIds,
-  startupInstanceId,
   startupScenarioOptionConflict,
 } from "../startServer";
+import { scenarioInstanceId } from "../../scenarioInstanceId";
 import { startMockCsms } from "../../../cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
@@ -161,11 +160,13 @@ describe("startup scenario identity across a restart (#314)", () => {
     }
   });
 
-  it("drops an instance a previous build generated with a clock-based id", async () => {
-    // The upgrade path. Builds through 0f6f951 minted
-    // `<base>-c<connector>-<epoch ms>`, so a state DB written by one carries a
-    // row this boot's stable id can never match — left alone it stays loaded
-    // forever, unwatched, and auto-starts beside the configured graph.
+  it("leaves an older build's clock-based instance to the boot prune", async () => {
+    // Builds through 0f6f951 minted `<base>-c<connector>-<epoch ms>`. The
+    // install itself no longer removes such a row: the schema v19 migration
+    // records it as `legacy:<base>` and the daemon's one startup prune removes
+    // it at restore, once the boot installs its stable successor (#338, see
+    // `startupScenarioProvenance.bun.test.ts`). Without a state DB nothing is
+    // recorded, and nothing here prunes.
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-identity-legacy-"));
     const file = join(tmpDir, "template.json");
     writeFileSync(file, scenarioJson("startup-template", 11));
@@ -183,42 +184,16 @@ describe("startup scenario identity across a restart (#314)", () => {
 
       await runStartupScenario(svc, templateOptions(file), 1, null, null);
 
-      expect(svc.listScenarios(1).map((s) => s.scenarioId)).toEqual([
-        "startup-template-c1",
-      ]);
+      expect(
+        svc
+          .listScenarios(1)
+          .map((s) => s.scenarioId)
+          .sort(),
+      ).toEqual(["startup-template-c1", "startup-template-c1-1757200000000"]);
     } finally {
       svc.cleanup(true);
       rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-
-  it("leaves a scenario that only looks generated alone", () => {
-    // The objection to pruning as a strategy, answered by making the pattern
-    // exact: an operator's own `<base>-c1` and a same-prefix scenario with a
-    // non-epoch suffix are not this code's output and are not touched.
-    expect(
-      legacyStartupInstanceIds(
-        [
-          "startup-template-c1",
-          "startup-template-c1-manual",
-          "startup-template-c1-42",
-          "startup-template-c2-1757200000000",
-          "other-c1-1757200000000",
-          "startup-template-c1-1757200000000",
-        ],
-        "startup-template",
-        1,
-      ),
-    ).toEqual(["startup-template-c1-1757200000000"]);
-
-    // The base id is matched literally, not as a pattern: a scenario file may
-    // name itself anything, and `a.b` must not match `axb`.
-    expect(
-      legacyStartupInstanceIds(["axb-c1-1757200000000"], "a.b", 1),
-    ).toEqual([]);
-    expect(
-      legacyStartupInstanceIds(["a.b-c1-1757200000000"], "a.b", 1),
-    ).toEqual(["a.b-c1-1757200000000"]);
   });
 
   it("claims the id it will load, from the bytes it will load", async () => {
@@ -261,8 +236,10 @@ describe("startup scenario identity across a restart (#314)", () => {
   it("mints the same id for the same file and connector", () => {
     // The property everything above rests on, stated on its own: nothing in
     // this id comes from the clock.
-    expect(startupInstanceId("demo", 1)).toBe(startupInstanceId("demo", 1));
-    expect(startupInstanceId("demo", 1)).not.toBe(startupInstanceId("demo", 2));
+    expect(scenarioInstanceId("demo", 1)).toBe(scenarioInstanceId("demo", 1));
+    expect(scenarioInstanceId("demo", 1)).not.toBe(
+      scenarioInstanceId("demo", 2),
+    );
   });
 });
 
@@ -507,9 +484,9 @@ describe("startup scenario installs before the dial (#314)", () => {
     // The agreement the refusal exists to protect, asserted directly rather
     // than inferred: for each mode, what `startupClaimedScenarioIds` predicts
     // and what `installStartupScenario` actually loads are compared against the
-    // same read of the same file. `--scenario-template` is the one deliberate
-    // asymmetry — `loadScenarioTemplate` mints the id and prunes its own prior
-    // instances, so the claim is empty by design and the load is not.
+    // same read of the same file. `--scenario-template` used to be the one
+    // deliberate asymmetry, claiming nothing; its instance id is stable since
+    // #338, so it is claimed like the others.
     const tmpDir = mkdtempSync(join(tmpdir(), "ocpp-startup-agree-"));
     const file = join(tmpDir, "scenario.json");
     writeFileSync(file, scenarioJson("targeted-scenario", 11));
@@ -536,6 +513,12 @@ describe("startup scenario installs before the dial (#314)", () => {
       {
         label: "--scenario-template-file",
         opt: { ...base, scenarioTemplateFile: file },
+        connectors: 2,
+      },
+      // A built-in template: `<templateId>-c<connector>`, no file involved.
+      {
+        label: "--scenario-template",
+        opt: { ...base, scenarioTemplate: "essential-cp-behavior" },
         connectors: 2,
       },
     ];

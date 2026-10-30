@@ -131,8 +131,9 @@ On either failure the station:
 
 - **keeps the transaction running.** The connector stays as it was, the
   station does not end the transaction on the error, and the
-  [charging session](charging-sessions.md) stays `active`. OCPP-J 1.6 does
-  the same since #527 (see
+  [charging session](charging-sessions.md) stays `active`. An `Ended`
+  event goes out once its transaction ended: both stay ended. OCPP-J 1.6
+  does the same since #527 (see
   [the 1.6 section](#transaction-message-retries-ocpp-j-16));
 - **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
   `action`, `eventType`, `reason`, `errorCode`, `attempt`) on every failed
@@ -314,8 +315,12 @@ same way 2.x handles a TransactionEvent (above). It used to abandon the
 transaction on a StartTransaction CALLERROR (#447) and to ignore one on the
 other two. Now it:
 
-- **keeps the transaction running**, and the
-  [charging session](charging-sessions.md) stays `active`;
+- **keeps the transaction running** on a StartTransaction.req or
+  MeterValues.req CALLERROR, and the
+  [charging session](charging-sessions.md) stays `active`. A
+  StopTransaction.req goes out once its transaction stopped: the
+  transaction and its session stay ended, and the retry only resends the
+  message;
 - **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
   `action` `StartTransaction` / `StopTransaction` / `MeterValues`, `reason`
   `callError`, `errorCode`, `attempt`; no `eventType`) on every CALLERROR;
@@ -356,24 +361,34 @@ identified by the request's `idTag` and `timestamp`. When it answers a resend
 after that transaction stopped, or after another one began on the connector,
 it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
-updates the Authorization Cache. A Reset drops a StartTransaction.req
-waiting for its resend: the reset ends that transaction. A CALLERROR
+updates the Authorization Cache. OCPP-S binds its StartTransaction answer
+the same way, though it never resends: a slow HTTP exchange can return
+after the transaction stopped. A Reset drops a StartTransaction.req waiting
+for its resend, whether its retry interval is still running or it already
+waits in the serial queue behind another CALL: the reset ends that
+transaction. A CALLERROR
 answering a StartTransaction.req whose transaction no longer runs (a Reset
 stopped it while the request was in flight) is not resent: the request is
 reported rejected, then discarded after that one attempt.
 
 A resend still waiting when the WebSocket closes goes to the 1.6 offline
 queue (§3.7), ahead of the CALLs still queued, and is replayed after the
-next accepted boot like any queued transaction message. That replay is a
-fresh delivery: a CALLERROR answering it starts the count again. With a
-link that keeps dropping and a CSMS that always answers with a CALLERROR,
-the resends therefore never stop.
+next accepted boot like any queued transaction message. So does a resend
+that falls due while the boot gate is closed on a live link (a
+BootNotification answered `Pending`, e.g. after a TriggerMessage). That
+replay is a fresh delivery: a CALLERROR answering it starts the count
+again. With a link that keeps dropping and a CSMS that always answers with
+a CALLERROR, the resends therefore never stop.
 
 Known limitations, as on 2.x: a waiting resend does not hold back the next
 transaction-related message, so a StopTransaction.req can overtake the
 StartTransaction.req being retried, against the chronological order §3.7
 asks for. Unlike 2.x (#529), a message left unanswered is not retried:
 only a CALLERROR is.
+A resend waiting out its interval is held in memory, like the CALLs in the
+serial queue. It reaches the persisted offline queue only when the socket
+closes, so a process that ends without closing it, such as a crash, loses
+the resend.
 An [expert call](expert-ocpp-calls.md) is never resent, and a MeterValues.req
 without a `transactionId` is not transaction-related. OCPP-S (1.2 / 1.5 /
 1.6S) does not retry: a SOAP Fault answering these messages is reported as an

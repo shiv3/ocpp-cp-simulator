@@ -112,7 +112,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `transaction_stopped`           | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
 | `transaction_rejected`          | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
 | `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x #490, #529; 1.6 #527) A transaction message transmission fails; it is resent unless it was the last.               |
-| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x #490, #529; 1.6 #527) The last attempt failed too: the message is dropped, the transaction keeps running.          |
+| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x #490, #529; 1.6 #527) The last attempt failed too: the message is dropped, the transaction is left as is.          |
 | `authorization_rejected`        | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
 | `scenario_started`              | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`         | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
@@ -122,11 +122,15 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `charging_profile_cleared`      | either    | `connectorId`, `reason`, `profiles`                                  | At least one profile is removed from one scope (see [Smart-charging profiles](#smart-charging-profiles)).               |
 | `charging_profile_expired`      | either    | profile fields                                                       | A profile's `validTo` passes while it is still installed.                                                               |
 
-The 1.6 placeholder transaction id (`0` until StartTransaction.conf) is never
-recorded: `transaction_started` has no id on 1.6, and
-`transaction_id_assigned` reports the CSMS's id. A disconnect never records a
-"transaction interrupted" entry: a 1.6 transaction can legitimately continue
-offline.
+`transaction_started` and `transaction_id_assigned` never record the 1.6
+placeholder transaction id (`0` until StartTransaction.conf):
+`transaction_started` has no id on 1.6, and `transaction_id_assigned` reports
+the CSMS's id. `transaction_message_rejected` and
+`transaction_message_discarded` do record `"0"` for a 1.6 message that
+carries no CSMS id: a StartTransaction.req, and the MeterValues.req and
+StopTransaction.req of a transaction whose start got no conf. A disconnect
+never records a "transaction interrupted" entry: a 1.6 transaction can
+legitimately continue offline.
 
 `transaction_rejected.stopped` says whether the station ended the transaction
 on the rejection: `StopTransactionOnInvalidId` on 1.6 (#181),

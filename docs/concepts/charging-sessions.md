@@ -123,16 +123,19 @@ A CALLERROR answering a transaction-related message is not a failed start,
 on any version: a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or
 `Ended`; OCPP E13, #490), or an OCPP-J 1.6 StartTransaction.req,
 StopTransaction.req or MeterValues.req of a transaction (Part 2 §3.7.1,
-#527). Both treat it as a failure to process the message: the station keeps
-the transaction running, resends the message and finally discards it (see
+#527). Both treat it as a failure to process the message: the station
+resends the message and finally discards it, and leaves the transaction as
+it was: still running, or already stopped for a StopTransaction.req or an
+`Ended` event (see
 [Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)
 and [its 1.6 counterpart](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
 A 2.x TransactionEvent left unanswered within `MessageTimeout` is handled the
 same way (#529). `transactionMessageRejected` and
 `transactionMessageDiscarded` report both, with `reason` `callError` or
 (2.x only) `timeout`. The recorder does not listen to them, so the session
-stays `active`. A 1.6 transaction whose StartTransaction.req was discarded
-never gets a CSMS id: its session keeps `transactionId: null`.
+keeps its state: `active`, or already ended when the stop came first. A 1.6
+transaction whose StartTransaction.req was discarded never gets a CSMS id:
+its session keeps `transactionId: null`.
 
 ## Recording
 

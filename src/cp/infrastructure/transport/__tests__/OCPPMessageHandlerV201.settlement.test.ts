@@ -138,7 +138,8 @@ const createMockChargePoint = (): ChargePoint => {
       // #529: a written TransactionEvent arms its MessageTimeout.
       messageTimeout: vi.fn(() => 30),
     },
-    database: {} as unknown,
+    // #528: no state database, so the E11 queue stays in memory.
+    database: null,
     certificateStore: {} as unknown,
     consumeResponseOverride: vi.fn(() => null),
     // #349: the 2.0.1 dispatch consults inbound policies too.

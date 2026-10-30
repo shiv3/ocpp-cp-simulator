@@ -11,7 +11,8 @@ sources:
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
   - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
-  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries)
+  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
+  - src/cp/domain/transport/PendingMessageQueue.ts
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -185,19 +186,77 @@ before.
 Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
 resend does not hold back the next transaction message. E13 (Figure 62)
 describes sequential delivery; this station may deliver `Ended` before the
-resent `Started`, and the CSMS has to order the messages by `seqNo`. A
-resend still waiting when the WebSocket closes
-(network loss, disconnect, reset, delete) is dropped: 2.x has no offline
-queue to hand it to. So is a resend that finds the station offline when it
-falls due. Either way the station logs a `warn` (category `TRANSACTION`)
-naming the event type, transaction and attempt; no event is emitted. A
-written TransactionEvent still waiting for its answer when the WebSocket
-closes is forgotten silently with its `MessageTimeout` timer, like any
-unanswered CALL. Only TransactionEvents the station builds are retried or
-time out; one sent as an [expert call](expert-ocpp-calls.md) is not.
+resent `Started`, and the CSMS has to order the messages by `seqNo`. When
+the WebSocket closes (network loss, disconnect, reset, delete), a resend
+still waiting and a written TransactionEvent still waiting for its answer
+are not dropped: they go to the
+[E11 offline queue](#e11-offline-queue-for-transactionevent) (#528), and
+their timers are cleared. So does a resend that finds the station offline
+when it falls due. A transmission the socket drops while the connection
+stays up (a network-sim queue overflow) is lost: a resend is logged as a
+`warn` (category `TRANSACTION`) naming the event type, transaction and
+attempt; no event is emitted. Only TransactionEvents the station builds are
+retried, time out or are queued; one sent as an
+[expert call](expert-ocpp-calls.md) is not.
 
 The [operational timeline](operational-timeline.md) records both events as
 `transaction_message_rejected` and `transaction_message_discarded`.
+
+## E11 offline queue for TransactionEvent
+
+On 2.0.1 and 2.1 the station queues the TransactionEvents (`Started`,
+`Updated`, `Ended`) it cannot deliver and replays them once the connection
+is restored (E11 "Connection Loss During Transaction", #528):
+
+- **What is queued** (E11.FR.01: "all TransactionEventRequest messages,
+  that it would have sent to the CSMS if the Charging Station had been
+  online"): an event produced while the WebSocket is down, an event the
+  socket drops on close, an event written but still unanswered when the
+  socket closes, and an E13 resend still waiting. Each message is queued
+  once, in the order the events were produced, with the payload as built
+  (no `offline` field). An event produced while the queue still waits for
+  its replay (socket back, BootNotification not yet Accepted) joins the
+  queue too, so the order holds.
+- **Where**: the `pending_messages` table that 1.6 uses (action
+  `TransactionEvent`), with [`--state-db`](state-persistence.md); in memory
+  otherwise. A restart with state persistence replays what was queued.
+- **Replay** (E11.FR.02): after the next BootNotification `Accepted`, every
+  queued event is sent in order with `offline: true`, under a new message
+  id, with the `seqNo` it was built with. E11.FR.07 ("every message that is
+  still in the queue SHALL be set Offline") is why an event that was
+  written before the close also carries `offline: true` on replay.
+  `offline` is set at replay time only; an event sent online never carries
+  it.
+- **E13 still applies to a replayed event**, with fresh counters: its
+  `MessageAttempts[TransactionEvent]` budget and `transactionMessageRejected`
+  `attempt` restart at 1, as a 1.6 replay goes through the serial queue
+  anew. A row leaves the queue when its replay is handed to the socket; a
+  close before the answer queues the event again.
+- **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
+  MeterValues, NotifyEvent and the rest are dropped while offline, as
+  before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is
+  what would queue them; when it is false the spec queues only
+  transaction-related messages "as required in: E04.FR.01" (2.0.1
+  §2.1.9, 2.1 §2.1.10). The spec sets no order between the replay and the
+  other messages sent after reconnecting. The station sends its post-boot
+  StatusNotifications first, then the replay, as on 1.6
+  (`ChargePoint.markBootAccepted` defers the flush to a microtask).
+
+Limits:
+
+- The queue has no size cap, so the E11.FR.04/FR.05 memory-pressure drop
+  of `Updated` events is not modelled.
+- The replay goes out as a burst: 2.x has no serial queue (see the known
+  limitation above), so the station does not wait for one answer before
+  sending the next replayed event.
+- A row leaves the table when its replay is handed to the socket, as on
+  1.6. A process crash before the answer loses it, where the E04 failure
+  postcondition keeps an unanswered event in the queue.
+- A restart replays the queued events, but the 2.x `transactionId` and
+  `seqNo` counter of a transaction restored after the restart are not
+  persisted, so its later events do not continue the replayed ones.
+- `GetTransactionStatus` answers `messagesInQueue: false` whatever the
+  queue holds (E14).
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

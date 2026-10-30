@@ -15,7 +15,7 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Testing strategy
@@ -46,8 +46,8 @@ daemon goes into `tsconfig.cli.json`.
   server, `bun:sqlite`, and subprocess-spawning integration tests.
 - **Bench slow path** (`bun run test:bench-slow`) is one Bun file named to
   match _neither_ filter, `scripts/bench/fleetBench.slowpath.test-bun.ts`
-  (#330): it drives the real benchmark against a deliberately slow mock CSMS,
-  costs about 36s by construction, and so runs only in its own CI job
+  (#330, #523): it drives the real benchmark against a deliberately slow mock
+  CSMS and a slow control-plane relay, costs about 56s by construction, and so runs only in its own CI job
   (`bench-slow`) instead of lengthening `test:bun`. A new file meant to stay
   out of `test:bun` must avoid the `bun.test` substring and Vitest's
   `*.test.ts` pattern alike; `bun test` still runs it when given its path

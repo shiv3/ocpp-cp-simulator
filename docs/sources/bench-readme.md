@@ -11,7 +11,7 @@ related:
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Source: `scripts/bench/README.md`
@@ -694,15 +694,22 @@ arming.
   bound including its assigned-id stage, leaving a retired charge point's
   transaction for teardown, re-stopping a transaction whose hold teardown
   cancelled, and keeping a charge point whose stop was acked on the re-stop
-  list. Run by `bun run test:bench-slow` in its own CI job — the name avoids
-  the `bun.test` substring `test:bun` filters on — in about 36s locally.
-  Two cases shorten deadlines through **test-only** environment variables
+  list. A second group puts a socket.io relay between the bench and the
+  daemon (#523) that forwards events, acks and HTTP but holds chosen RPC
+  requests, so the daemon acts late (a closed daemon socket reaches the bench
+  as a dropped transport; no other outage is modelled): it pins teardown's wait for an in-flight `cp.create_many`,
+  the `not_found` reconciliation after a create that outlived its client
+  deadline, and the RPC stage of the cycle bound. Run by
+  `bun run test:bench-slow` in its own CI job — the name avoids the `bun.test`
+  substring `test:bun` filters on — in about 56s locally.
+  Several cases shorten deadlines through **test-only** environment variables
   (`FLEET_BENCH_TEST_RPC_DEADLINE_MS`, `_LOCAL_START_TIMEOUT_MS`,
   `_ASSIGNED_ID_TIMEOUT_MS`; positive integer ms, unknown names refused,
   defaults 35000 / 50000 / 95000), which are not flags and make the run say on
   stderr that it is not a measurement.
 - `smokeHarness.ts` — the mock CSMS (per-action `delayMs` / `stallAfter`, hooks
-  on receipt and reply, open transactions tracked by id), the daemon and bench
+  on receipt and reply, open transactions tracked by id), the slow control-plane
+  relay (per-RPC request holds, an RPC log, `drained()`), the daemon and bench
   subprocesses and the control-plane helpers, shared by both run-level suites.
 
 - `tsconfig.json` — this directory is outside `tsconfig.cli.json`'s
@@ -710,12 +717,10 @@ arming.
   `tsconfig.json` as a `composite` project so `tsc -b` covers it.
 
 **Not covered by a run-level test.** A mock CSMS cannot slow a
-control-plane RPC (the daemon acks `start_transaction` before Authorize is
-answered and `stop_transaction` once the frame is queued), so the RPC stages of
-the cycle bound are pinned only as arithmetic by `lib.bun.test.ts`, with no
-run-level test showing teardown needs them; it cannot make `cp.create_many` outlive its 35s
-client deadline either, because `createOneCp` does not await the connection —
-that needs a fake daemon and is #523, a follow-up to #330. Re-stopping a charge
+control-plane RPC, which is why the relay exists. Its RPC-stage case asserts
+the order the daemon saw the RPCs in, not the CSMS: teardown's unconditional
+re-stop closes the session even when the charge point is deleted before the
+cycle's own stop arrives, so the CSMS looks the same either way. Re-stopping a charge
 point whose stop was already acked sends nothing (`ChargePoint.stopTransaction`
 returns once the transaction is closed), so the CSMS cannot tell it happened;
 that the charge point stays on the re-stop list is pinned only by teardown's

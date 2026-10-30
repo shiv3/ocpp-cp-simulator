@@ -79,6 +79,27 @@ describe("sign_certificate csr bound (#456)", () => {
   });
 });
 
+describe("security_event_notification bounds (#537)", () => {
+  // SecurityEventNotification: type string[0..50], techInfo
+  // string[0..255] (1.6 whitepaper, 2.0.1, 2.1).
+  const params = METHODS.security_event_notification.params;
+
+  it("accepts a 50-character type and refuses 51", () => {
+    expect(params.safeParse({ type: "t".repeat(50) }).success).toBe(true);
+    expect(params.safeParse({ type: "t".repeat(51) }).success).toBe(false);
+  });
+
+  it("accepts a 255-character techInfo and refuses 256", () => {
+    const type = "SettingSystemTime";
+    expect(params.safeParse({ type, techInfo: "i".repeat(255) }).success).toBe(
+      true,
+    );
+    expect(params.safeParse({ type, techInfo: "i".repeat(256) }).success).toBe(
+      false,
+    );
+  });
+});
+
 describe("get_15118_ev_certificate bounds (#537)", () => {
   const params = METHODS.get_15118_ev_certificate.params;
   const valid = {

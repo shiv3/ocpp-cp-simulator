@@ -136,6 +136,8 @@ export async function relayGet15118EVCertificate(
       break;
     }
     previousRemaining = remaining;
+    // A request sent with no time left could only time out.
+    if (Date.now() >= deadline) return { responses, noAnswer: "timeout" };
   }
   return { responses };
 }

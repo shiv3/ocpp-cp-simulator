@@ -242,11 +242,7 @@ export async function handleJsonCommand(
     }
 
     case "security_event_notification": {
-      const type = requireString(params, "type");
-      const techInfo =
-        params.techInfo === undefined
-          ? undefined
-          : requireString(params, "techInfo");
+      const { type, techInfo } = securityEventParams(params);
       await ops.sendSecurityEventNotification(type, techInfo);
       return undefined;
     }
@@ -719,7 +715,24 @@ function seedEntries(
   return parsed.data;
 }
 
-/** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
+/** `security_event_notification`'s params (#537), checked by
+ *  `METHODS.security_event_notification` (its length bounds included). */
+function securityEventParams(params: Record<string, unknown>): {
+  type: string;
+  techInfo?: string;
+} {
+  const parsed = METHODS.security_event_notification.params.safeParse(params);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
+  }
+  return parsed.data;
+}
+
+/** `get_15118_ev_certificate`'s params (#537), checked by
+ *  `METHODS.get_15118_ev_certificate`. */
 function get15118EVCertificateRequest(
   params: Record<string, unknown>,
 ): Get15118EVCertificateRequest {
@@ -733,6 +746,7 @@ function get15118EVCertificateRequest(
   return parsed.data;
 }
 
+/** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
 function ocppCallRequest(params: Record<string, unknown>): OcppCallRequest {
   const parsed = METHODS.send_ocpp_call.params.safeParse(params);
   if (!parsed.success) {

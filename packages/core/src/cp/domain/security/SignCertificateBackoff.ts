@@ -20,8 +20,7 @@ export interface SignCertificateBackoffDeps {
 interface Sequence {
   /** Resends sent so far. */
   resends: number;
-  /** A resend is on the wire and its answer is awaited. */
-  awaitingResendAnswer: boolean;
+  /** The wait in progress; none once `CertSigningRepeatTimes` is reached. */
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -31,14 +30,18 @@ interface Sequence {
  *
  * - an accepted SignCertificateRequest starts a wait of
  *   `CertSigningWaitMinimum` seconds (A02.FR.17);
- * - when it expires and the CSR still awaits its CertificateSigned, the
- *   request is resent, and the wait doubles once the resend is accepted
- *   (A02.FR.18);
+ * - every time the wait expires and the CSR still awaits its
+ *   CertificateSigned, the request is resent and the next wait, twice as
+ *   long, starts at once (A02.FR.18): a resend left unanswered or answered
+ *   with a CALLERROR does not stall the sequence;
  * - after `CertSigningRepeatTimes` resends the station stops until the
- *   CSMS triggers a new request (A02.FR.19), which {@link restart}s it.
+ *   CSMS triggers a new request (A02.FR.19). The sequence is kept, with no
+ *   wait, so the last resend's answer does not start it over.
  *
- * The owner stops a sequence when CertificateSigned is rejected
- * (A02.FR.20) and every sequence when the connection closes.
+ * Every new request (TriggerMessage, `sign_certificate`) calls
+ * {@link restart} first, so an `Accepted` seen while a sequence exists is
+ * a resend's. The owner stops a sequence when CertificateSigned is
+ * rejected (A02.FR.20) and every sequence when the connection closes.
  */
 export class SignCertificateBackoff {
   readonly #sequences = new Map<SignedCertificateUse, Sequence>();
@@ -47,20 +50,10 @@ export class SignCertificateBackoff {
 
   /** The CSMS accepted a SignCertificateRequest for `use`. */
   accepted(use: SignedCertificateUse): void {
-    const current = this.#sequences.get(use);
-    if (current?.awaitingResendAnswer) {
-      current.awaitingResendAnswer = false;
-      if (current.resends >= this.deps.settings().repeatTimes) {
-        this.stop(use);
-        return;
-      }
-      this.schedule(use, current);
-      return;
-    }
-    // A new request: its sequence starts over.
-    this.stop(use);
+    // A resend's answer: the next wait already runs since the expiry.
+    if (this.#sequences.has(use)) return;
     if (this.deps.settings().repeatTimes <= 0) return;
-    const sequence: Sequence = { resends: 0, awaitingResendAnswer: false };
+    const sequence: Sequence = { resends: 0 };
     this.#sequences.set(use, sequence);
     this.schedule(use, sequence);
   }
@@ -70,7 +63,8 @@ export class SignCertificateBackoff {
     this.stop(use);
   }
 
-  /** A new request for `use` is about to be sent (TriggerMessage). */
+  /** A new request for `use` is about to be sent (TriggerMessage,
+   *  `sign_certificate`): its sequence starts over once accepted. */
   restart(use: SignedCertificateUse): void {
     this.stop(use);
   }
@@ -85,8 +79,9 @@ export class SignCertificateBackoff {
     for (const use of [...this.#sequences.keys()]) this.stop(use);
   }
 
+  /** Whether a wait for `use` is in progress. */
   isRunning(use: SignedCertificateUse): boolean {
-    return this.#sequences.has(use);
+    return this.#sequences.get(use)?.timer !== undefined;
   }
 
   private schedule(use: SignedCertificateUse, sequence: Sequence): void {
@@ -109,7 +104,13 @@ export class SignCertificateBackoff {
       return;
     }
     sequence.resends++;
-    sequence.awaitingResendAnswer = true;
     this.deps.resend(use);
+    // A02.FR.18: the doubled wait starts now, whatever the answer.
+    if (
+      this.#sequences.get(use) === sequence &&
+      sequence.resends < this.deps.settings().repeatTimes
+    ) {
+      this.schedule(use, sequence);
+    }
   }
 }

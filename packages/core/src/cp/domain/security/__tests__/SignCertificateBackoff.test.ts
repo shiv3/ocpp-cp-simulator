@@ -60,6 +60,37 @@ describe("SignCertificateBackoff", () => {
     expect(backoff.isRunning(use)).toBe(false);
   });
 
+  it("doubles the wait every time it expires, whatever the resend's answer (A02.FR.18)", () => {
+    const { backoff, resend } = setup(10, 3);
+    const use = "ChargingStationCertificate";
+
+    backoff.accepted(use);
+    vi.advanceTimersByTime(10_000);
+    expect(resend).toHaveBeenCalledTimes(1);
+    // No answer to the resend (a CALLERROR, a lost frame): the next wait
+    // still runs, twice as long.
+    vi.advanceTimersByTime(19_999);
+    expect(resend).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(resend).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(40_000);
+    expect(resend).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(resend).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not start over on the last resend's Accepted", () => {
+    const { backoff, resend } = setup(10, 1);
+    const use = "ChargingStationCertificate";
+    backoff.accepted(use);
+    vi.advanceTimersByTime(10_000);
+    expect(resend).toHaveBeenCalledTimes(1);
+
+    backoff.accepted(use);
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(resend).toHaveBeenCalledTimes(1);
+  });
+
   it("never resends when CertSigningRepeatTimes is 0", () => {
     const { backoff, resend } = setup(10, 0);
     backoff.accepted("ChargingStationCertificate");

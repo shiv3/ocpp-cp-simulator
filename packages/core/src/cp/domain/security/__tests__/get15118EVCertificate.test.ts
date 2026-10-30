@@ -220,6 +220,28 @@ describe("relayGet15118EVCertificate (M01 / M02)", () => {
     expect((await relayed).responses).toHaveLength(2);
   });
 
+  it("sends no further request once the budget is spent", async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    const send = vi.fn(async (): Promise<OcppCallOutcome> => {
+      // The answer lands exactly when the budget runs out.
+      vi.setSystemTime(started + 1000);
+      return callResult({
+        status: "Accepted",
+        exiResponse: "",
+        remainingContracts: 5,
+      });
+    });
+
+    const relayed = await relayGet15118EVCertificate(ISO20, send, {
+      budgetMs: 1000,
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(relayed).toMatchObject({ noAnswer: "timeout" });
+    expect(relayed.responses).toHaveLength(1);
+  });
+
   it("throws a timeout when the budget runs out before the first answer", async () => {
     vi.useFakeTimers();
     const send = vi.fn(

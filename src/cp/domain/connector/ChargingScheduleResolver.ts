@@ -376,7 +376,10 @@ export function compositeLimitInUnit(
  */
 export function floorToTenth(value: number): number {
   if (!Number.isFinite(value)) return value;
-  return Math.max(0, Math.floor(value * 10 + 1e-9) / 10);
+  const scaled = value * 10;
+  // Past ~1.8e307 the product overflows; such a double is already an integer.
+  if (!Number.isFinite(scaled)) return Math.max(0, value);
+  return Math.max(0, Math.floor(scaled + 1e-9) / 10);
 }
 
 function sameComposite(a: CompositePeriod, b: CompositePeriod): boolean {

@@ -239,6 +239,13 @@ describe("floorToTenth (#524)", () => {
     expect(result).toBeGreaterThanOrEqual(0);
     expect(result).toBeLessThanOrEqual(Math.max(0, input) + 1e-9);
   });
+
+  it("returns a finite value whose tenfold overflows unchanged", () => {
+    // Above ~1.8e307 the product by 10 is Infinity; such a double is
+    // already an integer, so there is nothing to floor.
+    expect(floorToTenth(Number.MAX_VALUE)).toBe(Number.MAX_VALUE);
+    expect(floorToTenth(2e307)).toBe(2e307);
+  });
 });
 
 describe("compositeLimitInUnit (#524)", () => {

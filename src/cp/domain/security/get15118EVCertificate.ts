@@ -21,7 +21,7 @@ export interface Get15118EVCertificateRequest {
    *  station repeat the request while contracts remain (M01.FR.06). */
   readonly maximumContractCertificateChains?: number;
   /** 2.1, ISO 15118-20 sessions only. */
-  readonly prioritizedEMAIDs?: readonly string[];
+  readonly prioritizedEMAIDs?: string[];
 }
 
 export interface Get15118EVCertificateResult {
@@ -60,7 +60,7 @@ export function get15118EVCertificatePayload(
         }
       : {}),
     ...(request.prioritizedEMAIDs !== undefined
-      ? { prioritizedEMAIDs: [...request.prioritizedEMAIDs] }
+      ? { prioritizedEMAIDs: request.prioritizedEMAIDs }
       : {}),
   };
 }

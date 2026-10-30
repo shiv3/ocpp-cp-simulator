@@ -395,7 +395,7 @@ describe("get_15118_ev_certificate (#537)", () => {
     [
       new OcppCallRejectedError(
         "unsupported_action",
-        "Get15118EVCertificate is an OCPP 2.0.1 / 2.1 message; OCPP-1.6J has none",
+        "Get15118EVCertificate is not a station-initiated call on OCPP-1.6J; expected one of Authorize, BootNotification",
       ),
       "invalid_params",
     ],

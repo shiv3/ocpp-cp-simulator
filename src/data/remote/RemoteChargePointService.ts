@@ -969,13 +969,11 @@ export class RemoteChargePointService implements ChargePointService {
     id: string,
     request: Get15118EVCertificateRequest,
   ): Promise<Get15118EVCertificateResult> {
-    const { prioritizedEMAIDs, ...rest } = request;
-    return (await this.runCpRpc(id, "get_15118_ev_certificate", {
-      ...rest,
-      ...(prioritizedEMAIDs !== undefined
-        ? { prioritizedEMAIDs: [...prioritizedEMAIDs] }
-        : {}),
-    })) as Get15118EVCertificateResult;
+    return (await this.runCpRpc(
+      id,
+      "get_15118_ev_certificate",
+      request,
+    )) as Get15118EVCertificateResult;
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {

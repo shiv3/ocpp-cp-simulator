@@ -53,7 +53,6 @@ import {
 import { RawFrameSender } from "../../infrastructure/transport/RawFrameSender";
 import { OcppCallRejectedError } from "../errors/OcppCallErrors";
 import {
-  get15118EVCertificatePayload,
   relayGet15118EVCertificate,
   type Get15118EVCertificateRequest,
   type Get15118EVCertificateResult,
@@ -1874,38 +1873,19 @@ export class ChargePoint {
   /**
    * 2.0.1 / 2.1 Get15118EVCertificate relay (M01 / M02, #537): sends the EXI
    * request the caller supplies, standing in for an EV, and resolves with
-   * the CSMS's answers. See {@link relayGet15118EVCertificate}. Refused
-   * before anything is written on 1.6 and SOAP stations, which have no such
-   * message, and when the payload fails the version's schema (a 2.1-only
-   * field or an over-long `exiRequest` on 2.0.1).
+   * the CSMS's answers. See {@link relayGet15118EVCertificate}. Each request
+   * goes through {@link sendOcppCall}, so it is refused before anything is
+   * written on 1.6 and SOAP stations, which have no such message, and when
+   * the payload fails the version's schema (a 2.1-only field or an
+   * over-long `exiRequest` on 2.0.1).
    */
   async get15118EVCertificate(
     request: Get15118EVCertificateRequest,
   ): Promise<Get15118EVCertificateResult> {
-    const action = "Get15118EVCertificate";
-    const catalog = getOcppCallCatalog(this._ocppVersion);
-    if (!catalog) {
-      throw new OcppCallRejectedError(
-        "unsupported_transport",
-        `${action} is an OCPP 2.0.1 / 2.1 message; ${this._ocppVersion} is SOAP`,
-      );
-    }
-    if (!catalog.isSupported(action)) {
-      throw new OcppCallRejectedError(
-        "unsupported_action",
-        `${action} is an OCPP 2.0.1 / 2.1 message; ${this._ocppVersion} has none`,
-      );
-    }
-    const warning = catalog.validate(
-      action,
-      get15118EVCertificatePayload(request),
-    );
-    if (warning) {
-      throw new OcppCallRejectedError("invalid_payload", warning);
-    }
     return relayGet15118EVCertificate(
       request,
-      (payload) => this._outbox.sendOcppCall({ action, payload }),
+      (payload) =>
+        this.sendOcppCall({ action: "Get15118EVCertificate", payload }),
       { warn: (message) => this._logger.warn(message, LogType.OCPP) },
     );
   }

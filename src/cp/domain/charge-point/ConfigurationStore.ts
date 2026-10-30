@@ -69,6 +69,8 @@ export type ConfigurationChangeListener = (
 export class ConfigurationStore {
   private readonly values = new Map<string, ConfigurationValue>();
   private readonly listeners = new Set<ConfigurationChangeListener>();
+  /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
+  private readonly runtimeKeys = new Set<string>();
 
   constructor(
     private readonly chargePointId: string,
@@ -196,6 +198,18 @@ export class ConfigurationStore {
     return this.getInteger("TransactionMessageRetryInterval") ?? 60;
   }
 
+  /** 2.x key `MessageTimeout` (seconds); default `30` (#529). 2.x reads it
+   *  as `OCPPCommCtrlr.MessageTimeout` with instance `Default`. */
+  messageTimeout(): number {
+    return this.getInteger("MessageTimeout") ?? 30;
+  }
+
+  /** 2.x key `OfflineQueuingSeverity` (0-9); default `0` (#538). 2.x reads
+   *  it as `MonitoringCtrlr.OfflineQueuingSeverity`. */
+  offlineQueuingSeverity(): number {
+    return this.getInteger("OfflineQueuingSeverity") ?? 0;
+  }
+
   /** Canonical key `AuthorizeRemoteTxRequests`; default `false`. */
   authorizeRemoteTxRequests(): boolean {
     return this.getBoolean("AuthorizeRemoteTxRequests") ?? false;
@@ -273,15 +287,54 @@ export class ConfigurationStore {
    * `MeterPublicKey<connectorId>` once that connector's signing key exists
    * (#315). Not persisted: the value is only true for this process.
    */
-  defineRuntimeKey(name: string, value: string): void {
+  defineRuntimeKey(
+    name: string,
+    value: string,
+    allowed?: readonly string[],
+  ): void {
     const key: StringConfigurationKey = {
       name,
       required: false,
       readonly: true,
       type: "string",
+      ...(allowed !== undefined && { allowed }),
     };
     this.values.set(name, { key, value });
+    this.runtimeKeys.add(name);
     this.emit(name, value);
+  }
+
+  /**
+   * The integer counterpart of {@link defineRuntimeKey}, such as an OCPP 2.x
+   * `MonitoringCtrlr` value the station owns (#538): read-only, never
+   * persisted, and redefining it fires the listeners like a change does.
+   */
+  defineRuntimeIntegerKey(
+    name: string,
+    value: number,
+    bounds: { readonly min?: number; readonly max?: number } = {},
+  ): void {
+    const key: IntegerConfigurationKey = {
+      name,
+      required: false,
+      readonly: true,
+      type: "integer",
+      ...(bounds.min !== undefined && { min: bounds.min }),
+      ...(bounds.max !== undefined && { max: bounds.max }),
+    };
+    this.values.set(name, { key, value });
+    this.runtimeKeys.add(name);
+    this.emit(name, value);
+  }
+
+  /**
+   * Withdraw a runtime key, such as the per-EVSE values of a removed
+   * connector (#538). Silent: nothing changed value, the variable is gone.
+   * Returns false, touching nothing, for a configuration key.
+   */
+  removeRuntimeKey(name: string): boolean {
+    if (!this.runtimeKeys.delete(name)) return false;
+    return this.values.delete(name);
   }
 
   /** Canonical key `LocalAuthListEnabled`; default `true`. */

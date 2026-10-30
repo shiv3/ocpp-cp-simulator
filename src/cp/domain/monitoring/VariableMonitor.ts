@@ -1,3 +1,5 @@
+import { isOneOf } from "../types/FirmwareLogStatus";
+
 /**
  * OCPP 2.x variable monitoring (use cases N02–N07) — domain types.
  *
@@ -8,11 +10,20 @@
  * (the value `GetVariables` / `SetVariables` read and write).
  */
 
-/** Monitor types the simulator implements (N07.FR.16–FR.19). */
+/**
+ * Monitor types the simulator implements: thresholds and Delta (N07.FR.16–
+ * FR.19), Periodic and PeriodicClockAligned (N08, #538), and the 2.1
+ * TargetDelta / TargetDeltaRelative (2.1 N07.FR.22, FR.23, #538), which the
+ * 2.0.1 schema does not have.
+ */
 export const SUPPORTED_MONITOR_TYPES = [
   "UpperThreshold",
   "LowerThreshold",
   "Delta",
+  "Periodic",
+  "PeriodicClockAligned",
+  "TargetDelta",
+  "TargetDeltaRelative",
 ] as const;
 
 export type SupportedMonitorType = (typeof SUPPORTED_MONITOR_TYPES)[number];
@@ -20,14 +31,53 @@ export type SupportedMonitorType = (typeof SUPPORTED_MONITOR_TYPES)[number];
 export function parseSupportedMonitorType(
   raw: string,
 ): SupportedMonitorType | null {
-  return (SUPPORTED_MONITOR_TYPES as readonly string[]).includes(raw)
-    ? (raw as SupportedMonitorType)
-    : null;
+  return isOneOf(raw, SUPPORTED_MONITOR_TYPES) ? raw : null;
 }
 
-export function isThresholdMonitorType(type: SupportedMonitorType): boolean {
-  return type === "UpperThreshold" || type === "LowerThreshold";
+/**
+ * How a monitor type behaves:
+ * - `alert`: fires `Alerting` when the value goes beyond a bound and
+ *   `cleared` when it comes back (N07.FR.02, FR.11, FR.12, FR.14);
+ * - `delta`: fires `Delta` when the value moves by a step (N07.FR.18, FR.19);
+ * - `periodic`: fires `Periodic` on a timer, whatever the value (N08).
+ */
+export type MonitorBehaviour = "alert" | "delta" | "periodic";
+
+export function monitorBehaviour(type: SupportedMonitorType): MonitorBehaviour {
+  switch (type) {
+    case "UpperThreshold":
+    case "LowerThreshold":
+    case "TargetDelta":
+    case "TargetDeltaRelative":
+      return "alert";
+    case "Delta":
+      return "delta";
+    case "Periodic":
+    case "PeriodicClockAligned":
+      return "periodic";
+  }
 }
+
+/** 2.1 TargetDelta / TargetDeltaRelative: Actual against Target. */
+export function isTargetDeltaMonitorType(type: SupportedMonitorType): boolean {
+  return type === "TargetDelta" || type === "TargetDeltaRelative";
+}
+
+/** A monitor with a triggered state: it fires, then fires `cleared`. */
+export function isAlertMonitorType(type: SupportedMonitorType): boolean {
+  return monitorBehaviour(type) === "alert";
+}
+
+export function isPeriodicMonitorType(type: SupportedMonitorType): boolean {
+  return monitorBehaviour(type) === "periodic";
+}
+
+/**
+ * The shortest Periodic / PeriodicClockAligned interval, in seconds. N08
+ * sets no lower bound; this one keeps a monitor from flooding the CSMS (or
+ * spinning on a zero interval).
+ */
+export const MIN_PERIODIC_INTERVAL_SECONDS = 1;
 
 /**
  * Where a monitor comes from; the values match OCPP's
@@ -73,13 +123,19 @@ export interface MonitoredValueType {
   /** Inclusive bounds of a numeric variable, when it has any (N04.FR.06). */
   readonly min?: number;
   readonly max?: number;
+  /** The variable has a Target attribute (TargetDelta monitors, #538). */
+  readonly hasTarget?: boolean;
 }
 
 export interface VariableMonitor {
   readonly id: number;
   readonly type: SupportedMonitorType;
   readonly severity: number;
-  /** Threshold for Upper/LowerThreshold, step for Delta. */
+  /**
+   * Threshold for Upper/LowerThreshold, step for Delta, interval in seconds
+   * for Periodic / PeriodicClockAligned, allowed deviation from the target
+   * for TargetDelta (absolute) / TargetDeltaRelative (a fraction of it).
+   */
   readonly value: number;
   /** Monitor only while a transaction is running. */
   readonly transaction: boolean;

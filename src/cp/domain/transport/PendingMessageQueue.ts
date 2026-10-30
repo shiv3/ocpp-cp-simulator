@@ -2,13 +2,16 @@ import type { OCPPAction } from "../types/OcppTypes";
 import type { Database } from "../persistence/Database";
 
 /**
- * One queued transaction-related CALL waiting to be (re)delivered. Stored
- * verbatim — the payload is `unknown` because each action has its own
- * generated request type.
+ * One queued CALL waiting to be (re)delivered. Stored verbatim — the
+ * payload is `unknown` because each action has its own generated request
+ * type. `A` is the action vocabulary of the protocol that owns the queue:
+ * {@link OCPPAction} for 1.6, the 2.x handler's own action union for 2.0.1 /
+ * 2.1 (#528).
  */
-export interface PendingMessage {
-  /** Action name (StartTransaction / StopTransaction / MeterValues). */
-  action: OCPPAction;
+export interface PendingMessage<A extends string = OCPPAction> {
+  /** Action name (1.6: StartTransaction / StopTransaction / MeterValues;
+   *  2.x: TransactionEvent, NotifyEvent). */
+  action: A;
   /** Serialized request payload. */
   payload: unknown;
   /** Connector this message belongs to, for logging/diagnostics. */
@@ -25,21 +28,35 @@ export interface PendingMessage {
  * shape, so we keep it next to the payload here. `seq` is a monotonic
  * per-CP sequence number for stable ordering across restarts.
  */
-interface PendingRow extends PendingMessage {
+interface PendingRow<A extends string> extends PendingMessage<A> {
   messageId: string;
   seq: number;
 }
 
 /**
  * Persistent queue of transaction-related messages that failed to deliver
- * (typically because the WebSocket was offline). Matches OCPP 1.6 §4.7 /
+ * (typically because the WebSocket was offline). Each protocol handler owns
+ * one; both share the `pending_messages` table, keyed by charge point.
+ *
+ * Each handler names the actions it queues. The table is shared by charge
+ * point id and `cp.update` can switch ocppVersion over the same
+ * --state-db, so a row of any other action (the other protocol's) is
+ * deleted when the queue loads and listed in {@link droppedOnLoad} (#528).
+ *
+ * OCPP 2.0.1 / 2.1 (#528): the 2.x handler queues TransactionEvent requests
+ * under E11.FR.01 and replays them with `offline = true` (E11.FR.02); it
+ * flushes with no attempt limit, since E13 owns the attempt counting there.
+ * It also queues NotifyEvent reports (#538, N07.FR.04), replayed in the
+ * same pass without `offline`.
+ *
+ * OCPP 1.6: matches OCPP 1.6 §4.7 /
  * §4.8 / §4.10 + errata 3.18: "When the Central System fails to process
  * a transaction-related message, the Charge Point SHALL retry up to
  * `TransactionMessageAttempts` times at `TransactionMessageRetryInterval`
  * intervals." Queue contents persist across reboots so a power outage
  * during an active transaction doesn't lose StartTransaction.req.
  *
- * Only StartTransaction / StopTransaction / MeterValues(with
+ * On 1.6 only StartTransaction / StopTransaction / MeterValues(with
  * transactionId) belong here. Heartbeats, StatusNotifications, etc. are
  * informational and are fine to drop while offline.
  *
@@ -47,23 +64,29 @@ interface PendingRow extends PendingMessage {
  * is provided; falls back to an in-memory queue otherwise (tests / future
  * memory-only daemon mode).
  */
-export class PendingMessageQueue {
-  private items: PendingRow[] = [];
+export class PendingMessageQueue<A extends string = OCPPAction> {
+  private items: PendingRow<A>[] = [];
   /** Persisted FIFO ordering key; seeded from MAX(seq) for this cp on load. */
   private nextSeq = 0;
   /** Independent counter for the user-visible message id — keeping it apart
    *  from `nextSeq` stops an id allocation from perturbing the ordering key. */
   private nextIdSuffix = 0;
+  /** Actions of the persisted rows `load` deleted: not queued by this
+   *  handler (#528). */
+  readonly droppedOnLoad: string[] = [];
+  private readonly queuedActions: ReadonlySet<string>;
 
   constructor(
     private readonly chargePointId: string,
-    private readonly database: Database | null = null,
+    private readonly database: Database | null,
+    queuedActions: ReadonlySet<A>,
   ) {
+    this.queuedActions = queuedActions;
     this.load();
   }
 
   /** Snapshot of the current queue (FIFO order). */
-  all(): PendingMessage[] {
+  all(): PendingMessage<A>[] {
     return this.items.map(toPendingMessage);
   }
 
@@ -71,8 +94,8 @@ export class PendingMessageQueue {
     return this.items.length;
   }
 
-  enqueue(message: Omit<PendingMessage, "queuedAt" | "attempts">): void {
-    const row: PendingRow = {
+  enqueue(message: Omit<PendingMessage<A>, "queuedAt" | "attempts">): void {
+    const row: PendingRow<A> = {
       ...message,
       queuedAt: Date.now(),
       attempts: 0,
@@ -83,8 +106,31 @@ export class PendingMessageQueue {
     this.insertRow(row);
   }
 
+  /** How many queued messages carry `action`. */
+  countOf(action: A): number {
+    let count = 0;
+    for (const item of this.items) if (item.action === action) count++;
+    return count;
+  }
+
+  /**
+   * Remove the oldest queued message carrying `action` (and whose payload
+   * `where` accepts, when given) and persist; the other actions are never
+   * touched. Returns whether one was removed.
+   */
+  removeOldest(action: A, where?: (payload: unknown) => boolean): boolean {
+    const index = this.items.findIndex(
+      (item) =>
+        item.action === action && (where === undefined || where(item.payload)),
+    );
+    if (index < 0) return false;
+    const [row] = this.items.splice(index, 1);
+    this.deleteRow(row.messageId);
+    return true;
+  }
+
   /** Remove the head and persist. Returns the dequeued message or undefined. */
-  dequeue(): PendingMessage | undefined {
+  dequeue(): PendingMessage<A> | undefined {
     const row = this.items.shift();
     if (!row) return undefined;
     this.deleteRow(row.messageId);
@@ -98,7 +144,7 @@ export class PendingMessageQueue {
    * so retries respect order. Returns the count delivered.
    */
   flush(
-    send: (message: PendingMessage) => boolean,
+    send: (message: PendingMessage<A>) => boolean,
     maxAttempts: number,
   ): number {
     let delivered = 0;
@@ -156,20 +202,26 @@ export class PendingMessageQueue {
           "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
         [this.chargePointId],
       );
-      this.items = rows.map((r) => ({
-        messageId: r.message_id,
-        action: r.action as OCPPAction,
-        payload: safeParse(r.payload),
-        connectorId: r.connector_id ?? undefined,
-        queuedAt: Date.parse(r.created_at) || Date.now(),
-        attempts: r.attempts,
-        seq: r.seq ?? 0,
-      }));
+      this.items = [];
+      for (const r of rows) {
+        const action = r.action;
+        if (!this.isQueued(action)) {
+          this.droppedOnLoad.push(action);
+          this.deleteRow(r.message_id);
+          continue;
+        }
+        this.items.push({
+          messageId: r.message_id,
+          action,
+          payload: safeParse(r.payload),
+          connectorId: r.connector_id ?? undefined,
+          queuedAt: Date.parse(r.created_at) || Date.now(),
+          attempts: r.attempts,
+          seq: r.seq ?? 0,
+        });
+      }
       // Initialize seq counter to 1 + MAX(seq) to avoid collisions.
-      const maxSeq = this.items.reduce(
-        (max, item) => Math.max(max, item.seq),
-        0,
-      );
+      const maxSeq = rows.reduce((max, r) => Math.max(max, r.seq ?? 0), 0);
       this.nextSeq = maxSeq + 1;
       // The id suffix rides the same high-water mark so a queue reopened
       // within the same millisecond cannot mint an id that collides with a
@@ -182,7 +234,11 @@ export class PendingMessageQueue {
     }
   }
 
-  private insertRow(row: PendingRow): void {
+  private isQueued(action: string): action is A {
+    return this.queuedActions.has(action);
+  }
+
+  private insertRow(row: PendingRow<A>): void {
     if (!this.database) return;
     try {
       this.database.run(
@@ -240,7 +296,9 @@ export class PendingMessageQueue {
 
 /** Strip the persistence-only columns so callers see exactly the declared
  *  {@link PendingMessage} shape — `messageId` and `seq` are storage details. */
-function toPendingMessage(row: PendingRow): PendingMessage {
+function toPendingMessage<A extends string>(
+  row: PendingRow<A>,
+): PendingMessage<A> {
   const { messageId: _id, seq: _seq, ...msg } = row;
   return msg;
 }

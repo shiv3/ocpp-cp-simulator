@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { evaluateMonitor, type MonitoredReading } from "../evaluateMonitor";
-import { MonitorEvaluation, type MonitoringEvent } from "../MonitorEvaluation";
+import {
+  MonitorEvaluation,
+  type MonitorEvaluationDeps,
+  type MonitoringEvent,
+} from "../MonitorEvaluation";
 import { MonitoringStore, type MonitorDraft } from "../MonitoringStore";
 
 const INTEGER = { numeric: true } as const;
@@ -94,6 +98,7 @@ function harness(
     store?: MonitoringStore;
     restored?: ReadonlyMap<number, boolean>;
     values?: Record<string, MonitoredReading>;
+    transactionIdOf?: MonitorEvaluationDeps["transactionIdOf"];
   } = {},
 ): Harness {
   const store = options.store ?? new MonitoringStore();
@@ -111,6 +116,9 @@ function harness(
       transactionActive: () => transaction.active,
       now: () => new Date("2026-10-29T12:00:00.000Z"),
       onTriggeredChange: (id, value) => triggered.push([id, value]),
+      ...(options.transactionIdOf && {
+        transactionIdOf: options.transactionIdOf,
+      }),
     },
     options.restored,
   );
@@ -229,6 +237,22 @@ describe("MonitorEvaluation", () => {
     h.transaction.active = true;
     h.change("HeartbeatInterval", num(45));
     expect(h.events.map((e) => e.cleared)).toEqual([true]);
+  });
+
+  it("links an event to the transaction the charge point names for its monitor (#538)", () => {
+    const h = harness({
+      transactionIdOf: (m) => (m.component.evse?.id === 1 ? "tx-1" : undefined),
+    });
+    h.store.install(
+      draft({ component: { name: "OCPPCommCtrlr", evse: { id: 1 } } }),
+    );
+    h.store.install(draft({ severity: 6 }));
+    h.change("HeartbeatInterval", num(60));
+
+    expect(h.events.map((e) => [e.monitor.id, e.transactionId])).toEqual([
+      [1, "tx-1"],
+      [2, undefined],
+    ]);
   });
 
   it("evaluates a new monitor against the current value", () => {

@@ -1,9 +1,13 @@
+import { isOneOf } from "../types/FirmwareLogStatus";
 import {
-  isThresholdMonitorType,
   isValidMonitorSeverity,
   MAX_MONITOR_SEVERITY,
+  isTargetDeltaMonitorType,
+  MIN_PERIODIC_INTERVAL_SECONDS,
+  monitorBehaviour,
   parseSupportedMonitorType,
   sameMonitorTarget,
+  type SupportedMonitorType,
   type MonitorComponent,
   type MonitoredValueType,
   type MonitorVariable,
@@ -40,7 +44,11 @@ export type InstallRejectionReason =
   /** N04.FR.14 */
   | "NegativeDelta"
   /** Severity outside 0-9 (the schemas only set a minimum). */
-  | "SeverityOutOfRange";
+  | "SeverityOutOfRange"
+  /** Periodic interval under one second (a simulator limit, #538). */
+  | "IntervalTooShort"
+  /** Negative TargetDelta / TargetDeltaRelative value (#538). */
+  | "NegativeTargetDelta";
 
 export type InstallOutcome =
   | {
@@ -62,20 +70,95 @@ export type MonitoringStoreEvent =
       readonly replaced?: VariableMonitor;
     }
   | { readonly kind: "cleared"; readonly monitor: VariableMonitor }
-  | { readonly kind: "levelChanged"; readonly level: number };
+  | { readonly kind: "levelChanged"; readonly level: number }
+  | { readonly kind: "baseChanged"; readonly base: MonitoringBase };
 
 export type MonitoringStoreListener = (event: MonitoringStoreEvent) => void;
 
+/** What {@link MonitoringStore.initialize} leaves persistence to do. */
+export interface MonitoringInitialization {
+  /** Persisted monitors the store ignored: delete their rows. */
+  readonly dropped: readonly VariableMonitor[];
+  /** The station's own monitors now installed: save their rows. */
+  readonly added: readonly VariableMonitor[];
+}
+
+/** `MonitoringBaseEnumType`, the same in 2.0.1 and 2.1. */
+export const MONITORING_BASES = [
+  "All",
+  "FactoryDefault",
+  "HardWiredOnly",
+] as const;
+
+export type MonitoringBase = (typeof MONITORING_BASES)[number];
+
+export function parseMonitoringBase(raw: string): MonitoringBase | null {
+  return isOneOf(raw, MONITORING_BASES) ? raw : null;
+}
+
 /**
  * In-memory catalog of installed variable monitors plus the monitoring
- * level set by SetMonitoringLevel (N04–N06). Ids are allocated in
- * increasing order and never reused while the store lives.
+ * level set by SetMonitoringLevel (N04–N06) and the monitoring base set by
+ * SetMonitoringBase (N03). Custom ids are allocated in increasing order,
+ * skip the ids of the station's own monitors, and are never reused while
+ * the store lives.
+ *
+ * `catalog` holds the station's hardwired and preconfigured monitors
+ * (#538); they are only in the store once {@link initialize} has run.
  */
 export class MonitoringStore {
   private readonly monitors = new Map<number, VariableMonitor>();
   private readonly listeners = new Set<MonitoringStoreListener>();
+  private readonly catalogIds: ReadonlySet<number>;
   private nextId = 1;
   private level = MAX_MONITOR_SEVERITY;
+  private base: MonitoringBase = "All";
+
+  constructor(private readonly catalog: readonly VariableMonitor[] = []) {
+    this.catalogIds = new Set(catalog.map((m) => m.id));
+  }
+
+  /**
+   * Start-up (silent, like {@link restore}): the persisted monitors, the
+   * hardwired monitors of the catalog (always theirs, whatever was
+   * persisted; a persisted hardwired monitor the catalog lacks is
+   * ignored), and the persisted monitoring base. `activeBase` undefined
+   * means the station never stored its catalog state (a first start, or a
+   * database from before #538): the preconfigured monitors are activated
+   * as under `All`, a persisted monitor with the same id winning.
+   *
+   * Returns what persistence must catch up with: `dropped`, the persisted
+   * hardwired monitors the catalog lacks; `added`, the station's own
+   * monitors now installed (every hardwired one, and the preconfigured
+   * ones when `activeBase` is undefined), by increasing id.
+   */
+  initialize(
+    persisted: readonly VariableMonitor[],
+    activeBase: MonitoringBase | undefined,
+  ): MonitoringInitialization {
+    if (activeBase === undefined) {
+      for (const monitor of this.preconfigured()) {
+        this.monitors.set(monitor.id, monitor);
+      }
+    }
+    // A hardwired row the catalog no longer has would be undeletable.
+    const dropped = persisted.filter(
+      (m) => m.origin === "HardWiredMonitor" && !this.catalogIds.has(m.id),
+    );
+    this.restore(persisted.filter((m) => !dropped.includes(m)));
+    for (const monitor of this.catalog) {
+      if (monitor.origin === "HardWiredMonitor") {
+        this.monitors.set(monitor.id, monitor);
+      }
+    }
+    this.base = activeBase ?? "All";
+    const added = this.list().filter(
+      (m) =>
+        m.origin === "HardWiredMonitor" ||
+        (activeBase === undefined && m.origin === "PreconfiguredMonitor"),
+    );
+    return { dropped, added };
+  }
 
   install(draft: MonitorDraft): InstallOutcome {
     const previous =
@@ -91,18 +174,8 @@ export class MonitoringStore {
 
     const type = parseSupportedMonitorType(draft.type);
     if (type === null) return { status: "UnsupportedMonitorType" };
-    if (isThresholdMonitorType(type)) {
-      if (!draft.valueType.numeric) return { status: "UnsupportedMonitorType" };
-      const { min, max } = draft.valueType;
-      if (
-        (min !== undefined && draft.value < min) ||
-        (max !== undefined && draft.value > max)
-      ) {
-        return rejected("ValueOutOfRange");
-      }
-    } else if (draft.value < 0) {
-      return rejected("NegativeDelta");
-    }
+    const refusal = checkValue(type, draft);
+    if (refusal !== undefined) return refusal;
     if (!isValidMonitorSeverity(draft.severity)) {
       return rejected("SeverityOutOfRange");
     }
@@ -117,7 +190,7 @@ export class MonitoringStore {
     if (duplicate) return { status: "Duplicate", existing: duplicate };
 
     const monitor: VariableMonitor = {
-      id: previous?.id ?? this.nextId++,
+      id: previous?.id ?? this.allocateId(),
       type,
       severity: draft.severity,
       value: draft.value,
@@ -144,35 +217,74 @@ export class MonitoringStore {
     const monitor = this.monitors.get(id);
     if (!monitor) return "NotFound";
     if (monitor.origin === "HardWiredMonitor") return "Rejected";
-    this.monitors.delete(id);
-    this.emit({ kind: "cleared", monitor });
+    this.remove(monitor);
     return "Accepted";
   }
 
+  private remove(monitor: VariableMonitor): void {
+    this.monitors.delete(monitor.id);
+    this.emit({ kind: "cleared", monitor });
+  }
+
+  /** The next free custom id: never a catalog id, even one not active. */
+  private allocateId(): number {
+    while (this.catalogIds.has(this.nextId) || this.monitors.has(this.nextId)) {
+      this.nextId++;
+    }
+    return this.nextId++;
+  }
+
+  private preconfigured(): VariableMonitor[] {
+    return this.catalog.filter((m) => m.origin === "PreconfiguredMonitor");
+  }
+
   /**
-   * N03 SetMonitoringBase. No preconfigured or hardwired monitor is
-   * modelled, so activating them is a no-op: `All` keeps the custom
-   * monitors (N03.FR.03), `FactoryDefault` and `HardWiredOnly` delete
-   * them (N03.FR.04, FR.05). Each deletion is reported as `cleared`.
+   * N03 SetMonitoringBase. `All` activates the preconfigured monitors that
+   * are not there and keeps every custom monitor, replaced preconfigured
+   * ones included (N03.FR.03); `FactoryDefault` deletes every custom
+   * monitor, then does the same (N03.FR.04); `HardWiredOnly` deletes the
+   * custom and the preconfigured monitors (N03.FR.05). The hardwired
+   * monitors stay. Each deletion is reported as `cleared`, each activation
+   * as `installed`, then the new base as `baseChanged`.
    */
-  applyMonitoringBase(base: string): "Accepted" | "NotSupported" {
-    if (!MONITORING_BASES.has(base)) return "NotSupported"; // N03.FR.02
-    if (base !== "All") {
-      for (const monitor of this.list()) {
-        if (monitor.origin !== "HardWiredMonitor") this.clear(monitor.id);
+  applyMonitoringBase(raw: string): "Accepted" | "NotSupported" {
+    const base = parseMonitoringBase(raw);
+    if (base === null) return "NotSupported"; // N03.FR.02
+    for (const monitor of this.list()) {
+      const deleted =
+        base === "HardWiredOnly"
+          ? monitor.origin !== "HardWiredMonitor"
+          : base === "FactoryDefault" && monitor.origin === "CustomMonitor";
+      if (deleted) this.remove(monitor);
+    }
+    if (base !== "HardWiredOnly") {
+      for (const monitor of this.preconfigured()) {
+        if (this.monitors.has(monitor.id)) continue;
+        this.monitors.set(monitor.id, monitor);
+        this.emit({ kind: "installed", monitor });
       }
     }
+    this.base = base;
+    this.emit({ kind: "baseChanged", base });
     return "Accepted"; // N03.FR.01
+  }
+
+  /** The base last set by SetMonitoringBase; `All` until then. */
+  get activeMonitoringBase(): MonitoringBase {
+    return this.base;
   }
 
   /**
    * Put back monitors read from persistence (N07.FR.13), without telling
-   * listeners. New ids resume after the highest restored one (N04.FR.19).
+   * listeners. New ids resume after the highest restored custom id
+   * (N04.FR.19); the catalog's ids do not count.
    */
   restore(monitors: readonly VariableMonitor[]): void {
     for (const monitor of monitors) {
       this.monitors.set(monitor.id, monitor);
-      this.nextId = Math.max(this.nextId, monitor.id + 1);
+      if (!this.catalogIds.has(monitor.id)) {
+        this.nextId = Math.max(this.nextId, monitor.id + 1);
+      }
     }
   }
 
@@ -187,7 +299,9 @@ export class MonitoringStore {
 
   /** Monitors watching the given configuration key, by increasing id. */
   byValueKey(valueKey: string): VariableMonitor[] {
-    return this.list().filter((m) => m.valueKey === valueKey);
+    return [...this.monitors.values()]
+      .filter((m) => m.valueKey === valueKey)
+      .sort((a, b) => a.id - b.id);
   }
 
   /**
@@ -216,12 +330,40 @@ export class MonitoringStore {
   }
 }
 
-/** `MonitoringBaseEnumType`, the same in 2.0.1 and 2.1. */
-const MONITORING_BASES: ReadonlySet<string> = new Set([
-  "All",
-  "FactoryDefault",
-  "HardWiredOnly",
-]);
+/** N04.FR.05, FR.06, FR.14: the monitor value against its type. */
+function checkValue(
+  type: SupportedMonitorType,
+  draft: MonitorDraft,
+): InstallOutcome | undefined {
+  switch (monitorBehaviour(type)) {
+    case "alert": {
+      if (!draft.valueType.numeric) return { status: "UnsupportedMonitorType" };
+      if (isTargetDeltaMonitorType(type)) {
+        // 2.1 N07.FR.22, FR.23 compare with the Target attribute.
+        if (!draft.valueType.hasTarget) {
+          return { status: "UnsupportedMonitorType" };
+        }
+        return draft.value < 0 ? rejected("NegativeTargetDelta") : undefined;
+      }
+      const { min, max } = draft.valueType;
+      if (
+        (min !== undefined && draft.value < min) ||
+        (max !== undefined && draft.value > max)
+      ) {
+        return rejected("ValueOutOfRange");
+      }
+      return undefined;
+    }
+    case "delta":
+      return draft.value < 0 ? rejected("NegativeDelta") : undefined;
+    case "periodic":
+      // Any variable can be reported periodically (N08); the interval is
+      // in seconds.
+      return draft.value < MIN_PERIODIC_INTERVAL_SECONDS
+        ? rejected("IntervalTooShort")
+        : undefined;
+  }
+}
 
 function rejected(reason: InstallRejectionReason): InstallOutcome {
   return { status: "Rejected", reason };

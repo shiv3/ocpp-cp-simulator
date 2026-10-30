@@ -1046,6 +1046,15 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     );
   }
 
+  /** Same as above: nothing to queue on SOAP (#538). */
+  public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
+    this.sendNotifyEvent(events);
+  }
+
+  public highestQueuedNotifyEventId(): number {
+    return 0;
+  }
+
   public sendSignCertificate(_csr?: string): Promise<void> {
     this._logger.warn(
       `${this._dialect.version} SOAP has no security extension; ignoring SignCertificate`,

@@ -173,3 +173,16 @@ describe("params that must not be empty strings (#383)", () => {
     },
   );
 });
+
+// #452: the seed's identifiers are nested in `entries`, out of the table's
+// reach.
+describe("seed_auth_cache entries (#452)", () => {
+  it.each(["idToken", "parentId"])("refuses an empty %s", (field) => {
+    const params = METHODS.seed_auth_cache.params;
+    const entry = { idToken: "T", status: "Accepted", parentId: "P" };
+    expect(params.safeParse({ entries: [entry] }).success).toBe(true);
+    expect(
+      params.safeParse({ entries: [{ ...entry, [field]: "" }] }).success,
+    ).toBe(false);
+  });
+});

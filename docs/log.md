@@ -1852,6 +1852,38 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Local vs Remote mode → Consequences](concepts/local-vs-remote-mode.md#consequences): the release rule, in both modes.
 - [GitHub issues](sources/github-issues.md): #333.
 
+## [2026-10-29] ingest | Authorization cache and offline authorization (#452)
+
+- A local start now consults the Local Authorization List, then a real Authorization Cache, before (or instead of) Authorize.req: `LocalPreAuthorize` starts a valid cached or listed identifier online without the round trip, and offline the charge point decides at once (`LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`), per OCPP 1.6 §3.5 and 2.0.1 C10–C15.
+- Behaviour change: an offline local start with an identifier in neither the list nor the cache is refused under the default configuration (`AllowOfflineTxForUnknownId=false`), where it used to wait 10 s and start. Online with the cache disabled, the wire is unchanged.
+- The cache is filled from 1.6 Authorize.conf, StartTransaction.conf and StopTransaction.conf, never for a listed identifier, evicts NOT-valid entries first at 1,000 entries, and persists in the new `authorization_cache` table (schema v18). ClearCache empties it and answers `Accepted`.
+- [Local authorization](concepts/local-authorization.md): new page, the decision table, cache rules and limits.
+- [State persistence](concepts/state-persistence.md#tables): `authorization_cache` row, `.tables` listing, `cp.delete` list.
+- [src/utils/scenarios/README.md](sources/cert16-templates-readme.md): TC_007 no longer blocked by a missing cache; TC_061 description.
+- [Index](index.md), [GitHub issues](sources/github-issues.md): new page, #452 row.
+
+## [2026-10-29] ingest | Authorization cache on OCPP 2.x and its control seam (#452)
+
+- 2.0.1 / 2.1 device model: `AuthCtrlr.LocalPreAuthorize`, `LocalAuthorizeOffline`, `OfflineTxForUnknownIdEnabled`, `AuthCacheCtrlr.Enabled` and `AuthCacheCtrlr.LifeTime` map onto the 1.6 keys and the new 2.x-only `AuthCacheLifeTime` (0 = no lifetime); GetBaseReport lists them. `AuthCacheCtrlr` becomes a known component, so its unmapped variables answer `UnknownVariable`.
+- AuthorizeResponse and TransactionEventResponse `idTokenInfo` fill the cache (C10.FR.04/.05); `cacheExpiryDateTime` overrides `LifeTime` (C10.FR.13).
+- Behaviour change (2.x wire): ClearCache answers `Rejected` while `AuthCacheCtrlr.Enabled=false`, the default, and keeps the content (C11.FR.04); enabled, it clears and answers `Accepted`. 1.6 is unchanged.
+- New CP command methods `get_auth_cache`, `seed_auth_cache`, `clear_auth_cache` (JSON Lines too) and MCP tools `auth_cache_get` / `auth_cache_seed` / `auth_cache_clear`: 28 curated tools.
+- [Local authorization](concepts/local-authorization.md): OCPP 2.x and control-plane seam sections, limits.
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): three rows.
+- [MCP endpoint](entities/mcp-endpoint.md#curated-tools), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool rows and count.
+
+## [2026-10-29] ingest | Local authorization review fixes (#452)
+
+- Online, a timeout waiting for Authorize.conf now refuses an identifier the station knows as not valid (enabled list or cache entry) with its status; an unknown or valid identifier still proceeds as `Accepted`, so the default configuration is unchanged.
+- Identifiers are case insensitive (1.6 §7.28 IdToken, 2.x `IdTokenType.idToken`): the cache, its rows and the Local Authorization List fold ASCII letters for lookups and keep the spelling last received; a restore folds rows spelt differently.
+- `seed_auth_cache`: `idToken` / `parentId` bounded per version (20 on 1.x, 36 on 2.0.1, 255 on 2.1; the schema admits 255), duplicates compared case-insensitively, `expiresAt` an ISO date-time with `Z` or an offset.
+- [Local authorization](concepts/local-authorization.md): timeout fallback, case folding, seam prose linking the canonical tables instead of repeating them, Limits (2.1 C10.FR.10 / C10.FR.14, `SupportsExpiryDateTime`, local refusals absent from the timeline).
+- [Control plane → CP command methods](concepts/control-plane.md#cp-command-methods): `seed_auth_cache` bounds.
+- Behaviour changes: with the list enabled by default, a listed `Blocked` tag is now refused on an online timeout; SendLocalList entries differing only by case merge, and a differential delete matches any case.
+- [State persistence](concepts/state-persistence.md#tables): one `authorization_cache` row per case-folded identifier.
+- [GitHub issues](sources/github-issues.md): #452 row covers 2.x and the seam. `related:` back-links on [CLI](entities/cli.md), [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md).
+- Maintainer review: a closed connection no longer empties the Local Authorization List (`teardownAfterClose` disposed it before `disconnected`, so offline the list was always empty and listed tags were refused); only deleting the charge point drops it, pinned with a real socket close ([Local authorization](concepts/local-authorization.md)). Browser cache seed / clear wait for the database flush. Behaviour changes to note in the release: an unknown tag started offline is refused at once (no 10 s wait) unless `AllowOfflineTxForUnknownId`; 2.x `ClearCache` answers `Rejected` while `AuthCacheCtrlr.Enabled` is false (C11.FR.04).
+
 ## [2026-10-29] ingest | Certificate store shared by 1.6 and 2.x, persisted (#456)
 
 - The certificate store speaks version-neutral uses (`src/cp/domain/security/certificateUse.ts`); 1.6, 2.0.1 and 2.1 map onto them explicitly in `certificateUseMapping.ts` and refuse what a version does not define (`OEMRootCertificate` and `V2G20Certificate` are 2.1-only). Hash data is computed at install time; chain members are hashed against their issuer. Pending CSRs are tracked per signing use and matched to a returned chain by public key; the private key is never kept.

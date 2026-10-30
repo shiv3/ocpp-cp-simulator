@@ -18,6 +18,7 @@ related:
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
   - charging-sessions.md
+  - local-authorization.md
   - ocpp-versions-and-transports.md
 updated: 2026-10-29
 ---

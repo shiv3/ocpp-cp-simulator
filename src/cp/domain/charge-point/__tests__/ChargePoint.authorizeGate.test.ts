@@ -3,6 +3,7 @@ import { ChargePoint } from "../ChargePoint";
 import { OCPPStatus } from "../../types/OcppTypes";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
+import { handleSetVariablesV201 } from "../../../infrastructure/transport/v201/setVariablesV201";
 
 /**
  * Issue #181: `ChargePoint.authorizeAndWait` gives `startTransaction` a way
@@ -16,11 +17,11 @@ import { DefaultBootNotification } from "../../types/OcppTypes";
 
 const bootNotification: BootNotification = DefaultBootNotification;
 
-function buildChargePoint(): ChargePoint {
+function buildChargePoint(connectorCount = 1): ChargePoint {
   return new ChargePoint(
     "test-cp-181",
     bootNotification,
-    1,
+    connectorCount,
     "ws://localhost:8080",
     null,
     null,
@@ -30,6 +31,14 @@ function buildChargePoint(): ChargePoint {
     "OCPP-1.6J",
     {},
   );
+}
+
+/** The CP built here never opens its socket, so it is offline. #452 makes
+ *  an offline start decide locally; the #181 tests below are about the
+ *  online round trip, so they declare the CP online. */
+function online(cp: ChargePoint): ChargePoint {
+  vi.spyOn(cp, "isOnline").mockReturnValue(true);
+  return cp;
 }
 
 // Long-lived subscribers (the #448 timeline projector) listen too; what
@@ -47,14 +56,14 @@ describe("ChargePoint.authorizeAndWait (#181)", () => {
   });
 
   it("resolves with the idTagInfo.status from the tagId-matched authorizeResult event", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const promise = cp.authorizeAndWait("TAG-A", 5000);
     cp.notifyAuthorizeResult("TAG-A", "Blocked");
     await expect(promise).resolves.toBe("Blocked");
   });
 
   it("ignores authorizeResult events for a different tagId", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const promise = cp.authorizeAndWait("TAG-A", 5000);
     cp.notifyAuthorizeResult("TAG-OTHER", "Accepted");
     cp.notifyAuthorizeResult("TAG-A", "Expired");
@@ -62,7 +71,7 @@ describe("ChargePoint.authorizeAndWait (#181)", () => {
   });
 
   it("cleans up its listeners once resolved via the event", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const baseline = listenerCounts(cp);
     const promise = cp.authorizeAndWait("TAG-A", 5000);
     cp.notifyAuthorizeResult("TAG-A", "Accepted");
@@ -70,9 +79,11 @@ describe("ChargePoint.authorizeAndWait (#181)", () => {
     expect(listenerCounts(cp)).toEqual(baseline);
   });
 
+  // Online with no answer and nothing known locally: still warn-and-proceed
+  // (#181). A known NOT-valid entry refuses instead (#452, below).
   it("times out and resolves 'Accepted' (warn-and-proceed) when no Authorize.conf arrives", async () => {
     vi.useFakeTimers();
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const baseline = listenerCounts(cp);
     const promise = cp.authorizeAndWait("TAG-A", 1000);
     await vi.advanceTimersByTimeAsync(1000);
@@ -80,19 +91,29 @@ describe("ChargePoint.authorizeAndWait (#181)", () => {
     expect(listenerCounts(cp)).toEqual(baseline);
   });
 
-  it("resolves 'Accepted' (warn-and-proceed) if disconnected while waiting", async () => {
-    const cp = buildChargePoint();
+  // #452: a disconnect while waiting leaves the CP offline, so the offline
+  // rules decide (1.6 §3.5.4) instead of the former fail-open "Accepted".
+  it("applies the offline rules if disconnected while waiting: unknown tag refused by default", async () => {
+    const cp = online(buildChargePoint());
     const baseline = listenerCounts(cp);
     const promise = cp.authorizeAndWait("TAG-A", 5000);
     cp.events.emit("disconnected", { code: 1006, reason: "test" });
-    await expect(promise).resolves.toBe("Accepted");
+    await expect(promise).resolves.toBe("Invalid");
     expect(listenerCounts(cp)).toEqual(baseline);
+  });
+
+  it("applies the offline rules if disconnected while waiting: AllowOfflineTxForUnknownId=true accepts", async () => {
+    const cp = online(buildChargePoint());
+    cp.configuration.applyChange("AllowOfflineTxForUnknownId", "true");
+    const promise = cp.authorizeAndWait("TAG-A", 5000);
+    cp.events.emit("disconnected", { code: 1006, reason: "test" });
+    await expect(promise).resolves.toBe("Accepted");
   });
 });
 
 describe("ChargePoint.startTransaction — local-authorize gate (#181)", () => {
   it("denies the local start on Invalid Authorize.conf: no transaction begun, authorizeDenied emitted", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const connector = cp.getConnector(1)!;
     const denied: Array<{
       connectorId: number;
@@ -115,7 +136,7 @@ describe("ChargePoint.startTransaction — local-authorize gate (#181)", () => {
   it.each(["Expired", "Blocked"] as const)(
     "denies the local start on %s Authorize.conf",
     async (status) => {
-      const cp = buildChargePoint();
+      const cp = online(buildChargePoint());
       const promise = cp.startTransaction("BAD-TAG", 1);
       cp.notifyAuthorizeResult("BAD-TAG", status);
       const outcome = await promise;
@@ -124,7 +145,7 @@ describe("ChargePoint.startTransaction — local-authorize gate (#181)", () => {
   );
 
   it("proceeds to start the transaction on Accepted Authorize.conf", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const connector = cp.getConnector(1)!;
 
     const promise = cp.startTransaction("GOOD-TAG", 1);
@@ -137,7 +158,7 @@ describe("ChargePoint.startTransaction — local-authorize gate (#181)", () => {
   });
 
   it("AuthorizeBeforeLocalStart=false: sends no Authorize.req and starts immediately", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const applyStatus = cp.configuration.applyChange(
       "AuthorizeBeforeLocalStart",
       "false",
@@ -155,7 +176,7 @@ describe("ChargePoint.startTransaction — local-authorize gate (#181)", () => {
   });
 
   it("skips the gate for a RemoteStart-triggered start (triggerReason='RemoteStart')", async () => {
-    const cp = buildChargePoint();
+    const cp = online(buildChargePoint());
     const authorizeSpy = vi.spyOn(cp, "authorize");
     const connector = cp.getConnector(1)!;
 
@@ -172,3 +193,336 @@ describe("ChargePoint.startTransaction — local-authorize gate (#181)", () => {
     expect(connector.transaction).not.toBeNull();
   });
 });
+
+/**
+ * Issue #452: the local start consults the Local Authorization List and the
+ * Authorization Cache (OCPP 1.6 Part 2 §3.5) before, or instead of, the
+ * Authorize round trip. `recordAuthorizationResult` is the seam the 1.6
+ * Authorize/StartTransaction/StopTransaction result handlers feed.
+ */
+describe("ChargePoint.startTransaction — local authorization (#452)", () => {
+  const LIMITS = { localAuthListMaxLength: 100, sendLocalListMaxLength: 100 };
+
+  function deniedEvents(cp: ChargePoint) {
+    const denied: Array<{
+      connectorId: number;
+      tagId: string;
+      status: string;
+    }> = [];
+    cp.events.on("authorizeDenied", (e) => denied.push(e));
+    return denied;
+  }
+
+  function enableCache(cp: ChargePoint) {
+    expect(
+      cp.configuration.applyChange("AuthorizationCacheEnabled", "true"),
+    ).toBe("Accepted");
+  }
+
+  it("online: Authorize.conf fills the cache, then LocalPreAuthorize starts without Authorize.req (issue test 1)", async () => {
+    const cp = online(buildChargePoint(2));
+    enableCache(cp);
+    cp.configuration.applyChange("LocalPreAuthorize", "true");
+    const authorizeSpy = vi.spyOn(cp, "authorize");
+
+    const first = cp.startTransaction("TAG-A", 1);
+    cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+    cp.notifyAuthorizeResult("TAG-A", "Accepted");
+    expect(await first).toEqual({ started: true });
+    expect(authorizeSpy).toHaveBeenCalledTimes(1);
+
+    expect(await cp.startTransaction("TAG-A", 2)).toEqual({ started: true });
+    expect(authorizeSpy).toHaveBeenCalledTimes(1);
+    expect(cp.getConnector(2)!.transaction?.tagId).toBe("TAG-A");
+  });
+
+  it("online with LocalPreAuthorize=false still sends Authorize.req for a cached tag", async () => {
+    const cp = online(buildChargePoint());
+    enableCache(cp);
+    cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+    const authorizeSpy = vi.spyOn(cp, "authorize");
+
+    const promise = cp.startTransaction("TAG-A", 1);
+    expect(authorizeSpy).toHaveBeenCalledWith("TAG-A");
+    cp.notifyAuthorizeResult("TAG-A", "Accepted");
+    expect(await promise).toEqual({ started: true });
+  });
+
+  it("cache disabled: nothing is cached and every start asks the CSMS (issue test 2)", async () => {
+    const cp = online(buildChargePoint());
+    cp.configuration.applyChange("LocalPreAuthorize", "true");
+    cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+    expect(cp.authorization.cache.size()).toBe(0);
+    const authorizeSpy = vi.spyOn(cp, "authorize");
+
+    const promise = cp.startTransaction("TAG-A", 1);
+    expect(authorizeSpy).toHaveBeenCalledWith("TAG-A");
+    cp.notifyAuthorizeResult("TAG-A", "Accepted");
+    expect(await promise).toEqual({ started: true });
+  });
+
+  it("expired cached tag: online asks the CSMS, offline refuses it as Expired (issue test 3)", async () => {
+    const cp = buildChargePoint();
+    enableCache(cp);
+    cp.configuration.applyChange("LocalPreAuthorize", "true");
+    cp.configuration.applyChange("AllowOfflineTxForUnknownId", "true");
+    cp.recordAuthorizationResult("TAG-OLD", {
+      status: "Accepted",
+      expiresAt: Date.now() - 1000,
+    });
+    const denied = deniedEvents(cp);
+    const isOnline = vi.spyOn(cp, "isOnline").mockReturnValue(false);
+
+    expect(await cp.startTransaction("TAG-OLD", 1)).toEqual({
+      started: false,
+      denialStatus: "Expired",
+    });
+    expect(denied).toEqual([
+      { connectorId: 1, tagId: "TAG-OLD", status: "Expired" },
+    ]);
+
+    isOnline.mockReturnValue(true);
+    const authorizeSpy = vi.spyOn(cp, "authorize");
+    const promise = cp.startTransaction("TAG-OLD", 1);
+    expect(authorizeSpy).toHaveBeenCalledWith("TAG-OLD");
+    cp.notifyAuthorizeResult("TAG-OLD", "Accepted");
+    expect(await promise).toEqual({ started: true });
+  });
+
+  it("offline with a cached Accepted tag: starts at once, no Authorize.req (issue test 5)", async () => {
+    const cp = buildChargePoint();
+    enableCache(cp);
+    cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+    const authorizeSpy = vi.spyOn(cp, "authorize");
+
+    expect(cp.isOnline()).toBe(false);
+    expect(await cp.startTransaction("TAG-A", 1)).toEqual({ started: true });
+    expect(authorizeSpy).not.toHaveBeenCalled();
+  });
+
+  it("offline with a local-list Accepted tag: starts at once (§9.1.12)", async () => {
+    const cp = buildChargePoint();
+    cp.localAuthListManager.applyFull(
+      1,
+      [{ idTag: "LISTED", idTagInfo: { status: "Accepted" } }],
+      LIMITS,
+    );
+    expect(await cp.startTransaction("LISTED", 1)).toEqual({ started: true });
+  });
+
+  it("offline with an unknown tag: refused by default, no 10 s stall (issue test 6, plan deviation 3)", async () => {
+    const cp = buildChargePoint();
+    const denied = deniedEvents(cp);
+    const authorizeSpy = vi.spyOn(cp, "authorize");
+
+    expect(await cp.startTransaction("STRANGER", 1)).toEqual({
+      started: false,
+      denialStatus: "Invalid",
+    });
+    expect(authorizeSpy).not.toHaveBeenCalled();
+    expect(cp.getConnector(1)!.transaction).toBeNull();
+    expect(denied).toEqual([
+      { connectorId: 1, tagId: "STRANGER", status: "Invalid" },
+    ]);
+  });
+
+  it("offline with an unknown tag and AllowOfflineTxForUnknownId=true: starts, and the tag is not cached (C15.FR.01)", async () => {
+    const cp = buildChargePoint();
+    enableCache(cp);
+    cp.configuration.applyChange("AllowOfflineTxForUnknownId", "true");
+
+    expect(await cp.startTransaction("STRANGER", 1)).toEqual({
+      started: true,
+    });
+    expect(cp.authorization.cache.get("STRANGER")).toBeUndefined();
+  });
+
+  it("local list wins over the cache: listed Blocked refuses a cached Accepted tag (issue test 7)", async () => {
+    const cp = buildChargePoint();
+    enableCache(cp);
+    cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+    cp.localAuthListManager.applyFull(
+      1,
+      [{ idTag: "TAG-A", idTagInfo: { status: "Blocked" } }],
+      LIMITS,
+    );
+
+    expect(await cp.startTransaction("TAG-A", 1)).toEqual({
+      started: false,
+      denialStatus: "Blocked",
+    });
+    // §3.5.3: a listed identifier is never (re)written to the cache.
+    cp.recordAuthorizationResult("TAG-A", { status: "Invalid" });
+    expect(cp.authorization.cache.get("TAG-A")?.status).toBe("Accepted");
+  });
+
+  describe("online timeout falls back to the local decision", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    type Setup = (cp: ChargePoint) => void;
+    const cacheBlocked: Setup = (cp) => {
+      enableCache(cp);
+      cp.recordAuthorizationResult("TAG-A", { status: "Blocked" });
+    };
+    const listed =
+      (status: "Accepted" | "Blocked" | "Invalid"): Setup =>
+      (cp) => {
+        cp.localAuthListManager.applyFull(
+          1,
+          [{ idTag: "TAG-A", idTagInfo: { status } }],
+          LIMITS,
+        );
+      };
+
+    it.each<[string, Setup, string]>([
+      ["default configuration, unknown tag → Accepted", () => {}, "Accepted"],
+      [
+        "cache disabled: a recorded Blocked answer is not kept → Accepted",
+        (cp) => cp.recordAuthorizationResult("TAG-A", { status: "Blocked" }),
+        "Accepted",
+      ],
+      [
+        "cache disabled: a seeded Blocked entry is ignored → Accepted",
+        (cp) => {
+          cp.authorization.seedCache([{ idToken: "TAG-A", status: "Blocked" }]);
+        },
+        "Accepted",
+      ],
+      [
+        "local list disabled: a listed Blocked entry is ignored → Accepted",
+        (cp) => {
+          listed("Blocked")(cp);
+          cp.configuration.applyChange("LocalAuthListEnabled", "false");
+        },
+        "Accepted",
+      ],
+      [
+        "cached Accepted tag, LocalPreAuthorize=false → Accepted",
+        (cp) => {
+          enableCache(cp);
+          cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+        },
+        "Accepted",
+      ],
+      ["listed Accepted tag → Accepted", listed("Accepted"), "Accepted"],
+      ["cached Blocked tag → Blocked", cacheBlocked, "Blocked"],
+      [
+        "cached Accepted tag past its expiry → Expired",
+        (cp) => {
+          enableCache(cp);
+          cp.recordAuthorizationResult("TAG-A", {
+            status: "Accepted",
+            expiresAt: Date.now() - 1000,
+          });
+        },
+        "Expired",
+      ],
+      ["listed Invalid tag → Invalid", listed("Invalid"), "Invalid"],
+    ])("%s", async (_label, setup, expected) => {
+      vi.useFakeTimers();
+      const cp = online(buildChargePoint());
+      setup(cp);
+      const authorizeSpy = vi.spyOn(cp, "authorize");
+      const denied = deniedEvents(cp);
+
+      const promise = cp.startTransaction("TAG-A", 1);
+      expect(authorizeSpy).toHaveBeenCalledWith("TAG-A");
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      if (expected === "Accepted") {
+        expect(await promise).toEqual({ started: true });
+        expect(denied).toEqual([]);
+      } else {
+        expect(await promise).toEqual({
+          started: false,
+          denialStatus: expected,
+        });
+        expect(denied).toEqual([
+          { connectorId: 1, tagId: "TAG-A", status: expected },
+        ]);
+        expect(cp.getConnector(1)!.transaction).toBeNull();
+      }
+    });
+  });
+
+  it("AuthorizeBeforeLocalStart=false bypasses the local decision too: offline unknown starts as before", async () => {
+    const cp = buildChargePoint();
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+    expect(await cp.startTransaction("STRANGER", 1)).toEqual({
+      started: true,
+    });
+  });
+});
+
+/**
+ * #452: `AuthCacheCtrlr.LifeTime` (C10.FR.08/.10) reaches the decision
+ * through the policy ChargePoint builds. Set through SetVariables, as a
+ * CSMS would, and read through authorizeAndWait.
+ */
+describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
+  "%s ChargePoint — AuthCacheCtrlr.LifeTime",
+  (ocppVersion) => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function set(
+      cp: ChargePoint,
+      component: string,
+      variable: string,
+      v: string,
+    ) {
+      const response = handleSetVariablesV201(
+        {
+          setVariableData: [
+            {
+              component: { name: component },
+              variable: { name: variable },
+              attributeValue: v,
+            },
+          ],
+        },
+        cp.configuration,
+      );
+      expect(response.setVariableResult[0].attributeStatus).toBe("Accepted");
+    }
+
+    it("a cached Accepted tag pre-authorizes within the lifetime, then asks the CSMS again", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.parse("2026-10-29T12:00:00Z"));
+      const cp = new ChargePoint(
+        "test-cp-452-lifetime",
+        bootNotification,
+        1,
+        "ws://localhost:8080",
+        null,
+        null,
+        null,
+        {},
+        [],
+        ocppVersion,
+        {},
+      );
+      vi.spyOn(cp, "isOnline").mockReturnValue(true);
+      set(cp, "AuthCacheCtrlr", "Enabled", "true");
+      set(cp, "AuthCacheCtrlr", "LifeTime", "60");
+      set(cp, "AuthCtrlr", "LocalPreAuthorize", "true");
+      cp.recordAuthorizationResult("TAG-A", { status: "Accepted" });
+      const authorizeSpy = vi.spyOn(cp, "authorize");
+
+      await vi.advanceTimersByTimeAsync(59_000);
+      await expect(cp.authorizeAndWait("TAG-A", 5000)).resolves.toBe(
+        "Accepted",
+      );
+      expect(authorizeSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      const promise = cp.authorizeAndWait("TAG-A", 5000);
+      expect(authorizeSpy).toHaveBeenCalledWith("TAG-A");
+      cp.notifyAuthorizeResult("TAG-A", "Accepted");
+      await expect(promise).resolves.toBe("Accepted");
+    });
+  },
+);

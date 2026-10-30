@@ -637,6 +637,25 @@ describe("charging sessions schema, v17 (#447)", () => {
       db.close();
     }
   });
+
+  it("creates authorization_cache on a database stamped 17", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE authorization_cache");
+      db.run("UPDATE schema_meta SET value = '17' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("authorization_cache");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("authorization_cache");
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe("certificates schema, v18 (#456)", () => {

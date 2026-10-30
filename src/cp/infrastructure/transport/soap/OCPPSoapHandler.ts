@@ -1071,7 +1071,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       connectorId,
     );
     this.enqueueRequest("StartTransaction", payload, (env) => {
-      new StartTransactionResultHandler(connectorId).handle(
+      new StartTransactionResultHandler(connectorId, transaction.tagId).handle(
         this.startTransactionResponseFromPayload(env.payload),
         this.handlerContext(),
       );
@@ -1122,7 +1122,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
             meterStop: transaction.meterStop,
           };
     this.enqueueRequest("StopTransaction", soapPayload(payload), (env) => {
-      new StopTransactionResultHandler(connectorId).handle(
+      new StopTransactionResultHandler(connectorId, payload.idTag).handle(
         this.stopTransactionResponseFromPayload(env.payload),
         this.handlerContext(),
       );

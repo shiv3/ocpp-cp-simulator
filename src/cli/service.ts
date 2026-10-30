@@ -5,6 +5,10 @@ import type {
 } from "../cp/domain/types/FirmwareLogStatus";
 import { ChargePoint } from "../cp/domain/charge-point/ChargePoint";
 import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../cp/domain/auth/AuthorizationCacheSeed";
+import type {
   DataTransferData,
   DataTransferResult,
 } from "../cp/domain/types/DataTransfer";
@@ -1189,6 +1193,23 @@ export class CLIChargePointService {
   /** Expert OCPP call (#389); see `ChargePoint.sendOcppCall`. */
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
     return this._chargePoint.sendOcppCall(request);
+  }
+
+  /** #452 test seam: the Authorization Cache and its switch. */
+  getAuthorizationCache(): AuthorizationCacheView {
+    return this._chargePoint.authorization.cacheView();
+  }
+
+  /** #452 test seam; throws InvalidAuthorizationCacheSeedError. */
+  seedAuthorizationCache(
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): number {
+    return this._chargePoint.authorization.seedCache(entries);
+  }
+
+  /** #452 test seam: empty the cache whatever its switch says. */
+  clearAuthorizationCache(): boolean {
+    return this._chargePoint.clearAuthorizationCache();
   }
 
   updateConnectorStatus(

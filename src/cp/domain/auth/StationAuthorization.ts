@@ -1,0 +1,144 @@
+import type {
+  AuthorizationCache,
+  AuthorizationCacheRecord,
+} from "./AuthorizationCache";
+import {
+  authorizationCacheEntryView,
+  parseAuthorizationCacheSeed,
+  type AuthorizationCacheSeedEntry,
+  type AuthorizationCacheView,
+} from "./AuthorizationCacheSeed";
+import type { LocalAuthListManager } from "./LocalAuthList";
+import {
+  resolveLocalAuthorization,
+  resolveOfflineAuthorization,
+  resolveUnansweredAuthorization,
+  type KnownAuthorization,
+  type LocalAuthorizationDecision,
+  type LocalAuthorizationInput,
+  type LocalAuthorizationPolicy,
+  type LocalOnlyDecision,
+} from "./LocalAuthorizationResolver";
+
+/** A CSMS verdict on an identifier, without the identifier itself. */
+export type CsmsAuthorizationResult = Omit<AuthorizationCacheRecord, "idToken">;
+
+export interface StationAuthorizationDeps {
+  cache: AuthorizationCache;
+  localList: LocalAuthListManager;
+  /** Read on every call, so configuration changes apply at once. */
+  policy: () => LocalAuthorizationPolicy;
+  now?: () => number;
+  /** Longest `idToken` / `parentId` a seed may carry, per the charge
+   *  point's OCPP version (`idTokenMaxLength` of AuthorizationCacheSeed). */
+  idTokenMaxLength: number;
+}
+
+/**
+ * The charge point's local authorization (issue #452): the Authorization
+ * Cache and the Local Authorization List, read through
+ * {@link resolveLocalAuthorization} and written from CSMS answers (plus
+ * the {@link StationAuthorization.seedCache} test seam).
+ */
+export class StationAuthorization {
+  private readonly now: () => number;
+
+  constructor(private readonly deps: StationAuthorizationDeps) {
+    this.now = deps.now ?? Date.now;
+  }
+
+  get cache(): AuthorizationCache {
+    return this.deps.cache;
+  }
+
+  policy(): LocalAuthorizationPolicy {
+    return this.deps.policy();
+  }
+
+  decide(idToken: string, online: boolean): LocalAuthorizationDecision {
+    return resolveLocalAuthorization({ online, ...this.inputFor(idToken) });
+  }
+
+  /** The offline rules alone, e.g. when the connection drops mid-wait. */
+  decideOffline(idToken: string): LocalOnlyDecision {
+    return resolveOfflineAuthorization(this.inputFor(idToken));
+  }
+
+  /** Online with no Authorize answer in time: the refusal a known NOT-valid
+   *  entry gives, or `null` to keep the warn-and-proceed `Accepted`. */
+  decideUnanswered(
+    idToken: string,
+  ): Extract<LocalOnlyDecision, { kind: "reject" }> | null {
+    return resolveUnansweredAuthorization(this.inputFor(idToken));
+  }
+
+  private inputFor(idToken: string): Omit<LocalAuthorizationInput, "online"> {
+    const listed = this.deps.localList.getEntry(idToken);
+    const cached = this.deps.cache.get(idToken);
+    return {
+      policy: this.deps.policy(),
+      now: this.now(),
+      ...(listed ? { localListEntry: toKnown(listed) } : {}),
+      ...(cached ? { cacheEntry: cached } : {}),
+    };
+  }
+
+  /**
+   * Record what the CSMS answered for `idToken` (1.6 Authorize.conf,
+   * StartTransaction.conf, StopTransaction.conf: §3.5.1, §4.1; 2.x
+   * AuthorizeResponse / TransactionEventResponse: C10.FR.04/.05). Returns
+   * whether the cache was written.
+   *
+   * Nothing is written while the cache is disabled, nor for an identifier
+   * of the Local Authorization List ("SHALL NOT be added to the
+   * Authorization Cache", 1.6 §3.5.3). Only CSMS answers come here, never a
+   * local decision, so an identifier accepted offline as unknown is not
+   * cached (C15.FR.01).
+   */
+  recordCsmsResult(idToken: string, result: CsmsAuthorizationResult): boolean {
+    if (!this.deps.policy().cacheEnabled) return false;
+    if (this.deps.localList.getEntry(idToken)) return false;
+    this.deps.cache.upsert({ idToken, ...result });
+    return true;
+  }
+
+  /** Empty the cache (1.6 §5.4, C11.FR.01). False when it could not be. */
+  clearCache(): boolean {
+    return this.deps.cache.clear();
+  }
+
+  /**
+   * Control seam (#452): write `entries` as if the CSMS had answered them,
+   * whatever the cache switch says, so a test can prepare the cache before
+   * enabling it. All entries are checked first; an
+   * {@link InvalidAuthorizationCacheSeedError} leaves the cache untouched.
+   * Returns the number written.
+   */
+  seedCache(entries: readonly AuthorizationCacheSeedEntry[]): number {
+    const records = parseAuthorizationCacheSeed(
+      entries,
+      this.deps.idTokenMaxLength,
+    );
+    for (const record of records) this.deps.cache.upsert(record);
+    return records.length;
+  }
+
+  /** Control seam (#452): the switch and every stored entry. */
+  cacheView(): AuthorizationCacheView {
+    return {
+      enabled: this.deps.policy().cacheEnabled,
+      entries: this.deps.cache.all().map(authorizationCacheEntryView),
+    };
+  }
+}
+
+function toKnown(entry: {
+  status: string;
+  expiryDate?: string;
+}): KnownAuthorization {
+  const expiresAt =
+    entry.expiryDate !== undefined ? Date.parse(entry.expiryDate) : NaN;
+  return Number.isFinite(expiresAt)
+    ? { status: entry.status, expiresAt }
+    : { status: entry.status };
+}

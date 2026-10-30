@@ -78,6 +78,10 @@ import {
   v201TransactionEvse,
 } from "./v201/topologyWireV201";
 import {
+  authorizationResultFromIdTokenInfo,
+  cacheableIdToken,
+} from "./v201/authorizationCacheV201";
+import {
   buildV201InboundRegistry,
   type V201Action,
   type V201HandlerResult,
@@ -542,10 +546,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       }
 
       // Issue #181: a CALLERROR answering Authorize.req is a definite
-      // protocol failure (unlike the authorizeAndWait timeout/disconnect
-      // paths, which proceed fail-OPEN as "Accepted" because the CSMS
-      // said nothing at all). Here the CSMS *did* respond, and what it
-      // said was "I couldn't process this" — so treat it as fail-CLOSED:
+      // protocol failure, unlike the authorizeAndWait paths where the CSMS
+      // said nothing at all (#452: a disconnect applies the offline
+      // rules; a timeout refuses a tag known locally as NOT valid and
+      // otherwise proceeds as "Accepted"). Here the CSMS *did* respond,
+      // and what it said was "I couldn't process this" — so treat it as
+      // fail-CLOSED:
       // synthesize a denial ("Invalid") rather than let authorizeAndWait
       // burn its full timeout waiting for a CALLRESULT that will never
       // arrive.
@@ -591,6 +597,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const authorizeResult = payload as AuthorizeResponseV201;
       const authorizeRequest = pending.payload as AuthorizeRequestV201;
       const status = authorizeResult.idTokenInfo?.status;
+      this.recordIdTokenInfo(
+        authorizeRequest.idToken,
+        authorizeResult.idTokenInfo,
+      );
       if (status !== undefined) {
         this._logger.info(
           `[v2.0.1] Authorize response: ${status}`,
@@ -636,6 +646,24 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   }
 
   /**
+   * #452: feed the CSMS's idTokenInfo on `idToken` to the Authorization
+   * Cache (C10.FR.04 AuthorizeResponse, C10.FR.05 TransactionEventResponse).
+   * Only real answers come here: the "Invalid" synthesized from a CALLERROR
+   * is not a verdict and is never cached.
+   */
+  private recordIdTokenInfo(
+    idToken: TransactionEventRequestV201["idToken"],
+    idTokenInfo: TransactionEventResponseV201["idTokenInfo"],
+  ): void {
+    const key = cacheableIdToken(idToken);
+    if (key === undefined || idTokenInfo === undefined) return;
+    this._chargePoint.recordAuthorizationResult(
+      key,
+      authorizationResultFromIdTokenInfo(idTokenInfo),
+    );
+  }
+
+  /**
    * A02 SignCertificateResponse (#456), the 2.x twin of 1.6's #410 result
    * handling: logged only. A Rejected answer (A02.FR.12) leaves the CSR
    * pending: A02 has no rule to discard it, and a CertificateSigned that
@@ -669,6 +697,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     request: TransactionEventRequestV201,
     response: TransactionEventResponseV201,
   ): void {
+    this.recordIdTokenInfo(request.idToken, response.idTokenInfo);
     const status = response.idTokenInfo?.status;
     if (status === undefined || status === "Accepted") return;
     if (request.eventType === "Ended") return;

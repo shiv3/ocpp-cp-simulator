@@ -23,6 +23,7 @@ related:
   - open-ev-directory.md
   - ../concepts/charging-sessions.md
   - ../concepts/log-format.md
+  - ../concepts/local-authorization.md
 updated: 2026-10-29
 ---
 

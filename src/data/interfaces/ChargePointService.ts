@@ -1,4 +1,8 @@
 import type { VehicleCatalog } from "../../cp/domain/vehicle/VehicleCatalog";
+import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "../../cp/domain/auth/AuthorizationCacheSeed";
 import type { VehicleProfile } from "../../cp/domain/vehicle/VehicleProfile";
 import type { AutoTrafficConfig } from "../../cp/domain/connector/AutoTraffic";
 import type {
@@ -514,6 +518,17 @@ export interface ChargePointService {
    *  resolves with the CALLRESULT or CALLERROR. See
    *  `ChargePoint.sendOcppCall`. */
   sendOcppCall(id: string, request: OcppCallRequest): Promise<OcppCallOutcome>;
+  /** The Authorization Cache and its switch (#452 test seam). */
+  getAuthorizationCache(id: string): Promise<AuthorizationCacheView>;
+  /** Write cache entries whatever the switch says (#452 test seam);
+   *  resolves with the number written. Refused entries write nothing. */
+  seedAuthorizationCache(
+    id: string,
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number>;
+  /** Empty the cache whatever the switch says (#452 test seam); false when
+   *  the stored copy could not be cleared. */
+  clearAuthorizationCache(id: string): Promise<boolean>;
 
   // Connector operations
   startTransaction(

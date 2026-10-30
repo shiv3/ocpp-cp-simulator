@@ -153,4 +153,26 @@ describe("ChargePoint stale socket close (#478)", () => {
       cp.dispose();
     },
   );
+
+  it("keeps the Local Authorization List across a connection loss, and only dispose() drops it (#534)", async () => {
+    const { cp } = newChargePoint();
+    cp.connect();
+    const socket = await openAndBoot(cp);
+    const list = cp["_localAuthListManager"];
+    list.applyFull(
+      3,
+      [{ idTag: "LISTED", idTagInfo: { status: "Accepted" } }],
+      { localAuthListMaxLength: 10, sendLocalListMaxLength: 10 },
+    );
+
+    socket.fireClose(1006);
+
+    expect(cp.status).toBe(OCPPStatus.Unavailable);
+    expect(list.getEntry("LISTED")).toEqual({ status: "Accepted" });
+    expect(list.getVersion()).toBe(3);
+
+    cp.dispose();
+    expect(list.getEntry("LISTED")).toBeUndefined();
+    expect(list.getVersion()).toBe(0);
+  });
 });

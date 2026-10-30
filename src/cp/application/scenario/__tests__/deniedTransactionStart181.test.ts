@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
@@ -55,6 +55,10 @@ function newChargePoint(id: string): ChargePoint {
     {},
   );
   cp.events.on("error", () => undefined);
+  // #452: a never-connected CP is offline and decides locally, with no
+  // Authorize round trip. These tests are about the online denial path,
+  // so the CP is declared online.
+  vi.spyOn(cp, "isOnline").mockReturnValue(true);
   return cp;
 }
 

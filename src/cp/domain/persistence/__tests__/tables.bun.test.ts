@@ -57,7 +57,11 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
       [cp, t],
     );
     db.run(
-      "INSERT INTO logs (cp_id, timestamp, level, log_type, message) VALUES (?, ?, 'info', 'ocpp', 'hello')",
+      "INSERT INTO authorization_cache (cp_id, id_token, status, inserted_at, updated_at) VALUES (?, 'TAG', 'Accepted', ?, ?)",
+      [cp, t, t],
+    );
+    db.run(
+      "INSERT INTO logs(cp_id, timestamp, level, log_type, message) VALUES (?, ?, 'info', 'ocpp', 'hello')",
       [cp, t],
     );
     db.run(

@@ -238,6 +238,7 @@ describe("signed meter configuration keys (#315)", () => {
         connectorNumber: 1,
         wsUrl: "ws://localhost",
         supportsWebSocketPing: false,
+        ocppVersion: "OCPP-1.6J",
       } as unknown as ChargePoint),
     );
 

@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc061-clear-cache",
   "name": "Cert 1.6 Core: TC_061 Clear Authorization Cache",
-  "description": "CSMS sends ClearCache. CP has no authorization cache (per §5.3, a CP without a cache may still accept the request) and confirms Accepted.",
+  "description": "CSMS sends ClearCache. CP empties its Authorization Cache (§5.4) and confirms Accepted, also while AuthorizationCacheEnabled is false.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

@@ -76,6 +76,13 @@ import type {
 import type { ReadingContext } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
+import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
+import { AuthorizationCache } from "../auth/AuthorizationCache";
+import {
+  StationAuthorization,
+  type CsmsAuthorizationResult,
+} from "../auth/StationAuthorization";
+import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
   type ProfileRemoveCriteria,
@@ -209,6 +216,7 @@ export class ChargePoint {
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
   private readonly _localAuthListManager: LocalAuthListManager;
+  private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
   // station-wide TxDefaultProfile) belong at the CP level, not duplicated
   // onto every connector. Connectors consult this store at composite time.
@@ -441,6 +449,25 @@ export class ChargePoint {
       (connectorId) => this.onReservationExpired(connectorId),
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
+    // #452: the policy is read on every decision, so ChangeConfiguration
+    // applies at once. `_configuration` is assigned further down; nothing
+    // reads the policy before the constructor returns.
+    this._authorization = new StationAuthorization({
+      cache: new AuthorizationCache(this._id, this._database),
+      localList: this._localAuthListManager,
+      policy: () => ({
+        cacheEnabled: this._configuration.authorizationCacheEnabled(),
+        localListEnabled: this._configuration.localAuthListEnabled(),
+        localPreAuthorize: this._configuration.localPreAuthorize(),
+        localAuthorizeOffline: this._configuration.localAuthorizeOffline(),
+        allowOfflineTxForUnknownId:
+          this._configuration.allowOfflineTxForUnknownId(),
+        // 2.x AuthCacheCtrlr.LifeTime; a 1.6 store has no such key → null.
+        cacheLifetimeSeconds: this._configuration.authCacheLifeTimeSeconds(),
+        localListChecksExpiry: true,
+      }),
+      idTokenMaxLength: idTokenMaxLength(this._ocppVersion),
+    });
 
     this._stateManager = new StateManager(
       this._logger,
@@ -847,6 +874,42 @@ export class ChargePoint {
     return this._localAuthListManager;
   }
 
+  /** Local authorization (#452): Authorization Cache + Local Authorization
+   *  List, and the decision over them. */
+  get authorization(): StationAuthorization {
+    return this._authorization;
+  }
+
+  /** Whether the CSMS is reachable now (#452 offline authorization). A SOAP
+   *  charge point has no connection state and counts as online, which
+   *  keeps its local start flow as it was. */
+  isOnline(): boolean {
+    if (!this._webSocket) return true;
+    return this._webSocket.isConnected();
+  }
+
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452):
+   *  called by the Authorize / StartTransaction / StopTransaction result
+   *  handlers. A no-op while the cache is disabled or for an identifier of
+   *  the Local Authorization List (1.6 §3.5.3). */
+  recordAuthorizationResult(
+    idToken: string,
+    result: CsmsAuthorizationResult,
+  ): void {
+    if (this._authorization.recordCsmsResult(idToken, result)) {
+      this._logger.debug(
+        `Authorization cache updated: ${idToken} → ${result.status}`,
+        LogType.TRANSACTION,
+      );
+    }
+  }
+
+  /** ClearCache (1.6 §5.4): empty the Authorization Cache. Returns whether
+   *  it could be cleared. */
+  clearAuthorizationCache(): boolean {
+    return this._authorization.clearCache();
+  }
+
   /** Read-only: install and remove profiles with `applyChargingProfile` /
    *  `clearChargingProfiles`, which report the change (#469). */
   get stationProfiles(): Pick<ChargingProfileStore, "all" | "getActive"> {
@@ -1091,16 +1154,31 @@ export class ChargePoint {
   }
 
   /**
-   * Send Authorize.req for `tagId` and await the matching Authorize.conf
-   * (issue #181). Resolves with `idTagInfo.status` ("Accepted", "Invalid",
-   * "Expired", "Blocked", ...). Tag-matched against the `authorizeResult`
-   * event so concurrent Authorize calls for different tags don't cross
-   * streams. Bounded by `timeoutMs`; on timeout OR disconnect while
-   * waiting, warns and resolves as "Accepted" (warn-and-proceed — mirrors
-   * the boot-wait philosophy; a real LocalAuthorizeOffline cache is future
-   * work). Never rejects.
+   * Authorize `tagId` for a local start (issues #181, #452). Resolves with
+   * an idTagInfo/idTokenInfo status ("Accepted", "Invalid", "Expired",
+   * "Blocked", ...). Never rejects.
+   *
+   * The local decision comes first (see `auth/LocalAuthorizationResolver.ts`
+   * for the rules and their OCPP 1.6 §3.5 / 2.0.1 C12-C15 sources):
+   * - offline, it decides alone, at once, without Authorize.req;
+   * - online, a valid local-list or cache entry with `LocalPreAuthorize`
+   *   resolves "Accepted" without Authorize.req (§9.1.13);
+   * - otherwise Authorize.req goes out and the tag-matched
+   *   `authorizeResult` event resolves it, so concurrent Authorize calls
+   *   for different tags don't cross streams.
+   *
+   * While waiting, a disconnect hands the decision to the offline rules.
+   * A timeout while still connected falls back to what the station knows:
+   * a NOT-valid local-list or cache entry resolves its status (#452);
+   * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
+   * A timeout once the socket is gone applies the offline rules.
    */
   authorizeAndWait(tagId: string, timeoutMs = 10000): Promise<string> {
+    const decision = this._authorization.decide(tagId, this.isOnline());
+    if (decision.kind !== "askCsms") {
+      return Promise.resolve(this.localAuthorizationStatus(tagId, decision));
+    }
+
     this.authorize(tagId);
 
     return new Promise<string>((resolve) => {
@@ -1121,13 +1199,21 @@ export class ChargePoint {
         resolve(data.status);
       };
 
-      const disconnectHandler = () => {
-        cleanup();
+      const decideOffline = (why: string) => {
+        const status = this.localAuthorizationStatus(
+          tagId,
+          this._authorization.decideOffline(tagId),
+        );
         this._logger.warn(
-          `Disconnected while awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
+          `${why} while awaiting Authorize.conf for ${tagId}; offline authorization: ${status}`,
           LogType.TRANSACTION,
         );
-        resolve("Accepted");
+        resolve(status);
+      };
+
+      const disconnectHandler = () => {
+        cleanup();
+        decideOffline("Disconnected");
       };
 
       this._events.on("authorizeResult", handler);
@@ -1135,6 +1221,19 @@ export class ChargePoint {
 
       timeoutId = setTimeout(() => {
         cleanup();
+        if (!this.isOnline()) {
+          decideOffline(`Timeout (${timeoutMs}ms) and offline`);
+          return;
+        }
+        const refusal = this._authorization.decideUnanswered(tagId);
+        if (refusal) {
+          this._logger.warn(
+            `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; falling back to the local decision`,
+            LogType.TRANSACTION,
+          );
+          resolve(this.localAuthorizationStatus(tagId, refusal));
+          return;
+        }
         this._logger.warn(
           `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
           LogType.TRANSACTION,
@@ -1142,6 +1241,25 @@ export class ChargePoint {
         resolve("Accepted");
       }, timeoutMs);
     });
+  }
+
+  /** The status a local (no Authorize round trip) decision resolves to. */
+  private localAuthorizationStatus(
+    tagId: string,
+    decision: LocalOnlyDecision,
+  ): string {
+    if (decision.kind === "accept") {
+      this._logger.info(
+        `${tagId} authorized locally (${decision.source}); no Authorize.req sent`,
+        LogType.TRANSACTION,
+      );
+      return "Accepted";
+    }
+    this._logger.warn(
+      `${tagId} refused locally (${decision.source}): ${decision.status}`,
+      LogType.TRANSACTION,
+    );
+    return decision.status;
   }
 
   armResponseOverride(action: string, status: string): void {
@@ -1748,7 +1866,9 @@ export class ChargePoint {
     this._clockAligned.disable();
     this._connectors.forEach((connector) => connector.cleanup());
     this._reservationManager.dispose();
-    this._localAuthListManager.dispose();
+    // The Local Authorization List is kept: it is what authorizes while the
+    // connection is down (§3.5.3, LocalAuthorizeOffline), so a connection
+    // loss must not empty it (#534). Only dispose() drops it.
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // Cancel any pending firmware-update simulation so its status train
     // doesn't keep firing against a dead WebSocket.
@@ -1799,6 +1919,7 @@ export class ChargePoint {
   dispose(): void {
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its
     // handler logs "WebSocket closed" through this repository. Closing it

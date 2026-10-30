@@ -101,7 +101,8 @@ describe("OCPP 2.x variable monitoring", () => {
             csms,
             "gmr-empty",
             "GetMonitoringReport",
-            { requestId: 1 },
+            // The station's own monitors (#538) are all Delta monitors.
+            { requestId: 1, monitoringCriteria: ["ThresholdMonitoring"] },
             v.reportResponse,
           ),
         ).toEqual({ status: "EmptyResultSet" });
@@ -245,7 +246,12 @@ describe("OCPP 2.x variable monitoring", () => {
             { id: 99, status: "NotFound" },
           ],
         });
-        expect(cp.monitoring.list().map((m) => m.id)).toEqual([1, 3]);
+        expect(
+          cp.monitoring
+            .list()
+            .filter((m) => m.origin === "CustomMonitor")
+            .map((m) => m.id),
+        ).toEqual([1, 3]);
       } finally {
         cp.disconnect();
         await csms.stop();

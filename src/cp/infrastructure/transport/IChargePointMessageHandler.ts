@@ -95,6 +95,11 @@ export interface IChargePointMessageHandler {
   /** OCPP 2.x NotifyEvent.req for variable-monitor events (N07, #457):
    *  one request, one eventData per event. 1.6 has no such message. */
   sendNotifyEvent(events: readonly MonitoringEvent[]): void;
+  /** OCPP 2.x: queue the NotifyEvent of `events` while offline, for
+   *  delivery after the next Boot Accepted (N07.FR.04, N08.FR.03, #538). */
+  queueNotifyEvent(events: readonly MonitoringEvent[]): void;
+  /** OCPP 2.x: the highest `eventId` still queued, 0 when none (#538). */
+  highestQueuedNotifyEventId(): number;
   setBootStatus(
     status:
       | { status: "Idle" }

@@ -53,6 +53,14 @@ export interface ClearedChargingProfiles {
 /**
  * ChargePoint event types
  */
+/** The transaction-related message a `transactionMessage*` event is about. */
+export type TransactionMessageAction =
+  "TransactionEvent" | "StartTransaction" | "StopTransaction" | "MeterValues";
+
+/** Why a transmission of a transaction-related message failed: a CALLERROR
+ *  answered it, or no answer came within the message timeout. */
+export type TransactionMessageFailure = "callError" | "timeout";
+
 export interface ChargePointEvents {
   // Status events
   statusChange: {
@@ -198,25 +206,33 @@ export interface ChargePointEvents {
     connectorId: number;
     errorCode: string;
   };
-  /** OCPP 2.0.1 / 2.1 (#490, E13.FR.02): the CSMS answered a
-   *  TransactionEvent (any eventType) with a CALLERROR. `attempt` is the
-   *  1-based transmission that failed. The transaction keeps running; the
+  /** OCPP 2.0.1 / 2.1 (E13.FR.02): a transmission of a transaction-related
+   *  message failed — the CSMS answered it with a CALLERROR (`reason:
+   *  "callError"`, #490, `errorCode` set) or left it unanswered for
+   *  `MessageTimeout` (`reason: "timeout"`, #529, no `errorCode`).
+   *  `attempt` is the 1-based transmission that failed; `eventType` is set
+   *  on a 2.x TransactionEvent only. The transaction keeps running; the
    *  station resends the message unless this was its last attempt. */
   transactionMessageRejected: {
     connectorId: number;
     transactionId: string;
-    eventType: string;
-    errorCode: string;
+    action: TransactionMessageAction;
+    eventType?: string;
+    reason: TransactionMessageFailure;
+    errorCode?: string;
     attempt: number;
   };
-  /** OCPP 2.0.1 / 2.1 (#490, E13.FR.04): the last of
+  /** OCPP 2.0.1 / 2.1 (E13.FR.04): the last of
    *  `MessageAttempts[TransactionEvent]` transmissions failed too, so the
-   *  message is dropped. The transaction keeps running. */
+   *  message is dropped. `reason` and `errorCode` describe that last
+   *  failure. The transaction keeps running. */
   transactionMessageDiscarded: {
     connectorId: number;
     transactionId: string;
-    eventType: string;
-    errorCode: string;
+    action: TransactionMessageAction;
+    eventType?: string;
+    reason: TransactionMessageFailure;
+    errorCode?: string;
     attempts: number;
   };
 

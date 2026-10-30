@@ -37,6 +37,8 @@ class FakeSocket {
   currentGeneration(): { gen: number; closeCause: string | null } {
     return { gen: 1, closeCause: null };
   }
+  /** Set to settle the next CALLs with this drop outcome (socket still up). */
+  dropOutcome: string | null = null;
   sendAction(
     messageId: string,
     action: string,
@@ -44,6 +46,10 @@ class FakeSocket {
     _gen: unknown,
     onSettled?: (s: { outcome: string }) => void,
   ): boolean {
+    if (this.dropOutcome !== null) {
+      onSettled?.({ outcome: this.dropOutcome });
+      return true;
+    }
     this.calls.push({ messageId, action, payload });
     onSettled?.({ outcome: "written" });
     return true;
@@ -114,6 +120,9 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     configuration: {
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),
+      // #529: the timeout trigger is covered in
+      // OCPPMessageHandlerV201.transactionTimeout.test.ts.
+      messageTimeout: vi.fn(() => 30),
       meterValuesSampledData: vi.fn(() => []),
     },
   };
@@ -150,7 +159,9 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
       {
         connectorId: 1,
         transactionId: "tx-490",
+        action: "TransactionEvent",
         eventType: "Started",
+        reason: "callError",
         errorCode: "InternalError",
         attempt: 1,
       },
@@ -184,7 +195,9 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
       {
         connectorId: 1,
         transactionId: "tx-490",
+        action: "TransactionEvent",
         eventType: "Started",
+        reason: "callError",
         errorCode: "InternalError",
         attempts: 3,
       },
@@ -337,7 +350,9 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     expect(discarded).toEqual([]);
   });
 
-  it("logs a warning naming the resend a WebSocket close cancels", () => {
+  // #528 (E11.FR.01): a close queues the waiting resend instead of
+  // cancelling it; the replay is covered by the offline-queue tests.
+  it("logs a warning naming the resend a WebSocket close queues", () => {
     const { socket, tx, handler } = setup();
     handler.sendTransactionEvent({
       phase: "started",
@@ -350,12 +365,12 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     const messages = vi.mocked(logger.warn).mock.calls.map((c) => c[0]);
     expect(messages).toEqual([
       expect.stringMatching(
-        /TransactionEvent Started .*tx-490.*attempt 2 cancelled/,
+        /TransactionEvent Started .*tx-490.*queued while offline/,
       ),
     ]);
   });
 
-  it("logs a warning naming the resend dropped while disconnected", () => {
+  it("logs a warning naming the resend queued while disconnected", () => {
     const { socket, tx, handler } = setup();
     handler.sendTransactionEvent({
       phase: "started",
@@ -366,15 +381,40 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     socket.connected = false;
     vi.mocked(logger.warn).mockClear();
     vi.advanceTimersByTime(60_000);
+    // The socket is closing: the close that follows queues the resend.
+    const queued = expect.stringMatching(
+      /TransactionEvent Started .*tx-490.*queued while offline/,
+    );
+    const warnings = () => vi.mocked(logger.warn).mock.calls.map((c) => c[0]);
+    expect(warnings()).not.toContainEqual(queued);
+    handler.onWebSocketClosed();
+    expect(warnings().filter((m) => queued.asymmetricMatch(m))).toHaveLength(1);
+  });
+
+  it("logs a warning naming the resend dropped while the socket stays up", () => {
+    const { socket, tx, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: tx,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().messageId);
+    socket.dropOutcome = "queue_overflow";
+    vi.mocked(logger.warn).mockClear();
+    vi.advanceTimersByTime(60_000);
     const messages = vi.mocked(logger.warn).mock.calls.map((c) => c[0]);
     expect(messages).toContainEqual(
       expect.stringMatching(
-        /TransactionEvent Started .*tx-490.*attempt 2 dropped/,
+        /TransactionEvent Started .*tx-490.*attempt 2 dropped: queue_overflow/,
       ),
     );
+    // Lost, not queued: a later Boot Accepted replays nothing.
+    socket.dropOutcome = null;
+    handler.flushPendingQueue();
+    expect(socket.transactionEvents()).toHaveLength(1);
   });
 
-  it("forgets a retry the socket drops, and does not retry other CALLs", () => {
+  it("leaves no timer for a retry dropped offline, and does not retry other CALLs", () => {
     const { socket, tx, handler, rejected } = setup();
     handler.sendHeartbeat();
     socket.callError(socket.last().messageId);
@@ -389,7 +429,7 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     socket.callError(socket.last().messageId);
     socket.connected = false;
     vi.advanceTimersByTime(60_000);
-    // Not connected: the resend is dropped, and nothing is left behind.
+    // Not connected: the resend is queued (#528), and no timer is left.
     expect(socket.transactionEvents()).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });

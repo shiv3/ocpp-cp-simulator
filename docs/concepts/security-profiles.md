@@ -453,27 +453,53 @@ whose client certificate it replaces; other profiles have none and stay
 connected.
 
 - The station presents the stored chain, leaf first, with the private key
-  of the CSR it generated. A chain signed for a CSR the caller passed to
-  `sign_certificate` has no key in the store: the station keeps its
-  configured certificate. The `--tls-ca` and server-name settings do not
+  of the CSR it generated. The `--tls-ca` and server-name settings do not
   change.
+- The station presents a renewed certificate only while the store holds
+  its key. A chain signed for a CSR the caller passed to
+  `sign_certificate` has none, and neither has the store once its
+  Charging Station chain is replaced by such a chain or removed: the
+  station then forgets every renewed certificate, the confirmed one
+  included, and presents `--tls-cert` again from its next connection.
 - 2.0.1 asks the station to switch once the certificate's `notBefore` has
   passed; the simulator waits for it on 2.1 too, so a certificate not yet
-  valid is switched to at that time.
+  valid is switched to at that time. A manual disconnect does not cancel
+  that wait; only a `cp.delete` (dispose) does.
 - A station that is not connected then (reconnect back-off, a simulated
   outage, a manual disconnect) does not reconnect for it: it presents the
   renewed certificate at its next connection, on that connection's timing.
+- A connected station first waits, up to 60 s, until no `TransactionEvent`
+  awaits its write (network-simulation latency can hold it), its answer or
+  its resend (`MessageAttemptInterval`, E13). The close would not lose
+  one: the [E11 offline queue](ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent)
+  takes it and replays it with `offline` set after the next accepted boot.
+  Waiting avoids marking offline, and resending, events the CSMS was
+  about to settle. Events already queued for their replay are not waited
+  for: they replay after the reconnect's boot. Past 60 s it reconnects
+  anyway, and the close queues what is still in flight. The
+  reconnect is otherwise a full one, as a connection loss would be: the
+  station boots again; heartbeat, clock-aligned samples and monitor
+  reporting stop until the boot is `Accepted`; reservations, the
+  station-level charging profiles, response overrides and a running
+  firmware simulation are dropped; non-transaction CALLs awaiting an
+  answer are lost; and the SignCertificate back-off of every use and the
+  weekly OCSP refresh stop.
 - Until a connection with the renewed certificate has opened, a failed
   attempt makes the next one present the other certificate (2.1 A02.FR.28,
   alternating as B10.FR.08 describes; the reconnect back-off is unchanged).
-  A02.FR.28 alternates once every `NetworkConfigurationPriority` entry has
-  failed; the simulator alternates after each failed attempt, which is the
-  same with one URL but not with a list of supervision URLs.
-  If the configured certificate connects first, the renewed one is
-  discarded (A02.FR.10) and the station keeps the configured one until the
-  next `CertificateSigned`. The stored chain stays, and no
-  `DiscardedRenewedClientCertificate` security event is sent (A02.FR.29 is
-  a SHOULD).
+  The other certificate is the one in use before the renewal: a renewed
+  certificate confirmed earlier, else `--tls-cert`. A02.FR.28 alternates
+  once every `NetworkConfigurationPriority` entry has failed; the
+  simulator alternates after each failed attempt, which is the same with
+  one URL but not with a list of supervision URLs. It does so on 2.0.1
+  too, whose A02 has no such rule.
+  If the previous certificate connects first, the renewed one is
+  discarded (A02.FR.10) and the station keeps the previous one until the
+  next `CertificateSigned`. The stored chain stays. On 2.1 the station
+  then sends a `SecurityEventNotification` of type
+  `DiscardedRenewedClientCertificate` once that connection's boot is
+  `Accepted` (A02.FR.29). 2.0.1 defines neither the rule nor the event
+  type, and sends none.
 - The key is memory-only, so a restart presents `--tls-cert` / `--tls-key`
   again although the state database still holds the renewed chain.
 - 1.6 does not switch: its `CertificateSigned` stores the chain without
@@ -531,7 +557,7 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | Rewrite `remainingContracts` into the EXI answer                      | Declined: no EXI codec                   | 2.1 M01.FR.05                                |
 | Indicate a failure to the EV                                          | Declined: no EV link                     | M01 / M02 error handling (no FR id)          |
 | Renewed Charging Station certificate as the TLS client one            | Implemented: 2.x, security profile 3     | A02.FR.08; 2.1 A02.FR.28, A02.FR.10          |
-| `DiscardedRenewedClientCertificate` security event                    | Not sent                                 | 2.1 A02.FR.29 (SHOULD)                       |
+| `DiscardedRenewedClientCertificate` security event                    | Implemented on 2.1                       | 2.1 A02.FR.29 (SHOULD)                       |
 | V2G certificate as the TLS server one towards the EV                  | Declined: no EV link, no ISO 15118 stack | A00.FR.428, A00.FR.513                       |
 | `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                       | M03.FR.05                                    |
 | TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                              | F06.FR.04, A02.FR.02/03/13                   |

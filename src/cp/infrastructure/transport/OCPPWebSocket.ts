@@ -62,6 +62,10 @@ export interface TransportObserverEvents {
    *  disconnect, a reset, a simulated drop), or the transport was disposed.
    *  Emitted once per generation, before any replacement socket opens. */
   closed: { cause: CloseCause | "disposed" };
+  /** #537 A02.FR.10: a connection opened with the previous client
+   *  certificate while the renewed one was unconfirmed; the renewed one is
+   *  discarded (A02.FR.29 reports it). */
+  renewedClientCertificateDiscarded: Record<string, never>;
 }
 
 /**
@@ -113,6 +117,12 @@ type MessageHandler = (
 
 /** What the charge point is told about a socket's close. */
 export type SocketClose = Pick<CloseEvent, "code" | "reason">;
+
+/** A TLS client certificate chain (PEM) and its private key (PEM). */
+interface ClientIdentity {
+  readonly cert: string;
+  readonly key: string;
+}
 
 /**
  * Reported for a socket the charge point closed itself (reset, disconnect)
@@ -200,11 +210,14 @@ export class OCPPWebSocket {
    * #537 A02.FR.08: a renewed Charging Station certificate presented in
    * place of the configured `cert` / `key`. Memory-only. `confirmed` once a
    * connection presenting it opened; until then failed attempts alternate
-   * between it and the configured one (2.1 A02.FR.28 with B10.FR.08).
+   * between it and `fallback` (2.1 A02.FR.28 with B10.FR.08): the identity
+   * in use before it, a previously confirmed renewal or, when absent, the
+   * configured one.
    */
   private _renewedClientCertificate: {
     readonly cert: string;
     readonly key: string;
+    readonly fallback?: ClientIdentity;
     confirmed: boolean;
     presentNext: boolean;
   } | null = null;
@@ -294,17 +307,38 @@ export class OCPPWebSocket {
    * the configured client certificate. The caller reconnects. Ignored
    * unless {@link usesClientCertificate}.
    */
-  public useRenewedClientCertificate(identity: {
-    readonly cert: string;
-    readonly key: string;
-  }): void {
+  public useRenewedClientCertificate(identity: ClientIdentity): void {
     if (!this.usesClientCertificate()) return;
+    const previous = this._renewedClientCertificate;
+    // A02.FR.28: the fallback is the certificate in use, which is a
+    // renewal confirmed earlier rather than the configured one.
+    const fallback = previous?.confirmed
+      ? { cert: previous.cert, key: previous.key }
+      : previous?.fallback;
     this._renewedClientCertificate = {
       cert: identity.cert,
       key: identity.key,
+      ...(fallback ? { fallback } : {}),
       confirmed: false,
       presentNext: true,
     };
+  }
+
+  /**
+   * #537: forgets every renewed identity, confirmed or not, so the next
+   * connection presents the configured `cert` / `key`. Called when the
+   * certificate store no longer holds the key of its Charging Station
+   * certificate (a chain replaced by one signed for a caller-supplied CSR,
+   * or removed). The refusal probe's replay options lose the key too.
+   */
+  public clearRenewedClientCertificate(): void {
+    this._renewedClientCertificate = null;
+    if (this._lastConnectOptions) {
+      this._lastConnectOptions = {
+        ...this._lastConnectOptions,
+        tls: this._tls,
+      };
+    }
   }
 
   /** The TLS options of the next attempt, and whether it presents the
@@ -314,13 +348,18 @@ export class OCPPWebSocket {
     renewed: boolean;
   } {
     const renewed = this._renewedClientCertificate;
-    if (!renewed || !(renewed.confirmed || renewed.presentNext)) {
-      return { tls: this._tls, renewed: false };
+    if (renewed && (renewed.confirmed || renewed.presentNext)) {
+      return { tls: this.tlsWith(renewed), renewed: true };
     }
+    const fallback = renewed?.fallback;
     return {
-      tls: { ...(this._tls ?? {}), cert: renewed.cert, key: renewed.key },
-      renewed: true,
+      tls: fallback ? this.tlsWith(fallback) : this._tls,
+      renewed: false,
     };
+  }
+
+  private tlsWith(identity: ClientIdentity): OcppTlsOptions {
+    return { ...(this._tls ?? {}), cert: identity.cert, key: identity.key };
   }
 
   /** A connection opened: settles which client certificate the station
@@ -336,11 +375,16 @@ export class OCPPWebSocket {
       );
       return;
     }
-    this._renewedClientCertificate = null;
+    // The certificate in use before the renewal stays the station's.
+    const fallback = renewed.fallback;
+    this._renewedClientCertificate = fallback
+      ? { ...fallback, confirmed: true, presentNext: false }
+      : null;
     this._logger.warn(
-      "Connected with the configured client certificate after the renewed one failed; discarding the renewed certificate (A02.FR.10)",
+      "Connected with the previous client certificate after the renewed one failed; discarding the renewed certificate (A02.FR.10)",
       LogType.WEBSOCKET,
     );
+    this.observers.emit("renewedClientCertificateDiscarded", {});
   }
 
   /** An attempt closed before it opened: the next one presents the other
@@ -351,7 +395,7 @@ export class OCPPWebSocket {
     renewed.presentNext = !presentedRenewed;
     if (presentedRenewed) {
       this._logger.warn(
-        "Could not connect with the renewed Charging Station certificate; the next attempt presents the configured one (A02.FR.28)",
+        "Could not connect with the renewed Charging Station certificate; the next attempt presents the previous one (A02.FR.28)",
         LogType.WEBSOCKET,
       );
     }

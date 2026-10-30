@@ -327,11 +327,14 @@ export class CertificateStore {
       return { status: "PublicKeyMismatch" };
     }
 
-    this.replaceChains(use, chain);
-    this.#pendingCsrs.delete(use);
+    // Bound before the change is announced, so a listener reading
+    // tlsClientIdentity() sees the new chain with its key. The leaf is
+    // new (its CSR's key pair is), so no chain replaced below shares it.
     if (pending.privateKey) {
       this.#chainKeys.set(chain.pems[0], pending.privateKey);
     }
+    this.replaceChains(use, chain);
+    this.#pendingCsrs.delete(use);
     return { status: "Accepted", chain };
   }
 

@@ -227,6 +227,25 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("reports a TransactionEvent in flight until answered, retries included (#537)", () => {
+    const { socket, tx, handler } = setup();
+    expect(handler.hasTransactionMessagesInFlight()).toBe(false);
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: tx,
+      connectorId: 1,
+    });
+    // Awaiting its answer.
+    expect(handler.hasTransactionMessagesInFlight()).toBe(true);
+    socket.callError(socket.last().messageId);
+    // Waiting out MessageAttemptInterval before the resend.
+    expect(handler.hasTransactionMessagesInFlight()).toBe(true);
+    vi.advanceTimersByTime(60_000);
+    expect(handler.hasTransactionMessagesInFlight()).toBe(true);
+    socket.callResult(socket.last().messageId, {});
+    expect(handler.hasTransactionMessagesInFlight()).toBe(false);
+  });
+
   it("does not retry a TransactionEvent answered with a CALLRESULT", () => {
     const { socket, tx, handler, rejected } = setup();
     handler.sendTransactionEvent({

@@ -262,28 +262,61 @@ describe.skipIf(!canBindBunServe())(
         const renewalOnly = csmsOn(port, certs, [certs.renewalCa.pem]);
         await waitUntil(() => renewalOnly.openCount() === 1, 8_000);
       }, 20_000);
+
+      it("falls back to the configured certificate when the CSMS refuses the renewed one (A02.FR.28)", async () => {
+        const certs = await pki();
+        const port = freePort();
+        const operatorOnly = csmsOn(port, certs, [certs.operatorCa.pem]);
+        const cp = station(version, operatorOnly.url, certs);
+        const logs: string[] = [];
+        cp.events.on("log", (entry) => logs.push(entry.message));
+        cp.connect();
+        await bootOn(operatorOnly);
+
+        expect(
+          await installRenewedCertificate(operatorOnly, cp, certs),
+        ).toEqual({
+          status: "Accepted",
+        });
+
+        // The renewed certificate is refused at the handshake; the next
+        // attempt presents the configured one and gets in.
+        await waitUntil(() => operatorOnly.openCount() === 2, 8_000);
+        expect(logs.some((line) => line.includes("(A02.FR.28)"))).toBe(true);
+        expect(logs.some((line) => line.includes("(A02.FR.10)"))).toBe(true);
+      }, 20_000);
+
+      it("reconnects once the pending TransactionEvent is answered", async () => {
+        const certs = await pki();
+        const port = freePort();
+        const both = [certs.operatorCa.pem, certs.renewalCa.pem];
+        const csms = csmsOn(port, certs, both);
+        const cp = station(version, csms.url, certs);
+        const logs: string[] = [];
+        cp.events.on("log", (entry) => logs.push(entry.message));
+        cp.connect();
+        await bootOn(csms);
+        cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+        void cp.startTransaction("TAG-RENEW", 1);
+        const started = await csms.waitForFrame(
+          (frame) => frame[0] === 2 && frame[2] === "TransactionEvent",
+        );
+
+        expect(await installRenewedCertificate(csms, cp, certs)).toEqual({
+          status: "Accepted",
+        });
+        // The TransactionEvent is unanswered: the station stays connected.
+        await Bun.sleep(1_500);
+        expect(csms.openCount()).toBe(1);
+
+        csms.replyCallResult(started[1] as string, {});
+        await waitUntil(() => csms.openCount() === 2, 5_000);
+        // Settled before the close: nothing went to the E11 queue (#528).
+        expect(logs.some((line) => line.includes("queued while offline"))).toBe(
+          false,
+        );
+      }, 20_000);
     });
-
-    it("falls back to the configured certificate when the CSMS refuses the renewed one (A02.FR.28)", async () => {
-      const certs = await pki();
-      const port = freePort();
-      const operatorOnly = csmsOn(port, certs, [certs.operatorCa.pem]);
-      const cp = station("OCPP-2.1", operatorOnly.url, certs);
-      const logs: string[] = [];
-      cp.events.on("log", (entry) => logs.push(entry.message));
-      cp.connect();
-      await bootOn(operatorOnly);
-
-      expect(await installRenewedCertificate(operatorOnly, cp, certs)).toEqual({
-        status: "Accepted",
-      });
-
-      // The renewed certificate is refused at the handshake; the next
-      // attempt presents the configured one and gets in.
-      await waitUntil(() => operatorOnly.openCount() === 2, 8_000);
-      expect(logs.some((line) => line.includes("(A02.FR.28)"))).toBe(true);
-      expect(logs.some((line) => line.includes("(A02.FR.10)"))).toBe(true);
-    }, 20_000);
 
     it("waits for the certificate's notBefore before switching (2.0.1 A02.FR.08)", async () => {
       const certs = await pki();

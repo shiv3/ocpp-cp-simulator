@@ -21,7 +21,8 @@ import {
  * {@link powerWattsForCurrent} instead, so the watt cap and the
  * `Current.Import` derived back from it agree. This constant remains the
  * fallback for the connectors that declare nothing, and it is still what
- * `GetCompositeSchedule` reports with.
+ * `GetCompositeSchedule` converts with when asked for the unit a profile
+ * was not written in ({@link compositeLimitInUnit}).
  */
 const REFERENCE_PHASE_VOLTAGE = 230;
 
@@ -298,12 +299,72 @@ export function resolveEffectivePhaseLimit(
 
 // ─── Composite schedule (GetCompositeSchedule.req) ───────────────────────
 
+/**
+ * The schedule period that set a composite slice's limit, as the CSMS sent
+ * it. A composite restates the CSMS's own profiles, so the response is
+ * built from this rather than from the watts (#323).
+ */
+export interface CompositeSource {
+  limit: number;
+  unit: ChargingRateUnitType;
+  /**
+   * The joint phase count in force ({@link resolveEffectivePhaseLimit}),
+   * when any profile restricts it; for a single profile, its period's own
+   * `numberPhases`.
+   */
+  numberPhases?: number;
+}
+
 export interface CompositePeriod {
   startPeriod: number;
   /** Watts. `Infinity` means "uncapped" — the caller should skip emitting
    *  a ChargingSchedulePeriod for this slice, since OCPP has no encoding
    *  for "no limit". */
   watts: number;
+  /** The winning profile's period; absent when the slice is uncapped. */
+  source?: CompositeSource;
+}
+
+/**
+ * A composite slice's limit in the unit a GetCompositeSchedule.req asked
+ * for, with the joint phase count as `numberPhases` (#323).
+ *
+ * - Same unit as the winning profile: its limit, verbatim — no A → W → A
+ *   float drift. An ampere limit is per phase, so it holds on whatever
+ *   phase count is in force.
+ * - The other unit: converted on the 230 V reference and the joint phase
+ *   count (3 when no profile restricts it), the same count `limitToWatts`
+ *   used to compare it, so a W profile on 1 phase reads back as `W / 230`
+ *   amperes, not `W / 690`.
+ *
+ * `numberPhases` is emitted only when a profile restricts the phase count;
+ * none is invented.
+ */
+export function compositeLimitInUnit(
+  period: CompositePeriod,
+  unit: ChargingRateUnitType,
+): { limit: number; numberPhases?: number } {
+  const source = period.source;
+  const phases = source?.numberPhases;
+  const extra = phases === undefined ? {} : { numberPhases: phases };
+  // Clamped like the watts, which never go below 0.
+  if (source && source.unit === unit) {
+    return { limit: Math.max(0, source.limit), ...extra };
+  }
+  if (unit === ChargingRateUnitType.W) return { limit: period.watts, ...extra };
+  return {
+    limit: period.watts / REFERENCE_PHASE_VOLTAGE / (phases ?? 3),
+    ...extra,
+  };
+}
+
+function sameComposite(a: CompositePeriod, b: CompositePeriod): boolean {
+  return (
+    a.watts === b.watts &&
+    a.source?.limit === b.source?.limit &&
+    a.source?.unit === b.source?.unit &&
+    a.source?.numberPhases === b.source?.numberPhases
+  );
 }
 
 export interface CompositeInput {
@@ -339,10 +400,14 @@ export interface CompositeInput {
  * OCPP type has no "uncapped" encoding).
  *
  * Deliberately converts `ChargingRateUnit=A` against the 230 V reference
- * rather than the connector's electrical model: the handler converts the
- * watts straight back to amperes for a CSMS that asked for `A`, and the two
- * halves of *that* round trip have to agree with each other. A composite is
- * a restatement of the CSMS's own profiles, not a metering claim.
+ * rather than the connector's electrical model: a composite is a
+ * restatement of the CSMS's own profiles, not a metering claim. Every
+ * profile converts on the joint phase count, as `resolveEffectiveLimitWatts`
+ * does, so the winner and its watts are the cap metering applies at the
+ * 230 V reference. Each slice carries the winning period as `source`, so the
+ * response restates it in its own unit ({@link compositeLimitInUnit}); the
+ * watts pick the winner and serve a request for the other unit (#323).
+ * Consecutive slices merge only when they restate the same values.
  */
 export function buildCompositeWattsSchedule(
   inputs: CompositeInput,
@@ -369,17 +434,41 @@ export function buildCompositeWattsSchedule(
   const slices: CompositePeriod[] = [];
   for (const startPeriod of sorted) {
     const at = new Date(anchor.getTime() + startPeriod * 1000);
-    let limit = Infinity;
+    let slice: CompositePeriod = { startPeriod, watts: Infinity };
+    // Every profile converts on the joint phase count, exactly as metering
+    // does (`resolveEffectiveLimitWatts`): an ampere limit is per phase and
+    // delivery happens only on the phases every profile permits, so the
+    // composite restates the cap that is actually applied (#323).
+    const jointPhases = resolveEffectivePhaseLimit(
+      inputs.txProfile,
+      inputs.chargePointMaxProfile,
+      anchor,
+      at,
+    );
+    const numberPhases =
+      jointPhases === null ? {} : { numberPhases: jointPhases };
     for (const profile of profiles) {
       // For Recurring/Absolute kinds the resolver walks elapsed time from
       // the profile's reference; for Relative it's elapsed from the
       // anchor (we treat the composite anchor as the transaction start).
-      const r = resolveScheduleLimitWatts(profile, anchor, at);
-      if (r.watts < limit) limit = r.watts;
+      // The tx side wins a tie.
+      const r = resolveScheduleLimitWatts(
+        profile,
+        anchor,
+        at,
+        undefined,
+        jointPhases,
+      );
+      if (r.watts < slice.watts && r.rawLimit !== null && r.unit !== null) {
+        slice = {
+          startPeriod,
+          watts: r.watts,
+          source: { limit: r.rawLimit, unit: r.unit, ...numberPhases },
+        };
+      }
     }
-    if (slices.length === 0 || slices[slices.length - 1].watts !== limit) {
-      slices.push({ startPeriod, watts: limit });
-    }
+    const last = slices[slices.length - 1];
+    if (!last || !sameComposite(last, slice)) slices.push(slice);
   }
   return slices;
 }

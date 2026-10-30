@@ -11,7 +11,7 @@ related:
   - ../analyses/testing-strategy.md
   - ../concepts/ocpp-versions-and-transports.md
   - example-scenarios.md
-updated: 2026-09-17
+updated: 2026-10-29
 ---
 
 # Source: `e2e/README.md`
@@ -21,12 +21,11 @@ independent implementation ([gocpp](../entities/csms-peers.md#gocpp)) and its
 inbound handling via CSMS-initiated commands. Everything is real: WebSocket,
 CP, CSMS.
 
-**Run.** `bun run test:e2e` builds the Go CSMS fixture once, then runs five
-suites: `e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`,
-`e2e/ocpp21.gocpp.e2e.ts`, `e2e/scenario.gocpp.e2e.ts` and
-`e2e/comprehensive.gocpp.e2e.ts` (the last runs
-`docs/examples/scenarios/all-cases.json` under every version). The README's
-"three suites" wording predates the scenario / comprehensive suites. Run a
+**Run.** `bun run test:e2e` builds the Go CSMS fixture once, then runs six
+suites: `e2e/ocpp16.gocpp.e2e.ts`, `e2e/chargingProfile.gocpp.e2e.ts`,
+`e2e/ocpp201.gocpp.e2e.ts`, `e2e/ocpp21.gocpp.e2e.ts`,
+`e2e/scenario.gocpp.e2e.ts` and `e2e/comprehensive.gocpp.e2e.ts` (the last
+runs `docs/examples/scenarios/all-cases.json` under every version). Run a
 single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 **Requirements (local-only).** Go 1.26+ on PATH and network access to the
@@ -50,3 +49,24 @@ not yet provision Go, so the suites are local-only and excluded from `test`,
 - `support/buildCsms.ts` — builds the Go binary.
 - `ocpp16|201|21.gocpp.e2e.ts` — per-version suites, driven in-process via
   `ChargePoint`, asserting on the CSMS frame log + CP state.
+- `chargingProfile.gocpp.e2e.ts` — OCPP 1.6 smart charging (#323): a 6 A
+  `SetChargingProfile` on an AC 230 V / 3-phase / cos φ 0.9 connector reaches
+  the CSMS as `Power.Active.Import` 3726 W and `Current.Import` 6.0 A (1242 W
+  and 6.0 A with `numberPhases: 1`); `ClearChargingProfile` lifts the cap;
+  `GetCompositeSchedule` returns the profile's limit and `numberPhases`.
+
+**CSMS→CP actions** (`e2e/csms/command.go`, listed in the README):
+
+- 1.6 — `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`,
+  `ReserveNow`, `CancelReservation`, `SetChargingProfile`,
+  `ClearChargingProfile`, `GetCompositeSchedule` (the last three since #323).
+- 2.0.1 — `RequestStartTransaction`, `RequestStopTransaction`, `Reset`,
+  `ChangeAvailability`, `TriggerMessage`, `UnlockConnector`, `GetVariables`,
+  `SetVariables`, `GetBaseReport`, `ReserveNow`.
+- 2.1 — `RequestStartTransaction`, `RequestStopTransaction`,
+  `UsePriorityCharging`, `ReserveNow`.
+
+Any other action returns `ok: false` with an `unsupported <version> action`
+error. The fixture marshals decimals (a schedule's `limit`) as JSON numbers;
+shopspring/decimal's default quoted string fails the simulator's 1.6 schema
+validation.

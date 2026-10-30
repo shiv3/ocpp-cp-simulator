@@ -94,16 +94,32 @@ gets no record from a `Sent:` / `Received:` line it cannot parse (#401). An
 object or array held by a secret-named member is replaced whole by the same
 `"[redacted]"`, so `{"password":{"a":"b"}}` logs `{"password":"[redacted]"}`
 (#515). Outside a complete JSON object (non-JSON text, a truncated frame), a
-quoted value stays on its line: it ends at the first unescaped closing quote
-on that line (an escaped quote, `"ab\"cd"`, does not end it), or at the end
-of the line when none comes (a truncated message), so an assignment on the
-next line is still matched on its own. Only a value starting with
-`-----BEGIN` (a PEM in non-JSON text, after optional whitespace) spans lines,
-up to its closing quote, or to the end of the message without one (#401). In
-log text, a non-PEM quoted value with a raw newline (or a backslash before
-the line end) is redacted only to the end of its first line, and a PEM value
-that lacks its closing quote ends at the next quote, so an assignment after
-it can be read — limits tracked in #519.
+quoted value ends at its first unescaped matching quote (an escaped quote,
+`"ab\"cd"`, does not end it). On the value's first line any such quote ends
+it. On a later line (after a raw newline, or a backslash before the line
+end) it ends the value only when whitespace, `,`, `}`, `]` or the end of the
+text follows it and no `:` / `=` (optionally followed by whitespace) precedes
+it, so `password="line1\nline2" x` logs `password="[redacted]" x` while the
+quote opening the next line's `privateKey="SECRET"` does not end
+`password="a` (#401, #519). Nor does it run over another secret-named
+assignment (`name=` or `name:`, quoted or bare) before that quote. Without
+such a quote, or across such an assignment, the value is redacted to the end
+of its first line and the next line's assignments are matched on their own.
+A value starting with `-----BEGIN` (a PEM, after optional whitespace) ends
+only at a quote that follows its `-----END …-----` marker (a label of
+letters, digits, spaces and dots; whitespace or a `\n` / `\r` escape before the
+quote) with no secret-named assignment before it, even after a backslash,
+whatever quotes its body holds; otherwise the rest of the message is
+redacted (#519). Both rules fail closed, so they over-redact: a truncated
+value followed by a later line that ends in a delimited quote swallows it
+(`password="a\nuser=bob" x` logs `password="[redacted]" x`), and a PEM
+without its `-----END …-----"` hides everything after it, later assignments
+included — inside a JSON string (a single-quoted
+`{"msg":"privateKey='-----BEGIN…'"}`) it also cuts the frame, which then no
+longer parses for the trace adapter. Limit: when the quote on a later line is followed by any other
+character (`;`, `)`, a letter) or preceded by `=` / `:`, the value is
+redacted only to the end of its first line and its later lines stay
+readable.
 
 ## WebSocket close lines
 

@@ -2021,6 +2021,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this._dataTransferHandler;
   }
 
+  /**
+   * #537: a TransactionEvent is active — awaiting its write (network-sim
+   * latency can hold it), its answer, or the end of
+   * `MessageAttemptInterval` before its resend (#490). A close would not
+   * lose it: the E11 queue takes it and replays it after the next accepted
+   * boot (#528). The renewed-certificate reconnect still waits for it, so
+   * as not to mark offline and resend an event the CSMS was about to
+   * settle. Queued events awaiting their replay do not count: they replay
+   * after the reconnect's boot anyway.
+   */
+  public hasTransactionMessagesInFlight(): boolean {
+    return this._activeTransactionEvents.size > 0;
+  }
+
   public onWebSocketClosed(): void {
     // #528, E11.FR.01 / E11.FR.07: every TransactionEvent the CSMS has not
     // settled goes to the offline queue, in creation order and once each —

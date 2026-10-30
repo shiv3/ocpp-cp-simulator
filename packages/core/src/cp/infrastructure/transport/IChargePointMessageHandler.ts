@@ -108,6 +108,11 @@ export interface IChargePointMessageHandler {
       | { status: "Rejected"; retryAfter: Date },
   ): void;
   getDataTransferHandler(): DataTransferHandler;
+  /** #537: whether a transaction message awaits its write, its answer or
+   *  a resend, which the CSMS may still settle before a close. Implemented
+   *  on 2.x, the only version that reconnects for a renewed client
+   *  certificate; absent means none. */
+  hasTransactionMessagesInFlight?(): boolean;
   onWebSocketClosed(): void;
   flushPendingQueue(): void;
 }

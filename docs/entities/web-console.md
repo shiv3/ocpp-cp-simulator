@@ -7,6 +7,7 @@ sources:
   - index.html
   - vite.config.ts
 related:
+  - web-console-tour.md
   - desktop-app.md
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
@@ -40,6 +41,8 @@ exposed to Tailwind as `bg-cx-card`, `text-cx-muted`, …), which also retune th
 shared shadcn variables, so dialogs, menus and the graph editor follow.
 
 ![Web console — a charge point charging over OCPP 1.6J against SteVe, with labels, its connector card and the message log](../images/web-console-overview.png)
+
+The [web console tour](web-console-tour.md) shows each feature in a short recording.
 
 ## Web Version
 

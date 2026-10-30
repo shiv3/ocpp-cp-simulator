@@ -2209,3 +2209,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Operational timeline](concepts/operational-timeline.md): the `transaction_message_rejected` and `transaction_message_discarded` rows no longer imply a resend or a last attempt in every case; the prose names the 1.6 exceptions and the `error code not recorded` summary.
 - A connector in `Preparing` goes on to `Charging` after a discarded StartTransaction.req only if that request's transaction still runs once the `transactionMessageDiscarded` listeners have returned.
 - Maintainer's answers on #545: OCPP-S stays out of this PR. The 1.6S deviation from the errata sheet (3.2) is noted in [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16) and tracked in #585.
+
+## [2026-10-30] ingest | Certificate follow-ups, first part (#537)
+
+- 2.x M06: `GetCertificateStatus` for the V2G certificates (after a V2G `CertificateSigned`, every accepted boot, then weekly), `ocspRequestData` from the stored hash data plus the AIA OCSP URL, `ocspResult` cached in memory.
+- 2.x `TriggerMessage` `SignChargingStationCertificate` / `SignV2GCertificate` answer `Accepted` and send a new CSR with the triggered `certificateType` (A02.FR.02/03/13); the A02.FR.17-19 resend back-off (`CertSigningWaitMinimum` 60 s, `CertSigningRepeatTimes` 3).
+- 2.x `security_event_notification` sends `SecurityEventNotificationRequest` (A04) instead of a WARN; new curated MCP tool (31 curated tools).
+- 2.x `SecurityCtrlr` variables `CertificateEntries`, `MaxCertificateChainSize` (enforced, A02.FR.16), `CertSigningWaitMinimum`, `CertSigningRepeatTimes`.
+- `serialNumber` without leading zeroes on 1.6 and 2.x, backward compatible with persisted rows; 1.6 whitepaper M04.FR.06 refuses deleting the `--tls-ca` root of a `wss://` connection.
+- [Security profiles](concepts/security-profiles.md): 2.x behaviour bullets, new [SecurityCtrlr variables](concepts/security-profiles.md#securityctrlr-variables) table, "Not covered yet" list trimmed to the ISO 15118 items. [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool row and count.
+- [GitHub issues](sources/github-issues.md): #537.

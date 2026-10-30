@@ -10,7 +10,9 @@
 
 /**
  * Monitor types the simulator implements: thresholds and Delta (N07.FR.16–
- * FR.19), Periodic and PeriodicClockAligned (N08, #538).
+ * FR.19), Periodic and PeriodicClockAligned (N08, #538), and the 2.1
+ * TargetDelta / TargetDeltaRelative (2.1 N07.FR.22, FR.23, #538), which the
+ * 2.0.1 schema does not have.
  */
 export const SUPPORTED_MONITOR_TYPES = [
   "UpperThreshold",
@@ -18,6 +20,8 @@ export const SUPPORTED_MONITOR_TYPES = [
   "Delta",
   "Periodic",
   "PeriodicClockAligned",
+  "TargetDelta",
+  "TargetDeltaRelative",
 ] as const;
 
 export type SupportedMonitorType = (typeof SUPPORTED_MONITOR_TYPES)[number];
@@ -43,6 +47,8 @@ export function monitorBehaviour(type: SupportedMonitorType): MonitorBehaviour {
   switch (type) {
     case "UpperThreshold":
     case "LowerThreshold":
+    case "TargetDelta":
+    case "TargetDeltaRelative":
       return "alert";
     case "Delta":
       return "delta";
@@ -54,6 +60,11 @@ export function monitorBehaviour(type: SupportedMonitorType): MonitorBehaviour {
 
 export function isThresholdMonitorType(type: SupportedMonitorType): boolean {
   return type === "UpperThreshold" || type === "LowerThreshold";
+}
+
+/** 2.1 TargetDelta / TargetDeltaRelative: Actual against Target. */
+export function isTargetDeltaMonitorType(type: SupportedMonitorType): boolean {
+  return type === "TargetDelta" || type === "TargetDeltaRelative";
 }
 
 /** A monitor with a triggered state: it fires, then fires `cleared`. */
@@ -116,6 +127,8 @@ export interface MonitoredValueType {
   /** Inclusive bounds of a numeric variable, when it has any (N04.FR.06). */
   readonly min?: number;
   readonly max?: number;
+  /** The variable has a Target attribute (TargetDelta monitors, #538). */
+  readonly hasTarget?: boolean;
 }
 
 export interface VariableMonitor {
@@ -124,7 +137,8 @@ export interface VariableMonitor {
   readonly severity: number;
   /**
    * Threshold for Upper/LowerThreshold, step for Delta, interval in seconds
-   * for Periodic / PeriodicClockAligned.
+   * for Periodic / PeriodicClockAligned, allowed deviation from the target
+   * for TargetDelta (absolute) / TargetDeltaRelative (a fraction of it).
    */
   readonly value: number;
   /** Monitor only while a transaction is running. */

@@ -9,6 +9,7 @@ import type {
   VariableCharacteristicsType,
 } from "../../../../ocpp/types/v201/notify-report";
 import type { ConfigurationValue } from "../../../domain/charge-point/ConfigurationStore";
+import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import { evseValueKey } from "../../../domain/charge-point/runtimeValueKeys";
 import {
   parseV201VariableKey,
@@ -34,11 +35,13 @@ function toCharacteristicDataType(
 
 /**
  * One ReportData per mapped variable the store has: the station-wide ones,
- * then (#538) the per-EVSE runtime values of every EVSE in `evseIds`.
+ * then (#538) the per-EVSE runtime values of every EVSE in `evseIds`, with
+ * the Target attribute of the variables that have one (2.1).
  */
 export function buildBaseReportData(
   store: ConfigurationStore,
   evseIds: Iterable<number> = [],
+  targets?: DeviceModelTargets,
 ): ReportDataType[] {
   const reportData: ReportDataType[] = [];
 
@@ -62,24 +65,35 @@ export function buildBaseReportData(
   const evses = [...evseIds].filter((id) => id >= 1).sort((a, b) => a - b);
   for (const evseId of evses) {
     for (const [v201Key, { keyPrefix, unit }] of V201_EVSE_VARIABLES) {
-      const entry = store.get(evseValueKey(keyPrefix, evseId));
+      const valueKey = evseValueKey(keyPrefix, evseId);
+      const entry = store.get(valueKey);
       if (!entry) continue;
       const { component, variable } = parseV201VariableKey(v201Key);
-      reportData.push(
-        reportDatum(
-          {
-            name: component,
-            // EVSE N has one connector, number 1.
-            evse:
-              component === "Connector"
-                ? { id: evseId, connectorId: 1 }
-                : { id: evseId },
-          },
-          { name: variable },
-          entry,
-          unit,
-        ),
+      const datum = reportDatum(
+        {
+          name: component,
+          // EVSE N has one connector, number 1.
+          evse:
+            component === "Connector"
+              ? { id: evseId, connectorId: 1 }
+              : { id: evseId },
+        },
+        { name: variable },
+        entry,
+        unit,
       );
+      if (targets?.supports(valueKey) === true) {
+        const target = targets.get(valueKey);
+        datum.variableAttribute = [
+          datum.variableAttribute[0],
+          {
+            type: "Target",
+            ...(target !== undefined && { value: String(target) }),
+            mutability: "ReadWrite",
+          },
+        ];
+      }
+      reportData.push(datum);
     }
   }
 

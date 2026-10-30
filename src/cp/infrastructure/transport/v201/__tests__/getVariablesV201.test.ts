@@ -5,7 +5,13 @@ import {
   ConfigurationStore,
   type ConfigurationValue,
 } from "../../../../domain/charge-point/ConfigurationStore";
+import { DeviceModelTargets } from "../../../../domain/charge-point/DeviceModelTargets";
+import {
+  isValidGetVariablesResponseV21,
+  isValidSetVariablesResponseV21,
+} from "../../../../../ocpp/v21";
 import { handleGetVariablesV201 } from "../getVariablesV201";
+import { handleSetVariablesV201 } from "../setVariablesV201";
 
 function storeWithDefaults(): ConfigurationStore {
   const entries: ConfigurationValue[] = [
@@ -349,5 +355,122 @@ describe("handleGetVariablesV201 EVSE-scoped runtime variables (#538)", () => {
         runtimeStore(),
       ).getVariableResult[0].attributeStatus,
     ).toBe("UnknownComponent");
+  });
+});
+
+describe("handleGetVariablesV201 / handleSetVariablesV201 Target attribute (2.1, #538)", () => {
+  function setup() {
+    const store = storeWithDefaults();
+    store.defineRuntimeIntegerKey("EVSEPower1", 7400);
+    const targets = new DeviceModelTargets();
+    targets.declare("EVSEPower1");
+    return {
+      store,
+      targets,
+      context: { evseExists: (e: { id: number }) => e.id === 1, targets },
+    };
+  }
+  const POWER = {
+    component: { name: "EVSE", evse: { id: 1 } },
+    variable: { name: "Power" },
+  };
+
+  it("answers an empty Target until one is set, then the target, echoing attributeType (B06.FR.03, FR.13)", () => {
+    const { store, targets, context } = setup();
+    const getTarget = () =>
+      handleGetVariablesV201(
+        { getVariableData: [{ attributeType: "Target", ...POWER }] },
+        store,
+        context,
+      );
+    const unset = getTarget();
+    expect(isValidGetVariablesResponseV21(unset)).toBe(true);
+    expect(unset.getVariableResult[0]).toEqual({
+      attributeStatus: "Accepted",
+      attributeType: "Target",
+      attributeValue: "",
+      ...POWER,
+    });
+
+    const set = handleSetVariablesV201(
+      {
+        setVariableData: [
+          { attributeType: "Target", attributeValue: "7000.5", ...POWER },
+        ],
+      },
+      store,
+      context,
+    );
+    expect(isValidSetVariablesResponseV21(set)).toBe(true);
+    expect(set.setVariableResult[0]).toEqual({
+      attributeStatus: "Accepted",
+      attributeType: "Target",
+      ...POWER,
+    });
+    expect(targets.get("EVSEPower1")).toBe(7000.5);
+    expect(getTarget().getVariableResult[0].attributeValue).toBe("7000.5");
+    // The Actual value is untouched.
+    expect(store.get("EVSEPower1")?.value).toBe(7400);
+  });
+
+  it("rejects a Target that is not a number (B05.FR.07)", () => {
+    const { store, targets, context } = setup();
+    for (const attributeValue of ["", "abc", "Infinity", "1e999"]) {
+      const result = handleSetVariablesV201(
+        {
+          setVariableData: [
+            { attributeType: "Target", attributeValue, ...POWER },
+          ],
+        },
+        store,
+        context,
+      ).setVariableResult[0];
+      expect(result.attributeStatus).toBe("Rejected");
+    }
+    expect(targets.get("EVSEPower1")).toBeUndefined();
+  });
+
+  it("answers NotSupportedAttributeType for a Target on a variable without one, or without targets (2.0.1) (B05.FR.06, B06.FR.08)", () => {
+    const { store, context } = setup();
+    expect(
+      handleGetVariablesV201(
+        {
+          getVariableData: [
+            {
+              attributeType: "Target",
+              component: { name: "OCPPCommCtrlr" },
+              variable: { name: "HeartbeatInterval" },
+            },
+          ],
+        },
+        store,
+        context,
+      ).getVariableResult[0].attributeStatus,
+    ).toBe("NotSupportedAttributeType");
+    expect(
+      handleGetVariablesV201(
+        { getVariableData: [{ attributeType: "Target", ...POWER }] },
+        store,
+        { evseExists: context.evseExists },
+      ).getVariableResult[0].attributeStatus,
+    ).toBe("NotSupportedAttributeType");
+    expect(
+      handleSetVariablesV201(
+        {
+          setVariableData: [
+            { attributeType: "Target", attributeValue: "1", ...POWER },
+          ],
+        },
+        store,
+        { evseExists: context.evseExists },
+      ).setVariableResult[0].attributeStatus,
+    ).toBe("NotSupportedAttributeType");
+    expect(
+      handleGetVariablesV201(
+        { getVariableData: [{ attributeType: "MaxSet", ...POWER }] },
+        store,
+        context,
+      ).getVariableResult[0].attributeStatus,
+    ).toBe("NotSupportedAttributeType");
   });
 });

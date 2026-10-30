@@ -340,6 +340,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       gen,
       (settlement) => {
         if (settlement.outcome === "written") {
+          // A transmission written after its message was settled or
+          // discarded is not tracked: nothing would ever remove it.
+          if (transactionEvent?.message.done) {
+            this._chargePoint.notifyOutgoingCall(false);
+            return;
+          }
           this._pendingRequests.set(messageId, {
             action,
             payload,
@@ -812,14 +818,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         message.inFlight.delete(messageId);
         if (attempt === 1) return;
         this.warnResendLost(message.payload, attempt, `dropped: ${reason}`);
-        this.forgetTransactionEvent(message);
+        // A timed-out transmission still on the wire keeps the message
+        // open: its late answer can still settle it.
+        if (message.inFlight.size === 0) this.forgetTransactionEvent(message);
       },
       { message, attempt },
     );
   }
 
   /**
-   * #529: OCPP 2.0.1 / 2.1 E13 (Table 120, Description and Remark) also
+   * #529: OCPP 2.0.1 / 2.1 E13 (2.0.1 Table 120 / 2.1 E13 use case,
+   * Description and Remark) also
    * resends a transaction-related message the CSMS "does not reply [to]
    * within the MessageTimeout"; OCPP-J Part 4 §4.1.1 calls such a CALL timed
    * out. `OCPPCommCtrlr.MessageTimeout[Default]` is read at each

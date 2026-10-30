@@ -12,7 +12,8 @@ import { v21Schemas } from "../../../../ocpp/v21/schemas";
 import type { TransactionEventRequestV201 } from "../../../../ocpp";
 
 /**
- * #529, OCPP 2.0.1 / 2.1 E13 (Table 120, Description and Remark): a
+ * #529, OCPP 2.0.1 / 2.1 E13 (2.0.1 Table 120 / 2.1 E13 use case,
+ * Description and Remark): a
  * TransactionEvent left without a CALLRESULT or CALLERROR within
  * `OCPPCommCtrlr.MessageTimeout[Default]` is a failed transmission, like a
  * CALLERROR (#490). The same E13.FR.02-04 rules then apply: resend after
@@ -35,6 +36,10 @@ type Handler = (
 class FakeSocket {
   calls: Array<{ messageId: string; action: string; payload: unknown }> = [];
   connected = true;
+  /** Settlements of the next CALLs ("written" once empty); "held" keeps
+   *  the settlement in `held` until the test confirms the write. */
+  outcomes: string[] = [];
+  held: Array<() => void> = [];
   private handler: Handler | null = null;
   setMessageHandler(handler: Handler): void {
     this.handler = handler;
@@ -54,7 +59,12 @@ class FakeSocket {
     onSettled?: (s: { outcome: string }) => void,
   ): boolean {
     this.calls.push({ messageId, action, payload });
-    onSettled?.({ outcome: "written" });
+    const outcome = this.outcomes.shift() ?? "written";
+    if (outcome === "held") {
+      this.held.push(() => onSettled?.({ outcome: "written" }));
+    } else {
+      onSettled?.({ outcome });
+    }
     return true;
   }
   callError(messageId: string, errorCode = "InternalError"): void {
@@ -331,6 +341,41 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(socket.transactionEvents()).toHaveLength(2);
       // The resend's own timeout is the only timer left.
       expect(vi.getTimerCount()).toBe(1);
+    });
+
+    it.each(["queue_overflow", "write_failed"])(
+      "still applies a late CALLRESULT to a timed-out transmission when the resend is lost (%s)",
+      (outcome) => {
+        const { socket, start, cp } = setup(version);
+        start();
+        const [first] = socket.transactionEvents();
+        vi.advanceTimersByTime(30_000);
+        socket.outcomes.push(outcome);
+        vi.advanceTimersByTime(60_000);
+        expect(socket.transactionEvents()).toHaveLength(2);
+
+        socket.callResult(first.messageId, INVALID);
+        expect(cp.stopTransaction).toHaveBeenCalledTimes(1);
+        expect(cp.notifyStartTransactionNotAccepted).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it("does not keep a resend written after the message was settled", () => {
+      const { socket, start, handler } = setup(version);
+      start();
+      const [first] = socket.transactionEvents();
+      vi.advanceTimersByTime(30_000);
+      socket.outcomes.push("held");
+      vi.advanceTimersByTime(60_000);
+      const [, second] = socket.transactionEvents();
+      socket.callResult(first.messageId, {});
+
+      socket.held.shift()!();
+      const pending = (
+        handler as unknown as { _pendingRequests: Map<string, unknown> }
+      )._pendingRequests;
+      expect(pending.has(second.messageId)).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it("ignores a CALLRESULT arriving after the message was discarded", () => {

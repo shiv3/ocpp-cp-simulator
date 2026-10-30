@@ -90,7 +90,7 @@ additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
 `transaction_message_discarded` (#490). `1.3` added their `action` and `reason`
-fields, and made `errorCode` conditional (#529).
+fields, and made `errorCode` conditional (#527, #529).
 
 ## Kinds
 
@@ -111,7 +111,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `transaction_stopped`           | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
 | `transaction_rejected`          | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
 | `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x, #490, #529) A TransactionEvent transmission fails (CALLERROR or no answer); it is resent unless it was the last.  |
-| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x, #490) The last attempt failed too: the message is dropped, the transaction keeps running.                         |
+| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x, #490, #529) The last attempt failed too: the message is dropped, the transaction keeps running.                   |
 | `authorization_rejected`        | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
 | `scenario_started`              | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`         | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |

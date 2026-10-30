@@ -116,7 +116,8 @@ or `Ended`) fails in two ways (E13):
 - a CALLERROR answers it: the CSMS failed to process it (#490);
 - no CALLRESULT or CALLERROR comes within
   `OCPPCommCtrlr.MessageTimeout[Default]` seconds (default 30, #529). E13
-  names this trigger in its description and remark (Table 120); OCPP-J
+  names this trigger in its description and remark (2.0.1 Table 120 / 2.1
+  E13 use case); OCPP-J
   Part 4 §4.1.1 calls such a CALL timed out.
 
 On either failure the station:

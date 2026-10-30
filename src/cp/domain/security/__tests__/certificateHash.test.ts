@@ -5,6 +5,7 @@ import {
   certificateHashDataEquals,
   computeCertificateHashData,
   normalizeSerialNumber,
+  ocspResponderUrl,
 } from "../certificateHash";
 import { selfSignedRoot, subCa } from "./certificateFixtures";
 
@@ -209,5 +210,16 @@ describe("computeCertificateHashData with an issuer", () => {
     expect(issued.issuerNameHash).toBe(rootHash.issuerNameHash);
     expect(issued.serialNumber).toBe("2");
     expect(selfKeyed.issuerKeyHash).not.toBe(rootHash.issuerKeyHash);
+  });
+});
+
+describe("ocspResponderUrl (#537)", () => {
+  it("reads the OCSP URL of the Authority Information Access extension", async () => {
+    const root = await selfSignedRoot("01", "Root");
+    const sub = await subCa("02", "Sub", root, {
+      ocspUrl: "http://ocsp.example.com/",
+    });
+    expect(ocspResponderUrl(sub.pem)).toBe("http://ocsp.example.com/");
+    expect(ocspResponderUrl(root.pem)).toBeUndefined();
   });
 });

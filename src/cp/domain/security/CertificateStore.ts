@@ -6,7 +6,9 @@ import {
   certificateHashDataEquals,
   computeCertificateHashData,
   normalizeSerialNumber,
+  ocspResponderUrl,
   type CertificateHashData,
+  type OcspRequestData,
 } from "./certificateHash";
 import {
   isRootCertificateUse,
@@ -79,6 +81,13 @@ export type DeleteCertificateOutcome =
   /** M04.FR.06 (2.x) / M04.FR.05 (1.6 whitepaper): never deletable. */
   | { status: "ChargingStationCertificate" };
 
+/** An OCSP response cached for one certificate (2.x M06, #537). */
+export interface CachedOcspResponse {
+  /** Base64 DER OCSPResponse, as the CSMS sent it. */
+  readonly ocspResult: string;
+  readonly cachedAt: string;
+}
+
 export type ApplySignedChainOutcome =
   | { status: "Accepted"; chain: StoredCertificateChain }
   | { status: "Malformed" }
@@ -144,6 +153,11 @@ export class CertificateStore {
   #tail: Promise<void> = Promise.resolve();
   #pendingOperations = 0;
   #listeners = new Set<() => void>();
+  #ocspResponses: {
+    hash: CertificateHashDataLike;
+    ocspResult: string;
+    cachedAt: string;
+  }[] = [];
 
   constructor(
     private readonly chargePointId: string = "",
@@ -296,6 +310,43 @@ export class CertificateStore {
     this.replaceChains(use, chain);
     this.#pendingCsrs.delete(use);
     return { status: "Accepted", chain };
+  }
+
+  // ── OCSP (2.x M06, #537) ────────────────────────────────────────────────
+
+  /**
+   * GetCertificateStatus `ocspRequestData` for every member of the stored
+   * `use` chain, leaf first, whose certificate names an OCSP responder
+   * (M06.FR.07: the certificate and its sub-CAs). A member without one is
+   * left out: OCPP requires a responderURL.
+   */
+  ocspRequestData(use: SignedCertificateUse): OcspRequestData[] {
+    return this.listSignedChains(use).flatMap((chain) =>
+      chain.pems.flatMap((pem, i): OcspRequestData[] => {
+        const responderURL = ocspResponderUrl(pem);
+        return responderURL ? [{ ...chain.hashData[i], responderURL }] : [];
+      }),
+    );
+  }
+
+  /** Caches the OCSP response a CSMS returned for `hash` (M06.FR.06),
+   *  replacing an older one. Memory-only. */
+  cacheOcspResponse(hash: CertificateHashDataLike, ocspResult: string): void {
+    this.#ocspResponses = [
+      ...this.#ocspResponses.filter(
+        (entry) => !certificateHashDataEquals(entry.hash, hash),
+      ),
+      { hash: { ...hash }, ocspResult, cachedAt: new Date().toISOString() },
+    ];
+  }
+
+  cachedOcspResponse(
+    hash: CertificateHashDataLike,
+  ): CachedOcspResponse | undefined {
+    const entry = this.#ocspResponses.find((e) =>
+      certificateHashDataEquals(e.hash, hash),
+    );
+    return entry && { ocspResult: entry.ocspResult, cachedAt: entry.cachedAt };
   }
 
   listSignedChains(use?: SignedCertificateUse): StoredCertificateChain[] {
@@ -454,6 +505,7 @@ export class CertificateStore {
 
   clearAll(): void {
     this.#pendingCsrs.clear();
+    this.#ocspResponses = [];
     this.#entries = [];
     this.runSafely("clear certificates", () =>
       this.database?.run("DELETE FROM certificates WHERE cp_id = ?", [

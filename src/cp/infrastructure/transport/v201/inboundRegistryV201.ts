@@ -8,6 +8,7 @@ import type {
   DataTransferRequestV201,
   GetBaseReportRequestV201,
   GetBaseReportResponseV201,
+  GetCertificateStatusRequestV201,
   GetReportRequestV201,
   GetReportResponseV201,
   GetVariablesRequestV201,
@@ -147,7 +148,9 @@ export type V201Action =
   | "LogStatusNotification"
   // #456: A02 certificate signing and its security event (A02.FR.07).
   | "SignCertificate"
-  | "SecurityEventNotification";
+  | "SecurityEventNotification"
+  // #537: M06 OCSP status of the station's V2G certificates.
+  | "GetCertificateStatus";
 
 export type V201RequestPayload =
   | BootNotificationRequestV201
@@ -164,7 +167,8 @@ export type V201RequestPayload =
   | FirmwareStatusNotificationRequestV201
   | LogStatusNotificationRequestV201
   | SignCertificateRequestV201
-  | SecurityEventNotificationRequestV201;
+  | SecurityEventNotificationRequestV201
+  | GetCertificateStatusRequestV201;
 
 /**
  * #537: the station's SignCertificate flow (A02), owned by the 2.x message
@@ -181,6 +185,12 @@ export interface V201CertificateSigning {
   /** A CertificateSigned for `use` was answered: its back-off stops
    *  (accepted, or rejected per A02.FR.20). */
   certificateSignedAnswered(use: SignedCertificateUse): void;
+  /**
+   * A chain for `use` was installed: for a V2G certificate the station
+   * asks the CSMS for the OCSP status of the certificate and its sub-CAs
+   * (M06.FR.07). Nothing happens for the Charging Station certificate.
+   */
+  certificateInstalled(use: SignedCertificateUse): void;
 }
 
 export interface V201InboundContext {

@@ -29,6 +29,8 @@ import type {
   MeterValuesResponseV201,
   AuthorizeRequestV201,
   AuthorizeResponseV201,
+  GetCertificateStatusRequestV201,
+  GetCertificateStatusResponseV201,
   SecurityEventNotificationRequestV201,
   SignCertificateRequestV201,
   SignCertificateResponseV201,
@@ -120,6 +122,16 @@ type V201ResponsePayload =
   | TransactionEventResponseV201
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
+
+/** The station's V2G certificates, whose OCSP status it requests and
+ *  caches (M06.FR.06, #537). */
+const V2G_CERTIFICATE_USES: readonly SignedCertificateUse[] = [
+  "V2GCertificate",
+  "V2G20Certificate",
+];
+
+/** M06.FR.10: the cached OCSP data is refreshed at least once a week. */
+const CERTIFICATE_STATUS_REFRESH_MS = 7 * 24 * 3600 * 1000;
 
 /** The certificate use a SignCertificateRequest asks for: absent means
  *  the Charging Station certificate (#456). */
@@ -297,7 +309,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
     certificateSignedAnswered: (use) => this._signBackoff.stop(use),
+    certificateInstalled: (use) => {
+      if (V2G_CERTIFICATE_USES.includes(use)) {
+        this.requestCertificateStatus([use]);
+      }
+    },
   };
+  /** #537 M06.FR.10: the weekly OCSP refresh, running while booted. */
+  private _certificateStatusRefresh: ReturnType<typeof setInterval> | null =
+    null;
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -750,6 +770,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           status,
         );
       }
+      return;
+    }
+
+    if (pending?.action === "GetCertificateStatus") {
+      this.applyCertificateStatusResult(
+        pending.payload as GetCertificateStatusRequestV201,
+        payload as GetCertificateStatusResponseV201,
+      );
       return;
     }
 
@@ -1731,6 +1759,63 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("SignCertificate", this.generateMessageId(), payload);
   }
 
+  /**
+   * M06 GetCertificateStatusRequest (#537), one per certificate of the
+   * stored `uses` chains that names an OCSP responder (M06 remark: one
+   * certificate per request). A responderURL longer than the schema
+   * allows (512 on 2.0.1, 2000 on 2.1) is left out with a WARN.
+   */
+  private requestCertificateStatus(
+    uses: readonly SignedCertificateUse[] = V2G_CERTIFICATE_USES,
+  ): void {
+    const maxUrl = this._chargePoint.ocppVersion === OCPP_2_1 ? 2000 : 512;
+    const store = this._chargePoint.certificateStore;
+    for (const use of uses) {
+      for (const ocspRequestData of store.ocspRequestData(use)) {
+        if (ocspRequestData.responderURL.length > maxUrl) {
+          this._logger.warn(
+            `[v2.0.1] GetCertificateStatus: ${use} certificate ${ocspRequestData.serialNumber} has a responderURL over ${maxUrl} characters; not asked`,
+            LogType.OCPP,
+          );
+          continue;
+        }
+        const payload: GetCertificateStatusRequestV201 = { ocspRequestData };
+        this.send("GetCertificateStatus", this.generateMessageId(), payload);
+      }
+    }
+  }
+
+  /** M06.FR.02-04: an Accepted answer's ocspResult is cached for the
+   *  certificate asked about; Failed leaves the cache as it was. */
+  private applyCertificateStatusResult(
+    request: GetCertificateStatusRequestV201,
+    response: GetCertificateStatusResponseV201,
+  ): void {
+    const serial = request.ocspRequestData.serialNumber;
+    if (response.status === "Accepted" && response.ocspResult !== undefined) {
+      this._chargePoint.certificateStore.cacheOcspResponse(
+        request.ocspRequestData,
+        response.ocspResult,
+      );
+      this._logger.info(
+        `[v2.0.1] GetCertificateStatus: cached the OCSP response for certificate ${serial}`,
+        LogType.OCPP,
+      );
+      return;
+    }
+    this._logger.warn(
+      `[v2.0.1] GetCertificateStatus: no OCSP response for certificate ${serial} (status ${response.status})`,
+      LogType.OCPP,
+    );
+  }
+
+  private stopCertificateStatusRefresh(): void {
+    if (this._certificateStatusRefresh !== null) {
+      clearInterval(this._certificateStatusRefresh);
+      this._certificateStatusRefresh = null;
+    }
+  }
+
   /** A02.FR.17: the same request again, no CertificateSigned having come. */
   private resendSignCertificate(use: SignedCertificateUse): void {
     const payload = this._signRequests.get(use);
@@ -1908,6 +1993,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void {
+    // #537 M06.FR.06/10: every accepted boot asks for the OCSP status of
+    // the stored V2G certificates, then again every week while connected.
+    if (status.status === "Accepted") {
+      this.stopCertificateStatusRefresh();
+      this.requestCertificateStatus();
+      const refresh = setInterval(
+        () => this.requestCertificateStatus(),
+        CERTIFICATE_STATUS_REFRESH_MS,
+      );
+      unrefTimer(refresh);
+      this._certificateStatusRefresh = refresh;
+    }
     if (
       this._bootStatus.status === status.status &&
       status.status !== "Rejected"
@@ -1940,8 +2037,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
     this._expertCalls.onClosed();
-    // #537: the SignCertificate back-off dies with the connection too.
+    // #537: the SignCertificate back-off and the weekly OCSP refresh die
+    // with the connection too.
     this._signBackoff.stopAll();
+    this.stopCertificateStatusRefresh();
   }
 
   /**

@@ -41,11 +41,24 @@ export async function selfSignedRoot(
   return { pem: cert.toString("pem"), name, keys };
 }
 
+export interface IssuedOptions {
+  /** OCSP responder URL put in an Authority Information Access extension
+   *  (#537, M06). */
+  ocspUrl?: string;
+}
+
+function aiaExtensions({ ocspUrl }: IssuedOptions): x509.Extension[] {
+  return ocspUrl
+    ? [new x509.AuthorityInfoAccessExtension({ ocsp: [ocspUrl] })]
+    : [];
+}
+
 /** A CA certificate issued by `issuer` (a sub-CA in a chain). */
 export async function subCa(
   serialNumber: string,
   cn: string,
   issuer: TestAuthority,
+  options: IssuedOptions = {},
 ): Promise<TestAuthority> {
   const keys = await crypto.subtle.generateKey(EC_ALG, true, [
     "sign",
@@ -60,7 +73,10 @@ export async function subCa(
     signingAlgorithm: EC_ALG,
     publicKey: keys.publicKey,
     signingKey: issuer.keys.privateKey,
-    extensions: [new x509.BasicConstraintsExtension(true, undefined, true)],
+    extensions: [
+      new x509.BasicConstraintsExtension(true, undefined, true),
+      ...aiaExtensions(options),
+    ],
   });
   return { pem: cert.toString("pem"), name, keys };
 }
@@ -70,6 +86,7 @@ export async function leafForCsr(
   serialNumber: string,
   csrPem: string,
   issuer: TestAuthority,
+  options: IssuedOptions = {},
 ): Promise<string> {
   const csr = new x509.Pkcs10CertificateRequest(csrPem);
   const cert = await x509.X509CertificateGenerator.create({
@@ -80,6 +97,7 @@ export async function leafForCsr(
     signingAlgorithm: EC_ALG,
     publicKey: csr.publicKey,
     signingKey: issuer.keys.privateKey,
+    extensions: aiaExtensions(options),
   });
   return cert.toString("pem");
 }

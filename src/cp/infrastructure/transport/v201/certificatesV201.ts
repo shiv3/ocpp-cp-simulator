@@ -368,6 +368,8 @@ async function certificateSigned(
       );
       return {
         response: { status: "Accepted" } satisfies CertificateSignedResponseV21,
+        // #537 M06.FR.07: a new V2G certificate's OCSP status is fetched.
+        afterResult: () => ctx.certificateSigning?.certificateInstalled(use),
       };
     }
     reason = {

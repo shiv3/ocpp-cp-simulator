@@ -601,3 +601,70 @@ describe("CertificateStore change notifications (#537)", () => {
     expect(calls).toBe(0);
   });
 });
+
+describe("CertificateStore OCSP (#537, M06)", () => {
+  async function v2gChain(store: CertificateStore) {
+    const root = await selfSignedRoot("01", "V2G Root");
+    const sub = await subCa("02", "V2G Sub-CA", root, {
+      ocspUrl: "http://ocsp.example.com/sub",
+    });
+    const csr = await store.generateNewCsr(
+      "CP",
+      "CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    const leaf = await leafForCsr("0a1b", csr, sub, {
+      ocspUrl: "http://ocsp.example.com/leaf",
+    });
+    await store.applySignedChain("V2GCertificate", [leaf, sub.pem]);
+    return store.listSignedChains("V2GCertificate")[0];
+  }
+
+  it("builds ocspRequestData for every chain member with a responder URL (M06.FR.07)", async () => {
+    const store = new CertificateStore();
+    const chain = await v2gChain(store);
+
+    expect(store.ocspRequestData("V2GCertificate")).toEqual([
+      { ...chain.hashData[0], responderURL: "http://ocsp.example.com/leaf" },
+      { ...chain.hashData[1], responderURL: "http://ocsp.example.com/sub" },
+    ]);
+    expect(chain.hashData[0].serialNumber).toBe("a1b");
+  });
+
+  it("leaves out a member without an OCSP responder URL", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+    const csr = await store.generateNewCsr(
+      "CP",
+      "CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    await store.applySignedChain("V2GCertificate", [
+      await leafForCsr("02", csr, root),
+    ]);
+
+    expect(store.ocspRequestData("V2GCertificate")).toEqual([]);
+    expect(store.ocspRequestData("ChargingStationCertificate")).toEqual([]);
+  });
+
+  it("caches an OCSP response per certificate, matched like hash data", async () => {
+    const store = new CertificateStore();
+    const chain = await v2gChain(store);
+    const leafHash = chain.hashData[0];
+
+    expect(store.cachedOcspResponse(leafHash)).toBeUndefined();
+    store.cacheOcspResponse(leafHash, "MIIB");
+    expect(
+      store.cachedOcspResponse({
+        ...leafHash,
+        serialNumber: `0${leafHash.serialNumber.toUpperCase()}`,
+      })?.ocspResult,
+    ).toBe("MIIB");
+    expect(store.cachedOcspResponse(chain.hashData[1])).toBeUndefined();
+
+    store.clearAll();
+    expect(store.cachedOcspResponse(leafHash)).toBeUndefined();
+  });
+});

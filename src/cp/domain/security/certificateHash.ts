@@ -13,6 +13,14 @@ export interface CertificateHashData {
   serialNumber: string;
 }
 
+/** Hash data as any side may write it: any algorithm name, any casing. */
+interface WireCertificateHashData {
+  hashAlgorithm: string;
+  issuerNameHash: string;
+  issuerKeyHash: string;
+  serialNumber: string;
+}
+
 function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -84,13 +92,8 @@ export function normalizeSerialNumber(hex: string): string {
  * CSMS sending `0a` or `a` matches either stored form.
  */
 export function certificateHashDataEquals(
-  a: CertificateHashData,
-  b: {
-    hashAlgorithm: string;
-    issuerNameHash: string;
-    issuerKeyHash: string;
-    serialNumber: string;
-  },
+  a: WireCertificateHashData,
+  b: WireCertificateHashData,
 ): boolean {
   return (
     a.hashAlgorithm === b.hashAlgorithm &&
@@ -99,4 +102,23 @@ export function certificateHashDataEquals(
     normalizeSerialNumber(a.serialNumber) ===
       normalizeSerialNumber(b.serialNumber)
   );
+}
+
+/** OCPP 2.x `OCSPRequestDataType`: a certificate's hash data plus the
+ *  responder to ask about it (M06). */
+export interface OcspRequestData extends CertificateHashData {
+  responderURL: string;
+}
+
+/**
+ * The OCSP responder URL of `pem`'s Authority Information Access
+ * extension (#537), or `undefined` when it names none. OCPP requires a
+ * responderURL for any certificate whose status is requested (M06
+ * remark), so a certificate without one is never asked about.
+ */
+export function ocspResponderUrl(pem: string): string | undefined {
+  const aia = new x509.X509Certificate(pem).getExtension(
+    x509.AuthorityInfoAccessExtension,
+  );
+  return aia?.ocsp.find((name) => name.type === "url")?.value;
 }

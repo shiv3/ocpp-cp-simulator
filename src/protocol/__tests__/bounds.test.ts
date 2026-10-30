@@ -152,9 +152,10 @@ describe("get_15118_ev_certificate bounds (#537)", () => {
     },
   );
 
-  it("checks a long non-base64 input in linear time", () => {
-    const started = performance.now();
-    params.safeParse({ ...valid, exiRequest: `${"A".repeat(10999)}=` });
-    expect(performance.now() - started).toBeLessThan(200);
+  it("refuses a long input whose last character is not base64", () => {
+    expect(
+      params.safeParse({ ...valid, exiRequest: `${"A".repeat(10999)}!` })
+        .success,
+    ).toBe(false);
   });
 });

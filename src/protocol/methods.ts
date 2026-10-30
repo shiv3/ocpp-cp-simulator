@@ -843,9 +843,11 @@ export const METHODS = {
     result: ANY,
   },
   security_event_notification: {
+    // SecurityEventNotification: type string[0..50], techInfo
+    // string[0..255] (1.6 whitepaper, 2.0.1, 2.1).
     params: z.object({
-      type: NON_EMPTY_STR,
-      techInfo: NON_EMPTY_STR.optional(),
+      type: NON_EMPTY_STR.max(50),
+      techInfo: NON_EMPTY_STR.max(255).optional(),
     }),
     result: ANY,
   },

@@ -377,12 +377,15 @@ CALLERROR.
 - **Resend back-off** (A02.FR.17-19, #537). After an `Accepted`
   `SignCertificateResponse`, the station waits `CertSigningWaitMinimum`
   seconds for `CertificateSigned`. When none came and the CSR is still
-  pending, it resends the same request (same CSR). Each accepted resend
-  doubles the wait: W, 2W, 4W… After `CertSigningRepeatTimes` resends it
-  stops until a `TriggerMessage` starts over (A02.FR.19). One sequence runs
-  per certificate use. It ends on any `CertificateSigned` for that use
-  (A02.FR.20 for a rejected one), on a non-`Accepted` answer and when the
-  connection closes. `sign_certificate` gets the same back-off.
+  pending, it resends the same request (same CSR). Every expiry doubles
+  the wait, which restarts as the resend goes out: W, 2W, 4W… (A02.FR.18).
+  A resend answered with a CALLERROR, or not at all, does not hold the
+  sequence back. After `CertSigningRepeatTimes` resends it stops until a
+  `TriggerMessage` starts over (A02.FR.19). One sequence runs per
+  certificate use. It ends on any `CertificateSigned` for that use
+  (A02.FR.20 for a rejected one), on a non-`Accepted` `SignCertificate`
+  answer and when the connection closes. `sign_certificate` gets the same
+  back-off.
 - **`GetCertificateStatus`** (M06, #537). The station asks the CSMS for the
   OCSP status of its V2G certificates (`V2GCertificate`, 2.1
   `V2G20Certificate`): after an accepted V2G `CertificateSigned`, for the
@@ -397,8 +400,10 @@ CALLERROR.
   entry and logs a WARN (M06.FR.04). The cached response is not used
   elsewhere: the simulator has no ISO 15118 stack to hand it to.
 - `security_event_notification` ([Control plane](control-plane.md#cp-command-methods))
-  sends an A04 `SecurityEventNotificationRequest` with the given `type`,
-  the current `timestamp` and the optional `techInfo` (#537; before, a WARN
+  sends an A04 `SecurityEventNotificationRequest` with the given `type`
+  (at most 50 characters), the current `timestamp` and the optional
+  `techInfo` (at most 255), the bounds of the 1.6 whitepaper, 2.0.1 and
+  2.1 schemas; a longer value is `invalid_params` (#537; before, a WARN
   only). Like every 2.x CALL it is dropped while offline: the A04.FR.02
   queue is not modelled. The automatic `StartupOfTheDevice` event stays
   1.6-only.
@@ -433,8 +438,9 @@ answers.
   `remainingContracts` > 0 (2.1 M01.FR.06). It stops early when
   `remainingContracts` does not go down (M01.FR.07 has the CSMS decrease
   it), after `maximumContractCertificateChains` requests (at least one), and
-  when the 25 s the relay allows for all requests together run out. Without
-  the field the request is sent once.
+  when the 25 s the relay allows for all requests together run out: no
+  request is sent once they have, and the relay ends with
+  `noAnswer: "timeout"`. Without the field the request is sent once.
 - A first request with no answer is an error: `timeout`, or `disconnected`
   when it never reached the wire or the socket closed. A later one ends
   the relay with the answers already had and `noAnswer`.

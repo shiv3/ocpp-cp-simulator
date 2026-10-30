@@ -91,6 +91,13 @@ class FakeSocket {
   deliverResult(messageId: string, payload: unknown): void {
     this.handler?.(OCPPMessageType.CALLRESULT, messageId, "", payload);
   }
+  deliverError(messageId: string): void {
+    this.handler?.(OCPPMessageType.CALLERROR, messageId, "", {
+      errorCode: "InternalError",
+      errorDescription: "boom",
+      errorDetails: {},
+    });
+  }
   calls(action: string): WireCall[] {
     return this.wire.filter(
       (e): e is WireCall => e.kind === "call" && e.action === action,
@@ -285,6 +292,29 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     });
     vi.advanceTimersByTime(10_000);
     expect(socket.calls("SignCertificate")).toHaveLength(5);
+  });
+
+  it("keeps resending after a CALLERROR or no answer to a resend (A02.FR.18)", async () => {
+    const { socket } = setup(version);
+    await trigger(socket, "SignChargingStationCertificate");
+    await settle(socket, 1);
+    const [first] = socket.calls("SignCertificate");
+    socket.deliverResult(first.messageId, { status: "Accepted" });
+
+    vi.advanceTimersByTime(10_000);
+    const resent = socket.calls("SignCertificate");
+    expect(resent).toHaveLength(2);
+    socket.deliverError(resent[1].messageId);
+
+    // The wait that expired doubles regardless: 2W after the resend.
+    vi.advanceTimersByTime(19_999);
+    expect(socket.calls("SignCertificate")).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(socket.calls("SignCertificate")).toHaveLength(3);
+
+    // CertSigningRepeatTimes = 2, the last resend unanswered: no third.
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(socket.calls("SignCertificate")).toHaveLength(3);
   });
 
   it("resends the control-plane SignCertificate unchanged (no certificateType)", async () => {

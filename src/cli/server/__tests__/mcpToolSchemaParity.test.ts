@@ -464,3 +464,14 @@ describe("MCP tools advertise the vocabularies their method enforces (#383)", ()
     expect(JSON.stringify(properties.status)).not.toContain("Occupied");
   });
 });
+
+describe("MCP tools advertise the length bounds their method enforces (#537)", () => {
+  it("security_event_notification bounds type at 50 and techInfo at 255", async () => {
+    const { properties } = await toolInputSchema("security_event_notification");
+    const method = methodInputSchema("security_event_notification").properties;
+    expect(method.type).toMatchObject({ maxLength: 50 });
+    expect(method.techInfo).toMatchObject({ maxLength: 255 });
+    expect(properties.type).toMatchObject({ maxLength: 50 });
+    expect(properties.techInfo).toMatchObject({ maxLength: 255 });
+  });
+});

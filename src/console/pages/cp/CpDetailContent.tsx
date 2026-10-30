@@ -145,6 +145,7 @@ function buildChargePointConfig(
       soapCallbackUrlDerived: c?.soapCallbackUrlDerived,
       soapPath: c?.soapPath,
       cpoName: c?.cpoName,
+      txUpdatedMeterValues: c?.txUpdatedMeterValues,
       tlsCaPath: c?.tlsCaPath,
       tlsCertPath: c?.tlsCertPath,
       tlsKeyPath: c?.tlsKeyPath,

@@ -276,6 +276,8 @@ export class ChargePoint {
   private _status: ChargePointStatus = OCPPStatus.Unavailable;
   private _error = "";
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
+  /** #347: see {@link sendScheduledMeterValue}. Off by default. */
+  private _txUpdatedMeterValues = false;
   private readonly _scenarioHandledConnectors: Set<number> = new Set();
   // Mirror of _scenarioHandledConnectors but for the stop side. When a
   // connector id is in this set, the RemoteStopTransaction default
@@ -919,6 +921,19 @@ export class ChargePoint {
           break;
       }
     });
+  }
+
+  /**
+   * #347: whether the meter-value scheduler's samples taken during an OCPP
+   * 2.x transaction ride TransactionEvent(Updated, MeterValuePeriodic)
+   * instead of MeterValues. Off by default; ignored on 1.x.
+   */
+  get txUpdatedMeterValues(): boolean {
+    return this._txUpdatedMeterValues;
+  }
+
+  set txUpdatedMeterValues(enabled: boolean) {
+    this._txUpdatedMeterValues = enabled;
   }
 
   get autoMeterValueSetting(): AutoMeterValueSetting | null {
@@ -2107,22 +2122,21 @@ export class ChargePoint {
     const measurands = this._configuration.meterValuesAlignedData();
     if (measurands.length === 0) return;
     const timestamp = new Date(boundaryMs);
-    const isV2 = isOcpp2Version(this._ocppVersion);
     this._connectors.forEach((connector) => {
-      const live = connector.hasRunningTransaction;
-      if (live && isV2) {
-        this._outbox.sendTransactionUpdate(connector.id, {
+      if (
+        this.sendSampleInTransactionEvent(connector, {
           triggerReason: "MeterValueClock",
-          meterValues: true,
           context: "Sample.Clock",
           measurands,
           timestamp,
-        });
+        })
+      ) {
         return;
       }
       // `0` until StartTransaction.conf assigns the id.
       const id = connector.transaction?.id;
-      const transactionId = live && id ? id : undefined;
+      const transactionId =
+        connector.hasRunningTransaction && id ? id : undefined;
       this._outbox.sendMeterValue(transactionId, connector.id, "Sample.Clock", {
         measurands,
         timestamp,
@@ -2686,6 +2700,58 @@ export class ChargePoint {
       connectorId,
       context,
     );
+  }
+
+  /**
+   * One sample from the connector's meter-value scheduler (#347).
+   *
+   * With {@link txUpdatedMeterValues} on and an OCPP 2.x transaction
+   * running, it rides TransactionEvent(Updated, MeterValuePeriodic) with
+   * `MeterValuesSampledData` (2.0.1 `SampledDataCtrlr.TxUpdatedMeasurands`),
+   * so the E13 transaction-message retries cover it. A sample with nothing
+   * in it sends nothing, as MeterValues does. Otherwise — option off, no
+   * transaction, or OCPP 1.x — it is the MeterValues of
+   * {@link sendMeterValue}. Only the scheduler calls this: a MeterValues a
+   * caller or a TriggerMessage asks for stays a MeterValues.
+   */
+  sendScheduledMeterValue(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (
+      this._txUpdatedMeterValues &&
+      connector &&
+      this.sendSampleInTransactionEvent(connector, {
+        triggerReason: "MeterValuePeriodic",
+        context: "Sample.Periodic",
+        skipWithoutMeterValue: true,
+      })
+    ) {
+      return;
+    }
+    this.sendMeterValue(connectorId);
+  }
+
+  /**
+   * The OCPP 2.x routing shared by the clock-aligned (#454) and scheduled
+   * (#347) samples: with a transaction running on the connector, the sample
+   * rides TransactionEvent(Updated) and this returns true. Otherwise it
+   * sends nothing and returns false, leaving the caller to send its own
+   * MeterValues.
+   */
+  private sendSampleInTransactionEvent(
+    connector: Connector,
+    sample: Omit<TransactionUpdateOptions, "meterValues">,
+  ): boolean {
+    if (
+      !isOcpp2Version(this._ocppVersion) ||
+      !connector.hasRunningTransaction
+    ) {
+      return false;
+    }
+    this._outbox.sendTransactionUpdate(connector.id, {
+      ...sample,
+      meterValues: true,
+    });
+    return true;
   }
 
   /**

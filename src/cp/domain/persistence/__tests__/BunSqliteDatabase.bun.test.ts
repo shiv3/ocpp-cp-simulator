@@ -618,6 +618,51 @@ describe("charge-point labels schema, v16 (#446)", () => {
   });
 });
 
+describe("txUpdatedMeterValues schema, v22 (#347)", () => {
+  it("adds the column to a database stamped 21 and keeps its rows off", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // The v21 shape of `charge_points`: everything but the new column.
+      db.exec("DROP TABLE charge_points");
+      db.exec(
+        "CREATE TABLE charge_points (" +
+          "cp_id TEXT PRIMARY KEY, ws_url TEXT NOT NULL, " +
+          "supervision_urls TEXT, url_distribution TEXT, " +
+          "id_tags TEXT, id_tag_distribution TEXT, id_tag_file TEXT, " +
+          "connectors INTEGER NOT NULL, vendor TEXT NOT NULL, " +
+          "model TEXT NOT NULL, ocpp_version TEXT, central_system_url TEXT, " +
+          "soap_callback_url TEXT, soap_path TEXT, security_profile INTEGER, " +
+          "authorization_key TEXT, cpo_name TEXT, tls_ca_path TEXT, " +
+          "tls_cert_path TEXT, tls_key_path TEXT, basic_auth TEXT, " +
+          "boot_notif TEXT, created_at TEXT NOT NULL, labels TEXT)",
+      );
+      db.run(
+        "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at) " +
+          "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-10-30T00:00:00Z')",
+      );
+      db.run("UPDATE schema_meta SET value = '21' WHERE key = 'version'");
+
+      runMigrations(db);
+
+      const row = db.get<{
+        cp_id: string;
+        tx_updated_meter_values: number | null;
+      }>("SELECT cp_id, tx_updated_meter_values FROM charge_points");
+      expect(row).toEqual({ cp_id: "CP1", tx_updated_meter_values: null });
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(22);
+
+      db.run("UPDATE schema_meta SET value = '21' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("charging sessions schema, v17 (#447)", () => {
   it("creates charging_sessions on a database stamped 16", () => {
     const db = BunSqliteDatabase.open(":memory:");

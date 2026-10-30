@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -178,7 +178,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   created_at     TEXT NOT NULL,
   -- Operator labels as a JSON object of string values (#446), e.g.
   -- {"site":"oberkirch-01","env":"lab"}. NULL when the charge point has none.
-  labels         TEXT
+  labels         TEXT,
+  -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
+  -- TransactionEvent(Updated); NULL (a row older than the column) is off.
+  tx_updated_meter_values INTEGER
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"
@@ -696,6 +699,17 @@ export function runMigrations(db: Database): void {
 
   // v20 → v21 (#457): the `variable_monitors` table, `IF NOT EXISTS` in
   // SCHEMA_SQL like the v14 step.
+
+  // v21 → v22 (#347): `charge_points.tx_updated_meter_values`. Guarded like
+  // the v16 column; existing rows stay NULL, which restores as off.
+  if (stored < 22) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("tx_updated_meter_values")) {
+      db.exec(
+        "ALTER TABLE charge_points ADD COLUMN tx_updated_meter_values INTEGER",
+      );
+    }
+  }
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

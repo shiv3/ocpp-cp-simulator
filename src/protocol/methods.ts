@@ -314,6 +314,12 @@ const cpParamsBaseSchema = z.object({
   cpoName: STR_64K.optional().describe(
     "CPO name used when generating certificate signing requests",
   ),
+  txUpdatedMeterValues: z
+    .boolean()
+    .optional()
+    .describe(
+      "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to false",
+    ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
   ),

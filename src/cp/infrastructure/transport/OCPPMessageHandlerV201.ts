@@ -1207,6 +1207,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
               {
                 value: transaction.meterStart / 1000,
                 measurand: "Energy.Active.Import.Register",
+                // #347: the boundary says which one it is, signed or not.
+                context: "Transaction.Begin",
                 unitOfMeasure: { unit: "kWh" },
               },
             ],
@@ -1300,6 +1302,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
                     {
                       value: transaction.meterStop / 1000,
                       measurand: "Energy.Active.Import.Register",
+                      context: "Transaction.End",
                       unitOfMeasure: { unit: "kWh" },
                     },
                   ],
@@ -1350,12 +1353,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (!transaction.cpTransactionId) {
       transaction.cpTransactionId = crypto.randomUUID();
     }
-    const seqNo = transaction.cpNextSeqNo ?? 0;
-    transaction.cpNextSeqNo = seqNo + 1;
-    if (options.chargingState) {
-      transaction.cpLastTransactionEventChargingState = options.chargingState;
-    }
-    connector.markTransactionChanged();
     const timestamp = (options.timestamp ?? new Date()).toISOString();
 
     let meterValue: TransactionEventRequestV201["meterValue"];
@@ -1387,6 +1384,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             ],
           },
         ];
+      } else if (options.skipWithoutMeterValue) {
+        // #347: before the seqNo is taken, so a skipped sample leaves no gap.
+        this._logger.debug(
+          `[v2.0.1] transaction_event: no sampled values for connector ${connectorId}; nothing sent`,
+          LogType.METER_VALUE,
+        );
+        return;
       } else {
         this._logger.debug(
           `[v2.0.1] transaction_event: no sampled values for connector ${connectorId}; sending without meterValue`,
@@ -1394,6 +1398,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         );
       }
     }
+
+    const seqNo = transaction.cpNextSeqNo ?? 0;
+    transaction.cpNextSeqNo = seqNo + 1;
+    if (options.chargingState) {
+      transaction.cpLastTransactionEventChargingState = options.chargingState;
+    }
+    connector.markTransactionChanged();
 
     const payload: TransactionEventRequestV201 = {
       eventType: "Updated",

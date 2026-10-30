@@ -989,6 +989,10 @@ export function parseCreateBody(
       ? body.authorizationKey
       : undefined;
   const cpoName = typeof body.cpoName === "string" ? body.cpoName : undefined;
+  const txUpdatedMeterValues =
+    typeof body.txUpdatedMeterValues === "boolean"
+      ? body.txUpdatedMeterValues
+      : undefined;
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1060,6 +1064,7 @@ export function parseCreateBody(
     securityProfile,
     authorizationKey,
     cpoName,
+    ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

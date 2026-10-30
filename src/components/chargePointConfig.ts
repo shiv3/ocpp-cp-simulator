@@ -56,6 +56,8 @@ export interface ChargePointConfig {
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   cpoName?: string;
+  /** #347: no form input; carried so an edit sends back what it read. */
+  txUpdatedMeterValues?: boolean;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;

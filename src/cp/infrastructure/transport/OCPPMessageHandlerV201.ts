@@ -94,11 +94,14 @@ import {
 import {
   buildV201InboundRegistry,
   type V201Action,
+  type V201CertificateSigning,
   type V201HandlerResult,
   type V201InboundContext,
   type V201InboundRegistry,
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
+import { SignCertificateBackoff } from "../../domain/security/SignCertificateBackoff";
+import type { SignedCertificateUse } from "../../domain/security/certificateUse";
 import {
   ResponseEffectQueue,
   type GenerationToken,
@@ -116,6 +119,16 @@ type V201ResponsePayload =
   | TransactionEventResponseV201
   | MeterValuesResponseV201
   | AuthorizeResponseV201;
+
+/** The certificate use a SignCertificateRequest asks for: absent means
+ *  the Charging Station certificate (#456). */
+function signRequestUse(
+  request: SignCertificateRequestV201,
+): SignedCertificateUse {
+  return request.certificateType === "V2GCertificate"
+    ? "V2GCertificate"
+    : "ChargingStationCertificate";
+}
 
 /** True for a promise or any other thenable a handler may return. */
 function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
@@ -264,6 +277,26 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _expertCalls = new ExpertCalls(() => false);
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
+  /** #537: the last SignCertificateRequest sent per certificate use, what
+   *  the A02.FR.17 back-off resends. */
+  private readonly _signRequests = new Map<
+    SignedCertificateUse,
+    SignCertificateRequestV201
+  >();
+  private readonly _signBackoff = new SignCertificateBackoff({
+    settings: () => ({
+      waitMinimumSeconds:
+        this._chargePoint.configuration.certSigningWaitMinimum(),
+      repeatTimes: this._chargePoint.configuration.certSigningRepeatTimes(),
+    }),
+    isPending: (use) =>
+      this._chargePoint.certificateStore.pendingCsr(use) !== undefined,
+    resend: (use) => this.resendSignCertificate(use),
+  });
+  private readonly _certificateSigning: V201CertificateSigning = {
+    requestSignature: (use) => this.requestSignature(use),
+    certificateSignedAnswered: (use) => this._signBackoff.stop(use),
+  };
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -539,6 +572,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           chargePoint: this._chargePoint,
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
+          certificateSigning: this._certificateSigning,
         };
         // An async answer that settles after the socket generation changed
         // cannot reach the CSMS (`sendResult` / `sendError` drop it): report
@@ -719,7 +753,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
 
     if (pending?.action === "SignCertificate") {
-      this.applySignCertificateResult(payload as SignCertificateResponseV201);
+      this.applySignCertificateResult(
+        pending.payload as SignCertificateRequestV201,
+        payload as SignCertificateResponseV201,
+      );
       return;
     }
 
@@ -792,18 +829,24 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * A02 SignCertificateResponse (#456), the 2.x twin of 1.6's #410 result
    * handling: logged only. A Rejected answer (A02.FR.12) leaves the CSR
    * pending: A02 has no rule to discard it, and a CertificateSigned that
-   * still arrives for it can be matched.
+   * still arrives for it can be matched. An Accepted answer starts, or
+   * continues, the resend back-off of the request's certificate use
+   * (A02.FR.17/18, #537); any other answer ends it.
    */
   private applySignCertificateResult(
+    request: SignCertificateRequestV201,
     response: SignCertificateResponseV201,
   ): void {
+    const use = signRequestUse(request);
     if (response.status === "Accepted") {
       this._logger.info(
         "[v2.0.1] SignCertificate accepted by the CSMS; awaiting CertificateSigned",
         LogType.OCPP,
       );
+      this._signBackoff.accepted(use);
       return;
     }
+    this._signBackoff.notAccepted(use);
     this._logger.warn(
       `[v2.0.1] SignCertificate not accepted by the CSMS (status ${response.status}); the CSR stays pending`,
       LogType.OCPP,
@@ -1630,23 +1673,67 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         );
       }
     } else {
-      const quirks = this._chargePoint.certificateQuirks;
-      if (quirks.csrKeyAlgorithm === "RSA") {
-        this._logger.info(
-          "[v2.0.1] SignCertificate: generating RSA CSR (certificate quirk)",
-          LogType.OCPP,
-        );
-      }
-      payloadCsr = await store.generateNewCsr(
-        this._chargePoint.id,
-        this._chargePoint.configuration.getString("CpoName") ?? "",
-        {
-          keyAlgorithm: quirks.csrKeyAlgorithm,
-          pemLineEndings: quirks.csrPemLineEndings,
-        },
+      payloadCsr = await this.generateCsr("ChargingStationCertificate");
+    }
+    this.sendSignCertificateRequest("ChargingStationCertificate", {
+      csr: payloadCsr,
+    });
+  }
+
+  /**
+   * TriggerMessage SignChargingStationCertificate / SignV2GCertificate
+   * (#537): a new key pair and CSR (A02.FR.02), sent with the triggered
+   * certificateType (A02.FR.03/13).
+   */
+  private async requestSignature(use: SignedCertificateUse): Promise<void> {
+    const csr = await this.generateCsr(use);
+    this.sendSignCertificateRequest(use, {
+      csr,
+      certificateType:
+        use === "V2GCertificate"
+          ? "V2GCertificate"
+          : "ChargingStationCertificate",
+    });
+  }
+
+  private async generateCsr(use: SignedCertificateUse): Promise<string> {
+    const quirks = this._chargePoint.certificateQuirks;
+    if (quirks.csrKeyAlgorithm === "RSA") {
+      this._logger.info(
+        "[v2.0.1] SignCertificate: generating RSA CSR (certificate quirk)",
+        LogType.OCPP,
       );
     }
-    const payload: SignCertificateRequestV201 = { csr: payloadCsr };
+    return this._chargePoint.certificateStore.generateNewCsr(
+      this._chargePoint.id,
+      this._chargePoint.configuration.getString("CpoName") ?? "",
+      {
+        keyAlgorithm: quirks.csrKeyAlgorithm,
+        pemLineEndings: quirks.csrPemLineEndings,
+      },
+      use,
+    );
+  }
+
+  /** A new SignCertificateRequest: its back-off starts over once it is
+   *  accepted (A02.FR.19). */
+  private sendSignCertificateRequest(
+    use: SignedCertificateUse,
+    payload: SignCertificateRequestV201,
+  ): void {
+    this._signBackoff.restart(use);
+    this._signRequests.set(use, payload);
+    this.send("SignCertificate", this.generateMessageId(), payload);
+  }
+
+  /** A02.FR.17: the same request again, no CertificateSigned having come. */
+  private resendSignCertificate(use: SignedCertificateUse): void {
+    const payload = this._signRequests.get(use);
+    if (!payload) return;
+    this._logger.info(
+      `[v2.0.1] SignCertificate: no CertificateSigned for the ${use} CSR in time; resending it (A02.FR.17)`,
+      LogType.OCPP,
+    );
     this.send("SignCertificate", this.generateMessageId(), payload);
   }
 
@@ -1848,6 +1935,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
     this._expertCalls.onClosed();
+    // #537: the SignCertificate back-off dies with the connection too.
+    this._signBackoff.stopAll();
   }
 
   /**

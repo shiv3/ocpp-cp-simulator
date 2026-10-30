@@ -347,6 +347,9 @@ async function certificateSigned(
     req.certificateType === undefined
       ? "ChargingStationCertificate"
       : mapping.signedUseFrom(req.certificateType);
+  // #537: a CertificateSigned for `use` ends its CSR's resend back-off,
+  // accepted (A02.FR.17) or rejected as invalid (A02.FR.20).
+  if (use) ctx.certificateSigning?.certificateSignedAnswered(use);
   const pems = splitPemChain(req.certificateChain);
   let reason: string;
   if (!use) {

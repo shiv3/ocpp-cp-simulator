@@ -71,6 +71,7 @@ import {
 import type { ReportDataType } from "../../../../ocpp/types/v201/notify-report";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
+import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import {
@@ -165,10 +166,29 @@ export type V201RequestPayload =
   | SignCertificateRequestV201
   | SecurityEventNotificationRequestV201;
 
+/**
+ * #537: the station's SignCertificate flow (A02), owned by the 2.x message
+ * handler, as the inbound TriggerMessage and CertificateSigned handlers
+ * drive it.
+ */
+export interface V201CertificateSigning {
+  /**
+   * Generates a new key pair and CSR for `use` (A02.FR.02) and sends it in
+   * a SignCertificateRequest naming `use` (A02.FR.03/13). Starts the
+   * resend back-off over (A02.FR.19).
+   */
+  requestSignature(use: SignedCertificateUse): Promise<void>;
+  /** A CertificateSigned for `use` was answered: its back-off stops
+   *  (accepted, or rejected per A02.FR.20). */
+  certificateSignedAnswered(use: SignedCertificateUse): void;
+}
+
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
   readonly logger: Logger;
   readonly sendCall: (action: V201Action, payload: V201RequestPayload) => void;
+  /** Absent in contexts built without a message handler (unit tests). */
+  readonly certificateSigning?: V201CertificateSigning;
 }
 
 export interface V201HandlerResult {

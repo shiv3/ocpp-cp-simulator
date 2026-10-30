@@ -2672,6 +2672,8 @@ export class ChargePoint {
       }
       const previousStatus = this._status;
       this._status = status;
+      // #538: ChargingStation.AvailabilityState on a 2.x station.
+      if (this._monitorEvaluation) this.publishStationAvailability();
       this._events.emit("statusChange", { status, previousStatus });
       this._stateManager.transitionChargePointStatus(status, {
         source: "connector-0-update",

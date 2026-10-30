@@ -86,6 +86,15 @@ describe.each(VERSIONS)("$version runtime device-model values (#538)", (v) => {
     expect(value(cp, "EVSEAvailabilityState1")).toBe("Faulted");
   });
 
+  it("follows the station status set through connector 0", () => {
+    cp = makeChargePoint({ ocppVersion: v.version });
+    bootAccepted(cp);
+    cp.updateConnectorStatus(0, OCPPStatus.Unavailable);
+    expect(value(cp, "ChargingStationAvailabilityState")).toBe("Unavailable");
+    cp.updateConnectorStatus(0, OCPPStatus.Faulted);
+    expect(value(cp, "ChargingStationAvailabilityState")).toBe("Faulted");
+  });
+
   it("fires monitors on the runtime values, with the monitor's EVSE (N07.FR.16, FR.19)", async () => {
     cp = makeChargePoint({ ocppVersion: v.version, connectorCount: 2 });
     const sent = captureNotifyEvents(cp);

@@ -4,6 +4,7 @@ import * as x509 from "@peculiar/x509";
 import {
   certificateHashDataEquals,
   computeCertificateHashData,
+  normalizeSerialNumber,
 } from "../certificateHash";
 import { selfSignedRoot, subCa } from "./certificateFixtures";
 
@@ -65,7 +66,8 @@ describe("computeCertificateHashData", () => {
         "2f1e564ddbf440fc551bf9d5284e6700c64a42fb685d5c9db91f606a721c0fa4",
       issuerKeyHash:
         "e5330c333975c58e5d299572140e2663337dfc1714ea5c85f581151b5eae8059",
-      serialNumber: "0aa2b3",
+      // #537: the DER serial is 0a a2 b3; the field forbids leading zeroes.
+      serialNumber: "aa2b3",
     });
   });
 
@@ -131,6 +133,42 @@ describe("certificateHashDataEquals", () => {
     ).toBe(true);
   });
 
+  // #537: rows persisted before the fix hold "0a"; a CSMS may send either
+  // form, so both sides compare without leading zeroes.
+  it.each([
+    ["0a", "a"],
+    ["a", "0a"],
+    ["000A", "a"],
+    ["00", "0"],
+    ["0", "000"],
+  ])("matches serialNumber %s with %s", async (stored, sent) => {
+    const { pem } = await selfSignedRootCert("0c", "Zero Test");
+    const hash = await computeCertificateHashData(pem);
+
+    expect(
+      certificateHashDataEquals(
+        { ...hash, serialNumber: stored },
+        { ...hash, serialNumber: sent },
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["0a", "a0"],
+    ["0", ""],
+    ["10", "1"],
+  ])("does not match serialNumber %s with %s", async (stored, sent) => {
+    const { pem } = await selfSignedRootCert("0d", "Zero Mismatch");
+    const hash = await computeCertificateHashData(pem);
+
+    expect(
+      certificateHashDataEquals(
+        { ...hash, serialNumber: stored },
+        { ...hash, serialNumber: sent },
+      ),
+    ).toBe(false);
+  });
+
   it("returns false when any field differs", async () => {
     const { pem } = await selfSignedRootCert("0b", "Mismatch Test");
     const hash = await computeCertificateHashData(pem);
@@ -141,6 +179,20 @@ describe("certificateHashDataEquals", () => {
         serialNumber: "ffffff",
       }),
     ).toBe(false);
+  });
+});
+
+describe("normalizeSerialNumber", () => {
+  it.each([
+    ["0a", "a"],
+    ["000a2b", "a2b"],
+    ["00", "0"],
+    ["0", "0"],
+    ["A0", "a0"],
+    ["ff0102", "ff0102"],
+    ["", ""],
+  ])("turns %j into %j", (input, expected) => {
+    expect(normalizeSerialNumber(input)).toBe(expected);
   });
 });
 
@@ -155,7 +207,7 @@ describe("computeCertificateHashData with an issuer", () => {
 
     expect(issued.issuerKeyHash).toBe(rootHash.issuerKeyHash);
     expect(issued.issuerNameHash).toBe(rootHash.issuerNameHash);
-    expect(issued.serialNumber).toBe("02");
+    expect(issued.serialNumber).toBe("2");
     expect(selfKeyed.issuerKeyHash).not.toBe(rootHash.issuerKeyHash);
   });
 });

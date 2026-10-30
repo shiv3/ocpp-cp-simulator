@@ -27,7 +27,7 @@ bare `user-attachments` URLs, so they play on github.com only.
 
 The TagIDs the connector card offers for **Start charging** (here the ones SteVe knows), and the global network-simulation layer.
 
-https://github.com/user-attachments/assets/b79b0bb3-5172-4cfe-a376-9bd89232930b
+https://github.com/user-attachments/assets/5f07a972-20e7-41dc-be46-9334e9251e7c
 
 <details>
 <summary>Screenshots</summary>
@@ -40,7 +40,7 @@ https://github.com/user-attachments/assets/b79b0bb3-5172-4cfe-a376-9bd89232930b
 
 Every charge point the daemon runs, as a hierarchy, a charge point list or a connector list, filtered by status, OCPP version or label (`site=tokyo-01`).
 
-https://github.com/user-attachments/assets/bae86d0e-40f5-41a7-a8fc-102b38b26296
+https://github.com/user-attachments/assets/f1fb5f33-5f7f-4a4a-9a1c-83584da6e529
 
 <details>
 <summary>Screenshots</summary>
@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/bae86d0e-40f5-41a7-a8fc-102b38b26296
 
 **Plug in → Start charging → Stop charging**: the connector card drives a real OCPP 1.6J transaction against SteVe, with the auto meter feeding power, energy and SoC; the **Transactions** tab keeps the session.
 
-https://github.com/user-attachments/assets/ddc2b067-2c41-4a48-ab4d-12adf82e0df6
+https://github.com/user-attachments/assets/af5c16ba-1f8e-447b-a280-665b6b95f421
 
 <details>
 <summary>Screenshots</summary>
@@ -70,7 +70,7 @@ https://github.com/user-attachments/assets/ddc2b067-2c41-4a48-ab4d-12adf82e0df6
 
 SteVe sends **RemoteStartTransaction**; the charge point's _Essential CP Behavior_ scenario plugs in, starts the transaction and meters it, and the operational timeline records each step.
 
-https://github.com/user-attachments/assets/8c75baf7-67d1-415d-8c4e-a9c6c1419afd
+https://github.com/user-attachments/assets/809a8545-4ed8-463b-87f8-40c312acff7a
 
 <details>
 <summary>Screenshots</summary>
@@ -85,7 +85,7 @@ https://github.com/user-attachments/assets/8c75baf7-67d1-415d-8c4e-a9c6c1419afd
 
 Relabel a charge point from its header (`cp.labels.set`): no reconnect, the chips update at once.
 
-https://github.com/user-attachments/assets/24f75863-1b95-4ceb-b0f9-15d004d11828
+https://github.com/user-attachments/assets/d286a9bf-94e8-4ecb-95b6-42906df3c2d8
 
 <details>
 <summary>Screenshots</summary>
@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/24f75863-1b95-4ceb-b0f9-15d004d11828
 
 Per-charge-point rules (here a 300 ms latency and a manual disconnect); the **Operational events** tab ties the injected fault, the reconnect, the boot and `recovery_completed` into one incident.
 
-https://github.com/user-attachments/assets/dd905829-4e6c-4448-a955-36c48dcf8ea9
+https://github.com/user-attachments/assets/6de014fb-e8cb-43f9-86ba-2972e17b93c2
 
 <details>
 <summary>Screenshots</summary>
@@ -113,7 +113,7 @@ https://github.com/user-attachments/assets/dd905829-4e6c-4448-a955-36c48dcf8ea9
 
 Send any OCPP call the station can send (here a DataTransfer) through the live connection and see the CSMS's answer.
 
-https://github.com/user-attachments/assets/e503d6dd-bc22-45eb-b1d2-abe1a84f900e
+https://github.com/user-attachments/assets/fd82e53d-c296-4efb-ba85-ad8312ad349f
 
 <details>
 <summary>Screenshots</summary>
@@ -126,7 +126,7 @@ https://github.com/user-attachments/assets/e503d6dd-bc22-45eb-b1d2-abe1a84f900e
 
 OCPP DebugKit's failure-pattern analysis over the charge point's stored logs, in the browser.
 
-https://github.com/user-attachments/assets/25bbd716-5ccc-4790-9f75-d2afc0810f77
+https://github.com/user-attachments/assets/845d901a-64ef-474f-90df-134500be6aef
 
 <details>
 <summary>Screenshots</summary>
@@ -139,7 +139,7 @@ https://github.com/user-attachments/assets/25bbd716-5ccc-4790-9f75-d2afc0810f77
 
 Running scenarios per connector and their steps, the template library (54 templates), and the scenario editor's steps and graph views.
 
-https://github.com/user-attachments/assets/f4711591-40b3-489e-8014-b2ddb3940ad7
+https://github.com/user-attachments/assets/c47960ae-12d3-4f4d-949c-fffbca4b6f88
 
 <details>
 <summary>Screenshots</summary>
@@ -158,7 +158,7 @@ https://github.com/user-attachments/assets/f4711591-40b3-489e-8014-b2ddb3940ad7
 
 Past scenario runs with their verdicts, and every OCPP frame across charge points, filterable by charge point, level, type and connector.
 
-https://github.com/user-attachments/assets/9d074d50-8583-4ccd-ace1-e3c77be45f64
+https://github.com/user-attachments/assets/0eaa02ce-9431-4dc3-b1e1-f3b18a26542f
 
 <details>
 <summary>Screenshots</summary>

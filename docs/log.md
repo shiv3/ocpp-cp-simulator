@@ -1725,6 +1725,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Web console → Scenario editor](entities/web-console.md#scenario-editor-steps-and-graph): a Meter Value node of the full graph editor shows its configured value until the connector reports a meter reading (always in the Library editor), no longer 0 Wh; a reading no longer enables Undo or clears Redo. The reading reaches the node through a context instead of being written into its data.
 - [GitHub issues](sources/github-issues.md): #443.
 
+## [2026-10-29] ingest | README screenshots and web console tour
+
+- The README's screenshot showed the classic UI retired in #426. `docs/images/web-console-overview.png` is now the console's charge point page (connector charging, message log); [Web console](entities/web-console.md) uses the same image.
+- New **Web console tour** section in the README: one recording per feature (settings, fleet and labels, a charging session, a remote start from SteVe, in-place relabel, network faults and recovery on the operational timeline, the Expert tab, session analysis, scenarios (runs, library, editor), run history and message log) with screenshots under `docs/images/tour/`; the recordings are MP4 (H.264) attachments uploaded with `gh pr comment --attach` and embedded as bare `user-attachments` URLs (a `<video>` tag stays blank for signed-in viewers), so no video file lives in the repository.
+- Recorded from the daemon's own console in a headless browser, with `WEBCP001` / `WEBCP002` (OCPP 1.6J) connected to SteVe 3.14.1.
+
 ## [2026-10-29] ingest | Network simulation latency example (#497)
 
 - [Network simulation → Rule schema and example](concepts/network-simulation.md#rule-schema-and-example): the latency example carried `messageType`, which the daemon rejects as an unknown field; it now uses `match.actions`, and the section lists the latency rule's fields and the unknown-field error.

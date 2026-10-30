@@ -39,7 +39,7 @@ from the palette variables in [`src/index.css`](../../src/index.css) (`--cx-*`,
 exposed to Tailwind as `bg-cx-card`, `text-cx-muted`, …), which also retune the
 shared shadcn variables, so dialogs, menus and the graph editor follow.
 
-![Web console — connector panel, scenario editor, and real-time logs](../images/web-console-overview.png)
+![Web console — a charge point charging over OCPP 1.6J against SteVe, with labels, its connector card and the message log](../images/web-console-overview.png)
 
 ## Web Version
 

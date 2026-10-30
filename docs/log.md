@@ -1847,3 +1847,29 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Fail-closed side effects stated: `password="a\nuser=bob" x` logs `password="[redacted]" x`; a PEM without `-----END …-----"` hides the rest of the message, and inside a single-quoted JSON string value it cuts the frame. Remaining limit stated: a later-line quote followed by `;`, `)` or a letter does not end the value.
 - [Log format → Redaction](concepts/log-format.md#redaction): the line-rule paragraph restated with its exceptions; the #519 limits sentence removed.
 - [GitHub issues](sources/github-issues.md): #519 row rewritten.
+
+## [2026-10-29] ingest | 1.6 charging profiles in e2e, composite round trip (#323)
+
+- The gocpp fixture's 1.6 dispatch gains `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule`, and marshals decimals as JSON numbers. `e2e/chargingProfile.gocpp.e2e.ts` (in `test:e2e`) pins a 6 A profile on an AC 230 V / 3-phase / cos φ 0.9 connector: `Power.Active.Import` 3726 W and `Current.Import` 6.0 A, or 1242 W and 6.0 A with `numberPhases: 1`. The issue's 2.0 A for one phase was the old divide-by-three artefact.
+- `GetCompositeSchedule` (1.6, 2.0.1 and 2.1) converted A → W on the period's `numberPhases` and back over 3 phases, so 6 A on one phase came back as 2.0 A, and it dropped `numberPhases`. Each period now restates the winning profile period: verbatim in its own unit, converted at 230 V on the joint phase count (3 when none) for the other unit, with that count as `numberPhases`; equal watts from different periods no longer merge. A stack is converted on the joint phase count, as metering does, so the composite restates the cap the meter enforces (16 A / 1 ph under a 10 A station cap reads 10 A on 1 phase).
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence rewritten; the composite now equals the metering cap at the 230 V reference.
+- [Source: e2e/README.md](sources/e2e-readme.md): six suites, the new suite, the CSMS→CP action list per version.
+- [Testing strategy](analyses/testing-strategy.md): the e2e row mentions 1.6 charging profiles.
+- [GitHub issues](sources/github-issues.md): #323.
+
+## [2026-10-29] ingest | Retire the manual desktop release workflow (#516)
+
+- `.github/workflows/manual-release.yml` created a draft `v<version>` release and built the desktop bundles without `npm version`, so the bundle, the web console and the sidecar daemon reported the `0.0.0` placeholder. It never ran, and publishing its draft would have fired `release.yml` on the new tag and uploaded the bundles a second time. It is removed rather than stamped: publishing the release-drafter draft is the only release path.
+- [Desktop app → Download](entities/desktop-app.md#download): the tag path stamps the version; the manual workflow is gone; a branch dispatch of `release.yml` uploads nothing.
+- [GitHub issues](sources/github-issues.md): #516.
+
+## [2026-10-29] ingest | Bench teardown slow paths tested against a slow mock CSMS (#330)
+
+- The bench smoke suite's mock CSMS answered every CALL at once, so the teardown guards that only engage when something is slow could be removed with every test green. `scripts/bench/smokeHarness.ts` now holds the mock (per-action `delayMs` / `stallAfter`, receipt and reply hooks, open transactions tracked by id), the daemon and bench subprocesses and the control-plane helpers, shared with the smoke file.
+- New `scripts/bench/fleetBench.slowpath.test-bun.ts`, run by `bun run test:bench-slow` in a separate `bench-slow` CI job (about 36s locally), not by `test:bun`. It pins settle-before-close, the assigned-id stage of the cycle bound, the retirement branch, the re-stop of a cancelled hold and the re-stop list keeping an acked stop (read off teardown's `closing N open transaction(s)` count, since the CSMS sees one stop either way), each by a mutation that turns it red. Two cases use test-only `FLEET_BENCH_TEST_*` deadline overrides, validated in `lib.ts` and refused like a bad flag (`Error: …`, usage, exit 1); defaults unchanged.
+- Stale text dropped: teardown no longer waits on `ocppcp_ocpp_messages_total` nor verifies each closing stop; it re-stops and counts acks. No run-level test for: the RPC stages of the cycle bound (pinned only as arithmetic by `lib.bun.test.ts`), `cp.create_many` past its 35s deadline (#523), and what the no-op re-stop of an already-acked stop does on the wire.
+- [Source: bench README](sources/bench-readme.md): teardown paragraph, layout, "Not covered by a run-level test".
+- [Daemon → Measured scale ceiling](entities/daemon.md#measured-scale-ceiling): the slow-path suite and its CI job.
+- [Testing strategy](analyses/testing-strategy.md): a Bun file outside both runner filters.
+- [GitHub issues](sources/github-issues.md): #330, #523.
+- Raw sources changed in the same PR: `scripts/bench/lib.ts`, `scripts/bench/fleet-bench.ts`, `scripts/bench/lib.bun.test.ts`, `scripts/bench/fleetBench.smoke.bun.test.ts`, `scripts/bench/smokeHarness.ts`, `scripts/bench/fleetBench.slowpath.test-bun.ts`, `scripts/bench/README.md`, `package.json`, `.github/workflows/ci.yml`.

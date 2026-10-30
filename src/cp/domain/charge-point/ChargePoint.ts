@@ -1873,22 +1873,21 @@ export class ChargePoint {
     const measurands = this._configuration.meterValuesAlignedData();
     if (measurands.length === 0) return;
     const timestamp = new Date(boundaryMs);
-    const isV2 = isOcpp2Version(this._ocppVersion);
     this._connectors.forEach((connector) => {
-      const live = connector.hasRunningTransaction;
-      if (live && isV2) {
-        this._outbox.sendTransactionUpdate(connector.id, {
+      if (
+        this.sendSampleInTransactionEvent(connector, {
           triggerReason: "MeterValueClock",
-          meterValues: true,
           context: "Sample.Clock",
           measurands,
           timestamp,
-        });
+        })
+      ) {
         return;
       }
       // `0` until StartTransaction.conf assigns the id.
       const id = connector.transaction?.id;
-      const transactionId = live && id ? id : undefined;
+      const transactionId =
+        connector.hasRunningTransaction && id ? id : undefined;
       this._outbox.sendMeterValue(transactionId, connector.id, "Sample.Clock", {
         measurands,
         timestamp,
@@ -2456,18 +2455,40 @@ export class ChargePoint {
     const connector = this.getConnector(connectorId);
     if (
       this._txUpdatedMeterValues &&
-      isOcpp2Version(this._ocppVersion) &&
-      connector?.hasRunningTransaction
-    ) {
-      this._outbox.sendTransactionUpdate(connectorId, {
+      connector &&
+      this.sendSampleInTransactionEvent(connector, {
         triggerReason: "MeterValuePeriodic",
-        meterValues: true,
         context: "Sample.Periodic",
         skipWithoutMeterValue: true,
-      });
+      })
+    ) {
       return;
     }
     this.sendMeterValue(connectorId);
+  }
+
+  /**
+   * The OCPP 2.x routing shared by the clock-aligned (#454) and scheduled
+   * (#347) samples: with a transaction running on the connector, the sample
+   * rides TransactionEvent(Updated) and this returns true. Otherwise it
+   * sends nothing and returns false, leaving the caller to send its own
+   * MeterValues.
+   */
+  private sendSampleInTransactionEvent(
+    connector: Connector,
+    sample: Omit<TransactionUpdateOptions, "meterValues">,
+  ): boolean {
+    if (
+      !isOcpp2Version(this._ocppVersion) ||
+      !connector.hasRunningTransaction
+    ) {
+      return false;
+    }
+    this._outbox.sendTransactionUpdate(connector.id, {
+      ...sample,
+      meterValues: true,
+    });
+    return true;
   }
 
   /**

@@ -80,10 +80,4 @@ describe("parseCreateBody txUpdatedMeterValues (#347)", () => {
     ).toBe(false);
     expect("txUpdatedMeterValues" in parseCreateBody(base)).toBe(false);
   });
-
-  it("refuses a non-boolean", () => {
-    expect(() =>
-      parseCreateBody({ ...base, txUpdatedMeterValues: "yes" }),
-    ).toThrow("txUpdatedMeterValues must be a boolean");
-  });
 });

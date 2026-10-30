@@ -2020,3 +2020,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Second review of #521: clock-aligned (`Sample.Clock`) samples carry no signed record on 1.6 or 2.x, as the documented scope excludes aligned records; signed 2.x samples on `TransactionEvent(Started)` / `(Ended)` carry `context` `Transaction.Begin` / `Transaction.End`; the records claim no identification detail (`IF` empty), since the station does not record how a tag was authorized; a register too large to write as plain decimal digits is not signed; `tampered_payload` with no reading throws instead of corrupting the header.
 - Not changed: a message signed before a restart and still queued offline is resent as it was. Keys are ephemeral by design (#315), so its records fail against the new key, which is what a station that lost its key sends. Documented.
 - [OCPP versions and transports → Signed meter values](concepts/ocpp-versions-and-transports.md#signed-meter-values-ocmf-315): the above, and `ChangeConfiguration` as a way to set the mode scoped to 1.6J.
+
+## [2026-10-30] ingest | Composite limits floored to 0.1 when converted (#524)
+
+- The 1.6 `GetCompositeScheduleResponse` schema requires `chargingSchedulePeriod[].limit` to be a multiple of 0.1, but a converted limit went out unrounded: a 3000 W / 1-phase `ChargePointMaxProfile` asked in A read 13.043478… A. `compositeLimitInUnit` now floors a converted limit (W → A and A → W) to 0.1, never below 0, with a 1e-9 tolerance so float noise (4.1 A × 230 V = 942.9999999999999 W) is not pushed a step down. A limit returned in its own unit stays as the CSMS set it.
+- The helper is shared, so 2.0.1 and 2.1 round the same way, though their schemas declare no `multipleOf`.
+- [Scenario format → Charging curve](concepts/scenario-format.md#charging-curve-v12): the composite sentence states the rounding.
+- [GitHub issues](sources/github-issues.md): #524.

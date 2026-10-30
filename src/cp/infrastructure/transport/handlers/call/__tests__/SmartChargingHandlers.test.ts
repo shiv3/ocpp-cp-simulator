@@ -504,7 +504,51 @@ describe("GetCompositeScheduleHandler round trip (#323)", () => {
     const amps = compositeFor(profiles, "A").chargingSchedulePeriod;
     expect(amps).toHaveLength(1);
     expect(amps[0].numberPhases).toBe(1);
-    expect(amps[0].limit).toBeCloseTo(1000 / 230, 10);
+    // 1000 / 230 = 4.347… A, floored to the schema's 0.1 step (#524).
+    expect(amps[0].limit).toBe(4.3);
+  });
+
+  // GetCompositeScheduleResponse.json puts `multipleOf: 0.1` on `limit`: a
+  // converted limit is floored to one decimal, never above the profiles.
+  it("floors a 3000 W / 1-phase station cap asked in A to 13.0 A (#524)", () => {
+    const profiles = {
+      max: {
+        unit: "W" as const,
+        periods: [{ startPeriod: 0, limit: 3000, numberPhases: 1 }],
+      },
+    };
+    expect(compositeFor(profiles, "A").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 13, numberPhases: 1 },
+    ]);
+  });
+
+  it("floors a 6.123 A / 1-phase tx asked in W, keeps it verbatim in A (#524)", () => {
+    const profiles = {
+      tx: {
+        unit: "A" as const,
+        periods: [{ startPeriod: 0, limit: 6.123, numberPhases: 1 }],
+      },
+    };
+    // 6.123 A × 230 V = 1408.29 W.
+    expect(compositeFor(profiles, "W").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 1408.2, numberPhases: 1 },
+    ]);
+    expect(compositeFor(profiles, "A").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 6.123, numberPhases: 1 },
+    ]);
+  });
+
+  it("does not floor float noise: 4.1 A / 1-phase asked in W is 943 W (#524)", () => {
+    // 4.1 × 230 is 942.9999999999999 in binary floating point.
+    const profiles = {
+      tx: {
+        unit: "A" as const,
+        periods: [{ startPeriod: 0, limit: 4.1, numberPhases: 1 }],
+      },
+    };
+    expect(compositeFor(profiles, "W").chargingSchedulePeriod).toStrictEqual([
+      { startPeriod: 0, limit: 943, numberPhases: 1 },
+    ]);
   });
 
   it("keeps two periods apart when equal watts come from different phase counts", () => {

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   buildCompositeWattsSchedule,
+  compositeLimitInUnit,
+  floorToTenth,
   resolveEffectiveLimitWatts,
 } from "../ChargingScheduleResolver";
 import type { ActiveChargingProfile } from "../Connector";
@@ -207,5 +209,76 @@ describe("buildCompositeWattsSchedule", () => {
     expect(offsets).toContain(12 * 3600);
     // Day-2 06:00 lands at offset 12h + 6h = 18h
     expect(offsets).toContain(18 * 3600);
+  });
+});
+
+/** True when `value` is a multiple of 0.1 up to float noise. */
+function isTenth(value: number): boolean {
+  return Math.abs(value * 10 - Math.round(value * 10)) < 1e-9;
+}
+
+describe("floorToTenth (#524)", () => {
+  it.each([
+    [0.3, 0.3],
+    [0.7, 0.7],
+    [3000 / 230, 13],
+    [1000 / 230, 4.3],
+    [6.123 * 230, 1408.2],
+    [0, 0],
+    [13, 13],
+    [230, 230],
+    [12.99999999, 12.9],
+    // 4.1 × 230 is 942.9999999999999 in binary: float noise, not a step.
+    [4.1 * 230, 943],
+    [0.05, 0],
+    [-0.5, 0],
+  ])("floors %d to %d", (input, expected) => {
+    const result = floorToTenth(input);
+    expect(result).toBe(expected);
+    expect(isTenth(result)).toBe(true);
+    expect(result).toBeGreaterThanOrEqual(0);
+    expect(result).toBeLessThanOrEqual(Math.max(0, input) + 1e-9);
+  });
+});
+
+describe("compositeLimitInUnit (#524)", () => {
+  // OCPP 1.6 GetCompositeSchedule.conf requires `limit` to be a multiple
+  // of 0.1; a converted limit is floored so it never exceeds the profiles.
+  it("floors a W limit converted to A to one decimal", () => {
+    const { limit, numberPhases } = compositeLimitInUnit(
+      {
+        startPeriod: 0,
+        watts: 3000,
+        source: { limit: 3000, unit: ChargingRateUnitType.W, numberPhases: 1 },
+      },
+      ChargingRateUnitType.A,
+    );
+    expect(limit).toBe(13);
+    expect(numberPhases).toBe(1);
+  });
+
+  it("floors an A limit converted to W to one decimal", () => {
+    // 6.123 A × 230 V × 1 phase = 1408.29 W.
+    const { limit } = compositeLimitInUnit(
+      {
+        startPeriod: 0,
+        watts: 6.123 * 230,
+        source: { limit: 6.123, unit: ChargingRateUnitType.A, numberPhases: 1 },
+      },
+      ChargingRateUnitType.W,
+    );
+    expect(limit).toBe(1408.2);
+  });
+
+  it("returns a limit in its own unit as the CSMS set it", () => {
+    const { limit } = compositeLimitInUnit(
+      {
+        startPeriod: 0,
+        watts: 6.123 * 230,
+        source: { limit: 6.123, unit: ChargingRateUnitType.A, numberPhases: 1 },
+      },
+      ChargingRateUnitType.A,
+    );
+    expect(limit).toBe(6.123);
   });
 });

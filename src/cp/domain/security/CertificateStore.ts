@@ -675,11 +675,13 @@ export class CertificateStore {
     for (const entry of this.#entries.filter(
       (e) => e.kind === "chain" && e.value.use === use,
     )) {
-      this.remove(entry);
+      this.remove(entry, { pruneOcsp: false });
     }
     const entry: Entry = { kind: "chain", seq: this.#nextSeq++, value: chain };
     this.persist(entry);
     this.#entries.push(entry);
+    // After the push: a sub-CA the new chain shares keeps its response.
+    this.pruneOcspResponses();
     this.notifyChanged();
   }
 
@@ -711,15 +713,19 @@ export class CertificateStore {
     );
   }
 
-  private remove(entry: Entry): void {
+  /** Drops cached OCSP responses no stored chain member matches any more. */
+  private pruneOcspResponses(): void {
+    const stored = this.listSignedChains().flatMap((chain) => chain.hashData);
+    this.#ocspResponses = this.#ocspResponses.filter((cached) =>
+      stored.some((h) => certificateHashDataEquals(h, cached.hash)),
+    );
+  }
+
+  private remove(entry: Entry, { pruneOcsp = true } = {}): void {
     this.#entries = this.#entries.filter((e) => e !== entry);
     if (entry.kind === "chain") {
-      const { pems, hashData } = entry.value;
-      this.#chainKeys.delete(pems[0]);
-      this.#ocspResponses = this.#ocspResponses.filter(
-        (cached) =>
-          !hashData.some((h) => certificateHashDataEquals(h, cached.hash)),
-      );
+      this.#chainKeys.delete(entry.value.pems[0]);
+      if (pruneOcsp) this.pruneOcspResponses();
     }
     this.runSafely("delete certificate", () =>
       this.database?.run(

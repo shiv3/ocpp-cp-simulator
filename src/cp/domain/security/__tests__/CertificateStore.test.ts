@@ -728,6 +728,36 @@ describe("CertificateStore OCSP (#537, M06)", () => {
     ]);
     expect(store.cachedOcspResponse(replaced.hashData[0])).toBeUndefined();
   });
+
+  it("keeps the cached response of a sub-CA the replacement chain shares", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "V2G Root");
+    const sub = await subCa("02", "V2G Sub-CA", root, {
+      ocspUrl: "http://ocsp.example.com/sub",
+    });
+    const install = async (serial: string) => {
+      const csr = await store.generateNewCsr(
+        "CP",
+        "CPO",
+        undefined,
+        "V2GCertificate",
+      );
+      await store.applySignedChain("V2GCertificate", [
+        await leafForCsr(serial, csr, sub),
+        sub.pem,
+      ]);
+      return store.listSignedChains("V2GCertificate")[0];
+    };
+    const first = await install("0a");
+    for (const hash of first.hashData) store.cacheOcspResponse(hash, "MIIB");
+
+    const second = await install("0b");
+
+    expect(store.cachedOcspResponse(first.hashData[0])).toBeUndefined();
+    expect(store.cachedOcspResponse(second.hashData[1])?.ocspResult).toBe(
+      "MIIB",
+    );
+  });
 });
 
 describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {

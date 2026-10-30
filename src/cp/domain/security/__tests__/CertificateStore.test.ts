@@ -562,3 +562,42 @@ describe("CertificateStore persistence failures (#456 review)", () => {
     ]);
   });
 });
+
+describe("CertificateStore change notifications (#537)", () => {
+  it("tells its listeners after every change to what it holds", async () => {
+    const store = new CertificateStore();
+    const counts: number[] = [];
+    store.onChange(() => counts.push(store.listRootCertificates().length));
+    const root = await selfSignedRoot("01", "Root");
+
+    await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+      maxEntries: 10,
+    });
+    const csr = await store.generateNewCsr("CP", "CPO");
+    await store.applySignedChain("ChargingStationCertificate", [
+      await leafForCsr("02", csr, root),
+    ]);
+    store.deleteRootCertificate(store.listRootCertificates()[0].hashData);
+    store.clearAll();
+
+    expect(counts).toEqual([1, 1, 0, 0]);
+  });
+
+  it("stays silent on a refused install and stops after unsubscribing", async () => {
+    const store = new CertificateStore();
+    let calls = 0;
+    const unsubscribe = store.onChange(() => calls++);
+
+    await store.installRootCertificate("CsmsRootCertificate", "not a pem", {
+      maxEntries: 10,
+    });
+    expect(calls).toBe(0);
+
+    unsubscribe();
+    const root = await selfSignedRoot("01", "Root");
+    await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+      maxEntries: 10,
+    });
+    expect(calls).toBe(0);
+  });
+});

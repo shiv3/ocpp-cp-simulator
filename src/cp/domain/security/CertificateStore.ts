@@ -143,12 +143,33 @@ export class CertificateStore {
   /** Settles once every operation queued so far has completed. */
   #tail: Promise<void> = Promise.resolve();
   #pendingOperations = 0;
+  #listeners = new Set<() => void>();
 
   constructor(
     private readonly chargePointId: string = "",
     private readonly database: Database | null = null,
   ) {
     this.load();
+  }
+
+  /**
+   * Calls `listener` after every change to the installed roots or stored
+   * chains (#537: the 2.x `CertificateEntries` count). Pending CSRs do not
+   * count. Returns the unsubscribe function.
+   */
+  onChange(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  private notifyChanged(): void {
+    for (const listener of this.#listeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error("Certificate store listener threw:", err);
+      }
+    }
   }
 
   // ── Ordering ────────────────────────────────────────────────────────────
@@ -343,6 +364,7 @@ export class CertificateStore {
     if (!this.persist(entry)) return { status: "PersistFailed" };
     this.#entries.push(entry);
     if (duplicate) this.remove(duplicate);
+    this.notifyChanged();
     return { status: "Installed", certificate };
   }
 
@@ -403,6 +425,7 @@ export class CertificateStore {
     );
     if (!entry || entry.kind !== "root") return undefined;
     this.remove(entry);
+    this.notifyChanged();
     return entry.value;
   }
 
@@ -425,6 +448,7 @@ export class CertificateStore {
       return { status: "ChargingStationCertificate" };
     }
     this.remove(entry);
+    this.notifyChanged();
     return { status: "Deleted", use: entry.value.use };
   }
 
@@ -436,6 +460,7 @@ export class CertificateStore {
         this.chargePointId,
       ]),
     );
+    this.notifyChanged();
   }
 
   toJSON(): CertificateStoreJson {
@@ -500,6 +525,7 @@ export class CertificateStore {
     const entry: Entry = { kind: "chain", seq: this.#nextSeq++, value: chain };
     this.persist(entry);
     this.#entries.push(entry);
+    this.notifyChanged();
   }
 
   /** INSERTs `entry`; `false` (logged) when the database refuses it. */

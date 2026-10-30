@@ -79,6 +79,11 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
     "ChargingStation/AvailabilityState",
     RUNTIME_VALUE_KEYS.chargingStationAvailabilityState,
   ],
+  // #537: 2.0.1 / 2.1 Part 2 referenced components §2.2.4, §2.2.7-§2.2.9.
+  ["SecurityCtrlr/CertificateEntries", "CertificateEntries"],
+  ["SecurityCtrlr/MaxCertificateChainSize", "MaxCertificateChainSize"],
+  ["SecurityCtrlr/CertSigningWaitMinimum", "CertSigningWaitMinimum"],
+  ["SecurityCtrlr/CertSigningRepeatTimes", "CertSigningRepeatTimes"],
 ]);
 
 /**

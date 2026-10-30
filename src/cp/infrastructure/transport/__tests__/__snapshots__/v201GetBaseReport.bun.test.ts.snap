@@ -600,6 +600,87 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "CertificateEntries",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "MaxCertificateChainSize",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "10000",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 10000,
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "CertSigningWaitMinimum",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "60",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "CertSigningRepeatTimes",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "3",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "evse": {
               "id": 1,
             },

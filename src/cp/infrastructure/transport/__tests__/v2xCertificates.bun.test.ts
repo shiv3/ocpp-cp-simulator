@@ -13,6 +13,10 @@ import {
   selfSignedRoot,
   subCa,
 } from "../../../domain/security/__tests__/certificateFixtures";
+import {
+  isValidGetVariablesResponseV201,
+  isValidGetVariablesResponseV21,
+} from "../../../../ocpp";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
 
@@ -127,6 +131,52 @@ describe.skipIf(!canBindBunServe())(
   "OCPP 2.x certificate management (#456)",
   () => {
     describe.each(["OCPP-2.0.1", "OCPP-2.1"] as const)("%s", (version) => {
+      it("reports SecurityCtrlr.CertificateEntries from the store (#537)", async () => {
+        const entries = async (csms: MockCsms): Promise<unknown> => {
+          const answer = await result(csms, "GetVariables", {
+            getVariableData: [
+              {
+                component: { name: "SecurityCtrlr" },
+                variable: { name: "CertificateEntries" },
+              },
+            ],
+          });
+          const validate =
+            version === "OCPP-2.1"
+              ? isValidGetVariablesResponseV21
+              : isValidGetVariablesResponseV201;
+          expect(validate(answer)).toBe(true);
+          return (answer.getVariableResult as { attributeValue?: string }[])[0]
+            .attributeValue;
+        };
+        const db = BunSqliteDatabase.open(":memory:");
+        const id = `CP-CERT-ENTRIES-${version}`;
+        await withStation(
+          version,
+          async (csms) => {
+            expect(await entries(csms)).toBe("0");
+            const root = await selfSignedRoot("0a", "Entries Root");
+            await result(csms, "InstallCertificate", {
+              certificateType: "CSMSRootCertificate",
+              certificate: root.pem,
+            });
+            expect(await entries(csms)).toBe("1");
+          },
+          db,
+          id,
+        );
+        // Restarted on the same database: the count is read back.
+        await withStation(
+          version,
+          async (csms) => {
+            expect(await entries(csms)).toBe("1");
+          },
+          db,
+          id,
+        );
+        db.close();
+      });
+
       it("installs, lists and deletes a root certificate (M05, M03, M04)", async () => {
         await withStation(version, async (csms) => {
           const root = await selfSignedRoot("0A", "CSMS Root");

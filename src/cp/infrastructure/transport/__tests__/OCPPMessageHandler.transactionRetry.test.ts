@@ -312,4 +312,54 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     socket.callError(replayed.id);
     expect(rejected.map((r) => r.attempt)).toEqual([1, 1]);
   });
+
+  it("a Reset drops a StartTransaction resend already queued behind another CALL", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    await vi.advanceTimersByTimeAsync(59_000);
+    // An unanswered Heartbeat.req holds the serial slot when the retry
+    // timer fires: the resend waits in the serial queue, not on its timer.
+    handler.sendHeartbeat();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+
+    handler.cancelStartTransactionResends();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    // Nor is it salvaged to the offline queue by the Reset's close.
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+    handler.flushPendingQueue();
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+  });
+
+  it("a resend due while the boot gate is closed waits in the offline queue", async () => {
+    const { socket, connector, handler, rejected } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    socket.callError(first.id);
+    // A TriggerMessage BootNotification answered Pending closes the gate
+    // while the link stays up.
+    handler.setBootStatus({ status: "Pending" });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+
+    handler.setBootStatus({ status: "Accepted" });
+    handler.flushPendingQueue();
+    const replayed = socket.last();
+    expect(replayed.action).toBe("StartTransaction");
+    expect(replayed.payload).toEqual(first.payload);
+    socket.callError(replayed.id);
+    expect(rejected.map((r) => r.attempt)).toEqual([1, 1]);
+  });
 });

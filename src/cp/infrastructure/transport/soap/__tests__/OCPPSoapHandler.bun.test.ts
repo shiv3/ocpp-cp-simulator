@@ -1255,6 +1255,53 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
     });
   });
 
+  it("ignores a StartTransaction answer once another transaction runs on the connector (#527)", async () => {
+    await withGlobalFetch(async () => {
+      const csms = startFakeCentralSystemService();
+      const cpId = "CP-SOAP-1.6-STALE-STX";
+      const callbackUrl =
+        "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-1.6-STALE-STX/ChargePointService";
+      const cp = createSoapChargePoint(cpId, csms.url, callbackUrl);
+      const handler = new OCPPSoapHandler(cp, new Logger(), {
+        centralSystemUrl: csms.url,
+        soapCallbackUrl: callbackUrl,
+        dialect: OCPP16_DIALECT,
+      });
+      handler.setBootStatus({ status: "Accepted" });
+
+      try {
+        const first = {
+          id: 0,
+          tagId: "TAG-DEMO",
+          startTime: new Date("2026-10-30T10:00:00.000Z"),
+          stopTime: null,
+          meterStart: 0,
+        } as unknown as Transaction;
+        // The first transaction stopped before its answer came back, and
+        // a second one, same tag, now runs on the connector.
+        const second = {
+          ...first,
+          startTime: new Date("2026-10-30T10:05:00.000Z"),
+        } as Transaction;
+        cp.getConnector(1)!.transaction = second;
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: first,
+          connectorId: 1,
+        });
+        // The SOAP requests are chained: once the Heartbeat.req is out,
+        // the StartTransaction answer has been handled.
+        handler.sendHeartbeat();
+        await waitForOperationCount(csms.received, "Heartbeat", 1);
+
+        expect(cp.getConnector(1)?.transaction).toBe(second);
+        expect(second.id).toBe(0);
+      } finally {
+        csms.stop();
+      }
+    });
+  });
+
   it("sends OCPP 1.6 DataTransfer request (CP→CS direction)", async () => {
     await withGlobalFetch(async () => {
       const csms = startFakeCentralSystemService();

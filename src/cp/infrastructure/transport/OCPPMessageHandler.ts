@@ -1189,12 +1189,25 @@ export class OCPPMessageHandler {
   }
 
   /** #527: see `IChargePointMessageHandler.cancelStartTransactionResends`.
-   *  The other resends (StopTransaction, MeterValues) carry on. */
+   *  A resend whose timer already fired waits in the serial queue behind
+   *  the CALL in flight; it goes too. The other resends (StopTransaction,
+   *  MeterValues) carry on. */
   public cancelStartTransactionResends(): void {
+    const isStartResend = (entry: SerialEntry) =>
+      entry.action === OCPPAction.StartTransaction &&
+      entry.attempt !== undefined;
+    const dropped: SerialEntry[] = [];
     for (const [timer, resend] of this._transactionMessageRetries) {
-      if (resend.action !== OCPPAction.StartTransaction) continue;
+      if (!isStartResend(resend)) continue;
       clearTimeout(timer);
       this._transactionMessageRetries.delete(timer);
+      dropped.push(resend);
+    }
+    dropped.push(...this._serialQueue.filter(isStartResend));
+    this._serialQueue = this._serialQueue.filter(
+      (entry) => !isStartResend(entry),
+    );
+    for (const resend of dropped) {
       this._logger.warn(
         `StartTransaction resend for connector ${resend.connectorId ?? "?"} dropped: a Reset stops its transaction`,
         LogType.TRANSACTION,
@@ -1615,6 +1628,13 @@ export class OCPPMessageHandler {
     };
     const timer = setTimeout(() => {
       this._transactionMessageRetries.delete(timer);
+      // The boot gate closed meanwhile (a BootNotification answered
+      // Pending): sendRequest would drop the resend. It waits in the
+      // offline queue for the next Accepted instead, as on a close.
+      if (!this.isCallAllowed(resend.action)) {
+        this.salvageOrDiscard(resend, "boot gate");
+        return;
+      }
       this.sendRequest(
         resend.action,
         this.generateMessageId(),

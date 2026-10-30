@@ -24,6 +24,7 @@ describe("ConfigurationStore semantic accessors", () => {
     expect(firstSampledData).not.toBe(secondSampledData);
 
     expect(store.transactionMessageAttempts()).toBe(3);
+    expect(store.transactionMessageRetryInterval()).toBe(60);
     expect(store.authorizeRemoteTxRequests()).toBe(false);
     expect(store.localAuthListEnabled()).toBe(true);
     expect(store.localAuthListMaxLength()).toBe(1000);
@@ -42,6 +43,10 @@ describe("ConfigurationStore semantic accessors", () => {
       {
         key: ConfigurationKeys.Core.TransactionMessageAttempts,
         value: 7,
+      },
+      {
+        key: ConfigurationKeys.Core.TransactionMessageRetryInterval,
+        value: 15,
       },
       {
         key: ConfigurationKeys.Core.AuthorizeRemoteTxRequests,
@@ -71,6 +76,7 @@ describe("ConfigurationStore semantic accessors", () => {
 
     expect(store.meterValuesSampledData()).toBe(sampledData);
     expect(store.transactionMessageAttempts()).toBe(7);
+    expect(store.transactionMessageRetryInterval()).toBe(15);
     expect(store.authorizeRemoteTxRequests()).toBe(true);
     expect(store.localAuthListEnabled()).toBe(false);
     expect(store.localAuthListMaxLength()).toBe(42);

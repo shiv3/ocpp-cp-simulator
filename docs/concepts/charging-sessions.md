@@ -10,6 +10,7 @@ sources:
   - src/protocol/methods.ts (sessions.list)
   - "issue #447"
   - "issue #491"
+  - "issue #490"
   - "issue #488"
   - "issue #528"
   - src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
@@ -116,6 +117,14 @@ Two domain gaps were closed so these outcomes can be told apart:
 In both versions the CSMS's answer is written to the transaction
 (`Transaction.authorizationStatus`, persisted with it) before the station
 stops on it, so the stop already carries its cause.
+
+A CALLERROR answering a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated`
+or `Ended`) is not a failed start, unlike 1.6 (#490). OCPP E13 treats it as a
+failure to process the message: the station keeps the transaction running,
+resends the message and finally discards it (see
+[Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)).
+`transactionMessageRejected` and `transactionMessageDiscarded` report it.
+The recorder does not listen to them, so the session stays `active`.
 
 ## Recording
 
@@ -234,8 +243,10 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   transaction with StopTransaction `transactionId: 0`. This predates #488
   (`stop_transaction` does the same), but the Unplug button now reaches it.
 - A 1.6 StartTransaction that is never answered keeps `transactionId: null`.
-- A 2.x TransactionEvent that the CSMS answers with a CALLERROR does not mark
-  the session `failed`; only 1.6 StartTransaction does
+- A 2.x TransactionEvent that the CSMS answers with a CALLERROR never marks
+  the session `failed`, by design (OCPP E13): the transaction keeps running,
+  and the message is resent up to `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` times,
+  then discarded. Only a 1.6 StartTransaction CALLERROR fails a session
   ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet
   ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).

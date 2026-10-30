@@ -2048,3 +2048,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `SetVariableMonitoring` resolves `variable.instance` and refuses an unknown EVSE (`UnknownComponent`, N04.FR.03); events carry the `transactionId` of the monitor's EVSE (or of the only transaction for a `transaction` monitor); `cause` declined (N07.FR.05). `NotifyEvent` / `NotifyMonitoringReport` go out in parts of up to 100 items (`seqNo` / `tbc`): the spec's per-message variables bound CSMS requests, not station reports.
 - [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): new sections (station's own monitors, MonitoringCtrlr variables, reports in parts), SetMonitoringBase, targets, events, persistence and limits rewritten.
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [State persistence](concepts/state-persistence.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.
+
+## [2026-10-30] ingest | Variable monitoring follow-ups, part 2 (#538)
+
+- `Periodic` / `PeriodicClockAligned` monitors (N08): accepted on every mapped variable (an interval of at least 1 s, else `Rejected` `IntervalTooShort`), one `NotifyEvent` with trigger `Periodic` per tick (N08.FR.04-FR.07), on the `AlignedDataCtrlr.Interval` clock grid for the aligned type; timers run only while reporting is on. `GetMonitoringReport` selects them with `PeriodicMonitoring` (N02.FR.14), which no longer answers `NotSupported`; persisted ones are restored.
+- Runtime values as device-model variables: `EVSE.Power`, `EVSE.AvailabilityState`, `Connector.AvailabilityState` per EVSE and `ChargingStation.AvailabilityState`, redefined on change only; `EVSE` / `Connector` variables need an EVSE the station has in `GetVariables` / `SetVariables` too; `GetBaseReport` lists them per EVSE.
+- 2.1 `TargetDelta` / `TargetDeltaRelative` (N07.FR.22, FR.23) on `EVSE.Power`, which gets a `Target` attribute on 2.1 (B05 / B06); threshold semantics for `cleared`. N02.FR.23's `TargetDeltaMonitoring` criterion is absent from the 2.1 schema.
+- Offline queuing (N07.FR.04, N08.FR.03) stays pending for slice 538c.
+- [OCPP 2.x variable monitoring](concepts/variable-monitoring.md): runtime values, Target attribute, monitor types, report criteria, periodic and TargetDelta evaluation, persistence, limits, and the #538 items table.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [index](index.md), [GitHub issues](sources/github-issues.md): #538.

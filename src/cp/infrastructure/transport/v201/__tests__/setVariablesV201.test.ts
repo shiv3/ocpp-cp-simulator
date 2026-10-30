@@ -6,6 +6,7 @@ import {
   type ConfigurationValue,
   type ConfigurationValueType,
 } from "../../../../domain/charge-point/ConfigurationStore";
+import { DeviceModelTargets } from "../../../../domain/charge-point/DeviceModelTargets";
 import { handleSetVariablesV201 } from "../setVariablesV201";
 
 function storeWithDefaults(): ConfigurationStore {
@@ -292,5 +293,41 @@ describe("handleSetVariablesV201 EVSE-scoped runtime variables (#538)", () => {
       "UnknownComponent",
     ]);
     expect(store.get("EVSEAvailabilityState1")?.value).toBe("Available");
+  });
+});
+
+describe("handleSetVariablesV201 Target attribute (2.1, #538)", () => {
+  it.each([
+    ["1500", "Accepted", 1500],
+    ["-2.5", "Accepted", -2.5],
+    ["0x10", "Rejected", undefined],
+    ["1e3", "Rejected", undefined],
+    ["Infinity", "Rejected", undefined],
+    ["+5", "Rejected", undefined],
+    [".5", "Rejected", undefined],
+    ["5.", "Rejected", undefined],
+    [" 5 ", "Rejected", undefined],
+    ["", "Rejected", undefined],
+  ])("target %j is %s (decimal only, B05.FR.07)", (raw, status, target) => {
+    const store = storeWithDefaults();
+    store.defineRuntimeIntegerKey("EVSEPower1", 0);
+    const targets = new DeviceModelTargets();
+    targets.declare("EVSEPower1");
+    const response = handleSetVariablesV201(
+      {
+        setVariableData: [
+          {
+            attributeType: "Target",
+            attributeValue: raw,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "Power" },
+          },
+        ],
+      },
+      store,
+      { evseExists: (evse) => evse.id === 1, targets },
+    );
+    expect(response.setVariableResult[0].attributeStatus).toBe(status);
+    expect(targets.get("EVSEPower1")).toBe(target);
   });
 });

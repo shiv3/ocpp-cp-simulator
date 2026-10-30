@@ -649,6 +649,16 @@ export class ChargePoint {
       persisted.map((p) => p.monitor),
       storedBase,
     );
+    // A hardwired row the catalog no longer has was ignored: drop it, so a
+    // later monitor under its id does not inherit its triggered flag.
+    for (const { monitor } of persisted) {
+      if (
+        monitor.origin === "HardWiredMonitor" &&
+        this._monitoring.get(monitor.id) === undefined
+      ) {
+        repository.delete(monitor.id);
+      }
+    }
     for (const monitor of this._monitoring.list()) {
       if (
         monitor.origin === "HardWiredMonitor" ||
@@ -769,6 +779,25 @@ export class ChargePoint {
     for (const prefix of [keys.evseState, keys.connectorState]) {
       this.publishRuntimeString(evseValueKey(prefix, connector.id), state);
     }
+  }
+
+  /**
+   * A removed connector's EVSE leaves the device model (#538): its runtime
+   * keys and its `EVSE.Power` target go. A monitor on them stays installed
+   * and reads no value, so it reports nothing, periodic ticks included.
+   */
+  private withdrawConnectorValues(connectorId: number): void {
+    const keys = RUNTIME_VALUE_KEYS;
+    for (const prefix of [
+      keys.evsePower,
+      keys.evseState,
+      keys.connectorState,
+    ]) {
+      this._configuration.removeRuntimeKey(evseValueKey(prefix, connectorId));
+    }
+    this._deviceModelTargets.undeclare(
+      evseValueKey(keys.evsePower, connectorId),
+    );
   }
 
   /** `ChargingStation.AvailabilityState`: the station-level status. */
@@ -2655,6 +2684,7 @@ export class ChargePoint {
     connector.dispose();
     const removed = this._connectors.delete(connectorId);
     if (removed) {
+      this.withdrawConnectorValues(connectorId);
       this._events.emit("connectorRemoved", { connectorId });
     }
     return removed;

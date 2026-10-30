@@ -1,8 +1,8 @@
+import { MAX_TIMER_MS } from "../../shared/timers";
 import { nextClockAlignedBoundary } from "../charge-point/ClockAlignedMeterScheduler";
 import type { VariableMonitor } from "./VariableMonitor";
 
-/** setTimeout's longest delay; a longer wait is chained. */
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const DAY_SECONDS = 86_400;
 
 /**
  * The timers behind Periodic and PeriodicClockAligned monitors (N08, #538),
@@ -12,7 +12,10 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  *   (N08.FR.06).
  * - `PeriodicClockAligned` fires on the clock-aligned grid of `value`
  *   seconds (N08.FR.07), the grid `AlignedDataCtrlr.Interval` uses (#454):
- *   it restarts at each UTC midnight.
+ *   it restarts at each UTC midnight. Above a day that grid would fire at
+ *   every midnight, before `value` seconds have passed, so the grid is the
+ *   one of `value` seconds counted from the Unix epoch (a UTC midnight):
+ *   a whole number of days fires at midnight, and a re-arm keeps the grid.
  *
  * A late timer never replays the boundaries it slept through, and a wait
  * beyond setTimeout's limit is chained instead of firing at once.
@@ -44,10 +47,7 @@ export class PeriodicMonitorScheduler {
     monitor: Pick<VariableMonitor, "id" | "type" | "value">,
     fireAt: number,
   ): void {
-    const delay = Math.min(
-      Math.max(0, fireAt - Date.now()),
-      MAX_TIMER_DELAY_MS,
-    );
+    const delay = Math.min(Math.max(0, fireAt - Date.now()), MAX_TIMER_MS);
     this.timers.set(
       monitor.id,
       setTimeout(() => {
@@ -70,7 +70,11 @@ export class PeriodicMonitorScheduler {
     afterMs: number,
   ): number {
     if (monitor.type === "PeriodicClockAligned") {
-      return nextClockAlignedBoundary(afterMs, monitor.value);
+      if (monitor.value <= DAY_SECONDS) {
+        return nextClockAlignedBoundary(afterMs, monitor.value);
+      }
+      const periodMs = monitor.value * 1000;
+      return (Math.floor(afterMs / periodMs) + 1) * periodMs;
     }
     return afterMs + monitor.value * 1000;
   }

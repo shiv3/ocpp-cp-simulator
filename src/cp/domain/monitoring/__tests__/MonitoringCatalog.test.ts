@@ -116,6 +116,23 @@ describe("MonitoringStore catalog (#538)", () => {
     expect(store.get(HARDWIRED.id)).toEqual(HARDWIRED);
   });
 
+  it("ignores a persisted hardwired monitor the catalog no longer has", () => {
+    const store = new MonitoringStore(CATALOG);
+    const stale: VariableMonitor = { ...HARDWIRED, id: 950 };
+    const kept: VariableMonitor = {
+      ...PRECONFIGURED,
+      id: 951,
+      origin: "CustomMonitor",
+    };
+    store.initialize([stale, kept], "All");
+    expect(store.get(stale.id)).toBeUndefined();
+    expect(store.get(kept.id)).toEqual(kept);
+    // Nothing undeletable is left behind.
+    expect(store.list().filter((m) => m.origin === "HardWiredMonitor")).toEqual(
+      [HARDWIRED],
+    );
+  });
+
   it("refuses to clear (N06.FR.03) or replace (N04.FR.18) a hardwired monitor", () => {
     const store = fresh();
     expect(store.clear(HARDWIRED.id)).toBe("Rejected");
@@ -225,6 +242,33 @@ describe("MonitoringStore catalog (#538)", () => {
       expect(store.applyMonitoringBase("HardWiredOnly")).toBe("Accepted");
       expect(store.list()).toEqual([HARDWIRED]);
       expect(store.activeMonitoringBase).toBe("HardWiredOnly");
+    });
+
+    it("All after HardWiredOnly restores a preconfigured monitor next to a custom duplicate of it (N03.FR.03; N04.FR.10 not applied)", () => {
+      const store = fresh();
+      store.applyMonitoringBase("HardWiredOnly");
+      // The same type, severity and target as the preconfigured monitor:
+      // not a Duplicate now that the preconfigured one is deleted.
+      const twin = store.install(
+        custom({
+          type: PRECONFIGURED.type,
+          severity: PRECONFIGURED.severity,
+          value: PRECONFIGURED.value,
+          component: PRECONFIGURED.component,
+          variable: PRECONFIGURED.variable,
+          valueKey: PRECONFIGURED.valueKey,
+        }),
+      );
+      expect(twin.status).toBe("Accepted");
+
+      store.applyMonitoringBase("All");
+      const sameTarget = store
+        .list()
+        .filter((m) => m.valueKey === PRECONFIGURED.valueKey);
+      expect(sameTarget.map((m) => [m.origin, m.type, m.severity])).toEqual([
+        ["CustomMonitor", "Delta", 5],
+        ["PreconfiguredMonitor", "Delta", 5],
+      ]);
     });
 
     it("keeps the base on an unknown value (N03.FR.02)", () => {

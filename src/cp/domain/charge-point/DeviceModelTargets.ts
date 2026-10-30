@@ -17,6 +17,12 @@ export class DeviceModelTargets {
     this.declared.add(valueKey);
   }
 
+  /** Drop a key's Target and its value, as when its EVSE is removed. */
+  undeclare(valueKey: string): void {
+    this.declared.delete(valueKey);
+    this.values.delete(valueKey);
+  }
+
   supports(valueKey: string): boolean {
     return this.declared.has(valueKey);
   }

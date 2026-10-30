@@ -526,7 +526,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           this.rejectCall(
             action,
             messageId,
-            "FormationViolation" as OCPPErrorCode,
+            "FormatViolation" as OCPPErrorCode,
             `Invalid ${action} payload`,
             gen,
           );

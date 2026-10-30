@@ -201,7 +201,7 @@ describe("OCPP 2.x runtime device-model values (#538)", () => {
       });
       expect(frame[0]).toBe(4);
       // The station's answer to any 2.x payload outside its schema.
-      expect(frame[2]).toBe("FormationViolation");
+      expect(frame[2]).toBe("FormatViolation");
       expect(isValidSetVariableMonitoringResponseV201(frame[3])).toBe(false);
     });
   });

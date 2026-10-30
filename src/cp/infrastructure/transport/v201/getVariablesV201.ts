@@ -3,39 +3,40 @@ import type {
   GetVariablesResponseV201,
 } from "../../../../ocpp";
 import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
-import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
+import {
+  resolveDeviceModelVariable,
+  type DeviceModelEvse,
+} from "./deviceModelMap";
 import { renderConfigValue } from "./renderConfigValue";
 
 type GetVariableResult = GetVariablesResponseV201["getVariableResult"][number];
 
+/** What the station's topology adds to the device-model lookup (#538). */
+export interface DeviceModelContext {
+  /** Whether the station has this EVSE (and connector); without it, no
+   *  EVSE-scoped variable resolves. */
+  readonly evseExists?: (evse: DeviceModelEvse) => boolean;
+}
+
 export function handleGetVariablesV201(
   req: GetVariablesRequestV201,
   store: ConfigurationStore,
+  context: DeviceModelContext = {},
 ): GetVariablesResponseV201 {
   const results = req.getVariableData.map((data): GetVariableResult => {
-    const componentName = data.component.name;
-    const variableName = data.variable.name;
-
-    if (!KNOWN_V201_COMPONENTS.has(componentName)) {
-      return {
-        attributeStatus: "UnknownComponent",
-        component: data.component,
-        variable: data.variable,
-      };
-    }
-
-    const v16Key = lookupV16Key(
-      componentName,
-      variableName,
-      data.variable.instance,
+    const resolved = resolveDeviceModelVariable(
+      data.component,
+      data.variable,
+      context.evseExists,
     );
-    if (v16Key === undefined) {
+    if (resolved.status !== "Found") {
       return {
-        attributeStatus: "UnknownVariable",
+        attributeStatus: resolved.status,
         component: data.component,
         variable: data.variable,
       };
     }
+    const v16Key = resolved.valueKey;
 
     if (data.attributeType !== undefined && data.attributeType !== "Actual") {
       return {

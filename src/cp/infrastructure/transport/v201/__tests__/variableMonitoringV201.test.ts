@@ -330,6 +330,67 @@ describe("handleSetVariableMonitoringV201", () => {
   });
 });
 
+describe("handleSetVariableMonitoringV201 on runtime values (#538)", () => {
+  function runtimeConfig(): ConfigurationStore {
+    const store = config();
+    store.defineRuntimeIntegerKey("EVSEPower1", 0);
+    store.defineRuntimeKey("EVSEAvailabilityState1", "Available");
+    return store;
+  }
+
+  it("monitors EVSE.Power and EVSE.AvailabilityState of an EVSE the station has (N04.FR.03)", () => {
+    const store = new MonitoringStore();
+    const response = handleSetVariableMonitoringV201(
+      {
+        setMonitoringData: [
+          {
+            value: 5000,
+            type: "UpperThreshold",
+            severity: 3,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "Power" },
+          },
+          {
+            value: 0,
+            type: "Delta",
+            severity: 3,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "AvailabilityState" },
+          },
+          {
+            value: 0,
+            type: "Delta",
+            severity: 3,
+            component: { name: "EVSE" },
+            variable: { name: "AvailabilityState" },
+          },
+          {
+            value: 0,
+            type: "Delta",
+            severity: 3,
+            component: { name: "EVSE", evse: { id: 1 } },
+            variable: { name: "EvseId" },
+          },
+        ],
+      },
+      store,
+      runtimeConfig(),
+      (e) => e.id === 1 && (e.connectorId ?? 1) === 1,
+    );
+    expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
+    expect(response.setMonitoringResult.map((r) => r.status)).toEqual([
+      "Accepted",
+      "Accepted",
+      "UnknownComponent",
+      "UnknownVariable",
+    ]);
+    expect(store.list().map((m) => [m.valueKey, m.component])).toEqual([
+      ["EVSEPower1", { name: "EVSE", evse: { id: 1 } }],
+      ["EVSEAvailabilityState1", { name: "EVSE", evse: { id: 1 } }],
+    ]);
+  });
+});
+
 describe("handleClearVariableMonitoringV201", () => {
   it("clears known ids and reports unknown ones per id (N06.FR.01, N06.FR.02, N06.FR.05)", () => {
     const store = new MonitoringStore();

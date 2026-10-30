@@ -6,38 +6,30 @@ import type {
   ConfigurationChangeStatus,
   ConfigurationStore,
 } from "../../../domain/charge-point/ConfigurationStore";
-import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
+import type { DeviceModelContext } from "./getVariablesV201";
+import { resolveDeviceModelVariable } from "./deviceModelMap";
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
 
 export function handleSetVariablesV201(
   req: SetVariablesRequestV201,
   store: ConfigurationStore,
+  context: DeviceModelContext = {},
 ): SetVariablesResponseV201 {
   const results = req.setVariableData.map((data): SetVariableResult => {
-    const componentName = data.component.name;
-    const variableName = data.variable.name;
-
-    if (!KNOWN_V201_COMPONENTS.has(componentName)) {
-      return {
-        attributeStatus: "UnknownComponent",
-        component: data.component,
-        variable: data.variable,
-      };
-    }
-
-    const v16Key = lookupV16Key(
-      componentName,
-      variableName,
-      data.variable.instance,
+    const resolved = resolveDeviceModelVariable(
+      data.component,
+      data.variable,
+      context.evseExists,
     );
-    if (v16Key === undefined) {
+    if (resolved.status !== "Found") {
       return {
-        attributeStatus: "UnknownVariable",
+        attributeStatus: resolved.status,
         component: data.component,
         variable: data.variable,
       };
     }
+    const v16Key = resolved.valueKey;
 
     if (data.attributeType !== undefined && data.attributeType !== "Actual") {
       return {

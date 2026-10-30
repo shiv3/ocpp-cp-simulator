@@ -27,7 +27,7 @@ import {
   type SupportedMonitorType,
   type VariableMonitor,
 } from "../../../domain/monitoring/VariableMonitor";
-import { KNOWN_V201_COMPONENTS, lookupV16Key } from "./deviceModelMap";
+import { resolveDeviceModelVariable } from "./deviceModelMap";
 import { MONITORING_ITEMS_PER_PART, splitIntoParts } from "./reportParts";
 import type {
   V201HandlerResult,
@@ -77,20 +77,19 @@ export function handleSetVariableMonitoringV201(
 
     // N04.FR.03: a component is its name plus its EVSE scope, so an EVSE
     // (or a connector on it) the station does not have is unknown too.
-    if (
-      !KNOWN_V201_COMPONENTS.has(data.component.name) ||
-      (data.component.evse !== undefined && !evseExists(data.component.evse))
-    ) {
+    // An EVSE-scoped component (#538) also needs an EVSE (below).
+    if (data.component.evse !== undefined && !evseExists(data.component.evse)) {
       return { status: "UnknownComponent", ...echo };
     }
-    const valueKey = lookupV16Key(
-      data.component.name,
-      data.variable.name,
-      data.variable.instance,
+    const resolved = resolveDeviceModelVariable(
+      data.component,
+      data.variable,
+      evseExists,
     );
-    if (valueKey === undefined) {
-      return { status: "UnknownVariable", ...echo }; // N04.FR.04
+    if (resolved.status !== "Found") {
+      return { status: resolved.status, ...echo }; // N04.FR.03, FR.04
     }
+    const { valueKey } = resolved;
     const entry = configuration.get(valueKey);
     if (entry === undefined) {
       // Same answer as GetVariables for a mapped key the store lacks.

@@ -93,6 +93,7 @@ import { MonitoringStore } from "../monitoring/MonitoringStore";
 import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
 import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
+import type { VariableMonitor } from "../monitoring/VariableMonitor";
 import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
@@ -628,6 +629,7 @@ export class ChargePoint {
           queueMicrotask(() => this._outbox.sendNotifyEvent(events)),
         transactionActive: () =>
           [...this._connectors.values()].some((c) => c.hasRunningTransaction),
+        transactionIdOf: (monitor) => this.monitoredTransactionId(monitor),
         onTriggeredChange: (id, triggered) =>
           repository.setTriggered(id, triggered),
       },
@@ -636,6 +638,24 @@ export class ChargePoint {
     evaluation.setReporting(false);
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /**
+   * The 2.x transactionId a monitor's event is linked to (#538): the
+   * transaction running on the monitor's EVSE (EVSE N is connector N), or,
+   * for a station-level monitor reporting only during a transaction, the
+   * transaction when exactly one runs. Otherwise none.
+   */
+  private monitoredTransactionId(monitor: VariableMonitor): string | undefined {
+    const running = (c: Connector | undefined) =>
+      c?.hasRunningTransaction ? c.transaction?.cpTransactionId : undefined;
+    const evse = monitor.component.evse;
+    if (evse !== undefined) return running(this._connectors.get(evse.id));
+    if (!monitor.transaction) return undefined;
+    const active = [...this._connectors.values()].filter(
+      (c) => c.hasRunningTransaction,
+    );
+    return active.length === 1 ? running(active[0]) : undefined;
   }
 
   /** A configuration value as a monitor sees it: GetVariables' rendering

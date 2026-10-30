@@ -38,6 +38,7 @@ function config(): ConfigurationStore {
     { key: ConfigurationKeys.Core.HeartbeatInterval, value: 300 },
     { key: ConfigurationKeys.Core.ClockAlignedDataInterval, value: 0 },
     { key: ConfigurationKeys.Core.WebSocketPingInterval, value: 0 },
+    { key: ConfigurationKeys.Core.TransactionMessageAttempts, value: 3 },
     {
       key: ConfigurationKeys.LocalAuthListManagement.LocalAuthListEnabled,
       value: true,
@@ -65,6 +66,7 @@ function set(
     { setMonitoringData: items as [MonitoringData, ...MonitoringData[]] },
     store,
     config(),
+    () => true,
   );
   expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
   expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
@@ -142,6 +144,52 @@ describe("handleSetVariableMonitoringV201", () => {
     expect(store.get(1)?.valueKey).toBe("LocalAuthListEnabled");
   });
 
+  it("resolves an instanced variable with its instance only (#538)", () => {
+    const store = new MonitoringStore();
+    const attempts = {
+      type: "Delta" as const,
+      value: 1,
+      component: { name: "OCPPCommCtrlr" },
+    };
+    const [withInstance, withoutInstance] = set(
+      store,
+      heartbeat({
+        ...attempts,
+        variable: { name: "MessageAttempts", instance: "TransactionEvent" },
+      }),
+      heartbeat({ ...attempts, variable: { name: "MessageAttempts" } }),
+    ).setMonitoringResult;
+
+    expect(withInstance).toMatchObject({ id: 1, status: "Accepted" });
+    expect(store.get(1)?.valueKey).toBe("TransactionMessageAttempts");
+    expect(withoutInstance.status).toBe("UnknownVariable"); // N04.FR.04
+  });
+
+  it.each([
+    [{ id: 2 }, "UnknownComponent"],
+    [{ id: 0 }, "UnknownComponent"],
+    [{ id: 1, connectorId: 2 }, "UnknownComponent"],
+    [{ id: 1 }, "Accepted"],
+    [{ id: 1, connectorId: 1 }, "Accepted"],
+  ])(
+    "answers %j on a one-EVSE station with %s (N04.FR.03, #538)",
+    (evse, status) => {
+      const store = new MonitoringStore();
+      const response = handleSetVariableMonitoringV201(
+        {
+          setMonitoringData: [
+            heartbeat({ component: { name: "OCPPCommCtrlr", evse } }),
+          ],
+        },
+        store,
+        config(),
+        (e) => e.id === 1 && (e.connectorId ?? 1) === 1,
+      );
+      expect(isValidSetVariableMonitoringResponseV201(response)).toBe(true);
+      expect(response.setMonitoringResult[0].status).toBe(status);
+    },
+  );
+
   it.each(["Periodic", "PeriodicClockAligned"] as const)(
     "answers UnsupportedMonitorType for %s (N04.FR.05)",
     (type) => {
@@ -170,6 +218,7 @@ describe("handleSetVariableMonitoringV201", () => {
       request as SetVariableMonitoringRequestV201,
       store,
       config(),
+      () => true,
     );
     expect(isValidSetVariableMonitoringResponseV21(response)).toBe(true);
     expect(response.setMonitoringResult.map((r) => r.status)).toEqual([
@@ -324,25 +373,45 @@ describe("buildMonitoringReportV201", () => {
     store: MonitoringStore,
     req: Partial<GetMonitoringReportRequestV201>,
     dialect: "v201" | "v21" = "v201",
+    itemsPerPart?: number,
   ) {
     const result = buildMonitoringReportV201(
       { requestId: 7, ...req },
       store,
       dialect,
+      itemsPerPart,
     );
     expect(isValidGetMonitoringReportResponseV201(result.response)).toBe(true);
-    if (result.report) {
+    for (const part of result.reports) {
       if (dialect === "v201") {
-        expect(isValidNotifyMonitoringReportRequestV201(result.report)).toBe(
-          true,
-        );
+        expect(isValidNotifyMonitoringReportRequestV201(part)).toBe(true);
       } else {
-        expect(isValidNotifyMonitoringReportRequestV21(result.report)).toBe(
-          true,
-        );
+        expect(isValidNotifyMonitoringReportRequestV21(part)).toBe(true);
       }
     }
-    return result;
+    if (itemsPerPart === undefined) {
+      expect(result.reports.length).toBeLessThanOrEqual(1);
+    }
+    return { ...result, report: result.reports[0] };
+  }
+
+  for (const dialect of ["v201", "v21"] as const) {
+    it(`${dialect}: splits the report into parts with increasing seqNo and tbc on all but the last (N02.FR.03, FR.04, FR.09, #538)`, () => {
+      const { response, reports } = report(seeded(), {}, dialect, 1);
+
+      expect(response).toEqual({ status: "Accepted" });
+      expect(
+        reports.map((r) => [r.requestId, r.seqNo, r.tbc, r.monitor?.length]),
+      ).toEqual([
+        [7, 0, true, 1],
+        [7, 1, false, 1],
+      ]);
+      expect(reports.map((r) => r.monitor?.[0]?.component.name)).toEqual([
+        "OCPPCommCtrlr",
+        "LocalAuthListCtrlr",
+      ]);
+      expect(new Set(reports.map((r) => r.generatedAt)).size).toBe(1);
+    });
   }
 
   it("reports every monitor, grouped per component/variable (N02.FR.03, FR.04, FR.09, FR.11)", () => {

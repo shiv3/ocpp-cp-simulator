@@ -101,6 +101,7 @@ import {
 } from "./coreControlV201";
 import { handleGetVariablesV201 } from "./getVariablesV201";
 import { handleSetVariablesV201 } from "./setVariablesV201";
+import { v201EvseExists } from "./topologyWireV201";
 import {
   createGetMonitoringReportHandlerV201,
   handleClearVariableMonitoringV201,
@@ -557,6 +558,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
             p as SetVariableMonitoringRequestV201,
             ctx.chargePoint.monitoring,
             ctx.chargePoint.configuration,
+            (evse) => v201EvseExists(evse, ctx.chargePoint.connectors.keys()),
           ),
         }),
       },

@@ -11,6 +11,7 @@ sources:
   - "issue #448"
   - "issue #469"
   - "issue #490"
+  - "issue #527"
 related:
   - control-plane.md
   - network-simulation.md
@@ -110,8 +111,8 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `transaction_id_assigned`       | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                         |
 | `transaction_stopped`           | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
 | `transaction_rejected`          | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
-| `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x, #490, #529) A TransactionEvent transmission fails (CALLERROR or no answer); it is resent unless it was the last.  |
-| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x, #490, #529) The last attempt failed too: the message is dropped, the transaction keeps running.                   |
+| `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x #490, #529; 1.6 #527) A transaction message transmission fails; it is resent unless it was the last.               |
+| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x #490, #529; 1.6 #527) The last attempt failed too: the message is dropped, the transaction keeps running.          |
 | `authorization_rejected`        | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
 | `scenario_started`              | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`         | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
@@ -134,14 +135,17 @@ on the rejection: `StopTransactionOnInvalidId` on 1.6 (#181),
 the transaction runs (not on an `Ended` event's answer).
 
 The message fields of `transaction_message_rejected` and
-`transaction_message_discarded` are `transactionId`, `action` (always
-`TransactionEvent` for now), `eventType` (`Started`, `Updated` or `Ended`),
-`reason` and `errorCode`. `reason` is `callError` when a CALLERROR answered
-the transmission (#490), and then `errorCode` holds its error code; it is
-`timeout` when no answer came within `OCPPCommCtrlr.MessageTimeout` (#529),
-and then there is no `errorCode`. On `transaction_message_discarded` they
-describe the last failure. See
-[Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x).
+`transaction_message_discarded` are `transactionId`, `action`
+(`TransactionEvent` on 2.x; `StartTransaction`, `StopTransaction` or
+`MeterValues` on 1.6, #527), `eventType` (2.x only: `Started`, `Updated` or
+`Ended`), `reason` and `errorCode`. `reason` is `callError` when a CALLERROR
+answered the transmission (#490, #527), and then `errorCode` holds its error
+code; it is `timeout` when no answer came within
+`OCPPCommCtrlr.MessageTimeout` (#529, 2.x only), and then there is no
+`errorCode`. On `transaction_message_discarded` they describe the last
+failure. See
+[Transaction message retries (2.x)](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)
+and [(OCPP-J 1.6)](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16).
 
 ### Smart-charging profiles
 

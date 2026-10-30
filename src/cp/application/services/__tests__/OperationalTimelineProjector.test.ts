@@ -411,6 +411,38 @@ describe("OperationalTimelineProjector (#448)", () => {
       "TransactionEvent Updated of transaction tx-529 discarded after 2 attempts (no answer)",
     ]);
   });
+
+  it("records a rejected and a discarded 1.6 StopTransaction, without eventType (#527)", () => {
+    const cp = buildChargePoint();
+    const report = {
+      connectorId: 1,
+      transactionId: "42",
+      action: "StopTransaction" as const,
+      reason: "callError" as const,
+      errorCode: "InternalError",
+    };
+
+    cp.notifyTransactionMessageRejected({ ...report, attempt: 3 });
+    cp.notifyTransactionMessageDiscarded({ ...report, attempts: 3 });
+
+    const entries = cp.timeline.query({
+      kinds: ["transaction_message_rejected", "transaction_message_discarded"],
+    }).entries;
+    const data = {
+      transactionId: "42",
+      action: "StopTransaction",
+      reason: "callError",
+      errorCode: "InternalError",
+    };
+    expect(entries.map((e) => [e.kind, e.connectorId, e.data])).toEqual([
+      ["transaction_message_rejected", 1, { ...data, attempt: 3 }],
+      ["transaction_message_discarded", 1, { ...data, attempts: 3 }],
+    ]);
+    expect(entries.map((e) => e.summary)).toEqual([
+      "StopTransaction of transaction 42 rejected (InternalError), attempt 3",
+      "StopTransaction of transaction 42 discarded after 3 attempts (InternalError)",
+    ]);
+  });
 });
 
 const PROFILE_KINDS: TimelineKind[] = [

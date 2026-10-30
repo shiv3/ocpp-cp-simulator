@@ -14,6 +14,7 @@ sources:
   - "issue #488"
   - "issue #528"
   - "issue #549"
+  - "issue #527"
   - src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
 related:
   - operational-timeline.md
@@ -85,7 +86,7 @@ for 2.x):
 | Outcome       | When                                                                                                                                                                                                                                                               |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `active`      | The transaction is still running.                                                                                                                                                                                                                                  |
-| `failed`      | The CSMS refused the start: a CALLERROR answered 1.6 StartTransaction, or the CSMS did not accept the id on the start and the station stopped on it (`DeAuthorized`, see below). An id a 2.x `Updated` answer withdraws mid-session ends it `interrupted`.         |
+| `failed`      | The CSMS refused the start: it did not accept the id on the start and the station stopped on it (`DeAuthorized`, see below). An id a 2.x `Updated` answer withdraws mid-session ends it `interrupted`. A CALLERROR is not a refusal (see below).                   |
 | `interrupted` | It ended with `EmergencyStop`, `HardReset`, `SoftReset`, `ImmediateReset`, `Reboot`, `PowerLoss`, `UnlockCommand`, `GroundFault`, `OvercurrentFault`, `PowerQuality`, `Timeout`, or `DeAuthorized` without a CSMS rejection; or its end was lost across a restart. |
 | `completed`   | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, …                                                                                                                                             |
 
@@ -97,18 +98,16 @@ A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
 
 Two domain gaps were closed so these outcomes can be told apart:
 
-- **1.6 StartTransaction CALLERROR.** The station already closed the
-  transaction (stop time and meter stamped) and went back to Available; it
-  now also emits `transactionStartFailed`, once the transaction is closed and
-  before Available. No StopTransaction.req follows. Once the listeners have
-  read it, the closed transaction is detached from the connector (#491). A
-  later Reset or UnlockConnector finds no transaction there and sends no
-  StopTransaction.req for it (one used to go out with the placeholder
-  `transactionId: 0`); a RemoteStopTransaction for id `0` is `Rejected`, and
-  ChangeAvailability is `Accepted` at once rather than `Scheduled`.
-  `ChargePoint.stopTransaction` also ignores a transaction whose stop time is
-  already set, such as one restored from a `connector_runtime` snapshot
-  persisted before this fix.
+- **1.6 StartTransaction CALLERROR.** From #447 to #527 the station closed
+  the transaction, went back to Available, emitted `transactionStartFailed`
+  and recorded the session `failed`; #491 then detached the closed
+  transaction so no stop path sent a StopTransaction.req with the
+  placeholder `transactionId: 0` for it. Since #527 a CALLERROR is no longer
+  a failed start: the station follows §3.7.1, resends the message and
+  finally discards it, and the transaction keeps running (below). The
+  `transactionStartFailed` event is gone. `ChargePoint.stopTransaction` still
+  ignores a transaction whose stop time is already set, such as one restored
+  from a `connector_runtime` snapshot persisted before #491.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
@@ -120,16 +119,20 @@ In both versions the CSMS's answer is written to the transaction
 (`Transaction.authorizationStatus`, persisted with it) before the station
 stops on it, so the stop already carries its cause.
 
-A CALLERROR answering a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated`
-or `Ended`) is not a failed start, unlike 1.6 (#490). OCPP E13 treats it as a
-failure to process the message: the station keeps the transaction running,
-resends the message and finally discards it (see
-[Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)).
-A TransactionEvent left unanswered within `MessageTimeout` is handled the
+A CALLERROR answering a transaction-related message is not a failed start,
+on any version: a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or
+`Ended`; OCPP E13, #490), or an OCPP-J 1.6 StartTransaction.req,
+StopTransaction.req or MeterValues.req of a transaction (Part 2 §3.7.1,
+#527). Both treat it as a failure to process the message: the station keeps
+the transaction running, resends the message and finally discards it (see
+[Transaction message retries](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)
+and [its 1.6 counterpart](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
+A 2.x TransactionEvent left unanswered within `MessageTimeout` is handled the
 same way (#529). `transactionMessageRejected` and
 `transactionMessageDiscarded` report both, with `reason` `callError` or
-`timeout`. The recorder does not listen to them, so the session stays
-`active`.
+(2.x only) `timeout`. The recorder does not listen to them, so the session
+stays `active`. A 1.6 transaction whose StartTransaction.req was discarded
+never gets a CSMS id: its session keeps `transactionId: null`.
 
 ## Recording
 
@@ -138,8 +141,7 @@ same way the [timeline projector](operational-timeline.md) does:
 `transactionStarted` opens a session, the connector's `transactionIdChange`
 fills in the 1.6 id, `transactionStopped` closes it (taking
 `authorizationStatus` from the transaction), `startTransactionNotAccepted`
-sets `authorizationStatus` on a session that keeps charging, and
-`transactionStartFailed` marks it `failed`. Each field is read from the
+and sets `authorizationStatus` on a session that keeps charging. Each field is read from the
 connector's `Transaction` when the event fires, never parsed from frames.
 Every stored change is also pushed (below).
 
@@ -242,7 +244,8 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   StopTransaction, MeterValues with a transaction) are queued (in
   [`pending_messages`](state-persistence.md) with `--state-db`, in memory
   otherwise) and replayed after the next accepted boot, at most
-  `TransactionMessageAttempts` times. On 2.x the TransactionEvents
+  `TransactionMessageAttempts` times. So is a resend still waiting out its
+  retry interval after a CALLERROR (#527). On 2.x the TransactionEvents
   (`Started`, `Updated`, `Ended`) go to the same queue (E11.FR.01): those
   produced offline, those written but unanswered when the socket closed, and
   a pending E13 resend. After the next accepted boot they are replayed in the
@@ -264,12 +267,15 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
 - On 1.6, an Unplug while StartTransaction.conf is still pending stops the
   transaction with StopTransaction `transactionId: 0`. This predates #488
   (`stop_transaction` does the same), but the Unplug button now reaches it.
-- A 1.6 StartTransaction that is never answered keeps `transactionId: null`.
-- A 2.x TransactionEvent that the CSMS answers with a CALLERROR never marks
-  the session `failed`, by design (OCPP E13): the transaction keeps running,
-  and the message is resent up to `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` times,
-  then discarded. Only a 1.6 StartTransaction CALLERROR fails a session
-  ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490)).
+- A 1.6 StartTransaction that is never answered, or that is discarded after
+  `TransactionMessageAttempts` CALLERRORs, keeps `transactionId: null`.
+- A CALLERROR answering a transaction-related message never marks the
+  session `failed`, by design (2.x E13, 1.6 §3.7.1): the transaction keeps
+  running, and the message is resent up to
+  `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` (1.6
+  `TransactionMessageAttempts`) times, then discarded
+  ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490),
+  [#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet
   ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
 - Local mode does not drop a removed charge point's sessions until

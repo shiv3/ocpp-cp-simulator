@@ -1417,37 +1417,21 @@ export class ChargePoint {
     });
   }
 
-  /**
-   * Called by the 1.6 handler when StartTransaction.req is answered with a
-   * CALLERROR (#447), once `cleanTransaction` has closed the connector's
-   * transaction. Listeners still find the closed transaction on the
-   * connector (its stop time and meter), then it is detached: the CSMS never
-   * accepted it, so nothing may stop it again. Left attached, every path that
-   * asks "is there a transaction?" — Reset, UnlockConnector, RemoteStop,
-   * ChangeAvailability — took it for a running one, and the stop paths sent
-   * a StopTransaction.req with the `0` placeholder id (#491). A transaction
-   * a listener began in the meantime is a new one and stays.
-   */
-  notifyTransactionStartFailed(connectorId: number, errorCode: string): void {
-    const connector = this.getConnector(connectorId);
-    const failed = connector?.transaction ?? null;
-    this._events.emit("transactionStartFailed", { connectorId, errorCode });
-    if (connector && failed && connector.transaction === failed) {
-      connector.stopTransaction();
-    }
-  }
-
-  /** Called by the 2.x handler on each failed TransactionEvent
-   *  transmission: a CALLERROR (#490) or no answer within `MessageTimeout`
-   *  (#529). Reports only: the transaction is untouched. */
+  /** Called by the handlers on each failed transmission of a
+   *  transaction-related message: a 2.x TransactionEvent answered with a
+   *  CALLERROR (#490) or left without answer for `MessageTimeout` (#529), a
+   *  1.6 StartTransaction, StopTransaction or MeterValues of a transaction
+   *  answered with a CALLERROR (#527). Reports only: the transaction is
+   *  untouched. */
   notifyTransactionMessageRejected(
     event: ChargePointEvents["transactionMessageRejected"],
   ): void {
     this._events.emit("transactionMessageRejected", event);
   }
 
-  /** Called by the 2.x handler when a TransactionEvent failed its last
-   *  attempt and is dropped (#490). Reports only, like the above. */
+  /** Called by the handlers when a transaction-related message failed its
+   *  last attempt and is dropped (#490, #527). Reports only, like the
+   *  above. */
   notifyTransactionMessageDiscarded(
     event: ChargePointEvents["transactionMessageDiscarded"],
   ): void {

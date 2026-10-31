@@ -4,6 +4,7 @@ import type {
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
+import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type {
   DataTransferData,
   DataTransferResult,
@@ -32,6 +33,7 @@ import {
 } from "../../infrastructure/transport/OCPPWebSocket";
 import type {
   CloseCause,
+  GenerationToken,
   ResolvedNetworkSimConfig,
 } from "../../infrastructure/transport/network-sim";
 import type {
@@ -50,6 +52,11 @@ import {
 } from "../types/OcppCall";
 import { RawFrameSender } from "../../infrastructure/transport/RawFrameSender";
 import { OcppCallRejectedError } from "../errors/OcppCallErrors";
+import {
+  relayGet15118EVCertificate,
+  type Get15118EVCertificateRequest,
+  type Get15118EVCertificateResult,
+} from "../security/get15118EVCertificate";
 import type { Database } from "../persistence/Database";
 import { LogRepository } from "../persistence/LogRepository";
 import type {
@@ -137,6 +144,19 @@ import {
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
+/**
+ * #537: how long the reconnect that presents a renewed Charging Station
+ * certificate waits for the transaction messages in flight (a
+ * TransactionEvent awaiting its write or its answer, or one waiting to be
+ * resent) to settle. The close would not lose them: the 2.x E11 queue
+ * takes them and replays them, marked offline, after the next accepted
+ * boot (#528). Waiting avoids marking offline, and resending, events the
+ * CSMS was about to settle. Past this bound the station reconnects anyway
+ * and the close queues what is still in flight.
+ */
+export const RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS = 60_000;
+/** How often that wait checks again. */
+const RENEWED_CERTIFICATE_RECONNECT_POLL_MS = 500;
 
 interface BasicAuthSettings {
   username: string;
@@ -243,6 +263,19 @@ export class ChargePoint {
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
+  /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08),
+   *  then for the transaction messages in flight before reconnecting. */
+  private _clientCertificateSwitchTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  /** #537: bumped by every switch request and every cancel, so a request
+   *  still reading the store when a newer one (or a cancel) arrives does
+   *  nothing once it resumes. */
+  private _clientCertificateSwitchSeq = 0;
+  /** #537: set by {@link releaseRenewedClientCertificate} (and dispose):
+   *  no switch is started any more. */
+  private _clientCertificateSwitchReleased = false;
+  /** #537: stops following the certificate store (dispose). */
+  private _unwatchClientIdentity: (() => void) | null = null;
   private readonly _idTagPool: IdTagPool | null;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
@@ -579,7 +612,11 @@ export class ChargePoint {
     if (persistedCp === "Inoperative") {
       this._status = OCPPStatus.Unavailable;
     }
-    if (isOcpp2Version(this._ocppVersion)) this.wireVariableMonitoring();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this.wireVariableMonitoring();
+      this.wireCertificateEntries();
+      this.wireRenewedClientIdentity();
+    }
     // A persisted override never fires onChange; the scheduler only runs
     // once a boot is Accepted (#454).
     this._clockAligned.setIntervalSeconds(
@@ -864,6 +901,42 @@ export class ChargePoint {
     return active.length === 1 ? running(active[0]) : undefined;
   }
 
+  /**
+   * #537: 2.x `SecurityCtrlr.CertificateEntries` is the number of installed
+   * trust anchors, the set M05.FR.06 limits. The certificate store stays
+   * the source; the configuration value follows it, so GetVariables,
+   * GetBaseReport and variable monitors read it like any other variable,
+   * and a change fires the configuration listeners monitors evaluate on.
+   */
+  private wireCertificateEntries(): void {
+    const sync = (): void => {
+      this._configuration.setRuntimeValue(
+        "CertificateEntries",
+        this._certificateStore.listRootCertificates().length,
+      );
+    };
+    sync();
+    this._certificateStore.onChange(sync);
+  }
+
+  /**
+   * #537: the transport presents a renewed Charging Station certificate
+   * only while the store holds its key. Once the store's current chain has
+   * none (replaced by a chain signed for a caller-supplied CSR, removed),
+   * the transport forgets every renewed identity and presents the
+   * configured `--tls-cert` again. A new keyed chain is switched to by
+   * {@link useRenewedClientCertificate}, not here.
+   */
+  private wireRenewedClientIdentity(): void {
+    const webSocket = this._webSocket;
+    if (!webSocket?.usesClientCertificate()) return;
+    this._unwatchClientIdentity = this._certificateStore.onChange(() => {
+      if (!this._certificateStore.hasTlsClientIdentity()) {
+        webSocket.clearRenewedClientCertificate();
+      }
+    });
+  }
+
   /** A configuration value as a monitor sees it: GetVariables' rendering
    *  (empty when write-only, N07.FR.10) and its number, if it is one. */
   private readMonitoredValue(key: string): MonitoredReading | undefined {
@@ -1113,6 +1186,12 @@ export class ChargePoint {
     if (!this._idTagPool || !this.canReplaceIdTags(tags)) return false;
     this._idTagPool.replaceTags(tags);
     return true;
+  }
+
+  /** The PEM bundle that validates the current CSMS connection (#537), as
+   *  {@link OCPPWebSocket.connectionTrustAnchorsPem}; `undefined` on SOAP. */
+  connectionTrustAnchorsPem(): string | undefined {
+    return this._webSocket?.connectionTrustAnchorsPem();
   }
 
   get wsUrl(): string {
@@ -1791,6 +1870,143 @@ export class ChargePoint {
     return this._rawFrames.send(request);
   }
 
+  /**
+   * 2.0.1 / 2.1 Get15118EVCertificate relay (M01 / M02, #537): sends the EXI
+   * request the caller supplies, standing in for an EV, and resolves with
+   * the CSMS's answers. See {@link relayGet15118EVCertificate}. Each request
+   * goes through {@link sendOcppCall}, so it is refused before anything is
+   * written on 1.6 and SOAP stations, which have no such message, and when
+   * the payload fails the version's schema (a 2.1-only field or an
+   * over-long `exiRequest` on 2.0.1).
+   */
+  async get15118EVCertificate(
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult> {
+    return relayGet15118EVCertificate(
+      request,
+      (payload) =>
+        this.sendOcppCall({ action: "Get15118EVCertificate", payload }),
+      { warn: (message) => this._logger.warn(message, LogType.OCPP) },
+    );
+  }
+
+  /**
+   * #537 A02.FR.08: after CertificateSigned accepted a new Charging Station
+   * certificate, a security-profile-3 station switches to it by
+   * reconnecting with it as its TLS client certificate, once its notBefore
+   * has passed (2.0.1 asks for that; 2.1 gets the same wait). A station
+   * that is not connected presents it at its next connection instead of
+   * reconnecting. The reconnect waits, up to
+   * {@link RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS}, for the transaction
+   * messages in flight. Nothing happens on other profiles; when the store
+   * holds no private key for the chain (a CSR the caller supplied) the
+   * transport forgets any renewed identity. A restart or a `cp.update`
+   * presents the configured `--tls-cert` again: the key is never
+   * persisted. A call made while an earlier one still reads the store
+   * supersedes it.
+   */
+  async useRenewedClientCertificate(): Promise<void> {
+    if (this._clientCertificateSwitchReleased) return;
+    this.cancelClientCertificateSwitch();
+    const request = this._clientCertificateSwitchSeq;
+    const webSocket = this._webSocket;
+    if (!webSocket?.usesClientCertificate()) return;
+    const identity = await this._certificateStore.tlsClientIdentity();
+    // Superseded by a newer request, or cancelled (dispose, cp.update),
+    // while the store was read: that one decides, this one does nothing.
+    if (request !== this._clientCertificateSwitchSeq) return;
+    if (!identity) {
+      webSocket.clearRenewedClientCertificate();
+      return;
+    }
+    const wait = identity.notBefore.getTime() - Date.now();
+    if (wait > 0) {
+      this._logger.info(
+        `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
+        LogType.WEBSOCKET,
+      );
+      // Capped: a longer setTimeout delay fires at once. The check runs
+      // again when it does. Unref'd: a wait of days must not keep the
+      // process alive.
+      this._clientCertificateSwitchTimer = setTimeout(
+        () => {
+          if (request !== this._clientCertificateSwitchSeq) return;
+          void this.useRenewedClientCertificate();
+        },
+        Math.min(wait, MAX_TIMER_MS),
+      );
+      unrefTimer(this._clientCertificateSwitchTimer);
+      return;
+    }
+    webSocket.useRenewedClientCertificate(identity);
+    // A station that is not connected (back-off, simulated outage, manual
+    // disconnect) presents it at its next connection, on that one's timing.
+    if (!webSocket.isOpenOrConnecting()) {
+      this._logger.info(
+        "Renewed Charging Station certificate presented at the next connection (A02.FR.08)",
+        LogType.WEBSOCKET,
+      );
+      return;
+    }
+    this.reconnectWithRenewedCertificate(
+      webSocket.currentGeneration(),
+      Date.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+    );
+  }
+
+  /** Reconnects once no transaction message awaits its write, an answer
+   *  or a resend, or at `deadline`. A connection that closed meanwhile is
+   *  not reconnected: the next one presents the renewed certificate. */
+  private reconnectWithRenewedCertificate(
+    generation: GenerationToken,
+    deadline: number,
+  ): void {
+    this._clientCertificateSwitchTimer = null;
+    const webSocket = this._webSocket;
+    if (!webSocket?.isOpenOrConnecting()) return;
+    if (webSocket.currentGeneration() !== generation) return;
+    if (
+      this._outbox.hasTransactionMessagesInFlight() &&
+      Date.now() < deadline
+    ) {
+      this._clientCertificateSwitchTimer = setTimeout(
+        () => this.reconnectWithRenewedCertificate(generation, deadline),
+        Math.min(RENEWED_CERTIFICATE_RECONNECT_POLL_MS, deadline - Date.now()),
+      );
+      return;
+    }
+    this._logger.info(
+      "Reconnecting with the renewed Charging Station certificate (A02.FR.08)",
+      LogType.WEBSOCKET,
+    );
+    this.reset();
+  }
+
+  /**
+   * #537: ends the renewed certificate switch for good on an instance being
+   * replaced (`cp.update`) or disposed: cancels the notBefore or in-flight
+   * wait, stops following the store, and drops every in-memory key — the
+   * transport's renewed identities and the store's private keys. The
+   * stored chains stay; the replacement presents the configured
+   * `--tls-cert`, as after a restart.
+   */
+  releaseRenewedClientCertificate(): void {
+    this._clientCertificateSwitchReleased = true;
+    this.cancelClientCertificateSwitch();
+    this._unwatchClientIdentity?.();
+    this._unwatchClientIdentity = null;
+    this._webSocket?.clearRenewedClientCertificate();
+    this._certificateStore.forgetPrivateKeys();
+  }
+
+  private cancelClientCertificateSwitch(): void {
+    this._clientCertificateSwitchSeq++;
+    if (this._clientCertificateSwitchTimer) {
+      clearTimeout(this._clientCertificateSwitchTimer);
+      this._clientCertificateSwitchTimer = null;
+    }
+  }
+
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */
   sendSecurityEventNotification(type: string, techInfo?: string): void {
     this._outbox.sendSecurityEventNotification(type, techInfo);
@@ -2160,6 +2376,8 @@ export class ChargePoint {
         : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
+    // A renewed certificate's notBefore wait survives a manual disconnect:
+    // once valid, it is presented at the next connect() (#537).
     this._webSocket?.disconnect(); // drains network-sim pipelines synchronously (spec 2.6 step 1)
     this.teardownAfterClose(); // handler teardown incl. serializer _serialQueue salvage (step 2)
   }
@@ -2261,6 +2479,7 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    this.releaseRenewedClientCertificate();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
     // Offline monitoring keeps the periodic timers running: stop them.

@@ -318,6 +318,14 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       tool: "auth_cache_clear",
       method: "clear_auth_cache",
     },
+    {
+      tool: "security_event_notification",
+      method: "security_event_notification",
+    },
+    {
+      tool: "get_15118_ev_certificate",
+      method: "get_15118_ev_certificate",
+    },
     { tool: "set_connector_status", method: "update_connector_status" },
     { tool: "ev_disconnected", method: "ev_disconnected" },
     { tool: "set_meter_value", method: "set_meter_value" },
@@ -454,5 +462,16 @@ describe("MCP tools advertise the vocabularies their method enforces (#383)", ()
     expect(accepted.enum).toContain("Available");
     expect(properties.status).toMatchObject({ enum: accepted.enum });
     expect(JSON.stringify(properties.status)).not.toContain("Occupied");
+  });
+});
+
+describe("MCP tools advertise the length bounds their method enforces (#537)", () => {
+  it("security_event_notification bounds type at 50 and techInfo at 255", async () => {
+    const { properties } = await toolInputSchema("security_event_notification");
+    const method = methodInputSchema("security_event_notification").properties;
+    expect(method.type).toMatchObject({ maxLength: 50 });
+    expect(method.techInfo).toMatchObject({ maxLength: 255 });
+    expect(properties.type).toMatchObject({ maxLength: 50 });
+    expect(properties.techInfo).toMatchObject({ maxLength: 255 });
   });
 });

@@ -18,6 +18,10 @@ import type {
   RawFrameOutcome,
   RawFrameRequest,
 } from "../cp/domain/types/OcppCall";
+import type {
+  Get15118EVCertificateRequest,
+  Get15118EVCertificateResult,
+} from "../cp/domain/security/get15118EVCertificate";
 import type { AutoMeterValueSetting } from "../cp/domain/charge-point/ChargePoint";
 import type {
   BootNotificationResult,
@@ -1203,6 +1207,14 @@ export class CLIChargePointService {
   /** Expert raw frame (#393); see `ChargePoint.sendRawFrame`. */
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
     return this._chargePoint.sendRawFrame(request);
+  }
+
+  /** Get15118EVCertificate relay (#537); see
+   *  `ChargePoint.get15118EVCertificate`. */
+  get15118EVCertificate(
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult> {
+    return this._chargePoint.get15118EVCertificate(request);
   }
 
   /** #452 test seam: the Authorization Cache and its switch. */
@@ -2785,6 +2797,10 @@ export class CLIChargePointService {
       // first, so the disconnect does not re-arm them on an instance that
       // `CPRegistry.update` is about to replace.
       this._chargePoint.stopMonitoring();
+      // #537: a manual disconnect keeps the renewed certificate wait, but
+      // this instance is being replaced (`CPRegistry.update`) or the process
+      // is stopping: its wait, store listener and in-memory keys go too.
+      this._chargePoint.releaseRenewedClientCertificate();
       this._chargePoint.disconnect();
     }
     this.detachConnectorEventForwarders();

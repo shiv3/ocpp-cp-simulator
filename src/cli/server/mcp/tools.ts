@@ -415,6 +415,48 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  mcp.tool("security_event_notification", {
+    description:
+      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it.",
+    // The method's own schema, so the tool advertises what it enforces.
+    inputSchema: METHODS.security_event_notification.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "security_event_notification",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("get_15118_ev_certificate", {
+    description:
+      "Relay an EV's ISO 15118 certificate request to the CSMS with Get15118EVCertificate (#537): OCPP 2.0.1 / 2.1 M01 (Install) and M02 (Update). You stand in for the EV: exiRequest is its EXI CertificateInstallationReq / CertificateUpdateReq, base64. Returns the CSMS answers in `responses`, a CALLERROR in `callError`. With maximumContractCertificateChains (2.1, ISO 15118-20) the station repeats the request while remainingContracts > 0. OCPP 1.6 and SOAP charge points refuse it.",
+    // The method's own schema, so the tool advertises what it enforces.
+    inputSchema: METHODS.get_15118_ev_certificate.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "get_15118_ev_certificate",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   // #452: the Authorization Cache test seam, one tool per method.
   mcp.tool("auth_cache_get", {
     description:

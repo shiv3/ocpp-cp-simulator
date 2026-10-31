@@ -1798,6 +1798,15 @@ async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "get_15118_ev_certificate": {
+      const { params } = call;
+      // #537: the CSMS's answers (a CALLERROR included) are the result.
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.get15118EVCertificate(id, params),
+        ),
+      );
+    }
     // #452: the Authorization Cache test seam.
     case "get_auth_cache":
       return handled(

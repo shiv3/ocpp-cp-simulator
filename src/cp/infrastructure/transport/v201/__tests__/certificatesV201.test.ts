@@ -31,7 +31,11 @@ import type {
   V201InboundContext,
 } from "../inboundRegistryV201";
 
-function context(store: CertificateStore, maxEntries = 10) {
+function context(
+  store: CertificateStore,
+  maxEntries = 10,
+  maxChainSize = 10000,
+) {
   const sendCall = vi.fn();
   const logger = {
     info: vi.fn(),
@@ -42,7 +46,10 @@ function context(store: CertificateStore, maxEntries = 10) {
   const ctx: V201InboundContext = {
     chargePoint: {
       certificateStore: store,
-      configuration: { certificateStoreMaxLength: () => maxEntries },
+      configuration: {
+        certificateStoreMaxLength: () => maxEntries,
+        maxCertificateChainSize: () => maxChainSize,
+      },
     } as unknown as ChargePoint,
     logger: logger as unknown as Logger,
     sendCall,
@@ -372,6 +379,54 @@ describe.each(VERSIONS)(
       expect((deleted as V201HandlerResult).response).toEqual({
         status: "Accepted",
       });
+    });
+
+    // #537 A02.FR.16 (SHALL on 2.0.1, MAY on 2.1): a chain longer than
+    // MaxCertificateChainSize is Rejected before it is even parsed.
+    it("rejects a certificateChain longer than MaxCertificateChainSize (A02.FR.16)", async () => {
+      const store = new CertificateStore();
+      const root = await selfSignedRoot("01", "Root");
+      const csr = await store.generateNewCsr("CP", "CPO");
+      const leaf = await leafForCsr("02", csr, root);
+
+      const tooLong = await handlers.CertificateSigned(
+        { certificateChain: leaf },
+        context(store, 10, leaf.length - 1).ctx,
+      );
+      expect(tooLong.response).toEqual({ status: "Rejected" });
+      expect(validSigned(tooLong.response)).toBe(true);
+      expect(store.listSignedChains()).toEqual([]);
+
+      const atLimit = await handlers.CertificateSigned(
+        { certificateChain: leaf },
+        context(store, 10, leaf.length).ctx,
+      );
+      expect(atLimit.response).toEqual({ status: "Accepted" });
+    });
+
+    // #537 A02.FR.17: the CSMS answered the CSR, so its resends stop.
+    it("stops the CSR's resend back-off on an over-limit chain too", async () => {
+      const certificateSignedAnswered = vi.fn();
+      const ctx: V201InboundContext = {
+        ...context(new CertificateStore(), 10, 10).ctx,
+        certificateSigning: {
+          requestSignature: vi.fn(),
+          certificateSignedAnswered,
+          certificateInstalled: vi.fn(),
+        },
+      };
+
+      const overLimit = await handlers.CertificateSigned(
+        {
+          certificateChain: "x".repeat(11),
+          certificateType: "ChargingStationCertificate",
+        },
+        ctx,
+      );
+      expect(overLimit.response).toEqual({ status: "Rejected" });
+      expect(certificateSignedAnswered).toHaveBeenCalledWith(
+        "ChargingStationCertificate",
+      );
     });
 
     it("sends a schema-valid SecurityEventNotification for a rejected chain", async () => {

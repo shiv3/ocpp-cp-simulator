@@ -15,10 +15,11 @@ import type {
   InstalledCertificateIds,
 } from "../../../domain/security/CertificateStore";
 import type { CertificateHashData } from "../../../domain/security/certificateHash";
-import type {
-  InstalledCertificateQuery,
-  RootCertificateUse,
-  SignedCertificateUse,
+import {
+  V2G_CERTIFICATE_USES,
+  type InstalledCertificateQuery,
+  type RootCertificateUse,
+  type SignedCertificateUse,
 } from "../../../domain/security/certificateUse";
 import { LogType } from "../../../shared/Logger";
 import {
@@ -30,6 +31,8 @@ import {
   rootUseFromV21,
   signedUseFromV201,
   signedUseFromV21,
+  signedUseToV201,
+  signedUseToV21,
 } from "../certificateUseMapping";
 import { splitPemChain } from "../handlers/call/CertificateSignedHandler";
 import type {
@@ -53,6 +56,9 @@ export interface CertificateWireMapping {
   readonly queryFrom: (value: string) => InstalledCertificateQuery | undefined;
   readonly queryTo: (query: InstalledCertificateQuery) => string | undefined;
   readonly signedUseFrom: (value: string) => SignedCertificateUse | undefined;
+  readonly signedUseTo: (use: SignedCertificateUse) => string | undefined;
+  /** The chains a `V2GCertificateChain` query lists (M03.FR.05). */
+  readonly v2gChainUses: readonly SignedCertificateUse[];
 }
 
 export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -60,6 +66,8 @@ export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
   queryFrom: installedCertificateQueryFromV201,
   queryTo: installedCertificateQueryToV201,
   signedUseFrom: signedUseFromV201,
+  signedUseTo: signedUseToV201,
+  v2gChainUses: ["V2GCertificate"],
 };
 
 export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -67,6 +75,10 @@ export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
   queryFrom: installedCertificateQueryFromV21,
   queryTo: installedCertificateQueryToV21,
   signedUseFrom: signedUseFromV21,
+  signedUseTo: signedUseToV21,
+  // #537 M03.FR.05: 2.1 has no query value of its own for ISO 15118-20
+  // certificates, so its V2G chains are listed under V2GCertificateChain.
+  v2gChainUses: V2G_CERTIFICATE_USES,
 };
 
 /** `childCertificateHashData` is 0..4 in both 2.0.1 and 2.1. */
@@ -122,8 +134,9 @@ function afterPendingOperations<T>(
 /**
  * M05: Accepted once installed (M05.FR.02); Rejected for a certificate that
  * does not parse (M05.FR.07) or when the store already holds
- * `CertificateStoreMaxLength` roots (M05.FR.06; the simulator has no
- * separate `SecurityCtrlr.CertificateEntries` limit). A certificate already
+ * `CertificateStoreMaxLength` roots (M05.FR.06: that key is the
+ * `CertificateEntries.maxLimit`, and `SecurityCtrlr.CertificateEntries`
+ * reports the same root count, #537). A certificate already
  * installed replaces the old copy and is Accepted, full store or not
  * (M05.FR.17; AdditionalRootCertificateCheck, M05.FR.10, is not
  * implemented). Failed when the state database refuses it (M05.FR.03).
@@ -206,7 +219,11 @@ function getInstalledCertificateIds(
   });
   return afterPendingOperations(
     ctx,
-    () => ctx.chargePoint.certificateStore.installedCertificateIds(queries),
+    () =>
+      ctx.chargePoint.certificateStore.installedCertificateIds(
+        queries,
+        mapping.v2gChainUses,
+      ),
     (installed) => answerInstalledCertificateIds(mapping, installed, ctx),
   );
 }
@@ -334,6 +351,21 @@ async function certificateSigned(
     req.certificateType === undefined
       ? "ChargingStationCertificate"
       : mapping.signedUseFrom(req.certificateType);
+  // #537: a CertificateSigned for `use` ends its CSR's resend back-off,
+  // accepted (A02.FR.17) or rejected: invalid (A02.FR.20) or over-long.
+  if (use) ctx.certificateSigning?.certificateSignedAnswered(use);
+  // #537 A02.FR.16: SHALL on 2.0.1, MAY on 2.1; the station applies it on
+  // both. A02.FR.16 asks for Rejected only, so no security event is sent.
+  const maxChainSize = ctx.chargePoint.configuration.maxCertificateChainSize();
+  if (req.certificateChain.length > maxChainSize) {
+    ctx.logger.warn(
+      `CertificateSigned rejected: certificateChain is ${req.certificateChain.length} characters, over MaxCertificateChainSize (${maxChainSize})`,
+      LogType.OCPP,
+    );
+    return {
+      response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
+    };
+  }
   const pems = splitPemChain(req.certificateChain);
   let reason: string;
   if (!use) {
@@ -352,6 +384,8 @@ async function certificateSigned(
       );
       return {
         response: { status: "Accepted" } satisfies CertificateSignedResponseV21,
+        // #537 M06.FR.07: a new V2G certificate's OCSP status is fetched.
+        afterResult: () => ctx.certificateSigning?.certificateInstalled(use),
       };
     }
     reason = {

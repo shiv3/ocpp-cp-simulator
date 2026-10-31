@@ -651,6 +651,27 @@ describe("RemoteChargePointService socket.io rpc", () => {
         ],
       },
       {
+        name: "get15118EVCertificate",
+        invoke: (service) =>
+          service.get15118EVCertificate("cp-1", {
+            iso15118SchemaVersion: "urn:iso:15118:2:2013:MsgDef",
+            action: "Install",
+            exiRequest: "AAAA",
+          }),
+        expected: [
+          {
+            cpId: "cp-1",
+            method: "get_15118_ev_certificate",
+            params: {
+              iso15118SchemaVersion: "urn:iso:15118:2:2013:MsgDef",
+              action: "Install",
+              exiRequest: "AAAA",
+            },
+          },
+        ],
+        results: [{ responses: [{ status: "Accepted", exiResponse: "BBBB" }] }],
+      },
+      {
         name: "startTransaction",
         invoke: (service) => service.startTransaction("cp-1", 1, "TAG-1"),
         expected: [

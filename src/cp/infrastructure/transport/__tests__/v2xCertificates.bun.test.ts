@@ -13,6 +13,12 @@ import {
   selfSignedRoot,
   subCa,
 } from "../../../domain/security/__tests__/certificateFixtures";
+import {
+  isValidGetInstalledCertificateIdsResponseV201,
+  isValidGetInstalledCertificateIdsResponseV21,
+  isValidGetVariablesResponseV201,
+  isValidGetVariablesResponseV21,
+} from "../../../../ocpp";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
 
@@ -127,6 +133,52 @@ describe.skipIf(!canBindBunServe())(
   "OCPP 2.x certificate management (#456)",
   () => {
     describe.each(["OCPP-2.0.1", "OCPP-2.1"] as const)("%s", (version) => {
+      it("reports SecurityCtrlr.CertificateEntries from the store (#537)", async () => {
+        const entries = async (csms: MockCsms): Promise<unknown> => {
+          const answer = await result(csms, "GetVariables", {
+            getVariableData: [
+              {
+                component: { name: "SecurityCtrlr" },
+                variable: { name: "CertificateEntries" },
+              },
+            ],
+          });
+          const validate =
+            version === "OCPP-2.1"
+              ? isValidGetVariablesResponseV21
+              : isValidGetVariablesResponseV201;
+          expect(validate(answer)).toBe(true);
+          return (answer.getVariableResult as { attributeValue?: string }[])[0]
+            .attributeValue;
+        };
+        const db = BunSqliteDatabase.open(":memory:");
+        const id = `CP-CERT-ENTRIES-${version}`;
+        await withStation(
+          version,
+          async (csms) => {
+            expect(await entries(csms)).toBe("0");
+            const root = await selfSignedRoot("0a", "Entries Root");
+            await result(csms, "InstallCertificate", {
+              certificateType: "CSMSRootCertificate",
+              certificate: root.pem,
+            });
+            expect(await entries(csms)).toBe("1");
+          },
+          db,
+          id,
+        );
+        // Restarted on the same database: the count is read back.
+        await withStation(
+          version,
+          async (csms) => {
+            expect(await entries(csms)).toBe("1");
+          },
+          db,
+          id,
+        );
+        db.close();
+      });
+
       it("installs, lists and deletes a root certificate (M05, M03, M04)", async () => {
         await withStation(version, async (csms) => {
           const root = await selfSignedRoot("0A", "CSMS Root");
@@ -145,7 +197,7 @@ describe.skipIf(!canBindBunServe())(
           const chain = listed.certificateHashDataChain as HashDataChain[];
           expect(chain).toHaveLength(1);
           expect(chain[0].certificateType).toBe("CSMSRootCertificate");
-          expect(chain[0].certificateHashData.serialNumber).toBe("0a");
+          expect(chain[0].certificateHashData.serialNumber).toBe("a");
           expect(chain[0].childCertificateHashData).toBeUndefined();
 
           expect(
@@ -270,6 +322,9 @@ describe.skipIf(!canBindBunServe())(
               certificateHashData: stored.hashData[0],
             }),
           ).toEqual({ status: "Failed" });
+          // #537: without security profile 3 there is no client certificate
+          // to replace, so the station stays on its connection.
+          expect(csms.openCount()).toBe(1);
         });
       });
 
@@ -318,9 +373,9 @@ describe.skipIf(!canBindBunServe())(
           expect(listed.status).toBe("Accepted");
           const [entry] = listed.certificateHashDataChain as HashDataChain[];
           expect(entry.certificateType).toBe("V2GCertificateChain");
-          expect(entry.certificateHashData.serialNumber).toBe("03");
+          expect(entry.certificateHashData.serialNumber).toBe("3");
           expect(entry.childCertificateHashData).toHaveLength(1);
-          expect(entry.childCertificateHashData?.[0].serialNumber).toBe("02");
+          expect(entry.childCertificateHashData?.[0].serialNumber).toBe("2");
         });
       });
 
@@ -405,7 +460,7 @@ describe.skipIf(!canBindBunServe())(
             const chain = listed.certificateHashDataChain as HashDataChain[];
             expect(
               chain.map((c) => c.certificateHashData.serialNumber),
-            ).toEqual(["0b"]);
+            ).toEqual(["b"]);
           },
           db,
           id,
@@ -437,6 +492,56 @@ describe.skipIf(!canBindBunServe())(
           });
           expect(signed[0]).toBe(4);
           expect(signed[2]).toBe("FormatViolation");
+        });
+      });
+
+      it("lists V2G20Certificate chains under V2GCertificateChain on 2.1 (M03.FR.05, #537)", async () => {
+        await withStation("OCPP-2.1", async (csms, cp) => {
+          const root = await selfSignedRoot("01", "V2G Root");
+          const ca = await subCa("02", "V2G Sub-CA", root);
+          const csr = await cp.certificateStore.generateNewCsr(
+            cp.id,
+            "Example CPO",
+            undefined,
+            "V2G20Certificate",
+          );
+          expect(
+            await result(csms, "CertificateSigned", {
+              certificateChain: `${await leafForCsr("05", csr, ca)}\n${ca.pem}`,
+              certificateType: "V2G20Certificate",
+            }),
+          ).toEqual({ status: "Accepted" });
+
+          const listed = await result(csms, "GetInstalledCertificateIds", {
+            certificateType: ["V2GCertificateChain"],
+          });
+          expect(isValidGetInstalledCertificateIdsResponseV21(listed)).toBe(
+            true,
+          );
+          const [entry] = listed.certificateHashDataChain as HashDataChain[];
+          expect(entry.certificateType).toBe("V2GCertificateChain");
+          expect(entry.certificateHashData.serialNumber).toBe("5");
+          expect(entry.childCertificateHashData?.[0].serialNumber).toBe("2");
+        });
+      });
+
+      it("keeps V2G20Certificate chains out of a 2.0.1 V2GCertificateChain answer", async () => {
+        await withStation("OCPP-2.0.1", async (csms, cp) => {
+          // A chain a 2.1 station stored in a shared state database.
+          const root = await selfSignedRoot("01", "V2G Root");
+          const { pem } = await generateCsr(cp.id, "Example CPO");
+          await cp.certificateStore.storeSignedChain(
+            [await leafForCsr("05", pem, root)],
+            "V2G20Certificate",
+          );
+
+          const listed = await result(csms, "GetInstalledCertificateIds", {
+            certificateType: ["V2GCertificateChain"],
+          });
+          expect(isValidGetInstalledCertificateIdsResponseV201(listed)).toBe(
+            true,
+          );
+          expect(listed.status).toBe("NotFound");
         });
       });
 

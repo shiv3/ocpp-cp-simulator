@@ -12,6 +12,10 @@ import type {
   RawFrameRequest,
 } from "../../cp/domain/types/OcppCall";
 import type {
+  Get15118EVCertificateRequest,
+  Get15118EVCertificateResult,
+} from "../../cp/domain/security/get15118EVCertificate";
+import type {
   DataTransferData,
   DataTransferResult,
 } from "../../cp/domain/types/DataTransfer";
@@ -528,6 +532,13 @@ export interface ChargePointService {
   /** Expert raw frame (#393): one text frame as given, valid OCPP-J or
    *  not. See `ChargePoint.sendRawFrame`. */
   sendRawFrame(id: string, request: RawFrameRequest): Promise<RawFrameOutcome>;
+  /** 2.0.1 / 2.1 Get15118EVCertificate relay (#537): sends the EXI request
+   *  as the EV would and resolves with the CSMS's answers. See
+   *  `ChargePoint.get15118EVCertificate`. */
+  get15118EVCertificate(
+    id: string,
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult>;
   /** The Authorization Cache and its switch (#452 test seam). */
   getAuthorizationCache(id: string): Promise<AuthorizationCacheView>;
   /** Write cache entries whatever the switch says (#452 test seam);

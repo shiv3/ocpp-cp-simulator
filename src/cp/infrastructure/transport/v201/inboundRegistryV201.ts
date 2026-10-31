@@ -8,6 +8,7 @@ import type {
   DataTransferRequestV201,
   GetBaseReportRequestV201,
   GetBaseReportResponseV201,
+  GetCertificateStatusRequestV201,
   GetReportRequestV201,
   GetReportResponseV201,
   GetVariablesRequestV201,
@@ -71,6 +72,7 @@ import {
 import type { ReportDataType } from "../../../../ocpp/types/v201/notify-report";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
+import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData } from "./baseReportV201";
 import {
@@ -146,7 +148,9 @@ export type V201Action =
   | "LogStatusNotification"
   // #456: A02 certificate signing and its security event (A02.FR.07).
   | "SignCertificate"
-  | "SecurityEventNotification";
+  | "SecurityEventNotification"
+  // #537: M06 OCSP status of the station's V2G certificates.
+  | "GetCertificateStatus";
 
 export type V201RequestPayload =
   | BootNotificationRequestV201
@@ -163,12 +167,39 @@ export type V201RequestPayload =
   | FirmwareStatusNotificationRequestV201
   | LogStatusNotificationRequestV201
   | SignCertificateRequestV201
-  | SecurityEventNotificationRequestV201;
+  | SecurityEventNotificationRequestV201
+  | GetCertificateStatusRequestV201;
+
+/**
+ * #537: the station's SignCertificate flow (A02), owned by the 2.x message
+ * handler, as the inbound TriggerMessage and CertificateSigned handlers
+ * drive it.
+ */
+export interface V201CertificateSigning {
+  /**
+   * Generates a new key pair and CSR for `use` (A02.FR.02) and sends it in
+   * a SignCertificateRequest naming `use` (A02.FR.03/13). Starts the
+   * resend back-off over (A02.FR.19).
+   */
+  requestSignature(use: SignedCertificateUse): Promise<void>;
+  /** A CertificateSigned for `use` was answered: its back-off stops
+   *  (accepted, or rejected per A02.FR.20). */
+  certificateSignedAnswered(use: SignedCertificateUse): void;
+  /**
+   * A chain for `use` was installed: for a V2G certificate the station
+   * asks the CSMS for the OCSP status of the certificate and its sub-CAs
+   * (M06.FR.07); a security-profile-3 station switches to a new Charging
+   * Station certificate as its TLS client certificate (A02.FR.08).
+   */
+  certificateInstalled(use: SignedCertificateUse): void;
+}
 
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
   readonly logger: Logger;
   readonly sendCall: (action: V201Action, payload: V201RequestPayload) => void;
+  /** Absent in contexts built without a message handler (unit tests). */
+  readonly certificateSigning?: V201CertificateSigning;
 }
 
 export interface V201HandlerResult {

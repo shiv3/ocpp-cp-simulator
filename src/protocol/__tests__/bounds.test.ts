@@ -78,3 +78,84 @@ describe("sign_certificate csr bound (#456)", () => {
     expect(params.safeParse({ csr: "c".repeat(5501) }).success).toBe(false);
   });
 });
+
+describe("security_event_notification bounds (#537)", () => {
+  // SecurityEventNotification: type string[0..50], techInfo
+  // string[0..255] (1.6 whitepaper, 2.0.1, 2.1).
+  const params = METHODS.security_event_notification.params;
+
+  it("accepts a 50-character type and refuses 51", () => {
+    expect(params.safeParse({ type: "t".repeat(50) }).success).toBe(true);
+    expect(params.safeParse({ type: "t".repeat(51) }).success).toBe(false);
+  });
+
+  it("accepts a 255-character techInfo and refuses 256", () => {
+    const type = "SettingSystemTime";
+    expect(params.safeParse({ type, techInfo: "i".repeat(255) }).success).toBe(
+      true,
+    );
+    expect(params.safeParse({ type, techInfo: "i".repeat(256) }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("get_15118_ev_certificate bounds (#537)", () => {
+  const params = METHODS.get_15118_ev_certificate.params;
+  const valid = {
+    iso15118SchemaVersion: "urn:iso:15118:2:2013:MsgDef",
+    action: "Install",
+    exiRequest: "AAAA",
+  };
+
+  it("takes the 2.1 bounds; a station on 2.0.1 applies its own schema", () => {
+    // exiRequest is string[0..11000] on 2.1 (5600 on 2.0.1),
+    // iso15118SchemaVersion string[0..50], prioritizedEMAIDs 0..8 of
+    // identifierString[0..255].
+    expect(
+      params.safeParse({ ...valid, exiRequest: "A".repeat(11000) }).success,
+    ).toBe(true);
+    expect(
+      params.safeParse({ ...valid, exiRequest: "A".repeat(11004) }).success,
+    ).toBe(false);
+    expect(
+      params.safeParse({ ...valid, iso15118SchemaVersion: "v".repeat(51) })
+        .success,
+    ).toBe(false);
+    expect(
+      params.safeParse({ ...valid, prioritizedEMAIDs: Array(9).fill("E") })
+        .success,
+    ).toBe(false);
+    expect(
+      params.safeParse({ ...valid, prioritizedEMAIDs: ["E".repeat(256)] })
+        .success,
+    ).toBe(false);
+    expect(
+      params.safeParse({ ...valid, maximumContractCertificateChains: -1 })
+        .success,
+    ).toBe(false);
+    expect(params.safeParse({ ...valid, action: "Delete" }).success).toBe(
+      false,
+    );
+  });
+
+  it.each(["AA==", "AAA=", "AAAA", "ab+/"])("accepts base64 %s", (exi) => {
+    expect(params.safeParse({ ...valid, exiRequest: exi }).success).toBe(true);
+  });
+
+  it.each(["AAA", "AA=A", "A===", "AA AA", "AA==\n", "é"])(
+    "refuses %j, not base64",
+    (exi) => {
+      expect(params.safeParse({ ...valid, exiRequest: exi }).success).toBe(
+        false,
+      );
+    },
+  );
+
+  it("refuses a long input whose last character is not base64", () => {
+    expect(
+      params.safeParse({ ...valid, exiRequest: `${"A".repeat(10999)}!` })
+        .success,
+    ).toBe(false);
+  });
+});

@@ -18,11 +18,9 @@ import {
   dataTransferDataSchema,
   METHODS,
   scenarioWaitExtensionSecondsSchema,
+  type Params,
+  type RpcMethod,
 } from "../protocol";
-import type {
-  OcppCallRequest,
-  RawFrameRequest,
-} from "../cp/domain/types/OcppCall";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
@@ -241,11 +239,10 @@ export async function handleJsonCommand(
     }
 
     case "security_event_notification": {
-      const type = requireString(params, "type");
-      const techInfo =
-        params.techInfo === undefined
-          ? undefined
-          : requireString(params, "techInfo");
+      const { type, techInfo } = methodParams(
+        "security_event_notification",
+        params,
+      );
       await ops.sendSecurityEventNotification(type, techInfo);
       return undefined;
     }
@@ -293,11 +290,19 @@ export async function handleJsonCommand(
     case "send_ocpp_call":
       // #389: validated against the daemon's own schema, so JSON-Lines mode
       // admits exactly what the control plane admits.
-      return ops.sendOcppCall(ocppCallRequest(params));
+      return ops.sendOcppCall(methodParams("send_ocpp_call", params));
 
     case "send_raw_frame":
       // #393: same schema as the control plane's.
-      return ops.sendRawFrame(rawFrameRequest(params));
+      return ops.sendRawFrame(methodParams("send_raw_frame", params));
+
+    case "get_15118_ev_certificate":
+      // #537: the station relays the EXI request as the EV would; the
+      // CSMS's answers are the result line. Validated against the daemon's
+      // own schema, like send_ocpp_call.
+      return ops.get15118EVCertificate(
+        methodParams("get_15118_ev_certificate", params),
+      );
 
     // #452: the Authorization Cache test seam. Seed and clear act whatever
     // the cache switch says.
@@ -712,28 +717,22 @@ function seedEntries(
   return parsed.data;
 }
 
-/** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
-function ocppCallRequest(params: Record<string, unknown>): OcppCallRequest {
-  const parsed = METHODS.send_ocpp_call.params.safeParse(params);
+/** `method`'s params checked by `METHODS[method]`, the control plane's own
+ *  schema (bounds included): `send_ocpp_call` (#389), `send_raw_frame`
+ *  (#393), `security_event_notification` and `get_15118_ev_certificate`
+ *  (#537). */
+function methodParams<M extends RpcMethod>(
+  method: M,
+  params: Record<string, unknown>,
+): Params<M> {
+  const parsed = METHODS[method].params.safeParse(params);
   if (!parsed.success) {
     const fields = [
       ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
     ];
     throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
   }
-  return parsed.data;
-}
-
-/** `send_raw_frame`'s params (#393), checked by `METHODS.send_raw_frame`. */
-function rawFrameRequest(params: Record<string, unknown>): RawFrameRequest {
-  const parsed = METHODS.send_raw_frame.params.safeParse(params);
-  if (!parsed.success) {
-    const fields = [
-      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
-    ];
-    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
-  }
-  return parsed.data;
+  return parsed.data as Params<M>;
 }
 
 /** `extend_scenario_wait`'s `seconds`, validated by the control plane's own

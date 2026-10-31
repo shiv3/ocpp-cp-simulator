@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Database } from "../../persistence/Database";
 import { CertificateStore } from "../CertificateStore";
@@ -193,6 +193,43 @@ describe("CertificateStore V2G certificate chain (M03.FR.05)", () => {
     expect(ids[0].childHashData[0].issuerKeyHash).toBe(
       (await computeCertificateHashData(root.pem)).issuerKeyHash,
     );
+  });
+
+  it("lists only the chain uses it is given, V2GCertificate by default (#537)", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "V2G Root");
+    const v2gCsr = await generateCsr("CP-V2G", "Example CPO");
+    const v2g20Csr = await generateCsr("CP-V2G20", "Example CPO");
+    const v2gLeaf = await leafForCsr("03", v2gCsr.pem, root);
+    const v2g20Leaf = await leafForCsr("04", v2g20Csr.pem, root);
+    await store.storeSignedChain([v2gLeaf], "V2GCertificate");
+    await store.storeSignedChain([v2g20Leaf], "V2G20Certificate");
+
+    // 2.0.1 has no V2G20Certificate: only the V2G chain is a V2G chain.
+    expect(
+      store
+        .installedCertificateIds(["V2GCertificateChain"])
+        .map((entry) => entry.hashData.serialNumber),
+    ).toEqual(["3"]);
+    // 2.1 M03.FR.05: both kinds of V2G chain, in install order.
+    expect(
+      store
+        .installedCertificateIds(
+          ["V2GCertificateChain"],
+          ["V2GCertificate", "V2G20Certificate"],
+        )
+        .map((entry) => [entry.use, entry.hashData.serialNumber]),
+    ).toEqual([
+      ["V2GCertificateChain", "3"],
+      ["V2GCertificateChain", "4"],
+    ]);
+    // Without a query, every installed certificate: the same two chains.
+    expect(
+      store.installedCertificateIds(undefined, [
+        "V2GCertificate",
+        "V2G20Certificate",
+      ]),
+    ).toHaveLength(2);
   });
 
   it("does not list ChargingStationCertificate chains under V2GCertificateChain", async () => {
@@ -560,5 +597,340 @@ describe("CertificateStore persistence failures (#456 review)", () => {
     expect(store.listRootCertificates().map((c) => c.use)).toEqual([
       "CsmsRootCertificate",
     ]);
+  });
+});
+
+describe("CertificateStore change notifications (#537)", () => {
+  it("tells its listeners after every change to what it holds", async () => {
+    const store = new CertificateStore();
+    const counts: number[] = [];
+    store.onChange(() => counts.push(store.listRootCertificates().length));
+    const root = await selfSignedRoot("01", "Root");
+
+    await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+      maxEntries: 10,
+    });
+    const csr = await store.generateNewCsr("CP", "CPO");
+    await store.applySignedChain("ChargingStationCertificate", [
+      await leafForCsr("02", csr, root),
+    ]);
+    store.deleteRootCertificate(store.listRootCertificates()[0].hashData);
+    store.clearAll();
+
+    expect(counts).toEqual([1, 1, 0, 0]);
+  });
+
+  it("stays silent on a refused install and stops after unsubscribing", async () => {
+    const store = new CertificateStore();
+    let calls = 0;
+    const unsubscribe = store.onChange(() => calls++);
+
+    await store.installRootCertificate("CsmsRootCertificate", "not a pem", {
+      maxEntries: 10,
+    });
+    expect(calls).toBe(0);
+
+    unsubscribe();
+    const root = await selfSignedRoot("01", "Root");
+    await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+      maxEntries: 10,
+    });
+    expect(calls).toBe(0);
+  });
+});
+
+describe("CertificateStore OCSP (#537, M06)", () => {
+  async function v2gChain(store: CertificateStore) {
+    const root = await selfSignedRoot("01", "V2G Root");
+    const sub = await subCa("02", "V2G Sub-CA", root, {
+      ocspUrl: "http://ocsp.example.com/sub",
+    });
+    const csr = await store.generateNewCsr(
+      "CP",
+      "CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    const leaf = await leafForCsr("0a1b", csr, sub, {
+      ocspUrl: "http://ocsp.example.com/leaf",
+    });
+    await store.applySignedChain("V2GCertificate", [leaf, sub.pem]);
+    return store.listSignedChains("V2GCertificate")[0];
+  }
+
+  it("builds ocspRequestData for every chain member with a responder URL (M06.FR.07)", async () => {
+    const store = new CertificateStore();
+    const chain = await v2gChain(store);
+
+    expect(store.ocspRequestData("V2GCertificate")).toEqual([
+      { ...chain.hashData[0], responderURL: "http://ocsp.example.com/leaf" },
+      { ...chain.hashData[1], responderURL: "http://ocsp.example.com/sub" },
+    ]);
+    expect(chain.hashData[0].serialNumber).toBe("a1b");
+  });
+
+  it("leaves out a member without an OCSP responder URL", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "Root");
+    const csr = await store.generateNewCsr(
+      "CP",
+      "CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    await store.applySignedChain("V2GCertificate", [
+      await leafForCsr("02", csr, root),
+    ]);
+
+    expect(store.ocspRequestData("V2GCertificate")).toEqual([]);
+    expect(store.ocspRequestData("ChargingStationCertificate")).toEqual([]);
+  });
+
+  it("caches an OCSP response per certificate, matched like hash data", async () => {
+    const store = new CertificateStore();
+    const chain = await v2gChain(store);
+    const leafHash = chain.hashData[0];
+
+    expect(store.cachedOcspResponse(leafHash)).toBeUndefined();
+    store.cacheOcspResponse(leafHash, "MIIB");
+    expect(
+      store.cachedOcspResponse({
+        ...leafHash,
+        serialNumber: `0${leafHash.serialNumber.toUpperCase()}`,
+      })?.ocspResult,
+    ).toBe("MIIB");
+    expect(store.cachedOcspResponse(chain.hashData[1])).toBeUndefined();
+
+    store.clearAll();
+    expect(store.cachedOcspResponse(leafHash)).toBeUndefined();
+  });
+
+  it("drops the cached responses of a chain deleted or replaced", async () => {
+    const store = new CertificateStore();
+    const chain = await v2gChain(store);
+    for (const hash of chain.hashData) store.cacheOcspResponse(hash, "MIIB");
+
+    expect(store.deleteCertificate(chain.hashData[0]).status).toBe("Deleted");
+    for (const hash of chain.hashData) {
+      expect(store.cachedOcspResponse(hash)).toBeUndefined();
+    }
+
+    const replaced = await v2gChain(store);
+    store.cacheOcspResponse(replaced.hashData[0], "MIIB");
+    const csr = await store.generateNewCsr(
+      "CP",
+      "CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    await store.applySignedChain("V2GCertificate", [
+      await leafForCsr("0c", csr, await selfSignedRoot("09", "Other Root")),
+    ]);
+    expect(store.cachedOcspResponse(replaced.hashData[0])).toBeUndefined();
+  });
+
+  it("keeps the cached response of a sub-CA the replacement chain shares", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "V2G Root");
+    const sub = await subCa("02", "V2G Sub-CA", root, {
+      ocspUrl: "http://ocsp.example.com/sub",
+    });
+    const install = async (serial: string) => {
+      const csr = await store.generateNewCsr(
+        "CP",
+        "CPO",
+        undefined,
+        "V2GCertificate",
+      );
+      await store.applySignedChain("V2GCertificate", [
+        await leafForCsr(serial, csr, sub),
+        sub.pem,
+      ]);
+      return store.listSignedChains("V2GCertificate")[0];
+    };
+    const first = await install("0a");
+    for (const hash of first.hashData) store.cacheOcspResponse(hash, "MIIB");
+
+    const second = await install("0b");
+
+    expect(store.cachedOcspResponse(first.hashData[0])).toBeUndefined();
+    expect(store.cachedOcspResponse(second.hashData[1])?.ocspResult).toBe(
+      "MIIB",
+    );
+  });
+});
+
+describe("CertificateStore TLS client identity (#537, A02.FR.08)", () => {
+  async function importKey(pem: string): Promise<CryptoKey> {
+    const der = Buffer.from(
+      pem.replace(/-----[A-Z ]+-----/g, "").replace(/\s+/g, ""),
+      "base64",
+    );
+    return crypto.subtle.importKey(
+      "pkcs8",
+      der,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+  }
+
+  async function signedChargingStationChain(store: CertificateStore) {
+    const root = await selfSignedRoot("01", "CPO Root");
+    const sub = await subCa("02", "CPO Sub-CA", root);
+    const csr = await store.generateNewCsr("CP-TLS", "Example CPO");
+    const leaf = await leafForCsr("03", csr, sub);
+    await store.applySignedChain("ChargingStationCertificate", [leaf, sub.pem]);
+    return { root, sub, leaf };
+  }
+
+  it("binds the CSR's private key to the accepted chain", async () => {
+    const store = new CertificateStore();
+    const { sub, leaf } = await signedChargingStationChain(store);
+
+    const identity = await store.tlsClientIdentity();
+
+    expect(identity?.cert).toBe(`${leaf.trim()}\n${sub.pem.trim()}\n`);
+    expect(identity?.key).toMatch(/^-----BEGIN PRIVATE KEY-----\n/);
+    // The key is the one the leaf certifies: a signature made with it
+    // verifies against the leaf's public key.
+    const data = new TextEncoder().encode("A02.FR.08");
+    const signature = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      await importKey(identity!.key),
+      data,
+    );
+    const { X509Certificate } = await import("@peculiar/x509");
+    const leafKey = await new X509Certificate(leaf).publicKey.export();
+    expect(
+      await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        leafKey,
+        signature,
+        data,
+      ),
+    ).toBe(true);
+    expect(identity?.notBefore).toBeInstanceOf(Date);
+  });
+
+  it("has none for a chain signed for a CSR it did not generate, nor for a V2G chain", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CPO Root");
+    const forwarded = await generateCsr("CP-TLS", "Example CPO");
+    expect(
+      store.recordPendingCsr("ChargingStationCertificate", forwarded.pem),
+    ).toBe(true);
+    await store.applySignedChain("ChargingStationCertificate", [
+      await leafForCsr("03", forwarded.pem, root),
+    ]);
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.hasTlsClientIdentity()).toBe(false);
+
+    const v2gCsr = await store.generateNewCsr(
+      "CP-TLS",
+      "Example CPO",
+      undefined,
+      "V2GCertificate",
+    );
+    await store.applySignedChain("V2GCertificate", [
+      await leafForCsr("04", v2gCsr, root),
+    ]);
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.hasTlsClientIdentity()).toBe(false);
+  });
+
+  it("drops the identity once its chain is replaced or deleted", async () => {
+    const store = new CertificateStore();
+    const { root } = await signedChargingStationChain(store);
+    expect(await store.tlsClientIdentity()).toBeDefined();
+
+    // A 1.6 CertificateSigned replaces the chain without a matching key.
+    const other = await generateCsr("CP-TLS", "Example CPO");
+    await store.storeSignedChain([await leafForCsr("05", other.pem, root)]);
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.hasTlsClientIdentity()).toBe(false);
+
+    // state.reset / cp.delete
+    const again = new CertificateStore();
+    await signedChargingStationChain(again);
+    again.clearAll();
+    expect(await again.tlsClientIdentity()).toBeUndefined();
+  });
+
+  it("answers for the chain current once the key is exported", async () => {
+    const store = new CertificateStore();
+    const { root } = await signedChargingStationChain(store);
+    const exportKey = crypto.subtle.exportKey.bind(crypto.subtle);
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => (release = resolve));
+    const spy = vi
+      .spyOn(crypto.subtle, "exportKey")
+      .mockImplementationOnce(async (...args: Parameters<typeof exportKey>) => {
+        await stalled;
+        return exportKey(...args);
+      });
+
+    try {
+      const pending = store.tlsClientIdentity();
+      // Replaced by a keyless chain while the key is being exported.
+      const other = await generateCsr("CP-TLS", "Example CPO");
+      await store.storeSignedChain([await leafForCsr("06", other.pem, root)]);
+      release();
+
+      expect(await pending).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("exports the key as PEM in 64-character lines ending with a newline", async () => {
+    const store = new CertificateStore();
+    await signedChargingStationChain(store);
+
+    const key = (await store.tlsClientIdentity())!.key;
+
+    const body = key
+      .replace("-----BEGIN PRIVATE KEY-----\n", "")
+      .replace("\n-----END PRIVATE KEY-----\n", "");
+    const base64 = body.replace(/\n/g, "");
+    expect(key).toBe(
+      `-----BEGIN PRIVATE KEY-----\n${(base64.match(/.{1,64}/g) ?? []).join("\n")}\n-----END PRIVATE KEY-----\n`,
+    );
+    expect(key).not.toContain("\r");
+    expect(base64.length).toBeGreaterThan(64);
+  });
+
+  it("tells synchronously whether it holds an identity", async () => {
+    const store = new CertificateStore();
+    expect(store.hasTlsClientIdentity()).toBe(false);
+
+    await signedChargingStationChain(store);
+    expect(store.hasTlsClientIdentity()).toBe(true);
+
+    store.forgetPrivateKeys();
+    expect(store.hasTlsClientIdentity()).toBe(false);
+  });
+
+  it("forgets its private keys but keeps the chains", async () => {
+    const store = new CertificateStore();
+    await signedChargingStationChain(store);
+
+    store.forgetPrivateKeys();
+
+    expect(await store.tlsClientIdentity()).toBeUndefined();
+    expect(store.listSignedChains("ChargingStationCertificate")).toHaveLength(
+      1,
+    );
+  });
+
+  it("keeps the key out of JSON and toString", async () => {
+    const store = new CertificateStore();
+    await signedChargingStationChain(store);
+    await store.tlsClientIdentity();
+
+    for (const text of [JSON.stringify(store), String(store)]) {
+      expect(text).not.toContain("PRIVATE KEY");
+      expect(text).not.toMatch(/"privateKey"\s*:/i);
+    }
   });
 });

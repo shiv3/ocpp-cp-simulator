@@ -3,9 +3,13 @@ import * as x509 from "@peculiar/x509";
 
 import type { Database } from "../persistence/Database";
 import {
+  bytesEqual,
   certificateHashDataEquals,
   computeCertificateHashData,
+  normalizeSerialNumber,
+  ocspResponderUrl,
   type CertificateHashData,
+  type OcspRequestData,
 } from "./certificateHash";
 import {
   isRootCertificateUse,
@@ -78,6 +82,13 @@ export type DeleteCertificateOutcome =
   /** M04.FR.06 (2.x) / M04.FR.05 (1.6 whitepaper): never deletable. */
   | { status: "ChargingStationCertificate" };
 
+/** An OCSP response cached for one certificate (2.x M06, #537). */
+export interface CachedOcspResponse {
+  /** Base64 DER OCSPResponse, as the CSMS sent it. */
+  readonly ocspResult: string;
+  readonly cachedAt: string;
+}
+
 export type ApplySignedChainOutcome =
   | { status: "Accepted"; chain: StoredCertificateChain }
   | { status: "Malformed" }
@@ -86,7 +97,7 @@ export type ApplySignedChainOutcome =
 
 /**
  * Safe snapshot of the store. Holds public material only (certificates and
- * CSRs); the store never retains a private key, so there is none to leak.
+ * CSRs): the private keys the store holds in memory (#537) are left out.
  */
 export interface CertificateStoreJson {
   pendingCsrs: { use: SignedCertificateUse; pem: string }[];
@@ -99,6 +110,20 @@ interface PendingCsr {
   readonly pem: string;
   /** DER SubjectPublicKeyInfo of the CSR, compared with a returned leaf. */
   readonly publicKey: Uint8Array;
+  /** The key pair's private half, when the store generated the CSR (#537).
+   *  Memory-only; absent for a CSR forwarded by the caller. */
+  readonly privateKey?: CryptoKey;
+}
+
+/** A signed Charging Station certificate the station can present as its
+ *  TLS client identity (#537, A02.FR.08). */
+export interface TlsClientIdentity {
+  /** The stored chain, leaf first, as PEM. */
+  readonly cert: string;
+  /** The leaf's PKCS#8 private key, as PEM. */
+  readonly key: string;
+  /** The leaf's `notBefore`: the station switches once it has passed. */
+  readonly notBefore: Date;
 }
 
 type Entry =
@@ -125,9 +150,12 @@ interface CertificateRow {
  * does not survive a restart, and A02.FR.17 has the station send a new CSR
  * when no CertificateSigned arrives for the previous one.
  *
- * Private keys: `generateNewCsr` drops the generated private key (A02.FR.05,
- * it never leaves the station, and the simulator does not use it). A
- * returned chain is matched to its CSR by public key only.
+ * Private keys (A02.FR.05: they never leave the station): `generateNewCsr`
+ * keeps the generated private key in memory with the pending CSR. When the
+ * signed chain is accepted, the key stays bound to that chain's leaf, so
+ * the station can present it as its TLS client identity (#537,
+ * {@link tlsClientIdentity}). Neither is ever persisted or serialized; a
+ * restart loses both. A returned chain is matched to its CSR by public key.
  *
  * Ordering: installs and signed-chain updates hash asynchronously, so they
  * run one at a time through {@link runExclusive}. A transport handler that
@@ -138,16 +166,44 @@ interface CertificateRow {
 export class CertificateStore {
   #entries: Entry[] = [];
   #pendingCsrs = new Map<SignedCertificateUse, PendingCsr>();
+  /** Private keys of accepted chains, by leaf PEM (#537). Memory-only. */
+  #chainKeys = new Map<string, CryptoKey>();
   #nextSeq = 1;
   /** Settles once every operation queued so far has completed. */
   #tail: Promise<void> = Promise.resolve();
   #pendingOperations = 0;
+  #listeners = new Set<() => void>();
+  #ocspResponses: {
+    hash: CertificateHashDataLike;
+    ocspResult: string;
+    cachedAt: string;
+  }[] = [];
 
   constructor(
     private readonly chargePointId: string = "",
     private readonly database: Database | null = null,
   ) {
     this.load();
+  }
+
+  /**
+   * Calls `listener` after every change to the installed roots or stored
+   * chains (#537: the 2.x `CertificateEntries` count). Pending CSRs do not
+   * count. Returns the unsubscribe function.
+   */
+  onChange(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  private notifyChanged(): void {
+    for (const listener of this.#listeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error("Certificate store listener threw:", err);
+      }
+    }
   }
 
   // ── Ordering ────────────────────────────────────────────────────────────
@@ -189,6 +245,7 @@ export class CertificateStore {
     this.#pendingCsrs.set(use, {
       pem: generated.pem,
       publicKey: new Uint8Array(generated.csr.publicKey.rawData),
+      privateKey: generated.privateKey,
     });
     return generated.pem;
   }
@@ -271,9 +328,113 @@ export class CertificateStore {
       return { status: "PublicKeyMismatch" };
     }
 
+    // Bound before the change is announced, so a listener reading
+    // tlsClientIdentity() sees the new chain with its key. The leaf is
+    // new (its CSR's key pair is), so no chain replaced below shares it.
+    if (pending.privateKey) {
+      this.#chainKeys.set(chain.pems[0], pending.privateKey);
+    }
     this.replaceChains(use, chain);
     this.#pendingCsrs.delete(use);
     return { status: "Accepted", chain };
+  }
+
+  /**
+   * The current Charging Station certificate chain with its private key
+   * (#537, A02.FR.08), or `undefined` when there is no such chain or the
+   * store does not hold its key: a chain signed for a CSR the caller
+   * supplied, one stored by 1.6 CertificateSigned, or any chain read back
+   * after a restart. The key is exported for the TLS handshake only; the
+   * caller must not log or persist it. A chain replaced while its key is
+   * exported is not returned: the answer is the chain current once the
+   * export completes.
+   */
+  async tlsClientIdentity(): Promise<TlsClientIdentity | undefined> {
+    for (;;) {
+      const { chain, privateKey } = this.currentClientChain();
+      if (!chain || !privateKey) return undefined;
+      const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
+      const [current] = this.listSignedChains("ChargingStationCertificate");
+      if (current?.pems[0] !== chain.pems[0]) continue;
+      if (this.#chainKeys.get(chain.pems[0]) !== privateKey) continue;
+      return {
+        cert: current.pems.map((pem) => `${pem}\n`).join(""),
+        key: `${x509.PemConverter.encode(pkcs8, "PRIVATE KEY")}\n`,
+        notBefore: new x509.X509Certificate(chain.pems[0]).notBefore,
+      };
+    }
+  }
+
+  /** Whether {@link tlsClientIdentity} has an identity to export, without
+   *  exporting the key. */
+  hasTlsClientIdentity(): boolean {
+    return this.currentClientChain().privateKey !== undefined;
+  }
+
+  /** The current Charging Station certificate chain and the key bound to
+   *  its leaf, if the store holds one. */
+  private currentClientChain(): {
+    chain?: StoredCertificateChain;
+    privateKey?: CryptoKey;
+  } {
+    const [chain] = this.listSignedChains("ChargingStationCertificate");
+    return { chain, privateKey: chain && this.#chainKeys.get(chain.pems[0]) };
+  }
+
+  /**
+   * Drops every private key the store holds in memory (#537): those of
+   * accepted chains and of pending CSRs. Chains, roots and CSRs stay, as
+   * after a restart. Called when the charge point owning the store is
+   * replaced (`cp.update`), so a discarded instance keeps no key.
+   */
+  forgetPrivateKeys(): void {
+    this.#chainKeys.clear();
+    for (const [use, pending] of this.#pendingCsrs) {
+      if (pending.privateKey) {
+        this.#pendingCsrs.set(use, {
+          pem: pending.pem,
+          publicKey: pending.publicKey,
+        });
+      }
+    }
+  }
+
+  // ── OCSP (2.x M06, #537) ────────────────────────────────────────────────
+
+  /**
+   * GetCertificateStatus `ocspRequestData` for every member of the stored
+   * `use` chain, leaf first, whose certificate names an OCSP responder
+   * (M06.FR.07: the certificate and its sub-CAs). A member without one is
+   * left out: OCPP requires a responderURL.
+   */
+  ocspRequestData(use: SignedCertificateUse): OcspRequestData[] {
+    return this.listSignedChains(use).flatMap((chain) =>
+      chain.pems.flatMap((pem, i): OcspRequestData[] => {
+        const responderURL = ocspResponderUrl(pem);
+        return responderURL ? [{ ...chain.hashData[i], responderURL }] : [];
+      }),
+    );
+  }
+
+  /** Caches the OCSP response a CSMS returned for `hash` (M06.FR.06),
+   *  replacing an older one. Memory-only; dropped with the chain holding
+   *  the certificate. */
+  cacheOcspResponse(hash: CertificateHashDataLike, ocspResult: string): void {
+    this.#ocspResponses = [
+      ...this.#ocspResponses.filter(
+        (entry) => !certificateHashDataEquals(entry.hash, hash),
+      ),
+      { hash: { ...hash }, ocspResult, cachedAt: new Date().toISOString() },
+    ];
+  }
+
+  cachedOcspResponse(
+    hash: CertificateHashDataLike,
+  ): CachedOcspResponse | undefined {
+    const entry = this.#ocspResponses.find((e) =>
+      certificateHashDataEquals(e.hash, hash),
+    );
+    return entry && { ocspResult: entry.ocspResult, cachedAt: entry.cachedAt };
   }
 
   listSignedChains(use?: SignedCertificateUse): StoredCertificateChain[] {
@@ -342,6 +503,7 @@ export class CertificateStore {
     if (!this.persist(entry)) return { status: "PersistFailed" };
     this.#entries.push(entry);
     if (duplicate) this.remove(duplicate);
+    this.notifyChanged();
     return { status: "Installed", certificate };
   }
 
@@ -359,11 +521,13 @@ export class CertificateStore {
   /**
    * GetInstalledCertificateIds, version-neutral. `queries` absent means
    * every installed certificate (2.x omits `certificateType` for "all").
-   * `V2GCertificateChain` lists each stored `V2GCertificate` chain as its
-   * leaf with the sub-CAs as children (M03.FR.05).
+   * `V2GCertificateChain` lists each stored chain of a `v2gChainUses` use
+   * as its leaf with the sub-CAs as children (M03.FR.05). The default is
+   * 2.0.1's single V2G certificate; 2.1 adds `V2G20Certificate` (#537).
    */
   installedCertificateIds(
     queries?: readonly InstalledCertificateQuery[],
+    v2gChainUses: readonly SignedCertificateUse[] = ["V2GCertificate"],
   ): InstalledCertificateIds[] {
     const wants = (q: InstalledCertificateQuery) =>
       queries === undefined || queries.includes(q);
@@ -379,7 +543,10 @@ export class CertificateStore {
             ]
           : [];
       }
-      if (e.value.use !== "V2GCertificate" || !wants("V2GCertificateChain")) {
+      if (
+        !v2gChainUses.includes(e.value.use) ||
+        !wants("V2GCertificateChain")
+      ) {
         return [];
       }
       const [leaf, ...children] = e.value.hashData;
@@ -387,6 +554,15 @@ export class CertificateStore {
         { use: "V2GCertificateChain", hashData: leaf, childHashData: children },
       ];
     });
+  }
+
+  /** The first installed root matching `hash`, the one a delete removes. */
+  findRootCertificate(
+    hash: CertificateHashDataLike,
+  ): InstalledRootCertificate | undefined {
+    return this.listRootCertificates().find((root) =>
+      certificateHashDataEquals(root.hashData, hash),
+    );
   }
 
   /**
@@ -402,6 +578,7 @@ export class CertificateStore {
     );
     if (!entry || entry.kind !== "root") return undefined;
     this.remove(entry);
+    this.notifyChanged();
     return entry.value;
   }
 
@@ -424,17 +601,21 @@ export class CertificateStore {
       return { status: "ChargingStationCertificate" };
     }
     this.remove(entry);
+    this.notifyChanged();
     return { status: "Deleted", use: entry.value.use };
   }
 
   clearAll(): void {
     this.#pendingCsrs.clear();
+    this.#chainKeys.clear();
+    this.#ocspResponses = [];
     this.#entries = [];
     this.runSafely("clear certificates", () =>
       this.database?.run("DELETE FROM certificates WHERE cp_id = ?", [
         this.chargePointId,
       ]),
     );
+    this.notifyChanged();
   }
 
   toJSON(): CertificateStoreJson {
@@ -494,11 +675,14 @@ export class CertificateStore {
     for (const entry of this.#entries.filter(
       (e) => e.kind === "chain" && e.value.use === use,
     )) {
-      this.remove(entry);
+      this.remove(entry, { pruneOcsp: false });
     }
     const entry: Entry = { kind: "chain", seq: this.#nextSeq++, value: chain };
     this.persist(entry);
     this.#entries.push(entry);
+    // After the push: a sub-CA the new chain shares keeps its response.
+    this.pruneOcspResponses();
+    this.notifyChanged();
   }
 
   /** INSERTs `entry`; `false` (logged) when the database refuses it. */
@@ -529,8 +713,20 @@ export class CertificateStore {
     );
   }
 
-  private remove(entry: Entry): void {
+  /** Drops cached OCSP responses no stored chain member matches any more. */
+  private pruneOcspResponses(): void {
+    const stored = this.listSignedChains().flatMap((chain) => chain.hashData);
+    this.#ocspResponses = this.#ocspResponses.filter((cached) =>
+      stored.some((h) => certificateHashDataEquals(h, cached.hash)),
+    );
+  }
+
+  private remove(entry: Entry, { pruneOcsp = true } = {}): void {
     this.#entries = this.#entries.filter((e) => e !== entry);
+    if (entry.kind === "chain") {
+      this.#chainKeys.delete(entry.value.pems[0]);
+      if (pruneOcsp) this.pruneOcspResponses();
+    }
     this.runSafely("delete certificate", () =>
       this.database?.run(
         "DELETE FROM certificates WHERE cp_id = ? AND seq = ?",
@@ -593,7 +789,7 @@ function rowToEntry(row: CertificateRow): Entry | null {
       value: {
         use: row.certificate_use,
         pem: body.pem,
-        hashData: body.hashData,
+        hashData: normalizeHashData(body.hashData),
         installedAt: row.installed_at,
       },
     };
@@ -616,12 +812,21 @@ function rowToEntry(row: CertificateRow): Entry | null {
       value: {
         use: row.certificate_use,
         pems: pems as string[],
-        hashData: hashData as CertificateHashData[],
+        hashData: (hashData as CertificateHashData[]).map(normalizeHashData),
         storedAt: row.installed_at,
       },
     };
   }
   return null;
+}
+
+/**
+ * Rows written before #537 hold the serialNumber with its leading zero;
+ * they are read back in the current form, so GetInstalledCertificateIds
+ * reports one form whatever the row's age.
+ */
+function normalizeHashData(hash: CertificateHashData): CertificateHashData {
+  return { ...hash, serialNumber: normalizeSerialNumber(hash.serialNumber) };
 }
 
 function isHashData(value: unknown): value is CertificateHashData {
@@ -633,8 +838,4 @@ function isHashData(value: unknown): value is CertificateHashData {
     typeof v.issuerKeyHash === "string" &&
     typeof v.serialNumber === "string"
   );
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }

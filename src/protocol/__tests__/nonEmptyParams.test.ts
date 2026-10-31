@@ -46,6 +46,24 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
   },
   { method: "sign_certificate", valid: { csr: "c" }, field: "csr" },
   {
+    method: "get_15118_ev_certificate",
+    valid: {
+      iso15118SchemaVersion: "v",
+      action: "Install",
+      exiRequest: "AA==",
+    },
+    field: "iso15118SchemaVersion",
+  },
+  {
+    method: "get_15118_ev_certificate",
+    valid: {
+      iso15118SchemaVersion: "v",
+      action: "Install",
+      exiRequest: "AA==",
+    },
+    field: "exiRequest",
+  },
+  {
     method: "load_scenario_template",
     valid: { connector: 1, templateId: "t" },
     field: "templateId",
@@ -183,6 +201,24 @@ describe("seed_auth_cache entries (#452)", () => {
     expect(params.safeParse({ entries: [entry] }).success).toBe(true);
     expect(
       params.safeParse({ entries: [{ ...entry, [field]: "" }] }).success,
+    ).toBe(false);
+  });
+});
+
+// #537: the EMAIDs are nested in an array, out of the table's reach.
+describe("get_15118_ev_certificate prioritizedEMAIDs (#537)", () => {
+  it("refuses an empty EMAID", () => {
+    const params = METHODS.get_15118_ev_certificate.params;
+    const valid = {
+      iso15118SchemaVersion: "v",
+      action: "Install",
+      exiRequest: "AA==",
+    };
+    expect(
+      params.safeParse({ ...valid, prioritizedEMAIDs: ["E"] }).success,
+    ).toBe(true);
+    expect(
+      params.safeParse({ ...valid, prioritizedEMAIDs: [""] }).success,
     ).toBe(false);
   });
 });

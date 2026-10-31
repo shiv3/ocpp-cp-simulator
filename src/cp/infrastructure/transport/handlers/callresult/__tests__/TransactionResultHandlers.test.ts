@@ -280,6 +280,104 @@ describe("StopTransactionResultHandler (#367) — late CALLRESULT", () => {
 });
 
 /**
+ * #527: a StartTransaction.req resent after a CALLERROR can be answered
+ * after its transaction stopped, or after another one began on the
+ * connector. The conf belongs to the transaction the request started
+ * (identified by the request's `idTag` and `timestamp`): it must leave
+ * whatever now runs on the connector alone.
+ */
+describe("StartTransactionResultHandler (#527) — late conf", () => {
+  function requestOf(cp: ChargePoint): { idTag: string; timestamp: string } {
+    const transaction = cp.getConnector(1)!.transaction!;
+    return {
+      idTag: transaction.tagId,
+      timestamp: transaction.startTime.toISOString(),
+    };
+  }
+
+  it("an accepted conf after the transaction stopped touches neither id nor status", () => {
+    const cp = buildChargePoint();
+    const connector = cp.getConnector(1)!;
+    cp.startTransaction("TAG-527-A", 1);
+    const request = requestOf(cp);
+    cp.stopTransaction(1, "Local");
+    expect(connector.transaction).toBeNull();
+    const statusBefore = connector.status;
+    const changes = trackConnectorStatus(cp);
+
+    new StartTransactionResultHandler(
+      1,
+      request.idTag,
+      request.timestamp,
+    ).handle(
+      { transactionId: 527, idTagInfo: { status: "Accepted" } },
+      buildContext(cp),
+    );
+
+    expect(changes).toEqual([]);
+    expect(connector.status).toBe(statusBefore);
+    expect(connector.transaction).toBeNull();
+  });
+
+  it("a conf for transaction A leaves transaction B alone", async () => {
+    const cp = buildChargePoint();
+    const connector = cp.getConnector(1)!;
+    cp.startTransaction("TAG-527-A", 1);
+    const requestA = requestOf(cp);
+    cp.stopTransaction(1, "Local");
+    // A different start time, as a real second session has.
+    await new Promise((r) => setTimeout(r, 2));
+    cp.startTransaction("TAG-527-B", 1);
+    const b = connector.transaction!;
+    connector.transactionId = 1002;
+    cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    const stops: unknown[] = [];
+    cp.events.on("transactionStopped", (e) => stops.push(e));
+    const notAccepted: unknown[] = [];
+    cp.events.on("startTransactionNotAccepted", (e) => notAccepted.push(e));
+    const changes = trackConnectorStatus(cp);
+
+    for (const status of ["Accepted", "Invalid"] as const) {
+      new StartTransactionResultHandler(
+        1,
+        requestA.idTag,
+        requestA.timestamp,
+      ).handle(
+        { transactionId: 1001, idTagInfo: { status } },
+        buildContext(cp),
+      );
+    }
+
+    expect(connector.transaction).toBe(b);
+    expect(b.id).toBe(1002);
+    expect(b.stopTime).toBeNull();
+    expect(stops).toEqual([]);
+    expect(notAccepted).toEqual([]);
+    expect(changes).toEqual([]);
+    expect(connector.status).toBe(OCPPStatus.Charging);
+  });
+
+  it("the conf of the running transaction's own request still applies", () => {
+    const cp = buildChargePoint();
+    const connector = cp.getConnector(1)!;
+    cp.startTransaction("TAG-527-A", 1);
+    const request = requestOf(cp);
+
+    new StartTransactionResultHandler(
+      1,
+      request.idTag,
+      request.timestamp,
+    ).handle(
+      { transactionId: 527, idTagInfo: { status: "Accepted" } },
+      buildContext(cp),
+    );
+
+    expect(connector.transaction?.id).toBe(527);
+    expect(connector.status).toBe(OCPPStatus.Charging);
+  });
+});
+
+/**
  * Issue #181: StartTransaction.conf with a non-Accepted idTagInfo.status is
  * now acted on per §4.8 `StopTransactionOnInvalidId` — default true stops
  * the transaction with reason "DeAuthorized" (delegating to

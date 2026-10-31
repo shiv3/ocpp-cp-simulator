@@ -1417,37 +1417,21 @@ export class ChargePoint {
     });
   }
 
-  /**
-   * Called by the 1.6 handler when StartTransaction.req is answered with a
-   * CALLERROR (#447), once `cleanTransaction` has closed the connector's
-   * transaction. Listeners still find the closed transaction on the
-   * connector (its stop time and meter), then it is detached: the CSMS never
-   * accepted it, so nothing may stop it again. Left attached, every path that
-   * asks "is there a transaction?" — Reset, UnlockConnector, RemoteStop,
-   * ChangeAvailability — took it for a running one, and the stop paths sent
-   * a StopTransaction.req with the `0` placeholder id (#491). A transaction
-   * a listener began in the meantime is a new one and stays.
-   */
-  notifyTransactionStartFailed(connectorId: number, errorCode: string): void {
-    const connector = this.getConnector(connectorId);
-    const failed = connector?.transaction ?? null;
-    this._events.emit("transactionStartFailed", { connectorId, errorCode });
-    if (connector && failed && connector.transaction === failed) {
-      connector.stopTransaction();
-    }
-  }
-
-  /** Called by the 2.x handler on each failed TransactionEvent
-   *  transmission: a CALLERROR (#490) or no answer within `MessageTimeout`
-   *  (#529). Reports only: the transaction is untouched. */
+  /** Called by the handlers on each failed transmission of a
+   *  transaction-related message: a 2.x TransactionEvent answered with a
+   *  CALLERROR (#490) or left without answer for `MessageTimeout` (#529), a
+   *  1.6 StartTransaction, StopTransaction or MeterValues of a transaction
+   *  answered with a CALLERROR (#527). Reports only: the transaction is
+   *  untouched. */
   notifyTransactionMessageRejected(
     event: ChargePointEvents["transactionMessageRejected"],
   ): void {
     this._events.emit("transactionMessageRejected", event);
   }
 
-  /** Called by the 2.x handler when a TransactionEvent failed its last
-   *  attempt and is dropped (#490). Reports only, like the above. */
+  /** Called by the handlers when a transaction-related message failed its
+   *  last attempt and is dropped (#490, #527). Reports only, like the
+   *  above. */
   notifyTransactionMessageDiscarded(
     event: ChargePointEvents["transactionMessageDiscarded"],
   ): void {
@@ -2288,6 +2272,8 @@ export class ChargePoint {
       return;
     }
     const reason = type === "Hard" ? "HardReset" : "SoftReset";
+    // #527: see IChargePointMessageHandler.cancelStartTransactionResends.
+    this._outbox.cancelStartTransactionResends();
     for (const connector of this.connectors.values()) {
       if (connector.transaction) {
         this.stopTransaction(connector, reason);
@@ -2451,7 +2437,9 @@ export class ChargePoint {
     // than an accident of scenario node ordering (#176). A connector already
     // in Preparing (plugged in first) has sent it: a second
     // StatusNotification(Preparing) is a Preparing → Preparing transition
-    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts as before.
+    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts; on 1.x
+    // the transaction set above now runs, so the restart only clears it
+    // (#527). On 2.x EVConnectionTimeOut targets this very transaction.
     if (connector.status === OCPPStatus.Preparing) {
       this.startConnectionTimeout(connectorId);
     } else {
@@ -2863,10 +2851,22 @@ export class ChargePoint {
     });
   }
 
+  /** OCPP 1.x (#527): a connector whose transaction runs is past
+   *  ConnectionTimeOut. It waits in Preparing for StartTransaction.conf,
+   *  which a CALLERROR resend can hold back for longer than the timeout.
+   *  On 2.x the setting is TxCtrlr/EVConnectionTimeOut, which targets
+   *  exactly a transaction started before the cable is plugged in, so a
+   *  running transaction does not hold it back there. */
+  private holdsConnectionTimeout(connectorId: number): boolean {
+    if (isOcpp2Version(this._ocppVersion)) return false;
+    const transaction = this.getConnector(connectorId)?.transaction;
+    return !!transaction && transaction.stopTime === null;
+  }
+
   private startConnectionTimeout(connectorId: number): void {
     this.clearConnectionTimeout(connectorId);
     const timeoutSec = this._configuration?.connectionTimeOut();
-    if (timeoutSec <= 0) return;
+    if (timeoutSec <= 0 || this.holdsConnectionTimeout(connectorId)) return;
     const handle = setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);
       const connector = this.getConnector(connectorId);
@@ -2891,6 +2891,7 @@ export class ChargePoint {
         }
         return;
       }
+      if (this.holdsConnectionTimeout(connectorId)) return;
       this._logger.info(
         `Connector ${connectorId} ConnectionTimeOut elapsed; transitioning Preparing → Finishing (§4.9 B6)`,
         LogType.OCPP,

@@ -110,4 +110,15 @@ export interface IChargePointMessageHandler {
   getDataTransferHandler(): DataTransferHandler;
   onWebSocketClosed(): void;
   flushPendingQueue(): void;
+  /** #527: drop the StartTransaction.req resends waiting out their retry
+   *  interval. Called by a Reset, which stops their transactions: a Start
+   *  sent after its StopTransaction.req would open on the CSMS a
+   *  transaction nothing stops. Only a Reset cancels: it closes the socket
+   *  and reboots, so a waiting resend would be salvaged to the offline
+   *  queue and replayed after the BootNotification as a fresh delivery,
+   *  its attempt count restarted. The other stop paths keep the link up:
+   *  the resend goes out under the §3.7 ordering limitation documented on
+   *  `onTransactionMessageCallError`, and its conf, bound to the request's
+   *  idTag and timestamp, is ignored. OCPP 1.6 only; a no-op elsewhere. */
+  cancelStartTransactionResends(): void;
 }

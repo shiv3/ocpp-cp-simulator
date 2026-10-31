@@ -70,9 +70,6 @@ export class ChargingSessionRecorder {
       events.on("startTransactionNotAccepted", ({ connectorId, status }) =>
         this.onNotAccepted(connectorId, status),
       ),
-      events.on("transactionStartFailed", ({ connectorId }) =>
-        this.onStartFailed(connectorId),
-      ),
       // Removing a connector does not stop its transaction.
       events.on("connectorRemoved", ({ connectorId }) =>
         this.interrupt(connectorId),
@@ -185,9 +182,8 @@ export class ChargingSessionRecorder {
   private onStopped(connectorId: number, reason: string | undefined): void {
     const transaction = this.cp.connectors.get(connectorId)?.transaction;
     const open = this.active.get(connectorId);
-    // No running session: the transaction already ended. (A failed start is
-    // detached from the connector, so no stop path reaches it since #491.)
-    // A restored one was taken back by `reconcile`.
+    // No running session: the transaction already ended. A restored one was
+    // taken back by `reconcile`.
     if (!transaction || !open) return;
     // The handlers that stop on a rejected id record the verdict on the
     // transaction first, so it is here before `startTransactionNotAccepted`.
@@ -214,16 +210,6 @@ export class ChargingSessionRecorder {
     if (running) {
       this.update(connectorId, { ...running, authorizationStatus: status });
     }
-  }
-
-  private onStartFailed(connectorId: number): void {
-    const session = this.active.get(connectorId);
-    const transaction = this.cp.connectors.get(connectorId)?.transaction;
-    if (!session || !transaction) return;
-    this.store({
-      ...this.ended(connectorId, session, transaction),
-      outcome: "failed",
-    });
   }
 
   /** `open` closed with `transaction`'s end, and no longer running. */

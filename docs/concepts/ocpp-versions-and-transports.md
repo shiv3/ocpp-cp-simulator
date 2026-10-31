@@ -13,6 +13,8 @@ sources:
   - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
   - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
   - src/cp/domain/transport/PendingMessageQueue.ts
+  - src/cp/infrastructure/transport/OCPPMessageHandler.ts (1.6 transaction message retries)
+  - "OCPP 1.6 Part 2 §3.7.1 (issue #527)"
   - src/cli/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
@@ -129,8 +131,10 @@ On either failure the station:
 
 - **keeps the transaction running.** The connector stays as it was, the
   station does not end the transaction on the error, and the
-  [charging session](charging-sessions.md) stays `active`. This differs from 1.6, where a StartTransaction CALLERROR
-  abandons the transaction (#447);
+  [charging session](charging-sessions.md) stays `active`. An `Ended`
+  event goes out once its transaction ended: both stay ended. OCPP-J 1.6
+  does the same since #527 (see
+  [the 1.6 section](#transaction-message-retries-ocpp-j-16));
 - **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
   `action`, `eventType`, `reason`, `errorCode`, `attempt`) on every failed
   transmission. `action` is `TransactionEvent`; `reason` is `callError` or
@@ -292,6 +296,103 @@ Limits:
   persisted, so its later events do not continue the replayed ones.
 - `GetTransactionStatus` answers `messagesInQueue: false` whatever the
   queue holds (E14).
+
+## Transaction message retries (OCPP-J 1.6)
+
+OCPP 1.6 Part 2 §3.7.1 lets a charge point skip a transaction-related
+message only when the Central System repeatedly fails to process it: the
+station "SHOULD send this message again" until it has met as many failures
+as `TransactionMessageAttempts`, waiting before each retransmission
+`TransactionMessageRetryInterval` seconds "multiplied by the number of
+preceding transmissions", then "SHOULD discard the message and continue with
+the next transaction-related message". §4.8 adds that failing to answer a
+StartTransaction.req "will only cause the Charge Point to try the same
+message again". OCPP-J 1.6 reports such a failure as a CALLERROR.
+
+Since #527 the 1.6 station follows it for StartTransaction.req,
+StopTransaction.req and a MeterValues.req carrying a `transactionId`, the
+same way 2.x handles a TransactionEvent (above). It used to abandon the
+transaction on a StartTransaction CALLERROR (#447) and to ignore one on the
+other two. Now it:
+
+- **keeps the transaction running** on a StartTransaction.req or
+  MeterValues.req CALLERROR, and the
+  [charging session](charging-sessions.md) stays `active`. A
+  StopTransaction.req goes out once its transaction stopped: the
+  transaction and its session stay ended, and the retry only resends the
+  message;
+- **emits `transactionMessageRejected`** (`connectorId`, `transactionId`,
+  `action` `StartTransaction` / `StopTransaction` / `MeterValues`, `reason`
+  `callError`, `errorCode`, `attempt`; no `eventType`) on every CALLERROR;
+- **resends the same payload** under a new message id, through the §4.1.1
+  serial queue, after `TransactionMessageRetryInterval` seconds times the
+  number of transmissions so far: 60 s, then 120 s with the default of 60;
+- **discards the message after `TransactionMessageAttempts` transmissions
+  in all** (default 3) and emits `transactionMessageDiscarded` (`attempts`
+  instead of `attempt`).
+
+A CALLRESULT ends the retries, and an answer to a resend goes through the
+normal StartTransaction.conf handling (`transactionId`, `idTagInfo`). Both
+keys are read at each CALLERROR, so a ChangeConfiguration applies to the
+next one; an attempts value below 1 counts as 1, a negative interval as 0.
+
+StartTransaction.req carries no transaction id: its events report the
+placeholder `transactionId` `"0"`. Once it is discarded the transaction
+runs on under that placeholder: its MeterValues.req and StopTransaction.req
+carry `transactionId: 0`, as they do while a StartTransaction.conf is still
+pending, and a connector still in `Preparing` goes to `Charging`, as when
+`StopTransactionOnInvalidId` is false. Any other status, such as one a
+scenario set meanwhile, is left alone. On 1.x, `ConnectionTimeOut` does not
+apply while the transaction runs, so it never moves a connector waiting in
+`Preparing` for the conf to `Finishing`. On 2.x it maps to
+`TxCtrlr/EVConnectionTimeOut`, which targets exactly a transaction started
+before the cable is plugged in: it still fires while that transaction runs
+and ends it (E03.FR.05, #549). Once a CALLERROR answered its
+StartTransaction.req, while it is resent and after it is discarded, a
+RemoteStopTransaction for id `0` is `Rejected`, with no
+StopTransaction.req: the CSMS never issued that id (#491). A `0` the CSMS
+did assign in a StartTransaction.conf is stopped as any other id (#328).
+Unlock, Reset and the other stop paths stop the
+transaction with one StopTransaction.req carrying `transactionId: 0`, and a
+ChangeAvailability to `Inoperative` answers `Scheduled`.
+
+A StartTransaction.conf belongs to the transaction its request started,
+identified by the request's `idTag` and `timestamp`. When it answers a resend
+after that transaction stopped, or after another one began on the connector,
+it is logged and ignored: neither the transaction id nor the connector
+status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
+updates the Authorization Cache. OCPP-S binds its StartTransaction answer
+the same way, though it never resends: a slow HTTP exchange can return
+after the transaction stopped. A Reset drops a StartTransaction.req waiting
+for its resend, whether its retry interval is still running or it already
+waits in the serial queue behind another CALL: the reset ends that
+transaction. A CALLERROR
+answering a StartTransaction.req whose transaction no longer runs (a Reset
+stopped it while the request was in flight) is not resent: the request is
+reported rejected, then discarded after that one attempt.
+
+A resend still waiting when the WebSocket closes goes to the 1.6 offline
+queue (§3.7), ahead of the CALLs still queued, and is replayed after the
+next accepted boot like any queued transaction message. So does a resend
+that falls due while the boot gate is closed on a live link (a
+BootNotification answered `Pending`, e.g. after a TriggerMessage). That
+replay is a fresh delivery: a CALLERROR answering it starts the count
+again. With a link that keeps dropping and a CSMS that always answers with
+a CALLERROR, the resends therefore never stop.
+
+Known limitations, as on 2.x: a waiting resend does not hold back the next
+transaction-related message, so a StopTransaction.req can overtake the
+StartTransaction.req being retried, against the chronological order §3.7
+asks for. Unlike 2.x (#529), a message left unanswered is not retried:
+only a CALLERROR is.
+A resend waiting out its interval is held in memory, like the CALLs in the
+serial queue. It reaches the persisted offline queue only when the socket
+closes, so a process that ends without closing it, such as a crash, loses
+the resend.
+An [expert call](expert-ocpp-calls.md) is never resent, and a MeterValues.req
+without a `transactionId` is not transaction-related. OCPP-S (1.2 / 1.5 /
+1.6S) does not retry: a SOAP Fault answering these messages is reported as an
+error and the message is not sent again.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

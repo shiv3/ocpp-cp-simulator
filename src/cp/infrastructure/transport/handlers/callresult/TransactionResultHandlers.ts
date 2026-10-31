@@ -8,6 +8,7 @@ import type { AuthorizeRequestV16 } from "../../../../../ocpp";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 import type { CsmsAuthorizationResult } from "../../../../domain/auth/StationAuthorization";
+import { isRunningTransactionStartedBy } from "../../../../domain/connector/Transaction";
 
 /** OCPP 1.6 idTagInfo → the domain's CSMS verdict (#452). A missing or
  *  unparseable expiryDate means no end date (§7.24). */
@@ -29,10 +30,13 @@ export function authorizationResultFromIdTagInfo(idTagInfo: {
 
 export class StartTransactionResultHandler implements CallResultHandler<StartTransactionResponseV16> {
   /** `idTag` is the one of the StartTransaction.req this conf answers; it
-   *  feeds the Authorization Cache (#452, §3.5.1). */
+   *  feeds the Authorization Cache (#452, §3.5.1). `startedAt` is that
+   *  request's `timestamp`: with `idTag`, it identifies the transaction the
+   *  conf belongs to (#527). */
   constructor(
     private connectorId: number,
     private idTag?: string,
+    private startedAt?: string,
   ) {}
 
   handle(payload: StartTransactionResponseV16, context: HandlerContext): void {
@@ -44,6 +48,25 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
       );
     }
     const connector = context.chargePoint.getConnector(this.connectorId);
+    // #527: a StartTransaction.req resent after a CALLERROR can be answered
+    // after its transaction stopped (StopTransaction.req went out with the
+    // `0` placeholder) or after another one began on the connector. The
+    // conf belongs to the request's transaction only: the cache update
+    // above stands, nothing else here applies to what runs now.
+    if (
+      this.idTag !== undefined &&
+      this.startedAt !== undefined &&
+      !isRunningTransactionStartedBy(connector?.transaction, {
+        idTag: this.idTag,
+        timestamp: this.startedAt,
+      })
+    ) {
+      context.logger.warn(
+        `StartTransaction.conf (transactionId ${transactionId}) answers a transaction no longer running on connector ${this.connectorId}; ignoring it`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
 
     if (idTagInfo.status === "Accepted") {
       if (connector) {

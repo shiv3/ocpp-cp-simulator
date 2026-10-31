@@ -1027,7 +1027,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * resends it after `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`
    * seconds times the number of transmissions so far, up to
    * `MessageAttempts[TransactionEvent]` transmissions, then discards it.
-   * The transaction keeps running either way (unlike 1.6, #447).
+   * The transaction keeps running either way, as on 1.6 since #527.
    *
    * Each transmission counts as failed once: a CALLERROR arriving for a
    * transmission that already timed out changes nothing, and neither does
@@ -1963,5 +1963,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       case "NotifyEvent":
         return this.replayNotifyEvent(queued);
     }
+  }
+
+  public cancelStartTransactionResends(): void {
+    // OCPP 2.x has no StartTransaction.req (#527 is 1.6 only).
   }
 }

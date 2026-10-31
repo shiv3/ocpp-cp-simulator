@@ -14,8 +14,15 @@ export class RemoteStopTransactionHandler implements CallHandler<
     context: HandlerContext,
   ): RemoteStopTransactionResponseV16 {
     const { transactionId } = payload;
+    // #491, #527: a transaction whose StartTransaction.req was answered with
+    // a CALLERROR (being resent, or discarded) runs on the `0` placeholder.
+    // The CSMS never issued that id, so a request naming it is not about
+    // this transaction. A `0` the CSMS assigned is (#328).
     const connector = Array.from(context.chargePoint.connectors.values()).find(
-      (c) => c.transaction && c.transaction.id === transactionId,
+      (c) =>
+        c.transaction &&
+        c.transaction.id === transactionId &&
+        !c.transaction.startCallError,
     );
 
     if (!connector) {

@@ -175,6 +175,12 @@ class FakeMessageHandler implements IChargePointMessageHandler {
   > {
     this.record("flushPendingQueue", []);
   }
+
+  cancelStartTransactionResends(): ReturnType<
+    IChargePointMessageHandler["cancelStartTransactionResends"]
+  > {
+    this.record("cancelStartTransactionResends", []);
+  }
 }
 
 function expectCall(
@@ -313,5 +319,8 @@ describe("Outbox", () => {
 
     outbox.flushPendingQueue();
     expectCall(handler, "flushPendingQueue", []);
+
+    outbox.cancelStartTransactionResends();
+    expectCall(handler, "cancelStartTransactionResends", []);
   });
 });

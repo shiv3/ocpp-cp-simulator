@@ -181,4 +181,10 @@ export class Outbox implements IChargePointMessageHandler {
   > {
     return this.handler.flushPendingQueue();
   }
+
+  cancelStartTransactionResends(): ReturnType<
+    IChargePointMessageHandler["cancelStartTransactionResends"]
+  > {
+    return this.handler.cancelStartTransactionResends();
+  }
 }

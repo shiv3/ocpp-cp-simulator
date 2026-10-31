@@ -102,6 +102,4 @@ Also browsable at https://deepwiki.com/shiv3/ocpp-cp-simulator.
 
 ## Contributing
 
-Before pushing, run the checks CI runs: `bun run lint`, `bun run format:check`, `bun run typecheck` and `bun run test` ([Testing strategy](docs/analyses/testing-strategy.md)). Type errors fail the build.
-
-`CLAUDE.md` is the schema for the documentation wiki (layers, layout, ingest / query / lint workflows); `docs/conventions.md` holds the page conventions. When a change alters behaviour, update the affected wiki pages, `docs/index.md` and `docs/log.md` in the same PR.
+See [CONTRIBUTING.md](CONTRIBUTING.md): the checks to run before pushing, the wiki update rule, and how issues and pull requests are labelled and assigned to milestones.

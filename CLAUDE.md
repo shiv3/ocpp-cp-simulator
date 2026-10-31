@@ -18,7 +18,9 @@ every page is catalogued in [`docs/index.md`](docs/index.md).
 | Schema      | This file                                                                                                                                                                                                                                                                                                                     | Co-evolved with the humans; update it when a workflow changes.                                                                                                  |
 
 `README.md` is the GitHub landing page (quick start + links into the wiki), not
-a wiki page. Keep it short; deep content belongs in `docs/`.
+a wiki page. Keep it short; deep content belongs in `docs/`. `CONTRIBUTING.md`
+(checks, wiki update rule, issue / PR triage convention) is not a wiki page
+either; keep it in sync with `.github/release-drafter.yml`.
 
 ## Layout
 

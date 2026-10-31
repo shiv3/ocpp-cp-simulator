@@ -1705,8 +1705,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /**
    * A04 SecurityEventNotificationRequest (#537), sent by the control-plane
-   * `security_event_notification` method. Dropped like any 2.x CALL while
-   * offline: the A04.FR.02 queue is not modelled.
+   * `security_event_notification` method. Dropped while offline: the E11
+   * queue (#528) does not take it, and the A04.FR.02 queue is not modelled.
    */
   public sendSecurityEventNotification(type: string, techInfo?: string): void {
     const payload: SecurityEventNotificationRequestV201 = {

@@ -408,7 +408,9 @@ CALLERROR.
   (at most 50 characters), the current `timestamp` and the optional
   `techInfo` (at most 255), the bounds of the 1.6 whitepaper, 2.0.1 and
   2.1 schemas; a longer value is `invalid_params` (#537; before, a WARN
-  only). Like every 2.x CALL it is dropped while offline: the A04.FR.02
+  only). It is dropped while offline: the 2.x
+  [offline queue](ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent)
+  (#528) holds only `TransactionEvent` and `NotifyEvent`, so the A04.FR.02
   queue is not modelled. The automatic `StartupOfTheDevice` event stays
   1.6-only.
 
@@ -591,7 +593,8 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 `SignV2G20Certificate` and `SignCombinedCertificate` still answer
 `NotImplemented` (F06.FR.08), so a 2.1 station only gets a
 `V2G20Certificate` chain for a CSR generated another way. Offline queuing
-(A04.FR.02) is left to a follow-up once the 2.x offline queue of #528 is in.
+(A04.FR.02) is left to a follow-up: the 2.x offline queue of #528 does not
+take `SecurityEventNotification`.
 
 ### Persistence
 

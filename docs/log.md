@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Log
@@ -2131,3 +2131,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Review fixes: a `PeriodicClockAligned` interval above a day fires on the grid of `value` seconds from the Unix epoch, not at every midnight (N08.FR.07); a `GetReport` `componentVariable` with an `evse` (and `connectorId`) keeps that EVSE only (B08.FR.11); removing a connector withdraws its EVSE's runtime keys and `EVSE.Power` target; a `Target` value must be a plain decimal; a stored hardwired monitor missing from the catalog is ignored and deleted; the `All`-after-`HardWiredOnly` duplicate and the `OfflineQueuingSeverity` default rationale are documented. Page: [OCPP 2.x variable monitoring](concepts/variable-monitoring.md) (runtime values, Target attribute, periodic monitors, offline queuing, SetMonitoringBase, persistence).
 - Review fixes: a `cp.update` stops the periodic timers of the instance it replaces (they kept queuing rows under its id); a `cp.delete` no longer leaves a `NotifyEvent` row for the deleted charge point; at the cap, the oldest report made only of `Periodic` events is dropped first, so a threshold crossing survives until no such report is left; after a restart, `eventId` continues past the highest one still queued; a queued report logs at `debug`, not `warn`. Pages: [OCPP 2.x variable monitoring](concepts/variable-monitoring.md) (offline queuing, NotifyEvent fields, limits), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md) (E11).
 - Maintainer review (#541): an object or array behind an escaped name whose members were not escaped (`password\":{"d":"S1"}`) leaked past its first plain quote; the value is now read by bracket depth, strings of either quote style (escaped or not) not counted, and the redacted member keeps the closing bracket of its holder. Under Bun the `after a quoted name` and `escaped and nested values` timing rows take seconds because of `SENSITIVE_ASSIGNMENT` on `password="___…` — `main`'s pattern, not this change's — so the second gets a Bun budget like the first ([Log format](concepts/log-format.md)).
+
+## [2026-10-31] ingest | Contribution and triage convention (#579)
+
+- New root `CONTRIBUTING.md` (not a wiki page): pre-push checks and the wiki update rule, moved from the README's Contributing section, plus the triage convention — one `type:*`, one `area:*`, one `priority:*` label and one milestone per issue; a PR carries its issue's labels, and its `type:*` label picks the release-drafter section and bump.
+- [Wiki conventions](conventions.md) and `CLAUDE.md`: `CONTRIBUTING.md` sits beside `README.md` outside the wiki.

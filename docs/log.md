@@ -2162,3 +2162,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `get_15118_ev_certificate` answers `disconnected` when its first CALL is dropped, like `send_ocpp_call`. [MCP endpoint](entities/mcp-endpoint.md), [Control plane](concepts/control-plane.md#rpc).
 - A `CertificateSigned` refused for exceeding `MaxCertificateChainSize` now ends its CSR's resend back-off too. [Security profiles](concepts/security-profiles.md).
+- The renewed-certificate reconnect waits for a `TransactionEvent` that network-simulation latency still holds before its write (an active event since #528); a test pins it, and that the event stops counting once the close queues it for the E11 replay. [Security profiles](concepts/security-profiles.md#renewed-client-certificate).

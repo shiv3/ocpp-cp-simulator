@@ -54,7 +54,7 @@ describe("AppShell collapsible sidebar", () => {
     }
   });
 
-  it("starts expanded, with labels and the version line, and writes nothing", async () => {
+  it("starts expanded, with labels, and writes nothing", async () => {
     vi.mocked(appBuildLabel).mockReturnValue("v9.9.9");
     const aside = await renderAside();
 
@@ -62,7 +62,6 @@ describe("AppShell collapsible sidebar", () => {
     expect(toggle(aside).getAttribute("aria-label")).toBe("Collapse sidebar");
     expect(toggle(aside).getAttribute("aria-expanded")).toBe("true");
     expect(aside.textContent).toContain("Scenarios");
-    expect(aside.textContent).toContain("v9.9.9");
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
@@ -81,8 +80,11 @@ describe("AppShell collapsible sidebar", () => {
     expect(scenarios!.getAttribute("title")).toBe("Scenarios");
     expect(scenarios!.getAttribute("aria-current")).toBe("page");
     expect(aside.querySelector('a[aria-label="Run History"]')).toBeTruthy();
-    expect(aside.textContent).not.toContain("v9.9.9");
+    // The version line lives in the footer, so folding the sidebar keeps it.
     expect(aside.textContent).not.toContain("ocpp-cp-simulator");
+    expect(document.querySelector("footer")!.textContent).toContain(
+      "ui v9.9.9",
+    );
     expect(aside.querySelector('[data-testid="mode-indicator"]')).toBeTruthy();
     expect(aside.querySelector('[aria-label="Toggle theme"]')).toBeTruthy();
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("1");

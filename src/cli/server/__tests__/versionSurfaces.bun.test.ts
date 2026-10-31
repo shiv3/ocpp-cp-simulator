@@ -22,11 +22,14 @@ const STAMP = "9.9.9-test";
 
 const servers: TestServer[] = [];
 const originalAppVersion = process.env.APP_VERSION;
+const originalAppCommit = process.env.APP_COMMIT;
 
 afterEach(async () => {
   while (servers.length > 0) await servers.pop()?.close();
   if (originalAppVersion === undefined) delete process.env.APP_VERSION;
   else process.env.APP_VERSION = originalAppVersion;
+  if (originalAppCommit === undefined) delete process.env.APP_COMMIT;
+  else process.env.APP_COMMIT = originalAppCommit;
 });
 
 function emitRpc(socket: Socket, request: unknown): Promise<any> {
@@ -114,8 +117,9 @@ describe("the running version is reported, not a 0.0.0 placeholder", () => {
     }
   }, 20_000);
 
-  it("reports a dev marker rather than a bare 0.0.0 when unstamped", async () => {
+  it("reports local-dev rather than a bare 0.0.0 when unstamped", async () => {
     delete process.env.APP_VERSION;
+    delete process.env.APP_COMMIT;
     const server = await startTestServer();
     servers.push(server);
 
@@ -125,6 +129,18 @@ describe("the running version is reported, not a 0.0.0 placeholder", () => {
     // A checkout's package.json is the 0.0.0 placeholder; either way the
     // endpoint must never claim to be release 0.0.0.
     expect(body.version).not.toBe("0.0.0");
-    expect(body.version).toBe("0.0.0-dev");
+    expect(body.version).toBe("local-dev");
+  });
+
+  it("reports the short commit as a dev build when only APP_COMMIT is stamped", async () => {
+    delete process.env.APP_VERSION;
+    process.env.APP_COMMIT = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
+    const server = await startTestServer();
+    servers.push(server);
+
+    const body = (await (await fetch(`${server.url}/v1/healthz`)).json()) as {
+      version: string;
+    };
+    expect(body.version).toBe("1a2b3c4-dev");
   });
 });

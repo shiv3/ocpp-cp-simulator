@@ -134,9 +134,13 @@ GET /v1/healthz
 `ok` is what readiness probes assert on. `version` is the running build, so you
 can confirm which image a deployment is actually serving without an
 authenticated round-trip. It reads `APP_VERSION` if set, otherwise the release's
-stamped `package.json`, and reports `0.0.0-dev` for an unstamped build — never a
-bare `0.0.0` that could be mistaken for a release. The same value appears as
-`scenario_report.simulatorVersion` and MCP `serverInfo.version`.
+stamped `package.json`; an unstamped build reports `<sha7>-dev` when the commit
+is stamped through `APP_COMMIT` (the GHCR branch images, see
+[Docker image](docker-image.md#version-reported-by-a-build)) and `local-dev`
+when nothing is — never a bare `0.0.0` that could be mistaken for a release.
+The same value appears as `scenario_report.simulatorVersion` and MCP
+`serverInfo.version`; the rule lives in `src/protocol/buildVersion.ts`, shared
+with the web console's label.
 
 The path is configurable via `--health-path <path>` (default `/v1/healthz`).
 Change it when a reverse proxy in front of the daemon reserves the default path

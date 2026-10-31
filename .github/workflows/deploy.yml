@@ -44,8 +44,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       # Pages builds from `main`, not a tag, so package.json stays 0.0.0 and the
-      # footer would render no build identifier. Stamp the short SHA instead —
-      # it's what actually identifies a rolling deploy (issue #93).
+      # label would read `local-dev`. Stamp the commit instead — the label then
+      # reads `<sha7>-dev`, which is what identifies a rolling deploy (#93).
       - name: Build
         run: VITE_BASE_URL="/ocpp-cp-simulator" bun run build
         env:

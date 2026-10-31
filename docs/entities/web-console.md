@@ -117,8 +117,8 @@ was always green. Local mode has no daemon, so its dot carries no status.
 The button beside the logo (**Collapse sidebar** / **Expand sidebar**)
 folds the sidebar into a 52 px icon rail: the logo, the navigation icons
 (each label becomes the link's tooltip and accessible name), the mode dot
-and the theme toggle. The server URL and the version line are hidden while
-it is collapsed. The sidebar starts expanded; the collapsed state is kept in
+and the theme toggle. The server URL is hidden while it is collapsed; the
+version line sits in the page footer and stays visible. The sidebar starts expanded; the collapsed state is kept in
 `localStorage` (`ocpp-cp.console.sidebar.collapsed`), so it survives a
 reload, and a browser without storage just does not keep it.
 
@@ -1106,18 +1106,25 @@ In Local mode the run page keeps a history of this page view only, and the
 Run History page says it needs the daemon — local run reports are tracked in
 #394.
 
-The console shows the running build as `ocpp-cp-simulator vX.Y.Z · GitHub` at
-the bottom of its sidebar (#364), as the classic UI's footer did (#93). It
-comes from `src/lib/appBuildLabel.ts`: the package version stamped by the release
-tooling (`__APP_VERSION__`), falling back to the short commit SHA on the
-GitHub Pages deploy (`__APP_COMMIT__`, built from `main`); an unstamped dev
-build shows no version rather than `v0.0.0`. In Remote mode the line also
-shows the connected daemon's version, `· daemon vX.Y.Z`, from the `version`
-of [`server.info`](../concepts/control-plane.md) (re-read on reconnect), since
-the UI bundle and the daemon can be different releases — e.g. the hosted
-console pointed at a self-hosted daemon. An unstamped daemon reports
-`0.0.0-dev`. Local mode has no daemon and shows no daemon version; neither
-does a daemon that predates `server.info`.
+The console shows the running build as
+`ocpp-cp-simulator · ui vX.Y.Z · daemon vX.Y.Z · GitHub` in a footer under the
+page, as the classic UI's footer did (#93); it first sat at the bottom of the
+sidebar (#364), whose 220px width wrapped it one item per line. Each version is
+labelled with its side. The `ui` value comes from `src/lib/appBuildLabel.ts`: the package
+version stamped by the release tooling (`__APP_VERSION__`, shown `vX.Y.Z`),
+falling back to `<sha7>-dev` when the build stamped a commit (`__APP_COMMIT__`:
+the GitHub Pages deploy and the GHCR branch images, both built from `main`),
+and to `local-dev` for a local build that stamped nothing. In Remote mode the
+line also shows the connected daemon's version, `· daemon …`, from the
+`version` of [`server.info`](../concepts/control-plane.md) (re-read on
+reconnect), since the UI bundle and the daemon can be different builds — e.g.
+the hosted console pointed at a self-hosted daemon. The daemon follows the same
+rule (`src/protocol/buildVersion.ts`, see
+[Daemon](daemon.md)): `1.2.3`, `<sha7>-dev` or `local-dev`. A `v` is
+prepended to a semver only, so a dev build reads `daemon 1a2b3c4-dev`; an older
+daemon still reporting `0.0.0-dev` reads `daemon v0.0.0-dev`. Local mode has no
+daemon and shows no daemon version; neither does a daemon that predates
+`server.info`.
 
 The console's dashboard (the connector cells and the Connectors view) and the connector cards format a connector's live readings
 with

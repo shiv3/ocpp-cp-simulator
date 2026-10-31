@@ -28,13 +28,15 @@ async function unmount(root: Root): Promise<void> {
 describe("AppShell build version (issue #364)", () => {
   let cleanup: (() => Promise<void>) | null = null;
 
-  async function renderAside(
+  // The line sits in a footer under the page, not in the 220px sidebar where it
+  // wrapped one item per line.
+  async function renderFooter(
     opts?: Parameters<typeof renderConsole>[1],
   ): Promise<HTMLElement> {
     const { container, root } = await renderConsole("/", opts);
     cleanup = () => unmount(root);
     await flush();
-    return container.querySelector("aside")!;
+    return container.querySelector("footer")!;
   }
 
   beforeAll(() => {
@@ -50,33 +52,34 @@ describe("AppShell build version (issue #364)", () => {
     }
   });
 
-  it("shows the build label and the GitHub link in the sidebar, like the classic footer", async () => {
+  it("shows the build label and the GitHub link in the footer, not the sidebar", async () => {
     vi.mocked(appBuildLabel).mockReturnValue("v9.9.9");
-    const aside = await renderAside();
+    const footer = await renderFooter();
 
-    expect(aside.textContent).toContain("ocpp-cp-simulator");
-    expect(aside.textContent).toContain("v9.9.9");
-    expect(aside.querySelector(REPO_LINK)).toBeTruthy();
+    expect(footer.textContent).toContain("ocpp-cp-simulator");
+    expect(footer.textContent).toContain("ui v9.9.9");
+    expect(footer.querySelector(REPO_LINK)).toBeTruthy();
+    expect(
+      document.querySelector("aside")!.querySelector(REPO_LINK),
+    ).toBeNull();
   });
 
-  it("hides the version but keeps the GitHub link for an unstamped build", async () => {
-    vi.mocked(appBuildLabel).mockReturnValue(null);
-    const aside = await renderAside();
+  it("shows local-dev and keeps the GitHub link for an unstamped local build", async () => {
+    vi.mocked(appBuildLabel).mockReturnValue("local-dev");
+    const footer = await renderFooter();
 
-    expect(aside.textContent).not.toMatch(/\bv\d/);
-    expect(aside.querySelector(REPO_LINK)).toBeTruthy();
+    expect(footer.textContent).toContain("ui local-dev");
+    expect(footer.querySelector(REPO_LINK)).toBeTruthy();
   });
 
-  it("shows the connected daemon's version from server.info in remote mode", async () => {
-    vi.mocked(appBuildLabel).mockReturnValue("v9.9.9");
+  function remoteService(version: string, unsubscribe = vi.fn()) {
     const info: ServerInfo = {
-      version: "1.2.4",
+      version,
       soap: { publicBaseUrl: null, path: "/ocpp/soap", tunnel: null },
     };
-    const unsubscribe = vi.fn();
     // Like RemoteChargePointService: the subscription replays the current
     // state synchronously and hands back its cleanup.
-    const service = Object.assign(
+    return Object.assign(
       createFakeChargePointService({
         getServerInfo: vi.fn(async () => info),
       }),
@@ -89,20 +92,38 @@ describe("AppShell build version (issue #364)", () => {
         ),
       },
     );
-    const aside = await renderAside({ service });
+  }
 
-    expect(aside.textContent).toContain("v9.9.9");
-    expect(aside.textContent).toContain("daemon v1.2.4");
+  it("shows the connected daemon's version from server.info in remote mode", async () => {
+    vi.mocked(appBuildLabel).mockReturnValue("v9.9.9");
+    const unsubscribe = vi.fn();
+    const footer = await renderFooter({
+      service: remoteService("1.2.4", unsubscribe),
+    });
+
+    expect(footer.textContent).toContain("ui v9.9.9");
+    expect(footer.textContent).toContain("daemon v1.2.4");
 
     await cleanup!();
     cleanup = null;
     expect(unsubscribe).toHaveBeenCalled();
   });
 
+  it("shows a dev daemon build without a v prefix", async () => {
+    vi.mocked(appBuildLabel).mockReturnValue("1a2b3c4-dev");
+    const footer = await renderFooter({
+      service: remoteService("1a2b3c4-dev"),
+    });
+
+    expect(footer.textContent).toContain("ui 1a2b3c4-dev");
+    expect(footer.textContent).toContain("daemon 1a2b3c4-dev");
+    expect(footer.textContent).not.toContain("daemon v1a2b3c4");
+  });
+
   it("shows no daemon version when the service has no server.info (local mode)", async () => {
     vi.mocked(appBuildLabel).mockReturnValue("v9.9.9");
-    const aside = await renderAside({ mode: "local" });
+    const footer = await renderFooter({ mode: "local" });
 
-    expect(aside.textContent).not.toContain("daemon");
+    expect(footer.textContent).not.toContain("daemon");
   });
 });

@@ -4,18 +4,18 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
 
 // Surface the package version to the app (footer link, issue #93). Stays
-// "0.0.0" in dev and is stamped by the release tooling; the footer hides it
-// when unstamped.
+// "0.0.0" in dev and is stamped by the release tooling; unstamped, the label
+// falls back to the commit, then to "local-dev" (src/protocol/buildVersion.ts).
 const pkgVersion = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 ).version as string;
 
-// The GitHub Pages deploy builds from `main`, not a tag, so there is no semver
-// to stamp into package.json (`npm version` only takes semver anyway). It sets
-// APP_COMMIT instead and the footer falls back to the short SHA, which is what
-// actually identifies a rolling deploy. Truncated here rather than in the
-// workflow because GitHub expressions can't substring `github.sha`.
-const appCommit = (process.env.APP_COMMIT ?? "").slice(0, 7);
+// The GitHub Pages deploy and the GHCR branch images build from `main`, not a
+// tag, so there is no semver to stamp into package.json (`npm version` only
+// takes semver anyway). They set APP_COMMIT (the full `github.sha`) instead and
+// the label reads `<sha7>-dev`, which is what actually identifies a rolling
+// deploy. resolveBuildVersion truncates it, shared with the daemon side.
+const appCommit = process.env.APP_COMMIT ?? "";
 
 // https://vitejs.dev/config/
 export default defineConfig({

@@ -231,28 +231,32 @@ const AppShell: React.FC = () => {
               <ThemeToggle />
             </div>
             {!collapsed && (
-              <>
-                <div
-                  className="truncate font-mono text-[11.5px] text-cx-faint"
-                  title={serverUrl}
-                >
-                  {serverUrl}
-                </div>
-                {/* Build and daemon version line (issue #364). */}
-                <AppBuildInfo
-                  className="flex-wrap"
-                  daemonVersion={serverInfo?.version}
-                />
-              </>
+              <div
+                className="truncate font-mono text-[11.5px] text-cx-faint"
+                title={serverUrl}
+              >
+                {serverUrl}
+              </div>
             )}
           </div>
         </aside>
 
         {/* data-console-main: src/index.css gives it a right margin while a
-            side panel is open, so the page is not hidden under the panel. */}
-        <main data-console-main className="flex-1 overflow-y-auto bg-cx-bg">
-          <Outlet />
-        </main>
+            side panel is open, so neither the page nor the footer is hidden
+            under the panel. */}
+        <div data-console-main className="flex min-w-0 flex-1 flex-col">
+          <main className="flex-1 overflow-y-auto bg-cx-bg">
+            <Outlet />
+          </main>
+          {/* Build and daemon version line (issue #364), on one line here:
+              the 220px sidebar wrapped it one item per line. */}
+          <footer className="shrink-0 border-t border-cx-border bg-cx-side px-4 py-1.5">
+            <AppBuildInfo
+              className="flex-wrap justify-center"
+              daemonVersion={serverInfo?.version}
+            />
+          </footer>
+        </div>
       </div>
     </GlobalLogsProvider>
   );

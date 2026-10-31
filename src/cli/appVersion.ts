@@ -1,4 +1,5 @@
 import pkg from "../../package.json";
+import { resolveBuildVersion } from "../protocol/buildVersion";
 
 /**
  * The simulator version to report at runtime.
@@ -8,34 +9,30 @@ import pkg from "../../package.json";
  * hard-coded literals matching package.json's unstamped placeholder. That made
  * a report from a GHCR release indistinguishable from one off a dev checkout.
  *
- * No build plumbing is needed to fix it: the release workflows already run
- * `npm version --no-git-tag-version` before building
+ * The release workflows run `npm version --no-git-tag-version` before building
  * (.github/workflows/docker-publish.yml, release.yml), and the runtime image
  * copies package.json (Dockerfile), so a released artifact's package.json
- * already carries the real semver. The CLI runs from source under bun, so
- * there is no bundler `define` to hook — read it at runtime instead.
+ * carries the real semver. A branch image gets the commit instead through the
+ * `APP_COMMIT` build arg, which the Dockerfile re-exports as a runtime env.
+ * The CLI runs from source under bun, so there is no bundler `define` to hook —
+ * read both at runtime instead.
  *
- * Resolution order:
+ * Resolution order (see resolveBuildVersion):
  *   1. `APP_VERSION` — an explicit stamp, for callers that build the image
  *      without going through `npm version`.
  *   2. package.json's `version`, unless it is still the `0.0.0` placeholder.
- *   3. `0.0.0-dev` — an unstamped build, said out loud rather than reported as
- *      a real release.
+ *   3. `APP_COMMIT` → `<sha7>-dev` — a deployed build off a branch.
+ *   4. `local-dev` — nothing stamped, said out loud rather than reported as a
+ *      real release.
  */
-export const UNSTAMPED_VERSION = "0.0.0";
-export const DEV_VERSION = "0.0.0-dev";
-
-/** Resolve the version. Reads the environment on every call so a process that
- *  sets APP_VERSION late (or a test) isn't stuck with an import-time snapshot. */
 export function appVersion(): string {
-  const fromEnv = process.env.APP_VERSION?.trim();
-  if (fromEnv) return fromEnv;
-
-  const fromPackage = (pkg as { version?: unknown }).version;
-  if (typeof fromPackage === "string") {
-    const trimmed = fromPackage.trim();
-    if (trimmed && trimmed !== UNSTAMPED_VERSION) return trimmed;
-  }
-
-  return DEV_VERSION;
+  // Read on every call so a process that sets the env late (or a test) isn't
+  // stuck with an import-time snapshot.
+  const packageVersion = (pkg as { version?: unknown }).version;
+  return resolveBuildVersion({
+    explicit: process.env.APP_VERSION,
+    packageVersion:
+      typeof packageVersion === "string" ? packageVersion : undefined,
+    commit: process.env.APP_COMMIT,
+  });
 }

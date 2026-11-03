@@ -219,8 +219,12 @@ CSR by public key.
 
 A certificate is malformed when its DER continues past the encoded structure.
 `@peculiar/x509` 3 throws on those trailing bytes, where version 2 accepted
-them. In every OCPP version, such a certificate makes `InstallCertificate`
-answer `Rejected` and makes the whole chain of a `CertificateSigned` malformed.
+them. In 1.6 and 2.x, such a certificate makes `InstallCertificate` answer
+`Rejected` and makes the whole chain of a `CertificateSigned` malformed. A
+state database written by an older release may still hold such a root. It
+stays listed, and `DeleteCertificate` removes it by its hash data. It never
+counts as the issuer of a chain member, so it does not block a later
+`CertificateSigned`.
 
 ### Certificate uses
 

@@ -2143,4 +2143,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-03] ingest | `@peculiar/x509` 3: certificates with trailing DER bytes are malformed
 
 - The dependency update to `@peculiar/x509` 3 (superseding Dependabot #581) changes certificate parsing: DER that continues past the encoded structure now throws instead of being accepted. Tests pin `InstallCertificate` → `Rejected`, `splitPemChain` → `null` and `CertificateStore` → `Malformed`.
-- [Security profiles](concepts/security-profiles.md#certificate-store): new paragraph on trailing-byte rejection, which applies to every OCPP version.
+- [Security profiles](concepts/security-profiles.md#certificate-store): new paragraph on trailing-byte rejection in 1.6 and 2.x, and on a root of that kind persisted by an older release, which no longer blocks a later `CertificateSigned`.

@@ -16,7 +16,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-10-29
+updated: 2026-11-03
 ---
 
 # OCPP 1.6 security profiles
@@ -216,6 +216,11 @@ The store never retains a private key. `SignCertificate` discards the key it
 generates for the CSR (the simulator does not use it), so the key cannot leave
 the station (whitepaper and 2.x A02.FR.05). A returned chain is matched to its
 CSR by public key.
+
+A certificate is malformed when its DER continues past the encoded structure.
+`@peculiar/x509` 3 throws on those trailing bytes, where version 2 accepted
+them. In every OCPP version, such a certificate makes `InstallCertificate`
+answer `Rejected` and makes the whole chain of a `CertificateSigned` malformed.
 
 ### Certificate uses
 

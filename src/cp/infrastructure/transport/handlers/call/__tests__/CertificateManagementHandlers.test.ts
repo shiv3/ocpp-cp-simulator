@@ -9,6 +9,7 @@ import {
 import { Logger } from "../../../../../shared/Logger";
 import { CertificateStore } from "../../../../../domain/security/CertificateStore";
 import { computeCertificateHashData } from "../../../../../domain/security/certificateHash";
+import { withTrailingDerBytes } from "../../../../../domain/security/__tests__/certificateFixtures";
 import type { Database } from "../../../../../domain/persistence/Database";
 import { rootUseFromV16, rootUseToV16 } from "../../../certificateUseMapping";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
@@ -103,6 +104,23 @@ describe("InstallCertificateHandler", () => {
       {
         certificateType: "ManufacturerRootCertificate",
         certificate: "not a certificate",
+      },
+      ctx,
+    );
+
+    expect(res).toEqual({ status: "Rejected" });
+    expect(v16View(certificateStore)).toEqual([]);
+  });
+
+  it("rejects a certificate with trailing bytes after its DER structure", async () => {
+    const { ctx, certificateStore } = buildContext();
+    const pem = await selfSignedRootCert("01", "Root A");
+    const handler = new InstallCertificateHandler();
+
+    const res = await handler.handle(
+      {
+        certificateType: "CentralSystemRootCertificate",
+        certificate: withTrailingDerBytes(pem),
       },
       ctx,
     );

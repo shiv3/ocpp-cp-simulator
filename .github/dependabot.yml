@@ -8,6 +8,10 @@
 #   * github-actions — refreshes the SHA pins from #129 and their version
 #                      comments together.
 #   * docker         — the oven/bun base image in the Dockerfile.
+#   * cargo          — src-tauri/Cargo.toml. Cargo.lock is gitignored and the
+#                      requirements are major-only ("2", "1"), so every build
+#                      already resolves the latest compatible release; this
+#                      ecosystem only surfaces new majors (Tauri 3, …).
 #
 # Every update — majors included — is grouped into a single weekly PR per
 # ecosystem to keep the review load low. Omitting `update-types` from a group
@@ -50,5 +54,14 @@ updates:
       interval: "weekly"
     groups:
       docker:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    groups:
+      cargo:
         patterns:
           - "*"

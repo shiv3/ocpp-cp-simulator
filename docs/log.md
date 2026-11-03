@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-10-30
+updated: 2026-11-03
 ---
 
 # Log
@@ -2139,3 +2139,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Daemon](entities/daemon.md): `/v1/healthz`, `server.info`, MCP and `scenario_report` report `<sha7>-dev` / `local-dev` instead of `0.0.0-dev`.
 - [Docker image](entities/docker-image.md#version-reported-by-a-build): new section and `APP_COMMIT` build arg; `docker-publish.yml` passes `github.sha`, the Dockerfile feeds it to the UI stage and re-exports it for the daemon at runtime.
 - `cli-release.yml` stamps `package.json` before the vite build instead of after, so the CLI tarball's bundled web console reads `ui vX.Y.Z` rather than `ui local-dev` next to its stamped daemon.
+
+## [2026-11-03] ingest | `@peculiar/x509` 3: certificates with trailing DER bytes are malformed
+
+- The dependency update to `@peculiar/x509` 3 (superseding Dependabot #581) changes certificate parsing: DER that continues past the encoded structure now throws instead of being accepted. Tests pin `InstallCertificate` → `Rejected`, `splitPemChain` → `null` and `CertificateStore` → `Malformed`.
+- [Security profiles](concepts/security-profiles.md#certificate-store): new paragraph on trailing-byte rejection in 1.6 and 2.x, and on a root of that kind persisted by an older release, which no longer blocks a later `CertificateSigned`.

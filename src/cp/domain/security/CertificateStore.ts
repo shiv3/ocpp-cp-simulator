@@ -473,8 +473,7 @@ export class CertificateStore {
           next && next.subject === cert.issuer
             ? pems[i + 1]
             : this.listRootCertificates().find(
-                (root) =>
-                  new x509.X509Certificate(root.pem).subject === cert.issuer,
+                (root) => subjectOf(root.pem) === cert.issuer,
               )?.pem;
         return computeCertificateHashData(pems[i], issuerPem);
       }),
@@ -574,6 +573,21 @@ export class CertificateStore {
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
+}
+
+/**
+ * The subject of an installed root, or undefined when it no longer parses:
+ * @peculiar/x509 2 accepted DER with trailing bytes, so a state database
+ * written by an older release may hold a root that version 3 rejects. Such a
+ * root never issues a chain member, and DeleteCertificate still removes it by
+ * its stored hash data.
+ */
+function subjectOf(pem: string): string | undefined {
+  try {
+    return new x509.X509Certificate(pem).subject;
+  } catch {
+    return undefined;
+  }
 }
 
 function rowToEntry(row: CertificateRow): Entry | null {

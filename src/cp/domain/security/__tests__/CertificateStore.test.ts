@@ -597,3 +597,66 @@ describe("CertificateStore persistence failures (#456 review)", () => {
     ]);
   });
 });
+
+/** A database that restores `rows` and accepts every write. */
+function restoringDatabase(rows: unknown[]): Database {
+  return {
+    exec() {},
+    run() {},
+    all: <T>() => rows as T[],
+    get: () => null,
+    close() {},
+  };
+}
+
+describe("CertificateStore with a root persisted before @peculiar/x509 3", () => {
+  // x509 2 accepted DER with trailing bytes, so such a root may sit in a
+  // state database written by an older release. x509 3 no longer parses it.
+  async function storeWithTrailingByteRoot() {
+    const stale = await selfSignedRoot("01", "Stale Root");
+    const store = new CertificateStore(
+      "CP-1",
+      restoringDatabase([
+        {
+          seq: 1,
+          kind: "root",
+          certificate_use: "CsmsRootCertificate",
+          body: JSON.stringify({
+            pem: withTrailingDerBytes(stale.pem),
+            hashData: await computeCertificateHashData(stale.pem),
+          }),
+          installed_at: "2026-10-01T00:00:00.000Z",
+        },
+      ]),
+    );
+    expect(store.listRootCertificates()).toHaveLength(1);
+    return store;
+  }
+
+  it("still applies a signed chain issued by another root", async () => {
+    const store = await storeWithTrailingByteRoot();
+    const root = await selfSignedRoot("02", "CSO Root");
+    const csrPem = await store.generateNewCsr("CP-1", "Example CPO");
+    const leaf = await leafForCsr("03", csrPem, root);
+
+    const outcome = await store.applySignedChain("ChargingStationCertificate", [
+      leaf,
+    ]);
+
+    expect(outcome.status).toBe("Accepted");
+    expect(store.listSignedChains().map((c) => c.pems)).toEqual([
+      [leaf.trim()],
+    ]);
+  });
+
+  it("still stores a 1.6 signed chain", async () => {
+    const store = await storeWithTrailingByteRoot();
+    const root = await selfSignedRoot("02", "CSO Root");
+    const csrPem = await store.generateNewCsr("CP-1", "Example CPO");
+    const leaf = await leafForCsr("03", csrPem, root);
+
+    const chain = await store.storeSignedChain([leaf]);
+
+    expect(chain.pems).toEqual([leaf.trim()]);
+  });
+});

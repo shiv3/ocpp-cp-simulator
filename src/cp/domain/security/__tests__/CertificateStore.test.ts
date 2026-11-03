@@ -5,7 +5,12 @@ import type { Database } from "../../persistence/Database";
 import { CertificateStore } from "../CertificateStore";
 import { computeCertificateHashData } from "../certificateHash";
 import { generateCsr } from "../csr";
-import { leafForCsr, selfSignedRoot, subCa } from "./certificateFixtures";
+import {
+  leafForCsr,
+  selfSignedRoot,
+  subCa,
+  withTrailingDerBytes,
+} from "./certificateFixtures";
 
 const UNKNOWN_HASH = {
   hashAlgorithm: "SHA256",
@@ -44,6 +49,20 @@ describe("CertificateStore trust anchors (M05 / M03 / M04)", () => {
     const outcome = await store.installRootCertificate(
       "ManufacturerRootCertificate",
       "not a certificate",
+      { maxEntries: 10 },
+    );
+
+    expect(outcome).toEqual({ status: "Malformed" });
+    expect(store.listRootCertificates()).toEqual([]);
+  });
+
+  it("rejects a certificate with trailing bytes after its DER structure", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CSMS Root");
+
+    const outcome = await store.installRootCertificate(
+      "CsmsRootCertificate",
+      withTrailingDerBytes(root.pem),
       { maxEntries: 10 },
     );
 
@@ -311,6 +330,22 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
     expect(
       await store.applySignedChain("ChargingStationCertificate", []),
     ).toEqual({ status: "Malformed" });
+  });
+
+  it("rejects a leaf with trailing bytes after its DER structure and keeps the CSR pending", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CSO Root");
+    const csrPem = await store.generateNewCsr("CP-1", "Example CPO");
+    const leaf = await leafForCsr("02", csrPem, root);
+
+    expect(
+      await store.applySignedChain("ChargingStationCertificate", [
+        withTrailingDerBytes(leaf),
+        root.pem,
+      ]),
+    ).toEqual({ status: "Malformed" });
+    expect(store.pendingCsr("ChargingStationCertificate")).toBe(csrPem);
+    expect(store.listSignedChains()).toEqual([]);
   });
 
   it("replaces the previous chain of the same use on a successful apply", async () => {

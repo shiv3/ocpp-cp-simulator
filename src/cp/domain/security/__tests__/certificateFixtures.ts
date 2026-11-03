@@ -65,6 +65,18 @@ export async function subCa(
   return { pem: cert.toString("pem"), name, keys };
 }
 
+/**
+ * `pem` re-encoded with two bytes appended after its DER structure. Since
+ * @peculiar/x509 v3, parsing such a certificate throws instead of ignoring
+ * the extra bytes.
+ */
+export function withTrailingDerBytes(pem: string): string {
+  const der = new Uint8Array(x509.PemConverter.decodeFirst(pem));
+  const padded = new Uint8Array(der.length + 2);
+  padded.set(der);
+  return x509.PemConverter.encode(padded, x509.PemConverter.CertificateTag);
+}
+
 /** A leaf certificate for `csrPem`'s public key, signed by `issuer`. */
 export async function leafForCsr(
   serialNumber: string,

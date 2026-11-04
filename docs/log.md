@@ -2243,3 +2243,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The renewed-certificate reconnect waits for a `TransactionEvent` that network-simulation latency still holds before its write (an active event since #528); a test pins it, and that the event stops counting once the close queues it for the E11 replay. [Security profiles](concepts/security-profiles.md#renewed-client-certificate).
 - SignCertificate back-off: a wait longer than a timer can hold (about 24.8 days) is waited out in full instead of resending early; an answer to a request whose CSR a newer one replaced no longer starts or ends the back-off. [Security profiles](concepts/security-profiles.md).
 - Rebased on the E11 offline queue (#528): the renewed-certificate reconnect waits, up to 60 s, for the `TransactionEvent`s the CSMS has not settled yet, not for queued ones; past 60 s the close queues them. `SecurityEventNotification` is still dropped while offline: the E11 queue does not take it. [Security profiles](concepts/security-profiles.md).
+
+## [2026-11-04] ingest | Certificate follow-ups, maintainer review (#537)
+
+- SignCertificate back-off: a closed connection holds the wait instead of ending the sequence; it goes on after the next accepted boot with what it had left and the same resend count (A02.FR.17-19). Sequences that reached `CertSigningRepeatTimes` or ended stay stopped. [Security profiles](concepts/security-profiles.md).

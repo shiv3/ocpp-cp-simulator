@@ -407,15 +407,101 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     expect(socket.calls("SignCertificate")).toHaveLength(3);
   });
 
-  it("drops the back-off when the connection closes", async () => {
-    const { socket, handler } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    const [sign] = socket.calls("SignCertificate");
-    socket.deliverResult(sign.messageId, { status: "Accepted" });
-    handler.onWebSocketClosed();
-    vi.advanceTimersByTime(10 * 60_000);
-    expect(socket.calls("SignCertificate")).toHaveLength(1);
+  describe("across a reconnect (A02.FR.17-20)", () => {
+    function reconnect(handler: OCPPMessageHandlerV201): void {
+      handler.onWebSocketClosed();
+      handler.setBootStatus({ status: "Accepted" });
+    }
+
+    it("holds the wait while closed and runs what it had left after the next accepted boot", async () => {
+      const { socket, handler } = setup(version);
+      await trigger(socket, "SignV2GCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+      vi.advanceTimersByTime(4_000);
+
+      handler.onWebSocketClosed();
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(1);
+
+      handler.setBootStatus({ status: "Accepted" });
+      vi.advanceTimersByTime(5_999);
+      expect(socket.calls("SignCertificate")).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      expect(socket.calls("SignCertificate")).toHaveLength(2);
+      expect(socket.calls("SignCertificate")[1].payload).toEqual(sign.payload);
+      handler.onWebSocketClosed();
+    });
+
+    it("keeps the doubled wait and the resend count", async () => {
+      const { socket, handler } = setup(version);
+      await trigger(socket, "SignV2GCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+      vi.advanceTimersByTime(10_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(2);
+
+      reconnect(handler);
+      vi.advanceTimersByTime(19_999);
+      expect(socket.calls("SignCertificate")).toHaveLength(2);
+      vi.advanceTimersByTime(1);
+      expect(socket.calls("SignCertificate")).toHaveLength(3);
+
+      // CertSigningRepeatTimes (2) reached: a reconnect does not start over.
+      reconnect(handler);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(3);
+      handler.onWebSocketClosed();
+    });
+
+    it("does not resend a CSR whose CertificateSigned was rejected (A02.FR.20)", async () => {
+      const { socket, handler, certificateStore } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+      await deliverSigned(socket, {
+        certificateChain: "not a certificate",
+        certificateType: "ChargingStationCertificate",
+      });
+      expect(
+        certificateStore.pendingCsr("ChargingStationCertificate"),
+      ).toBeDefined();
+
+      reconnect(handler);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(1);
+      handler.onWebSocketClosed();
+    });
+
+    it("does not resend a CSR the CSMS did not accept", async () => {
+      const { socket, handler } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Rejected" });
+
+      reconnect(handler);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(1);
+      handler.onWebSocketClosed();
+    });
+
+    it("does not arm a second timer when the boot is accepted twice", async () => {
+      const { socket, handler } = setup(version);
+      await trigger(socket, "SignV2GCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+
+      reconnect(handler);
+      handler.setBootStatus({ status: "Accepted" });
+      vi.advanceTimersByTime(10_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(2);
+      handler.onWebSocketClosed();
+    });
   });
 });
 

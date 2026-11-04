@@ -166,12 +166,95 @@ describe("SignCertificateBackoff", () => {
     expect(resend.mock.calls).toEqual([["V2GCertificate"]]);
   });
 
-  it("stopAll cancels every sequence", () => {
-    const { backoff, resend } = setup();
-    backoff.accepted("ChargingStationCertificate");
-    backoff.accepted("V2GCertificate");
-    backoff.stopAll();
-    vi.advanceTimersByTime(60_000);
-    expect(resend).not.toHaveBeenCalled();
+  describe("holdAll and resumeAll (a closed connection)", () => {
+    it("holds every wait, then runs what each had left", () => {
+      const { backoff, resend } = setup();
+      backoff.accepted("ChargingStationCertificate");
+      vi.advanceTimersByTime(4_000);
+      backoff.accepted("V2GCertificate");
+
+      backoff.holdAll();
+      expect(backoff.isRunning("V2GCertificate")).toBe(false);
+      vi.advanceTimersByTime(60_000);
+      expect(resend).not.toHaveBeenCalled();
+
+      backoff.resumeAll();
+      vi.advanceTimersByTime(5_999);
+      expect(resend).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(resend.mock.calls).toEqual([["ChargingStationCertificate"]]);
+      vi.advanceTimersByTime(4_000);
+      expect(resend.mock.calls).toEqual([
+        ["ChargingStationCertificate"],
+        ["V2GCertificate"],
+      ]);
+    });
+
+    it("keeps the doubling across a hold (A02.FR.18)", () => {
+      const { backoff, resend } = setup(10, 3);
+      const use = "ChargingStationCertificate";
+      backoff.accepted(use);
+      vi.advanceTimersByTime(10_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+
+      backoff.holdAll();
+      backoff.resumeAll();
+      vi.advanceTimersByTime(19_999);
+      expect(resend).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(resend).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not start over a sequence past CertSigningRepeatTimes (A02.FR.19)", () => {
+      const { backoff, resend } = setup(10, 1);
+      const use = "ChargingStationCertificate";
+      backoff.accepted(use);
+      vi.advanceTimersByTime(10_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+
+      backoff.holdAll();
+      backoff.resumeAll();
+      backoff.accepted(use);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not bring back a stopped sequence (A02.FR.20)", () => {
+      const { backoff, resend } = setup();
+      const use = "ChargingStationCertificate";
+      backoff.accepted(use);
+      backoff.holdAll();
+      backoff.stop(use);
+      backoff.resumeAll();
+      vi.advanceTimersByTime(60_000);
+      expect(resend).not.toHaveBeenCalled();
+    });
+
+    it("lets a new request held in between start over from W", () => {
+      const { backoff, resend } = setup();
+      const use = "ChargingStationCertificate";
+      backoff.accepted(use);
+      vi.advanceTimersByTime(9_000);
+      backoff.holdAll();
+      backoff.restart(use);
+      backoff.resumeAll();
+      vi.advanceTimersByTime(60_000);
+      expect(resend).not.toHaveBeenCalled();
+      backoff.accepted(use);
+      vi.advanceTimersByTime(10_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("resumes once when resumed twice, and not at all without a hold", () => {
+      const { backoff, resend } = setup();
+      const use = "ChargingStationCertificate";
+      backoff.accepted(use);
+      backoff.resumeAll();
+      backoff.holdAll();
+      backoff.resumeAll();
+      backoff.resumeAll();
+      vi.advanceTimersByTime(10_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
   });
 });

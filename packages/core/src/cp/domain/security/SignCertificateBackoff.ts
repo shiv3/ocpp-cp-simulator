@@ -20,9 +20,12 @@ export interface SignCertificateBackoffDeps {
 interface Sequence {
   /** Resends sent so far. */
   resends: number;
-  /** Cancels the wait in progress; none once `CertSigningRepeatTimes` is
-   *  reached. */
-  cancelWait?: () => void;
+  /** The wait in progress; none once `CertSigningRepeatTimes` is reached
+   *  or while the wait is held. */
+  wait?: { readonly fireAt: number; readonly cancel: () => void };
+  /** What a wait held by {@link SignCertificateBackoff.holdAll} has left,
+   *  in ms. */
+  heldMs?: number;
 }
 
 /**
@@ -42,7 +45,14 @@ interface Sequence {
  * Every new request (TriggerMessage, `sign_certificate`) calls
  * {@link restart} first, so an `Accepted` seen while a sequence exists is
  * a resend's. The owner stops a sequence when CertificateSigned is
- * rejected (A02.FR.20) and every sequence when the connection closes.
+ * rejected (A02.FR.20).
+ *
+ * A closed connection does not end a sequence: A02.FR.17-19 have no such
+ * case. The owner calls {@link holdAll} when it closes and
+ * {@link resumeAll} once the next boot is accepted, and the wait goes on
+ * with what it had left. A sequence that reached `CertSigningRepeatTimes`
+ * or was stopped has no wait to resume, so a reconnect does not start it
+ * over (A02.FR.19, A02.FR.20).
  */
 export class SignCertificateBackoff {
   readonly #sequences = new Map<SignedCertificateUse, Sequence>();
@@ -71,33 +81,57 @@ export class SignCertificateBackoff {
   }
 
   stop(use: SignedCertificateUse): void {
-    this.#sequences.get(use)?.cancelWait?.();
+    this.#sequences.get(use)?.wait?.cancel();
     this.#sequences.delete(use);
   }
 
-  stopAll(): void {
-    for (const use of [...this.#sequences.keys()]) this.stop(use);
+  /** The connection closed: no wait expires until {@link resumeAll}. */
+  holdAll(): void {
+    for (const sequence of this.#sequences.values()) {
+      if (!sequence.wait) continue;
+      sequence.wait.cancel();
+      sequence.heldMs = Math.max(0, sequence.wait.fireAt - Date.now());
+      sequence.wait = undefined;
+    }
+  }
+
+  /** A boot was accepted: the held waits go on with what they had left. */
+  resumeAll(): void {
+    for (const [use, sequence] of this.#sequences) {
+      if (sequence.heldMs === undefined) continue;
+      const heldMs = sequence.heldMs;
+      sequence.heldMs = undefined;
+      this.wait(use, sequence, heldMs);
+    }
   }
 
   /** Whether a wait for `use` is in progress. */
   isRunning(use: SignedCertificateUse): boolean {
-    return this.#sequences.get(use)?.cancelWait !== undefined;
+    return this.#sequences.get(use)?.wait !== undefined;
   }
 
   private schedule(use: SignedCertificateUse, sequence: Sequence): void {
     const seconds =
       this.deps.settings().waitMinimumSeconds * 2 ** sequence.resends;
+    this.wait(use, sequence, seconds * 1000);
+  }
+
+  private wait(
+    use: SignedCertificateUse,
+    sequence: Sequence,
+    ms: number,
+  ): void {
+    const fireAt = Date.now() + ms;
     // A pending wait must not keep a CLI process alive on its own.
-    sequence.cancelWait = setTimeoutAt(
-      Date.now() + seconds * 1000,
-      () => this.expire(use, sequence),
-      { unref: true },
-    );
+    const cancel = setTimeoutAt(fireAt, () => this.expire(use, sequence), {
+      unref: true,
+    });
+    sequence.wait = { fireAt, cancel };
   }
 
   private expire(use: SignedCertificateUse, sequence: Sequence): void {
     if (this.#sequences.get(use) !== sequence) return;
-    sequence.cancelWait = undefined;
+    sequence.wait = undefined;
     if (!this.deps.isPending(use)) {
       this.stop(use);
       return;

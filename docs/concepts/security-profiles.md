@@ -395,9 +395,13 @@ CALLERROR.
   sequence back. After `CertSigningRepeatTimes` resends it stops until a
   `TriggerMessage` starts over (A02.FR.19). One sequence runs per
   certificate use. It ends on any `CertificateSigned` for that use
-  (A02.FR.20 for a rejected one), on a non-`Accepted` answer to the
-  current `SignCertificate` request and when the connection closes. `sign_certificate` gets the same
-  back-off.
+  (A02.FR.20 for a rejected one) and on a non-`Accepted` answer to the
+  current `SignCertificate` request. A closed connection only holds the
+  wait: after the next accepted boot it goes on with what it had left and
+  the same resend count, so a sequence that reached
+  `CertSigningRepeatTimes` or ended does not start over on a reconnect. A
+  request the close left unanswered was never accepted and starts no wait.
+  `sign_certificate` gets the same back-off.
 - **`GetCertificateStatus`** (M06, #537). The station asks the CSMS for the
   OCSP status of its V2G certificates (`V2GCertificate`, 2.1
   `V2G20Certificate`): after an accepted V2G `CertificateSigned`, for the
@@ -509,8 +513,9 @@ connected.
   reporting stop until the boot is `Accepted`; reservations, the
   station-level charging profiles, response overrides and a running
   firmware simulation are dropped; non-transaction CALLs awaiting an
-  answer are lost; and the SignCertificate back-off of every use and the
-  weekly OCSP refresh stop.
+  answer are lost; and the weekly OCSP refresh stops. The SignCertificate
+  back-off of every use is held until that boot, so a CSR still pending for
+  another use goes on being resent after it.
 - Until a connection with the renewed certificate has opened, a failed
   attempt makes the next one present the other certificate (2.1 A02.FR.28,
   alternating as B10.FR.08 describes; the reconnect back-off is unchanged).

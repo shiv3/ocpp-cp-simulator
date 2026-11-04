@@ -2035,6 +2035,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       unrefTimer(refresh);
       this._certificateStatusRefresh = refresh;
+      this._signBackoff.resumeAll();
       // #537 2.1 A02.FR.29: the connection that discarded a renewed
       // certificate is the one now booted.
       if (this._renewedClientCertificateDiscarded) {
@@ -2090,9 +2091,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
     this._expertCalls.onClosed();
-    // #537: the SignCertificate back-off and the weekly OCSP refresh die
-    // with the connection too.
-    this._signBackoff.stopAll();
+    // #537: the weekly OCSP refresh dies with the connection too. The
+    // SignCertificate back-off waits for the next accepted boot: A02.FR.17
+    // still holds for a CSR the CSMS accepted before this close.
+    this._signBackoff.holdAll();
     this.stopCertificateStatusRefresh();
   }
 

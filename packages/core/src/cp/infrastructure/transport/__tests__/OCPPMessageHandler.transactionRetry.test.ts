@@ -856,6 +856,110 @@ describe("OCPP 1.6 replay of a message at a lowered TransactionMessageAttempts (
     },
   );
 
+  it("discards a resend waiting out its interval when the limit drops, with its last error", async () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id, "FormationViolation");
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    expect(discarded).toEqual([
+      {
+        connectorId: 1,
+        transactionId: "0",
+        action: "StartTransaction",
+        reason: "callError",
+        errorCode: "FormationViolation",
+        attempts: 1,
+      },
+    ]);
+    expect(connector.status).toBe(OCPPStatus.Charging);
+  });
+
+  it("discards a resend waiting in the serial queue when the limit drops", async () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    await vi.advanceTimersByTimeAsync(59_000);
+    handler.sendHeartbeat();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(1);
+    socket.callResult(socket.last().id, {
+      currentTime: "2026-10-30T10:00:00.000Z",
+    });
+
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    expect(discarded).toMatchObject([
+      { action: "StartTransaction", attempts: 1 },
+    ]);
+  });
+
+  it("a CALL sent while the discard moves the connector leaves it once and keeps the queue in order", async () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    await vi.advanceTimersByTimeAsync(59_000);
+    handler.sendHeartbeat();
+    await vi.advanceTimersByTimeAsync(1_000);
+    handler.sendHeartbeat();
+    // As the StatusNotification a real status change sends.
+    chargePoint.updateConnectorStatus.mockImplementation(
+      (_id: number, status: OCPPStatus) => {
+        connector.status = status;
+        handler.sendHeartbeat();
+      },
+    );
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(1);
+    socket.callResult(socket.last().id, {
+      currentTime: "2026-10-30T10:00:00.000Z",
+    });
+
+    expect(discarded).toHaveLength(1);
+    expect(socket.written.map((w) => w.action)).toEqual([
+      "StartTransaction",
+      "Heartbeat",
+      "Heartbeat",
+    ]);
+    socket.callResult(socket.last().id, {
+      currentTime: "2026-10-30T10:00:00.000Z",
+    });
+    expect(socket.of("Heartbeat")).toHaveLength(3);
+  });
+
+  it("still sends a resend below a limit that dropped", async () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup({
+      attempts: 5,
+    });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    expect(discarded).toEqual([]);
+  });
+
   it("a limit of 0 counts as 1 for a message transmitted once", () => {
     const { socket, connector, chargePoint, handler, discarded } = setup();
     handler.sendTransactionEvent({

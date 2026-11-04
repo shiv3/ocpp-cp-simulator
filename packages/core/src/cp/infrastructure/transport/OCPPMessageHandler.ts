@@ -98,10 +98,7 @@ import {
   signReading,
   toOcpp16SampledValue,
 } from "../../domain/connector/SignedMeterData";
-import {
-  PendingMessageQueue,
-  type PendingMessage,
-} from "../../domain/transport/PendingMessageQueue";
+import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
 import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
@@ -1029,19 +1026,23 @@ export class OCPPMessageHandler {
    * from "written" → timeout/CALLRESULT.
    */
   private pumpSerialQueue(): void {
-    if (this._serialInFlight) return;
-    while (this._serialQueue.length > 0) {
-      const head = this._serialQueue[0];
-      if (this.discardOutlivedStartResend(head)) {
-        this._serialQueue.shift();
+    // Checked on every turn, and the head leaves the queue first: a discard
+    // can send a CALL of its own (the StatusNotification of the connector it
+    // moves), which pumps too.
+    while (!this._serialInFlight && this._serialQueue.length > 0) {
+      const head = this._serialQueue.shift()!;
+      if (
+        this.discardOutlivedStartResend(head) ||
+        this.discardResendPastLimit(head)
+      ) {
         continue;
       }
       if (!this.isCallAllowed(head.action)) {
         // Boot gate currently blocks this action — leave it at the front
         // of the queue. `setBootStatus` re-pumps us when the gate opens.
+        this._serialQueue.unshift(head);
         return;
       }
-      this._serialQueue.shift();
       this._requests.add({
         type: OCPPMessageType.CALL,
         action: head.action,
@@ -1223,28 +1224,20 @@ export class OCPPMessageHandler {
    * Re-attempt delivery of every queued transaction-related message.
    * Called from `ChargePoint.connect`'s onopen handler after a successful
    * BootNotification round-trip. A message resent after a CALLERROR before
-   * it was queued goes on with its count (#527, §3.7.1): one that already
-   * met `TransactionMessageAttempts`, lowered while it waited, is discarded
-   * instead of sent. A message never transmitted always goes out.
+   * it was queued goes on with its count (#527, §3.7.1), which
+   * `onTransactionMessageCallError` and `discardResendPastLimit` hold to
+   * `TransactionMessageAttempts`.
    */
   public flushPendingQueue(): void {
     if (this._pendingQueue.size() === 0) return;
-    const maxAttempts = Math.max(
-      1,
-      this._chargePoint.configuration.transactionMessageAttempts(),
-    );
-    let discarded = 0;
+    const maxAttempts =
+      this._chargePoint.configuration.transactionMessageAttempts();
     // Route flushed messages through `sendRequest` so they take the same
     // §4.1.1 serialization path as fresh CALLs. The PendingMessageQueue's
     // `flush` callback returns true for every entry (we're handing
     // delivery to the serializer); it'll re-enqueue on actual send
     // failure via the path in `pumpSerialQueue` below.
-    const flushed = this._pendingQueue.flush((message) => {
-      if (message.attempts >= maxAttempts) {
-        this.discardReplayPastLimit(message);
-        discarded += 1;
-        return true;
-      }
+    const delivered = this._pendingQueue.flush((message) => {
       const messageId = this.generateMessageId();
       this.sendRequest(
         message.action,
@@ -1256,7 +1249,6 @@ export class OCPPMessageHandler {
       );
       return true;
     }, maxAttempts);
-    const delivered = flushed - discarded;
     if (delivered > 0) {
       this._logger.info(
         `Flushed ${delivered} queued transaction message(s)`,
@@ -1576,8 +1568,8 @@ export class OCPPMessageHandler {
    * MeterValues.req can overtake the StartTransaction.req being retried, and
    * a StopTransaction.req goes out ahead of it with the `0` placeholder, then
    * discards it (#565). Both settings are read here, so a ChangeConfiguration
-   * applies to the next failure, and `flushPendingQueue` applies the limit to
-   * a replay. A resend already waiting goes out once.
+   * applies to the next failure; `discardResendPastLimit` applies the limit
+   * to a resend already waiting too.
    */
   private onTransactionMessageCallError(
     request: OCPPRequest,
@@ -1705,39 +1697,48 @@ export class OCPPMessageHandler {
   }
 
   /**
-   * #527, §3.7.1: this message already met as many failures as
-   * `TransactionMessageAttempts` allows, a limit lowered while it waited in
-   * the offline queue. It ends as after a last attempt, except that its last
-   * error is not persisted.
+   * #527, §3.7.1 resends a message only until it "encountered as many
+   * failures" as `TransactionMessageAttempts`. This resend already did, the
+   * limit having been lowered while it waited: on its interval, in the serial
+   * queue or in the offline queue. It ends as after a last attempt, and a
+   * replay carries no last error, which is not persisted. A first
+   * transmission (no `attempt` above 1) always goes out.
    */
-  private discardReplayPastLimit(message: PendingMessage): void {
-    const connectorId = requestConnectorId(message);
-    const { transactionId } = message.payload as { transactionId?: number };
+  private discardResendPastLimit(entry: SerialEntry): boolean {
+    const attempt = entry.attempt ?? 1;
+    if (attempt <= 1) return false;
+    const limit = Math.max(
+      1,
+      this._chargePoint.configuration.transactionMessageAttempts(),
+    );
+    if (attempt <= limit) return false;
+    const attempts = attempt - 1;
+    const connectorId = requestConnectorId(entry);
+    const { transactionId } = entry.payload as { transactionId?: number };
     const report = {
       connectorId,
       // StartTransaction.req has no id yet: the 1.6 placeholder stands in.
       transactionId: String(transactionId ?? 0),
-      action: message.action as
+      action: entry.action as
         "StartTransaction" | "StopTransaction" | "MeterValues",
       reason: "callError" as const,
     };
     this._logger.warn(
-      `${message.action} of transaction ${report.transactionId} discarded after ${message.attempts} attempt(s): TransactionMessageAttempts is now lower`,
+      `${entry.action} of transaction ${report.transactionId} discarded after ${attempts} attempt(s): TransactionMessageAttempts is now ${limit}`,
       LogType.TRANSACTION,
     );
     this._chargePoint.notifyTransactionMessageDiscarded({
       ...report,
-      attempts: message.attempts,
+      ...(entry.lastErrorCode !== undefined && {
+        errorCode: entry.lastErrorCode,
+      }),
+      attempts,
     });
-    if (
-      message.action === OCPPAction.StartTransaction &&
-      isRunningTransactionStartedBy(
-        this._chargePoint.getConnector(connectorId)?.transaction,
-        message.payload as StartTransactionRequestV16,
-      )
-    ) {
+    // `discardOutlivedStartResend` ran first: this Start's transaction runs.
+    if (entry.action === OCPPAction.StartTransaction) {
       this.proceedWithoutStartConf(connectorId);
     }
+    return true;
   }
 
   /** #527: the StartTransaction.req was discarded; the transaction it

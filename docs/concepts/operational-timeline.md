@@ -149,7 +149,7 @@ code; it is `timeout` when no answer came within
 `errorCode`. On `transaction_message_discarded` they describe the last
 failure. On 1.6 that entry also reports, with no last attempt failing, a
 StartTransaction.req resend dropped because its transaction no longer runs, and
-a replay that already met a lowered `TransactionMessageAttempts` (#527):
+a resend or replay that already met a lowered `TransactionMessageAttempts` (#527):
 `attempts` counts the transmissions made, and `errorCode` is absent when it was
 dropped at a replay from the offline queue, since `pending_messages` does not
 store it; the summary then says `error code not recorded`. A CALLERROR answering

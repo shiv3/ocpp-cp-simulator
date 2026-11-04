@@ -345,6 +345,40 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
     }
   });
 
+  it("a limit lowered while the resend waits discards it once, then the connector's StatusNotification goes out", async () => {
+    const s = await station("CP16-527-LIMIT", ["StartTransaction"]);
+    try {
+      s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
+      void s.cp.startTransaction("TAG-527", 1);
+      const statusesBefore = callsOf(s.csms, "StatusNotification").length;
+      callError(s.csms, await nthCall(s.csms, "StartTransaction", 1));
+      await until(() => s.rejected.length === 1, "the rejection");
+
+      s.cp.configuration.applyChange("TransactionMessageAttempts", "1");
+      await until(() => s.discarded.length > 0, "the discard");
+      await drainWire(s.cp, s.csms);
+
+      expect(callsOf(s.csms, "StartTransaction")).toHaveLength(1);
+      expect(s.discarded).toEqual([
+        {
+          connectorId: 1,
+          transactionId: "0",
+          action: "StartTransaction",
+          reason: "callError",
+          errorCode: "InternalError",
+          attempts: 1,
+        },
+      ]);
+      expect(s.cp.getConnector(1)?.status).toBe(OCPPStatus.Charging);
+      const charging = callsOf(s.csms, "StatusNotification")
+        .slice(statusesBefore)
+        .filter((f) => (f[3] as { status?: string }).status === "Charging");
+      expect(charging).toHaveLength(1);
+    } finally {
+      await s.stop();
+    }
+  });
+
   it("resends StopTransaction, then discards it", async () => {
     const s = await station("CP16-527-STOPTX", [
       "StartTransaction",

@@ -222,7 +222,7 @@ export interface ChargePointEvents {
    *  dropped: `MessageAttempts[TransactionEvent]` on 2.x (E13.FR.04), the
    *  1.6 `TransactionMessageAttempts` (#527, §3.7.1). `reason` and
    *  `errorCode` describe that last failure. On 1.6 a StartTransaction whose
-   *  transaction no longer runs, or a replay that already met a lowered limit,
+   *  transaction no longer runs, or a resend that already met a lowered limit,
    *  is dropped with no last attempt failing, and a replay has no `errorCode`:
    *  the offline queue does not store it. The transaction stays as it is,
    *  running or ended. */

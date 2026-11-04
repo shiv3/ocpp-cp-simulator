@@ -334,8 +334,8 @@ other two. Now it:
 A CALLRESULT ends the retries, and an answer to a resend goes through the
 normal StartTransaction.conf handling (`transactionId`, `idTagInfo`). Both
 keys are read at each CALLERROR, so a ChangeConfiguration applies to the
-next one, and the attempts key at a replay too (below); an attempts value
-below 1 counts as 1, a negative interval as 0.
+next one, and the attempts key also before each resend or replay (below); an
+attempts value below 1 counts as 1, a negative interval as 0.
 
 StartTransaction.req carries no transaction id: its events report the
 placeholder `transactionId` `"0"`. Once it is discarded the transaction
@@ -396,13 +396,12 @@ BootNotification answered `Pending`, e.g. after a TriggerMessage). That
 replay keeps its count, since §3.7.1 counts failures "for this message": it
 is stored in `pending_messages.attempts`, survives a restart, and the message
 is discarded after `TransactionMessageAttempts` transmissions however often
-the link drops. A replay that already met the limit, lowered while it waited,
-is not sent: it is discarded with `transactionMessageDiscarded` (no
-`errorCode`, the queue does not store it), and a StartTransaction.req whose
-transaction still runs ends as after a last attempt. A resend waiting out its
-interval or the serial queue when the limit drops still goes out once. A row
-stored by an older release holds `0` and replays as a first transmission, as
-does any message never transmitted, whatever the limit. The replay goes out
+the link drops. A resend or replay that already met the limit, lowered while
+it waited, is not sent: it is discarded with `transactionMessageDiscarded` (a
+replay has no `errorCode`, the queue does not store it), and a
+StartTransaction.req whose transaction still runs ends as after a last attempt.
+A row stored by an older release holds `0` and replays as a first transmission,
+as does any message never transmitted, whatever the limit. The replay goes out
 right after the boot, without waiting out what was left of the retry interval.
 
 A CALLERROR for a transmission that already timed out (the 30 s §4.1.1

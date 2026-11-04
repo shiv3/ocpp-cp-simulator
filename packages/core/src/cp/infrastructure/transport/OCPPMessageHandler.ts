@@ -245,6 +245,20 @@ function isRetriedOnCallError(entry: SerialEntry): boolean {
   );
 }
 
+/**
+ * The connector a StartTransaction.req, StopTransaction.req or MeterValues.req
+ * concerns, for both its CALLRESULT and its CALLERROR: the one it was sent
+ * for, else the one its payload names (a row of the offline queue can have no
+ * `connector_id`), else 1.
+ */
+function requestConnectorId(request: {
+  connectorId?: number | null;
+  payload: unknown;
+}): number {
+  const { connectorId } = request.payload as { connectorId?: number };
+  return request.connectorId ?? connectorId ?? 1;
+}
+
 class RequestHistory {
   private _currentId: string = "";
   private _requests: Map<string, OCPPRequest> = new Map();
@@ -1421,7 +1435,7 @@ export class OCPPMessageHandler {
       if (action === OCPPAction.StartTransaction) {
         const start = request.payload as StartTransactionRequestV16;
         handler = new StartTransactionResultHandler(
-          request.connectorId || 1,
+          requestConnectorId(request),
           start.idTag,
           // #527: the station's own StartTransaction.req (it carries an
           // attempt) answers for its transaction only. An expert call with
@@ -1430,7 +1444,7 @@ export class OCPPMessageHandler {
         );
       } else if (action === OCPPAction.StopTransaction) {
         handler = new StopTransactionResultHandler(
-          request.connectorId || 1,
+          requestConnectorId(request),
           (request.payload as StopTransactionRequestV16).idTag,
         );
       } else if (action === OCPPAction.MeterValues) {
@@ -1555,11 +1569,8 @@ export class OCPPMessageHandler {
     errorCode: string,
   ): void {
     const attempt = request.attempt ?? 1;
-    const payload = request.payload as {
-      connectorId?: number;
-      transactionId?: number;
-    };
-    const connectorId = request.connectorId ?? payload.connectorId ?? 0;
+    const payload = request.payload as { transactionId?: number };
+    const connectorId = requestConnectorId(request);
     const report = {
       connectorId,
       // StartTransaction.req has no id yet: the 1.6 placeholder stands in.
@@ -1649,9 +1660,9 @@ export class OCPPMessageHandler {
     if (entry.action !== OCPPAction.StartTransaction) return false;
     const attempt = entry.attempt ?? 1;
     if (attempt <= 1) return false;
-    const start = entry.payload as StartTransactionRequestV16;
-    const connectorId = entry.connectorId ?? start.connectorId;
+    const connectorId = requestConnectorId(entry);
     const connector = this._chargePoint.getConnector(connectorId);
+    const start = entry.payload as StartTransactionRequestV16;
     if (isRunningTransactionStartedBy(connector?.transaction, start)) {
       return false;
     }

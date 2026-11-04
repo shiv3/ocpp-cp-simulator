@@ -67,10 +67,14 @@ function runningTransaction(): Transaction {
   } as Transaction;
 }
 
-function station(db: BunSqliteDatabase, restored: Transaction | null) {
+function station(
+  db: BunSqliteDatabase,
+  restored: Transaction | null,
+  connectorId = 1,
+) {
   const socket = new FakeSocket();
   const connector = {
-    id: 1,
+    id: connectorId,
     status: OCPPStatus.Charging,
     transaction: restored,
     transactionId: undefined as number | undefined,
@@ -81,8 +85,8 @@ function station(db: BunSqliteDatabase, restored: Transaction | null) {
   const cp = {
     id: "CP-527",
     database: db,
-    connectors: new Map([[1, connector]]),
-    getConnector: () => connector,
+    connectors: new Map([[connectorId, connector]]),
+    getConnector: (id: number) => (id === connectorId ? connector : undefined),
     notifyOutgoingCall() {},
     recordAuthorizationResult() {},
     signedMeterFor: () => null,
@@ -136,6 +140,106 @@ function attemptsStored(db: BunSqliteDatabase): number[] {
     ])
     .map((row) => row.attempts);
 }
+
+/** A row with no `connector_id`, whatever stored it. */
+function storedStart(
+  db: BunSqliteDatabase,
+  payload: Record<string, unknown>,
+): void {
+  db.run(
+    "INSERT INTO pending_messages " +
+      "(cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      "CP-527",
+      "row-1",
+      "StartTransaction",
+      null,
+      JSON.stringify({
+        idTag: "TAG-527",
+        meterStart: 0,
+        timestamp: "2026-10-30T10:00:00.000Z",
+        ...payload,
+      }),
+      0,
+      "2026-10-30T10:00:00.000Z",
+      1,
+    ],
+  );
+}
+
+const ACCEPTED = { transactionId: 527, idTagInfo: { status: "Accepted" } };
+
+describe("OCPP 1.6 connector of a StartTransaction.req answer (#527)", () => {
+  it("a CALLRESULT for a row without connector_id goes to the payload's connector", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      storedStart(db, { connectorId: 2 });
+      const s = station(db, runningTransaction(), 2);
+      s.handler.flushPendingQueue();
+      s.socket.callResult(s.socket.last().id, ACCEPTED);
+      expect(s.connector.transactionId).toBe(527);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("a CALLERROR for a row without connector_id goes to the payload's connector", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      storedStart(db, { connectorId: 2 });
+      const s = station(db, runningTransaction(), 2);
+      s.handler.flushPendingQueue();
+      s.socket.callError(s.socket.last().id);
+      expect(s.rejected).toMatchObject([{ connectorId: 2, attempt: 1 }]);
+      expect(s.discarded).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("with no connector anywhere, a CALLRESULT and a CALLERROR both go to connector 1", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      storedStart(db, {});
+      const result = station(db, runningTransaction());
+      result.handler.flushPendingQueue();
+      result.socket.callResult(result.socket.last().id, ACCEPTED);
+      expect(result.connector.transactionId).toBe(527);
+
+      storedStart(db, {});
+      const error = station(db, runningTransaction());
+      error.handler.flushPendingQueue();
+      error.socket.callError(error.socket.last().id);
+      expect(error.rejected).toMatchObject([{ connectorId: 1, attempt: 1 }]);
+      expect(error.discarded).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("an expert StartTransaction on connector 0 with applyResponse leaves connector 1 alone", async () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const s = station(db, runningTransaction());
+      const answer = s.handler.sendOcppCall({
+        action: "StartTransaction",
+        payload: {
+          connectorId: 0,
+          idTag: "TAG-527",
+          meterStart: 0,
+          timestamp: "2026-10-30T10:00:00.000Z",
+        },
+        applyResponse: true,
+      });
+      s.socket.callResult(s.socket.last().id, ACCEPTED);
+      await answer;
+      expect(s.connector.transactionId).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+});
 
 describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
   it("a salvaged resend keeps its count: the replay is its second transmission", () => {

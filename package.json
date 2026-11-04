@@ -25,24 +25,16 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "ocpp-cp-sim": "src/cli/main.ts"
+    "ocpp-cp-sim": "dist-cli/main.js"
   },
   "files": [
-    "src/cli",
-    "src/cp",
-    "src/data",
-    "src/ocpp",
-    "src/protocol",
-    "src/scenario",
-    "src/trace",
-    "src/utils",
-    "schema",
-    "vendor",
-    "dist"
+    "dist",
+    "dist-cli"
   ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:cli": "bun build --target=bun --outfile=dist-cli/main.js src/cli/main.ts",
     "test": "vitest run && bun test bun.test",
     "test:vitest": "vitest run",
     "test:bun": "bun test bun.test",
@@ -57,14 +49,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky || true",
-    "prepack": "vite build",
-    "postinstall": "node -e \"try{require('fs').chmodSync('src/cli/main.ts',0o755)}catch(e){}\"",
+    "prepack": "vite build && bun run build:cli",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "cli": "bun src/cli/main.ts",
     "fetch:ocpp": "bash scripts/fetch-ocpp-schemas.sh",
-    "gen:ocpp": "bun run scripts/generate-ocpp.ts"
+    "gen:ocpp": "bun run scripts/generate-ocpp.ts",
+    "gen:k6-runtime": "bun run scripts/generate-k6-runtime.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

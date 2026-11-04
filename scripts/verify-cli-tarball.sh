@@ -13,10 +13,11 @@
 # Usage:
 #   scripts/verify-cli-tarball.sh [--expect-dist] [path/to/ocpp-cp-simulator-<version>.tgz]
 #
-# With no tarball argument it packs one itself (`npm pack --ignore-scripts`, so
-# the `prepack` vite build is skipped and whatever `dist/` is on disk — possibly
-# none — is used as-is). `dist/` is only needed by `--web-console`, so CI can
-# call this without paying for a UI build.
+# With no tarball argument it builds the CLI bundle (`bun run build:cli`, the
+# `bin` the tarball ships) and packs one itself (`npm pack --ignore-scripts`,
+# so the `prepack` vite build is skipped and whatever `dist/` is on disk —
+# possibly none — is used as-is). `dist/` is only needed by `--web-console`,
+# so CI can call this without paying for a UI build.
 #
 # --expect-dist makes the bundled web console mandatory instead of
 # best-effort: the release workflow builds `dist/` before packing, so a
@@ -57,6 +58,9 @@ for arg in "$@"; do
 done
 
 if [ -z "$TARBALL" ]; then
+  echo "==> building the CLI bundle (bun run build:cli)"
+  ( cd "$REPO_ROOT" && bun run build:cli ) > "$SCRATCH/build-cli.log" 2>&1
+  [ $? -eq 0 ] || fail "bun run build:cli" "$SCRATCH/build-cli.log"
   echo "==> packing (npm pack --ignore-scripts)"
   # Capture stdout only: npm prints the tarball name there. --ignore-scripts
   # keeps `prepack`'s vite log out of that capture. --pack-destination keeps
@@ -85,11 +89,17 @@ BIN="$BUN_INSTALL/bin/ocpp-cp-sim"
 [ -x "$BIN" ] || fail "installed bin missing or not executable: $BIN" "$SCRATCH/install.log"
 PKG_DIR="$BUN_INSTALL/install/global/node_modules/ocpp-cp-simulator"
 [ -d "$PKG_DIR" ] || fail "installed package dir missing: $PKG_DIR" "$SCRATCH/install.log"
+# The package is the bundle plus dist/; no source tree (#578). A src/ in the
+# tarball means `files` regressed to shipping sources, and anything that only
+# works because of it would hide behind this script's own checks.
+[ -f "$PKG_DIR/dist-cli/main.js" ] || fail "installed package has no dist-cli/main.js (is \"dist-cli\" in package.json#files, and was build:cli run?)" "$SCRATCH/install.log"
+[ ! -e "$PKG_DIR/src" ] || fail "installed package ships src/ — the tarball must carry only the bundle and dist/" "$SCRATCH/install.log"
 
 # ---------------------------------------------------------------------------
-# Stage A — the binary starts at all. This is what caught #320: main.ts's
-# static import of ../data/... is resolved before any argument is parsed, so a
-# missing top-level source directory kills even `--help`.
+# Stage A — the binary starts at all. This is what caught #320, when the
+# tarball shipped sources and main.ts's static import of ../data/... was
+# resolved before any argument was parsed; with the bundle it is the check
+# that `bin` points at a file the tarball has and that bun runs it.
 # (There is no --version flag; --help is the cheapest full-boot smoke.)
 # ---------------------------------------------------------------------------
 echo "==> [A] ocpp-cp-sim --help"
@@ -98,17 +108,16 @@ echo "==> [A] ocpp-cp-sim --help"
 grep -q "Usage: ocpp-cp-sim" "$SCRATCH/help.log" || fail "--help printed no usage banner" "$SCRATCH/help.log"
 
 # ---------------------------------------------------------------------------
-# Stage B — the WHOLE import graph of the installed tree resolves. Same
-# argument ci.yml already makes for the sidecar smoke: `bun build --compile`
-# is the only thing that resolves every import, including type-only ones the
-# runtime elides and modules no single run reaches. Pointing it at the
-# installed copy rather than the checkout is what makes it a packaging check:
-# it fails if `files` omits any directory anything imports, whether or not a
-# smoke-test code path happens to touch it.
+# Stage B — the installed bundle is self-contained: `bun build --compile`
+# over it resolves every import it still makes. The bundle inlines the
+# repository's modules, so what is left are external packages; a bare
+# specifier the bundle kept (an `--external`, or a dependency `bun build`
+# could not inline) must resolve from the installed package's own
+# node_modules, or the published CLI fails on that import.
 # ---------------------------------------------------------------------------
 echo "==> [B] bun build --compile (from the installed tree)"
-bun build --compile "$PKG_DIR/src/cli/main.ts" --outfile "$SCRATCH/compiled" > "$SCRATCH/compile.log" 2>&1
-[ $? -eq 0 ] || fail "the installed package's import graph does not resolve" "$SCRATCH/compile.log"
+bun build --compile "$PKG_DIR/dist-cli/main.js" --outfile "$SCRATCH/compiled" > "$SCRATCH/compile.log" 2>&1
+[ $? -eq 0 ] || fail "the installed bundle's import graph does not resolve" "$SCRATCH/compile.log"
 
 # ---------------------------------------------------------------------------
 # Stage C — it serves. Boots the daemon WITH a charge point, because creating
@@ -145,6 +154,20 @@ wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 
 # ---------------------------------------------------------------------------
+# Stage C2 — export-k6 writes its runtime. The runtime used to be copied from
+# src/cli/exportK6/runtime/ beside the running module, which a bundle does not
+# have; it is embedded now (runtimeSources.ts). Run from the installed tree,
+# this is the check that the embedded copy reaches the export.
+# ---------------------------------------------------------------------------
+echo "==> [C2] export-k6 from the installed tree"
+"$BIN" export-k6 --scenario "$REPO_ROOT/docs/examples/scenarios/demo-charging.json" \
+  --out "$SCRATCH/k6-export" > "$SCRATCH/export-k6.log" 2>&1
+[ $? -eq 0 ] || fail "'ocpp-cp-sim export-k6' exited non-zero" "$SCRATCH/export-k6.log"
+for f in scenario.k6.ts ocpp-runtime/index.ts ocpp-runtime/wire/v16.ts; do
+  [ -f "$SCRATCH/k6-export/$f" ] || fail "export-k6 wrote no $f" "$SCRATCH/export-k6.log"
+done
+
+# ---------------------------------------------------------------------------
 # Stage D — the bundled web console, but ONLY when the tarball actually ships
 # one. `dist/` is built by the `prepack` vite build, which the release workflow
 # runs and which CI (calling this after a plain `npm pack --ignore-scripts`)
@@ -173,10 +196,10 @@ if [ -f "$PKG_DIR/dist/index.html" ]; then
   kill "$DAEMON_PID" 2>/dev/null
   wait "$DAEMON_PID" 2>/dev/null
   DAEMON_PID=""
-  echo "==> CLI tarball verification passed (help + import graph + daemon healthz + web console)"
+  echo "==> CLI tarball verification passed (help + import graph + daemon healthz + export-k6 + web console)"
 elif [ "$EXPECT_DIST" = 1 ]; then
   fail "--expect-dist was requested but the tarball ships no dist/index.html (is \"dist\" still in package.json#files?)" "$SCRATCH/install.log"
 else
   echo "==> [D] skipped: tarball ships no dist/ (packed without the prepack vite build)"
-  echo "==> CLI tarball verification passed (help + import graph + daemon healthz)"
+  echo "==> CLI tarball verification passed (help + import graph + daemon healthz + export-k6)"
 fi

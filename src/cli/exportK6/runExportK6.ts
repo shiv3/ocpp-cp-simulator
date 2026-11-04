@@ -1,11 +1,11 @@
 // src/cli/exportK6/runExportK6.ts
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { SUPPORTED_ASSERTION_TYPES } from "./runtime/assertions";
 import type { ScenarioJson, ScenarioNodeJson } from "./runtime/types";
 import { RUNTIME_FILES } from "./runtimeManifest";
+import { RUNTIME_SOURCES } from "./runtimeSources";
 import {
   renderEntryScript,
   renderIdsExample,
@@ -105,18 +105,15 @@ export async function runExportK6(args: ExportK6Args): Promise<number> {
     }
   }
 
-  const runtimeSrc = path.dirname(
-    fileURLToPath(new URL("./runtime/index.ts", import.meta.url)),
-  );
   try {
-    fs.mkdirSync(path.join(outDir, "ocpp-runtime", "wire"), {
-      recursive: true,
-    });
+    // The runtime is embedded (runtimeSources.ts, generated from runtime/)
+    // rather than copied from beside this module: the published CLI is a
+    // single-file bundle and the desktop sidecar a compiled binary, and
+    // neither has the runtime's .ts files on disk.
     for (const file of RUNTIME_FILES) {
-      fs.copyFileSync(
-        path.join(runtimeSrc, file),
-        path.join(outDir, "ocpp-runtime", file),
-      );
+      const target = path.join(outDir, "ocpp-runtime", file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, RUNTIME_SOURCES[file]);
     }
     fs.writeFileSync(
       path.join(outDir, "scenario.json"),

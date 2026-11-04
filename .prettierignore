@@ -3,6 +3,7 @@ node_modules/
 
 # Production build
 dist/
+dist-cli/
 build/
 
 # Environment files

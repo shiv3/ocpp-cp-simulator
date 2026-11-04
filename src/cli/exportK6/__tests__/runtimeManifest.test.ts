@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { K6_ONLY_FILES, RUNTIME_FILES } from "../runtimeManifest";
+import { RUNTIME_SOURCES } from "../runtimeSources";
 
 const runtimeDir = fileURLToPath(new URL("../runtime", import.meta.url));
 
@@ -29,6 +30,20 @@ describe("runtime manifest", () => {
         importsK6,
         `${file} ${K6_ONLY_FILES.includes(file) ? "may" : "must not"} import k6/*`,
       ).toBe(K6_ONLY_FILES.includes(file));
+    }
+  });
+
+  // runtimeSources.ts is generated (`bun run gen:k6-runtime`) and committed:
+  // the bundle and the sidecar carry it instead of the runtime/ directory, so
+  // a runtime change without regeneration must fail here, not in an export.
+  it("embeds every runtime file as it is on disk (bun run gen:k6-runtime)", () => {
+    expect(Object.keys(RUNTIME_SOURCES).sort()).toEqual(
+      [...RUNTIME_FILES].sort(),
+    );
+    for (const file of RUNTIME_FILES) {
+      expect(RUNTIME_SOURCES[file], file).toBe(
+        readFileSync(join(runtimeDir, file), "utf8"),
+      );
     }
   });
 

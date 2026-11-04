@@ -91,15 +91,22 @@ jobs:
       - name: Build web console (vite)
         run: bun run build
 
+      # The tarball ships the CLI as one `bun build` bundle (dist-cli/main.js,
+      # the `bin`), not as sources: a published package must not depend on
+      # the source layout (#578). `npm pack --ignore-scripts` below skips the
+      # `prepack` hook that would otherwise run this.
+      - name: Build CLI bundle
+        run: bun run build:cli
+
       - name: Pack tarball
         id: pack
         run: |
-          # `npm pack` reads the `files` field of package.json, which lists
-          # `dist` plus every src/ directory (and `vendor/`, `schema/`) the
-          # CLI imports. --ignore-scripts skips the `prepack` hook (vite build) — we
-          # already built dist/ in the previous step, and letting prepack
-          # run again pollutes the captured stdout with vite's build log,
-          # which breaks the $TARBALL capture below.
+          # `npm pack` reads the `files` field of package.json: `dist` (the
+          # web console) and `dist-cli` (the CLI bundle). --ignore-scripts
+          # skips the `prepack` hook (vite build + CLI bundle) — both were
+          # built in the previous steps, and letting prepack run again
+          # pollutes the captured stdout with vite's build log, which breaks
+          # the $TARBALL capture below.
           TARBALL=$(npm pack --silent --ignore-scripts)
           # Also publish under a stable filename so consumers can fetch
           # `releases/download/cli-latest/ocpp-cp-simulator.tgz` and always

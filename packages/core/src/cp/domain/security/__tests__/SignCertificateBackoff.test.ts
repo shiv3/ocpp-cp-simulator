@@ -116,6 +116,48 @@ describe("SignCertificateBackoff", () => {
     expect(resend).not.toHaveBeenCalled();
   });
 
+  describe("CertSigningRepeatTimes lowered during a wait (A02.FR.19)", () => {
+    const use = "ChargingStationCertificate";
+    const lowerable = () => {
+      const settings = { waitMinimumSeconds: 10, repeatTimes: 3 };
+      const resend = vi.fn<(u: SignedCertificateUse) => void>();
+      const backoff = new SignCertificateBackoff({
+        settings: () => settings,
+        isPending: () => true,
+        resend,
+      });
+      return { backoff, resend, settings };
+    };
+
+    it("sends nothing once the new limit is 0", () => {
+      const { backoff, resend, settings } = lowerable();
+      backoff.accepted(use);
+      settings.repeatTimes = 0;
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(resend).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing past a limit the resends already reached", () => {
+      const { backoff, resend, settings } = lowerable();
+      backoff.accepted(use);
+      vi.advanceTimersByTime(10_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+      settings.repeatTimes = 1;
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the sequence, so a late Accepted does not start it over", () => {
+      const { backoff, resend, settings } = lowerable();
+      backoff.accepted(use);
+      settings.repeatTimes = 0;
+      vi.advanceTimersByTime(10_000);
+      backoff.accepted(use);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(resend).not.toHaveBeenCalled();
+    });
+  });
+
   it("stops once the CSR is no longer pending (CertificateSigned accepted)", () => {
     const { backoff, resend, pending } = setup();
     backoff.accepted("ChargingStationCertificate");

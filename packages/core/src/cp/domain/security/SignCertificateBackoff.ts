@@ -139,6 +139,9 @@ export class SignCertificateBackoff {
       this.stop(use);
       return;
     }
+    // A02.FR.19, the limit lowered during this wait. The sequence stays, so
+    // an answer still to come does not start it over.
+    if (sequence.resends >= this.deps.settings().repeatTimes) return;
     sequence.resends++;
     this.deps.resend(use);
     // A02.FR.18: the doubled wait starts now, whatever the answer.

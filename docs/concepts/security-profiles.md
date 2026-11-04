@@ -395,7 +395,9 @@ CALLERROR.
   A wait longer than a timer can hold (about 24.8 days) is waited out in
   full. A resend answered with a CALLERROR, or not at all, does not hold the
   sequence back. After `CertSigningRepeatTimes` resends it stops until a
-  `TriggerMessage` starts over (A02.FR.19). One sequence runs per
+  `TriggerMessage` starts over (A02.FR.19). The limit is read at each
+  expiry: lowered to the resends already sent or below, no further one goes
+  out. One sequence runs per
   certificate use. It ends on an `Accepted` `CertificateSigned` for that use
   and on a non-`Accepted` answer to the current `SignCertificate` request.
   A chain rejected for any reason (over `MaxCertificateChainSize`,

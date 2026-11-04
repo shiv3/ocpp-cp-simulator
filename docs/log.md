@@ -2262,3 +2262,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-04] ingest | Certificate follow-ups, CodeRabbit review on the discard change (#537)
 
 - `sign_certificate` with a given CSR that does not parse: still sent with a WARN, but once, and it no longer restarts the back-off or replaces what the back-off resends, so a CSR already pending keeps both. Its answer is logged at INFO and otherwise ignored. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
+- SignCertificate back-off: `CertSigningRepeatTimes` is checked before a resend, so a limit lowered during a wait sends no resend above it. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).

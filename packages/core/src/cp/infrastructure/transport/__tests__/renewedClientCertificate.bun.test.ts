@@ -284,36 +284,32 @@ describe.skipIf(!canBindBunServe())(
         // attempt presents the configured one and gets in.
         await waitUntil(() => operatorOnly.openCount() === 2, 8_000);
         expect(logs.some((line) => line.includes("(A02.FR.28)"))).toBe(true);
-        // The server's open comes first: the station may not have seen its
-        // own yet.
-        await waitUntil(
-          () => logs.some((line) => line.includes("once more")),
-          8_000,
-        );
-        expect(logs.some((line) => line.includes("(A02.FR.10)"))).toBe(false);
-
-        // Once that connection has booted, the renewed certificate gets one
-        // more attempt, refused too; the configured one gets in again.
+        // That connection's boot shows the station has seen its own open.
         await bootOn(operatorOnly, fallbackFrames);
-        const retryFrames = operatorOnly.received.length;
-        await waitUntil(() => operatorOnly.openCount() === 3, 12_000);
-        await waitUntil(
-          () => logs.some((line) => line.includes("(A02.FR.10)")),
-          8_000,
-        );
-        await bootOn(operatorOnly, retryFrames);
 
-        // Discarded: exactly one extra reconnect.
+        // Discarded at once: the switch's reconnect stays the only one.
+        // A refused handshake never counts as an open, so count the reconnect.
         await Bun.sleep(1_500);
-        expect(operatorOnly.openCount()).toBe(3);
-        const discardEvents = operatorOnly.received.filter(
-          (frame) =>
-            frame[2] === "SecurityEventNotification" &&
-            (frame[3] as { type?: string }).type ===
-              "DiscardedRenewedClientCertificate",
+        expect(
+          logs.filter((line) => line.includes("Reconnecting with the renewed")),
+        ).toHaveLength(1);
+        expect(logs.some((line) => line.includes("(A02.FR.10)"))).toBe(true);
+        expect(operatorOnly.openCount()).toBe(2);
+
+        // A02.FR.29 is 2.1's: 2.0.1 does not define the event type.
+        const discardEvents = () =>
+          operatorOnly.received.filter(
+            (frame) =>
+              frame[2] === "SecurityEventNotification" &&
+              (frame[3] as { type?: string }).type ===
+                "DiscardedRenewedClientCertificate",
+          );
+        await waitUntil(
+          () => version !== "OCPP-2.1" || discardEvents().length > 0,
+          5_000,
         );
-        expect(discardEvents).toHaveLength(version === "OCPP-2.1" ? 1 : 0);
-      }, 30_000);
+        expect(discardEvents()).toHaveLength(version === "OCPP-2.1" ? 1 : 0);
+      }, 20_000);
 
       it("reconnects once the pending TransactionEvent is answered", async () => {
         const certs = await pki();

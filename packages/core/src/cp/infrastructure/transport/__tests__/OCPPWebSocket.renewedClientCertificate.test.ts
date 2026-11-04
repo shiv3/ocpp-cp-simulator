@@ -126,12 +126,6 @@ describe("OCPPWebSocket renewed client certificate (#537)", () => {
     lastSocket().open();
   }
 
-  /** What `ChargePoint.reset()` does to the transport. */
-  function reconnectForRetry(): void {
-    ws.disconnectInternal();
-    ws.connect();
-  }
-
   /** Lets the reconnect back-off run and returns the next attempt's cert. */
   function nextAttempt(): string | undefined {
     const before = attempts.length;
@@ -172,13 +166,6 @@ describe("OCPPWebSocket renewed client certificate (#537)", () => {
     ws.useRenewedClientCertificate(SECOND);
     ws.disconnectInternal();
     ws.connect();
-    lastSocket().fail();
-    expect(nextAttempt()).toBe(FIRST.cert);
-    lastSocket().open();
-    expect(discarded).toBe(0);
-    // SECOND's one further attempt fails too.
-    reconnectForRetry();
-    expect(presented(attempts[attempts.length - 1])).toBe(SECOND.cert);
     lastSocket().fail();
     expect(nextAttempt()).toBe(FIRST.cert);
     lastSocket().open();
@@ -254,149 +241,12 @@ describe("OCPPWebSocket renewed client certificate (#537)", () => {
     lastSocket().fail();
     expect(nextAttempt()).toBe(CONFIGURED.cert);
     lastSocket().open();
-    reconnectForRetry();
-    lastSocket().fail();
-    expect(nextAttempt()).toBe(CONFIGURED.cert);
-    lastSocket().open();
     expect(discarded).toBe(1);
 
     lastSocket().fail();
     expect(nextAttempt()).toBe(CONFIGURED.cert);
     lastSocket().open();
     expect(discarded).toBe(1);
-  });
-
-  // #537: a deliberate departure from 2.1 A02.FR.10. The previous
-  // certificate opening shows the CSMS is reachable, so a further failure
-  // of the renewed one means something; the first one may not have.
-  describe("the one further attempt once the previous certificate opened", () => {
-    /** Connected, then FIRST failed and the previous certificate opened. */
-    function fallBack(): void {
-      ws.connect();
-      lastSocket().open();
-      ws.useRenewedClientCertificate(FIRST);
-      ws.disconnectInternal();
-      ws.connect();
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      lastSocket().open();
-    }
-
-    it("does not discard the renewed certificate yet, and presents it next", () => {
-      fallBack();
-      expect(discarded).toBe(0);
-      expect(ws.renewedClientCertificateAwaitsAttempt()).toBe(true);
-
-      reconnectForRetry();
-      expect(presented(attempts[attempts.length - 1])).toBe(FIRST.cert);
-    });
-
-    it("leaves the reconnect to the caller", () => {
-      fallBack();
-      const before = attempts.length;
-      vi.advanceTimersByTime(10 * 60_000);
-      expect(attempts.length).toBe(before);
-    });
-
-    it("confirms the renewed certificate when that attempt opens", () => {
-      fallBack();
-      reconnectForRetry();
-      lastSocket().open();
-
-      expect(discarded).toBe(0);
-      expect(ws.renewedClientCertificateAwaitsAttempt()).toBe(false);
-      // Confirmed: a later failure no longer turns back to the previous one.
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(FIRST.cert);
-    });
-
-    it("discards it when that attempt fails too, with no attempt after that", () => {
-      fallBack();
-      reconnectForRetry();
-      lastSocket().fail();
-      expect(discarded).toBe(0);
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      expect(discarded).toBe(0);
-
-      lastSocket().open();
-      expect(discarded).toBe(1);
-      expect(ws.renewedClientCertificateAwaitsAttempt()).toBe(false);
-
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      expect(discarded).toBe(1);
-    });
-
-    it("uses that attempt on the next connection if the fallback one drops first", () => {
-      fallBack();
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(FIRST.cert);
-      expect(ws.renewedClientCertificateAwaitsAttempt()).toBe(true);
-
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      lastSocket().open();
-      expect(discarded).toBe(1);
-    });
-
-    it("does not count that attempt when it reaches no server", () => {
-      fallBack();
-      reconnectForRetry();
-      lastSocket().fail({ code: 1006, reason: "Failed to connect" });
-      expect(nextAttempt()).toBe(FIRST.cert);
-      lastSocket().open();
-      expect(discarded).toBe(0);
-    });
-
-    it("gives a newer renewal its own attempt", () => {
-      fallBack();
-      ws.useRenewedClientCertificate(SECOND);
-
-      reconnectForRetry();
-      expect(presented(attempts[attempts.length - 1])).toBe(SECOND.cert);
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      lastSocket().open();
-      expect(discarded).toBe(0);
-
-      reconnectForRetry();
-      expect(presented(attempts[attempts.length - 1])).toBe(SECOND.cert);
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      lastSocket().open();
-      expect(discarded).toBe(1);
-    });
-
-    it("presents the configured certificate once the identity is cleared", () => {
-      fallBack();
-      ws.clearRenewedClientCertificate();
-      expect(ws.renewedClientCertificateAwaitsAttempt()).toBe(false);
-
-      reconnectForRetry();
-      expect(presented(attempts[attempts.length - 1])).toBe(CONFIGURED.cert);
-      lastSocket().open();
-      expect(discarded).toBe(0);
-    });
-
-    it("keeps a renewal handed over while the previous certificate connects", () => {
-      ws.connect();
-      expect(presented(attempts[0])).toBe(CONFIGURED.cert);
-      ws.useRenewedClientCertificate(FIRST);
-      lastSocket().open();
-      expect(discarded).toBe(0);
-
-      reconnectForRetry();
-      expect(presented(attempts[attempts.length - 1])).toBe(FIRST.cert);
-      lastSocket().fail();
-      expect(nextAttempt()).toBe(CONFIGURED.cert);
-      lastSocket().open();
-      // Its own further attempt is still to come.
-      expect(discarded).toBe(0);
-      reconnectForRetry();
-      expect(presented(attempts[attempts.length - 1])).toBe(FIRST.cert);
-    });
   });
 
   it("does not report a discard when the renewed certificate connects", () => {

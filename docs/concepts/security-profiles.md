@@ -543,43 +543,19 @@ connected.
   certificate confirmed earlier, else `--tls-cert`. A02.FR.28 alternates
   once every `NetworkConfigurationPriority` entry has failed; the
   simulator alternates after each failed attempt, which is the same with
-  one URL but not with a list of supervision URLs.
-- If the previous certificate connects after the renewed one failed, the
-  renewed one gets exactly one more attempt before it is discarded (#537).
-  This deliberately departs from 2.1 A02.FR.10, which says the station SHALL
-  discard the certificate not in use once either one connected: the previous
-  certificate having opened shows the CSMS is reachable, so a further failure
-  of the renewed one is meaningful, where the first may have been a transient
-  one the station cannot tell apart. A fallback therefore costs one more full
-  reconnect, with its boot, as described above. The station leaves the
-  fallback connection's `BootNotification` alone and reconnects once that
-  boot is `Accepted`: it checks 500 ms later, then waits as a switch does, up
-  to 60 s, for the `TransactionEvent`s in flight. A boot that is never
-  `Accepted` starts no reconnect; the next connection, whatever ends this
-  one, is the attempt. Then:
-  - if that attempt opens, the renewed certificate is confirmed: nothing is
-    discarded and no event is sent;
-  - if it fails, the next attempt presents the previous certificate, and once
-    that one opens the renewed one is discarded with no further attempt. An
-    attempt that reached no server does not count here either.
-
-  A manual disconnect during the wait cancels the reconnect, and the next
-  connection presents the renewed certificate; a `cp.update` or a `cp.delete`
-  cancels it for good. A newer `CertificateSigned` starts its own attempts. A
-  newer certificate's `notBefore` wait, if one is running, takes the place of
-  this reconnect: the attempt then happens at the next connection, or the
-  newer certificate replaces the older one.
-
-- Once discarded, the station keeps the previous certificate until the next
-  `CertificateSigned`. The stored chain stays: the store then holds the
-  discarded certificate's chain, unused, while the connection presents the
-  previous one. On 2.1 the station then sends a `SecurityEventNotification`
-  of type `DiscardedRenewedClientCertificate` once that connection's boot is
+  one URL but not with a list of supervision URLs. It does so on 2.0.1
+  too, whose A02 has no such rule.
+  If the previous certificate connects first, the renewed one is
+  discarded at once (2.1 A02.FR.10), with no further attempt, and the
+  station keeps the previous one until the next `CertificateSigned`. The
+  stored chain stays: the store then holds the discarded certificate's
+  chain, unused, while the connection presents the previous one. On 2.1
+  the station then sends a `SecurityEventNotification` of type
+  `DiscardedRenewedClientCertificate` once that connection's boot is
   `Accepted` (A02.FR.29). 2.0.1 does not define that event type and sends
-  none.
-- The simulator alternates, retries and discards on 2.0.1 as on 2.1. 2.0.1's
-  A02 has no such rule: its A02.FR.09 asks for the newest certificate, and its
-  A02.FR.10 only lets the station discard the old one once the new one works.
+  none. The simulator discards on 2.0.1 as on 2.1, for one behaviour on
+  both: 2.0.1's own A02.FR.10 only says the station MAY discard the old
+  certificate once the new one works.
 - The key is memory-only, so a restart or a `cp.update` presents
   `--tls-cert` / `--tls-key` again although the state database still
   holds the renewed chain.
@@ -637,7 +613,7 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | `Get15118EVCertificate`                                               | Implemented, as a control-plane relay    | M01.FR.01, M02.FR.01; 2.1 M01.FR.06          |
 | Rewrite `remainingContracts` into the EXI answer                      | Declined: no EXI codec                   | 2.1 M01.FR.05                                |
 | Indicate a failure to the EV                                          | Declined: no EV link                     | M01 / M02 error handling (no FR id)          |
-| Renewed Charging Station certificate as the TLS client one            | Implemented: 2.x, departs from A02.FR.10 | A02.FR.08; 2.1 A02.FR.28, A02.FR.10          |
+| Renewed Charging Station certificate as the TLS client one            | Implemented: 2.x, security profile 3     | A02.FR.08; 2.1 A02.FR.28, A02.FR.10          |
 | `DiscardedRenewedClientCertificate` security event                    | Implemented on 2.1                       | 2.1 A02.FR.29 (SHOULD)                       |
 | V2G certificate as the TLS server one towards the EV                  | Declined: no EV link, no ISO 15118 stack | A00.FR.428, A00.FR.513                       |
 | `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                       | M03.FR.05                                    |

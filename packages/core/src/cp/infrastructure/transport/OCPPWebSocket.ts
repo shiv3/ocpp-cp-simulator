@@ -63,8 +63,8 @@ export interface TransportObserverEvents {
    *  Emitted once per generation, before any replacement socket opens. */
   closed: { cause: CloseCause | "disposed" };
   /** #537 A02.FR.10: a connection opened with the previous client
-   *  certificate after the renewed one's further attempt failed too; the
-   *  renewed one is discarded (A02.FR.29 reports it). */
+   *  certificate while the renewed one was unconfirmed; the renewed one is
+   *  discarded (A02.FR.29 reports it). */
   renewedClientCertificateDiscarded: Record<string, never>;
 }
 
@@ -228,9 +228,7 @@ export class OCPPWebSocket {
    * connection presenting it opened; until then failed attempts alternate
    * between it and `fallback` (2.1 A02.FR.28 with B10.FR.08): the identity
    * in use before it, a previously confirmed renewal or, when absent, the
-   * configured one. `retried` once `fallback` opened after it failed: its
-   * one further attempt is spent, so the next time `fallback` opens it is
-   * discarded.
+   * configured one.
    */
   private _renewedClientCertificate: {
     readonly cert: string;
@@ -238,7 +236,6 @@ export class OCPPWebSocket {
     readonly fallback?: ClientIdentity;
     confirmed: boolean;
     presentNext: boolean;
-    retried: boolean;
   } | null = null;
 
   // Network simulation
@@ -353,18 +350,7 @@ export class OCPPWebSocket {
       ...(fallback ? { fallback } : {}),
       confirmed: false,
       presentNext: true,
-      retried: false,
     };
-  }
-
-  /**
-   * #537: whether a renewed certificate not yet confirmed is what the next
-   * attempt presents. On an open connection that one presented the previous
-   * certificate, so a reconnect is what would present the renewed one.
-   */
-  public renewedClientCertificateAwaitsAttempt(): boolean {
-    const renewed = this._renewedClientCertificate;
-    return renewed !== null && !renewed.confirmed && renewed.presentNext;
   }
 
   /**
@@ -405,13 +391,8 @@ export class OCPPWebSocket {
     return { ...(this._tls ?? {}), cert: identity.cert, key: identity.key };
   }
 
-  /**
-   * A connection opened: settles which client certificate the station keeps
-   * while the renewed one is unconfirmed. The previous certificate opening
-   * shows the CSMS is reachable, so the renewed one gets one further attempt
-   * before it is discarded (#537). 2.1 A02.FR.10 would discard it at once;
-   * this departs from it on purpose.
-   */
+  /** A connection opened: settles which client certificate the station
+   *  keeps while the renewed one is unconfirmed (A02.FR.10). */
   private onClientCertificateOpened(presentedRenewed: boolean): void {
     const renewed = this._renewedClientCertificate;
     if (!renewed || renewed.confirmed) return;
@@ -423,24 +404,13 @@ export class OCPPWebSocket {
       );
       return;
     }
-    // Handed over while this connection was being made: it has not failed.
-    if (renewed.presentNext) return;
-    if (!renewed.retried) {
-      renewed.retried = true;
-      renewed.presentNext = true;
-      this._logger.warn(
-        "Connected with the previous client certificate after the renewed one failed; trying the renewed certificate once more",
-        LogType.WEBSOCKET,
-      );
-      return;
-    }
     // The certificate in use before the renewal stays the station's.
     const fallback = renewed.fallback;
     this._renewedClientCertificate = fallback
-      ? { ...fallback, confirmed: true, presentNext: false, retried: false }
+      ? { ...fallback, confirmed: true, presentNext: false }
       : null;
     this._logger.warn(
-      "Connected with the previous client certificate after the renewed one failed twice; discarding the renewed certificate (A02.FR.10)",
+      "Connected with the previous client certificate after the renewed one failed; discarding the renewed certificate (A02.FR.10)",
       LogType.WEBSOCKET,
     );
     this.observers.emit("renewedClientCertificateDiscarded", {});

@@ -444,8 +444,9 @@ CALLERROR.
   control plane and the MCP tool, like a dropped first
   `get_15118_ev_certificate` CALL, and fails in JSON Lines mode. 1.6 still
   answers success once the CALL is queued or the boot gate suppressed it, and
-  SOAP once it is logged. The automatic `StartupOfTheDevice` event stays
-  1.6-only.
+  SOAP once it is logged: a 1.6 CALL dropped after that, the socket closing
+  for one, is only logged, so that success does not say it reached the CSMS.
+  The automatic `StartupOfTheDevice` event stays 1.6-only.
 
 #### Get15118EVCertificate relay
 

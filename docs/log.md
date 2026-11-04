@@ -2247,3 +2247,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-04] ingest | Certificate follow-ups, maintainer review (#537)
 
 - SignCertificate back-off: a closed connection holds the wait instead of ending the sequence; it goes on after the next accepted boot with what it had left and the same resend count (A02.FR.17-19). Sequences that reached `CertSigningRepeatTimes` or ended stay stopped. [Security profiles](concepts/security-profiles.md).
+- Renewed client certificate: an attempt that reached no server (connection refused or unreachable, DNS failure) no longer makes the next one present the other certificate, so an unreachable CSMS does not discard a valid renewal (A02.FR.28). A refused upgrade still counts, its status being unknown under Bun. The `ws` client's close reason reports such a failure as `Failed to connect: …`, like Bun's. [Security profiles](concepts/security-profiles.md#renewed-client-certificate).

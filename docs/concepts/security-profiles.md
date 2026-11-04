@@ -519,6 +519,13 @@ connected.
 - Until a connection with the renewed certificate has opened, a failed
   attempt makes the next one present the other certificate (2.1 A02.FR.28,
   alternating as B10.FR.08 describes; the reconnect back-off is unchanged).
+  An attempt that reached no server (connection refused or unreachable, a
+  DNS failure) does not count: it presented no certificate, so the next one
+  presents the same certificate as it did, and a CSMS that is only down
+  during the switch costs no renewal. Everything else counts, including a
+  dropped connection and an upgrade refused with any HTTP status: Bun does
+  not report the status, and a proxy that terminates TLS can refuse a client
+  certificate with one.
   The other certificate is the one in use before the renewal: a renewed
   certificate confirmed earlier, else `--tls-cert`. A02.FR.28 alternates
   once every `NetworkConfigurationPriority` entry has failed; the

@@ -118,6 +118,22 @@ type MessageHandler = (
 /** What the charge point is told about a socket's close. */
 export type SocketClose = Pick<CloseEvent, "code" | "reason">;
 
+/**
+ * Whether a connection attempt ended before any peer answered: connection
+ * refused or unreachable, or a DNS failure. Such an attempt presented no
+ * certificate, so it says nothing about it (#537, A02.FR.28). Bun's close
+ * reason says so; the `ws` path reports the same one. Measured on Bun 1.3.14
+ * and 1.4.3, a CSMS refusing a client certificate closes with `Connection
+ * ended` (1006), a refused upgrade with `Expected 101 status code` (1002)
+ * and a handshake dropped early with `TLS handshake failed` (1015): none
+ * match, so all of them count as the certificate failing. A refused upgrade
+ * counts because Bun hides its status, and a proxy that terminates TLS can
+ * refuse a client certificate with one.
+ */
+export function neverReachedCsms(close: SocketClose): boolean {
+  return close.code === 1006 && /^Failed to connect/i.test(close.reason);
+}
+
 /** A TLS client certificate chain (PEM) and its private key (PEM). */
 interface ClientIdentity {
   readonly cert: string;
@@ -400,8 +416,9 @@ export class OCPPWebSocket {
     this.observers.emit("renewedClientCertificateDiscarded", {});
   }
 
-  /** An attempt closed before it opened: the next one presents the other
-   *  certificate while the renewed one is unconfirmed (A02.FR.28). */
+  /** An attempt reached the CSMS and closed before it opened: the next one
+   *  presents the other certificate while the renewed one is unconfirmed
+   *  (A02.FR.28). */
   private onClientCertificateFailed(presentedRenewed: boolean): void {
     const renewed = this._renewedClientCertificate;
     if (!renewed || renewed.confirmed) return;
@@ -485,8 +502,8 @@ export class OCPPWebSocket {
       // Generation guard: only process close if this socket belongs to the current generation
       if (socketGeneration === this._generationCounter) {
         // Only a failed connection attempt counts, not one the station
-        // closed itself before it opened.
-        if (!opened && closeCause === "network") {
+        // closed itself before it opened, nor one no CSMS ever saw.
+        if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
           this.onClientCertificateFailed(attempt.renewed);
         }
         this.handleClose(ev, closeCause);

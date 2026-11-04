@@ -32,13 +32,13 @@ class FakeWebSocket {
   }
 
   /** The handshake failed (the CSMS refused the client certificate). */
-  fail(): void {
+  fail(close: { code: number; reason: string } = NO_REASON): void {
     this.readyState = 3;
-    this.onclose?.(
-      new CloseEvent("close", { code: 1006, reason: "", wasClean: false }),
-    );
+    this.onclose?.(new CloseEvent("close", { ...close, wasClean: false }));
   }
 }
+
+const NO_REASON = { code: 1006, reason: "" };
 
 const attempts: Array<OcppTlsOptions | undefined> = [];
 const sockets: FakeWebSocket[] = [];
@@ -176,6 +176,60 @@ describe("OCPPWebSocket renewed client certificate (#537)", () => {
     expect(nextAttempt()).toBe(FIRST.cert);
     lastSocket().fail();
     expect(nextAttempt()).toBe(FIRST.cert);
+  });
+
+  describe("an attempt that never reached the CSMS", () => {
+    // Bun's close for a refused connection and for a DNS failure, measured
+    // in tlsSecurityProfiles.bun.test.ts. The `ws` path is made to match.
+    const UNREACHABLE = { code: 1006, reason: "Failed to connect" };
+
+    function switchToFirst(): void {
+      ws.connect();
+      lastSocket().open();
+      ws.useRenewedClientCertificate(FIRST);
+      ws.disconnectInternal();
+      ws.connect();
+      expect(presented(attempts[attempts.length - 1])).toBe(FIRST.cert);
+    }
+
+    it("keeps presenting the renewed certificate until the CSMS is back", () => {
+      switchToFirst();
+
+      lastSocket().fail(UNREACHABLE);
+      expect(nextAttempt()).toBe(FIRST.cert);
+      lastSocket().fail(UNREACHABLE);
+      expect(nextAttempt()).toBe(FIRST.cert);
+      lastSocket().open();
+
+      expect(discarded).toBe(0);
+      lastSocket().fail();
+      expect(nextAttempt()).toBe(FIRST.cert);
+    });
+
+    it("does not turn back to the renewed certificate once it failed against the CSMS", () => {
+      switchToFirst();
+      lastSocket().fail();
+      expect(nextAttempt()).toBe(CONFIGURED.cert);
+
+      lastSocket().fail(UNREACHABLE);
+      expect(nextAttempt()).toBe(CONFIGURED.cert);
+    });
+
+    it.each([
+      [
+        "a TLS handshake failure",
+        { code: 1015, reason: "TLS handshake failed" },
+      ],
+      // Bun's close when the CSMS refuses the client certificate.
+      ["a connection ended", { code: 1006, reason: "Connection ended" }],
+      // Bun hides the status, which may be a refusal of the certificate.
+      ["a refused upgrade", { code: 1002, reason: "Expected 101 status code" }],
+      ["a close that gives no reason", NO_REASON],
+    ])("still alternates after %s (A02.FR.28)", (_name, close) => {
+      switchToFirst();
+      lastSocket().fail(close);
+      expect(nextAttempt()).toBe(CONFIGURED.cert);
+    });
   });
 
   it("reports a discarded renewed certificate once (A02.FR.29)", () => {

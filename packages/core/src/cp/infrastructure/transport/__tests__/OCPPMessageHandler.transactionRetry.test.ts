@@ -1047,3 +1047,66 @@ describe("OCPP 1.6 transactionMessageRejected and the resend timer (#527)", () =
     expect(order).toEqual(["rejected", "discarded"]);
   });
 });
+
+describe("OCPP 1.6 transactionMessageDiscarded listener changing the transaction (#527)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const replacements: Array<[string, () => Transaction | null]> = [
+    [
+      "starts another one",
+      () => transaction({ startTime: new Date("2026-10-30T10:05:00.000Z") }),
+    ],
+    ["stops it", () => null],
+  ];
+
+  it.each(replacements)(
+    "after a last attempt: a listener that %s keeps the connector out of Charging",
+    (_name, replacement) => {
+      const { socket, connector, chargePoint, handler, discarded } = setup({
+        attempts: 1,
+      });
+      chargePoint.notifyTransactionMessageDiscarded.mockImplementation(() => {
+        connector.transaction = replacement();
+        return discarded.length;
+      });
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: connector.transaction!,
+        connectorId: 1,
+      });
+      socket.callError(socket.last().id);
+
+      expect(
+        chargePoint.notifyTransactionMessageDiscarded,
+      ).toHaveBeenCalledOnce();
+      expect(chargePoint.updateConnectorStatus).not.toHaveBeenCalled();
+      expect(connector.status).toBe(OCPPStatus.Preparing);
+    },
+  );
+
+  it.each(replacements)(
+    "at a lowered limit: a listener that %s keeps the connector out of Charging",
+    async (_name, replacement) => {
+      const { socket, connector, chargePoint, handler, discarded } = setup();
+      chargePoint.notifyTransactionMessageDiscarded.mockImplementation(() => {
+        connector.transaction = replacement();
+        return discarded.length;
+      });
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: connector.transaction!,
+        connectorId: 1,
+      });
+      socket.callError(socket.last().id);
+      chargePoint.configuration.transactionMessageAttempts.mockReturnValue(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(
+        chargePoint.notifyTransactionMessageDiscarded,
+      ).toHaveBeenCalledOnce();
+      expect(chargePoint.updateConnectorStatus).not.toHaveBeenCalled();
+      expect(connector.status).toBe(OCPPStatus.Preparing);
+    },
+  );
+});

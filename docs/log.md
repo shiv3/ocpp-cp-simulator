@@ -2207,3 +2207,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [OCPP versions and transports → Transaction message retries (OCPP-J 1.6)](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16): resend and replay at a lowered limit.
 - [Charging sessions](concepts/charging-sessions.md) (limits): a CALLERROR leaves the transaction and its session as they are, so an ended one stays ended. The same correction in the event and handler comments.
 - [Operational timeline](concepts/operational-timeline.md): the `transaction_message_rejected` and `transaction_message_discarded` rows no longer imply a resend or a last attempt in every case; the prose names the 1.6 exceptions and the `error code not recorded` summary.
+- A connector in `Preparing` goes on to `Charging` after a discarded StartTransaction.req only if that request's transaction still runs once the `transactionMessageDiscarded` listeners have returned.

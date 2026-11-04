@@ -1618,7 +1618,12 @@ export class OCPPMessageHandler {
         ...report,
         attempts: attempt,
       });
-      if (startedTransaction) this.proceedWithoutStartConf(connectorId);
+      if (startedTransaction) {
+        this.proceedWithoutStartConf(
+          connectorId,
+          request.payload as StartTransactionRequestV16,
+        );
+      }
       return;
     }
     const delayMs = Math.min(
@@ -1734,19 +1739,29 @@ export class OCPPMessageHandler {
       }),
       attempts,
     });
-    // `discardOutlivedStartResend` ran first: this Start's transaction runs.
     if (entry.action === OCPPAction.StartTransaction) {
-      this.proceedWithoutStartConf(connectorId);
+      this.proceedWithoutStartConf(
+        connectorId,
+        entry.payload as StartTransactionRequestV16,
+      );
     }
     return true;
   }
 
   /** #527: the StartTransaction.req was discarded; the transaction it
    *  started, still running on the connector, goes on without a
-   *  StartTransaction.conf. */
-  private proceedWithoutStartConf(connectorId: number): void {
+   *  StartTransaction.conf. Checked here, after the discard's listeners ran:
+   *  one may have stopped that transaction or started another, which waits
+   *  for its own conf. */
+  private proceedWithoutStartConf(
+    connectorId: number,
+    start: StartTransactionRequestV16,
+  ): void {
     const connector = this._chargePoint.getConnector(connectorId);
-    if (connector?.status === OCPPStatus.Preparing) {
+    if (
+      connector?.status === OCPPStatus.Preparing &&
+      isRunningTransactionStartedBy(connector.transaction, start)
+    ) {
       this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Charging);
     }
   }

@@ -443,6 +443,26 @@ describe("OperationalTimelineProjector (#448)", () => {
       "StopTransaction of transaction 42 discarded after 3 attempts (InternalError)",
     ]);
   });
+
+  it("a discard without an error code says so: the offline queue does not store it (#527)", () => {
+    const cp = buildChargePoint();
+
+    cp.notifyTransactionMessageDiscarded({
+      connectorId: 1,
+      transactionId: "0",
+      action: "StartTransaction",
+      reason: "callError",
+      attempts: 2,
+    });
+
+    const [entry] = cp.timeline.query({
+      kinds: ["transaction_message_discarded"],
+    }).entries;
+    expect(entry?.summary).toBe(
+      "StartTransaction of transaction 0 discarded after 2 attempts (error code not recorded)",
+    );
+    expect(entry?.data).not.toHaveProperty("errorCode");
+  });
 });
 
 const PROFILE_KINDS: TimelineKind[] = [

@@ -283,7 +283,12 @@ describe.skipIf(!canBindBunServe())(
         // attempt presents the configured one and gets in.
         await waitUntil(() => operatorOnly.openCount() === 2, 8_000);
         expect(logs.some((line) => line.includes("(A02.FR.28)"))).toBe(true);
-        expect(logs.some((line) => line.includes("(A02.FR.10)"))).toBe(true);
+        // The server's open comes first: the station may not have seen its
+        // own yet.
+        await waitUntil(
+          () => logs.some((line) => line.includes("(A02.FR.10)")),
+          8_000,
+        );
       }, 20_000);
 
       it("reconnects once the pending TransactionEvent is answered", async () => {

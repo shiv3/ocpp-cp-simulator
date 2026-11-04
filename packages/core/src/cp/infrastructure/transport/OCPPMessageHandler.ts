@@ -991,6 +991,7 @@ export class OCPPMessageHandler {
         action: entry.action,
         payload: entry.payload,
         connectorId: entry.connectorId,
+        attempts: (entry.attempt ?? 1) - 1,
       });
       this._logger.warn(
         `Salvaged ${entry.action} to PendingMessageQueue (${reason}); size=${this._pendingQueue.size()}`,
@@ -1188,7 +1189,7 @@ export class OCPPMessageHandler {
     // #527: a resend waiting out its retry interval goes to the offline
     // queue (§3.7: queue transaction-related messages while offline), ahead
     // of the queued CALLs, which are younger. Replayed after the next boot,
-    // it is a fresh delivery: its CALLERROR count starts over.
+    // it goes on with its count: §3.7.1 counts failures for this message.
     for (const [timer, resend] of this._transactionMessageRetries) {
       clearTimeout(timer);
       this.salvageOrDiscard(resend, "socket_closed");
@@ -1204,8 +1205,9 @@ export class OCPPMessageHandler {
   /**
    * Re-attempt delivery of every queued transaction-related message.
    * Called from `ChargePoint.connect`'s onopen handler after a successful
-   * BootNotification round-trip. Respects `TransactionMessageAttempts`
-   * from Configuration; messages exceeding that count are dropped.
+   * BootNotification round-trip. A message resent after a CALLERROR before
+   * it was queued goes on with its count (#527, §3.7.1), which
+   * `onTransactionMessageCallError` holds to `TransactionMessageAttempts`.
    */
   public flushPendingQueue(): void {
     if (this._pendingQueue.size() === 0) return;
@@ -1223,6 +1225,8 @@ export class OCPPMessageHandler {
         messageId,
         message.payload as OcppMessageRequestPayload,
         message.connectorId,
+        undefined,
+        message.attempts > 0 ? message.attempts + 1 : undefined,
       );
       return true;
     }, maxAttempts);
@@ -1638,7 +1642,8 @@ export class OCPPMessageHandler {
    * request's `idTag` and `timestamp` identify the transaction, so a
    * transaction restored after a restart still matches. A first transmission
    * (no `attempt` above 1) is left alone: it goes out in order, ahead of its
-   * StopTransaction.req.
+   * StopTransaction.req. A replay carries the count it was salvaged with but
+   * not its last error, which is not persisted.
    */
   private discardOutlivedStartResend(entry: SerialEntry): boolean {
     if (entry.action !== OCPPAction.StartTransaction) return false;

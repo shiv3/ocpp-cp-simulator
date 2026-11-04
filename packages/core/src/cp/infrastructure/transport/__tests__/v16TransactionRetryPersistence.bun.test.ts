@@ -1,0 +1,225 @@
+import { describe, expect, it, mock } from "bun:test";
+import { OCPPMessageHandler } from "../OCPPMessageHandler";
+import type { OCPPWebSocket } from "../OCPPWebSocket";
+import type { ProtocolCodec } from "../profile/ProtocolProfile";
+import type { Logger } from "../../../shared/Logger";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
+import type { Transaction } from "../../../domain/connector/Transaction";
+import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { OCPPMessageType, OCPPStatus } from "../../../domain/types/OcppTypes";
+
+/**
+ * #527, OCPP 1.6 Part 2 §3.7.1 counts failures "for this message": a resend
+ * salvaged to the offline queue keeps its count across a restart, in the
+ * existing `pending_messages.attempts` column. Its replay still goes out for
+ * a transaction restored after the restart, identified by `idTag` and
+ * `timestamp`.
+ */
+class FakeSocket {
+  written: Array<{ id: string; action: string }> = [];
+  incoming: ((...args: unknown[]) => void) | null = null;
+  setMessageHandler(handler: (...args: unknown[]) => void): void {
+    this.incoming = handler;
+  }
+  isConnected(): boolean {
+    return true;
+  }
+  currentGeneration(): { gen: number; closeCause: string | null } {
+    return { gen: 1, closeCause: null };
+  }
+  sendAction(
+    id: string,
+    action: string,
+    _payload: unknown,
+    _gen: unknown,
+    onSettled?: (s: { outcome: string }) => void,
+  ): boolean {
+    this.written.push({ id, action });
+    onSettled?.({ outcome: "written" });
+    return true;
+  }
+  callError(id: string): void {
+    this.incoming?.(OCPPMessageType.CALLERROR, id, undefined, {
+      errorCode: "InternalError",
+      errorDescription: "boom",
+      errorDetails: {},
+    });
+  }
+  callResult(id: string, payload: unknown): void {
+    this.incoming?.(OCPPMessageType.CALLRESULT, id, undefined, payload);
+  }
+  last() {
+    return this.written[this.written.length - 1]!;
+  }
+}
+
+function runningTransaction(): Transaction {
+  return {
+    id: 0,
+    connectorId: 1,
+    tagId: "TAG-527",
+    meterStart: 0,
+    meterStop: null,
+    startTime: new Date("2026-10-30T10:00:00.000Z"),
+    stopTime: null,
+    meterSent: false,
+  } as Transaction;
+}
+
+function station(db: BunSqliteDatabase, restored: Transaction | null) {
+  const socket = new FakeSocket();
+  const connector = {
+    id: 1,
+    status: OCPPStatus.Charging,
+    transaction: restored,
+    transactionId: undefined as number | undefined,
+    markStartCallError: mock(() => {}),
+  };
+  const rejected: Array<ChargePointEvents["transactionMessageRejected"]> = [];
+  const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
+  const cp = {
+    id: "CP-527",
+    database: db,
+    connectors: new Map([[1, connector]]),
+    getConnector: () => connector,
+    notifyOutgoingCall() {},
+    recordAuthorizationResult() {},
+    signedMeterFor: () => null,
+    updateConnectorStatus() {},
+    notifyTransactionMessageRejected: (
+      e: ChargePointEvents["transactionMessageRejected"],
+    ) => rejected.push(e),
+    notifyTransactionMessageDiscarded: (
+      e: ChargePointEvents["transactionMessageDiscarded"],
+    ) => discarded.push(e),
+    configuration: {
+      transactionMessageAttempts: () => 3,
+      transactionMessageRetryInterval: () => 3_600,
+    },
+  };
+  const codec: ProtocolCodec = { outgoingWarning: () => null };
+  const logger = {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+  };
+  const handler = new OCPPMessageHandler(
+    cp as unknown as ChargePoint,
+    socket as unknown as OCPPWebSocket,
+    logger as unknown as Logger,
+    codec,
+  );
+  handler.setBootStatus({ status: "Accepted" });
+  return { socket, connector, handler, rejected, discarded };
+}
+
+function startResendSalvaged(db: BunSqliteDatabase) {
+  const before = station(db, runningTransaction());
+  before.handler.sendTransactionEvent({
+    phase: "started",
+    transaction: before.connector.transaction!,
+    connectorId: 1,
+  });
+  before.socket.callError(before.socket.last().id);
+  before.handler.onWebSocketClosed();
+  return before;
+}
+
+function attemptsStored(db: BunSqliteDatabase): number[] {
+  return db
+    .all<{
+      attempts: number;
+    }>("SELECT attempts FROM pending_messages WHERE cp_id = ? ORDER BY seq", [
+      "CP-527",
+    ])
+    .map((row) => row.attempts);
+}
+
+describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
+  it("a salvaged resend keeps its count: the replay is its second transmission", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      startResendSalvaged(db);
+      expect(attemptsStored(db)).toEqual([1]);
+
+      const after = station(db, runningTransaction());
+      after.handler.flushPendingQueue();
+      expect(after.socket.last().action).toBe("StartTransaction");
+      after.socket.callError(after.socket.last().id);
+
+      expect(after.rejected.map((r) => r.attempt)).toEqual([2]);
+      expect(after.discarded).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("a replayed StartTransaction.req still gets its conf on the restored transaction", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      startResendSalvaged(db);
+
+      const after = station(db, runningTransaction());
+      after.handler.flushPendingQueue();
+      after.socket.callResult(after.socket.last().id, {
+        transactionId: 527,
+        idTagInfo: { status: "Accepted" },
+      });
+
+      expect(after.connector.transactionId).toBe(527);
+      expect(after.discarded).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("a salvaged resend whose transaction did not survive the restart is discarded", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      startResendSalvaged(db);
+
+      const after = station(db, null);
+      after.handler.flushPendingQueue();
+
+      expect(after.socket.written).toEqual([]);
+      expect(after.discarded).toEqual([
+        {
+          connectorId: 1,
+          transactionId: "0",
+          action: "StartTransaction",
+          reason: "callError",
+          attempts: 1,
+        },
+      ]);
+      expect(attemptsStored(db)).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("a StartTransaction.req never transmitted replays whatever runs now: it precedes its StopTransaction.req", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const before = station(db, runningTransaction());
+      before.socket.sendAction = () => false;
+      before.handler.sendTransactionEvent({
+        phase: "started",
+        transaction: before.connector.transaction!,
+        connectorId: 1,
+      });
+      expect(attemptsStored(db)).toEqual([0]);
+
+      const after = station(db, null);
+      after.handler.flushPendingQueue();
+
+      expect(after.socket.written.map((w) => w.action)).toEqual([
+        "StartTransaction",
+      ]);
+      expect(after.discarded).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+});

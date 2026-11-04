@@ -290,7 +290,7 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(rejected).toEqual([]);
   });
 
-  it("on close, a waiting resend goes to the offline queue and is replayed once after the boot", async () => {
+  it("on close, a waiting resend goes to the offline queue and is replayed once after the boot, keeping its count", async () => {
     const { socket, connector, handler, rejected } = setup();
     handler.sendTransactionEvent({
       phase: "started",
@@ -314,9 +314,134 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     await vi.advanceTimersByTimeAsync(29_000);
     expect(socket.of("StartTransaction")).toHaveLength(2);
 
-    // The replay is a fresh delivery: its CALLERROR count starts over.
+    // §3.7.1 counts failures for this message: the replay is transmission 2.
     socket.callError(replayed.id);
-    expect(rejected.map((r) => r.attempt)).toEqual([1, 1]);
+    expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
+  });
+
+  it("a link that keeps dropping does not extend the count: discarded after TransactionMessageAttempts transmissions", async () => {
+    const { socket, connector, handler, rejected, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    for (let dropped = 0; dropped < 2; dropped++) {
+      socket.callError(socket.last().id);
+      socket.connected = false;
+      handler.onWebSocketClosed();
+      socket.connected = true;
+      handler.flushPendingQueue();
+    }
+    socket.callError(socket.last().id);
+
+    expect(rejected.map((r) => r.attempt)).toEqual([1, 2, 3]);
+    expect(discarded).toMatchObject([{ attempts: 3 }]);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+    handler.flushPendingQueue();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(socket.of("StartTransaction")).toHaveLength(3);
+  });
+
+  it("a replay answered CALLERROR waits as transmission 2 does, then is resent", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+    handler.flushPendingQueue();
+
+    socket.callError(socket.last().id);
+
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(socket.of("StartTransaction")).toHaveLength(3);
+  });
+
+  it("a message salvaged before its first transmission starts at 1", async () => {
+    const { socket, connector, handler, rejected } = setup();
+    socket.connected = false;
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.connected = true;
+    handler.flushPendingQueue();
+
+    socket.callError(socket.last().id);
+
+    expect(rejected.map((r) => r.attempt)).toEqual([1]);
+  });
+
+  it("a StopTransaction.req resend keeps its count across a close too", async () => {
+    const { socket, handler, rejected, discarded } = setup({ attempts: 2 });
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: transaction({
+        id: 42,
+        meterStop: 1_000,
+        stopTime: new Date("2026-10-30T11:00:00.000Z"),
+      }),
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+    handler.flushPendingQueue();
+
+    socket.callError(socket.last().id);
+
+    expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
+    expect(discarded).toMatchObject([
+      { action: "StopTransaction", attempts: 2 },
+    ]);
+  });
+
+  it("a salvaged resend whose transaction stops offline is discarded at the replay; its StopTransaction.req goes out", async () => {
+    const { socket, connector, handler, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    const stopped = transaction({
+      meterStop: 1_000,
+      stopTime: new Date("2026-10-30T11:00:00.000Z"),
+    });
+    connector.transaction = stopped;
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: stopped,
+      connectorId: 1,
+    });
+
+    socket.connected = true;
+    handler.flushPendingQueue();
+
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    expect(socket.of("StopTransaction")).toHaveLength(1);
+    expect(discarded).toEqual([
+      {
+        connectorId: 1,
+        transactionId: "0",
+        action: "StartTransaction",
+        reason: "callError",
+        attempts: 1,
+      },
+    ]);
   });
 
   describe("a StartTransaction resend whose transaction no longer runs", () => {
@@ -601,6 +726,6 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(replayed.action).toBe("StartTransaction");
     expect(replayed.payload).toEqual(first.payload);
     socket.callError(replayed.id);
-    expect(rejected.map((r) => r.attempt)).toEqual([1, 1]);
+    expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
   });
 });

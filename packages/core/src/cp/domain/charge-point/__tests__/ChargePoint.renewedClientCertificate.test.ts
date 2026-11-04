@@ -48,8 +48,8 @@ function outboxOf(cp: ChargePoint): Outbox {
 }
 
 function switchTimerOf(cp: ChargePoint): unknown {
-  return (cp as unknown as { _clientCertificateSwitchTimer: unknown })
-    ._clientCertificateSwitchTimer;
+  return (cp as unknown as { _cancelClientCertificateSwitchTimer: unknown })
+    ._cancelClientCertificateSwitchTimer;
 }
 
 const IDENTITY = {

@@ -1,4 +1,4 @@
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { setTimeoutAt } from "../../shared/timers";
 import type { SignedCertificateUse } from "./certificateUse";
 
 /** The two SecurityCtrlr variables the back-off reads on every step. */
@@ -20,10 +20,9 @@ export interface SignCertificateBackoffDeps {
 interface Sequence {
   /** Resends sent so far. */
   resends: number;
-  /** The wait in progress; none once `CertSigningRepeatTimes` is reached. */
-  timer?: ReturnType<typeof setTimeout>;
-  /** What the wait in progress has left beyond its armed timer, in ms. */
-  remainingMs: number;
+  /** Cancels the wait in progress; none once `CertSigningRepeatTimes` is
+   *  reached. */
+  cancelWait?: () => void;
 }
 
 /**
@@ -55,7 +54,7 @@ export class SignCertificateBackoff {
     // A resend's answer: the next wait already runs since the expiry.
     if (this.#sequences.has(use)) return;
     if (this.deps.settings().repeatTimes <= 0) return;
-    const sequence: Sequence = { resends: 0, remainingMs: 0 };
+    const sequence: Sequence = { resends: 0 };
     this.#sequences.set(use, sequence);
     this.schedule(use, sequence);
   }
@@ -72,8 +71,7 @@ export class SignCertificateBackoff {
   }
 
   stop(use: SignedCertificateUse): void {
-    const sequence = this.#sequences.get(use);
-    if (sequence?.timer !== undefined) clearTimeout(sequence.timer);
+    this.#sequences.get(use)?.cancelWait?.();
     this.#sequences.delete(use);
   }
 
@@ -83,34 +81,23 @@ export class SignCertificateBackoff {
 
   /** Whether a wait for `use` is in progress. */
   isRunning(use: SignedCertificateUse): boolean {
-    return this.#sequences.get(use)?.timer !== undefined;
+    return this.#sequences.get(use)?.cancelWait !== undefined;
   }
 
   private schedule(use: SignedCertificateUse, sequence: Sequence): void {
     const seconds =
       this.deps.settings().waitMinimumSeconds * 2 ** sequence.resends;
-    sequence.remainingMs = seconds * 1000;
-    this.arm(use, sequence);
-  }
-
-  /** Waits out the remaining time in timer-sized steps: a longer
-   *  `setTimeout` delay would fire at once. */
-  private arm(use: SignedCertificateUse, sequence: Sequence): void {
-    const step = Math.min(sequence.remainingMs, MAX_TIMER_MS);
-    sequence.remainingMs -= step;
-    const timer = setTimeout(() => this.expire(use, sequence), step);
     // A pending wait must not keep a CLI process alive on its own.
-    unrefTimer(timer);
-    sequence.timer = timer;
+    sequence.cancelWait = setTimeoutAt(
+      Date.now() + seconds * 1000,
+      () => this.expire(use, sequence),
+      { unref: true },
+    );
   }
 
   private expire(use: SignedCertificateUse, sequence: Sequence): void {
     if (this.#sequences.get(use) !== sequence) return;
-    if (sequence.remainingMs > 0) {
-      this.arm(use, sequence);
-      return;
-    }
-    sequence.timer = undefined;
+    sequence.cancelWait = undefined;
     if (!this.deps.isPending(use)) {
       this.stop(use);
       return;

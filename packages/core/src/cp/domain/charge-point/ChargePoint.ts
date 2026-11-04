@@ -4,7 +4,7 @@ import type {
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { setTimeoutAt } from "../../shared/timers";
 import type {
   DataTransferData,
   DataTransferResult,
@@ -265,8 +265,7 @@ export class ChargePoint {
   private readonly _transportUrl: string;
   /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08),
    *  then for the transaction messages in flight before reconnecting. */
-  private _clientCertificateSwitchTimer: ReturnType<typeof setTimeout> | null =
-    null;
+  private _cancelClientCertificateSwitchTimer: (() => void) | null = null;
   /** #537: bumped by every switch request and every cancel, so a request
    *  still reading the store when a newer one (or a cancel) arrives does
    *  nothing once it resumes. */
@@ -1909,17 +1908,15 @@ export class ChargePoint {
         `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
         LogType.WEBSOCKET,
       );
-      // Capped: a longer setTimeout delay fires at once. The check runs
-      // again when it does. Unref'd: a wait of days must not keep the
-      // process alive.
-      this._clientCertificateSwitchTimer = setTimeout(
+      // Unref'd: a wait of days must not keep the process alive.
+      this._cancelClientCertificateSwitchTimer = setTimeoutAt(
+        identity.notBefore.getTime(),
         () => {
           if (request !== this._clientCertificateSwitchSeq) return;
           void this.useRenewedClientCertificate();
         },
-        Math.min(wait, MAX_TIMER_MS),
+        { unref: true },
       );
-      unrefTimer(this._clientCertificateSwitchTimer);
       return;
     }
     webSocket.useRenewedClientCertificate(identity);
@@ -1945,7 +1942,7 @@ export class ChargePoint {
     generation: GenerationToken,
     deadline: number,
   ): void {
-    this._clientCertificateSwitchTimer = null;
+    this._cancelClientCertificateSwitchTimer = null;
     const webSocket = this._webSocket;
     if (!webSocket?.isOpenOrConnecting()) return;
     if (webSocket.currentGeneration() !== generation) return;
@@ -1953,9 +1950,9 @@ export class ChargePoint {
       this._outbox.hasTransactionMessagesInFlight() &&
       Date.now() < deadline
     ) {
-      this._clientCertificateSwitchTimer = setTimeout(
+      this._cancelClientCertificateSwitchTimer = setTimeoutAt(
+        Math.min(Date.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS, deadline),
         () => this.reconnectWithRenewedCertificate(generation, deadline),
-        Math.min(RENEWED_CERTIFICATE_RECONNECT_POLL_MS, deadline - Date.now()),
       );
       return;
     }
@@ -1985,10 +1982,8 @@ export class ChargePoint {
 
   private cancelClientCertificateSwitch(): void {
     this._clientCertificateSwitchSeq++;
-    if (this._clientCertificateSwitchTimer) {
-      clearTimeout(this._clientCertificateSwitchTimer);
-      this._clientCertificateSwitchTimer = null;
-    }
+    this._cancelClientCertificateSwitchTimer?.();
+    this._cancelClientCertificateSwitchTimer = null;
   }
 
   /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */

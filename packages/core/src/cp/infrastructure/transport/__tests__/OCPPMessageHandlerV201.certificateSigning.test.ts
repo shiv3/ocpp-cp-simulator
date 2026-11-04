@@ -207,7 +207,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
   const { validTrigger, validSign, validSigned } = VERSIONS[version];
 
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   });
   afterEach(() => {
     vi.useRealTimers();

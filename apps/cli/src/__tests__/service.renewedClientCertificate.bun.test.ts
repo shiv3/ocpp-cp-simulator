@@ -41,8 +41,8 @@ describe("CLIChargePointService.cleanup() and the renewed client certificate", (
     });
     await cp.useRenewedClientCertificate();
     const timer = () =>
-      (cp as unknown as { _clientCertificateSwitchTimer: unknown })
-        ._clientCertificateSwitchTimer;
+      (cp as unknown as { _cancelClientCertificateSwitchTimer: unknown })
+        ._cancelClientCertificateSwitchTimer;
     expect(timer()).not.toBeNull();
 
     svc.cleanup();

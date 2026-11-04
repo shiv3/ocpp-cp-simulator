@@ -2856,9 +2856,10 @@ export class ChargePoint {
    *  exactly a transaction started before the cable is plugged in, so a
    *  running transaction does not hold it back there. */
   private holdsConnectionTimeout(connectorId: number): boolean {
-    if (isOcpp2Version(this._ocppVersion)) return false;
-    const transaction = this.getConnector(connectorId)?.transaction;
-    return !!transaction && transaction.stopTime === null;
+    return (
+      !isOcpp2Version(this._ocppVersion) &&
+      !!this.getConnector(connectorId)?.hasRunningTransaction
+    );
   }
 
   private startConnectionTimeout(connectorId: number): void {

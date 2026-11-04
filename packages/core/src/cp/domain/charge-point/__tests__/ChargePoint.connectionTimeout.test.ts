@@ -67,6 +67,35 @@ describe("ChargePoint ConnectionTimeOut (§4.9)", () => {
     expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
   });
 
+  // The snapshot of a transaction persisted without `stopTime` restores it
+  // as undefined: no running transaction, as `=== null` reads it.
+  it.each<[string, Partial<Transaction> | null, OCPPStatus]>([
+    ["running", { stopTime: null }, OCPPStatus.Preparing],
+    ["with no stopTime", { stopTime: undefined }, OCPPStatus.Finishing],
+    ["stopped", { stopTime: new Date() }, OCPPStatus.Finishing],
+    ["absent", null, OCPPStatus.Finishing],
+  ])(
+    "after a restart, a restored transaction %s decides whether it holds",
+    (_name, restored, status) => {
+      const cp = chargePoint();
+      cp.getConnector(1)!.restoreRuntimeSnapshot({
+        status: OCPPStatus.Available,
+        availability: "Operative",
+        scheduledAvailability: null,
+        transaction: restored
+          ? ({ ...runningTransaction(), ...restored } as Transaction)
+          : null,
+        meterValueWh: 0,
+        socPercent: null,
+        lastAutoStartedScenarioKey: null,
+      });
+      cp.updateConnectorStatus(1, OCPPStatus.Preparing);
+
+      vi.advanceTimersByTime(60_000);
+      expect(cp.getConnector(1)?.status).toBe(status);
+    },
+  );
+
   it("a start on a plugged-in connector arms no new timer (#527)", async () => {
     const cp = chargePoint();
     cp.updateConnectorStatus(1, OCPPStatus.Preparing);

@@ -1556,8 +1556,8 @@ export class OCPPMessageHandler {
    * id, through the serial queue, waiting `TransactionMessageRetryInterval`
    * seconds times the number of transmissions so far, until
    * `TransactionMessageAttempts` transmissions failed; then it discards the
-   * message and carries on. The transaction keeps running either way, as on
-   * 2.x (#490).
+   * message and carries on. The transaction stays as it is either way,
+   * running or ended, as on 2.x (#490).
    *
    * A discarded StartTransaction.req leaves the transaction without a CSMS
    * id: it keeps the `0` placeholder, which its MeterValues.req and

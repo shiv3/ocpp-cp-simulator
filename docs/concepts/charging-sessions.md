@@ -274,12 +274,14 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
 - A 1.6 StartTransaction that is never answered, or that is discarded after
   `TransactionMessageAttempts` CALLERRORs, keeps `transactionId: null`.
 - A CALLERROR answering a transaction-related message never marks the
-  session `failed`, by design (2.x E13, 1.6 §3.7.1): the transaction keeps
-  running, and the message is resent up to
-  `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` (1.6
+  session `failed`, by design (2.x E13, 1.6 §3.7.1): the message is resent up
+  to `OCPPCommCtrlr.MessageAttempts[TransactionEvent]` (1.6
   `TransactionMessageAttempts`) times, then discarded
   ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490),
-  [#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)).
+  [#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)). The
+  transaction and its session stay as they are: a running one stays `active`,
+  and one that already ended (a 1.6 StopTransaction.req, a 2.x `Ended` event)
+  stays ended.
 - On 1.6 a transaction stopped before its StartTransaction.req got a conf
   stops with `transactionId: 0`. A resend still waiting is discarded, but a
   StartTransaction.req already on the wire or queued ahead of the stop reaches

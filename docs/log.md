@@ -2205,3 +2205,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A replay that already met `TransactionMessageAttempts`, lowered while it waited in the offline queue, is discarded with `transactionMessageDiscarded` instead of sent. A message never transmitted always goes out. A resend waiting out its interval or the serial queue still goes out once.
 - [OCPP versions and transports → Transaction message retries (OCPP-J 1.6)](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16): replay at a lowered limit.
+- [Charging sessions](concepts/charging-sessions.md) (limits): a CALLERROR leaves the transaction and its session as they are, so an ended one stays ended. The same correction in the event and handler comments.

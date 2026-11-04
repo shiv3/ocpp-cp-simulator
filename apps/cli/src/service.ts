@@ -1168,8 +1168,11 @@ export class CLIChargePointService {
     this._chargePoint.sendLogStatusNotification(status, requestId);
   }
 
-  sendSecurityEventNotification(type: string, techInfo?: string): void {
-    this._chargePoint.sendSecurityEventNotification(type, techInfo);
+  sendSecurityEventNotification(
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    return this._chargePoint.sendSecurityEventNotification(type, techInfo);
   }
 
   sendSignCertificate(csr?: string): Promise<void> {

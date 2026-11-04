@@ -428,10 +428,16 @@ CALLERROR.
   (at most 50 characters), the current `timestamp` and the optional
   `techInfo` (at most 255), the bounds of the 1.6 whitepaper, 2.0.1 and
   2.1 schemas; a longer value is `invalid_params` (#537; before, a WARN
-  only). It is dropped while offline: the 2.x
+  only). On 2.x, success means the CALL was handed over and written, not that
+  the CSMS answered it. It is dropped while offline: the 2.x
   [offline queue](ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent)
   (#528) holds only `TransactionEvent` and `NotifyEvent`, so the A04.FR.02
-  queue is not modelled. The automatic `StartupOfTheDevice` event stays
+  queue is not modelled. A dropped CALL (the socket is not connected, or the
+  network-simulation pipeline dropped it) answers `disconnected` on the
+  control plane and the MCP tool, like a dropped first
+  `get_15118_ev_certificate` CALL, and fails in JSON Lines mode. 1.6 still
+  answers success once the CALL is queued or the boot gate suppressed it, and
+  SOAP once it is logged. The automatic `StartupOfTheDevice` event stays
   1.6-only.
 
 #### Get15118EVCertificate relay

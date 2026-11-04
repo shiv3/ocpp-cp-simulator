@@ -711,7 +711,10 @@ export class OCPPMessageHandler {
   }
 
   /** OCPP 1.6 Security Whitepaper: CP-initiated security event. */
-  public sendSecurityEventNotification(type: string, techInfo?: string): void {
+  public sendSecurityEventNotification(
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
     const messageId = this.generateMessageId();
     const payload: SecurityEventNotificationRequestV16 = {
       type,
@@ -719,6 +722,7 @@ export class OCPPMessageHandler {
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
     this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
+    return Promise.resolve();
   }
 
   /** Generate or forward a CSR for the charge point certificate signing flow. */

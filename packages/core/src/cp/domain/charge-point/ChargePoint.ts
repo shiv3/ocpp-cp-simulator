@@ -2015,9 +2015,13 @@ export class ChargePoint {
     this._cancelClientCertificateSwitchTimer = null;
   }
 
-  /** Programmatic trigger for OCPP 1.6 SecurityEventNotification.req. */
-  sendSecurityEventNotification(type: string, techInfo?: string): void {
-    this._outbox.sendSecurityEventNotification(type, techInfo);
+  /** Programmatic trigger for SecurityEventNotification; see
+   *  {@link IChargePointMessageHandler.sendSecurityEventNotification}. */
+  sendSecurityEventNotification(
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    return this._outbox.sendSecurityEventNotification(type, techInfo);
   }
 
   /** Generate or forward a CSR and send OCPP 1.6 SignCertificate.req. */
@@ -2214,7 +2218,7 @@ export class ChargePoint {
       this._ocppVersion === "OCPP-1.6J" &&
       (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
     ) {
-      this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+      void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
     }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so

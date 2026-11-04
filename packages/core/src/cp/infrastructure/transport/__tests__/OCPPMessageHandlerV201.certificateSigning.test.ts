@@ -16,6 +16,7 @@ import {
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { defaultConfiguration } from "../../../domain/charge-point/Configuration";
 import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
+import { OcppCallNoAnswerError } from "../../../domain/errors/OcppCallErrors";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
 import { CertificateStore } from "../../../domain/security/CertificateStore";
 import {
@@ -669,6 +670,79 @@ describe.each([
     const [event] = socket.calls("SecurityEventNotification");
     expect(event.payload).not.toHaveProperty("techInfo");
     expect(validEvent(event.payload)).toBe(true);
+  });
+
+  // #537: the control plane reports a dropped CALL as `disconnected`, like
+  // the first CALL of get_15118_ev_certificate.
+  describe("the promise it returns", () => {
+    it("resolves once the CALL is written, without waiting for an answer", async () => {
+      const { socket, handler } = setup(version);
+      await expect(
+        handler.sendSecurityEventNotification("ResetOrReboot"),
+      ).resolves.toBeUndefined();
+      expect(socket.calls("SecurityEventNotification")).toHaveLength(1);
+    });
+
+    it("stays pending while the pipeline holds the CALL", async () => {
+      const { socket, handler } = setup(version);
+      let settled: ((s: Settlement) => void) | undefined;
+      vi.spyOn(socket, "sendAction").mockImplementation(
+        (_id, _action, _payload, _gen, onSettled) => {
+          settled = onSettled;
+          return true;
+        },
+      );
+      const done = vi.fn();
+      void handler.sendSecurityEventNotification("ResetOrReboot").then(done);
+
+      await Promise.resolve();
+      expect(done).not.toHaveBeenCalled();
+      settled?.({ outcome: "written" });
+      await vi.waitFor(() => expect(done).toHaveBeenCalledOnce());
+    });
+
+    it("rejects as dropped when the socket is not connected, sending nothing", async () => {
+      const { socket, handler } = setup(version);
+      vi.spyOn(socket, "isConnected").mockReturnValue(false);
+
+      const sending = handler.sendSecurityEventNotification("ResetOrReboot");
+
+      await expect(sending).rejects.toBeInstanceOf(OcppCallNoAnswerError);
+      await expect(sending).rejects.toMatchObject({
+        reason: "dropped",
+        message: expect.stringContaining("not_connected"),
+      });
+      expect(socket.calls("SecurityEventNotification")).toHaveLength(0);
+    });
+
+    it.each(["socket_closed", "write_failed", "queue_overflow", "disposed"])(
+      "rejects as dropped when the pipeline settles it %s",
+      async (outcome) => {
+        const { socket, handler } = setup(version);
+        vi.spyOn(socket, "sendAction").mockImplementation(
+          (_id, _action, _payload, _gen, onSettled) => {
+            onSettled?.({ outcome } as Settlement);
+            return true;
+          },
+        );
+
+        await expect(
+          handler.sendSecurityEventNotification("ResetOrReboot"),
+        ).rejects.toMatchObject({
+          reason: "dropped",
+          message: expect.stringContaining(outcome),
+        });
+      },
+    );
+
+    it("rejects as dropped when the socket does not accept it", async () => {
+      const { socket, handler } = setup(version);
+      vi.spyOn(socket, "sendAction").mockReturnValue(false);
+
+      await expect(
+        handler.sendSecurityEventNotification("ResetOrReboot"),
+      ).rejects.toMatchObject({ reason: "dropped" });
+    });
   });
 });
 

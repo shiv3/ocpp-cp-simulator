@@ -292,6 +292,27 @@ describe("send_ocpp_call (#389)", () => {
   });
 });
 
+describe("security_event_notification (#537)", () => {
+  it("answers disconnected for a dropped CALL, like get_15118_ev_certificate", async () => {
+    const thrown = new OcppCallNoAnswerError(
+      "dropped",
+      "dropped (not_connected)",
+    );
+    const error = await rpcError(
+      { sendSecurityEventNotification: vi.fn().mockRejectedValue(thrown) },
+      {
+        cpId: "cp-alpha",
+        method: "security_event_notification",
+        params: { type: "SettingSystemTime" },
+      },
+    );
+    expect(error).toEqual({
+      code: "disconnected",
+      message: "dropped (not_connected)",
+    });
+  });
+});
+
 describe("send_raw_frame (#393)", () => {
   it("passes the parsed request through and returns the outcome", async () => {
     const outcome = {

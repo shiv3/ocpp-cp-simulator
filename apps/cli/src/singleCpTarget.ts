@@ -332,9 +332,8 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendLogStatusNotification: async (status, requestId) => {
       service.sendLogStatusNotification(status, requestId);
     },
-    sendSecurityEventNotification: async (type, techInfo) => {
-      service.sendSecurityEventNotification(type, techInfo);
-    },
+    sendSecurityEventNotification: (type, techInfo) =>
+      service.sendSecurityEventNotification(type, techInfo),
     sendSignCertificate: (csr) => service.sendSignCertificate(csr),
     getScenarioTemplates: async () => service.getScenarioTemplates(),
     loadScenarioTemplate: async (templateId, connectorId, evSettings) =>

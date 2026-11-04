@@ -66,7 +66,7 @@ The endpoint exposes 32 curated tools wrapping the daemon's
 | `auth_cache_get`              | `get_auth_cache`              | `cpId` — cache switch and entries ([Local authorization](../concepts/local-authorization.md#control-plane-seam), #452)                                                                                                                                                        |
 | `auth_cache_seed`             | `seed_auth_cache`             | `cpId`, `entries` — schema taken from the method; writes whatever the cache switch says (#452)                                                                                                                                                                                |
 | `auth_cache_clear`            | `clear_auth_cache`            | `cpId` — empties the cache whatever its switch says; nothing goes on the wire (#452)                                                                                                                                                                                          |
-| `security_event_notification` | `security_event_notification` | `cpId`, `type`, `techInfo?` — schema taken from the method; sends SecurityEventNotification on 1.6 and 2.x (A04), SOAP only logs it ([Security profiles](../concepts/security-profiles.md), #537)                                                                             |
+| `security_event_notification` | `security_event_notification` | `cpId`, `type`, `techInfo?` — schema taken from the method; sends SecurityEventNotification on 1.6 and 2.x (A04), SOAP only logs it; a dropped 2.x CALL is `disconnected` ([Security profiles](../concepts/security-profiles.md), #537)                                       |
 | `get_15118_ev_certificate`    | `get_15118_ev_certificate`    | `cpId`, `iso15118SchemaVersion`, `action`, `exiRequest` (base64), 2.1 `maximumContractCertificateChains?` / `prioritizedEMAIDs?` — schema taken from the method; returns the CSMS answers (#537)                                                                              |
 | `set_connector_status`        | `update_connector_status`     | `cpId`, `connector`, `status` (a connector status, as `update_connector_status` enforces), `errorCode?`, `info?`, `vendorErrorCode?`, `vendorId?`, `timestamp?`, `suppressChargingStateTransactionEvent?`                                                                     |
 | `ev_disconnected`             | `ev_disconnected`             | `cpId`, `connector` — an EV-side unplug; `StopTransactionOnEVSideDisconnect` stops or suspends a running transaction (#488)                                                                                                                                                   |
@@ -132,11 +132,13 @@ meanings. An error's `retryAfterSeconds` is not a separate field here; the
 wait survives only in the message text
 (`rate_limited: Open EV Directory rate limit reached; retry in 7 s`). `disconnected` is mostly absent: the Socket.IO client synthesises
 it when the socket drops before an ack arrives, and an HTTP request/response
-has no such state to report. The two exceptions are `send_ocpp_call`, which
+has no such state to report. The three exceptions are `send_ocpp_call`, which
 answers `disconnected` when its CALL was dropped before the CSMS could answer
-([Expert OCPP calls](../concepts/expert-ocpp-calls.md#errors), #389), and
+([Expert OCPP calls](../concepts/expert-ocpp-calls.md#errors), #389),
 `get_15118_ev_certificate`, which does so when its first CALL was
-([Get15118EVCertificate relay](../concepts/security-profiles.md#get15118evcertificate-relay), #537).
+([Get15118EVCertificate relay](../concepts/security-profiles.md#get15118evcertificate-relay), #537),
+and a 2.x `security_event_notification`, which does so when its CALL was
+dropped before it was written ([Security profiles](../concepts/security-profiles.md#ocpp-201-and-21-behaviour), #537).
 
 Transport-level errors (malformed JSON-RPC, invalid auth, rate limit) are handled by the MCP
 protocol layer. Every call is subject to a 30-second deadline; timeout failures surface as

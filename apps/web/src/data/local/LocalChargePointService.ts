@@ -633,7 +633,7 @@ export class LocalChargePointService implements ChargePointService {
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
+    await this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
       type,
       techInfo,
     );

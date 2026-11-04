@@ -31,6 +31,18 @@ describe("JSON-Lines security_event_notification (#537)", () => {
     );
   });
 
+  it("fails when the CALL was dropped", async () => {
+    const sendSecurityEventNotification = vi
+      .fn()
+      .mockRejectedValue(new Error("OCPP call 1 dropped (not_connected)"));
+    await expect(
+      handleJsonCommand(facadeTarget({ sendSecurityEventNotification }), {
+        command: "security_event_notification",
+        params: { type: "SettingSystemTime" },
+      }),
+    ).rejects.toThrow("dropped (not_connected)");
+  });
+
   it.each([
     ["a 51-character type", { type: "t".repeat(51) }],
     [

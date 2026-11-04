@@ -424,7 +424,7 @@ export class RegistryChargePointService implements ChargePointService {
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    this.requireService(id).sendSecurityEventNotification(type, techInfo);
+    await this.requireService(id).sendSecurityEventNotification(type, techInfo);
   }
 
   async sendSignCertificate(id: string, csr?: string): Promise<void> {

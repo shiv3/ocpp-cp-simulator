@@ -3,6 +3,7 @@ import {
   ChargePoint,
   RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
 } from "../ChargePoint";
+import { OcppCallNoAnswerError } from "../../errors/OcppCallErrors";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { OCPPWebSocket } from "../../../infrastructure/transport/OCPPWebSocket";
 import type { Outbox } from "../../transport/Outbox";
@@ -573,7 +574,7 @@ describe("DiscardedRenewedClientCertificate (2.1 A02.FR.29)", () => {
     const cp = profile3Station(version);
     const send = vi
       .spyOn(outboxOf(cp), "sendSecurityEventNotification")
-      .mockImplementation(() => undefined);
+      .mockResolvedValue(undefined);
     vi.spyOn(outboxOf(cp), "sendStatusNotification").mockImplementation(
       () => undefined,
     );
@@ -597,6 +598,38 @@ describe("DiscardedRenewedClientCertificate (2.1 A02.FR.29)", () => {
     const send = discardThenBoot("OCPP-2.1");
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]).toBe("DiscardedRenewedClientCertificate");
+  });
+
+  // #537: nobody awaits this one, so a drop must not become an unhandled
+  // rejection, which would take a CLI process down.
+  it("logs a dropped event", async () => {
+    const cp = profile3Station("OCPP-2.1");
+    vi.spyOn(outboxOf(cp), "sendStatusNotification").mockImplementation(
+      () => undefined,
+    );
+    const send = vi
+      .spyOn(outboxOf(cp), "sendSecurityEventNotification")
+      .mockRejectedValue(new OcppCallNoAnswerError("dropped", "not sent"));
+    const warn = vi.spyOn(
+      (cp as unknown as { _logger: { warn: () => void } })._logger,
+      "warn",
+    );
+
+    transportOf(cp).observers.emit("renewedClientCertificateDiscarded", {});
+    cp.onBootNotificationResult({
+      status: "Accepted",
+      interval: 0,
+      currentTime: new Date().toISOString(),
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("not sent"),
+        expect.anything(),
+      ),
+    );
+    cp.dispose();
   });
 
   it("is not sent on 2.0.1, whose security events do not define it", () => {

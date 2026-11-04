@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import type { BootNotificationResult } from "../../../../domain/charge-point/ChargePointEvents";
@@ -416,6 +416,30 @@ function withFakeRawBodyFetch(status: number, body: string): () => void {
 }
 
 describe("OCPPSoapHandler CP-to-CSMS client", () => {
+  // #537: SOAP has no security extension, so there is nothing to drop.
+  it("only logs a SecurityEventNotification and answers success", async () => {
+    const callbackUrl =
+      "http://127.0.0.1:9700/ocpp/soap/CP-SOAP-SECURITY-EVENT/ChargePointService";
+    const cp = createSoapChargePoint(
+      "CP-SOAP-SECURITY-EVENT",
+      "http://127.0.0.1:65534/never",
+      callbackUrl,
+    );
+    const logger = new Logger();
+    const warn = spyOn(logger, "warn");
+    const handler = new OCPPSoapHandler(cp, logger, {
+      centralSystemUrl: "http://127.0.0.1:65534/never",
+      soapCallbackUrl: callbackUrl,
+    });
+
+    await expect(
+      handler.sendSecurityEventNotification("SettingSystemTime"),
+    ).resolves.toBeUndefined();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("no security extension");
+  });
+
   it("posts OCPP 1.5 SOAP Boot, Heartbeat, Status, transaction, and MeterValues requests", async () => {
     await withGlobalFetch(async () => {
       const csms = startFakeCentralSystemService();

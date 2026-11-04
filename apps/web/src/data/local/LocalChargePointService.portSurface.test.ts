@@ -5,6 +5,7 @@ import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenar
 import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { OcppCallNoAnswerError } from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
 import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
@@ -161,7 +162,7 @@ describe("LocalChargePointService A1.1d port methods", () => {
     service = setup.service;
     const spy = vi
       .spyOn(setup.chargePoint, "sendSecurityEventNotification")
-      .mockImplementation(() => undefined);
+      .mockResolvedValue(undefined);
 
     await service.sendSecurityEventNotification(
       "CP-PORT",
@@ -170,6 +171,20 @@ describe("LocalChargePointService A1.1d port methods", () => {
     );
 
     expect(spy).toHaveBeenCalledWith("SettingSystemTime", "clock adjusted");
+  });
+
+  it("passes a dropped SecurityEventNotification on (#537)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const dropped = new OcppCallNoAnswerError("dropped", "dropped");
+    vi.spyOn(
+      setup.chargePoint,
+      "sendSecurityEventNotification",
+    ).mockRejectedValue(dropped);
+
+    await expect(
+      service.sendSecurityEventNotification("CP-PORT", "SettingSystemTime"),
+    ).rejects.toBe(dropped);
   });
 
   it("sends SignCertificate through the local charge point", async () => {

@@ -43,7 +43,10 @@ import {
   type OcppCallOutcome,
   type OcppCallRequest,
 } from "../../domain/types/OcppCall";
-import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../domain/errors/OcppCallErrors";
 import { Logger, LogType } from "../../shared/Logger";
 import {
   BootNotification,
@@ -452,6 +455,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     /** Told when the CALL never reached the wire (#348 waiters). */
     onDropped?: (reason: string) => void,
     transactionEvent?: TransactionEventDelivery,
+    onWritten?: () => void,
   ): void {
     if (!this._webSocket.isConnected()) {
       this._logger.warn(
@@ -491,6 +495,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
               : {}),
           });
           this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
+          onWritten?.();
         } else {
           // On drop outcomes (socket_closed, disposed, write_failed,
           // queue_overflow): no retry here. The caller is told; a
@@ -1707,14 +1712,35 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * A04 SecurityEventNotificationRequest (#537), sent by the control-plane
    * `security_event_notification` method. Dropped while offline: the E11
    * queue (#528) does not take it, and the A04.FR.02 queue is not modelled.
+   * Resolves once the CALL is written, not answered; rejects with
+   * `OcppCallNoAnswerError` when it is dropped.
    */
-  public sendSecurityEventNotification(type: string, techInfo?: string): void {
+  public sendSecurityEventNotification(
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
     const payload: SecurityEventNotificationRequestV201 = {
       type,
       timestamp: new Date().toISOString(),
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
-    this.send("SecurityEventNotification", this.generateMessageId(), payload);
+    const id = this.generateMessageId();
+    return new Promise((resolve, reject) => {
+      this.send(
+        "SecurityEventNotification",
+        id,
+        payload,
+        (reason) =>
+          reject(
+            new OcppCallNoAnswerError(
+              "dropped",
+              `OCPP call ${id} dropped (${reason})`,
+            ),
+          ),
+        undefined,
+        resolve,
+      );
+    });
   }
 
   /**
@@ -2040,9 +2066,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       // certificate is the one now booted.
       if (this._renewedClientCertificateDiscarded) {
         this._renewedClientCertificateDiscarded = false;
-        this._chargePoint.sendSecurityEventNotification(
-          "DiscardedRenewedClientCertificate",
-        );
+        this._chargePoint
+          .sendSecurityEventNotification("DiscardedRenewedClientCertificate")
+          .catch((err: unknown) => {
+            this._logger.warn(
+              `DiscardedRenewedClientCertificate not sent: ${err instanceof Error ? err.message : String(err)}`,
+              LogType.OCPP,
+            );
+          });
       }
     }
     if (

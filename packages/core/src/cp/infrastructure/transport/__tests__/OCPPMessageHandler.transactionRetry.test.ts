@@ -875,3 +875,71 @@ describe("OCPP 1.6 replay of a message at a lowered TransactionMessageAttempts (
     expect(discarded).toMatchObject([{ attempts: 1 }]);
   });
 });
+
+describe("OCPP 1.6 transactionMessageRejected and the resend timer (#527)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a listener closing the link salvages the resend: no timer outlives the close", () => {
+    const { socket, connector, chargePoint, handler } = setup();
+    chargePoint.notifyTransactionMessageRejected.mockImplementation(() => {
+      socket.connected = false;
+      handler.onWebSocketClosed();
+      return 1;
+    });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+
+    socket.callError(socket.last().id);
+
+    expect(vi.getTimerCount()).toBe(0);
+    socket.connected = true;
+    handler.flushPendingQueue();
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+  });
+
+  it("a listener still sees the notice before the resend, with no interval to wait", async () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup({
+      interval: 0,
+    });
+    const writtenAtNotice: number[] = [];
+    chargePoint.notifyTransactionMessageRejected.mockImplementation(() =>
+      writtenAtNotice.push(socket.of("StartTransaction").length),
+    );
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+
+    socket.callError(socket.last().id);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(writtenAtNotice).toEqual([1]);
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    expect(discarded).toEqual([]);
+  });
+
+  it("the last attempt still reports the rejection before the discard", () => {
+    const { socket, connector, chargePoint, handler } = setup({ attempts: 1 });
+    const order: string[] = [];
+    chargePoint.notifyTransactionMessageRejected.mockImplementation(() =>
+      order.push("rejected"),
+    );
+    chargePoint.notifyTransactionMessageDiscarded.mockImplementation(() =>
+      order.push("discarded"),
+    );
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+
+    socket.callError(socket.last().id);
+
+    expect(order).toEqual(["rejected", "discarded"]);
+  });
+});

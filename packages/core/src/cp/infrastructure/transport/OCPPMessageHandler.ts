@@ -1609,12 +1609,15 @@ export class OCPPMessageHandler {
     }
     const config = this._chargePoint.configuration;
     const attempts = Math.max(1, config.transactionMessageAttempts());
-    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
     // Stopped while the request was in flight: discarded at once, as after
     // its last attempt.
     const startOutlived =
       request.action === OCPPAction.StartTransaction && !startedTransaction;
     if (attempt >= attempts || startOutlived) {
+      this._chargePoint.notifyTransactionMessageRejected({
+        ...report,
+        attempt,
+      });
       this._logger.warn(
         `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}${startOutlived ? "; its transaction no longer runs" : ""}`,
         LogType.TRANSACTION,
@@ -1656,6 +1659,9 @@ export class OCPPMessageHandler {
     }, delayMs);
     unrefTimer(timer);
     this._transactionMessageRetries.set(timer, resend);
+    // After the timer is tracked: a listener closing the link must find it
+    // in `_transactionMessageRetries`, or it would fire after the close.
+    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
   }
 
   /**

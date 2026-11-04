@@ -424,7 +424,10 @@ the resend.
 An [expert call](expert-ocpp-calls.md) is never resent, and a MeterValues.req
 without a `transactionId` is not transaction-related. OCPP-S (1.2 / 1.5 /
 1.6S) does not retry: a SOAP Fault answering these messages is reported as an
-error and the message is not sent again.
+error and the message is not sent again. On 1.6S that deviates from the OCPP-S
+1.6 errata sheet (3.2), which has a Charge Point retry transaction-related
+messages after a Fault
+([#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585)).
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

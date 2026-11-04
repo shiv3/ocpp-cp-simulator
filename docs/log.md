@@ -2200,3 +2200,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - A resend salvaged to the offline queue keeps its count (§3.7.1 "for this message") in the existing `pending_messages.attempts` column, across a restart: discarded after `TransactionMessageAttempts` transmissions however often the link drops. No schema change.
 - A request's connector resolves the same way on its CALLRESULT and its CALLERROR: the request's, else the payload's, else 1.
 - [OCPP versions and transports → Transaction message retries (OCPP-J 1.6)](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](concepts/charging-sessions.md) (connection loss, limits), [Operational timeline](concepts/operational-timeline.md) (`transaction_message_discarded`), [State persistence](concepts/state-persistence.md) (`pending_messages`).
+
+## [2026-11-04] ingest | OCPP 1.6 transaction message retries: CodeRabbit review (#527)
+
+- A replay that already met `TransactionMessageAttempts`, lowered while it waited in the offline queue, is discarded with `transactionMessageDiscarded` instead of sent. A message never transmitted always goes out. A resend waiting out its interval or the serial queue still goes out once.
+- [OCPP versions and transports → Transaction message retries (OCPP-J 1.6)](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16): replay at a lowered limit.

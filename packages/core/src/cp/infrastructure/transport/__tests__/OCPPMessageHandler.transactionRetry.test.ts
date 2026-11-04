@@ -729,3 +729,149 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
   });
 });
+
+describe("OCPP 1.6 replay of a message at a lowered TransactionMessageAttempts (#527, §3.7.1)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  /** Two transmissions of a StartTransaction.req failed, then the link drops:
+   *  the offline queue holds the message with a count of 2. */
+  async function startFailedTwiceThenClosed() {
+    const station = setup();
+    const { socket, connector, handler } = station;
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    await vi.advanceTimersByTimeAsync(60_000);
+    socket.callError(socket.last().id);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+    return station;
+  }
+
+  it("discards with a notice rather than sends a replay that already met the limit", async () => {
+    const { socket, connector, chargePoint, handler, discarded } =
+      await startFailedTwiceThenClosed();
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(2);
+    handler.flushPendingQueue();
+
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    expect(discarded).toEqual([
+      {
+        connectorId: 1,
+        transactionId: "0",
+        action: "StartTransaction",
+        reason: "callError",
+        attempts: 2,
+      },
+    ]);
+    // As after a last attempt: the transaction goes on without a conf.
+    expect(connector.status).toBe(OCPPStatus.Charging);
+
+    handler.flushPendingQueue();
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    expect(discarded).toHaveLength(1);
+  });
+
+  it("gives one notice for a Start over the limit whose transaction stopped, and leaves the connector alone", async () => {
+    const { socket, connector, chargePoint, handler, discarded } =
+      await startFailedTwiceThenClosed();
+    connector.transaction!.stopTime = new Date("2026-10-30T11:00:00.000Z");
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(2);
+    handler.flushPendingQueue();
+
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    expect(discarded).toMatchObject([{ attempts: 2 }]);
+    expect(chargePoint.updateConnectorStatus).not.toHaveBeenCalled();
+  });
+
+  it("still replays a message below the limit", async () => {
+    const { socket, chargePoint, handler, discarded } =
+      await startFailedTwiceThenClosed();
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(3);
+    handler.flushPendingQueue();
+
+    expect(socket.of("StartTransaction")).toHaveLength(3);
+    expect(discarded).toEqual([]);
+  });
+
+  it("reports a StopTransaction with its id and goes on with the next message", async () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: transaction({
+        id: 42,
+        meterStop: 1_000,
+        stopTime: new Date("2026-10-30T11:00:00.000Z"),
+      }),
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.connected = true;
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(1);
+    handler.flushPendingQueue();
+
+    expect(socket.of("StopTransaction")).toHaveLength(1);
+    expect(discarded).toMatchObject([
+      { action: "StopTransaction", transactionId: "42", attempts: 1 },
+    ]);
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+  });
+
+  it.each([0, 1])(
+    "with the limit at %i, a message never transmitted still goes out",
+    (limit) => {
+      const { socket, connector, chargePoint, handler, discarded } = setup();
+      socket.connected = false;
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: connector.transaction!,
+        connectorId: 1,
+      });
+      expect(socket.of("StartTransaction")).toHaveLength(0);
+      socket.connected = true;
+
+      chargePoint.configuration.transactionMessageAttempts.mockReturnValue(
+        limit,
+      );
+      handler.flushPendingQueue();
+
+      expect(socket.of("StartTransaction")).toHaveLength(1);
+      expect(discarded).toEqual([]);
+    },
+  );
+
+  it("a limit of 0 counts as 1 for a message transmitted once", () => {
+    const { socket, connector, chargePoint, handler, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+
+    chargePoint.configuration.transactionMessageAttempts.mockReturnValue(0);
+    handler.flushPendingQueue();
+
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    expect(discarded).toMatchObject([{ attempts: 1 }]);
+  });
+});

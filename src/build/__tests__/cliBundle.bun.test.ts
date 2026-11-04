@@ -127,6 +127,15 @@ describe("the CLI bundle runs away from the source tree (#578)", () => {
         join(dist, "index.html"),
         `<!doctype html><html><body><div id="root">${sentinel}</div></body></html>`,
       );
+      // A decoy where the source-checkout rule (two levels up) would look
+      // from the bundle: <root>/dist, beside the package. The package's own
+      // dist/ must win, so the candidate order matters.
+      const decoy = join(root, "dist");
+      mkdirSync(decoy, { recursive: true });
+      writeFileSync(
+        join(decoy, "index.html"),
+        `<!doctype html><html><body><div id="root">decoy-above-the-package</div></body></html>`,
+      );
       const port = await freePort();
       const proc = Bun.spawn(
         [
@@ -160,6 +169,7 @@ describe("the CLI bundle runs away from the source tree (#578)", () => {
           console.error(await new Response(proc.stderr).text());
         }
         expect(body).toContain(sentinel);
+        expect(body).not.toContain("decoy-above-the-package");
       } finally {
         proc.kill();
         await proc.exited;

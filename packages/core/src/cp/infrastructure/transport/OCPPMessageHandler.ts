@@ -278,6 +278,8 @@ interface SerialEntry {
   onDropped?: (reason: string) => void;
   /** #527: the 1-based transmission this is; 1 unless it is a resend. */
   attempt?: number;
+  /** #527: the CALLERROR that caused this resend, for its discard notice. */
+  lastErrorCode?: string;
 }
 
 export class OCPPMessageHandler {
@@ -975,6 +977,7 @@ export class OCPPMessageHandler {
    * are queued for retry and others are logged and discarded.
    */
   private salvageOrDiscard(entry: SerialEntry, reason: string): void {
+    if (this.discardOutlivedStartResend(entry)) return;
     if (entry.onDropped) {
       this._logger.warn(
         `Dropping ${entry.action} (${reason}); its caller is told`,
@@ -1011,6 +1014,10 @@ export class OCPPMessageHandler {
     if (this._serialInFlight) return;
     while (this._serialQueue.length > 0) {
       const head = this._serialQueue[0];
+      if (this.discardOutlivedStartResend(head)) {
+        this._serialQueue.shift();
+        continue;
+      }
       if (!this.isCallAllowed(head.action)) {
         // Boot gate currently blocks this action — leave it at the front
         // of the queue. `setBootStatus` re-pumps us when the gate opens.
@@ -1192,33 +1199,6 @@ export class OCPPMessageHandler {
       this.salvageOrDiscard(entry, "socket_closed");
     }
     this._serialQueue = [];
-  }
-
-  /** #527: see `IChargePointMessageHandler.cancelStartTransactionResends`.
-   *  A resend whose timer already fired waits in the serial queue behind
-   *  the CALL in flight; it goes too. The other resends (StopTransaction,
-   *  MeterValues) carry on. */
-  public cancelStartTransactionResends(): void {
-    const isStartResend = (entry: SerialEntry) =>
-      entry.action === OCPPAction.StartTransaction &&
-      entry.attempt !== undefined;
-    const dropped: SerialEntry[] = [];
-    for (const [timer, resend] of this._transactionMessageRetries) {
-      if (!isStartResend(resend)) continue;
-      clearTimeout(timer);
-      this._transactionMessageRetries.delete(timer);
-      dropped.push(resend);
-    }
-    dropped.push(...this._serialQueue.filter(isStartResend));
-    this._serialQueue = this._serialQueue.filter(
-      (entry) => !isStartResend(entry),
-    );
-    for (const resend of dropped) {
-      this._logger.warn(
-        `StartTransaction resend for connector ${resend.connectorId ?? "?"} dropped: a Reset stops its transaction`,
-        LogType.TRANSACTION,
-      );
-    }
   }
 
   /**
@@ -1554,16 +1534,17 @@ export class OCPPMessageHandler {
    * to Charging, as when StopTransactionOnInvalidId=false keeps a rejected
    * start running.
    *
-   * A CALLERROR answering a StartTransaction.req whose transaction no longer
-   * runs (stopped while the request was in flight, e.g. by a Reset) discards
-   * it at once, with no resend: the station reports it rejected, then
-   * discarded after that one attempt.
+   * A StartTransaction.req whose transaction no longer runs is not sent
+   * again: it would reach the CSMS after the StopTransaction.req and open a
+   * transaction nothing stops. A CALLERROR answering one in flight discards
+   * it at once; a resend already waiting is discarded by
+   * `discardOutlivedStartResend`, whichever stop path ended the transaction.
    *
    * Known limitation, as on 2.x: a waiting resend does not hold back the
    * next transaction-related message, so a StopTransaction.req can overtake
    * the StartTransaction.req being retried (§3.7 asks for chronological
-   * order). Both settings are read here, so a ChangeConfiguration applies to
-   * the next failure.
+   * order) and goes out with the `0` placeholder. Both settings are read
+   * here, so a ChangeConfiguration applies to the next failure.
    */
   private onTransactionMessageCallError(
     request: OCPPRequest,
@@ -1599,10 +1580,8 @@ export class OCPPMessageHandler {
     const config = this._chargePoint.configuration;
     const attempts = Math.max(1, config.transactionMessageAttempts());
     this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
-    // A StartTransaction.req whose transaction no longer runs (a Reset
-    // stopped it while the request was in flight) is not resent: it would
-    // reach the CSMS after the StopTransaction.req and open a transaction
-    // nothing stops. It is discarded at once, as after its last attempt.
+    // Stopped while the request was in flight: discarded at once, as after
+    // its last attempt.
     const startOutlived =
       request.action === OCPPAction.StartTransaction && !startedTransaction;
     if (attempt >= attempts || startOutlived) {
@@ -1631,6 +1610,7 @@ export class OCPPMessageHandler {
       payload: request.payload as OcppMessageRequestPayload,
       ...(request.connectorId != null && { connectorId: request.connectorId }),
       attempt: attempt + 1,
+      lastErrorCode: errorCode,
     };
     const timer = setTimeout(() => {
       this._transactionMessageRetries.delete(timer);
@@ -1641,17 +1621,51 @@ export class OCPPMessageHandler {
         this.salvageOrDiscard(resend, "boot gate");
         return;
       }
-      this.sendRequest(
-        resend.action,
-        this.generateMessageId(),
-        resend.payload,
-        resend.connectorId,
-        undefined,
-        resend.attempt,
-      );
+      this._serialQueue.push({ ...resend, id: this.generateMessageId() });
+      this.pumpSerialQueue();
     }, delayMs);
     unrefTimer(timer);
     this._transactionMessageRetries.set(timer, resend);
+  }
+
+  /**
+   * #527: a StartTransaction.req resend whose transaction no longer runs
+   * must not leave the station: it would reach the CSMS after the
+   * StopTransaction.req and open a transaction nothing stops, whatever
+   * stopped this one (local stop, Unlock, EV disconnect, ChangeAvailability,
+   * RemoteStop, Reset). So this runs wherever a resend leaves: the serial
+   * queue, and the offline queue it would otherwise be salvaged to. The
+   * request's `idTag` and `timestamp` identify the transaction, so a
+   * transaction restored after a restart still matches. A first transmission
+   * (no `attempt` above 1) is left alone: it goes out in order, ahead of its
+   * StopTransaction.req.
+   */
+  private discardOutlivedStartResend(entry: SerialEntry): boolean {
+    if (entry.action !== OCPPAction.StartTransaction) return false;
+    const attempt = entry.attempt ?? 1;
+    if (attempt <= 1) return false;
+    const start = entry.payload as StartTransactionRequestV16;
+    const connectorId = entry.connectorId ?? start.connectorId;
+    const connector = this._chargePoint.getConnector(connectorId);
+    if (isRunningTransactionStartedBy(connector?.transaction, start)) {
+      return false;
+    }
+    const attempts = attempt - 1;
+    this._logger.warn(
+      `StartTransaction of transaction 0 discarded after ${attempts} attempt(s): its transaction no longer runs`,
+      LogType.TRANSACTION,
+    );
+    this._chargePoint.notifyTransactionMessageDiscarded({
+      connectorId,
+      transactionId: "0",
+      action: "StartTransaction",
+      reason: "callError",
+      ...(entry.lastErrorCode !== undefined && {
+        errorCode: entry.lastErrorCode,
+      }),
+      attempts,
+    });
+    return true;
   }
 
   /** #527: the StartTransaction.req was discarded; the transaction it

@@ -319,30 +319,184 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(rejected.map((r) => r.attempt)).toEqual([1, 1]);
   });
 
-  it("a Reset drops a StartTransaction resend already queued behind another CALL", async () => {
-    const { socket, connector, handler } = setup();
-    handler.sendTransactionEvent({
-      phase: "started",
-      transaction: connector.transaction!,
+  describe("a StartTransaction resend whose transaction no longer runs", () => {
+    const discardNotice = {
       connectorId: 1,
-    });
-    socket.callError(socket.last().id);
-    await vi.advanceTimersByTimeAsync(59_000);
-    // An unanswered Heartbeat.req holds the serial slot when the retry
-    // timer fires: the resend waits in the serial queue, not on its timer.
-    handler.sendHeartbeat();
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(socket.of("StartTransaction")).toHaveLength(1);
+      transactionId: "0",
+      action: "StartTransaction",
+      reason: "callError",
+      errorCode: "InternalError",
+      attempts: 1,
+    };
 
-    handler.cancelStartTransactionResends();
-    await vi.advanceTimersByTimeAsync(600_000);
-    expect(socket.of("StartTransaction")).toHaveLength(1);
-    // Nor is it salvaged to the offline queue by the Reset's close.
-    socket.connected = false;
-    handler.onWebSocketClosed();
-    socket.connected = true;
-    handler.flushPendingQueue();
-    expect(socket.of("StartTransaction")).toHaveLength(1);
+    function retrying() {
+      const station = setup();
+      station.handler.sendTransactionEvent({
+        phase: "started",
+        transaction: station.connector.transaction!,
+        connectorId: 1,
+      });
+      station.socket.callError(station.socket.last().id);
+      return station;
+    }
+
+    // A local stop leaves a closed transaction on the connector until
+    // cleanup; another stop path leaves none; a new one can begin since.
+    const outlived: Array<[string, () => Transaction | null]> = [
+      [
+        "stopped",
+        () => transaction({ stopTime: new Date("2026-10-30T10:30:00.000Z") }),
+      ],
+      ["cleared from its connector", () => null],
+      ["replaced by another", () => transaction({ tagId: "TAG-OTHER" })],
+    ];
+
+    it.each(outlived)(
+      "is discarded when its retry interval ends: transaction %s",
+      async (_name, after) => {
+        const { socket, connector, rejected, discarded } = retrying();
+        connector.transaction = after();
+
+        await vi.advanceTimersByTimeAsync(600_000);
+
+        expect(socket.of("StartTransaction")).toHaveLength(1);
+        expect(rejected.map((r) => r.attempt)).toEqual([1]);
+        expect(discarded).toEqual([discardNotice]);
+      },
+    );
+
+    it("is discarded when it leaves the serial queue behind another CALL", async () => {
+      const { socket, connector, handler, discarded } = retrying();
+      await vi.advanceTimersByTimeAsync(59_000);
+      // An unanswered Heartbeat.req holds the serial slot when the retry
+      // timer fires: the resend waits in the serial queue, not on its timer.
+      handler.sendHeartbeat();
+      const heartbeat = socket.last();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(discarded).toEqual([]);
+      connector.transaction = transaction({
+        stopTime: new Date("2026-10-30T10:30:00.000Z"),
+      });
+
+      socket.callResult(heartbeat.id, { currentTime: "2026-10-30T10:31:00Z" });
+
+      expect(socket.of("StartTransaction")).toHaveLength(1);
+      expect(discarded).toEqual([discardNotice]);
+    });
+
+    it("lets the CALL queued behind it go out", async () => {
+      const { socket, connector, handler } = retrying();
+      await vi.advanceTimersByTimeAsync(59_000);
+      handler.sendHeartbeat();
+      const heartbeat = socket.last();
+      await vi.advanceTimersByTimeAsync(1_000);
+      connector.transaction = null;
+      handler.sendHeartbeat();
+
+      socket.callResult(heartbeat.id, { currentTime: "2026-10-30T10:31:00Z" });
+
+      expect(socket.of("Heartbeat")).toHaveLength(2);
+    });
+
+    it("is not salvaged to the offline queue when the socket closes, waiting out its interval", async () => {
+      const { socket, connector, handler, discarded } = retrying();
+      connector.transaction = null;
+
+      socket.connected = false;
+      handler.onWebSocketClosed();
+      socket.connected = true;
+      handler.flushPendingQueue();
+
+      expect(socket.of("StartTransaction")).toHaveLength(1);
+      expect(discarded).toEqual([discardNotice]);
+    });
+
+    it("is not salvaged to the offline queue when the socket closes, waiting in the serial queue", async () => {
+      const { socket, connector, handler, discarded } = retrying();
+      await vi.advanceTimersByTimeAsync(59_000);
+      handler.sendHeartbeat();
+      await vi.advanceTimersByTimeAsync(1_000);
+      connector.transaction = null;
+
+      socket.connected = false;
+      handler.onWebSocketClosed();
+      socket.connected = true;
+      handler.flushPendingQueue();
+
+      expect(socket.of("StartTransaction")).toHaveLength(1);
+      expect(discarded).toEqual([discardNotice]);
+    });
+
+    it("is not salvaged to the offline queue when it falls due behind a closed boot gate", async () => {
+      const { socket, connector, handler, discarded } = retrying();
+      handler.setBootStatus({ status: "Pending" });
+      connector.transaction = null;
+      await vi.advanceTimersByTimeAsync(600_000);
+
+      handler.setBootStatus({ status: "Accepted" });
+      handler.flushPendingQueue();
+
+      expect(socket.of("StartTransaction")).toHaveLength(1);
+      expect(discarded).toEqual([discardNotice]);
+    });
+
+    it("reports each failed transmission: a stop after two CALLERRORs counts two", async () => {
+      const { socket, connector, discarded } = retrying();
+      await vi.advanceTimersByTimeAsync(60_000);
+      socket.callError(socket.last().id, "GenericError");
+      connector.transaction = null;
+
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(socket.of("StartTransaction")).toHaveLength(2);
+      expect(discarded).toEqual([
+        { ...discardNotice, errorCode: "GenericError", attempts: 2 },
+      ]);
+    });
+
+    it("goes out while its transaction still runs", async () => {
+      const { socket, discarded } = retrying();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(socket.of("StartTransaction")).toHaveLength(2);
+      expect(discarded).toEqual([]);
+    });
+
+    it("leaves a first transmission queued before the stop alone: it precedes the StopTransaction.req", async () => {
+      const { socket, connector, handler, discarded } = setup();
+      handler.sendHeartbeat();
+      const heartbeat = socket.last();
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: connector.transaction!,
+        connectorId: 1,
+      });
+      connector.transaction = null;
+
+      socket.callResult(heartbeat.id, { currentTime: "2026-10-30T10:31:00Z" });
+
+      expect(socket.of("StartTransaction")).toHaveLength(1);
+      expect(discarded).toEqual([]);
+    });
+
+    it("carries on a StopTransaction.req and a MeterValues.req resend", async () => {
+      const { socket, connector, handler, discarded } = setup();
+      handler.sendTransactionEvent({
+        phase: "ended",
+        transaction: transaction({
+          id: 42,
+          meterStop: 1_000,
+          stopTime: new Date("2026-10-30T11:00:00.000Z"),
+        }),
+        connectorId: 1,
+      });
+      socket.callError(socket.last().id);
+      connector.transaction = null;
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(socket.of("StopTransaction")).toHaveLength(2);
+      expect(discarded).toEqual([]);
+    });
   });
 
   it("a CALLERROR after the CALL timed out changes nothing: 1.6 does not retry a timeout", async () => {

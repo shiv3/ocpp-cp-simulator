@@ -2272,8 +2272,6 @@ export class ChargePoint {
       return;
     }
     const reason = type === "Hard" ? "HardReset" : "SoftReset";
-    // #527: see IChargePointMessageHandler.cancelStartTransactionResends.
-    this._outbox.cancelStartTransactionResends();
     for (const connector of this.connectors.values()) {
       if (connector.transaction) {
         this.stopTransaction(connector, reason);

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Log
@@ -2144,3 +2144,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The dependency update to `@peculiar/x509` 3 (superseding Dependabot #581) changes certificate parsing: DER that continues past the encoded structure now throws instead of being accepted. Tests pin `InstallCertificate` → `Rejected`, `splitPemChain` → `null` and `CertificateStore` → `Malformed`.
 - [Security profiles](concepts/security-profiles.md#certificate-store): new paragraph on trailing-byte rejection in 1.6 and 2.x, and on a root of that kind persisted by an older release, which no longer blocks a later `CertificateSigned`.
+
+## [2026-11-04] ingest | PR-time Docker build guard; stale `package-lock.json` removed (#578)
+
+- `ci.yml` gains a `docker-build` job: builds the full image for `linux/amd64` with no push on every pull request, runs it with `STATE_DB=:memory:` and waits up to 30 s for `/v1/healthz`. Closes the gap the 2026-09-13 entry left open (the v0.7.11 image that never built, #302): `docker-publish.yml` still runs only on `main` and tags. Listed in #578 as groundwork for the workspaces move, where the Dockerfile's `deps` stage (root `package.json` + `bun.lock` only) will have to change.
+- `package-lock.json` deleted. It had not been touched since 2026-06-25 (`68877f0`), no workflow or script read it (`bun install --frozen-lockfile` everywhere; `deploy.yml` records that `npm install` broke on it), and a second lockfile beside `bun.lock` invites `npm install` to resolve a different tree than the one CI tests.
+- [Docker image](entities/docker-image.md): new sentence on the pull-request build and `ci.yml` added to its sources.

@@ -135,6 +135,59 @@ jobs:
           files: ./coverage/junit.xml
           fail_ci_if_error: false
 
+  # docker-publish.yml builds the image on pushes to `main` and on tags, not
+  # on pull requests, so a change that breaks only the container build is
+  # first seen after merge: a referenced tsconfig the `ui` stage did not copy
+  # left v0.7.11 without an image (#302), and the same shape of miss is what
+  # the `COPY src/...` list in the Dockerfile exists to prevent. This job
+  # builds the full image for the host arch on every pull request, starts it
+  # and waits for the health endpoint, so a build-time or boot-time miss
+  # fails here (#578 lists it as a prerequisite of the workspaces move:
+  # the `deps` stage copies only root package.json + bun.lock today). One
+  # arch and no push keep it to a few minutes; the gha cache is shared with
+  # docker-publish.yml, which uses the same cache scope.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ocpp-cp-sim:ci
+          build-args: |
+            APP_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The daemon comes up empty (no --cp-id), serves the web console and
+      # answers the health path the Dockerfile's HEALTHCHECK polls. Thirty
+      # seconds is generous: the entrypoint execs bun directly and the daemon
+      # answers /v1/healthz within a second or two on the runner.
+      - name: Image boots and answers the health path
+        run: |
+          docker run -d --rm --name ocpp-cp-sim-ci -p 9700:9700 \
+            -e STATE_DB=:memory: ocpp-cp-sim:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9700/v1/healthz; then echo; exit 0; fi
+            sleep 1
+          done
+          echo "daemon did not answer /v1/healthz within 30s"
+          docker logs ocpp-cp-sim-ci
+          exit 1
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f ocpp-cp-sim-ci || true
+
   # The bench's teardown slow paths (#330), beside the main job rather than
   # inside `test:bun`. Each case makes a mock CSMS slow on one action and so
   # costs wall-clock by construction (~36s locally, mostly injected delays);

@@ -417,8 +417,8 @@ export class CertificateStore {
   }
 
   /** Caches the OCSP response a CSMS returned for `hash` (M06.FR.06),
-   *  replacing an older one. Memory-only; dropped with the chain holding
-   *  the certificate. */
+   *  replacing an older one. Memory-only; dropped with the last chain
+   *  holding the certificate. */
   cacheOcspResponse(hash: CertificateHashDataLike, ocspResult: string): void {
     this.#ocspResponses = [
       ...this.#ocspResponses.filter(

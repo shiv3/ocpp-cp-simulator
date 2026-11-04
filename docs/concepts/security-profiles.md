@@ -427,8 +427,9 @@ CALLERROR.
   skipped with a WARN. An `Accepted` answer's `ocspResult` is cached for
   that certificate, in memory (M06.FR.02/03); `Failed` keeps the previous
   entry and logs a WARN (M06.FR.04). Deleting or replacing the chain drops
-  the responses cached for its certificates. The cached response is not used
-  elsewhere: the simulator has no ISO 15118 stack to hand it to.
+  the responses cached for its certificates, except a certificate another
+  stored chain still holds, such as a shared sub-CA. The cached response is
+  not used elsewhere: the simulator has no ISO 15118 stack to hand it to.
 - `security_event_notification` ([Control plane](control-plane.md#cp-command-methods))
   sends an A04 `SecurityEventNotificationRequest` with the given `type`
   (at most 50 characters), the current `timestamp` and the optional

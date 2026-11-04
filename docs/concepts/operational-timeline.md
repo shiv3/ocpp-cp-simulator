@@ -111,8 +111,8 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `transaction_id_assigned`       | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                         |
 | `transaction_stopped`           | connector | `transactionId`, `reason` (optional)                                 | A transaction stops; `reason` is the stop reason when one was given.                                                    |
 | `transaction_rejected`          | connector | `status`, `stopped`                                                  | A 1.6 StartTransaction.conf or (#447) 2.x TransactionEvent.conf carries a non-Accepted id status; `stopped`: see below. |
-| `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x #490, #529; 1.6 #527) A transaction message transmission fails; it is resent unless it was the last.               |
-| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x #490, #529; 1.6 #527) The last attempt failed too: the message is dropped, the transaction is left as is.          |
+| `transaction_message_rejected`  | connector | message fields (see below), `attempt`                                | (2.x #490, #529; 1.6 #527) A transaction message transmission fails; resent unless the last (exceptions below).         |
+| `transaction_message_discarded` | connector | message fields (see below), `attempts`                               | (2.x #490, #529; 1.6 #527) The message is dropped, usually after its last attempt; the transaction stays as is.         |
 | `authorization_rejected`        | CP        | `tagId`, `status`                                                    | An Authorize.conf is not Accepted (a CALLERROR counts as `Invalid`). Accepted answers are not recorded.                 |
 | `scenario_started`              | connector | `scenarioId`                                                         | (daemon) A scenario run starts.                                                                                         |
 | `scenario_wait_changed`         | connector | `scenarioId`, `nodeId`, `kind`                                       | (daemon) An operator extends, retries or continues a parked wait.                                                       |
@@ -147,10 +147,14 @@ answered the transmission (#490, #527), and then `errorCode` holds its error
 code; it is `timeout` when no answer came within
 `OCPPCommCtrlr.MessageTimeout` (#529, 2.x only), and then there is no
 `errorCode`. On `transaction_message_discarded` they describe the last
-failure. On 1.6 that entry also reports a StartTransaction.req resend dropped
-because its transaction no longer runs (#527), with no last attempt failing:
-`attempts` counts the transmissions made, and `errorCode` is absent when it
-was dropped at a replay from the offline queue. See
+failure. On 1.6 that entry also reports, with no last attempt failing, a
+StartTransaction.req resend dropped because its transaction no longer runs, and
+a replay that already met a lowered `TransactionMessageAttempts` (#527):
+`attempts` counts the transmissions made, and `errorCode` is absent when it was
+dropped at a replay from the offline queue, since `pending_messages` does not
+store it; the summary then says `error code not recorded`. A CALLERROR answering
+a 1.6 StartTransaction.req whose transaction stopped meanwhile records both
+entries at once, even with attempts left: it is not resent. See
 [Transaction message retries (2.x)](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)
 and [(OCPP-J 1.6)](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16).
 

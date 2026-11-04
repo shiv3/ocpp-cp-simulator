@@ -44,15 +44,17 @@ interface Sequence {
  *
  * Every new request (TriggerMessage, `sign_certificate`) calls
  * {@link restart} first, so an `Accepted` seen while a sequence exists is
- * a resend's. The owner stops a sequence when CertificateSigned is
- * rejected (A02.FR.20).
+ * a resend's. The owner stops a sequence once a CertificateSigned is
+ * Accepted (a rejected one leaves it running: no rejection can be tied to
+ * this CSR yet, so A02.FR.20 has no case to apply to). If the owner misses
+ * that, an expiry finds no CSR pending and ends the sequence too.
  *
  * A closed connection does not end a sequence: A02.FR.17-19 have no such
  * case. The owner calls {@link holdAll} when it closes and
  * {@link resumeAll} once the next boot is accepted, and the wait goes on
  * with what it had left. A sequence that reached `CertSigningRepeatTimes`
  * or was stopped has no wait to resume, so a reconnect does not start it
- * over (A02.FR.19, A02.FR.20).
+ * over (A02.FR.19).
  */
 export class SignCertificateBackoff {
   readonly #sequences = new Map<SignedCertificateUse, Sequence>();

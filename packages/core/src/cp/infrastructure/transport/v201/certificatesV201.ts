@@ -340,6 +340,13 @@ function answerDeleteCertificate(
  * written (A02.FR.07). An absent `certificateType` means the certificate
  * serves both the CSMS and the 15118 connection; the simulator has no
  * 15118 stack, so it is the Charging Station certificate.
+ *
+ * Only an Accepted chain ends the CSR's resend back-off (#537), through
+ * `certificateInstalled`: A02.FR.17 asks about a CertificateSigned "for
+ * this CSR". The station has no A02.FR.06 period or hierarchy check, so a
+ * chain whose leaf matches the CSR's key is Accepted and no rejection can
+ * be tied to this CSR as an invalid answer: A02.FR.20 has no case to apply
+ * to yet.
  */
 async function certificateSigned(
   mapping: CertificateWireMapping,
@@ -351,9 +358,6 @@ async function certificateSigned(
     req.certificateType === undefined
       ? "ChargingStationCertificate"
       : mapping.signedUseFrom(req.certificateType);
-  // #537: a CertificateSigned for `use` ends its CSR's resend back-off,
-  // accepted (A02.FR.17) or rejected: invalid (A02.FR.20) or over-long.
-  if (use) ctx.certificateSigning?.certificateSignedAnswered(use);
   // #537 A02.FR.16: SHALL on 2.0.1, MAY on 2.1; the station applies it on
   // both. A02.FR.16 asks for Rejected only, so no security event is sent.
   const maxChainSize = ctx.chargePoint.configuration.maxCertificateChainSize();

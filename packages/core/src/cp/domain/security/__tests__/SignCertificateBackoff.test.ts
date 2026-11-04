@@ -125,7 +125,7 @@ describe("SignCertificateBackoff", () => {
     expect(backoff.isRunning("ChargingStationCertificate")).toBe(false);
   });
 
-  it("stops on stop() (A02.FR.20: CertificateSigned rejected)", () => {
+  it("stops on stop() (an Accepted CertificateSigned)", () => {
     const { backoff, resend } = setup();
     backoff.accepted("ChargingStationCertificate");
     backoff.stop("ChargingStationCertificate");
@@ -219,7 +219,7 @@ describe("SignCertificateBackoff", () => {
       expect(resend).toHaveBeenCalledTimes(1);
     });
 
-    it("does not bring back a stopped sequence (A02.FR.20)", () => {
+    it("does not bring back a stopped sequence", () => {
       const { backoff, resend } = setup();
       const use = "ChargingStationCertificate";
       backoff.accepted(use);

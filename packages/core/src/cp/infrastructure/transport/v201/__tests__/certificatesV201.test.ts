@@ -404,29 +404,112 @@ describe.each(VERSIONS)(
       expect(atLimit.response).toEqual({ status: "Accepted" });
     });
 
-    // #537 A02.FR.17: the CSMS answered the CSR, so its resends stop.
-    it("stops the CSR's resend back-off on an over-limit chain too", async () => {
-      const certificateSignedAnswered = vi.fn();
-      const ctx: V201InboundContext = {
-        ...context(new CertificateStore(), 10, 10).ctx,
-        certificateSigning: {
-          requestSignature: vi.fn(),
-          certificateSignedAnswered,
-          certificateInstalled: vi.fn(),
-        },
-      };
+    // #537: an installed chain is the only thing that ends a CSR's resend
+    // back-off, so a rejected one must not report an install.
+    describe("the certificateInstalled notification", () => {
+      function signingContext(store: CertificateStore, maxChainSize = 10000) {
+        const certificateInstalled = vi.fn();
+        const ctx: V201InboundContext = {
+          ...context(store, 10, maxChainSize).ctx,
+          certificateSigning: {
+            requestSignature: vi.fn(),
+            certificateInstalled,
+          },
+        };
+        return { ctx, certificateInstalled };
+      }
 
-      const overLimit = await handlers.CertificateSigned(
-        {
-          certificateChain: "x".repeat(11),
-          certificateType: "ChargingStationCertificate",
-        },
-        ctx,
-      );
-      expect(overLimit.response).toEqual({ status: "Rejected" });
-      expect(certificateSignedAnswered).toHaveBeenCalledWith(
-        "ChargingStationCertificate",
-      );
+      it("comes after an Accepted chain's answer, not before", async () => {
+        const store = new CertificateStore();
+        const root = await selfSignedRoot("01", "Root");
+        const csr = await store.generateNewCsr("CP", "CPO");
+        const { ctx, certificateInstalled } = signingContext(store);
+
+        const handled = await handlers.CertificateSigned(
+          {
+            certificateChain: await leafForCsr("02", csr, root),
+            certificateType: "ChargingStationCertificate",
+          },
+          ctx,
+        );
+
+        expect(handled.response).toEqual({ status: "Accepted" });
+        expect(certificateInstalled).not.toHaveBeenCalled();
+        handled.afterResult?.();
+        expect(certificateInstalled).toHaveBeenCalledWith(
+          "ChargingStationCertificate",
+        );
+      });
+
+      it.each<
+        [
+          string,
+          (store: CertificateStore) => Promise<Record<string, unknown>>,
+          number,
+        ]
+      >([
+        [
+          "a chain over MaxCertificateChainSize",
+          async () => ({ certificateChain: "x".repeat(11) }),
+          10,
+        ],
+        [
+          "a malformed chain",
+          async (store) => {
+            await store.generateNewCsr("CP", "CPO");
+            return { certificateChain: "not a certificate" };
+          },
+          10000,
+        ],
+        [
+          "a leaf for another key",
+          async (store) => {
+            await store.generateNewCsr("CP", "CPO");
+            const other = await new CertificateStore().generateNewCsr(
+              "CP",
+              "CPO",
+            );
+            const root = await selfSignedRoot("01", "Root");
+            return { certificateChain: await leafForCsr("02", other, root) };
+          },
+          10000,
+        ],
+        [
+          "no pending CSR",
+          async () => {
+            const other = await new CertificateStore().generateNewCsr(
+              "CP",
+              "CPO",
+            );
+            const root = await selfSignedRoot("01", "Root");
+            return { certificateChain: await leafForCsr("02", other, root) };
+          },
+          10000,
+        ],
+        [
+          "an unsupported certificateType",
+          async () => ({
+            certificateChain: "any",
+            certificateType: "NotACertificateType",
+          }),
+          10000,
+        ],
+      ])("does not come for %s", async (_name, payload, maxChainSize) => {
+        const store = new CertificateStore();
+        const { ctx, certificateInstalled } = signingContext(
+          store,
+          maxChainSize,
+        );
+
+        const handled = await handlers.CertificateSigned(
+          await payload(store),
+          ctx,
+        );
+
+        expect(handled.response).toEqual({ status: "Rejected" });
+        handled.afterResult?.();
+        expect(certificateInstalled).not.toHaveBeenCalled();
+      });
     });
 
     it("sends a schema-valid SecurityEventNotification for a rejected chain", async () => {

@@ -299,8 +299,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   });
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
-    certificateSignedAnswered: (use) => this._signBackoff.stop(use),
     certificateInstalled: (use) => {
+      this._signBackoff.stop(use);
       if (V2G_CERTIFICATE_USES.includes(use)) {
         this.requestCertificateStatus([use]);
       } else if (use === "ChargingStationCertificate") {

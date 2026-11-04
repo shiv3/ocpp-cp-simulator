@@ -182,12 +182,10 @@ export interface V201CertificateSigning {
    * resend back-off over (A02.FR.19).
    */
   requestSignature(use: SignedCertificateUse): Promise<void>;
-  /** A CertificateSigned for `use` was answered: its back-off stops
-   *  (accepted, or rejected per A02.FR.20). */
-  certificateSignedAnswered(use: SignedCertificateUse): void;
   /**
-   * A chain for `use` was installed: for a V2G certificate the station
-   * asks the CSMS for the OCSP status of the certificate and its sub-CAs
+   * A chain for `use` was installed, the only thing that ends its CSR's
+   * resend back-off (a rejected chain leaves it running, #537): for a V2G
+   * certificate the station asks the CSMS for the OCSP status of the certificate and its sub-CAs
    * (M06.FR.07); a security-profile-3 station switches to a new Charging
    * Station certificate as its TLS client certificate (A02.FR.08).
    */

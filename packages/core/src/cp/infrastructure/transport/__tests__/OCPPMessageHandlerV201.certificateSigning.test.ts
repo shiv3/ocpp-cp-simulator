@@ -34,7 +34,7 @@ import { buildV21InboundRegistry } from "../v21/inboundRegistryV21";
 /**
  * #537: TriggerMessage SignChargingStationCertificate / SignV2GCertificate
  * (F06, A02.FR.02/03/13) and the SignCertificate resend back-off
- * (A02.FR.17-20) on a 2.0.1 and a 2.1 station.
+ * (A02.FR.17-19) on a 2.0.1 and a 2.1 station.
  */
 
 interface WireCall {
@@ -140,6 +140,8 @@ function setup(version: Version) {
   );
   configuration.applyChange("CertSigningWaitMinimum", "10");
   configuration.applyChange("CertSigningRepeatTimes", "2");
+  // Under the 10000 of the schema, which would refuse a longer chain first.
+  configuration.setRuntimeValue("MaxCertificateChainSize", 6000);
   const certificateStore = new CertificateStore();
   const chargePoint = {
     id: "cp-sign",
@@ -347,21 +349,155 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     expect(socket.calls("SignCertificate")).toHaveLength(1);
   });
 
-  it("stops resending once CertificateSigned is rejected (A02.FR.20)", async () => {
+  it("leaves no wait behind once CertificateSigned is accepted", async () => {
     const { socket } = setup(version);
     await trigger(socket, "SignChargingStationCertificate");
     await settle(socket, 1);
     const [sign] = socket.calls("SignCertificate");
     socket.deliverResult(sign.messageId, { status: "Accepted" });
+    const waiting = vi.getTimerCount();
 
-    const answer = await deliverSigned(socket, {
-      certificateChain: "not a certificate",
+    const root = await selfSignedRoot("01", "Root");
+    await deliverSigned(socket, {
+      certificateChain: await leafForCsr(
+        "02",
+        sign.payload.csr as string,
+        root,
+      ),
       certificateType: "ChargingStationCertificate",
     });
-    expect(answer).toEqual({ status: "Rejected" });
 
-    vi.advanceTimersByTime(10 * 60_000);
-    expect(socket.calls("SignCertificate")).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(waiting - 1);
+  });
+
+  // #537: only an Accepted chain ends the sequence. A02.FR.17 asks about a
+  // CertificateSigned "for this CSR", and without an A02.FR.06 period or
+  // hierarchy check no rejection can be tied to this CSR as an invalid
+  // answer, so A02.FR.20 has no case to apply to yet.
+  describe("a rejected CertificateSigned leaves the resends going", () => {
+    const leafForAnotherCsr = async () =>
+      leafForCsr(
+        "02",
+        await new CertificateStore().generateNewCsr("cp-other", "CPO"),
+        await selfSignedRoot("01", "Root"),
+      );
+
+    it.each<
+      [string, () => Promise<Record<string, unknown>>, number /* events */]
+    >([
+      [
+        "a malformed chain",
+        async () => ({
+          certificateChain: "not a certificate",
+          certificateType: "ChargingStationCertificate",
+        }),
+        1,
+      ],
+      [
+        // A02.FR.16 asks for Rejected only: no security event.
+        "a chain over MaxCertificateChainSize",
+        async () => ({
+          certificateChain: "x".repeat(6_001),
+          certificateType: "ChargingStationCertificate",
+        }),
+        0,
+      ],
+      [
+        "a leaf that does not match the CSR's public key",
+        async () => ({
+          certificateChain: await leafForAnotherCsr(),
+          certificateType: "ChargingStationCertificate",
+        }),
+        1,
+      ],
+      [
+        "a chain for a use with no pending CSR",
+        async () => ({
+          certificateChain: await leafForAnotherCsr(),
+          certificateType: "V2GCertificate",
+        }),
+        1,
+      ],
+    ])(
+      "goes on after %s, up to CertSigningRepeatTimes",
+      async (_name, payload, events) => {
+        const { socket } = setup(version);
+        await trigger(socket, "SignChargingStationCertificate");
+        await settle(socket, 1);
+        const [sign] = socket.calls("SignCertificate");
+        socket.deliverResult(sign.messageId, { status: "Accepted" });
+
+        const answer = await deliverSigned(socket, await payload());
+        expect(answer).toEqual({ status: "Rejected" });
+        expect(socket.calls("SecurityEventNotification")).toHaveLength(events);
+
+        vi.advanceTimersByTime(10_000);
+        expect(socket.calls("SignCertificate")).toHaveLength(2);
+        expect(socket.calls("SignCertificate")[1].payload).toEqual(
+          sign.payload,
+        );
+
+        // A second rejection does not start the sequence over either.
+        await deliverSigned(socket, await payload());
+        vi.advanceTimersByTime(20_000);
+        expect(socket.calls("SignCertificate")).toHaveLength(3);
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(socket.calls("SignCertificate")).toHaveLength(3);
+      },
+    );
+
+    it("does not let a chain for a CSR a newer trigger replaced cut the current CSR's resends", async () => {
+      const { socket } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 2);
+      const [stale, current] = socket.calls("SignCertificate");
+      socket.deliverResult(current.messageId, { status: "Accepted" });
+
+      const root = await selfSignedRoot("01", "Root");
+      const answer = await deliverSigned(socket, {
+        certificateChain: await leafForCsr(
+          "02",
+          stale.payload.csr as string,
+          root,
+        ),
+        certificateType: "ChargingStationCertificate",
+      });
+      expect(answer).toEqual({ status: "Rejected" });
+
+      vi.advanceTimersByTime(10_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(3);
+      expect(socket.calls("SignCertificate")[2].payload).toEqual(
+        current.payload,
+      );
+    });
+
+    it("still ends on the Accepted chain that follows", async () => {
+      const { socket } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+      await deliverSigned(socket, {
+        certificateChain: "not a certificate",
+        certificateType: "ChargingStationCertificate",
+      });
+
+      const root = await selfSignedRoot("01", "Root");
+      const answer = await deliverSigned(socket, {
+        certificateChain: await leafForCsr(
+          "02",
+          sign.payload.csr as string,
+          root,
+        ),
+        certificateType: "ChargingStationCertificate",
+      });
+      expect(answer).toEqual({ status: "Accepted" });
+
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(1);
+    });
   });
 
   it("does not resend when the CSMS rejects the SignCertificateRequest", async () => {
@@ -407,7 +543,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     expect(socket.calls("SignCertificate")).toHaveLength(3);
   });
 
-  describe("across a reconnect (A02.FR.17-20)", () => {
+  describe("across a reconnect (A02.FR.17-19)", () => {
     function reconnect(handler: OCPPMessageHandlerV201): void {
       handler.onWebSocketClosed();
       handler.setBootStatus({ status: "Accepted" });
@@ -456,7 +592,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
       handler.onWebSocketClosed();
     });
 
-    it("does not resend a CSR whose CertificateSigned was rejected (A02.FR.20)", async () => {
+    it("goes on resending a CSR whose CertificateSigned was rejected", async () => {
       const { socket, handler, certificateStore } = setup(version);
       await trigger(socket, "SignChargingStationCertificate");
       await settle(socket, 1);
@@ -471,8 +607,9 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
       ).toBeDefined();
 
       reconnect(handler);
-      vi.advanceTimersByTime(10 * 60_000);
-      expect(socket.calls("SignCertificate")).toHaveLength(1);
+      vi.advanceTimersByTime(10_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(2);
+      expect(socket.calls("SignCertificate")[1].payload).toEqual(sign.payload);
       handler.onWebSocketClosed();
     });
 

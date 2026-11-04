@@ -246,9 +246,10 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   transaction-related messages produced offline (StartTransaction,
   StopTransaction, MeterValues with a transaction) are queued (in
   [`pending_messages`](state-persistence.md) with `--state-db`, in memory
-  otherwise) and replayed after the next accepted boot, at most
-  `TransactionMessageAttempts` times. So is a resend still waiting out its
-  retry interval after a CALLERROR (#527). On 2.x the TransactionEvents
+  otherwise) and replayed after the next accepted boot. So is a resend still
+  waiting out its retry interval after a CALLERROR, which keeps its count of
+  transmissions; a StartTransaction.req resend is discarded instead if its
+  transaction no longer runs (#527). On 2.x the TransactionEvents
   (`Started`, `Updated`, `Ended`) go to the same queue (E11.FR.01): those
   produced offline, those written but unanswered when the socket closed, and
   a pending E13 resend. After the next accepted boot they are replayed in the
@@ -279,11 +280,11 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   `TransactionMessageAttempts`) times, then discarded
   ([#490](https://github.com/shiv3/ocpp-cp-simulator/issues/490),
   [#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)).
-- On 1.6 the CALLERROR count restarts at each reconnect: a resend waiting
-  when the link drops is replayed from the offline queue as a fresh
-  delivery. With a flapping link and a CSMS that always answers with a
-  CALLERROR, the resends never stop
-  ([#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527)).
+- On 1.6 a transaction stopped before its StartTransaction.req got a conf
+  stops with `transactionId: 0`. A resend still waiting is discarded, but a
+  StartTransaction.req already on the wire or queued ahead of the stop reaches
+  the CSMS, which can keep open a transaction nothing stops
+  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet
   ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
 - Local mode does not drop a removed charge point's sessions until

@@ -1559,10 +1559,11 @@ export class OCPPMessageHandler {
    * `discardOutlivedStartResend`, whichever stop path ended the transaction.
    *
    * Known limitation, as on 2.x: a waiting resend does not hold back the
-   * next transaction-related message, so a StopTransaction.req can overtake
-   * the StartTransaction.req being retried (§3.7 asks for chronological
-   * order) and goes out with the `0` placeholder. Both settings are read
-   * here, so a ChangeConfiguration applies to the next failure.
+   * next transaction-related message (§3.7 asks for chronological order). A
+   * MeterValues.req can overtake the StartTransaction.req being retried, and
+   * a StopTransaction.req goes out ahead of it with the `0` placeholder, then
+   * discards it (#565). Both settings are read here, so a ChangeConfiguration
+   * applies to the next failure.
    */
   private onTransactionMessageCallError(
     request: OCPPRequest,
@@ -1647,8 +1648,7 @@ export class OCPPMessageHandler {
    * #527: a StartTransaction.req resend whose transaction no longer runs
    * must not leave the station: it would reach the CSMS after the
    * StopTransaction.req and open a transaction nothing stops, whatever
-   * stopped this one (local stop, Unlock, EV disconnect, ChangeAvailability,
-   * RemoteStop, Reset). So this runs wherever a resend leaves: the serial
+   * stopped this one. So this runs wherever a resend leaves: the serial
    * queue, and the offline queue it would otherwise be salvaged to. The
    * request's `idTag` and `timestamp` identify the transaction, so a
    * transaction restored after a restart still matches. A first transmission

@@ -363,28 +363,55 @@ it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
 updates the Authorization Cache. OCPP-S binds its StartTransaction answer
 the same way, though it never resends: a slow HTTP exchange can return
-after the transaction stopped. A Reset drops a StartTransaction.req waiting
-for its resend, whether its retry interval is still running or it already
-waits in the serial queue behind another CALL: the reset ends that
-transaction. A CALLERROR
-answering a StartTransaction.req whose transaction no longer runs (a Reset
-stopped it while the request was in flight) is not resent: the request is
-reported rejected, then discarded after that one attempt.
+after the transaction stopped.
+
+A StartTransaction.req resend whose transaction no longer runs is discarded
+instead of sent: it would reach the CSMS after the StopTransaction.req and
+open a transaction nothing stops. This holds whatever stopped it (a local stop,
+UnlockConnector, an EV disconnect, a Reset) and wherever the resend waits: on
+its retry interval, in the serial queue behind another CALL, or in the offline
+queue. The station emits
+`transactionMessageDiscarded` with `attempts` the transmissions actually made
+and `errorCode` the last CALLERROR's, absent when the discard happens at a
+replay, since that code is not persisted. The request's `idTag` and
+`timestamp` identify the transaction, so a resend replayed for a transaction
+restored after a restart still goes out. A CALLERROR answering a
+StartTransaction.req whose transaction stopped while the request was in flight
+is not resent either: the request is reported rejected, then discarded after
+that one attempt.
+
+This covers resends only. A StartTransaction.req on the wire when its
+transaction stops, and a first transmission queued before the stop, online or
+offline, still reach the CSMS ahead of the StopTransaction.req. Their conf is
+ignored as above and the StopTransaction.req carries `transactionId: 0`, so
+the CSMS can keep open a transaction nothing stops
+([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
 
 A resend still waiting when the WebSocket closes goes to the 1.6 offline
 queue (§3.7), ahead of the CALLs still queued, and is replayed after the
 next accepted boot like any queued transaction message. So does a resend
 that falls due while the boot gate is closed on a live link (a
 BootNotification answered `Pending`, e.g. after a TriggerMessage). That
-replay is a fresh delivery: a CALLERROR answering it starts the count
-again. With a link that keeps dropping and a CSMS that always answers with
-a CALLERROR, the resends therefore never stop.
+replay keeps its count, since §3.7.1 counts failures "for this message": it
+is stored in `pending_messages.attempts`, survives a restart, and the message
+is discarded after `TransactionMessageAttempts` transmissions however often
+the link drops. A row stored by an older release holds `0` and replays as a
+first transmission. The replay goes out right after the boot, without waiting
+out what was left of the retry interval.
+
+A CALLERROR for a transmission that already timed out (the 30 s §4.1.1
+watchdog) changes nothing: no resend and no event, since the station gave up on
+it and 1.6 does not retry a timeout. Nor does it make the `0` placeholder one
+a RemoteStopTransaction refuses, as above. A CALLRESULT arriving that late
+still applies, to the transaction its request started.
 
 Known limitations, as on 2.x: a waiting resend does not hold back the next
-transaction-related message, so a StopTransaction.req can overtake the
-StartTransaction.req being retried, against the chronological order §3.7
-asks for. Unlike 2.x (#529), a message left unanswered is not retried:
-only a CALLERROR is.
+transaction-related message, against the chronological order §3.7 asks for. A
+MeterValues.req can overtake the StartTransaction.req being retried, and a
+StopTransaction.req goes out ahead of it with `transactionId: 0`, which then
+discards the resend
+([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)). Unlike 2.x
+(#529), a message left unanswered is not retried: only a CALLERROR is.
 A resend waiting out its interval is held in memory, like the CALLs in the
 serial queue. It reaches the persisted offline queue only when the socket
 closes, so a process that ends without closing it, such as a crash, loses

@@ -147,7 +147,10 @@ answered the transmission (#490, #527), and then `errorCode` holds its error
 code; it is `timeout` when no answer came within
 `OCPPCommCtrlr.MessageTimeout` (#529, 2.x only), and then there is no
 `errorCode`. On `transaction_message_discarded` they describe the last
-failure. See
+failure. On 1.6 that entry also reports a StartTransaction.req resend dropped
+because its transaction no longer runs (#527), with no last attempt failing:
+`attempts` counts the transmissions made, and `errorCode` is absent when it
+was dropped at a replay from the offline queue. See
 [Transaction message retries (2.x)](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-2x)
 and [(OCPP-J 1.6)](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16).
 

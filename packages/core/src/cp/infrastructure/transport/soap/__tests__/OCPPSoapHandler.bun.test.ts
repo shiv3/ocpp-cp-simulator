@@ -1293,6 +1293,7 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
         // the StartTransaction answer has been handled.
         handler.sendHeartbeat();
         await waitForOperationCount(csms.received, "Heartbeat", 1);
+        await waitForOperationCount(csms.received, "StartTransaction", 1);
 
         expect(cp.getConnector(1)?.transaction).toBe(second);
         expect(second.id).toBe(0);

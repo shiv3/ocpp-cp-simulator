@@ -148,6 +148,7 @@ jobs:
   # docker-publish.yml, which uses the same cache scope.
   docker-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -170,17 +171,20 @@ jobs:
 
       # The daemon comes up empty (no --cp-id), serves the web console and
       # answers the health path the Dockerfile's HEALTHCHECK polls. Thirty
-      # seconds is generous: the entrypoint execs bun directly and the daemon
-      # answers /v1/healthz within a second or two on the runner.
+      # attempts a second apart, each capped at 2 s, is generous: the
+      # entrypoint execs bun directly and the daemon answers /v1/healthz
+      # within a second or two on the runner. No --rm, so the failure branch
+      # can still read the logs of a container that exited; the step below
+      # removes it either way.
       - name: Image boots and answers the health path
         run: |
-          docker run -d --rm --name ocpp-cp-sim-ci -p 9700:9700 \
+          docker run -d --name ocpp-cp-sim-ci -p 9700:9700 \
             -e STATE_DB=:memory: ocpp-cp-sim:ci
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:9700/v1/healthz; then echo; exit 0; fi
+            if curl -fsS --max-time 2 http://127.0.0.1:9700/v1/healthz; then echo; exit 0; fi
             sleep 1
           done
-          echo "daemon did not answer /v1/healthz within 30s"
+          echo "daemon did not answer /v1/healthz after 30 attempts"
           docker logs ocpp-cp-sim-ci
           exit 1
 

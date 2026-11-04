@@ -278,6 +278,7 @@ describe.skipIf(!canBindBunServe())(
         ).toEqual({
           status: "Accepted",
         });
+        const fallbackFrames = operatorOnly.received.length;
 
         // The renewed certificate is refused at the handshake; the next
         // attempt presents the configured one and gets in.
@@ -286,10 +287,33 @@ describe.skipIf(!canBindBunServe())(
         // The server's open comes first: the station may not have seen its
         // own yet.
         await waitUntil(
+          () => logs.some((line) => line.includes("once more")),
+          8_000,
+        );
+        expect(logs.some((line) => line.includes("(A02.FR.10)"))).toBe(false);
+
+        // Once that connection has booted, the renewed certificate gets one
+        // more attempt, refused too; the configured one gets in again.
+        await bootOn(operatorOnly, fallbackFrames);
+        const retryFrames = operatorOnly.received.length;
+        await waitUntil(() => operatorOnly.openCount() === 3, 12_000);
+        await waitUntil(
           () => logs.some((line) => line.includes("(A02.FR.10)")),
           8_000,
         );
-      }, 20_000);
+        await bootOn(operatorOnly, retryFrames);
+
+        // Discarded: exactly one extra reconnect.
+        await Bun.sleep(1_500);
+        expect(operatorOnly.openCount()).toBe(3);
+        const discardEvents = operatorOnly.received.filter(
+          (frame) =>
+            frame[2] === "SecurityEventNotification" &&
+            (frame[3] as { type?: string }).type ===
+              "DiscardedRenewedClientCertificate",
+        );
+        expect(discardEvents).toHaveLength(version === "OCPP-2.1" ? 1 : 0);
+      }, 30_000);
 
       it("reconnects once the pending TransactionEvent is answered", async () => {
         const certs = await pki();

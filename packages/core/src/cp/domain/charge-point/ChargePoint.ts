@@ -1898,6 +1898,9 @@ export class ChargePoint {
     // Superseded by a newer request, or cancelled (dispose, cp.update),
     // while the store was read: that one decides, this one does nothing.
     if (request !== this._clientCertificateSwitchSeq) return;
+    // A retry armed while the store was read: this switch replaces it.
+    this._cancelClientCertificateSwitchTimer?.();
+    this._cancelClientCertificateSwitchTimer = null;
     if (!identity) {
       webSocket.clearRenewedClientCertificate();
       return;
@@ -1935,9 +1938,34 @@ export class ChargePoint {
     );
   }
 
+  /**
+   * #537: the boot of a connection that presented the previous certificate
+   * after the renewed one failed was accepted: gives the renewed one its
+   * one further attempt, through the same deferred reconnect as the switch.
+   * Waiting for the boot leaves that connection's BootNotification alone;
+   * the first check comes after a poll, once this boot's own messages are
+   * under way. A wait already armed decides: a switch in progress presents
+   * the renewed certificate anyway, and a newer one's `notBefore` wait
+   * replaces it when it ends. A boot that is never accepted starts no
+   * reconnect: the next connection, whatever closes this one, is the attempt.
+   */
+  private retryRenewedClientCertificate(): void {
+    const webSocket = this._webSocket;
+    if (!webSocket?.renewedClientCertificateAwaitsAttempt()) return;
+    if (this._cancelClientCertificateSwitchTimer) return;
+    const generation = webSocket.currentGeneration();
+    const now = Date.now();
+    const deadline = now + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS;
+    this._cancelClientCertificateSwitchTimer = setTimeoutAt(
+      now + RENEWED_CERTIFICATE_RECONNECT_POLL_MS,
+      () => this.reconnectWithRenewedCertificate(generation, deadline),
+    );
+  }
+
   /** Reconnects once no transaction message awaits its write, an answer
    *  or a resend, or at `deadline`. A connection that closed meanwhile is
-   *  not reconnected: the next one presents the renewed certificate. */
+   *  not reconnected: the next one presents the renewed certificate. Nor
+   *  is one whose renewed certificate the transport has forgotten. */
   private reconnectWithRenewedCertificate(
     generation: GenerationToken,
     deadline: number,
@@ -1946,6 +1974,7 @@ export class ChargePoint {
     const webSocket = this._webSocket;
     if (!webSocket?.isOpenOrConnecting()) return;
     if (webSocket.currentGeneration() !== generation) return;
+    if (!webSocket.renewedClientCertificateAwaitsAttempt()) return;
     if (
       this._outbox.hasTransactionMessagesInFlight() &&
       Date.now() < deadline
@@ -2191,6 +2220,7 @@ export class ChargePoint {
     // messages now that the boot gate is open. Run via queueMicrotask so
     // any post-boot StatusNotification fan-out goes first.
     queueMicrotask(() => this._outbox.flushPendingQueue());
+    this.retryRenewedClientCertificate();
   }
 
   markBootPending(): void {

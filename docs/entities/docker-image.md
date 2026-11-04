@@ -6,6 +6,7 @@ sources:
   - Dockerfile
   - docker-compose.yml
   - .github/workflows/docker-publish.yml
+  - .github/workflows/ci.yml
   - docker/
 related:
   - cli.md
@@ -15,7 +16,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-10-29
+updated: 2026-11-04
 ---
 
 # Docker image
@@ -27,7 +28,12 @@ full UI talking to the Socket.IO control plane on the same origin.
 
 Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by
 [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml)
-on push to `main` and on `v*` / `cli-v*` tags).
+on push to `main` and on `v*` / `cli-v*` tags). Every pull request also
+builds the image for one arch, starts it and waits for the health path
+(`docker-build` job in [`ci.yml`](../../.github/workflows/ci.yml)), so a
+Dockerfile copy set that no longer matches the source tree fails on the pull
+request rather than on the first `main` build after merge (#302 is the case
+that slipped through before this guard).
 
 ## Image tags
 

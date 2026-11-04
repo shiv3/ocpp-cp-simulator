@@ -330,6 +330,38 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     expect(socket.calls("SignCertificate")[1].payload).toEqual(first.payload);
   });
 
+  // recordPendingCsr keeps the pending CSR when the given one does not
+  // parse, so that CSR is not the one the back-off waits on.
+  it.each(["Accepted", "Rejected"])(
+    "sends a CSR that does not parse once, the pending CSR keeping its back-off and resend (%s)",
+    async (status) => {
+      const { socket, handler } = setup(version);
+      await handler.sendSignCertificate();
+      const [pending] = socket.calls("SignCertificate");
+      socket.deliverResult(pending.messageId, { status: "Accepted" });
+
+      await handler.sendSignCertificate("not a csr");
+      const [, refused] = socket.calls("SignCertificate");
+      expect(refused.payload).toEqual({ csr: "not a csr" });
+      socket.deliverResult(refused.messageId, { status });
+
+      vi.advanceTimersByTime(10_000);
+      const calls = socket.calls("SignCertificate");
+      expect(calls).toHaveLength(3);
+      expect(calls[2].payload).toEqual(pending.payload);
+    },
+  );
+
+  it("never resends a CSR that does not parse", async () => {
+    const { socket, handler } = setup(version);
+    await handler.sendSignCertificate("not a csr");
+    const [refused] = socket.calls("SignCertificate");
+    socket.deliverResult(refused.messageId, { status: "Accepted" });
+
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(socket.calls("SignCertificate")).toHaveLength(1);
+  });
+
   it("does not resend once CertificateSigned is accepted", async () => {
     const { socket } = setup(version);
     await trigger(socket, "SignChargingStationCertificate");

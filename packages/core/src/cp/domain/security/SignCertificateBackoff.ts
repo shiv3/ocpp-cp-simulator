@@ -42,7 +42,8 @@ interface Sequence {
  *   CSMS triggers a new request (A02.FR.19). The sequence is kept, with no
  *   wait, so the last resend's answer does not start it over.
  *
- * Every new request (TriggerMessage, `sign_certificate`) calls
+ * Every new request (TriggerMessage, `sign_certificate`; not a given CSR
+ * that does not parse, which never becomes the pending one) calls
  * {@link restart} first, so an `Accepted` seen while a sequence exists is
  * a resend's. The owner stops a sequence once a CertificateSigned is
  * Accepted (a rejected one leaves it running: no rejection can be tied to

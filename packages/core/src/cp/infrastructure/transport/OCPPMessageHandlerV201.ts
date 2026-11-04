@@ -889,8 +889,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * still arrives for it can be matched. An Accepted answer starts, or
    * continues, the resend back-off of the request's certificate use
    * (A02.FR.17/18, #537); any other answer ends it. An answer to a request
-   * a newer CSR replaced leaves the back-off alone: it belongs to the
-   * newer request.
+   * a newer CSR replaced, or to a given CSR that does not parse, leaves the
+   * back-off alone: it is not the request the back-off follows.
    */
   private applySignCertificateResult(
     request: SignCertificateRequestV201,
@@ -899,7 +899,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const use = this.signRequestUse(request);
     if (this._signRequests.get(use)?.csr !== request.csr) {
       this._logger.info(
-        `[v2.0.1] SignCertificate ${response.status} for a replaced ${use} CSR; ignored`,
+        `[v2.0.1] SignCertificate ${response.status} for a ${use} CSR that is not the current one; ignored`,
         LogType.OCPP,
       );
       return;
@@ -1762,6 +1762,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           "[v2.0.1] SignCertificate: the given CSR is not a parseable PKCS#10 request; no CertificateSigned can match it",
           LogType.OCPP,
         );
+        // Not the pending CSR: the back-off and what it resends stay its own.
+        this.send("SignCertificate", this.generateMessageId(), { csr });
+        return;
       }
     } else {
       payloadCsr = await this.generateCsr("ChargingStationCertificate");

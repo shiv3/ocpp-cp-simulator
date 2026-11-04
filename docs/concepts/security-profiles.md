@@ -371,7 +371,9 @@ CALLERROR.
   and `CpoName`. That CSR becomes the pending Charging Station certificate
   CSR. `certificateType` is omitted, and so are the optional 2.1
   `requestId` and `hashRootCertificate`. A given CSR that does not parse is
-  still sent, with a WARN log, but no `CertificateSigned` can match it.
+  still sent, with a WARN log, but no `CertificateSigned` can match it. It is
+  sent once and does not become the pending CSR: a CSR already pending keeps
+  its back-off and stays the one resent.
 - `TriggerMessage` with `SignChargingStationCertificate` or
   `SignV2GCertificate` answers `Accepted` (#537). Once the answer is written
   (F06.FR.04) the station generates a new key pair and CSR (A02.FR.02) and
@@ -382,8 +384,9 @@ CALLERROR.
 - The `SignCertificateResponse` status is logged: `Accepted` at INFO, any
   other status at WARN. A `Rejected` answer (A02.FR.12) leaves the CSR
   pending, since A02 has no rule to discard it. An answer to a request
-  whose CSR a newer one replaced is logged at INFO and otherwise ignored:
-  it neither starts nor ends the back-off.
+  whose CSR a newer one replaced, or to a given CSR that does not parse, is
+  logged at INFO and otherwise ignored: it neither starts nor ends the
+  back-off.
 - **Resend back-off** (A02.FR.17-19, #537). After an `Accepted`
   `SignCertificateResponse`, the station waits `CertSigningWaitMinimum`
   seconds for `CertificateSigned`. When none came and the CSR is still
@@ -408,7 +411,8 @@ CALLERROR.
   the same resend count, so a sequence that reached
   `CertSigningRepeatTimes` or ended does not start over on a reconnect. A
   request the close left unanswered was never accepted and starts no wait.
-  `sign_certificate` gets the same back-off.
+  `sign_certificate` gets the same back-off, except for a given CSR that
+  does not parse.
 - **`GetCertificateStatus`** (M06, #537). The station asks the CSMS for the
   OCSP status of its V2G certificates (`V2GCertificate`, 2.1
   `V2G20Certificate`): after an accepted V2G `CertificateSigned`, for the

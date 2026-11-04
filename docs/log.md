@@ -2258,3 +2258,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-04] ingest | Renewed client certificate: second attempt dropped (#537)
 
 - Maintainer review: the one further attempt of the 2026-11-04 entry above is removed on 2.0.1 and 2.1. Once the previous certificate opens after the renewed one failed, the renewed one is discarded at once (2.1 A02.FR.10), with `DiscardedRenewedClientCertificate` on 2.1 after the next `Accepted` boot (A02.FR.29); 2.0.1 discards the same way, by choice, and sends no event. An attempt that reached no server still does not count. [Security profiles](concepts/security-profiles.md).
+
+## [2026-11-04] ingest | Certificate follow-ups, CodeRabbit review on the discard change (#537)
+
+- `sign_certificate` with a given CSR that does not parse: still sent with a WARN, but once, and it no longer restarts the back-off or replaces what the back-off resends, so a CSR already pending keeps both. Its answer is logged at INFO and otherwise ignored. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).

@@ -216,6 +216,10 @@ interface OCPPRequest {
    *  station resends after a CALLERROR (§3.7.1). Absent on every other CALL,
    *  expert calls included. */
   attempt?: number;
+  /** #527: its 30 s watchdog expired. A later CALLRESULT still applies, but a
+   *  CALLERROR no longer counts as a failed transmission: 1.6 does not retry
+   *  a timeout, and the station already gave up on this one. */
+  timedOut?: boolean;
 }
 
 /**
@@ -1148,6 +1152,8 @@ export class OCPPMessageHandler {
       `CALL ${messageId} (${cur.action}) timed out after ${OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS}ms — releasing serialization slot`,
       LogType.OCPP,
     );
+    const request = this._requests.get(messageId);
+    if (request) request.timedOut = true;
     this._serialInFlight = null;
     this.pumpSerialQueue();
   }
@@ -1502,7 +1508,7 @@ export class OCPPMessageHandler {
       return;
     }
 
-    if (request?.attempt !== undefined) {
+    if (request?.attempt !== undefined && !request.timedOut) {
       this.onTransactionMessageCallError(request, error.errorCode);
     }
 

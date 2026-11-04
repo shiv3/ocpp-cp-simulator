@@ -57,6 +57,9 @@ class FakeSocket {
       errorDetails: {},
     });
   }
+  callResult(id: string, payload: unknown): void {
+    this.incoming?.(OCPPMessageType.CALLRESULT, id, undefined, payload);
+  }
   of(action: string) {
     return this.written.filter((w) => w.action === action);
   }
@@ -82,6 +85,7 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     id: 1,
     status: OCPPStatus.Preparing,
     transaction: transaction() as Transaction | null,
+    transactionId: undefined as number | undefined,
     markStartCallError() {
       if (this.transaction) this.transaction.startCallError = true;
     },
@@ -94,6 +98,7 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     connectors: new Map([[1, connector]]),
     getConnector: vi.fn(() => connector),
     notifyOutgoingCall: vi.fn(),
+    recordAuthorizationResult: vi.fn(),
     signedMeterFor: vi.fn(() => null),
     updateConnectorStatus: vi.fn((_id: number, status: OCPPStatus) => {
       connector.status = status;
@@ -305,7 +310,8 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     const replayed = socket.last();
     expect(replayed.action).toBe("StartTransaction");
     expect(replayed.payload).toEqual(first.payload);
-    await vi.advanceTimersByTimeAsync(600_000);
+    // Short of the 30 s watchdog: the CALLERROR below must count.
+    await vi.advanceTimersByTimeAsync(29_000);
     expect(socket.of("StartTransaction")).toHaveLength(2);
 
     // The replay is a fresh delivery: its CALLERROR count starts over.
@@ -337,6 +343,87 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     socket.connected = true;
     handler.flushPendingQueue();
     expect(socket.of("StartTransaction")).toHaveLength(1);
+  });
+
+  it("a CALLERROR after the CALL timed out changes nothing: 1.6 does not retry a timeout", async () => {
+    const { socket, connector, handler, rejected, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    socket.callError(first.id);
+
+    expect(rejected).toEqual([]);
+    expect(discarded).toEqual([]);
+    expect(connector.transaction?.startCallError).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+  });
+
+  it("a resend's late CALLERROR ends its chain: the next attempt never goes out", async () => {
+    const { socket, handler, rejected, discarded } = setup();
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: transaction({
+        id: 42,
+        meterStop: 1_000,
+        stopTime: new Date("2026-10-30T11:00:00.000Z"),
+      }),
+      connectorId: 1,
+    });
+    socket.callError(socket.last().id);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const resend = socket.last();
+    expect(socket.of("StopTransaction")).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    socket.callError(resend.id);
+
+    expect(rejected.map((r) => r.attempt)).toEqual([1]);
+    expect(discarded).toEqual([]);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(socket.of("StopTransaction")).toHaveLength(2);
+  });
+
+  it("a CALLRESULT after the CALL timed out still applies to its transaction", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    socket.callResult(first.id, {
+      transactionId: 527,
+      idTagInfo: { status: "Accepted" },
+    });
+
+    expect(connector.transactionId).toBe(527);
+  });
+
+  it("a CALLRESULT after the CALL timed out leaves a transaction started since alone", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    await vi.advanceTimersByTimeAsync(30_000);
+    connector.transaction = transaction({ tagId: "TAG-OTHER" });
+
+    socket.callResult(first.id, {
+      transactionId: 527,
+      idTagInfo: { status: "Accepted" },
+    });
+
+    expect(connector.transactionId).toBeUndefined();
   });
 
   it("a resend due while the boot gate is closed waits in the offline queue", async () => {

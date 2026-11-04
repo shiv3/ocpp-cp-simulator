@@ -2,11 +2,15 @@ import { describe, expect, it, mock } from "bun:test";
 import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
-import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { SqliteConnectorRuntimeRepository } from "../../../domain/persistence/SqliteConnectorRuntimeRepository";
+import { Connector } from "../../../domain/connector/Connector";
+import { Logger, LogLevel } from "../../../shared/Logger";
+import { RemoteStopTransactionHandler } from "../handlers/call/RemoteStopTransactionHandler";
+import type { HandlerContext } from "../handlers/MessageHandlerRegistry";
 import { OCPPMessageType, OCPPStatus } from "../../../domain/types/OcppTypes";
 
 /**
@@ -325,5 +329,47 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("OCPP 1.6 startCallError across a restart (#527)", () => {
+  /** A real connector, saved and restored through `connector_runtime`, then
+   *  asked to stop the transaction with the `0` id. */
+  function remoteStopAfterRestart(startCallError: boolean) {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteConnectorRuntimeRepository(db);
+      const logger = new Logger(LogLevel.ERROR);
+      const before = new Connector(1, logger);
+      before.beginTransaction(runningTransaction());
+      if (startCallError) before.markStartCallError();
+      repo.save("CP-527", 1, {
+        ...before.snapshotRuntime(),
+        scenarioPosition: null,
+      });
+
+      const restored = new Connector(1, logger);
+      restored.restoreRuntimeSnapshot(repo.load("CP-527", 1)!);
+
+      const chargePoint = {
+        connectors: new Map([[1, restored]]),
+        // Stops short of the stop itself: this test is about the match.
+        isScenarioStopHandled: () => true,
+        notifyRemoteStopReceived() {},
+      };
+      return new RemoteStopTransactionHandler().handle({ transactionId: 0 }, {
+        chargePoint,
+      } as unknown as HandlerContext);
+    } finally {
+      db.close();
+    }
+  }
+
+  it("a restored `0` the CSMS failed to process is not one a RemoteStopTransaction can name", () => {
+    expect(remoteStopAfterRestart(true)).toEqual({ status: "Rejected" });
+  });
+
+  it("a restored `0` with no CALLERROR behind it still matches", () => {
+    expect(remoteStopAfterRestart(false)).toEqual({ status: "Accepted" });
   });
 });

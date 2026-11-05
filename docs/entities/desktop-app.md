@@ -13,7 +13,7 @@ related:
   - cli.md
   - ../concepts/local-vs-remote-mode.md
   - ../analyses/testing-strategy.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Desktop app (Tauri)

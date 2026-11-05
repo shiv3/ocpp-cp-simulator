@@ -25,7 +25,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Charging sessions

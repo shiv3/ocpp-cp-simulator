@@ -14,7 +14,7 @@ related:
   - ../concepts/control-plane.md
   - fleet-load-and-observability-roadmap.md
   - ../sources/github-issues.md
-updated: 2026-09-07
+updated: 2026-11-05
 ---
 
 # OECS as a charger model source
@@ -58,11 +58,11 @@ on the _format_, not on either service.
 
 ## The boundary the issue asks us to document
 
-| Layer           | Owns                                                          | Lives in                                                                      |
-| --------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **OECS**        | What a charger model _is_, as the manufacturer specifies it   | External document, imported once                                              |
+| Layer           | Owns                                                          | Lives in                                                                                |
+| --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **OECS**        | What a charger model _is_, as the manufacturer specifies it   | External document, imported once                                                        |
 | **Blueprint**   | The simulator's reusable hardware description                 | [`blueprintSchema`](../../packages/contracts/src/methods.ts), `blueprints` SQLite table |
-| **ChargePoint** | A running instance: identity, CSMS link, configuration, state | `cp.create` / `cp.create_many`                                                |
+| **ChargePoint** | A running instance: identity, CSMS link, configuration, state | `cp.create` / `cp.create_many`                                                          |
 
 Scenarios stay the behaviour half and are untouched by this — see
 [`packages/core/src/utils/blueprints/README.md`](../../packages/core/src/utils/blueprints/README.md).

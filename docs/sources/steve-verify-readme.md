@@ -11,7 +11,7 @@ related:
   - ../entities/scenario-templates.md
   - ../analyses/testing-strategy.md
   - cert16-templates-readme.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Source: `scripts/steve-verify/README.md`

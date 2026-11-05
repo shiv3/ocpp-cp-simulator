@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Fleet, load and observability roadmap

@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # MCP endpoint (`POST /mcp`)

@@ -13,7 +13,7 @@ related:
   - log-format.md
   - scenario-format.md
   - ../entities/cli.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # OCPP Trace Format (v1.1)

@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/cli.md
   - vehicle-profiles.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Scenario File Format (v1.4)

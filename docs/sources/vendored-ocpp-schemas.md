@@ -8,7 +8,7 @@ sources:
   - scripts/generate-ocpp.ts
 related:
   - ../concepts/ocpp-versions-and-transports.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Source: `packages/ocpp/vendor/ocpp-schemas/`

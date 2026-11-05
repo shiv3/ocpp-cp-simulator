@@ -25,7 +25,7 @@ sources:
 related:
   - ocpp-versions-and-transports.md
   - state-persistence.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # OCPP 2.x variable monitoring

@@ -12,7 +12,7 @@ related:
   - ocpp-debugkit.md
   - ../concepts/trace-format.md
   - ../concepts/log-format.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # `analyze` subcommand

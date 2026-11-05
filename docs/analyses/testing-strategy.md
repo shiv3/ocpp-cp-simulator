@@ -15,26 +15,32 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Testing strategy
 
 ## Type-checking
 
-`bun run typecheck` (`tsc -b --noEmit`) checks every project the root
-`tsconfig.json` references: the web app (`tsconfig.app.json`, all of `src/`),
-the CLI / daemon (`tsconfig.cli.json`, under `bun-types` and without the DOM
-lib), `vite.config.ts` and `scripts/bench`. It is a **blocking** CI step and
+`bun run typecheck` (`tsc -b`) checks every project the root `tsconfig.json`
+references: one composite project per workspace package and app
+(`packages/*/tsconfig.json`, `apps/*/tsconfig.json`, all extending
+`tsconfig.base.json`), `vite.config.ts` and `scripts/bench`. The packages
+compile under `bun-types` without the DOM lib; `apps/web` adds the DOM lib and
+JSX, and `apps/cli` adds the DOM lib for one test that reads `fetch().json()`
+as `any`. (`--noEmit` is not an option: project references need the referenced
+projects to emit declarations, which land in `node_modules/.tmp/out`.) It is a **blocking** CI step and
 runs in the `pre-push` hook. Neither Vite nor Bun type-checks — both strip the
 types and run — so before this gate the code base had drifted to ~380 errors,
 several of them real bugs (#374).
 
-Test files are type-checked too. A file under `apps/cli/src`, `packages/core/src/cp` or the other
-CLI `include` paths is checked by both projects, so it must compile against
-both the DOM lib and `bun-types`. `tsc -b` also requires every file a project
-imports to be in that project's `include`: a new directory imported by the
-daemon goes into `tsconfig.cli.json`.
+Test files are type-checked too, by the project of the package they live in.
+`tsc -b` also requires every file a project imports to be in that project's
+`include` (JSON next to the sources included): the one test that crosses a
+package boundary on the allow-list in `scripts/check-package-boundaries.ts`,
+`packages/core/src/cp/infrastructure/transport/__tests__/OCPPMessageHandler.settlement.test.ts`,
+is excluded from `packages/core` and listed by `apps/cli/tsconfig.json`, which
+is why that project's `rootDir` is the repository root.
 
 ## Vitest vs. Bun test
 

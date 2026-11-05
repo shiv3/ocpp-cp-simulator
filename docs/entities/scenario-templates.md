@@ -11,7 +11,7 @@ related:
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Built-in scenario templates

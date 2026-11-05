@@ -11,7 +11,7 @@ related:
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Source: `scripts/bench/README.md`
@@ -712,9 +712,9 @@ arming.
   relay (per-RPC request holds, an RPC log, `drained()`), the daemon and bench
   subprocesses and the control-plane helpers, shared by both run-level suites.
 
-- `tsconfig.json` — this directory is outside `tsconfig.cli.json`'s
-  `include`; typechecked separately, and referenced from the root
-  `tsconfig.json` as a `composite` project so `tsc -b` covers it.
+- `tsconfig.json` — this directory is outside every package's project;
+  typechecked separately, and referenced from the root `tsconfig.json` as a
+  `composite` project so `tsc -b` covers it.
 
 **Not covered by a run-level test.** A mock CSMS cannot slow a
 control-plane RPC, which is why the relay exists. Its RPC-stage case asserts

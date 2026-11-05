@@ -20,7 +20,7 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Daemon (server mode)

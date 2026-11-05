@@ -16,7 +16,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-03
+updated: 2026-11-05
 ---
 
 # OCPP 1.6 security profiles

@@ -12,7 +12,7 @@ related:
   - ../entities/cli.md
   - control-plane.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-09-12
+updated: 2026-11-05
 ---
 
 # Access control

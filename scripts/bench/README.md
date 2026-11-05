@@ -1234,7 +1234,7 @@ a spare machine and a CSMS.
   and the token-bucket/semaphore pacing helpers. No network, no sockets — see
   `lib.bun.test.ts`.
 - `lib.bun.test.ts` — unit tests for the above (`bun test`).
-- `tsconfig.json` — this directory isn't part of `tsconfig.cli.json`; typecheck
-  it directly with `npx tsc --noEmit -p scripts/bench/tsconfig.json`. It is a
-  `composite` project referenced from the root `tsconfig.json`, so `tsc -b`
-  covers it too rather than leaving it orphaned.
+- `tsconfig.json` — this directory isn't part of any package's project;
+  typecheck it directly with `npx tsc --noEmit -p scripts/bench/tsconfig.json`.
+  It is a `composite` project referenced from the root `tsconfig.json`, so
+  `tsc -b` covers it too rather than leaving it orphaned.

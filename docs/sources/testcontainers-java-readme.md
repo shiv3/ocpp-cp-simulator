@@ -11,7 +11,7 @@ related:
   - ../entities/docker-image.md
   - ../concepts/scenario-format.md
   - ../analyses/testing-strategy.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Source: `examples/testcontainers-java/README.md`

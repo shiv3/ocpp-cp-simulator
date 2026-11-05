@@ -11,7 +11,7 @@ related:
   - ../concepts/scenario-format.md
   - steve-verify-readme.md
   - ../concepts/local-authorization.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Source: `packages/core/src/utils/scenarios/README.md`

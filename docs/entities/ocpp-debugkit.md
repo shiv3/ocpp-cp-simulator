@@ -9,7 +9,7 @@ sources:
 related:
   - analyze.md
   - ../concepts/trace-format.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # OCPP DebugKit

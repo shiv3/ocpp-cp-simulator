@@ -11,7 +11,7 @@ related:
   - ../entities/scenario-templates.md
   - ../entities/docker-image.md
   - e2e-readme.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Source: `docs/examples/scenarios/`

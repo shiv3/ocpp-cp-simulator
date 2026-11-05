@@ -2,7 +2,7 @@
 title: Wiki conventions
 type: conventions
 summary: How pages in docs/ are named, structured, linked and kept consistent — the human-readable companion to the LLM schema in CLAUDE.md.
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Wiki conventions
@@ -15,11 +15,11 @@ humans read, with the operating schema in the repository-root
 
 ## Layers
 
-| Layer           | Where                                                                                                                                                                       | Who edits                                                                                             |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Raw sources** | The code (`src/`, `src-tauri/`, `e2e/`, `scripts/`), `packages/core/schema/`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, the READMEs that live next to code, GitHub issues | Engineers, through normal PRs. The wiki never rewrites them; `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only. |
-| **Wiki**        | `docs/` — `overview.md`, `index.md`, `log.md`, this page, and `entities/`, `concepts/`, `sources/`, `analyses/`                                                             | The LLM (with human review in the PR); humans may edit too.                                           |
-| **Schema**      | `CLAUDE.md` at the repo root                                                                                                                                                | Humans and the LLM, co-evolved.                                                                       |
+| Layer           | Where                                                                                                                                                                                                                 | Who edits                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Raw sources** | The code (`packages/`, `apps/`, `src-tauri/`, `e2e/`, `scripts/`), `packages/core/schema/`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, the READMEs that live next to code, GitHub issues | Engineers, through normal PRs. The wiki never rewrites them; `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only. |
+| **Wiki**        | `docs/` — `overview.md`, `index.md`, `log.md`, this page, and `entities/`, `concepts/`, `sources/`, `analyses/`                                                                                                       | The LLM (with human review in the PR); humans may edit too.                                                         |
+| **Schema**      | `CLAUDE.md` at the repo root                                                                                                                                                                                          | Humans and the LLM, co-evolved.                                                                                     |
 
 `README.md` at the root is the GitHub landing page, not a wiki page: it holds
 the quick start and links into the wiki.
@@ -64,7 +64,7 @@ has **one canonical table**; other pages link to it rather than copy it.
 - Use relative markdown links (`[Daemon](entities/daemon.md#health)`), not
   wiki-links, so GitHub renders them. Obsidian follows them too.
 - Link to raw sources with repo-relative paths from the page
-  (`../../schema/scenario.schema.json`, `../../src/protocol/`). Link to GitHub
+  (`../../packages/core/schema/scenario.schema.json`, `../../packages/contracts/src/`). Link to GitHub
   issues by number and, on first mention in a page, with the full URL or via
   [`sources/github-issues.md`](sources/github-issues.md).
 - Every page must be reachable from `index.md`, and should have at least one

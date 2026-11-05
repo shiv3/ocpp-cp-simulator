@@ -11,11 +11,11 @@ every page is catalogued in [`docs/index.md`](docs/index.md).
 
 ## The three layers
 
-| Layer       | Location                                                                                                                                                                                                                                                                                                                      | Rule                                                                                                                                                            |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raw sources | `src/`, `src-tauri/`, `e2e/`, `scripts/`, `packages/core/schema/scenario.schema.json`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, READMEs beside code (`e2e/README.md`, `scripts/steve-verify/README.md`, `scripts/poc/README.md`, `packages/core/src/utils/scenarios/README.md`, `examples/testcontainers-java/README.md`), GitHub issues | Ground truth. Wiki work reads them and never rewrites them. Code changes go through normal engineering PRs. `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only (CC BY-ND). |
-| Wiki        | `docs/` — `overview.md`, `index.md`, `log.md`, `conventions.md`, `entities/`, `concepts/`, `sources/`, `analyses/`                                                                                                                                                                                                            | You own it: create, update, cross-link, keep consistent.                                                                                                        |
-| Schema      | This file                                                                                                                                                                                                                                                                                                                     | Co-evolved with the humans; update it when a workflow changes.                                                                                                  |
+| Layer       | Location                                                                                                                                                                                                                                                                                                                                                                              | Rule                                                                                                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raw sources | `packages/`, `apps/`, `src-tauri/`, `e2e/`, `scripts/`, `packages/core/schema/scenario.schema.json`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, READMEs beside code (`e2e/README.md`, `scripts/steve-verify/README.md`, `scripts/poc/README.md`, `packages/core/src/utils/scenarios/README.md`, `examples/testcontainers-java/README.md`), GitHub issues | Ground truth. Wiki work reads them and never rewrites them. Code changes go through normal engineering PRs. `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only (CC BY-ND). |
+| Wiki        | `docs/` — `overview.md`, `index.md`, `log.md`, `conventions.md`, `entities/`, `concepts/`, `sources/`, `analyses/`                                                                                                                                                                                                                                                                    | You own it: create, update, cross-link, keep consistent.                                                                                                                      |
+| Schema      | This file                                                                                                                                                                                                                                                                                                                                                                             | Co-evolved with the humans; update it when a workflow changes.                                                                                                                |
 
 `README.md` is the GitHub landing page (quick start + links into the wiki), not
 a wiki page. Keep it short; deep content belongs in `docs/`.
@@ -59,7 +59,7 @@ external document the maintainer hands you.
 4. If a page is new or renamed: add it to `index.md`, add `related:` links
    both ways, and ensure at least one inbound link.
 5. Keep paths in code comments / `--help` text / `packages/core/schema/scenario.schema.json`
-   that point into `docs/` working (`grep -rn "docs/" src schema docker-compose.yml Dockerfile examples`).
+   that point into `docs/` working (`grep -rn "docs/" packages apps docker-compose.yml Dockerfile examples`).
 6. Append a `log.md` entry: `## [YYYY-MM-DD] ingest | <title>` + pages touched.
 7. Bump `updated:` on each page you changed.
 
@@ -70,7 +70,7 @@ making the code change.
 
 1. Read `docs/index.md` first, then open the 2–5 pages whose summaries match.
 2. Answer with citations to page paths and, for behavioural claims, to the
-   raw source (`src/...`, issue number). If the wiki and the code disagree,
+   raw source (`packages/...`, `apps/...`, issue number). If the wiki and the code disagree,
    trust the code, answer from the code, and file a lint fix.
 3. If the answer required synthesis worth keeping (a comparison, a decision
    rationale, a migration path), file it as an `analyses/` page, link it from

@@ -3,7 +3,8 @@ title: Local vs Remote mode (browser)
 type: concept
 summary: The web console decides once per page load whether charge points run in-browser (Local, sql.js) or in a daemon (Remote, Socket.IO) by probing `/v1/healthz` at its own origin; there is no toggle.
 sources:
-  - src/ (runtime-mode detection)
+  - packages/client/src/RuntimeMode.ts (runtime-mode detection)
+  - apps/web/src/data/ (providers)
   - vite.config.ts (`VITE_HEALTH_PATH`)
 related:
   - ../entities/web-console.md
@@ -15,7 +16,7 @@ related:
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
   - charging-sessions.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Local vs Remote mode (browser)

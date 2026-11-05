@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - control-plane.md
   - scenario-format.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # File hot-reload (`--watch`)

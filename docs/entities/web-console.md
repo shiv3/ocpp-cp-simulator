@@ -3,7 +3,7 @@ title: Web console (browser UI)
 type: entity
 summary: The React + TypeScript web console at `/` (the classic UI was retired in #426) — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
 sources:
-  - src/ (React app)
+  - apps/web/src/ (React app)
   - index.html
   - vite.config.ts
 related:
@@ -18,7 +18,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Web console (browser UI)

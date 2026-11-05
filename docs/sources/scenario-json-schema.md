@@ -8,7 +8,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/scenario-templates.md
   - example-scenarios.md
-updated: 2026-10-04
+updated: 2026-11-05
 ---
 
 # Source: `packages/core/schema/scenario.schema.json`

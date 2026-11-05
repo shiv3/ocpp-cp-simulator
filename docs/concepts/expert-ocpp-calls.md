@@ -18,7 +18,7 @@ related:
   - ocpp-versions-and-transports.md
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Expert OCPP calls

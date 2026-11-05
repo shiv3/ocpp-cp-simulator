@@ -1,4 +1,4 @@
-import { buildSoapCallbackUrl } from "../cli/soapCallbackUrl";
+import { buildSoapCallbackUrl } from "../cp/infrastructure/transport/soap/soapCallbackUrl";
 import type { ServerInfo } from "../protocol";
 import {
   LABELS_MAX_ENTRIES,

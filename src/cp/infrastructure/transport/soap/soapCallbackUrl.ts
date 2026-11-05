@@ -1,0 +1,122 @@
+/**
+ * SOAP ChargePointService callback-URL resolution (issue #183).
+ *
+ * SOAP-based OCPP (1.2 / 1.5 / 1.6S) requires the charge point to advertise a
+ * callback endpoint — the `wsa:From` address the CSMS calls back on:
+ *
+ *     {publicBase}{soapPath}/{cpId}/ChargePointService
+ *
+ * The effective URL is resolved by precedence, so the explicit flag always wins
+ * and additional providers can be layered underneath without touching callers:
+ *
+ *   1. explicit  --soap-callback-url <url>       → used verbatim
+ *   2.           --soap-public-base-url <base>   → derived from the base origin
+ *   3.           --soap-tunnel ngrok             → provider yields a base, then (2)
+ *   4. none                                       → null (caller: local-only / error)
+ *
+ * Only steps 1–2 live here. Step 3 is `soapTunnel.ts`: the daemon brings the
+ * tunnel up, then hands its public origin in as `publicBaseUrl`, so this
+ * function and buildSoapCallbackUrl() never learn about providers.
+ */
+
+import { SOAP_SERVICE_SUFFIX, normalizeSoapPath } from "./soapPath";
+
+export interface SoapCallbackUrlInput {
+  /** --soap-callback-url: the full callback URL, used verbatim when present. */
+  readonly explicitCallbackUrl?: string | null;
+  /** --soap-public-base-url: public origin, optionally with a path prefix. */
+  readonly publicBaseUrl?: string | null;
+  /**
+   * Charge-point id that identifies the callback route segment. May be null in
+   * daemon-only mode, in which case no URL is derived from the public base.
+   */
+  readonly cpId: string | null;
+  /** Base path reserved for the SOAP callback server, e.g. "/ocpp/soap". */
+  readonly soapPath: string;
+}
+
+/** True when `value` parses as an absolute http(s) URL. */
+export function isHttpUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "http:" || url.protocol === "https:";
+}
+
+/**
+ * Build the full SOAP callback URL a CP advertises, given a public base URL.
+ * `publicBaseUrl` is an absolute http(s) URL (origin, optionally with a path
+ * prefix); a trailing slash is tolerated. The cpId is percent-encoded so the
+ * server's `decodeURIComponent(segment) === cpId` route match holds. Throws if
+ * `publicBaseUrl` is not a valid http(s) URL.
+ */
+export function buildSoapCallbackUrl(
+  publicBaseUrl: string,
+  cpId: string,
+  soapPath: string,
+): string {
+  if (!isHttpUrl(publicBaseUrl)) {
+    throw new Error(
+      `Invalid SOAP public base URL: ${publicBaseUrl} (expected an absolute http(s) URL)`,
+    );
+  }
+  return joinSoapCallbackUrl(publicBaseUrl, encodeURIComponent(cpId), soapPath);
+}
+
+/**
+ * `{base}{soapPath}/{segment}/ChargePointService` with the route segment used
+ * verbatim — for callers that pass a placeholder (a fleet's `<cp-id>`) rather
+ * than a charge point id. buildSoapCallbackUrl() is the encoding front door.
+ */
+export function joinSoapCallbackUrl(
+  publicBaseUrl: string,
+  segment: string,
+  soapPath: string,
+): string {
+  const base = publicBaseUrl.replace(/\/+$/, "");
+  const path = normalizeSoapPath(soapPath);
+  const prefix = path === "/" ? "" : path;
+  return `${base}${prefix}/${segment}/${SOAP_SERVICE_SUFFIX}`;
+}
+
+/**
+ * Resolve the effective SOAP callback URL by precedence (see module doc).
+ * Returns null when neither an explicit URL nor a usable public base is
+ * configured — the caller decides whether that is an error (SOAP) or a no-op
+ * (JSON). A blank cpId also yields null: there is no callback route to build.
+ */
+export function resolveSoapCallbackUrl(
+  input: SoapCallbackUrlInput,
+): string | null {
+  const explicit = input.explicitCallbackUrl?.trim();
+  if (explicit) return explicit;
+  const base = input.publicBaseUrl?.trim();
+  if (base && input.cpId) {
+    return buildSoapCallbackUrl(base, input.cpId, input.soapPath);
+  }
+  return null;
+}
+
+/**
+ * Advisory check (issue #178): the daemon routes inbound CS→CP calls on
+ * `<soapPath>/<cpId>/ChargePointService`, and the callback URL is advertised
+ * verbatim as the `wsa:From` the CSMS calls back on. An explicit callback URL
+ * that doesn't end in `/ChargePointService` is accepted but matches no route,
+ * so the CSMS gets 404s. Returns a warning string when the suffix is missing,
+ * or null when the URL is fine (a trailing slash is tolerated). `buildSoapCallbackUrl`
+ * always appends the suffix, so only an operator-supplied URL can trip this.
+ */
+export function soapCallbackUrlSuffixWarning(
+  callbackUrl: string,
+): string | null {
+  const trimmed = callbackUrl.replace(/\/+$/, "");
+  if (trimmed.endsWith(`/${SOAP_SERVICE_SUFFIX}`)) return null;
+  return (
+    `SOAP callback URL '${callbackUrl}' does not end in '/${SOAP_SERVICE_SUFFIX}'. ` +
+    `The daemon routes inbound CS→CP calls on '<soapPath>/<cpId>/${SOAP_SERVICE_SUFFIX}', ` +
+    `so the CSMS will get 404s calling back on this address.`
+  );
+}

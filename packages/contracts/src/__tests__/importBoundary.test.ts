@@ -1,24 +1,24 @@
 // packages/contracts/src/__tests__/importBoundary.test.ts
 //
-// `packages/contracts/src` is the contract of the control plane (#578). It is to become
-// its own package that the charge-point core depends on, never the reverse, so
-// no non-test file here may import from `packages/core/src/cp` (or any other part of the
-// repository that is not on the allow-list below) — at runtime or type-only.
+// @ocpp-cp-sim/contracts is the contract of the control plane (#578). The
+// charge-point core and both apps depend on it, never the reverse, so no
+// non-test file here may import another workspace package, reach outside its
+// own src/ with a relative path, or use the apps/web `@/` alias (at runtime
+// or type-only) beyond the allow-list below.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const protocolDir = fileURLToPath(new URL("..", import.meta.url));
-const srcDir = resolve(protocolDir, "..");
 
 /**
- * Repository directories (relative to `src/`) that `packages/contracts/src` may import
- * from besides itself. Each entry is a dependency the future `contracts`
- * package will have. Empty today: the protocol depends on third-party packages
- * (zod) only. `cp` must never appear here.
+ * Workspace packages (`@ocpp-cp-sim/<name>`) that this package may import
+ * besides itself. Each entry is a dependency in its package.json. Empty
+ * today: the protocol depends on third-party packages (zod) only. The core
+ * must never appear here.
  */
-const ALLOWED_REPO_DIRECTORIES: readonly string[] = [];
+const ALLOWED_WORKSPACE_PACKAGES: readonly string[] = [];
 
 function listSources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -49,11 +49,24 @@ function specifiers(source: string): string[] {
   return found;
 }
 
-/** The path under `src/` a repo-internal specifier points at, else null. */
-function resolveInRepo(from: string, specifier: string): string | null {
-  if (specifier.startsWith("@/")) return resolve(srcDir, specifier.slice(2));
-  if (specifier.startsWith(".")) return resolve(dirname(from), specifier);
-  return null; // a third-party or node: package
+/**
+ * What a repo-internal specifier points at: a path (relative specifier), the
+ * `@/` alias, or a workspace package name. Third-party and node: packages
+ * return null.
+ */
+function classify(
+  from: string,
+  specifier: string,
+):
+  | { kind: "path"; path: string }
+  | { kind: "alias" }
+  | { kind: "package"; name: string }
+  | null {
+  if (specifier.startsWith("@/")) return { kind: "alias" };
+  if (specifier.startsWith("."))
+    return { kind: "path", path: resolve(dirname(from), specifier) };
+  const ws = /^(@ocpp-cp-sim\/[^/]+)/.exec(specifier);
+  return ws ? { kind: "package", name: ws[1]! } : null;
 }
 
 const isInside = (path: string, dir: string) =>
@@ -66,23 +79,32 @@ describe("packages/contracts/src import boundary", () => {
     expect(files.length).toBeGreaterThan(5);
   });
 
-  it("never lists packages/core/src/cp as an allowed dependency", () => {
-    expect(ALLOWED_REPO_DIRECTORIES.some((d) => /^cp(\/|$)/.test(d))).toBe(
-      false,
-    );
+  it("never lists the core, the client or an app as an allowed dependency", () => {
+    expect(
+      ALLOWED_WORKSPACE_PACKAGES.filter((n) =>
+        /\/(core|client|cli|web)$/.test(n),
+      ),
+    ).toEqual([]);
   });
 
   it("imports nothing from the repository outside packages/contracts/src except the allow-list", () => {
-    const allowed = ALLOWED_REPO_DIRECTORIES.map((d) => resolve(srcDir, d));
+    const own = protocolDir.replace(/[\\/]$/, "");
     const violations: string[] = [];
     for (const file of files) {
       for (const specifier of specifiers(readFileSync(file, "utf8"))) {
-        const target = resolveInRepo(file, specifier);
+        const target = classify(file, specifier);
         if (target === null) continue;
-        if (isInside(target, protocolDir.replace(/[\\/]$/, ""))) continue;
-        if (allowed.some((dir) => isInside(target, dir))) continue;
+        if (target.kind === "path" && isInside(target.path, own)) continue;
+        if (
+          target.kind === "package" &&
+          (target.name === "@ocpp-cp-sim/contracts" ||
+            ALLOWED_WORKSPACE_PACKAGES.includes(target.name))
+        )
+          continue;
         violations.push(
-          `${relative(srcDir, file)} imports "${specifier}" (src/${relative(srcDir, target)})`,
+          `${relative(own, file)} imports "${specifier}"${
+            target.kind === "path" ? ` (${relative(own, target.path)})` : ""
+          }`,
         );
       }
     }

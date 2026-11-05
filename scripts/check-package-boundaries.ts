@@ -2,22 +2,24 @@
 //
 // Executable form of the package dependency rules from #578.
 //
-// The repository is going to become a Bun workspace in one pull request that
-// only moves files (`git mv`) and rewrites import specifiers. For that move to
-// be mechanical, the source tree has to obey the future package boundaries
-// while everything still lives under src/. This script is the definition of
-// those boundaries: PACKAGE_MAP says which future package every file belongs
-// to, ALLOWED_DEPENDENCIES says which package may import which, and
+// The repository is a Bun workspace: packages/* hold the portable code and
+// apps/* the two programs built from it. This script is the definition of the
+// boundaries between them: PACKAGE_MAP says which package every file belongs
+// to, ALLOWED_DEPENDENCIES says which package may import which,
 // FORBIDDEN_SPECIFIERS keeps the portable packages free of UI frameworks and
-// runtime-specific built-ins.
+// runtime-specific built-ins, and each package's package.json has to declare
+// exactly the `workspace:*` dependencies its imports need.
 //
 //   bun run check:boundaries                 # exit 1 on any violation
 //   bun run check:boundaries --json          # the full package x package edge matrix
 //   bun run check:boundaries --list core     # files mapped to one package
 //
-// TypeScript project references forbid cycles at the type level too, so
-// `import type`, `export type ... from` and `import("x").T` count as edges
-// exactly like value imports.
+// Across packages an import must name the package
+// (`@ocpp-cp-sim/core/cp/domain/...`, resolved through the package's
+// `exports`), never a relative path into another package. TypeScript project
+// references forbid cycles at the type level too, so `import type`,
+// `export type ... from` and `import("x").T` count as edges exactly like
+// value imports.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -51,143 +53,56 @@ export interface MapEntry {
   readonly why?: string;
 }
 
+/** Workspace directory of each package. */
+export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
+  ocpp: "packages/ocpp",
+  contracts: "packages/contracts",
+  trace: "packages/trace",
+  "k6-runtime": "packages/k6-runtime",
+  core: "packages/core",
+  client: "packages/client",
+  "apps/cli": "apps/cli",
+  "apps/web": "apps/web",
+};
+
+/** `@ocpp-cp-sim/<dir name>`: the name a package is imported and declared by. */
+export function packageNameOf(pkg: PackageName): string {
+  return `@ocpp-cp-sim/${PACKAGE_DIRS[pkg].split("/")[1]}`;
+}
+
 /**
- * Which future package each path belongs to. The FIRST matching entry wins, so
- * list the most specific first; `validatePackageMap` rejects an entry that a
- * broader earlier entry would swallow. Every .ts/.tsx file under src/ must
- * match an entry (the checker fails on a file that matches none), so a new
- * top-level directory has to be placed here on purpose.
+ * Which package each path belongs to: one entry per workspace directory. The
+ * FIRST matching entry wins; `validatePackageMap` rejects an entry that a
+ * broader earlier entry would swallow. Every .ts/.tsx file under packages/ or
+ * apps/ must match an entry (the checker fails on a file that matches none),
+ * so a new workspace directory has to be registered here on purpose.
  *
- * Test files belong to the package of the directory they sit in: there are no
- * separate test entries except where a directory mixes owners (packages/core/src/test).
+ * What lives where (the reasons the files were placed this way):
+ * - packages/ocpp: generated message types, validators and the vendored OCA
+ *   schemas.
+ * - packages/contracts: the wire/RPC vocabulary shared by daemon and clients.
+ * - packages/trace: the trace format reader/writer.
+ * - packages/k6-runtime: dependency-free files copied verbatim into an
+ *   export; runtimeManifest.test.ts enforces that they import nothing outside
+ *   themselves.
+ * - packages/core: the charge point engine, the scenario engine and what they
+ *   need (scenario templates and their JSON, blueprints, the WebCrypto
+ *   ambient types, the test helpers every package's tests share).
+ * - packages/client: how a UI or tool talks to a daemon or to an in-process
+ *   engine.
+ * - apps/cli: the CLI, the daemon, the MCP endpoint, export-k6, analyze, and
+ *   the tests that build the CLI bundle and the Tauri sidecar.
+ * - apps/web: the browser console and everything only it uses.
  */
 export const PACKAGE_MAP: readonly MapEntry[] = [
-  // --- k6-runtime: dependency-free files copied verbatim into an export.
-  // Must precede the apps/cli entry for apps/cli/src/. runtimeManifest.test.ts
-  // already enforces that these files import nothing outside themselves.
-  {
-    match: "packages/k6-runtime/k6-types.d.ts",
-    pkg: "k6-runtime",
-    why: "ambient k6/* module declarations the runtime is type-checked against; it sits outside runtime/ because that directory is emitted verbatim",
-  },
-  { match: "packages/k6-runtime/src/", pkg: "k6-runtime" },
-
-  // --- apps/cli: the CLI, the daemon, the MCP endpoint, export-k6, analyze.
-  { match: "apps/cli/src/", pkg: "apps/cli" },
-
-  // --- ocpp: generated message types, validators and the vendored schemas.
-  { match: "packages/ocpp/src/", pkg: "ocpp" },
-  { match: "packages/ocpp/vendor/ocpp-schemas/", pkg: "ocpp" },
-
-  // --- contracts: the wire/RPC vocabulary shared by daemon and clients.
-  // packages/contracts/src/buildVersion.ts is also used by apps/cli/src, apps/web/src/components and
-  // apps/web/src/lib; it stays here for now.
-  { match: "packages/contracts/src/", pkg: "contracts" },
-
-  // --- trace: the trace format reader/writer.
-  { match: "packages/trace/src/", pkg: "trace" },
-
-  // --- core: the charge point engine, the scenario engine and what they need.
-  { match: "packages/core/src/cp/", pkg: "core" },
-  { match: "packages/core/src/scenario/", pkg: "core" },
-  {
-    match: "packages/core/schema/",
-    pkg: "core",
-    why: "scenario.schema.json, validated by packages/core/src/scenario",
-  },
-  // apps/web/src/utils is a grab bag; each file goes where its importers are.
-  // Scenario templates are imported by packages/core/src/cp tests, apps/web/src/data/local, apps/cli/src
-  // and the console, and import only packages/core/src/cp: they are core data. Their JSON
-  // files and the blueprint helpers travel with them.
-  { match: "packages/core/src/utils/scenarioTemplates.ts", pkg: "core" },
-  { match: "packages/core/src/utils/scenarioTemplates.test.ts", pkg: "core" },
-  {
-    match: "packages/core/src/utils/scenarios/",
-    pkg: "core",
-    why: "template JSON imported by scenarioTemplates.ts",
-  },
-  {
-    match: "packages/core/src/utils/blueprints/",
-    pkg: "core",
-    why: "also listed in tsconfig.cli.json",
-  },
-  // packages/core/src/types holds one ambient .d.ts that gives the CLI project the WebCrypto
-  // dictionary types packages/core/src/cp/domain/security refers to.
-  {
-    match: "packages/core/src/types/",
-    pkg: "core",
-    why: "ambient WebCrypto types for packages/core/src/cp/domain/security",
-  },
-
-  // --- client: how a UI or tool talks to a daemon or to an in-process engine.
-  { match: "packages/client/src/interfaces/", pkg: "client" },
-  { match: "packages/client/src/remote/", pkg: "client" },
-  { match: "packages/client/src/configPort.ts", pkg: "client" },
-  { match: "packages/client/src/RuntimeMode.ts", pkg: "client" },
-  {
-    match: "packages/client/src/sqlite/SqliteConnectorSettingsRepository.ts",
-    pkg: "client",
-    why: "listed in tsconfig.cli.json; the CLI persists connector settings with it",
-  },
-
-  // --- packages/core/src/test: shared test helpers. They are split by file because the
-  // directory mixes owners. The ones that import only packages/core/src/cp (or nothing) and
-  // are used by cp, cli and web tests alike live in core, the only package all
-  // of those users may depend on. All four are also in tsconfig.cli.json.
-  {
-    match: "apps/web/src/test/setup.dom.ts",
-    pkg: "apps/web",
-    why: "vitest setupFiles: jsdom / testing-library only",
-  },
-  {
-    match: "apps/web/src/test/domSmoke.dom.test.tsx",
-    pkg: "apps/web",
-    why: "renders React under jsdom to prove setup.dom.ts works",
-  },
-  {
-    match: "packages/core/src/test/",
-    pkg: "core",
-    why: "bunServe, deferred and the fixtures import only packages/core/src/cp (or nothing); used by core, cli and web tests",
-  },
-
-  // --- apps/cli/src/build: tests that build the shipped artifacts. Per file.
-  {
-    match: "apps/web/src/build/__tests__/browserBundleNoDaemonXml.bun.test.ts",
-    pkg: "apps/web",
-    why: "builds the web console",
-  },
-  {
-    match: "apps/cli/src/build/",
-    pkg: "apps/cli",
-    why: "builds and boots the CLI bundle / Tauri sidecar",
-  },
-
-  // --- apps/web: the browser console and everything only it uses.
-  // apps/web/src/lib: shadcn cn(), connector formatting, build label, log download —
-  // imported only by apps/web/src/components and apps/web/src/console.
-  { match: "apps/web/src/lib/", pkg: "apps/web" },
-  // apps/web/src/utils leftovers: ocppUrl*, downloadJson, scenarioFile (File/Blob and
-  // download helpers) are imported only by apps/web/src/components and apps/web/src/console.
-  { match: "apps/web/src/utils/", pkg: "apps/web" },
-  { match: "apps/web/src/components/", pkg: "apps/web" },
-  { match: "apps/web/src/console/", pkg: "apps/web" },
-  { match: "apps/web/src/contexts/", pkg: "apps/web" },
-  {
-    match: "apps/web/src/store/",
-    pkg: "apps/web",
-    why: "jotai-style UI state; the CLI must not read it",
-  },
-  {
-    match: "apps/web/src/data/",
-    pkg: "apps/web",
-    why: "hooks, providers, the in-process service and sql.js persistence",
-  },
-  { match: "apps/web/src/assets/", pkg: "apps/web" },
-  { match: "apps/web/src/index.css", pkg: "apps/web" },
-  { match: "apps/web/src/App.tsx", pkg: "apps/web" },
-  { match: "apps/web/src/AppRoutes.dom.test.tsx", pkg: "apps/web" },
-  { match: "apps/web/src/main.tsx", pkg: "apps/web" },
-  { match: "apps/web/src/vite-env.d.ts", pkg: "apps/web" },
+  { match: "packages/ocpp/", pkg: "ocpp" },
+  { match: "packages/contracts/", pkg: "contracts" },
+  { match: "packages/trace/", pkg: "trace" },
+  { match: "packages/k6-runtime/", pkg: "k6-runtime" },
+  { match: "packages/core/", pkg: "core" },
+  { match: "packages/client/", pkg: "client" },
+  { match: "apps/cli/", pkg: "apps/cli" },
+  { match: "apps/web/", pkg: "apps/web" },
 ];
 
 /** Repo-internal dependencies each package may have (besides itself). */
@@ -339,7 +254,7 @@ export interface Config {
   readonly specifierAllowList: typeof SPECIFIER_ALLOW_LIST;
   readonly knownViolations: readonly KnownViolation[];
   readonly testAllowList: readonly KnownViolation[];
-  /** Alias prefix -> repo-relative directory, e.g. "@/" -> "src/". */
+  /** Alias prefix -> repo-relative directory, e.g. "@/" -> "apps/web/src/". */
   readonly aliases: Readonly<Record<string, string>>;
 }
 
@@ -351,15 +266,19 @@ export const DEFAULT_CONFIG: Config = {
   specifierAllowList: SPECIFIER_ALLOW_LIST,
   knownViolations: KNOWN_VIOLATIONS,
   testAllowList: TEST_ALLOW_LIST,
-  aliases: { "@/": "src/" },
+  aliases: { "@/": "apps/web/src/" },
 };
 
 /**
  * The `@/*` alias from a tsconfig's `compilerOptions.paths`. vite.config.ts
- * and tsconfig.app.json both map "@" to src/; reading it from the tsconfig
- * keeps this script from drifting if that ever changes.
+ * and apps/web/tsconfig.json both map "@" to apps/web/src; reading it from the
+ * tsconfig keeps this script from drifting if that ever changes. `paths`
+ * targets are relative to the tsconfig's directory, `baseDir` (repo-relative).
  */
-export function readAliases(tsconfigText: string): Record<string, string> {
+export function readAliases(
+  tsconfigText: string,
+  baseDir = "",
+): Record<string, string> {
   const parsed = ts.parseConfigFileTextToJson("tsconfig.json", tsconfigText);
   const paths = (parsed.config?.compilerOptions?.paths ?? {}) as Record<
     string,
@@ -369,7 +288,9 @@ export function readAliases(tsconfigText: string): Record<string, string> {
   for (const [key, targets] of Object.entries(paths)) {
     const target = targets[0];
     if (!key.endsWith("/*") || !target?.endsWith("/*")) continue;
-    out[key.slice(0, -1)] = posix.normalize(target.slice(0, -1) + "/");
+    out[key.slice(0, -1)] = posix.normalize(
+      posix.join(baseDir, target.slice(0, -1)) + "/",
+    );
   }
   return out;
 }
@@ -407,7 +328,7 @@ export function isTestFile(file: string): boolean {
   return (
     /\.test\.tsx?$/.test(file) ||
     /(^|\/)__tests__\//.test(file) ||
-    file.startsWith("packages/core/src/test/") ||
+    /^(packages|apps)\/[^/]+\/src\/test\//.test(file) ||
     file.startsWith("apps/web/src/console/test/")
   );
 }
@@ -545,18 +466,97 @@ const RESOLVE_SUFFIXES = [
   "/index.tsx",
 ];
 
+export interface PackageManifest {
+  /** Repo-relative workspace directory. */
+  readonly dir: string;
+  readonly name?: string;
+  readonly private?: boolean;
+  readonly exports?: Readonly<Record<string, string>>;
+  readonly dependencies?: Readonly<Record<string, string>>;
+}
+
+/** What `exports` is when a manifest is not at hand: the "./*" convention. */
+const DEFAULT_EXPORTS: Readonly<Record<string, string>> = {
+  "./*": "./src/*.ts",
+};
+
 /**
- * Repo-relative path a specifier points to, or null for a bare package.
- * `known` is the set of every file that exists. Throws-free: returns
- * `{ unresolved }` when a relative or aliased specifier hits nothing.
+ * The file a package subpath (`./cp/domain/x`) maps to under `exports`: an
+ * exact key first, then the pattern with the longest prefix before its `*`.
+ * Returns the target relative to the package directory, or null.
+ */
+export function resolveExport(
+  exportsMap: Readonly<Record<string, string>>,
+  subpath: string,
+): string | null {
+  const exact = exportsMap[subpath];
+  if (typeof exact === "string") return exact;
+  let best: { key: string; prefix: number } | null = null;
+  for (const key of Object.keys(exportsMap)) {
+    const star = key.indexOf("*");
+    if (star === -1) continue;
+    const prefix = key.slice(0, star);
+    const suffix = key.slice(star + 1);
+    if (
+      subpath.length >= key.length - 1 &&
+      subpath.startsWith(prefix) &&
+      subpath.endsWith(suffix) &&
+      (!best || prefix.length > best.prefix)
+    )
+      best = { key, prefix: prefix.length };
+  }
+  if (!best) return null;
+  const star = best.key.indexOf("*");
+  const matched = subpath.slice(
+    star,
+    subpath.length - (best.key.length - star - 1),
+  );
+  return exportsMap[best.key]!.replace("*", matched);
+}
+
+const PACKAGE_SPECIFIER = /^(@ocpp-cp-sim\/[^/]+)(?:\/(.*))?$/;
+
+export interface Resolution {
+  readonly path: string;
+  /** The specifier named a workspace package (`@ocpp-cp-sim/x/...`). */
+  readonly viaPackage: boolean;
+}
+
+/**
+ * Repo-relative path a specifier points to, or null for a bare third-party
+ * package. `known` is the set of every file that exists; `packages` the
+ * workspace manifests by name (defaults to the "./*" convention for every
+ * package in PACKAGE_DIRS). Throws-free: returns `{ unresolved }` when a
+ * relative, aliased or workspace specifier hits nothing.
  */
 export function resolveSpecifier(
   fromFile: string,
   specifier: string,
   known: ReadonlySet<string>,
   aliases: Readonly<Record<string, string>>,
-): { path: string } | { unresolved: string } | null {
+  packages?: ReadonlyMap<string, PackageManifest>,
+): Resolution | { unresolved: string } | null {
   const clean = specifier.replace(/\?.*$/, "");
+  const ws = PACKAGE_SPECIFIER.exec(clean);
+  if (ws) {
+    const name = ws[1]!;
+    const manifest: PackageManifest | undefined =
+      packages?.get(name) ??
+      (() => {
+        const hit = (Object.keys(PACKAGE_DIRS) as PackageName[]).find(
+          (p) => packageNameOf(p) === name,
+        );
+        return hit ? { dir: PACKAGE_DIRS[hit] } : undefined;
+      })();
+    if (!manifest) return { unresolved: clean };
+    const target = resolveExport(
+      manifest.exports ?? DEFAULT_EXPORTS,
+      ws[2] ? `./${ws[2]}` : ".",
+    );
+    if (target === null) return { unresolved: clean };
+    const path = posix.normalize(posix.join(manifest.dir, target));
+    return known.has(path) ? { path, viaPackage: true } : { unresolved: clean };
+  }
   let base: string | null = null;
   if (clean.startsWith(".")) {
     base = posix.normalize(posix.join(posix.dirname(fromFile), clean));
@@ -577,7 +577,8 @@ export function resolveSpecifier(
       ? [trimmed.replace(/\.js$/, ".ts"), trimmed.replace(/\.jsx$/, ".tsx")]
       : []),
   ];
-  for (const c of candidates) if (known.has(c)) return { path: c };
+  for (const c of candidates)
+    if (known.has(c)) return { path: c, viaPackage: false };
   return { unresolved: base };
 }
 
@@ -590,10 +591,12 @@ export interface Edge {
   readonly kind: ImportKind;
   readonly typeOnly: boolean;
   readonly test: boolean;
+  /** Imported through `@ocpp-cp-sim/<package>/...` rather than by path. */
+  readonly viaPackage: boolean;
 }
 
 export interface Violation {
-  readonly type: "edge" | "specifier";
+  readonly type: "edge" | "specifier" | "relative";
   /** "client → apps/web" for an edge, "core ⊅ node" for a specifier. */
   readonly group: string;
   readonly file: string;
@@ -620,6 +623,8 @@ export interface Report {
   }[];
   /** Allow-list entries that no longer match anything. */
   readonly staleAllowances: string[];
+  /** Package manifests that do not match the imports (see checkManifests). */
+  readonly manifestProblems: string[];
   readonly edges: Edge[];
 }
 
@@ -628,6 +633,15 @@ export interface Snapshot {
   readonly sources: ReadonlyMap<string, string>;
   /** Every other file that may be an import target (json, css, svg, ...). */
   readonly others: ReadonlySet<string>;
+  /**
+   * The workspace manifests (`<dir>/package.json`) by package. When present
+   * they resolve `@ocpp-cp-sim/...` specifiers through their real `exports`
+   * and are checked against the imports; without them the "./*" convention
+   * is assumed and no manifest is checked.
+   */
+  readonly manifests?: ReadonlyMap<PackageName, PackageManifest>;
+  /** The root package.json text: it must not depend on a workspace package. */
+  readonly rootManifestText?: string;
 }
 
 export function checkBoundaries(
@@ -635,6 +649,11 @@ export function checkBoundaries(
   config: Config = DEFAULT_CONFIG,
 ): Report {
   validatePackageMap(config.map);
+  const packageByName = snapshot.manifests
+    ? new Map(
+        [...snapshot.manifests].map(([pkg, m]) => [packageNameOf(pkg), m]),
+      )
+    : undefined;
   const known = new Set<string>([
     ...snapshot.sources.keys(),
     ...snapshot.others,
@@ -701,12 +720,21 @@ export function checkBoundaries(
         }
       }
 
-      const res = resolveSpecifier(file, imp.specifier, known, config.aliases);
+      const res = resolveSpecifier(
+        file,
+        imp.specifier,
+        known,
+        config.aliases,
+        packageByName,
+      );
       if (res === null) continue;
       if ("unresolved" in res) {
         // `new URL("../..", import.meta.url)` in tests names directories and
-        // docs; only a missing file under src/ is a real problem.
-        if (imp.kind === "new-url" && !res.unresolved.startsWith("src/"))
+        // docs; only a missing file under a package's src/ is a real problem.
+        if (
+          imp.kind === "new-url" &&
+          !/^(packages|apps)\/[^/]+\/src\//.test(res.unresolved)
+        )
           continue;
         if (imp.kind === "new-url" && !/\.[a-z]+$/.test(res.unresolved))
           continue;
@@ -716,7 +744,7 @@ export function checkBoundaries(
       const toPkg = packageOf(res.path, config.map);
       if (!toPkg) {
         // A file outside the map (package.json, scripts/, ...): not a package edge.
-        if (res.path.startsWith("src/")) unmapped.push(res.path);
+        if (/^(packages|apps)\//.test(res.path)) unmapped.push(res.path);
         continue;
       }
       edges.push({
@@ -728,6 +756,7 @@ export function checkBoundaries(
         kind: imp.kind,
         typeOnly: imp.typeOnly,
         test,
+        viaPackage: res.viaPackage,
       });
       matrix[fromPkg]![toPkg]!++;
       if (fromPkg !== toPkg && !config.allowed[fromPkg].includes(toPkg)) {
@@ -742,6 +771,22 @@ export function checkBoundaries(
           message: `${file} imports ${res.path}${imp.typeOnly ? " (type-only)" : ""}`,
         };
         (suppress(v) ? warnings : violations).push(v);
+      } else if (
+        fromPkg !== toPkg &&
+        !res.viaPackage &&
+        imp.kind !== "new-url"
+      ) {
+        // Allowed edge, wrong spelling: the workspace link, not a path.
+        violations.push({
+          type: "relative",
+          group: `${fromPkg} → ${toPkg} (by path)`,
+          file,
+          target: res.path,
+          specifier: imp.specifier,
+          typeOnly: imp.typeOnly,
+          test,
+          message: `${file} reaches into ${res.path} with "${imp.specifier}"; import it as ${packageNameOf(toPkg)}/<path under src>`,
+        });
       }
     }
   }
@@ -761,6 +806,7 @@ export function checkBoundaries(
   return {
     violations,
     warnings,
+    manifestProblems: checkManifests(snapshot, edges, violations),
     unmapped: [...new Set(unmapped)].sort(),
     unresolved,
     matrix,
@@ -771,13 +817,87 @@ export function checkBoundaries(
   };
 }
 
+/**
+ * Each package's package.json has to say what the code does: its name, that
+ * it is private, and exactly the `workspace:*` dependencies its imports need
+ * (a package-specifier import of another package; type-only imports count,
+ * allow-listed ones do not). The root package.json is the published CLI and
+ * must not depend on a workspace package, or the tarball would not install
+ * outside the repository.
+ */
+export function checkManifests(
+  snapshot: Snapshot,
+  edges: readonly Edge[],
+  violations: readonly Violation[],
+): string[] {
+  if (!snapshot.manifests) return [];
+  const problems: string[] = [];
+  const rejected = new Set(violations.map((v) => `${v.file}\0${v.target}`));
+  for (const pkg of PACKAGE_NAMES) {
+    const dir = PACKAGE_DIRS[pkg];
+    const where = `${dir}/package.json`;
+    const manifest = snapshot.manifests.get(pkg);
+    if (!manifest) {
+      problems.push(`${where} is missing`);
+      continue;
+    }
+    if (manifest.name !== packageNameOf(pkg))
+      problems.push(
+        `${where}: name is ${JSON.stringify(manifest.name)}, expected "${packageNameOf(pkg)}"`,
+      );
+    if (manifest.private !== true)
+      problems.push(`${where}: "private" must be true`);
+    if (pkg.startsWith("apps/") === false && !manifest.exports)
+      problems.push(`${where}: a package needs an "exports" map`);
+
+    const needed = new Map<string, number>();
+    for (const e of edges) {
+      if (
+        e.fromPkg !== pkg ||
+        e.toPkg === pkg ||
+        !e.viaPackage ||
+        rejected.has(`${e.from}\0${e.to}`)
+      )
+        continue;
+      const name = packageNameOf(e.toPkg);
+      needed.set(name, (needed.get(name) ?? 0) + 1);
+    }
+    const declared = Object.entries(manifest.dependencies ?? {}).filter(([n]) =>
+      n.startsWith("@ocpp-cp-sim/"),
+    );
+    for (const [name, range] of declared) {
+      if (range !== "workspace:*")
+        problems.push(
+          `${where}: ${name} must be "workspace:*", not ${JSON.stringify(range)}`,
+        );
+      if (!needed.has(name))
+        problems.push(`${where}: declares ${name} but nothing imports it`);
+    }
+    for (const [name, n] of [...needed].sort()) {
+      if (!declared.some(([d]) => d === name))
+        problems.push(
+          `${where}: ${n} import(s) of ${name} but it is not in "dependencies"`,
+        );
+    }
+  }
+  if (
+    snapshot.rootManifestText !== undefined &&
+    /workspace:/.test(snapshot.rootManifestText)
+  )
+    problems.push(
+      'package.json: the published root package must not use any "workspace:" dependency',
+    );
+  return problems;
+}
+
 /** True when the run must fail. */
 export function hasFailures(r: Report): boolean {
   return (
     r.violations.length > 0 ||
     r.unmapped.length > 0 ||
     r.unresolved.length > 0 ||
-    r.staleAllowances.length > 0
+    r.staleAllowances.length > 0 ||
+    r.manifestProblems.length > 0
   );
 }
 
@@ -806,6 +926,12 @@ export function formatReport(r: Report): string {
     );
     for (const u of r.unresolved)
       lines.push(`  ${u.file} imports "${u.specifier}"`);
+  }
+  if (r.manifestProblems.length) {
+    lines.push(
+      `package.json files that do not match the imports  (${r.manifestProblems.length})`,
+    );
+    for (const p of r.manifestProblems) lines.push(`  ${p}`);
   }
   if (r.staleAllowances.length) {
     lines.push("allow-list entries that match nothing (delete them)");
@@ -839,21 +965,36 @@ function walk(root: string, rel: string, out: string[]): void {
 
 export function loadSnapshot(root: string): Snapshot {
   const files: string[] = [];
-  for (const dir of ["src", "schema", "vendor"]) walk(root, dir, files);
+  for (const dir of ["packages", "apps"]) walk(root, dir, files);
   const sources = new Map<string, string>();
   const others = new Set<string>(["package.json"]);
   for (const f of files) {
-    if (f.startsWith("src/") && /\.tsx?$/.test(f))
-      sources.set(f, readFileSync(join(root, f), "utf8"));
+    if (/\.tsx?$/.test(f)) sources.set(f, readFileSync(join(root, f), "utf8"));
     else others.add(f);
   }
-  return { sources, others };
+  const manifests = new Map<PackageName, PackageManifest>();
+  for (const pkg of PACKAGE_NAMES) {
+    const file = join(root, PACKAGE_DIRS[pkg], "package.json");
+    if (!existsSync(file)) continue;
+    const json = JSON.parse(readFileSync(file, "utf8")) as Omit<
+      PackageManifest,
+      "dir"
+    >;
+    manifests.set(pkg, { ...json, dir: PACKAGE_DIRS[pkg] });
+  }
+  return {
+    sources,
+    others,
+    manifests,
+    rootManifestText: readFileSync(join(root, "package.json"), "utf8"),
+  };
 }
 
 export function loadConfig(root: string): Config {
-  const tsconfig = join(root, "tsconfig.app.json");
+  const dir = PACKAGE_DIRS["apps/web"];
+  const tsconfig = join(root, dir, "tsconfig.json");
   const aliases = existsSync(tsconfig)
-    ? readAliases(readFileSync(tsconfig, "utf8"))
+    ? readAliases(readFileSync(tsconfig, "utf8"), dir)
     : DEFAULT_CONFIG.aliases;
   return { ...DEFAULT_CONFIG, aliases };
 }

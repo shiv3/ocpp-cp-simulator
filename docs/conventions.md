@@ -22,7 +22,9 @@ humans read, with the operating schema in the repository-root
 | **Schema**      | `CLAUDE.md` at the repo root                                                                                                                                                                                          | Humans and the LLM, co-evolved.                                                                                     |
 
 `README.md` at the root is the GitHub landing page, not a wiki page: it holds
-the quick start and links into the wiki.
+the quick start and links into the wiki. `CONTRIBUTING.md` holds the
+contribution rules: pre-push checks, the wiki update rule, and the issue / PR
+triage convention (labels, milestones, release-drafter bumps).
 
 ## Page types and directories
 

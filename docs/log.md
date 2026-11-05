@@ -2265,3 +2265,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - SignCertificate back-off: `CertSigningRepeatTimes` is checked before a resend, so a limit lowered during a wait sends no resend above it. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
 - OCSP cache note: a chain change keeps the response of a certificate another stored chain still holds. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
 - 1.6 `security_event_notification`: unchanged, but the wiki now says its success means queued, not written. [Control plane](concepts/control-plane.md#cp-command-methods), [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
+
+## [2026-11-05] ingest | Contribution and triage convention (#579)
+
+- New root `CONTRIBUTING.md` (not a wiki page): pre-push checks and the wiki update rule, moved from the README's Contributing section, plus the triage convention — one `type:*`, one `area:*`, one `priority:*` label and one milestone per issue; a PR carries its issue's labels, and its `type:*` label picks the release-drafter section and bump.
+- [Wiki conventions](conventions.md) and `CLAUDE.md`: `CONTRIBUTING.md` sits beside `README.md` outside the wiki.

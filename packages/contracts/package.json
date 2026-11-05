@@ -1,0 +1,9 @@
+{
+  "name": "@ocpp-cp-sim/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  }
+}

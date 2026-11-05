@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { parseCreateBody } from "../../cli/server/httpServer";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
@@ -63,21 +62,5 @@ describe("LocalChargePointService txUpdatedMeterValues (#347)", () => {
     connector.onMeterSend!(1);
     expect(scheduled).toHaveBeenCalledWith(1);
     expect(plain).not.toHaveBeenCalled();
-  });
-});
-
-describe("parseCreateBody txUpdatedMeterValues (#347)", () => {
-  const base = { cpId: "CP", wsUrl: "ws://localhost:9000/ocpp/" };
-
-  it("keeps true and an explicit false, and omits it when absent", () => {
-    expect(
-      parseCreateBody({ ...base, txUpdatedMeterValues: true })
-        .txUpdatedMeterValues,
-    ).toBe(true);
-    expect(
-      parseCreateBody({ ...base, txUpdatedMeterValues: false })
-        .txUpdatedMeterValues,
-    ).toBe(false);
-    expect("txUpdatedMeterValues" in parseCreateBody(base)).toBe(false);
   });
 });

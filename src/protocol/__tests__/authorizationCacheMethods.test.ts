@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTHORIZATION_CACHE_SEED_MAX } from "../../cp/domain/auth/AuthorizationCacheSeed";
+import { AUTHORIZATION_CACHE_SEED_MAX } from "../authorization";
 import { METHODS } from "../methods";
 import { isRpcMethod } from "../index";
 

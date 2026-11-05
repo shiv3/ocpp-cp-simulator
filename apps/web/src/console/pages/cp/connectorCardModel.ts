@@ -2,7 +2,10 @@
  * What the connector card computes from its data, apart from the components
  * that draw it (kept out of the component files for Fast Refresh).
  */
-import { EV_PRESETS, type EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import {
+  EV_PRESETS,
+  type EVSettings,
+} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 
 import { curveDurationMin, curvePeakKw, type PowerPoint } from "./powerCurve";

@@ -4,7 +4,10 @@ import {
   SUPPORTED_OCPP_VERSIONS,
   isSoapVersion,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { LABEL_VALUE_MAX, LABELS_MAX_ENTRIES } from "@ocpp-cp-sim/contracts/labels";
+import {
+  LABEL_VALUE_MAX,
+  LABELS_MAX_ENTRIES,
+} from "@ocpp-cp-sim/contracts/labels";
 import {
   OCPP_VERSION_OPTIONS,
   labelMapFromRows,

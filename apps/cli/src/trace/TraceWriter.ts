@@ -7,7 +7,11 @@
 
 import * as fs from "fs";
 import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { Logger, LogLevel, type LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import {
+  Logger,
+  LogLevel,
+  type LogEntry,
+} from "@ocpp-cp-sim/core/cp/shared/Logger";
 import {
   logLineToTraceRecord,
   type SerializedLogLine,

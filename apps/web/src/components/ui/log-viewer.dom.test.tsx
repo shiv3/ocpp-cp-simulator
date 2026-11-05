@@ -2,7 +2,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LogViewer, type ClearLogsScope } from "./log-viewer";
-import { LogLevel, LogType, type LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import {
+  LogLevel,
+  LogType,
+  type LogEntry,
+} from "@ocpp-cp-sim/core/cp/shared/Logger";
 
 type ViewerEntry = LogEntry & { cpId?: string };
 

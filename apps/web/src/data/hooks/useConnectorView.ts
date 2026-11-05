@@ -7,7 +7,10 @@ import {
   defaultEVSettings,
 } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import type { ScenarioMode } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPAvailability, OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import {
+  OCPPAvailability,
+  OCPPStatus,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
 import { useDataContext } from "../providers/DataProvider";
 

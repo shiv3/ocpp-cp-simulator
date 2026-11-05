@@ -24,8 +24,16 @@ import { join } from "node:path";
 
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 const docPath = join(repoRoot, "docs", "entities", "cli.md");
-const schemaPath = join(repoRoot, "packages", "core", "schema", "scenario.schema.json");
-const runtimeDir = fileURLToPath(new URL("../../../../../packages/k6-runtime/src", import.meta.url));
+const schemaPath = join(
+  repoRoot,
+  "packages",
+  "core",
+  "schema",
+  "scenario.schema.json",
+);
+const runtimeDir = fileURLToPath(
+  new URL("../../../../../packages/k6-runtime/src", import.meta.url),
+);
 
 const HOW_TO_FIX =
   "either implement it in packages/k6-runtime/src/ or record it as not implemented " +

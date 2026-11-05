@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { K6_ONLY_FILES, RUNTIME_FILES } from "../runtimeManifest";
 import { RUNTIME_SOURCES } from "../runtimeSources";
 
-const runtimeDir = fileURLToPath(new URL("../../../../../packages/k6-runtime/src", import.meta.url));
+const runtimeDir = fileURLToPath(
+  new URL("../../../../../packages/k6-runtime/src", import.meta.url),
+);
 
 function listFiles(dir: string, prefix = ""): string[] {
   return readdirSync(dir).flatMap((name) => {

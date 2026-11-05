@@ -1,7 +1,10 @@
 // apps/cli/src/exportK6/emit/render.ts
 // String templates for the generated bundle. Kept CLI-side (not part of the
 // emitted runtime).
-import type { ScenarioJson, ScenarioNodeJson } from "@ocpp-cp-sim/k6-runtime/types";
+import type {
+  ScenarioJson,
+  ScenarioNodeJson,
+} from "@ocpp-cp-sim/k6-runtime/types";
 
 // Scenario-derived text (name, id, node labels) is embedded in `//` comments
 // of the generated script. A raw line terminator in any of it would close

@@ -1,4 +1,7 @@
-import type { SimulatorConfigInput, WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
+import type {
+  SimulatorConfigInput,
+  WireSimulatorConfig,
+} from "@ocpp-cp-sim/contracts/index";
 import type { Config } from "./interfaces/ConfigRepository";
 
 export function getConfigBasicAuthPassword(

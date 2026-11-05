@@ -4,7 +4,10 @@ import { CLIChargePointService } from "../service";
 
 type AnyServer = Server<unknown>;
 import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";
-import { matchesLabelSelector, type Labels } from "@ocpp-cp-sim/contracts/labels";
+import {
+  matchesLabelSelector,
+  type Labels,
+} from "@ocpp-cp-sim/contracts/labels";
 import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
 import { CPRegistry } from "./CPRegistry";

@@ -3,7 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
 import { SUPPORTED_ASSERTION_TYPES } from "@ocpp-cp-sim/k6-runtime/assertions";
-import type { ScenarioJson, ScenarioNodeJson } from "@ocpp-cp-sim/k6-runtime/types";
+import type {
+  ScenarioJson,
+  ScenarioNodeJson,
+} from "@ocpp-cp-sim/k6-runtime/types";
 import { RUNTIME_FILES } from "./runtimeManifest";
 import { RUNTIME_SOURCES } from "./runtimeSources";
 import {

@@ -3,7 +3,10 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FAULT_ERROR_CODES, OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import {
+  FAULT_ERROR_CODES,
+  OCPPStatus,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 import type { HeartbeatView } from "@/data/hooks/useChargePointView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";

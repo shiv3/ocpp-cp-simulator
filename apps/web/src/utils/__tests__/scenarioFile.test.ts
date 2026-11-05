@@ -152,7 +152,9 @@ describe("parseScenarioJSON", () => {
       expect(result.id).toBe("test-scenario");
       expect(result.nodes).toHaveLength(1);
       expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy.mock.calls[0][0]).toContain("packages/core/schema/scenario.schema.json");
+      expect(warnSpy.mock.calls[0][0]).toContain(
+        "packages/core/schema/scenario.schema.json",
+      );
     });
 
     it("does not warn for a schema-valid scenario", () => {

@@ -6,7 +6,11 @@ import {
   VehicleCatalogError,
   type VehicleCatalog,
 } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
-import { RpcFailure, type Params, type RpcErrorCode } from "@ocpp-cp-sim/contracts/index";
+import {
+  RpcFailure,
+  type Params,
+  type RpcErrorCode,
+} from "@ocpp-cp-sim/contracts/index";
 
 /**
  * The daemon side of `vehicle_profiles.*` and `vehicle_catalog.*` (#458).

@@ -5,9 +5,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { labelKeySchema, labelValueSchema } from "@ocpp-cp-sim/contracts/labels";
+import {
+  labelKeySchema,
+  labelValueSchema,
+} from "@ocpp-cp-sim/contracts/labels";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const repoRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../..",
+);
 
 function runParseArgs(args: string[]) {
   const script = [

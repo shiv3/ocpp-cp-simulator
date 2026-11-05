@@ -1,6 +1,9 @@
 import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
-import type { ResetRequestV16, ResetResponseV16 } from "@ocpp-cp-sim/ocpp/index";
+import type {
+  ResetRequestV16,
+  ResetResponseV16,
+} from "@ocpp-cp-sim/ocpp/index";
 import { LogType } from "../../../../shared/Logger";
 
 /**

@@ -83,7 +83,10 @@ import type {
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
 import type { ConnectorSettingsRepository } from "@ocpp-cp-sim/client/interfaces/ConnectorSettingsRepository";
 import { mergeWriteOnlyConfigSecrets } from "@ocpp-cp-sim/client/configPort";
-import type { SimulatorConfigInput, WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
+import type {
+  SimulatorConfigInput,
+  WireSimulatorConfig,
+} from "@ocpp-cp-sim/contracts/index";
 import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import { redactSensitiveText } from "@ocpp-cp-sim/core/cp/shared/redaction";
 import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";

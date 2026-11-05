@@ -122,7 +122,10 @@ import type {
   TimelinePage,
   TimelineQuery,
 } from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
-import { scenarioTemplates, getTemplateById } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import {
+  scenarioTemplates,
+  getTemplateById,
+} from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import { scenarioInstanceId } from "./scenarioInstanceId";
 import { TranscriptBuffer } from "@ocpp-cp-sim/core/cp/application/verification/TranscriptBuffer";
 import {

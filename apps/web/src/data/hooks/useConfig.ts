@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { SimulatorConfigInput, WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
+import type {
+  SimulatorConfigInput,
+  WireSimulatorConfig,
+} from "@ocpp-cp-sim/contracts/index";
 import { useDataContext } from "../providers/DataProvider";
 
 interface UseConfigResult {

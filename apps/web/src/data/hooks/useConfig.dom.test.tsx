@@ -3,7 +3,10 @@ import { act, type JSX } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SimulatorConfigInput, WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
+import type {
+  SimulatorConfigInput,
+  WireSimulatorConfig,
+} from "@ocpp-cp-sim/contracts/index";
 import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
 import { getConfigBasicAuthPassword } from "@ocpp-cp-sim/client/configPort";
 import { useConfig } from "./useConfig";

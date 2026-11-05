@@ -11,7 +11,10 @@ import type { OCPP15SoapInboundResult } from "./OCPPSoapServer";
 import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegistry";
 import { DataTransferHandler } from "../handlers";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
-import { v16Schemas, type DataTransferRequestV16 } from "@ocpp-cp-sim/ocpp/v16/index";
+import {
+  v16Schemas,
+  type DataTransferRequestV16,
+} from "@ocpp-cp-sim/ocpp/v16/index";
 import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
 import { OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 import {

@@ -12,6 +12,9 @@
     },
     {
       "path": "./scripts/bench/tsconfig.json"
+    },
+    {
+      "path": "./scripts/tsconfig.json"
     }
   ]
 }

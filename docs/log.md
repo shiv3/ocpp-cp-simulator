@@ -2274,3 +2274,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-05] restructure | Remove the one-off workspaces move script (#578)
 
 - `scripts/workspaces-move.ts` and its test are deleted. The script existed to generate the move in #590 and to carry branches opened before it; the move is merged and the last such branches (#545, #548) were carried over and merged, so nothing can run it any more (it refuses a tree already in the workspace layout). It stays reachable in history at `e0c05f9c`.
+
+## [2026-11-05] ingest | Import cycle check and type-only imports (#570)
+
+- The 18-file cycle through `Configuration.ts` and the 2-file cycle through the handlers barrel are gone; no cycle of static value imports is left under `packages/` and `apps/`.
+- `bun run check:boundaries` now fails on such a cycle, and ESLint enforces `consistent-type-imports`. [Overview](overview.md) lists what counts as a cycle edge. [GitHub issues](sources/github-issues.md): #570.

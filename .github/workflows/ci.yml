@@ -35,7 +35,7 @@ jobs:
       # @ocpp-cp-sim/<package> specifier, on a package.json whose workspace:*
       # dependencies differ from what the package imports, or on a UI / Node /
       # Bun-only specifier in a package that must run in both Bun and the
-      # browser.
+      # browser. #570: it also fails on a cycle of static value imports.
       - name: Package boundaries
         run: bun run check:boundaries
 

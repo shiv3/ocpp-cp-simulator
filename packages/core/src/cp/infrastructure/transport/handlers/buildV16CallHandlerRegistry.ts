@@ -1,38 +1,48 @@
 import { OCPPAction } from "../../../domain/types/OcppTypes";
+import { MessageHandlerRegistry } from "./MessageHandlerRegistry";
+import { RemoteStartTransactionHandler } from "./call/RemoteStartTransactionHandler";
+import { RemoteStopTransactionHandler } from "./call/RemoteStopTransactionHandler";
+import { ResetHandler } from "./call/ResetHandler";
+import { GetDiagnosticsHandler } from "./call/GetDiagnosticsHandler";
+import { GetConfigurationHandler } from "./call/GetConfigurationHandler";
 import {
-  MessageHandlerRegistry,
-  RemoteStartTransactionHandler,
-  RemoteStopTransactionHandler,
-  ResetHandler,
-  GetDiagnosticsHandler,
-  GetConfigurationHandler,
   TriggerMessageHandler,
   ChangeConfigurationHandler,
   ClearCacheHandler,
   UnlockConnectorHandler,
+} from "./call/OtherCallHandlers";
+import {
   ReserveNowHandler,
   CancelReservationHandler,
+} from "./call/ReservationHandlers";
+import {
   SetChargingProfileHandler,
   ClearChargingProfileHandler,
   GetCompositeScheduleHandler,
-  ChangeAvailabilityHandler,
+} from "./call/SmartChargingHandlers";
+import { ChangeAvailabilityHandler } from "./call/ChangeAvailabilityHandler";
+import {
   GetLocalListVersionHandler,
   SendLocalListHandler,
-  UpdateFirmwareHandler,
-  CertificateSignedHandler,
-  ExtendedTriggerMessageHandler,
+} from "./call/LocalAuthListHandlers";
+import { UpdateFirmwareHandler } from "./call/UpdateFirmwareHandler";
+import { CertificateSignedHandler } from "./call/CertificateSignedHandler";
+import { ExtendedTriggerMessageHandler } from "./call/ExtendedTriggerMessageHandler";
+import {
   InstallCertificateHandler,
   GetInstalledCertificateIdsHandler,
   DeleteCertificateHandler,
-  GetLogHandler,
-  SignedUpdateFirmwareHandler,
-  BootNotificationResultHandler,
+} from "./call/CertificateManagementHandlers";
+import { GetLogHandler } from "./call/GetLogHandler";
+import { SignedUpdateFirmwareHandler } from "./call/SignedUpdateFirmwareHandler";
+import { BootNotificationResultHandler } from "./callresult/BootNotificationResultHandler";
+import {
   HeartbeatResultHandler,
   StatusNotificationResultHandler,
   DataTransferResultHandler,
   EmptyConfirmationResultHandler,
   SignCertificateResultHandler,
-} from "./index";
+} from "./callresult/OtherResultHandlers";
 
 /**
  * Factory function to build the OCPP 1.6 CALL-handler registry.

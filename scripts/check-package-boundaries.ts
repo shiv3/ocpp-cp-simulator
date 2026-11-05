@@ -20,6 +20,12 @@
 // references forbid cycles at the type level too, so `import type`,
 // `export type ... from` and `import("x").T` count as edges exactly like
 // value imports.
+//
+// Files must not import each other in a cycle either (#570). That rule counts
+// only the imports that stay in the compiled code: a cycle of types disappears
+// at compile time, and `import()` is how a cycle is legitimately deferred. It
+// relies on the `consistent-type-imports` lint rule to mark an import used only
+// as a type, or the cycle it closes would be reported as a real one.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -625,6 +631,8 @@ export interface Report {
   readonly staleAllowances: string[];
   /** Package manifests that do not match the imports (see checkManifests). */
   readonly manifestProblems: string[];
+  /** Groups of files that import each other (see findImportCycles). */
+  readonly cycles: string[][];
   readonly edges: Edge[];
 }
 
@@ -813,8 +821,65 @@ export function checkBoundaries(
     fileCounts,
     typeOnlyForbidden,
     staleAllowances,
+    cycles: findImportCycles(edges),
     edges,
   };
+}
+
+/** The import kinds a module needs loaded before it can run. */
+const CYCLE_EDGE_KINDS: ReadonlySet<ImportKind> = new Set<ImportKind>([
+  "import",
+  "side-effect",
+  "export-from",
+  "require",
+]);
+
+/**
+ * Every group of files that reach each other through static value imports
+ * (the strongly connected components of that graph, by Tarjan's algorithm), a
+ * lone file only if it imports itself. Each group and the list are sorted.
+ */
+export function findImportCycles(edges: readonly Edge[]): string[][] {
+  const graph = new Map<string, Set<string>>();
+  for (const e of edges) {
+    if (e.typeOnly || !CYCLE_EDGE_KINDS.has(e.kind)) continue;
+    if (!graph.has(e.to)) graph.set(e.to, new Set());
+    const targets = graph.get(e.from);
+    if (targets) targets.add(e.to);
+    else graph.set(e.from, new Set([e.to]));
+  }
+
+  const cycles: string[][] = [];
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const visit = (file: string): void => {
+    index.set(file, index.size);
+    low.set(file, index.get(file)!);
+    stack.push(file);
+    onStack.add(file);
+    for (const next of graph.get(file)!) {
+      if (!index.has(next)) {
+        visit(next);
+        low.set(file, Math.min(low.get(file)!, low.get(next)!));
+      } else if (onStack.has(next)) {
+        low.set(file, Math.min(low.get(file)!, index.get(next)!));
+      }
+    }
+    if (low.get(file) !== index.get(file)) return;
+    const group: string[] = [];
+    let member: string;
+    do {
+      member = stack.pop()!;
+      onStack.delete(member);
+      group.push(member);
+    } while (member !== file);
+    if (group.length > 1 || graph.get(file)!.has(file))
+      cycles.push(group.sort());
+  };
+  for (const file of graph.keys()) if (!index.has(file)) visit(file);
+  return cycles.sort(([a], [b]) => (a! < b! ? -1 : 1));
 }
 
 /**
@@ -897,7 +962,8 @@ export function hasFailures(r: Report): boolean {
     r.unmapped.length > 0 ||
     r.unresolved.length > 0 ||
     r.staleAllowances.length > 0 ||
-    r.manifestProblems.length > 0
+    r.manifestProblems.length > 0 ||
+    r.cycles.length > 0
   );
 }
 
@@ -932,6 +998,15 @@ export function formatReport(r: Report): string {
       `package.json files that do not match the imports  (${r.manifestProblems.length})`,
     );
     for (const p of r.manifestProblems) lines.push(`  ${p}`);
+  }
+  if (r.cycles.length) {
+    lines.push(
+      `files that import each other, type-only imports aside  (${r.cycles.length})`,
+    );
+    for (const c of r.cycles) {
+      lines.push(`  cycle of ${c.length} file(s):`);
+      for (const f of c) lines.push(`    ${f}`);
+    }
   }
   if (r.staleAllowances.length) {
     lines.push("allow-list entries that match nothing (delete them)");
@@ -1008,6 +1083,7 @@ export function jsonSummary(r: Report): unknown {
     violations: r.violations,
     warnings: r.warnings,
     typeOnlyForbidden: r.typeOnlyForbidden,
+    cycles: r.cycles,
   };
 }
 

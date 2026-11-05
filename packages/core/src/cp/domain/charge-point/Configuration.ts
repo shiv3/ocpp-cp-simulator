@@ -1,4 +1,4 @@
-import { ChargePoint } from "./ChargePoint";
+import type { ChargePoint } from "./ChargePoint";
 import { OcppFeatureProfile } from "../types/OcppTypes";
 import { isOcpp2Version } from "../types/OcppVersion";
 import { MAX_TIMER_MS } from "../../shared/timers";

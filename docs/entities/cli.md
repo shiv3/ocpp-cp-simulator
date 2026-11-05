@@ -4,6 +4,8 @@ type: entity
 summary: The headless Bun binary — interactive REPL, JSON Lines mode, daemon launcher, and Socket.IO client modes — plus the full flag reference.
 sources:
   - src/cli/main.ts
+  - src/cli/exportK6/runtimeSources.ts
+  - scripts/generate-k6-runtime.ts
   - src/cli/types.ts
   - package.json (`bin`, `files`)
   - scripts/verify-cli-tarball.sh
@@ -24,7 +26,7 @@ related:
   - ../concepts/charging-sessions.md
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
-updated: 2026-10-30
+updated: 2026-11-04
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -63,7 +65,8 @@ installed:
 # Prebuilt release tarball (recommended) — ships the web-console dist/
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
-# From a local checkout (dev)
+# From a local checkout (dev) — the bin is the built bundle, so build it first
+bun run build:cli
 bun link
 bun link ocpp-cp-simulator    # in any consumer project
 
@@ -87,8 +90,8 @@ ocpp-cp-sim --daemon
 > this page does not advertise `npm install -g ocpp-cp-simulator`, for the
 > reason #321 gives: a documented install command must resolve. The package
 > needs Bun at run time whichever way it is installed — the bin is
-> `src/cli/main.ts` under a `bun` shebang, and the daemon uses `bun:sqlite`
-> and `Bun.serve`. A SemVer prerelease (`cli-v1.0.0-rc.1`) is published under
+> `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun`
+> shebang, and the daemon uses `bun:sqlite` and `Bun.serve`. A SemVer prerelease (`cli-v1.0.0-rc.1`) is published under
 > the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
 
 ### Why `cli-latest` and not `releases/latest`
@@ -323,42 +326,44 @@ above) is exempt: it is not an instruction a reader will paste.
 
 ### What the package ships
 
-`package.json`'s `files` field is a list of **directories**, not individual
-files:
+`package.json`'s `files` field lists two build outputs and no sources:
 
-| Entry          | Why it must ship                                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------- |
-| `src/cli`      | `main.ts` (the `bin`), the daemon server, the client modes, `analyze`, `export-k6`                    |
-| `src/cp`       | The charge point domain, transports and message handlers                                              |
-| `src/data`     | SQLite repositories — `main.ts` imports `../data/sqlite/…` before it parses a single argument         |
-| `src/ocpp`     | Generated OCPP types and validators reached from the CP's message handlers                            |
-| `src/protocol` | The Socket.IO [control-plane](../concepts/control-plane.md) zod schemas                               |
-| `src/scenario` | Advisory [scenario](../concepts/scenario-format.md) schema validation                                 |
-| `src/trace`    | The [trace](../concepts/trace-format.md) analysis disclaimer, on `analyze`'s module graph             |
-| `src/utils`    | Scenario templates, blueprints and URL helpers (the whole subtree — `blueprints/` is imported too)    |
-| `schema`       | `scenario.schema.json`, imported by the validator above                                               |
-| `vendor`       | The [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md) the validators import at runtime |
-| `dist`         | The Vite-built web console served by `--web-console`; built by `prepack`, never committed             |
+| Entry      | What it is                                                                                                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dist-cli` | `main.js`, the `bin`: one `bun build --target=bun` bundle of `src/cli/main.ts` (`bun run build:cli`, about 5 MB). Every repository module the CLI imports is inlined — the [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md), `schema/scenario.schema.json` and the scenario templates included |
+| `dist`     | The Vite-built web console served by `--web-console`                                                                                                                                                                                                                                                           |
 
-Every one of these is load-bearing: removing any single entry makes the
-installed `ocpp-cp-sim` fail on its first import, before `--help` prints. This
-is the same set the [Docker image](docker-image.md)'s `COPY` list carries, and
-the two are meant to stay in step.
+Both are built by `prepack` (and explicitly by `cli-release.yml`), never
+committed. The bundle finds `dist/` one level up from itself
+(`resolveBundledDist` in `main.ts`), and `export-k6` writes its k6 runtime
+from an embedded copy (`src/cli/exportK6/runtimeSources.ts`, generated from
+`runtime/` by `bun run gen:k6-runtime`; a stale copy fails
+`runtimeManifest.test.ts`). Nothing in the package depends on the source
+layout, which is what lets `src/` move (#578) without the published CLI
+noticing.
 
-Between 2026-07-01 and this page's `updated:` date the list named
-`src/utils/scenarioTemplates.ts` and `src/utils/scenarios` individually and
-omitted `src/data`, `src/ocpp`, `src/trace` and `vendor` entirely, so the
+Until 2026-11-04 the tarball shipped the sources instead, and `files` listed
+every `src/` directory the CLI imported. Between 2026-07-01 and 2026-09-12
+that list omitted `src/data`, `src/ocpp`, `src/trace` and `vendor`, so the
 tarball the release workflow produced could not start at all (#320). Nothing
 caught it because the only checks on the tarball were `tar -tf | grep`s for
 three filenames that happened to be present — a listing check cannot see a
-path nobody thought to name. `scripts/verify-cli-tarball.sh` replaces them: it
-installs the tarball into a throwaway global prefix and then boots it —
-`--help`, a `bun build --compile` over the installed tree (which resolves the
-whole import graph, type-only imports included), the daemon answering
-`GET /v1/healthz` with a charge point bootstrapped, and, when `dist/` is
-present, the web console serving its shell. It runs on every pull request
-(`ci.yml`) as well as at release time, so packaging breaks on the PR that
-breaks it.
+path nobody thought to name. `scripts/verify-cli-tarball.sh` replaced them
+and still guards the bundle: it installs the tarball into a throwaway global
+prefix (refusing one that ships `src/`) and then boots it — `--help`, a
+`bun build --compile` over the installed bundle (every bare specifier it kept
+must resolve from the installed package), the daemon answering
+`GET /v1/healthz` with a charge point bootstrapped, `export-k6` writing its
+runtime, and, when `dist/` is present, the web console serving its shell. It
+runs on every pull request (`ci.yml`) as well as at release time, so
+packaging breaks on the PR that breaks it. `src/build/__tests__/cliBundle.bun.test.ts`
+pins the same shape without `npm pack`: it builds the bundle into a directory
+outside the checkout and runs it from another one.
+
+The [Docker image](docker-image.md) and the desktop
+[sidecar](desktop-app.md) still run from the sources (`bun src/cli/main.ts`
+and `bun build --compile src/cli/main.ts`); the embedded k6 runtime serves
+the sidecar too.
 
 All flags described below apply whether you run the installed `ocpp-cp-sim`
 command or, from a source checkout, `bun src/cli/main.ts …`.

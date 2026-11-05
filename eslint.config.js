@@ -47,7 +47,7 @@ const restrictedScenarioPersistence = [
 export default tseslint.config(
   // Only TypeScript sources are linted (matches the old `--ext ts,tsx`); build
   // output and JS config files (vite/tailwind/postcss/this file) are skipped.
-  { ignores: ["dist", "**/*.{js,cjs,mjs}"] },
+  { ignores: ["dist", "dist-cli", "**/*.{js,cjs,mjs}"] },
 
   js.configs.recommended,
   ...tseslint.configs.recommended,

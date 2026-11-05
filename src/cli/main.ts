@@ -83,9 +83,9 @@ function hasIndexHtml(dir: string): boolean {
  *
  * 1. **Source checkout** — `bun src/cli/main.ts`. `dist/` is `<repo>/dist`
  *    once `bun run build` has run. Two levels up from `src/cli/`.
- * 2. **Installed package** — the release tarball's `files` field ships
- *    `src/cli` and `dist`, so the layout is `<pkg>/src/cli/main.ts` +
- *    `<pkg>/dist`. Same two levels up.
+ * 2. **Installed package** — the release tarball ships the CLI as one
+ *    `bun build` bundle, `<pkg>/dist-cli/main.js`, beside `<pkg>/dist`
+ *    (#578). One level up.
  * 3. **`bun build --compile` binary** — the Tauri sidecar. Here the module
  *    lives in the binary's virtual filesystem, so `import.meta.dir` is
  *    `/$bunfs/root` (POSIX) or `B:\~BUN\root` (Windows) and walking up
@@ -112,7 +112,13 @@ export function resolveBundledDist(
 
   const execDir = path.dirname(process.execPath);
   const candidates = [
-    // Shapes 1 and 2 (interpreted): <repo|pkg>/src/cli -> <repo|pkg>/dist.
+    // Shape 2 (installed bundle): <pkg>/dist-cli -> <pkg>/dist. First: from
+    // the bundle, two levels up is the directory holding the package
+    // (node_modules/), and a stray dist/ there must not win over the
+    // package's own. From a source checkout this is <repo>/src/dist, which
+    // does not exist, so shape 1 is reached unchanged.
+    path.resolve(import.meta.dir, "../dist"),
+    // Shape 1 (source checkout): <repo>/src/cli -> <repo>/dist.
     path.resolve(import.meta.dir, "../../dist"),
     // Shape 3 (compiled): a `dist/` shipped beside or one level above the
     // binary, and the macOS .app layout where the sidecar sits in

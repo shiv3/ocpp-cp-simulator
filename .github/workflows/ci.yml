@@ -61,7 +61,8 @@ jobs:
       # script skips its web-console stage for exactly that reason and does
       # not fail on it. Do NOT add a vite build here to "fix" the skip; the
       # release workflow builds dist/ and passes --expect-dist, which is where
-      # a missing "dist" entry is caught.
+      # a missing "dist" entry is caught. The script does build the CLI
+      # bundle (dist-cli/main.js) itself: that is the `bin` the tarball ships.
       - name: CLI tarball installs and runs (packaging smoke)
         run: ./scripts/verify-cli-tarball.sh
 

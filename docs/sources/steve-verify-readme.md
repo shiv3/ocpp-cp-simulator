@@ -39,7 +39,7 @@ bun runner/main.ts run --group core          # also: authlist-reservation,
 ```
 
 > **Stale count in the raw README.** The README still says "44 `cert16-*`
-> templates"; `src/utils/scenarios/` now holds 47 test-case templates (the
+> templates"; `packages/core/src/utils/scenarios/` now holds 47 test-case templates (the
 > TC_023.x Authorize-outcome cases were added later) plus the OCTT probe, and
 > the runner's `specs/` reference all 47.
 

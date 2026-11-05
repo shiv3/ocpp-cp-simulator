@@ -58,13 +58,13 @@ jobs:
       # for the host target takes seconds and fails the same way the release
       # would, on the pull request instead of on the tag.
       - name: CLI sidecar compiles (release smoke)
-        run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke src/cli/main.ts
+        run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke apps/cli/src/main.ts
 
       # No CI job used to touch the npm tarball at all — the only checks on it
       # lived in cli-release.yml and ran on the `cli-v*` tag, so a PR that
       # broke packaging stayed green and the breakage surfaced weeks later at
-      # release time. It did: package.json#files lost track of src/data,
-      # src/ocpp, src/trace and vendor/, and the published CLI could not run
+      # release time. It did: package.json#files lost track of apps/web/src/data,
+      # packages/ocpp/src, packages/trace/src and vendor/, and the published CLI could not run
       # (#320). Pack it and boot it here, on the pull request.
       #
       # Packed with --ignore-scripts, so no vite build and no dist/ — the
@@ -94,8 +94,8 @@ jobs:
         run: bun run test:bun
 
       # `test:bun` filters on `*.bun.test.ts`, so it never runs the whole
-      # src/cli/__tests__ directory in one process — and that is where the
-      # two runners overlap. `bun test src/cli/__tests__` is what a developer
+      # apps/cli/src/__tests__ directory in one process — and that is where the
+      # two runners overlap. `bun test apps/cli/src/__tests__` is what a developer
       # types while debugging, and on a clean tree it failed, with three
       # defects stacked in client.remote.test.ts, each masked by the one
       # before (#339): it used vitest-only `vi.hoisted` and so could not even

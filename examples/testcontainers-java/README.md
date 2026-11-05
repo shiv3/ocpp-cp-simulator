@@ -58,6 +58,6 @@ This is a **prototype** authored against the documented control-plane contract;
 it is not wired into the simulator's own CI (which is TypeScript). The identical
 RPC sequence is covered by a TypeScript integration test that **does** run in CI
 and drives the real socket server —
-`src/cli/server/__tests__/harnessScenarioVerdict.bun.test.ts` — so the flow this
+`apps/cli/src/server/__tests__/harnessScenarioVerdict.bun.test.ts` — so the flow this
 example demonstrates is guarded there. Contributions to grow this into a proper
 Testcontainers module + thin client are welcome.

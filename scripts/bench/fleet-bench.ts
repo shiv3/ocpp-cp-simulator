@@ -12,7 +12,7 @@ import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { io, type Socket } from "socket.io-client";
 
-import { CP_CREATE_MANY_MAX } from "../../src/protocol/limits.ts";
+import { CP_CREATE_MANY_MAX } from "../../packages/contracts/src/limits.ts";
 import {
   BENCH_OCPP_VERSIONS,
   BenchAbortError,
@@ -78,7 +78,7 @@ import {
   type StepResult,
   type TransactionStartOutcome,
 } from "./lib.ts";
-import { OCPP_1_6 } from "../../src/cp/domain/types/OcppVersion.ts";
+import { OCPP_1_6 } from "../../packages/core/src/cp/domain/types/OcppVersion.ts";
 
 const CALL_DURATION_METRIC = "ocppcp_ocpp_call_duration_seconds";
 const CALL_TIMEOUTS_METRIC = "ocppcp_ocpp_call_timeouts_total";
@@ -756,7 +756,7 @@ async function growFleet(
       process.stderr.write(
         `[bench] WARNING: cp.create_many returned ${unpredicted.length} id(s) this ` +
           `script did not predict (e.g. ${unpredicted[0]}). benchCpId() has drifted ` +
-          `from expandIdPattern() in src/protocol/methods.ts.\n`,
+          `from expandIdPattern() in packages/contracts/src/methods.ts.\n`,
       );
     }
     created.push(...result.created);
@@ -777,7 +777,7 @@ async function growFleet(
  *  elapses.
  *
  *  The gauge rather than `cp.list`: `cp.list`'s *result* schema is
- *  `ARRAY_1000` (`src/protocol/methods.ts`), so past 1000 charge points the
+ *  `ARRAY_1000` (`packages/contracts/src/methods.ts`), so past 1000 charge points the
  *  response fails validation and the RPC answers `internal` — which made the
  *  advertised 2000-CP sweep abort at the step that crossed the cap. The gauge
  *  is one bounded number whatever the fleet size. */
@@ -2398,7 +2398,7 @@ See scripts/bench/README.md for a worked example and what to record.
 `);
 }
 
-// Guarded the way `src/cli/main.ts` and `scripts/steve-verify/runner/main.ts`
+// Guarded the way `apps/cli/src/main.ts` and `scripts/steve-verify/runner/main.ts`
 // guard theirs, so importing this module — from a test, or from a tool that
 // wants one of its helpers — does not start a benchmark run.
 if (import.meta.main) {

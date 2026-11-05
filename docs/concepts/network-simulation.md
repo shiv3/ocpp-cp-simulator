@@ -4,7 +4,7 @@ type: concept
 summary: Phase-1 in-process fault injection for WebSocket charge points — seeded latency/jitter, manual and periodic disconnects, delayed reconnect — configured at runtime (UI, RPC, MCP) as a global layer with per-CP null-tombstone overrides.
 sources:
   - src/ (network-sim rule engine; issue #242)
-  - src/cli/server/__tests__/networkSimMcp.bun.test.ts
+  - apps/cli/src/server/__tests__/networkSimMcp.bun.test.ts
 related:
   - control-plane.md
   - ../entities/mcp-endpoint.md

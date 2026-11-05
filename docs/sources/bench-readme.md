@@ -643,7 +643,7 @@ issue calls "the one that matters".
 
 **Why a socket pool, and the ceiling it imposes.** The control plane
 rate-limits each socket.io connection (`RPC_RATE_PER_SEC` / `INFLIGHT_CAP`,
-[`src/protocol/limits.ts`](../../src/protocol/limits.ts)) to protect against a
+[`packages/contracts/src/limits.ts`](../../packages/contracts/src/limits.ts)) to protect against a
 misbehaving client — which would also throttle the benchmark's own
 control-plane traffic long before the daemon's OCPP-handling capacity became
 the bottleneck. The limit is per connection, so `fleet-bench.ts` opens as many

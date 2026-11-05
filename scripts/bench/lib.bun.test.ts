@@ -5,7 +5,7 @@ import { describe, expect, it } from "bun:test";
 import { z } from "zod";
 // The real daemon-side cap the bench's literal stands in for. Imported here,
 // not in lib.ts, which stays zod-free.
-import { ARRAY_1000 } from "../../src/protocol/limits.ts";
+import { ARRAY_1000 } from "../../packages/contracts/src/limits.ts";
 import {
   benchIdPattern,
   BENCH_ID_ROOT,
@@ -1066,7 +1066,7 @@ describe("predicted charge point ids (#302)", () => {
     const early = newRunId(1_700_000_000_000, () => 0);
     const later = newRunId(1_700_000_001_000, () => 0);
     expect(later > early).toBe(true);
-    // MAX_GENERATED_CP_ID_LENGTH is 256 in src/protocol/methods.ts.
+    // MAX_GENERATED_CP_ID_LENGTH is 256 in packages/contracts/src/methods.ts.
     expect(benchCpId(newRunId(Date.now()), 999_999).length).toBeLessThan(64);
   });
 });

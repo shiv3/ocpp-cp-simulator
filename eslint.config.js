@@ -89,22 +89,22 @@ export default tseslint.config(
   },
 
   {
-    files: ["src/components/**/*.{ts,tsx}"],
+    files: ["apps/web/src/components/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": ["error", ...restrictedScenarioPersistence],
     },
   },
   {
-    files: ["src/components/scenario/scenarioPersistence.ts"],
+    files: ["apps/web/src/components/scenario/scenarioPersistence.ts"],
     rules: { "no-restricted-syntax": "off" },
   },
   {
     files: [
-      "src/components/ui/**/*.tsx",
-      "src/contexts/**/*.tsx",
-      "src/data/providers/**/*.tsx",
-      "src/components/ChargePointConfigModal.tsx",
-      "src/components/MeterValueCurveModal.tsx",
+      "apps/web/src/components/ui/**/*.tsx",
+      "apps/web/src/contexts/**/*.tsx",
+      "apps/web/src/data/providers/**/*.tsx",
+      "apps/web/src/components/ChargePointConfigModal.tsx",
+      "apps/web/src/components/MeterValueCurveModal.tsx",
     ],
     rules: { "react-refresh/only-export-components": "off" },
   },

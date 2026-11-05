@@ -1,5 +1,5 @@
-import type { ScenarioDefinition } from "../../src/cp/application/scenario/ScenarioTypes";
-import { ScenarioNodeType } from "../../src/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "../../packages/core/src/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "../../packages/core/src/cp/application/scenario/ScenarioTypes";
 
 export const HEARTBEAT_INTERVAL_VALUE = "240";
 

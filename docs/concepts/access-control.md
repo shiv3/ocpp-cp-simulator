@@ -3,7 +3,7 @@ title: Access control (bind gate, Basic Auth, CORS, reverse proxies)
 type: concept
 summary: How the daemon decides who may reach it — loopback by default, `--unsafe-remote` or web-console Basic Auth for non-loopback binds, a bind-dependent CORS policy, and the `--cors-origin` / `--trust-forwarded-headers` fixes for consoles behind a proxy.
 sources:
-  - src/cli/server/
+  - apps/cli/src/server/
   - docs/examples/compose-reverse-proxy-sso.yml
   - "issue #73"
 related:

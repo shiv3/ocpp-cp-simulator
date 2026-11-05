@@ -13,7 +13,7 @@ every page is catalogued in [`docs/index.md`](docs/index.md).
 
 | Layer       | Location                                                                                                                                                                                                                                                                                                                      | Rule                                                                                                                                                            |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raw sources | `src/`, `src-tauri/`, `e2e/`, `scripts/`, `schema/scenario.schema.json`, `vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, READMEs beside code (`e2e/README.md`, `scripts/steve-verify/README.md`, `scripts/poc/README.md`, `src/utils/scenarios/README.md`, `examples/testcontainers-java/README.md`), GitHub issues | Ground truth. Wiki work reads them and never rewrites them. Code changes go through normal engineering PRs. `vendor/ocpp-schemas/` is verbatim-only (CC BY-ND). |
+| Raw sources | `src/`, `src-tauri/`, `e2e/`, `scripts/`, `packages/core/schema/scenario.schema.json`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, READMEs beside code (`e2e/README.md`, `scripts/steve-verify/README.md`, `scripts/poc/README.md`, `packages/core/src/utils/scenarios/README.md`, `examples/testcontainers-java/README.md`), GitHub issues | Ground truth. Wiki work reads them and never rewrites them. Code changes go through normal engineering PRs. `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only (CC BY-ND). |
 | Wiki        | `docs/` — `overview.md`, `index.md`, `log.md`, `conventions.md`, `entities/`, `concepts/`, `sources/`, `analyses/`                                                                                                                                                                                                            | You own it: create, update, cross-link, keep consistent.                                                                                                        |
 | Schema      | This file                                                                                                                                                                                                                                                                                                                     | Co-evolved with the humans; update it when a workflow changes.                                                                                                  |
 
@@ -58,7 +58,7 @@ external document the maintainer hands you.
    feature typically touches 3–10 pages.
 4. If a page is new or renamed: add it to `index.md`, add `related:` links
    both ways, and ensure at least one inbound link.
-5. Keep paths in code comments / `--help` text / `schema/scenario.schema.json`
+5. Keep paths in code comments / `--help` text / `packages/core/schema/scenario.schema.json`
    that point into `docs/` working (`grep -rn "docs/" src schema docker-compose.yml Dockerfile examples`).
 6. Append a `log.md` entry: `## [YYYY-MM-DD] ingest | <title>` + pages touched.
 7. Bump `updated:` on each page you changed.
@@ -82,9 +82,9 @@ Run when asked, after a batch of ingests, or when something looks stale:
 
 - **Contradictions** between pages (defaults, versions, method lists).
 - **Stale claims** superseded by code — spot-check flag tables against
-  `src/cli/main.ts` help text, RPC tables against `src/protocol/methods.ts`,
-  MCP tools against `src/cli/server/mcp/tools.ts`, template ids against
-  `src/utils/scenarios/`, node types against `schema/scenario.schema.json`.
+  `apps/cli/src/main.ts` help text, RPC tables against `packages/contracts/src/methods.ts`,
+  MCP tools against `apps/cli/src/server/mcp/tools.ts`, template ids against
+  `packages/core/src/utils/scenarios/`, node types against `packages/core/schema/scenario.schema.json`.
 - **Broken links / anchors** — relative links must resolve; run a quick check:
 
   ````bash

@@ -64,7 +64,7 @@ docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
 
 The web console's footer label and the daemon's version (`/v1/healthz`,
 `server.info`, MCP, `scenario_report`) follow one rule
-(`src/protocol/buildVersion.ts`):
+(`packages/contracts/src/buildVersion.ts`):
 
 | Build                                                      | Reports      |
 | ---------------------------------------------------------- | ------------ |

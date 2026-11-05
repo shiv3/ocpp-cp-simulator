@@ -20,7 +20,7 @@ for where a run's result gets recorded.
 
 - [`bun`](https://bun.sh)
 - A running daemon started with `--metrics` (or `--metrics-no-auth` if you
-  don't want to pass Basic Auth to this script): `bun src/cli/main.ts
+  don't want to pass Basic Auth to this script): `bun apps/cli/src/main.ts
 --http-port 9700 --metrics`
 - A CSMS the daemon can reach — [gocpp](../../docs/entities/csms-peers.md#gocpp)
   is what this project's own e2e suite uses; any real OCPP-J CSMS works
@@ -97,7 +97,7 @@ script measures one axis per invocation:
 
 - **Idle** (`--tx-interval 0`, the default): a heartbeat is the only traffic.
   Because the simulator's heartbeat is an _idle timer_ — any outgoing CALL
-  resets it (`src/cp/application/services/HeartbeatService.ts`) — this
+  resets it (`packages/core/src/cp/application/services/HeartbeatService.ts`) — this
   isolates pure per-CP scheduling/timer overhead from OCPP call handling.
 - **Active** (`--tx-interval N`): each CP also start/stops a transaction on
   connector 1 roughly every `N` seconds, staggered so the fleet reaches
@@ -196,7 +196,7 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    at least the expected number of charge points report a state other than
    `"Unavailable"` (or the settle timeout elapses), so boot traffic doesn't
    land inside the measurement window. The gauge, not `cp.list`: `cp.list`'s
-   _result_ schema is `ARRAY_1000` (`src/protocol/methods.ts`), so past 1000
+   _result_ schema is `ARRAY_1000` (`packages/contracts/src/methods.ts`), so past 1000
    charge points the response fails validation and the RPC answers `internal`
    — which aborted the sweep at exactly the sizes this tool exists to reach.
    The gauge is one bounded number whatever the fleet size, so the documented
@@ -213,7 +213,7 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    target quantile falls in — the same approximation Prometheus's own
    `histogram_quantile()` uses. Resolution is bounded by the fixed bucket
    edges (`CALL_DURATION_BUCKETS_SECONDS` in
-   `src/cli/server/metrics/MetricsRecorder.ts`, currently up to 30s); a
+   `apps/cli/src/server/metrics/MetricsRecorder.ts`, currently up to 30s); a
    quantile inside a wide bucket is only as precise as that bucket is
    narrow. A quantile past the last finite edge is reported as `>30s`
    ("overflow"), never fabricated.
@@ -439,7 +439,7 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    again and runs no meter scheduler: `Connector.startConfiguredMeterValue`
    needs `autoConfig.enabled` or an increment fallback, `cp.create` accepts no
    field that sets either, and the daemon constructs every charge point with
-   `autoMeterValueSetting = null` (`src/cli/service.ts`). The one frame it does
+   `autoMeterValueSetting = null` (`apps/cli/src/service.ts`). The one frame it does
    still emit is at the moment the late conf lands, when
    `StartTransactionResultHandler` drives the connector to `Charging` and a
    `StatusNotification` goes out — one frame per retired charge point, against
@@ -830,12 +830,12 @@ The warmup costs `--warmup` seconds per sweep point, on top of settling and
 ### Why a socket pool
 
 The control plane rate-limits each socket.io connection
-(`RPC_RATE_PER_SEC` / `INFLIGHT_CAP` in `src/protocol/limits.ts`) — a real
+(`RPC_RATE_PER_SEC` / `INFLIGHT_CAP` in `packages/contracts/src/limits.ts`) — a real
 protection against a single misbehaving client, but it would also throttle
 _this script's own_ control-plane traffic (arming N heartbeats, cycling
 transactions) long before the daemon's OCPP-handling capacity is the
 bottleneck. The limiter is **per connection** (`SocketRpcState` in
-`src/cli/server/socketServer.ts`), so the pool's budget grows with the socket
+`apps/cli/src/server/socketServer.ts`), so the pool's budget grows with the socket
 count. `fleet-bench.ts` opens as many sockets as the run needs — one per ~200
 planned CPs **and** enough for the transaction rate — capped at 10, and paces
 each at 80 RPC/s, below the server's 100.
@@ -1031,7 +1031,7 @@ a spare machine and a CSMS.
 - **The heartbeat override covers reconnects, not a CSMS that changes the
   interval by hand.** `ChangeConfiguration HeartbeatInterval` reaches
   `ChargePoint`'s configuration listener
-  (`src/cp/domain/charge-point/ChargePoint.ts`, the `HeartbeatInterval` case)
+  (`packages/core/src/cp/domain/charge-point/ChargePoint.ts`, the `HeartbeatInterval` case)
   and calls `startHeartbeat` directly, emitting **no** `boot_notification` —
   so nothing here observes it and the override is not put back. Real CSMSes do
   send that message; the mock in the smoke test does not, so this gap is

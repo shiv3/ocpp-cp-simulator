@@ -4,11 +4,11 @@ type: concept
 summary: CLI / server-mode support for the OCPP 1.6 Security Whitepaper transport profiles 1–3 (Basic Auth with AuthorizationKey, server-cert verification, mutual TLS), the related flags, configuration keys and security messages.
 sources:
   - README.md (Security Profiles section, PR #97 / issue #94)
-  - src/cli/
-  - src/cp/domain/security/CertificateStore.ts (certificate store, issue #456)
-  - src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
-  - src/cp/infrastructure/transport/v201/certificatesV201.ts (2.x certificate handlers, issue #456)
-  - src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
+  - apps/cli/src/
+  - packages/core/src/cp/domain/security/CertificateStore.ts (certificate store, issue #456)
+  - packages/core/src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
+  - packages/core/src/cp/infrastructure/transport/v201/certificatesV201.ts (2.x certificate handlers, issue #456)
+  - packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
   - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:
   - ../entities/cli.md
@@ -202,7 +202,7 @@ signature algorithms, hidden `CpoName`) can be armed from a scenario with the
 ## Certificate store
 
 Each charge point keeps one certificate store
-(`src/cp/domain/security/CertificateStore.ts`), shared by every OCPP version.
+(`packages/core/src/cp/domain/security/CertificateStore.ts`), shared by every OCPP version.
 It holds three things:
 
 - **Trust anchors** installed by `InstallCertificate`, each with its
@@ -229,7 +229,7 @@ counts as the issuer of a chain member, so it does not block a later
 ### Certificate uses
 
 The store speaks a version-neutral set of uses. Each version maps onto it
-explicitly (`src/cp/infrastructure/transport/certificateUseMapping.ts`), and a
+explicitly (`packages/core/src/cp/infrastructure/transport/certificateUseMapping.ts`), and a
 value that a version does not define is refused, not coerced.
 
 | Domain use                    | 1.6 Security Whitepaper        | 2.0.1                         | 2.1                           |
@@ -278,7 +278,7 @@ sub-CAs as `childCertificateHashData` (M03.FR.05). It cannot be installed.
 ### OCPP 2.0.1 and 2.1 behaviour
 
 Since #456 the 2.x handlers work on the same store
-(`src/cp/infrastructure/transport/v201/certificatesV201.ts`). 2.0.1 and 2.1
+(`packages/core/src/cp/infrastructure/transport/v201/certificatesV201.ts`). 2.0.1 and 2.1
 share them; each registry builds them with its own use mapping. A value a
 version does not define (`OEMRootCertificate`, `V2G20Certificate` on 2.0.1)
 fails that version's schema validator and gets a `FormationViolation`

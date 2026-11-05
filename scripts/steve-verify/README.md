@@ -2,7 +2,7 @@
 
 Automates the SteVe (open-source OCPP 1.6 Central System) certification-scenario
 verification for this repo's 44 `cert16-*` scenario templates
-(`src/utils/scenarios/README.md`). Spins up a real local SteVe CSMS, launches
+(`packages/core/src/utils/scenarios/README.md`). Spins up a real local SteVe CSMS, launches
 the simulator against it, drives each scenario's CSMS-side operator action
 (RemoteStart, Reset, TriggerMessage, ...) over SteVe's typed REST API, and
 asserts the expected wire behavior from the simulator's own log plus SteVe's

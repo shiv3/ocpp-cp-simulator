@@ -86,7 +86,7 @@ await rpc({ method: "state.reset", params: {} });
 `state.reset` truncates every simulator-owned table (schema preserved) and
 disconnects / forgets every in-memory CP. "Every" is enforced, not
 remembered (#326): the table set is one list, `TABLES` in
-`src/cp/domain/persistence/schema.ts`, with a flag per table for the two
+`packages/core/src/cp/domain/persistence/schema.ts`, with a flag per table for the two
 cleanup paths — `state.reset` truncates every table flagged for it (all but
 `schema_meta`), and `cp.delete` removes the charge point's rows from every
 `cp_id`-keyed table (`charge_points`, `charge_point_state`, `connector_runtime`,

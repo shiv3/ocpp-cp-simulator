@@ -30,7 +30,7 @@ runs in the `pre-push` hook. Neither Vite nor Bun type-checks — both strip the
 types and run — so before this gate the code base had drifted to ~380 errors,
 several of them real bugs (#374).
 
-Test files are type-checked too. A file under `src/cli`, `src/cp` or the other
+Test files are type-checked too. A file under `apps/cli/src`, `packages/core/src/cp` or the other
 CLI `include` paths is checked by both projects, so it must compile against
 both the DOM lib and `bun-types`. `tsc -b` also requires every file a project
 imports to be in that project's `include`: a new directory imported by the
@@ -69,7 +69,7 @@ Bun-only-covered code, not a fully-representative number.
 The split above is enforced by **filename only** — `vite.config.ts` excludes
 `**/*.bun.test.ts` from Vitest, and `test:bun` passes `bun.test` to `bun test`
 as a path filter. Nothing stops a developer from typing the obvious command,
-`bun test src/cli/__tests__`, which runs _every_ file in that directory in one
+`bun test apps/cli/src/__tests__`, which runs _every_ file in that directory in one
 Bun process regardless of its name. On a clean tree that command failed
 (#339) and neither gate saw it, because neither gate runs it.
 
@@ -96,7 +96,7 @@ Three distinct defects were stacked behind it, each masked by the one before:
   red exit code is the worst of the three: CI would have failed with nothing
   in the log to point at.
 
-`bun run test:bun:cli` (`bun test src/cli/__tests__`) now runs in CI, so the
+`bun run test:bun:cli` (`bun test apps/cli/src/__tests__`) now runs in CI, so the
 overlap is checked on every pull request. The rules that follow from it, for
 anything added to that directory:
 
@@ -138,7 +138,7 @@ already covers all 7) and so would not have caught either defect.
 | [Testcontainers (Java)](../sources/testcontainers-java-readme.md)                            | no (proto)  | A CSMS project can embed the Docker image and assert a scenario verdict; the same RPC sequence is guarded in CI by `harnessScenarioVerdict.bun.test.ts` |
 | Scenario assertions ([Scenario format](../concepts/scenario-format.md#assertions--verdicts)) | at run time | Declarative pass/fail over the OCPP transcript of any scenario run, with conformance vs compatibility axes                                              |
 
-The `analyze` test matrix (`src/cli/analyze/__tests__/`) is the gate that
+The `analyze` test matrix (`apps/cli/src/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes
 ([OCPP DebugKit](../entities/ocpp-debugkit.md)).
 
@@ -150,12 +150,12 @@ spawn for about 30 releases. CI compiled the sidecar (`bun build --compile`,
 the "release smoke" step added for #281) but never ran it, so a failure that
 only exists in the compiled binary was invisible.
 
-`src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` closes that class.
+`apps/cli/src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` closes that class.
 It runs under `bun run test:bun` on every pull request, takes ~12 s
 (the compile dominates; the binary is built once in `beforeAll` and reused),
 and it:
 
-- compiles `src/cli/main.ts` the way `scripts/build-tauri-sidecar.sh` does;
+- compiles `apps/cli/src/main.ts` the way `scripts/build-tauri-sidecar.sh` does;
 - **parses the arguments out of `src-tauri/src/lib.rs`'s `DAEMON_ARGS`**
   rather than keeping its own copy, so the test cannot silently disagree with
   what Tauri spawns;

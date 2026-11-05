@@ -83,19 +83,19 @@ COPY scripts/tsconfig.json ./scripts/tsconfig.json
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY src ./src
-# src/ocpp/v{16,201,21}/schemas.ts import the vendored OCA JSON schemas
+# packages/ocpp/src/v{16,201,21}/schemas.ts import the vendored OCA JSON schemas
 # (../../../vendor/ocpp-schemas/**). Vite resolves these JSON imports at
 # build time, so the vendor tree must be present or `bun run build` fails
 # with "Could not resolve ../../../vendor/ocpp-schemas/...".
 COPY vendor ./vendor
-# src/scenario/scenarioSchemaValidator.ts imports the scenario JSON Schema
+# packages/core/src/scenario/scenarioSchemaValidator.ts imports the scenario JSON Schema
 # (../../schema/scenario.schema.json, #214) and reaches the browser bundle via
-# src/utils/scenarioFile.ts -> ScenarioLibraryPage. Vite resolves that JSON
-# import at build time, so schema/ must be present or `bun run build` fails
+# apps/web/src/utils/scenarioFile.ts -> ScenarioLibraryPage. Vite resolves that JSON
+# import at build time, so packages/core/schema/ must be present or `bun run build` fails
 # with "[UNRESOLVED_IMPORT] Could not resolve ../../schema/scenario.schema.json".
 COPY schema ./schema
 
-# VITE_HEALTH_PATH is read by src/data/healthPath.ts at build time and
+# VITE_HEALTH_PATH is read by apps/web/src/data/healthPath.ts at build time and
 # inlined into the bundle so the static UI knows which path to probe for
 # Remote-mode auto-detect (and for the Navbar's health poll).
 ENV VITE_HEALTH_PATH=$HEALTH_PATH
@@ -129,42 +129,42 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json bun.lock ./
 
 # Only the files the CLI / daemon needs at runtime.
-COPY src/cli ./src/cli
-COPY src/cp ./src/cp
-# src/ocpp holds the self-generated OCPP types/validators. src/cp's transport
+COPY apps/cli/src ./apps/cli/src
+COPY packages/core/src/cp ./packages/core/src/cp
+# packages/ocpp/src holds the self-generated OCPP types/validators. packages/core/src/cp's transport
 # layer statically imports them on the daemon boot path
 # (ChargePoint -> profile/profiles -> OCPPMessageHandlerV201 ->
 # v201/inboundRegistryV201 -> ocpp/validation/v201), so without it the daemon
 # crashes when a charge point is created with a "Cannot find module
 # ../../../../ocpp/validation/v201" resolution error.
-COPY src/ocpp ./src/ocpp
+COPY packages/ocpp/src ./packages/ocpp/src
 # The validators above import the vendored OCA JSON schemas
-# (src/ocpp/v{16,201,21}/schemas.ts -> ../../../vendor/ocpp-schemas/**); bun
+# (packages/ocpp/src/v{16,201,21}/schemas.ts -> ../../../vendor/ocpp-schemas/**); bun
 # resolves those JSON imports at runtime, so the vendor tree must ship too.
 COPY vendor ./vendor
-# src/protocol holds the socket.io control-plane zod schemas imported by the
-# daemon (src/cli/server/*). Without it the daemon crashes on boot with a
+# packages/contracts/src holds the socket.io control-plane zod schemas imported by the
+# daemon (apps/cli/src/server/*). Without it the daemon crashes on boot with a
 # "Cannot find package '../../protocol'" resolution error.
-COPY src/protocol ./src/protocol
-COPY src/data ./src/data
+COPY packages/contracts/src ./packages/contracts/src
+COPY apps/web/src/data ./apps/web/src/data
 # scenarioTemplates.ts statically imports built-in templates from
-# src/utils/scenarios/*.json (extracted in PR #54). Copying the whole utils/
+# packages/core/src/utils/scenarios/*.json (extracted in PR #54). Copying the whole utils/
 # subtree keeps those imports resolvable at runtime — copying only
 # scenarioTemplates.ts left the daemon crashing on boot with
 # "Cannot find module './scenarios/essential-cp-behavior.json'".
-COPY src/utils ./src/utils
-# src/cli/server/{socketServer,startServer,RegistryChargePointService}.ts all
+COPY apps/web/src/utils ./apps/web/src/utils
+# apps/cli/src/server/{socketServer,startServer,RegistryChargePointService}.ts all
 # statically import ../../scenario/scenarioSchemaValidator (#214), which in turn
 # imports ../../schema/scenario.schema.json. Both must ship or the daemon
 # crashes on boot with "Cannot find module '../../scenario/
-# scenarioSchemaValidator'" — the same class of miss as src/protocol and
-# src/utils above. package.json's `files` already lists them for the npm
+# scenarioSchemaValidator'" — the same class of miss as packages/contracts/src and
+# apps/web/src/utils above. package.json's `files` already lists them for the npm
 # package; this keeps the image in step.
-COPY src/scenario ./src/scenario
+COPY packages/core/src/scenario ./packages/core/src/scenario
 COPY schema ./schema
-# src/cli/analyze/runAnalyze.ts imports ../../trace/analysisDisclaimer (#188),
+# apps/cli/src/analyze/runAnalyze.ts imports ../../trace/analysisDisclaimer (#188),
 # so the `analyze` subcommand's module graph is pulled in on CLI startup.
-COPY src/trace ./src/trace
+COPY packages/trace/src ./packages/trace/src
 
 # Built-in scenario examples — kept handy under /app/docs.
 COPY docs/examples/scenarios ./docs/examples/scenarios
@@ -215,7 +215,7 @@ ARG HEALTH_PATH
 ENV HEALTH_PATH=$HEALTH_PATH
 # The daemon runs from source with no .git, so the commit must reach it as a
 # runtime env too — otherwise the UI says `<sha7>-dev` next to a daemon that
-# says `local-dev` (src/cli/appVersion.ts).
+# says `local-dev` (apps/cli/src/appVersion.ts).
 ARG APP_COMMIT
 ENV APP_COMMIT=$APP_COMMIT
 EXPOSE 9700
@@ -224,7 +224,7 @@ EXPOSE 9700
 #   1. Fix up /data ownership when a host bind-mount overlayed root:root.
 #   2. Compose --http-host 0.0.0.0 --unix-socket none --web-console
 #      $HTTP_PORT [--state-db $STATE_DB] and append any user CMD args.
-#   3. Exec bun src/cli/main.ts as the non-root `bun` user.
+#   3. Exec bun apps/cli/src/main.ts as the non-root `bun` user.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp

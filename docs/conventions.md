@@ -17,7 +17,7 @@ humans read, with the operating schema in the repository-root
 
 | Layer           | Where                                                                                                                                                                       | Who edits                                                                                             |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Raw sources** | The code (`src/`, `src-tauri/`, `e2e/`, `scripts/`), `schema/`, `vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, the READMEs that live next to code, GitHub issues | Engineers, through normal PRs. The wiki never rewrites them; `vendor/ocpp-schemas/` is verbatim-only. |
+| **Raw sources** | The code (`src/`, `src-tauri/`, `e2e/`, `scripts/`), `packages/core/schema/`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, the READMEs that live next to code, GitHub issues | Engineers, through normal PRs. The wiki never rewrites them; `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only. |
 | **Wiki**        | `docs/` — `overview.md`, `index.md`, `log.md`, this page, and `entities/`, `concepts/`, `sources/`, `analyses/`                                                             | The LLM (with human review in the PR); humans may edit too.                                           |
 | **Schema**      | `CLAUDE.md` at the repo root                                                                                                                                                | Humans and the LLM, co-evolved.                                                                       |
 
@@ -46,7 +46,7 @@ title: Human-readable title
 type: entity | concept | source | analysis | overview | conventions
 summary: One sentence that could stand alone in index.md.
 sources: # raw files, issues, or sibling pages this page was derived from
-  - src/cli/main.ts
+  - apps/cli/src/main.ts
   - "issue #188"
 related: # relative links to sibling pages, most important first
   - ../concepts/control-plane.md
@@ -83,7 +83,7 @@ issue number when a behaviour exists because of one.
 
 The code wins. When a page and the code disagree, fix the page (and record it
 in `log.md` as a `lint` entry). Paths that appear in code comments, `--help`
-text and `schema/scenario.schema.json` point into `docs/…`; keep them working
+text and `packages/core/schema/scenario.schema.json` point into `docs/…`; keep them working
 when moving pages.
 
 ## `index.md` and `log.md`

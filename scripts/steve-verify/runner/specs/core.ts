@@ -380,7 +380,7 @@ export const tc014SoftResetSpec: ScenarioSpec<void> = {
     });
     assertSent(rec, frames, "StopTransaction", "StopTransaction sent");
     // ChargePoint.applyRemoteReset() takes the Soft path via boot() (no
-    // disconnect/reconnect -- see src/cp/domain/charge-point/ChargePoint.ts),
+    // disconnect/reconnect -- see packages/core/src/cp/domain/charge-point/ChargePoint.ts),
     // which re-sends BootNotification.req on the SAME socket -- a CP CALL,
     // so it shows up as "Sent:" here, not "Received:". Anchored strictly
     // after the Reset.req line (assertLineAfter, not assertLineOrder) so

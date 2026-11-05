@@ -27,7 +27,7 @@
   // `--ocpp-version` validates against — both dependency-free constants.
   "include": [
     "**/*.ts",
-    "../../src/protocol/limits.ts",
-    "../../src/cp/domain/types/OcppVersion.ts"
+    "../../packages/contracts/src/limits.ts",
+    "../../packages/core/src/cp/domain/types/OcppVersion.ts"
   ]
 }

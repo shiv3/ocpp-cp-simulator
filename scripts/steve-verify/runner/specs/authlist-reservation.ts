@@ -92,7 +92,7 @@ export const tc0422GetLocalListVersionEmptySpec: ScenarioSpec<void> = {
   // (fresh-process in-memory list)"): version 0 holds regardless of run
   // order. sim.ts's startSim() launches a FRESH simulator container per
   // scenario, and LocalAuthListManager's list/version live only in that
-  // process's memory (src/cp/domain/auth/LocalAuthList.ts), so a prior
+  // process's memory (packages/core/src/cp/domain/auth/LocalAuthList.ts), so a prior
   // SendLocalList run against the same cpId (even earlier in the same
   // group sweep) leaves nothing behind here. Do not "fix" this by
   // resetting/isolating state -- there's no cross-run state to reset.

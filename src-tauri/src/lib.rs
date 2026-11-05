@@ -10,7 +10,7 @@
 //!      <app-data-dir>/state.db --log-format json --web-console-dist
 //!      <resource-dir>/web-console`.
 //!      In `cargo run` / `tauri dev` builds the sidecar binary may not
-//!      exist yet; fall back to `bun src/cli/main.ts` so devs can
+//!      exist yet; fall back to `bun apps/cli/src/main.ts` so devs can
 //!      iterate without re-running the build script.
 //!   3. Splash window (`splash.html`) opens immediately, asks Rust for
 //!      the daemon URL via `get_daemon_url`, polls `/v1/healthz`, then
@@ -61,7 +61,7 @@ fn state_db_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// The daemon's argument list, as a template with `{...}` placeholders.
 ///
-/// Deliberately a flat list of literals: `src/build/__tests__/
+/// Deliberately a flat list of literals: `apps/cli/src/build/__tests__/
 /// tauriSidecarWebConsole.bun.test.ts` parses it straight out of this file
 /// and runs the compiled sidecar with exactly what we spawn here. Issue
 /// #319 shipped for ~30 desktop releases because nothing ever ran the
@@ -87,7 +87,7 @@ const DAEMON_ARGS: &[&str] = &[
 /// `web_console_dist` is `None` only when no built web console could be
 /// located (dev builds before `npm run build`); the `--web-console-dist`
 /// flag and its value are then dropped and the CLI falls back to its own
-/// search, which works for the `bun src/cli/main.ts` dev path.
+/// search, which works for the `bun apps/cli/src/main.ts` dev path.
 fn daemon_args(port: u16, state_db: &str, web_console_dist: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> = Vec::with_capacity(DAEMON_ARGS.len());
     let mut i = 0;
@@ -124,7 +124,7 @@ fn daemon_args(port: u16, state_db: &str, web_console_dist: Option<&str>) -> Vec
 /// binary is the in-binary VFS root, which is what broke #319.
 ///
 /// Returns `None` when the directory has no `index.html` — a `tauri dev`
-/// build before `npm run build`, where the `bun src/cli/main.ts` path
+/// build before `npm run build`, where the `bun apps/cli/src/main.ts` path
 /// resolves `dist/` from the checkout anyway.
 fn web_console_dist(app: &AppHandle) -> Option<PathBuf> {
     let dir = app.path().resource_dir().ok()?.join("web-console");
@@ -138,7 +138,7 @@ fn web_console_dist(app: &AppHandle) -> Option<PathBuf> {
 
 /// Spawn the daemon. Production builds invoke the bundled sidecar via
 /// `tauri-plugin-shell`; dev builds (`cargo run`, `tauri dev`) drop back
-/// to `bun src/cli/main.ts` so the loop stays tight without having to
+/// to `bun apps/cli/src/main.ts` so the loop stays tight without having to
 /// re-build a 60 MB compiled binary every iteration.
 fn spawn_daemon(
     app: &AppHandle,
@@ -148,7 +148,7 @@ fn spawn_daemon(
     let dist = web_console_dist(app);
     let args = daemon_args(port, state_db, dist.as_deref().and_then(|p| p.to_str()));
 
-    // In debug builds, prefer `bun src/cli/main.ts` so contributors don't
+    // In debug builds, prefer `bun apps/cli/src/main.ts` so contributors don't
     // need a sidecar binary to iterate. The path is resolved at compile
     // time from CARGO_MANIFEST_DIR (= src-tauri/) so it works no matter
     // what cwd Tauri spawns us with. In release builds, only the sidecar
@@ -157,7 +157,7 @@ fn spawn_daemon(
     {
         let main_ts: String = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
-            .join("src/cli/main.ts")
+            .join("apps/cli/src/main.ts")
             .to_string_lossy()
             .into_owned();
         match app
@@ -169,7 +169,7 @@ fn spawn_daemon(
             Ok(handle) => return Ok(handle),
             Err(err) => {
                 eprintln!(
-                    "[tauri] `bun src/cli/main.ts` spawn failed ({err}); falling back to sidecar"
+                    "[tauri] `bun apps/cli/src/main.ts` spawn failed ({err}); falling back to sidecar"
                 );
             }
         }

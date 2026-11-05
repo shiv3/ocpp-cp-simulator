@@ -1,0 +1,454 @@
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { Logger } from "../../../shared/Logger";
+import type {
+  SoapOperation,
+  SoapParsedPayload,
+  SoapParsedValue,
+  SoapPayload,
+} from "./soapEnvelope";
+import type { SoapDialect } from "./dialect";
+import type { OCPP15SoapInboundResult } from "./OCPPSoapServer";
+import { buildV16CallHandlerRegistry } from "../handlers/buildV16CallHandlerRegistry";
+import { DataTransferHandler } from "../handlers";
+import { OCPPAction } from "../../../domain/types/OcppTypes";
+import { v16Schemas, type DataTransferRequestV16 } from "@ocpp-cp-sim/ocpp/v16/index";
+import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
+import { OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
+import {
+  normalizeHandlerResult,
+  type HandlerResult,
+} from "../network-sim/ResponseEffectQueue";
+
+/**
+ * Map operation names to their v16 schema and validator.
+ * Used by coerceSoapPayloadWithSchema to transform SOAP strings to typed values.
+ */
+function getSchemaForOperation(operation: SoapOperation): {
+  schema: Record<string, unknown> | undefined;
+  action: OCPPAction | null;
+} {
+  // Map operation names to OCPPAction and schema
+  const operationMap: Record<
+    string,
+    { action: OCPPAction; schema: Record<string, unknown> }
+  > = {
+    RemoteStartTransaction: {
+      action: OCPPAction.RemoteStartTransaction,
+      schema: v16Schemas.remoteStartTransactionRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    RemoteStopTransaction: {
+      action: OCPPAction.RemoteStopTransaction,
+      schema: v16Schemas.remoteStopTransactionRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    TriggerMessage: {
+      action: OCPPAction.TriggerMessage,
+      schema: v16Schemas.triggerMessageRequestV16 as Record<string, unknown>,
+    },
+    ChangeAvailability: {
+      action: OCPPAction.ChangeAvailability,
+      schema: v16Schemas.changeAvailabilityRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    ChangeConfiguration: {
+      action: OCPPAction.ChangeConfiguration,
+      schema: v16Schemas.changeConfigurationRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    GetConfiguration: {
+      action: OCPPAction.GetConfiguration,
+      schema: v16Schemas.getConfigurationRequestV16 as Record<string, unknown>,
+    },
+    UnlockConnector: {
+      action: OCPPAction.UnlockConnector,
+      schema: v16Schemas.unlockConnectorRequestV16 as Record<string, unknown>,
+    },
+    ReserveNow: {
+      action: OCPPAction.ReserveNow,
+      schema: v16Schemas.reserveNowRequestV16 as Record<string, unknown>,
+    },
+    CancelReservation: {
+      action: OCPPAction.CancelReservation,
+      schema: v16Schemas.cancelReservationRequestV16 as Record<string, unknown>,
+    },
+    SetChargingProfile: {
+      action: OCPPAction.SetChargingProfile,
+      schema: v16Schemas.setChargingProfileRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    ClearChargingProfile: {
+      action: OCPPAction.ClearChargingProfile,
+      schema: v16Schemas.clearChargingProfileRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    GetCompositeSchedule: {
+      action: OCPPAction.GetCompositeSchedule,
+      schema: v16Schemas.getCompositeScheduleRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    GetLocalListVersion: {
+      action: OCPPAction.GetLocalListVersion,
+      schema: v16Schemas.getLocalListVersionRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    SendLocalList: {
+      action: OCPPAction.SendLocalList,
+      schema: v16Schemas.sendLocalListRequestV16 as Record<string, unknown>,
+    },
+    GetDiagnostics: {
+      action: OCPPAction.GetDiagnostics,
+      schema: v16Schemas.getDiagnosticsRequestV16 as Record<string, unknown>,
+    },
+    UpdateFirmware: {
+      action: OCPPAction.UpdateFirmware,
+      schema: v16Schemas.updateFirmwareRequestV16 as Record<string, unknown>,
+    },
+    ClearCache: {
+      action: OCPPAction.ClearCache,
+      schema: v16Schemas.clearCacheRequestV16 as Record<string, unknown>,
+    },
+    Reset: {
+      action: OCPPAction.Reset,
+      schema: v16Schemas.resetRequestV16 as Record<string, unknown>,
+    },
+    GetInstalledCertificateIds: {
+      action: OCPPAction.GetInstalledCertificateIds,
+      schema: v16Schemas.getInstalledCertificateIdsRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    DeleteCertificate: {
+      action: OCPPAction.DeleteCertificate,
+      schema: v16Schemas.deleteCertificateRequestV16 as Record<string, unknown>,
+    },
+    GetLog: {
+      action: OCPPAction.GetLog,
+      schema: v16Schemas.getLogRequestV16 as Record<string, unknown>,
+    },
+    CertificateSigned: {
+      action: OCPPAction.CertificateSigned,
+      schema: v16Schemas.certificateSignedRequestV16 as Record<string, unknown>,
+    },
+    InstallCertificate: {
+      action: OCPPAction.InstallCertificate,
+      schema: v16Schemas.installCertificateRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    ExtendedTriggerMessage: {
+      action: OCPPAction.ExtendedTriggerMessage,
+      schema: v16Schemas.extendedTriggerMessageRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    SignedUpdateFirmware: {
+      action: OCPPAction.SignedUpdateFirmware,
+      schema: v16Schemas.signedUpdateFirmwareRequestV16 as Record<
+        string,
+        unknown
+      >,
+    },
+    DataTransfer: {
+      action: OCPPAction.DataTransfer,
+      schema: v16Schemas.dataTransferRequestV16 as Record<string, unknown>,
+    },
+  };
+
+  const entry = operationMap[operation];
+  return {
+    schema: entry?.schema,
+    action: entry?.action ?? null,
+  };
+}
+
+/** True only for plain objects — excludes null and arrays. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Coerce a single SOAP-parsed value (a string, or a fast-xml-parser
+ * object/array of them) to the type its JSON schema node declares.
+ *
+ * - integer/number: Number(string)
+ * - boolean: "true" → true
+ * - array: normalize a lone element to a 1-tuple, then coerce EACH element
+ *   through `items` (so nested numeric fields inside e.g. chargingSchedulePeriod
+ *   or localAuthorizationList are converted, not left as strings)
+ * - object: recurse ONLY for a plain record (null/arrays pass through untouched
+ *   rather than throwing or being walked as index-keyed records)
+ */
+function coerceValueWithSchema(
+  value: SoapParsedValue,
+  schema: Record<string, unknown> | undefined,
+): unknown {
+  if (!schema) return value;
+  const type = schema.type;
+
+  if (type === "integer" || type === "number") {
+    if (typeof value !== "string") return value;
+    // #285: `Number("")` is 0 and `Number("1e2")` is 100, so coercion used to
+    // manufacture a schema-valid number out of XML that does not carry one --
+    // an empty `<duration/>` became a perfectly good `0` and the request was
+    // answered. Anything outside the lexical space its type declares is
+    // handed on untouched, so the validation gate sees a string and says so.
+    const lexical =
+      type === "integer" ? /^[+-]?\d+$/ : /^[+-]?(\d+(\.\d*)?|\.\d+)$/;
+    return lexical.test(value.trim()) ? Number(value) : value;
+  }
+  if (type === "boolean") {
+    return value === "true" || value === true;
+  }
+  if (type === "array") {
+    if (value === undefined || value === null) return value;
+    const items = Array.isArray(value) ? value : [value];
+    const itemSchema = schema.items as Record<string, unknown> | undefined;
+    return items.map((item) => coerceValueWithSchema(item, itemSchema));
+  }
+  if (type === "object" && isPlainRecord(value)) {
+    return coerceSoapPayloadWithSchema(value as SoapParsedPayload, schema);
+  }
+  return value;
+}
+
+/**
+ * Coerce a SOAP-parsed payload (all strings from fast-xml-parser) to proper
+ * types according to the v16 JSON schema for the operation. Unknown keys pass
+ * through untouched. Returns the coerced object, ready for handler dispatch.
+ */
+export function coerceSoapPayloadWithSchema(
+  payload: SoapParsedPayload,
+  schema: Record<string, unknown> | undefined,
+): unknown {
+  if (!schema || !schema.properties) {
+    // No schema to coerce against; return payload as-is
+    return payload;
+  }
+
+  const properties = schema.properties as Record<string, unknown>;
+  const coerced: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    const propSchema = properties[key] as Record<string, unknown> | undefined;
+    coerced[key] = propSchema
+      ? coerceValueWithSchema(value, propSchema)
+      : value;
+  }
+
+  return coerced;
+}
+
+/**
+ * A CS→CP request that does not satisfy its operation schema (#285).
+ *
+ * Its own class so {@link OCPPSoapServer} can render it as a Fault that names
+ * the offending element, instead of the generic "Dispatch error" wrapper --
+ * which is how a missing `csChargingProfiles` used to surface as a raw
+ * JavaScript `TypeError` naming an implementation variable.
+ */
+export class SoapRequestValidationError extends Error {
+  readonly operation: string;
+  readonly issues: ReadonlyArray<string>;
+
+  constructor(operation: string, issues: ReadonlyArray<string>) {
+    super(`Invalid ${operation} request: ${issues.join("; ")}`);
+    this.name = "SoapRequestValidationError";
+    this.operation = operation;
+    this.issues = issues;
+  }
+}
+
+/**
+ * The check itself, exported because `Reset` never reaches the dispatcher:
+ * `OCPPSoapServer` answers it from a legacy registry first, for every
+ * dialect. A rule that covered every operation *except* the one that reboots
+ * the station would be the wrong one to have.
+ *
+ * A no-op unless the dialect is 1.6-S and a schema exists.
+ */
+export function assertValidInboundRequest(
+  operation: string,
+  payload: unknown,
+  schema: Record<string, unknown> | undefined,
+  dialect: SoapDialect,
+): void {
+  if (!schema || dialect.version !== OCPP_1_6_SOAP) return;
+  const issues = strictValidationErrors(schema, payload);
+  if (issues.length > 0) {
+    throw new SoapRequestValidationError(operation, issues);
+  }
+}
+
+/** The coerced payload and schema for an operation, for callers outside the
+ *  dispatcher that still need to check a request (the legacy Reset path). */
+export function coerceAndSchemaForOperation(
+  operation: SoapOperation,
+  payload: SoapParsedPayload,
+): { coerced: unknown; schema: Record<string, unknown> | undefined } {
+  const { schema } = getSchemaForOperation(operation);
+  return { coerced: coerceSoapPayloadWithSchema(payload, schema), schema };
+}
+
+/**
+ * Dispatch a SOAP CS→CP request through the shared v16 CALL-handler registry.
+ *
+ * Steps:
+ * 1. Coerce the SOAP payload to proper types using the v16 JSON schema
+ * 2. Validate the coerced payload against that schema (OCPP 1.6-S only)
+ * 3. Look up and execute the CALL handler for the operation
+ * 4. Return the response payload, and the handler's post-response effect
+ *    for the caller to run once the reply is decided (#396)
+ *
+ * DataTransfer is handled specially: dispatched to a fresh DataTransferHandler()
+ * instance since it must be instance-specific in full dispatch context.
+ */
+export async function dispatchSoapCallViaV16Registry(input: {
+  operation: SoapOperation;
+  payload: SoapParsedPayload;
+  chargePoint: ChargePoint;
+  logger: Logger;
+  dialect: SoapDialect;
+}): Promise<OCPP15SoapInboundResult> {
+  const { operation, payload, chargePoint, logger } = input;
+
+  // Get the schema and action for this operation
+  const { schema, action } = getSchemaForOperation(operation);
+  if (!action) {
+    throw new Error(
+      `No handler mapping found for operation: ${operation}; this should have been caught by the dialect filter`,
+    );
+  }
+
+  // Coerce the SOAP payload to proper types
+  const coercedPayload = coerceSoapPayloadWithSchema(payload, schema);
+
+  // #285: and then check it. Step 2 of the list above was a comment and
+  // nothing else, so a request missing a mandatory element reached the
+  // handler: six operations answered it with a plausible OCPP status --
+  // `Rejected`, `NotSupported`, even `Accepted` with a full payload -- and
+  // one crashed with a TypeError that surfaced as a Fault naming an
+  // implementation variable. The first is the dangerous one for a tool whose
+  // job is to judge a CSMS: a malformed request came back with a well-formed
+  // verdict, so the CSMS's bug was not merely undetected, it was masked.
+  //
+  // Scoped to the 1.6-S dialect deliberately. The schemas here are the
+  // vendored OCPP 1.6 ones, and 1.2/1.5 have none of their own; validating a
+  // 1.2 request against a 1.6 schema would reject requests that are correct
+  // for their own version. Coercion stays schema-guided for every dialect,
+  // because being lenient in that direction cannot reject anything.
+  assertValidInboundRequest(operation, coercedPayload, schema, input.dialect);
+
+  // Build the handler registry (stateless handlers only; DataTransfer is special)
+  const registry = buildV16CallHandlerRegistry();
+
+  // For DataTransfer, use a fresh instance since it's not in the shared registry
+  if (action === OCPPAction.DataTransfer) {
+    const dataTransferHandler = new DataTransferHandler();
+    // Same trust as the registry path below: schema-coerced for every
+    // dialect, and strictly validated against the 1.6 schema on 1.6-S.
+    const response = dataTransferHandler.handle(
+      coercedPayload as DataTransferRequestV16,
+      {
+        chargePoint,
+        logger,
+      },
+    );
+    return unwrapHandlerResult(await Promise.resolve(response));
+  }
+
+  // Look up the CALL handler
+  const handler = registry.getCallHandler(action);
+  if (!handler) {
+    throw new Error(
+      `No handler registered for action: ${action}; check if operation is in dialect's CS→CP surface`,
+    );
+  }
+
+  // Execute the handler (may return Promise)
+  const response = handler.handle(coercedPayload, {
+    chargePoint,
+    logger,
+  });
+
+  return unwrapHandlerResult(await Promise.resolve(response));
+}
+
+/**
+ * Handlers shared with the JSON transport may return a {@link HandlerOutcome}
+ * wrapping the response and a post-response side effect. SOAP has no write
+ * settlement to hang that effect on, so unwrap the payload — returning the
+ * wrapper would serialize `kind`/`afterResponseSettled` into the response
+ * body — and hand the effect back, deferred past the reply. Queuing it here
+ * would run it before the server has announced the answer (#396).
+ */
+function unwrapHandlerResult(raw: unknown): OCPP15SoapInboundResult {
+  const { payload, effect } = normalizeHandlerResult(raw as HandlerResult);
+  return {
+    payload: payload as SoapPayload,
+    ...(effect ? { afterResponse: () => queueMicrotask(effect) } : {}),
+  };
+}
+
+/**
+ * Response transformation for OCPP 1.2 (narrow enum mapping).
+ *
+ * OCPP 1.6 handlers return 1.6 response enums; some do not exist in 1.2.
+ * This function maps 1.6 responses to 1.2-valid enum values.
+ *
+ * 1.2 response enum sets (verbatim from the OCPP 1.2 ChargePointService WSDL
+ * XSD, steve-community/ocpp-jaxb chargepointservice.wsdl):
+ *
+ * - UnlockStatus: Accepted, Rejected
+ *   (1.6 Unlocked→Accepted; UnlockFailed/NotSupported→Rejected)
+ * - AvailabilityStatus: Accepted, Rejected, Scheduled — Scheduled EXISTS in
+ *   1.2, so no mapping.
+ * - ConfigurationStatus: Accepted, Rejected, NotSupported — 1.2 has NO
+ *   RebootRequired; a change that was applied but needs a reboot is still an
+ *   accepted change, so RebootRequired→Accepted.
+ * - ClearCacheStatus / ResetStatus / RemoteStartStopStatus: Accepted,
+ *   Rejected — identical to the 1.6 handler output, no mapping.
+ * - GetDiagnosticsResponse (fileName?) / UpdateFirmwareResponse (empty):
+ *   no status field, no mapping.
+ */
+export function transformResponseForOcpp12(
+  operation: SoapOperation,
+  response: SoapPayload,
+): SoapPayload {
+  // Only transform responses that carry 1.6-only enum values.
+  if (operation === "UnlockConnector") {
+    const status = (response as Record<string, unknown>).status as string;
+    if (status === "Unlocked") {
+      return { ...response, status: "Accepted" };
+    }
+    if (status === "UnlockFailed" || status === "NotSupported") {
+      return { ...response, status: "Rejected" };
+    }
+  } else if (operation === "ChangeConfiguration") {
+    const status = (response as Record<string, unknown>).status as string;
+    if (status === "RebootRequired") {
+      return { ...response, status: "Accepted" };
+    }
+  }
+  // All other operations: every 1.6 handler output token is already 1.2-valid.
+  return response;
+}

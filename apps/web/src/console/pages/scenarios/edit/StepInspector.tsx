@@ -1,0 +1,124 @@
+import React, { Suspense, lazy, useState } from "react";
+
+import {
+  TextField,
+  TextareaField,
+} from "../../../../components/scenario/forms/FormFields";
+import {
+  NODE_FORM_REGISTRY,
+  isScenarioNodeType,
+} from "../../../../components/scenario/forms/nodeFormRegistry";
+import type { NodeFormData } from "../../../../components/scenario/forms/types";
+import {
+  applyCurveConfigToMeterNode,
+  meterNodeToCurveConfig,
+} from "../../../../components/scenario/meterValueNodeConfig";
+import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type {
+  ScenarioNode,
+  ScenarioNodeData,
+} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import EmptyState from "../../../components/EmptyState";
+
+// Lazy + Suspense, matching how the v2 ReactFlow editor
+// (`apps/web/src/components/scenario/ScenarioEditor.tsx`) loads this modal — it's a
+// canvas-heavy component only needed when a MeterValue step's "Configure
+// curve" action is used.
+const MeterValueCurveModal = lazy(
+  () => import("../../../../components/MeterValueCurveModal"),
+);
+
+export interface StepInspectorProps {
+  /** The selected step node, or `null` when nothing is selected. */
+  node: ScenarioNode | null;
+  onChange: (data: ScenarioNodeData) => void;
+}
+
+/**
+ * The scenario editor's step inspector: renders the registry form
+ * for whichever step is selected (Task 7 brief — `entry.Component` reused
+ * verbatim outside ReactFlow), plus a common Label/Description section that
+ * every step type gets regardless of whether its own form surfaces those
+ * fields (several registry forms, e.g. ConfigSetForm/CancelReservationForm,
+ * currently render no fields of their own beyond `NoExtraConfigForm`).
+ */
+const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
+  const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
+
+  if (!node) {
+    return (
+      <EmptyState
+        title="Select a step"
+        hint="Pick a step to edit its configuration."
+      />
+    );
+  }
+
+  if (!isScenarioNodeType(node.type)) {
+    return (
+      <EmptyState title="Unknown step type" hint={String(node.type ?? "")} />
+    );
+  }
+
+  const entry = NODE_FORM_REGISTRY[node.type];
+  const formValue = entry.nodeDataToForm(node.data);
+  const Form = entry.Component;
+
+  const handleFormChange = (next: NodeFormData) => {
+    onChange(entry.formToNodeData(next));
+  };
+
+  const handleCurveSave = (config: AutoMeterValueConfig) => {
+    handleFormChange(applyCurveConfigToMeterNode(formValue, config));
+    setIsCurveModalOpen(false);
+  };
+
+  // Two columns once the inspector is wide enough (under the steps in the
+  // side panel), one beside the steps on the page: a container query, since
+  // the window width says nothing about where the inspector sits.
+  return (
+    <div data-testid="step-inspector" className="@container space-y-4">
+      <h2 className="text-base font-semibold text-cx-fg">{entry.title}</h2>
+
+      <div className="grid grid-cols-1 gap-3 border-b border-cx-border pb-4 @lg:grid-cols-2">
+        <TextField
+          label="Label"
+          value={(formValue.label as string | undefined) ?? ""}
+          onChange={(label) => handleFormChange({ ...formValue, label })}
+        />
+        <TextareaField
+          label="Description"
+          value={(formValue.description as string | undefined) ?? ""}
+          onChange={(description) =>
+            handleFormChange({ ...formValue, description })
+          }
+          rows={2}
+        />
+      </div>
+
+      {/* The registry forms stack their fields in one `space-y-3` div: lay
+          that div out as the same grid, a textarea (JSON, payloads) across
+          both columns. */}
+      <div className="@lg:[&>div]:grid @lg:[&>div]:grid-cols-2 @lg:[&>div]:gap-3 @lg:[&>div>*]:my-0 @lg:[&>div>*:has(textarea)]:col-span-2">
+        <Form
+          value={formValue}
+          onChange={handleFormChange}
+          onOpenMeterCurve={() => setIsCurveModalOpen(true)}
+        />
+      </div>
+
+      {isCurveModalOpen && (
+        <Suspense fallback={null}>
+          <MeterValueCurveModal
+            isOpen={isCurveModalOpen}
+            onClose={() => setIsCurveModalOpen(false)}
+            initialConfig={meterNodeToCurveConfig(formValue)}
+            onSave={handleCurveSave}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+};
+
+export default StepInspector;

@@ -3,13 +3,13 @@ title: Vehicle profiles
 type: concept
 summary: Reusable, locally saved vehicle descriptions (specs, DC curve, local edits, provenance) imported from Open EV Directory and copied into EV settings when applied — the model, its resolution to EVSettings, refresh, storage and open points.
 sources:
-  - src/cp/domain/vehicle/VehicleProfile.ts
-  - src/cp/domain/vehicle/importProfile.ts
-  - src/cp/domain/vehicle/VehicleCatalog.ts
-  - src/cp/domain/persistence/VehicleProfileRepository.ts
-  - src/protocol/vehicle.ts
-  - src/protocol/vehicleProfile.ts
-  - src/components/vehicle/vehicleChoice.ts
+  - packages/core/src/cp/domain/vehicle/VehicleProfile.ts
+  - packages/core/src/cp/domain/vehicle/importProfile.ts
+  - packages/core/src/cp/domain/vehicle/VehicleCatalog.ts
+  - packages/core/src/cp/domain/persistence/VehicleProfileRepository.ts
+  - packages/contracts/src/vehicle.ts
+  - packages/contracts/src/vehicleProfile.ts
+  - apps/web/src/components/vehicle/vehicleChoice.ts
   - "issue #458"
   - "issue #327"
   - "issue #311"
@@ -36,15 +36,15 @@ settings or a scenario take a **copy** of it as
 [EV settings](scenario-format.md#charging-curve-v12) when you pick it. Profiles
 are imported from [Open EV Directory](../entities/open-ev-directory.md), then
 edited locally. The domain lives in
-[`src/cp/domain/vehicle/`](../../src/cp/domain/vehicle/); the RPC methods are
+[`packages/core/src/cp/domain/vehicle/`](../../packages/core/src/cp/domain/vehicle/); the RPC methods are
 in [Control plane → Vehicle profiles and catalog](control-plane.md#vehicle-profiles-and-catalog).
 
 ## The model
 
-[`VehicleProfile.ts`](../../src/cp/domain/vehicle/VehicleProfile.ts)
+[`VehicleProfile.ts`](../../packages/core/src/cp/domain/vehicle/VehicleProfile.ts)
 (the data types are defined in
-[`src/protocol/vehicleProfile.ts`](../../src/protocol/vehicleProfile.ts) and
-re-exported there, so the wire schema needs nothing from `src/cp`):
+[`packages/contracts/src/vehicleProfile.ts`](../../packages/contracts/src/vehicleProfile.ts) and
+re-exported there, so the wire schema needs nothing from `packages/core/src/cp`):
 
 | Field                    | Meaning                                                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -96,7 +96,7 @@ filled by an assumption: `phases: 1`, and a warning says so.
 
 A successful resolution returns warnings, which the console shows under the
 select (`describeWarning` in
-[`vehicleChoice.ts`](../../src/components/vehicle/vehicleChoice.ts)):
+[`vehicleChoice.ts`](../../apps/web/src/components/vehicle/vehicleChoice.ts)):
 
 | Warning                       | When                                        | Effect                                                      |
 | ----------------------------- | ------------------------------------------- | ----------------------------------------------------------- |
@@ -134,7 +134,7 @@ sets its battery, power, curve, current type, phases and attribution. A
 **preset** is a whole vehicle too: its name, battery and power, a flat curve
 and no third-party data. The fields a preset lacks — the curve, the current
 type, the phases and the attribution — are handled per form
-([`vehicleChoice.ts`](../../src/components/vehicle/vehicleChoice.ts)):
+([`vehicleChoice.ts`](../../apps/web/src/components/vehicle/vehicleChoice.ts)):
 
 | Form                                  | A preset picked over a profile's vehicle                                                                                                                                                                                      |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -159,7 +159,7 @@ change what was applied before; pick it again to take the new values.
 ## Import
 
 `profileFromCatalog(variant, selection)` in
-[`importProfile.ts`](../../src/cp/domain/vehicle/importProfile.ts) builds a
+[`importProfile.ts`](../../packages/core/src/cp/domain/vehicle/importProfile.ts) builds a
 profile from a catalog variant and two **explicit** choices: the source record
 whose specs to keep and the curve to import, or no curve. The catalog keeps
 sources side by side and never consolidates them, and the simulator never
@@ -199,7 +199,7 @@ Profiles are stored in the `vehicle_profiles` table (schema version 15,
 `--state-db` in Remote mode, in the browser's sql.js database in Local mode.
 Without `--state-db` the daemon keeps them in memory for the life of the
 process. Each row is validated by `vehicleProfileSchema`
-([`src/protocol/vehicle.ts`](../../src/protocol/vehicle.ts)) on save and on
+([`packages/contracts/src/vehicle.ts`](../../packages/contracts/src/vehicle.ts)) on save and on
 read; a stored row that no longer matches is skipped rather than hiding every
 other profile. A curve holds at most 512 points, and each store (the daemon's
 and the browser's) holds at most 1,000 profiles: a new one past the cap is
@@ -229,7 +229,7 @@ Imported specs and curves come from third-party datasets under their own
 terms, which Open EV Directory states per record: EVDB (Gaia) under
 **CC BY-SA 4.0** and Open EV Data (KilowattApp) under the **MIT License with
 Attribution Requirement** (see the
-[fixture LICENSE](../../src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md)).
+[fixture LICENSE](../../packages/core/src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md)).
 A profile keeps each license with its attribution text in `origin.licenses`
 (the specs' source and, when different, the curve's), and the console shows
 it under **Attribution** on each profile and before the import is saved.

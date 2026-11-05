@@ -3,8 +3,8 @@ title: Daemon (server mode)
 type: entity
 summary: The long-lived Bun process that hosts many charge points and exposes one Socket.IO control plane, health, optional web-console assets, SOAP callbacks, and the MCP endpoint over a single HTTP port.
 sources:
-  - src/cli/server/
-  - src/cli/main.ts
+  - apps/cli/src/server/
+  - apps/cli/src/main.ts
   - scripts/bench/README.md
 related:
   - cli.md
@@ -40,7 +40,7 @@ HTTP is only the carrier:
   removed (see [REST → Socket.IO migration](../analyses/rest-to-socketio-migration.md)).
 
 > All examples below use the installed `ocpp-cp-sim` command. From a source
-> checkout (no install), `bun src/cli/main.ts …` is interchangeable everywhere.
+> checkout (no install), `bun apps/cli/src/main.ts …` is interchangeable everywhere.
 
 ## Starting the Server
 
@@ -139,7 +139,7 @@ is stamped through `APP_COMMIT` (the GHCR branch images, see
 [Docker image](docker-image.md#version-reported-by-a-build)) and `local-dev`
 when nothing is — never a bare `0.0.0` that could be mistaken for a release.
 The same value appears as `scenario_report.simulatorVersion` and MCP
-`serverInfo.version`; the rule lives in `src/protocol/buildVersion.ts`, shared
+`serverInfo.version`; the rule lives in `packages/contracts/src/buildVersion.ts`, shared
 with the web console's label.
 
 The path is configurable via `--health-path <path>` (default `/v1/healthz`).
@@ -212,7 +212,7 @@ CALLERROR arrives, so a CSMS that never answers contributes **no observation at
 all** — a saturated CSMS would otherwise report zero slow calls and zero
 errors, the opposite of the truth. Exactly one thing increments it: the
 **OCPP-1.6J per-CALL watchdog** (`SERIAL_CALL_TIMEOUT_MS`, 30s, in
-`src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
+`packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
 the log line it writes. It is therefore a protocol fact — the transport
 abandoned this CALL — and **never** a fact about the daemon's own bookkeeping.
 

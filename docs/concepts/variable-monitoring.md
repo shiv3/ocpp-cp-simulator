@@ -3,21 +3,21 @@ title: OCPP 2.x variable monitoring
 type: concept
 summary: How a 2.0.1 / 2.1 station stores custom variable monitors (SetVariableMonitoring, ClearVariableMonitoring) next to its own hardwired and preconfigured ones, reports them (GetMonitoringReport → NotifyMonitoringReport, in parts), evaluates them into NotifyEvent (thresholds, Delta, Periodic, 2.1 TargetDelta) filtered by the monitoring level, queues them offline per OfflineQueuingSeverity, applies SetMonitoringBase, publishes the MonitoringCtrlr variables and the runtime values (EVSE.Power, AvailabilityState) and persists it all, with the statuses and their N-use-case requirement ids.
 sources:
-  - src/cp/domain/monitoring/
-  - src/cp/domain/monitoring/PeriodicMonitorScheduler.ts
-  - src/cp/domain/charge-point/runtimeValueKeys.ts
-  - src/cp/domain/charge-point/DeviceModelTargets.ts
-  - src/cp/infrastructure/transport/v201/variableMonitoringV201.ts
-  - src/cp/infrastructure/transport/v201/getVariablesV201.ts
-  - src/cp/infrastructure/transport/v201/setVariablesV201.ts
-  - src/cp/infrastructure/transport/v201/notifyEventV201.ts
-  - src/cp/infrastructure/transport/v201/reportParts.ts
-  - src/cp/domain/monitoring/monitorCatalog.ts
-  - src/cp/domain/monitoring/monitoringCtrlrKeys.ts
-  - src/cp/domain/persistence/schema.ts
-  - src/cp/infrastructure/transport/v201/deviceModelMap.ts
-  - src/cp/infrastructure/transport/v201/baseReportV201.ts
-  - src/cp/infrastructure/transport/v21/inboundRegistryV21.ts
+  - packages/core/src/cp/domain/monitoring/
+  - packages/core/src/cp/domain/monitoring/PeriodicMonitorScheduler.ts
+  - packages/core/src/cp/domain/charge-point/runtimeValueKeys.ts
+  - packages/core/src/cp/domain/charge-point/DeviceModelTargets.ts
+  - packages/core/src/cp/infrastructure/transport/v201/variableMonitoringV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/getVariablesV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/setVariablesV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/notifyEventV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/reportParts.ts
+  - packages/core/src/cp/domain/monitoring/monitorCatalog.ts
+  - packages/core/src/cp/domain/monitoring/monitoringCtrlrKeys.ts
+  - packages/core/src/cp/domain/persistence/schema.ts
+  - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
+  - packages/core/src/cp/infrastructure/transport/v201/baseReportV201.ts
+  - packages/core/src/cp/infrastructure/transport/v21/inboundRegistryV21.ts
   - "issue #457"
   - "issue #538"
   - OCPP 2.0.1 Part 2 §N02–N08, §2.11; OCPP 2.1 Part 2 §N02–N08, §2.13
@@ -48,7 +48,7 @@ version surface.
 
 A monitor targets a component/variable pair resolved through the same map as
 `GetVariables` / `SetVariables`
-([`deviceModelMap.ts`](../../src/cp/infrastructure/transport/v201/deviceModelMap.ts)):
+([`deviceModelMap.ts`](../../packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts)):
 each 2.x variable there is backed by a configuration key, a 1.6 key or a
 read-only value the 2.x station defines at runtime (the `MonitoringCtrlr`
 variables and the [runtime values](#runtime-values) below). An unknown
@@ -398,7 +398,7 @@ and one `eventData` per monitor, by increasing monitor id:
 
 Next to the custom monitors, a 2.x station ships **hardwired** and
 **preconfigured** monitors (#538), from the static catalog in
-[`monitorCatalog.ts`](../../src/cp/domain/monitoring/monitorCatalog.ts).
+[`monitorCatalog.ts`](../../packages/core/src/cp/domain/monitoring/monitorCatalog.ts).
 N03 leaves their content to the manufacturer; these three watch the
 read-only `MonitoringCtrlr` limits, which never change, so they appear in
 reports and obey the rules below without ever sending a `NotifyEvent` of
@@ -482,7 +482,7 @@ FR.09; N07.FR.07). No configuration variable sizes these parts: the
 `ItemsPerMessage` / `BytesPerMessage` instances above bound the CSMS's
 requests, not the station's reports. The station puts at most 100 items
 (monitor groups, eventData) in a part
-([`reportParts.ts`](../../src/cp/infrastructure/transport/v201/reportParts.ts)),
+([`reportParts.ts`](../../packages/core/src/cp/infrastructure/transport/v201/reportParts.ts)),
 which keeps every report it realistically builds in one part (`seqNo` 0,
 `tbc` false); a longer one is split, the parts sent in order.
 

@@ -55,7 +55,7 @@ ON DUPLICATE KEY UPDATE registration_status = 'Accepted';
 #    INSERT -- see lib.sh's steve_api_ensure_tag().
 # ---------------------------------------------------------------------------
 
-log_info "collecting tagId/idTag values referenced by src/utils/scenarios/cert16-*.json"
+log_info "collecting tagId/idTag values referenced by packages/core/src/utils/scenarios/cert16-*.json"
 mapfile -t scenario_tags < <(
   grep -ohE '"(tagId|idTag)"[[:space:]]*:[[:space:]]*"[^"]+"' "$SCENARIOS_DIR"/cert16-*.json |
     sed -E 's/.*"(tagId|idTag)"[[:space:]]*:[[:space:]]*"([^"]+)".*/\2/' |

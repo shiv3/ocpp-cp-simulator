@@ -3,21 +3,21 @@ title: Scenario file format (v1.4)
 type: concept
 summary: The node-graph JSON format for scripted charge-point behavior — 24 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
-  - schema/scenario.schema.json
-  - src/cp/application/scenario/ScenarioTypes.ts
-  - src/cp/application/scenario/WaitControl.ts
-  - src/cp/application/verification/ScenarioAssertions.ts
-  - src/scenario/scenarioSchemaValidator.ts
-  - src/scenario/deepPartialMatch.ts
-  - src/cp/domain/connector/ChargingCurve.ts
-  - src/cp/domain/connector/MeterValueBuilder.ts
-  - src/cp/domain/connector/Connector.ts
-  - src/cp/domain/connector/ChargingScheduleResolver.ts
-  - src/cp/domain/connector/MeterValueScheduler.ts
-  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
-  - src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
+  - packages/core/schema/scenario.schema.json
+  - packages/core/src/cp/application/scenario/ScenarioTypes.ts
+  - packages/core/src/cp/application/scenario/WaitControl.ts
+  - packages/core/src/cp/application/verification/ScenarioAssertions.ts
+  - packages/core/src/scenario/scenarioSchemaValidator.ts
+  - packages/core/src/scenario/deepPartialMatch.ts
+  - packages/core/src/cp/domain/connector/ChargingCurve.ts
+  - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
+  - packages/core/src/cp/domain/connector/Connector.ts
+  - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
+  - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
+  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
+  - packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
   - "issues #214, #240, #247, #239, #301, #332"
-  - src/console/lib/scenarioLibrary.ts
+  - apps/web/src/console/lib/scenarioLibrary.ts
 related:
   - ../sources/scenario-json-schema.md
   - ../entities/scenario-templates.md
@@ -40,7 +40,7 @@ This is the format the browser [Scenario Editor](../entities/web-console.md) exp
 — see [issue #214](https://github.com/shiv3/ocpp-cp-simulator/issues/214).
 
 A published **JSON Schema** (Draft 2020-12) lives at
-[`schema/scenario.schema.json`](../../schema/scenario.schema.json) and is the
+[`packages/core/schema/scenario.schema.json`](../../packages/core/schema/scenario.schema.json) and is the
 source of truth for field names, types, and the closed vocabularies (node
 `type`, `OCPPStatus`, etc.). This document is a human-readable overview of
 that schema, not a replacement for it.
@@ -191,7 +191,7 @@ station the 1.6 name is translated (`RemoteStartTransaction` answers a
 (#349). Which `status` values are valid depends on `action` (e.g. `action:
 "RemoteStartTransaction"` only accepts `status: "Accepted" | "Rejected"`; see
 `RESPONSE_OVERRIDE_STATUSES` in
-[`ScenarioTypes.ts`](../../src/cp/application/scenario/ScenarioTypes.ts)). The
+[`ScenarioTypes.ts`](../../packages/core/src/cp/application/scenario/ScenarioTypes.ts)). The
 schema types both fields as plain strings and does **not** enforce this
 action → status constraint — encoding the full per-action status matrix
 into JSON Schema would make the schema harder to read for little benefit
@@ -227,7 +227,7 @@ conformance.
 
 **Issue #240**: `csmsCallTrigger` accepts an optional `payload` object — a
 deep-partial subset the incoming CALL's payload must match (see
-`src/scenario/deepPartialMatch.ts`) for the wait to release. Only nested keys
+`packages/core/src/scenario/deepPartialMatch.ts`) for the wait to release. Only nested keys
 present in `payload` are checked; extra keys on the actual CALL are ignored.
 A CALL of the awaited `action` whose payload does **not** match keeps the
 wait parked — the non-matching frame is not consumed, so a later matching
@@ -355,7 +355,7 @@ allows but does not require.
 An optional array of declarative pass/fail checks evaluated against the
 run's captured OCPP transcript once a scenario finishes (see
 `evaluateAssertions` in
-[`ScenarioAssertions.ts`](../../src/cp/application/verification/ScenarioAssertions.ts)).
+[`ScenarioAssertions.ts`](../../packages/core/src/cp/application/verification/ScenarioAssertions.ts)).
 Each entry has `id` and `type` (one of `ocpp_sent`, `ocpp_received`,
 `ocpp_absent`, `response_status`, `idtag_info_status`, `payload_match`,
 `message_order`, `message_after`, `state_transition`, `no_unexpected`), plus
@@ -395,7 +395,7 @@ The bundled `cert16-octt-strictness-probe` [template](../entities/scenario-templ
 ## Validating a scenario file
 
 ```ts
-import { validateScenarioSchema } from "../../src/scenario/scenarioSchemaValidator";
+import { validateScenarioSchema } from "../../packages/core/src/scenario/scenarioSchemaValidator";
 
 const result = validateScenarioSchema(JSON.parse(fileContents));
 if (!result.valid) {
@@ -520,7 +520,7 @@ not an array, or whose entries are not objects with numeric `socPercent` and
 `powerFraction`, is dropped exactly like a point that fails the range checks;
 the result is an empty curve, which is flat acceptance at
 `maxChargingPowerKw` — the same as no curve at all. That disposition matters
-because such a value really does arrive: `src/protocol/methods.ts` types
+because such a value really does arrive: `packages/contracts/src/methods.ts` types
 `evSettings` as an opaque object and validates none of its fields, so
 `set_ev_settings` accepts anything, and schema validation of a scenario file
 is [advisory](#status--scope) — the file loads past the warning. The guard
@@ -645,7 +645,7 @@ rounding the derivation to match would divide by zero.
 
 **`powerFactor: 0` is out of range, and the substitution for it is visible.**
 cos φ = 0 means no real power flows, so `I = P / (V × phases × cos φ)` has no
-finite answer. `schema/scenario.schema.json` gives `powerFactor` an
+finite answer. `packages/core/schema/scenario.schema.json` gives `powerFactor` an
 `exclusiveMinimum` of 0, so every load path warns about a 0 — schema
 validation here is [advisory](#status--scope), so the file still loads — and
 neither browser panel can produce one: both clamp to `0.01`, the smallest
@@ -695,7 +695,7 @@ drove `Energy.Active.Import.Register` backwards, below `meterStart`, and a
 clamp lives inside the branch that applies a charging-profile cap, so it ran
 only while a profile was in force — the _unusual_ case. The rule is therefore
 stated where both runtimes can see it: `curvePoint.value` carries
-`minimum: 0` in [`schema/scenario.schema.json`](../../schema/scenario.schema.json),
+`minimum: 0` in [`packages/core/schema/scenario.schema.json`](../../packages/core/schema/scenario.schema.json),
 and the ordering rule — which JSON Schema cannot express — is checked
 alongside it by `validateScenarioSchema`.
 
@@ -792,7 +792,7 @@ delivered 5 kWh, not the 10 that baselining at the earliest point would claim.
 The [k6 export](../entities/cli.md#what-the-exported-runtime-models) baselines
 identically, and since #329 draws the same shape _between_ the points too: both
 runtimes evaluate one module,
-[`src/cli/exportK6/runtime/curve.ts`](../../src/cli/exportK6/runtime/curve.ts),
+[`packages/k6-runtime/src/curve.ts`](../../packages/k6-runtime/src/curve.ts),
 which the export bundle copies verbatim. The export previously interpolated
 piecewise-linearly, so a regenerated bundle **can** send different MeterValues
 for a curve with three or more control points — it does unless the Bezier and

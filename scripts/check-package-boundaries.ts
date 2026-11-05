@@ -59,135 +59,135 @@ export interface MapEntry {
  * top-level directory has to be placed here on purpose.
  *
  * Test files belong to the package of the directory they sit in: there are no
- * separate test entries except where a directory mixes owners (src/test).
+ * separate test entries except where a directory mixes owners (packages/core/src/test).
  */
 export const PACKAGE_MAP: readonly MapEntry[] = [
   // --- k6-runtime: dependency-free files copied verbatim into an export.
-  // Must precede the apps/cli entry for src/cli/. runtimeManifest.test.ts
+  // Must precede the apps/cli entry for apps/cli/src/. runtimeManifest.test.ts
   // already enforces that these files import nothing outside themselves.
   {
-    match: "src/cli/exportK6/k6-types.d.ts",
+    match: "packages/k6-runtime/k6-types.d.ts",
     pkg: "k6-runtime",
     why: "ambient k6/* module declarations the runtime is type-checked against; it sits outside runtime/ because that directory is emitted verbatim",
   },
-  { match: "src/cli/exportK6/runtime/", pkg: "k6-runtime" },
+  { match: "packages/k6-runtime/src/", pkg: "k6-runtime" },
 
   // --- apps/cli: the CLI, the daemon, the MCP endpoint, export-k6, analyze.
-  { match: "src/cli/", pkg: "apps/cli" },
+  { match: "apps/cli/src/", pkg: "apps/cli" },
 
   // --- ocpp: generated message types, validators and the vendored schemas.
-  { match: "src/ocpp/", pkg: "ocpp" },
-  { match: "vendor/ocpp-schemas/", pkg: "ocpp" },
+  { match: "packages/ocpp/src/", pkg: "ocpp" },
+  { match: "packages/ocpp/vendor/ocpp-schemas/", pkg: "ocpp" },
 
   // --- contracts: the wire/RPC vocabulary shared by daemon and clients.
-  // src/protocol/buildVersion.ts is also used by src/cli, src/components and
-  // src/lib; it stays here for now.
-  { match: "src/protocol/", pkg: "contracts" },
+  // packages/contracts/src/buildVersion.ts is also used by apps/cli/src, apps/web/src/components and
+  // apps/web/src/lib; it stays here for now.
+  { match: "packages/contracts/src/", pkg: "contracts" },
 
   // --- trace: the trace format reader/writer.
-  { match: "src/trace/", pkg: "trace" },
+  { match: "packages/trace/src/", pkg: "trace" },
 
   // --- core: the charge point engine, the scenario engine and what they need.
-  { match: "src/cp/", pkg: "core" },
-  { match: "src/scenario/", pkg: "core" },
+  { match: "packages/core/src/cp/", pkg: "core" },
+  { match: "packages/core/src/scenario/", pkg: "core" },
   {
-    match: "schema/",
+    match: "packages/core/schema/",
     pkg: "core",
-    why: "scenario.schema.json, validated by src/scenario",
+    why: "scenario.schema.json, validated by packages/core/src/scenario",
   },
-  // src/utils is a grab bag; each file goes where its importers are.
-  // Scenario templates are imported by src/cp tests, src/data/local, src/cli
-  // and the console, and import only src/cp: they are core data. Their JSON
+  // apps/web/src/utils is a grab bag; each file goes where its importers are.
+  // Scenario templates are imported by packages/core/src/cp tests, apps/web/src/data/local, apps/cli/src
+  // and the console, and import only packages/core/src/cp: they are core data. Their JSON
   // files and the blueprint helpers travel with them.
-  { match: "src/utils/scenarioTemplates.ts", pkg: "core" },
-  { match: "src/utils/scenarioTemplates.test.ts", pkg: "core" },
+  { match: "packages/core/src/utils/scenarioTemplates.ts", pkg: "core" },
+  { match: "packages/core/src/utils/scenarioTemplates.test.ts", pkg: "core" },
   {
-    match: "src/utils/scenarios/",
+    match: "packages/core/src/utils/scenarios/",
     pkg: "core",
     why: "template JSON imported by scenarioTemplates.ts",
   },
   {
-    match: "src/utils/blueprints/",
+    match: "packages/core/src/utils/blueprints/",
     pkg: "core",
     why: "also listed in tsconfig.cli.json",
   },
-  // src/types holds one ambient .d.ts that gives the CLI project the WebCrypto
-  // dictionary types src/cp/domain/security refers to.
+  // packages/core/src/types holds one ambient .d.ts that gives the CLI project the WebCrypto
+  // dictionary types packages/core/src/cp/domain/security refers to.
   {
-    match: "src/types/",
+    match: "packages/core/src/types/",
     pkg: "core",
-    why: "ambient WebCrypto types for src/cp/domain/security",
+    why: "ambient WebCrypto types for packages/core/src/cp/domain/security",
   },
 
   // --- client: how a UI or tool talks to a daemon or to an in-process engine.
-  { match: "src/data/interfaces/", pkg: "client" },
-  { match: "src/data/remote/", pkg: "client" },
-  { match: "src/data/configPort.ts", pkg: "client" },
-  { match: "src/data/RuntimeMode.ts", pkg: "client" },
+  { match: "packages/client/src/interfaces/", pkg: "client" },
+  { match: "packages/client/src/remote/", pkg: "client" },
+  { match: "packages/client/src/configPort.ts", pkg: "client" },
+  { match: "packages/client/src/RuntimeMode.ts", pkg: "client" },
   {
-    match: "src/data/sqlite/SqliteConnectorSettingsRepository.ts",
+    match: "packages/client/src/sqlite/SqliteConnectorSettingsRepository.ts",
     pkg: "client",
     why: "listed in tsconfig.cli.json; the CLI persists connector settings with it",
   },
 
-  // --- src/test: shared test helpers. They are split by file because the
-  // directory mixes owners. The ones that import only src/cp (or nothing) and
+  // --- packages/core/src/test: shared test helpers. They are split by file because the
+  // directory mixes owners. The ones that import only packages/core/src/cp (or nothing) and
   // are used by cp, cli and web tests alike live in core, the only package all
   // of those users may depend on. All four are also in tsconfig.cli.json.
   {
-    match: "src/test/setup.dom.ts",
+    match: "apps/web/src/test/setup.dom.ts",
     pkg: "apps/web",
     why: "vitest setupFiles: jsdom / testing-library only",
   },
   {
-    match: "src/test/domSmoke.dom.test.tsx",
+    match: "apps/web/src/test/domSmoke.dom.test.tsx",
     pkg: "apps/web",
     why: "renders React under jsdom to prove setup.dom.ts works",
   },
   {
-    match: "src/test/",
+    match: "packages/core/src/test/",
     pkg: "core",
-    why: "bunServe, deferred and the fixtures import only src/cp (or nothing); used by core, cli and web tests",
+    why: "bunServe, deferred and the fixtures import only packages/core/src/cp (or nothing); used by core, cli and web tests",
   },
 
-  // --- src/build: tests that build the shipped artifacts. Per file.
+  // --- apps/cli/src/build: tests that build the shipped artifacts. Per file.
   {
-    match: "src/build/__tests__/browserBundleNoDaemonXml.bun.test.ts",
+    match: "apps/web/src/build/__tests__/browserBundleNoDaemonXml.bun.test.ts",
     pkg: "apps/web",
     why: "builds the web console",
   },
   {
-    match: "src/build/",
+    match: "apps/cli/src/build/",
     pkg: "apps/cli",
     why: "builds and boots the CLI bundle / Tauri sidecar",
   },
 
   // --- apps/web: the browser console and everything only it uses.
-  // src/lib: shadcn cn(), connector formatting, build label, log download —
-  // imported only by src/components and src/console.
-  { match: "src/lib/", pkg: "apps/web" },
-  // src/utils leftovers: ocppUrl*, downloadJson, scenarioFile (File/Blob and
-  // download helpers) are imported only by src/components and src/console.
-  { match: "src/utils/", pkg: "apps/web" },
-  { match: "src/components/", pkg: "apps/web" },
-  { match: "src/console/", pkg: "apps/web" },
-  { match: "src/contexts/", pkg: "apps/web" },
+  // apps/web/src/lib: shadcn cn(), connector formatting, build label, log download —
+  // imported only by apps/web/src/components and apps/web/src/console.
+  { match: "apps/web/src/lib/", pkg: "apps/web" },
+  // apps/web/src/utils leftovers: ocppUrl*, downloadJson, scenarioFile (File/Blob and
+  // download helpers) are imported only by apps/web/src/components and apps/web/src/console.
+  { match: "apps/web/src/utils/", pkg: "apps/web" },
+  { match: "apps/web/src/components/", pkg: "apps/web" },
+  { match: "apps/web/src/console/", pkg: "apps/web" },
+  { match: "apps/web/src/contexts/", pkg: "apps/web" },
   {
-    match: "src/store/",
+    match: "apps/web/src/store/",
     pkg: "apps/web",
     why: "jotai-style UI state; the CLI must not read it",
   },
   {
-    match: "src/data/",
+    match: "apps/web/src/data/",
     pkg: "apps/web",
     why: "hooks, providers, the in-process service and sql.js persistence",
   },
-  { match: "src/assets/", pkg: "apps/web" },
-  { match: "src/index.css", pkg: "apps/web" },
-  { match: "src/App.tsx", pkg: "apps/web" },
-  { match: "src/AppRoutes.dom.test.tsx", pkg: "apps/web" },
-  { match: "src/main.tsx", pkg: "apps/web" },
-  { match: "src/vite-env.d.ts", pkg: "apps/web" },
+  { match: "apps/web/src/assets/", pkg: "apps/web" },
+  { match: "apps/web/src/index.css", pkg: "apps/web" },
+  { match: "apps/web/src/App.tsx", pkg: "apps/web" },
+  { match: "apps/web/src/AppRoutes.dom.test.tsx", pkg: "apps/web" },
+  { match: "apps/web/src/main.tsx", pkg: "apps/web" },
+  { match: "apps/web/src/vite-env.d.ts", pkg: "apps/web" },
 ];
 
 /** Repo-internal dependencies each package may have (besides itself). */
@@ -290,7 +290,7 @@ export const SPECIFIER_ALLOW_LIST: Readonly<
     { readonly specifiers: readonly string[]; readonly why: string }
   >
 > = {
-  "src/cp/domain/persistence/BunSqliteDatabase.ts": {
+  "packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts": {
     specifiers: ["bun:sqlite", "node:path", "node:fs"],
     why: "The Bun-only Database implementation behind the daemon's state file. Never reached from the browser bundle (browserBundleNoDaemonXml.bun.test.ts guards that); the web console uses SqlJsDatabase instead.",
   },
@@ -321,8 +321,8 @@ export const KNOWN_VIOLATIONS: readonly KnownViolation[] = [];
  */
 export const TEST_ALLOW_LIST: readonly KnownViolation[] = [
   {
-    from: "src/cp/infrastructure/transport/__tests__/OCPPMessageHandler.settlement.test.ts",
-    to: "src/cli/server/metrics/MetricsRecorder.ts",
+    from: "packages/core/src/cp/infrastructure/transport/__tests__/OCPPMessageHandler.settlement.test.ts",
+    to: "apps/cli/src/server/metrics/MetricsRecorder.ts",
     why: "One case (#302) pins the exact watchdog log line the daemon's Prometheus recorder parses: it drives the real transport watchdog with this file's fake socket and asserts the recorder's counter moves. The wording is the contract between the two packages, so the test needs both sides; moving it would mean copying the whole fake socket into apps/cli.",
   },
 ];
@@ -407,8 +407,8 @@ export function isTestFile(file: string): boolean {
   return (
     /\.test\.tsx?$/.test(file) ||
     /(^|\/)__tests__\//.test(file) ||
-    file.startsWith("src/test/") ||
-    file.startsWith("src/console/test/")
+    file.startsWith("packages/core/src/test/") ||
+    file.startsWith("apps/web/src/console/test/")
   );
 }
 

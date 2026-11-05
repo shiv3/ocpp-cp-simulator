@@ -3,13 +3,13 @@ title: Expert OCPP calls
 type: concept
 summary: Send any station-initiated OCPP-J CALL with an edited payload through the normal transport — per-version action lists, the schema check and its per-call bypass, `applyResponse`, errors, and the SOAP boundary; one API behind the console, the control plane and the `ocppCall` node.
 sources:
-  - src/cp/domain/types/OcppCall.ts
-  - src/cp/domain/errors/OcppCallErrors.ts
-  - src/cp/infrastructure/transport/codec/ocppCallCatalog.ts
-  - src/cp/infrastructure/transport/codec/defaultPayload.ts
-  - src/cp/infrastructure/transport/ExpertCalls.ts
-  - src/console/pages/cp/ExpertCallPanel.tsx
-  - src/cp/infrastructure/transport/RawFrameSender.ts
+  - packages/core/src/cp/domain/types/OcppCall.ts
+  - packages/core/src/cp/domain/errors/OcppCallErrors.ts
+  - packages/core/src/cp/infrastructure/transport/codec/ocppCallCatalog.ts
+  - packages/core/src/cp/infrastructure/transport/codec/defaultPayload.ts
+  - packages/core/src/cp/infrastructure/transport/ExpertCalls.ts
+  - apps/web/src/console/pages/cp/ExpertCallPanel.tsx
+  - packages/core/src/cp/infrastructure/transport/RawFrameSender.ts
   - "issue #389"
   - "issue #393"
 related:

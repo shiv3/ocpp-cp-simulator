@@ -1,0 +1,1319 @@
+import * as fs from "fs";
+import type {
+  AuthorizationCacheSeedEntry,
+  AuthorizationCacheView,
+} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+import type {
+  DataTransferData,
+  DataTransferResult,
+} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+import type {
+  OcppCallOutcome,
+  OcppCallRequest,
+  RawFrameOutcome,
+  RawFrameRequest,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+
+import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+import type {
+  EVSettings,
+  EVSettingsPatch,
+} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import {
+  isScenarioDefinitionShape,
+  type ScenarioDefinition,
+  type ScenarioExecutionContext,
+  type ScenarioMode,
+} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+import type {
+  HistoryOptions,
+  StateHistoryEntry,
+} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+import type {
+  TimelinePage,
+  TimelineQuery,
+} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+import type {
+  ChargingSessionPage,
+  ChargingSessionQuery,
+} from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
+import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
+import { clearStartupProvenance } from "./startupScenarioRows";
+import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
+import type {
+  OCPPAvailability,
+  OCPPStatus,
+  StatusNotificationOptions,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type {
+  MeterReadingContext,
+  StartTransactionCommandOptions,
+  StopTransactionCommandOptions,
+  TransactionUpdateOptions,
+} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+import type {
+  ChargePointEvent,
+  ChargePointService,
+  ChargePointSnapshot,
+  ConnectorSnapshot,
+  CreateChargePointParams,
+  LocalChargePointHandle,
+  ScenarioListItem,
+  ScenarioRunOptions,
+  ScenarioTemplateInfo,
+  StoredLogEntry,
+} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type {
+  NetworkSimLayerConfig,
+  ResolvedNetworkSimConfig,
+} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import type { ConnectorSettingsRepository } from "@ocpp-cp-sim/client/interfaces/ConnectorSettingsRepository";
+import { mergeWriteOnlyConfigSecrets } from "@ocpp-cp-sim/client/configPort";
+import type { SimulatorConfigInput, WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
+import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { redactSensitiveText } from "@ocpp-cp-sim/core/cp/shared/redaction";
+import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import type { CLIChargePointService, CLIEvent } from "../service";
+import type { ChargePointInitOptions, ChargePointStatus } from "../types";
+import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import type {
+  CPRegistry,
+  RegistryMembershipChange,
+  RegistryMembershipEvent,
+} from "./CPRegistry";
+
+export type RegistryChargePointSubscriptionEvent =
+  | { type: "snapshot"; cps: ChargePointSnapshot[] }
+  | {
+      type: "change";
+      change: RegistryMembershipChange;
+      cp: ChargePointSnapshot;
+    };
+
+export interface RegistryChargePointServiceDeps {
+  readonly database: Database | null;
+  readonly configRepository: RegistryConfigRepository;
+  readonly scenarioRepository: ScenarioRepository;
+  readonly connectorSettingsRepository: ConnectorSettingsRepository;
+  readonly onReset?: () => void;
+}
+
+export interface RegistryConfigRepository {
+  load(): Promise<SimulatorConfigInput | null>;
+  save(config: SimulatorConfigInput | null): Promise<void>;
+  subscribe(handler: (config: SimulatorConfigInput | null) => void): () => void;
+}
+
+/**
+ * CLI/daemon ChargePointService facade with three lanes:
+ * CPRegistry-backed registry lane; per-CP CLIChargePointService delegation;
+ * facade-owned global persistence/stateless operations.
+ */
+export class RegistryChargePointService implements ChargePointService {
+  constructor(
+    private readonly registry: CPRegistry,
+    private readonly deps: RegistryChargePointServiceDeps,
+  ) {}
+
+  /** `selector` is daemon-only (#470): only the charge points it matches get
+   *  a status snapshot built. Absent or empty, every charge point is listed. */
+  async listChargePoints(selector?: Labels): Promise<ChargePointSnapshot[]> {
+    return this.listChargePointSnapshots(selector);
+  }
+
+  async getChargePoint(id: string): Promise<ChargePointSnapshot | null> {
+    const service = this.registry.get(id);
+    return service ? toChargePointSnapshot(service.getStatus()) : null;
+  }
+
+  getLocalChargePoint(id: string): LocalChargePointHandle | null {
+    this.requireService(id);
+    return null;
+  }
+
+  async createChargePoint(params: CreateChargePointParams): Promise<void> {
+    this.registry.create(toInitOptions(params));
+  }
+
+  async updateChargePoint(params: CreateChargePointParams): Promise<void> {
+    const existing = this.registry.get(params.cpId);
+    if (!existing) throw new Error(`cpId not found: ${params.cpId}`);
+    this.registry.update(toInitOptions(params, existing.getInit()));
+  }
+
+  async removeChargePoint(id: string): Promise<void> {
+    if (!this.registry.remove(id)) throw new Error(`cpId not found: ${id}`);
+  }
+
+  /** Daemon-only (#446): relabel without the rebuild `updateChargePoint`
+   *  does. Rejects like it when no such charge point is registered. */
+  async setChargePointLabels(id: string, labels: Labels): Promise<void> {
+    if (!this.registry.setLabels(id, labels)) {
+      throw new Error(`cpId not found: ${id}`);
+    }
+  }
+
+  /** Daemon-only (#470): the ids a label selector matches, without building
+   *  any status snapshot. An absent or empty selector matches every one. */
+  selectChargePointIds(selector: Labels | undefined): string[] {
+    return this.registry.selectByLabels(selector);
+  }
+
+  async ping(): Promise<{ ok: boolean; cps: number }> {
+    return { ok: true, cps: this.registry.list().length };
+  }
+
+  async restoreFromDatabase(): Promise<string[]> {
+    return this.registry.restoreFromDatabase();
+  }
+
+  subscribeRegistry(
+    handler: (event: RegistryChargePointSubscriptionEvent) => void,
+  ): () => void {
+    handler({ type: "snapshot", cps: this.listChargePointSnapshots() });
+    return this.registry.onRegistryMembership((event) => {
+      handler({
+        type: "change",
+        change: event.change,
+        cp: toMembershipSnapshot(event),
+      });
+    });
+  }
+
+  async resetAllState(): Promise<void> {
+    for (const cpId of [...this.registry.list()]) {
+      this.registry.remove(cpId, { notify: false });
+    }
+    if (this.deps.database) {
+      resetSimulatorState(this.deps.database);
+      await this.deps.database.flush?.();
+    } else {
+      this.registry.clearScenarioDefinitions();
+    }
+    this.deps.onReset?.();
+  }
+
+  async clearStoredLogs(cpId: string): Promise<void> {
+    if (!this.deps.database) return;
+    this.deps.database.run("DELETE FROM logs WHERE cp_id = ?", [cpId]);
+    await this.deps.database.flush?.();
+  }
+
+  async listStoredLogs(cpId: string): Promise<StoredLogEntry[]> {
+    const service = this.registry.get(cpId);
+    service?.flushLogs();
+
+    let entries: StoredLogEntry[] = [];
+    if (this.deps.database) {
+      const rows = this.deps.database.all<{
+        timestamp: string;
+        level: string;
+        log_type: string;
+        message: string;
+      }>(
+        "SELECT timestamp, level, log_type, message FROM logs " +
+          "WHERE cp_id = ? ORDER BY id ASC",
+        [cpId],
+      );
+      entries = rows.map((row) => ({
+        timestamp: row.timestamp,
+        level: row.level,
+        type: row.log_type,
+        cpId,
+        message: redactSensitiveText(row.message),
+      }));
+    }
+
+    if (entries.length > 0) return entries;
+    return (service?.getInMemoryLogs() ?? []).map((entry) => ({
+      timestamp: entry.timestamp.toISOString(),
+      level: LogLevel[entry.level] ?? "INFO",
+      type: entry.type,
+      cpId,
+      message: redactSensitiveText(entry.message),
+    }));
+  }
+
+  async loadConfig(): Promise<WireSimulatorConfig | null> {
+    return this.deps.configRepository.load();
+  }
+
+  async saveConfig(config: SimulatorConfigInput | null): Promise<void> {
+    const existing = await this.deps.configRepository.load();
+    await this.deps.configRepository.save(
+      mergeWriteOnlyConfigSecrets(config, existing),
+    );
+    await this.deps.database?.flush?.();
+  }
+
+  subscribeConfig(
+    handler: (config: WireSimulatorConfig | null) => void,
+  ): () => void {
+    return this.deps.configRepository.subscribe(handler);
+  }
+
+  async connect(id: string): Promise<void> {
+    await this.requireService(id).connect();
+  }
+
+  async disconnect(id: string): Promise<void> {
+    this.requireService(id).disconnect();
+  }
+
+  async reset(id: string): Promise<void> {
+    this.requireService(id).reset();
+  }
+
+  async sendHeartbeat(id: string): Promise<void> {
+    this.requireService(id).sendHeartbeat();
+  }
+
+  async startHeartbeat(id: string, intervalSeconds: number): Promise<void> {
+    this.requireService(id).startHeartbeat(intervalSeconds);
+  }
+
+  async stopHeartbeat(id: string): Promise<void> {
+    this.requireService(id).stopHeartbeat();
+  }
+
+  async authorize(id: string, tagId: string): Promise<void> {
+    this.requireService(id).authorize(tagId);
+  }
+
+  /** Daemon-only: the tag a control-plane call without one presents, drawn
+   *  from the charge point's idTag pool (#299). */
+  resolveIdTag(id: string, tagId?: string, connectorId?: number): string {
+    return this.requireService(id).resolveIdTag(tagId, connectorId);
+  }
+
+  async sendDataTransfer(
+    id: string,
+    vendorId: string,
+    messageId?: string,
+    data?: DataTransferData,
+  ): Promise<DataTransferResult> {
+    return this.requireService(id).sendDataTransfer(vendorId, messageId, data);
+  }
+
+  async sendOcppCall(
+    id: string,
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    return this.requireService(id).sendOcppCall(request);
+  }
+
+  async sendRawFrame(
+    id: string,
+    request: RawFrameRequest,
+  ): Promise<RawFrameOutcome> {
+    return this.requireService(id).sendRawFrame(request);
+  }
+
+  async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
+    return this.requireService(id).getAuthorizationCache();
+  }
+
+  async seedAuthorizationCache(
+    id: string,
+    entries: readonly AuthorizationCacheSeedEntry[],
+  ): Promise<number> {
+    return this.requireService(id).seedAuthorizationCache(entries);
+  }
+
+  async clearAuthorizationCache(id: string): Promise<boolean> {
+    return this.requireService(id).clearAuthorizationCache();
+  }
+
+  async startTransaction(
+    id: string,
+    connectorId: number,
+    tagId: string,
+    options?: StartTransactionCommandOptions,
+  ): Promise<void> {
+    this.requireService(id).startTransaction(connectorId, tagId, options);
+  }
+
+  async stopTransaction(
+    id: string,
+    connectorId: number,
+    options?: StopTransactionCommandOptions,
+  ): Promise<void> {
+    this.requireService(id).stopTransaction(connectorId, options);
+  }
+
+  async sendTransactionUpdate(
+    id: string,
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): Promise<void> {
+    this.requireService(id).sendTransactionUpdate(connectorId, options);
+  }
+
+  async evDisconnected(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).evDisconnected(connectorId);
+  }
+
+  async sendStatusNotification(
+    id: string,
+    connectorId: number,
+    status: OCPPStatus,
+    opts?: StatusNotificationOptions,
+  ): Promise<void> {
+    this.requireService(id).updateConnectorStatus(connectorId, status, opts);
+  }
+
+  async sendDiagnosticsStatusNotification(
+    id: string,
+    status: DiagnosticsStatus,
+  ): Promise<void> {
+    this.requireService(id).sendDiagnosticsStatusNotification(status);
+  }
+
+  async sendFirmwareStatusNotification(
+    id: string,
+    status: FirmwareStatus,
+    requestId?: number,
+  ): Promise<void> {
+    // Two-argument form only when a requestId was given, so the 1.6-era
+    // call shape (and what its tests expect) is unchanged.
+    if (requestId === undefined) {
+      this.requireService(id).sendFirmwareStatusNotification(status);
+    } else {
+      this.requireService(id).sendFirmwareStatusNotification(status, requestId);
+    }
+  }
+
+  async sendLogStatusNotification(
+    id: string,
+    status: UploadLogStatus,
+    requestId?: number,
+  ): Promise<void> {
+    this.requireService(id).sendLogStatusNotification(status, requestId);
+  }
+
+  async sendSecurityEventNotification(
+    id: string,
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
+    this.requireService(id).sendSecurityEventNotification(type, techInfo);
+  }
+
+  async sendSignCertificate(id: string, csr?: string): Promise<void> {
+    await this.requireService(id).sendSignCertificate(csr);
+  }
+
+  async setMeterValue(
+    id: string,
+    connectorId: number,
+    value: number,
+  ): Promise<void> {
+    this.requireService(id).setMeterValue(connectorId, value);
+  }
+
+  async sendMeterValue(
+    id: string,
+    connectorId: number,
+    context?: MeterReadingContext,
+  ): Promise<void> {
+    this.requireService(id).sendMeterValue(connectorId, context);
+  }
+
+  async removeConnector(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).removeConnector(connectorId);
+  }
+
+  async setEVSettings(
+    id: string,
+    connectorId: number,
+    settings: EVSettingsPatch,
+  ): Promise<void> {
+    this.requireService(id).setEVSettings(connectorId, settings);
+  }
+
+  async getEVSettings(
+    id: string,
+    connectorId: number,
+  ): Promise<EVSettings | null> {
+    return this.requireService(id).getEVSettings(connectorId);
+  }
+
+  async applyDefaultEVSettings(settings: EVSettingsPatch): Promise<void> {
+    // Routes through the connector-level default path (#105) rather than
+    // setEVSettings — setEVSettings marks an explicit override, which would
+    // make this default propagation stick forever and defeat the very
+    // override it's supposed to respect.
+    for (const cpId of this.registry.list()) {
+      this.requireService(cpId).applyDefaultEVSettings(settings);
+    }
+  }
+
+  async setAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    this.requireService(id).setAutoMeterValueConfig(connectorId, config);
+  }
+
+  async getAutoMeterValueConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    return this.requireService(id).getAutoMeterValueConfig(connectorId);
+  }
+
+  async getAutoMeterConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoMeterValueConfig | null> {
+    return this.deps.connectorSettingsRepository.loadAutoMeterValueConfig(
+      id,
+      connectorId,
+    );
+  }
+
+  async saveAutoMeterConfig(
+    id: string,
+    connectorId: number,
+    config: AutoMeterValueConfig,
+  ): Promise<void> {
+    await this.deps.connectorSettingsRepository.saveAutoMeterValueConfig(
+      id,
+      connectorId,
+      config,
+    );
+    await this.deps.database?.flush?.();
+  }
+
+  async getAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+  ): Promise<AutoTrafficConfig | null> {
+    return this.deps.connectorSettingsRepository.loadAutoTrafficConfig(
+      id,
+      connectorId,
+    );
+  }
+
+  async saveAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    await this.deps.connectorSettingsRepository.saveAutoTrafficConfig(
+      id,
+      connectorId,
+      config,
+    );
+    await this.deps.database?.flush?.();
+    // Applied to the running charge point as well as stored: a save that only
+    // wrote a row would report success and generate nothing until a restart.
+    this.requireService(id).setAutoTrafficConfig(connectorId, config);
+  }
+
+  /**
+   * Apply a traffic config to the running charge point without storing it.
+   *
+   * The CP-command path (`set_auto_traffic_config`) is "make this station do
+   * that now"; `saveAutoTrafficConfig` is the settings path and does both.
+   */
+  async setAutoTrafficConfig(
+    id: string,
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): Promise<void> {
+    this.requireService(id).setAutoTrafficConfig(connectorId, config);
+  }
+
+  async setAutoResetToAvailable(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    this.requireService(id).setAutoResetToAvailable(connectorId, enabled);
+  }
+
+  async setConnectorMode(
+    id: string,
+    connectorId: number,
+    mode: ScenarioMode,
+  ): Promise<void> {
+    this.requireService(id).setConnectorMode(connectorId, mode);
+  }
+
+  async setConnectorSoc(
+    id: string,
+    connectorId: number,
+    soc: number | null,
+  ): Promise<void> {
+    this.requireService(id).setConnectorSoc(connectorId, soc);
+  }
+
+  async setConnectorSocMeterSync(
+    id: string,
+    connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    this.requireService(id).setConnectorSocMeterSync(connectorId, enabled);
+  }
+
+  async getSocMeterSync(_id: string, _connectorId: number): Promise<boolean> {
+    return this.deps.connectorSettingsRepository.loadSocMeterSync();
+  }
+
+  async saveSocMeterSync(
+    _id: string,
+    _connectorId: number,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.deps.connectorSettingsRepository.saveSocMeterSync(enabled);
+    await this.deps.database?.flush?.();
+  }
+
+  async getChargingProfiles(
+    id: string,
+    connectorId: number,
+  ): Promise<ReadonlyArray<ActiveChargingProfile>> {
+    return this.requireService(id).getChargingProfiles(connectorId);
+  }
+
+  async getStateHistory(
+    id: string,
+    options?: HistoryOptions,
+  ): Promise<StateHistoryEntry[]> {
+    return [...this.requireService(id).getStateHistory(options)];
+  }
+
+  async getOperationalTimeline(
+    id: string,
+    query?: TimelineQuery,
+  ): Promise<TimelinePage> {
+    return this.requireService(id).getOperationalTimeline(query);
+  }
+
+  async listChargingSessions(
+    id: string,
+    query?: Omit<ChargingSessionQuery, "cpId">,
+  ): Promise<ChargingSessionPage> {
+    return this.requireService(id).listChargingSessions(query);
+  }
+
+  async listScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+  ): Promise<ScenarioDefinition[]> {
+    return this.deps.scenarioRepository.listByConnector(id, connectorId);
+  }
+
+  async saveScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definition: ScenarioDefinition,
+  ): Promise<ScenarioDefinition> {
+    await this.deps.scenarioRepository.save(id, connectorId, definition);
+    // #338: a definition the operator saves is theirs, whatever generated it.
+    clearStartupProvenance(this.deps.database, id, connectorId, [
+      definition.id,
+    ]);
+    await this.deps.database?.flush?.();
+    return definition;
+  }
+
+  async replaceConnectorScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): Promise<ScenarioDefinition[]> {
+    await this.deps.scenarioRepository.replaceConnector(
+      id,
+      connectorId,
+      definitions,
+    );
+    clearStartupProvenance(
+      this.deps.database,
+      id,
+      connectorId,
+      definitions.map((definition) => definition.id),
+    );
+    await this.deps.database?.flush?.();
+    // #209: the DB is now authoritative, but the daemon runtime scenario map
+    // (read by connect-auto-start) still holds the stale seeded default and
+    // lacks the upload. Reconcile it so a connect-triggered scenario uploaded
+    // from the web console actually fires on connect. No-op when the CP isn't
+    // currently instantiated (definitions-only edit) — restore rebuilds it.
+    this.registry
+      .get(id)
+      ?.syncConnectorRuntimeScenarios(connectorId, definitions);
+    return [...definitions];
+  }
+
+  async deleteScenarioDefinition(
+    id: string,
+    connectorId: number | null,
+    definitionId: string,
+  ): Promise<void> {
+    this.deps.scenarioRepository.deleteOne(id, connectorId, definitionId);
+    await this.deps.database?.flush?.();
+  }
+
+  subscribeScenarioDefinitions(
+    id: string,
+    connectorId: number | null,
+    handler: (definitions: ScenarioDefinition[]) => void,
+  ): () => void {
+    return this.deps.scenarioRepository.subscribe(id, connectorId, () => {
+      handler(this.deps.scenarioRepository.listByConnector(id, connectorId));
+    });
+  }
+
+  async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
+    return scenarioTemplates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      description: template.description,
+    }));
+  }
+
+  async loadScenarioTemplate(
+    id: string,
+    templateId: string,
+    connectorId: number,
+    evSettings?: Partial<EVSettings>,
+  ): Promise<{ scenarioId: string }> {
+    const scenarioId = this.requireService(id).loadScenarioTemplate(
+      templateId,
+      connectorId,
+      evSettings,
+    );
+    clearStartupProvenance(this.deps.database, id, connectorId, [scenarioId]);
+    return { scenarioId };
+  }
+
+  async loadScenario(
+    id: string,
+    connectorId: number,
+    definition: ScenarioDefinition,
+  ): Promise<{ scenarioId: string }> {
+    const scenarioId = this.requireService(id).loadScenario(
+      connectorId,
+      definition,
+    );
+    clearStartupProvenance(this.deps.database, id, connectorId, [scenarioId]);
+    return { scenarioId };
+  }
+
+  async listScenarios(
+    id: string,
+    connectorId: number,
+  ): Promise<ScenarioListItem[]> {
+    return [...this.requireService(id).listScenarios(connectorId)];
+  }
+
+  async runScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    options?: { strict?: boolean; awaitArmed?: boolean },
+  ): Promise<void> {
+    const service = this.requireService(id);
+    service.runScenario(connectorId, scenarioId, options);
+    // Opt-in (see run_scenario's `awaitArmed` param / methods.ts): don't
+    // answer the RPC until the run has armed or ended. See
+    // CLIChargePointService.waitForScenarioArmed for why this closes the
+    // run_scenario / CSMS-command race.
+    if (options?.awaitArmed) {
+      await service.waitForScenarioArmed(scenarioId);
+    }
+  }
+
+  async runScenarioFile(
+    id: string,
+    path: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const service = this.requireService(id);
+    const connectorId = opts.connectorId ?? 1;
+    const sourceText = fs.readFileSync(path, "utf-8");
+    // `--watch` needs the exact bytes this call read as its reload baseline
+    // (#314). Handed over, never returned: as a result field it reached
+    // standalone JSON mode's stdout, because only the socket.io dispatcher
+    // knew to strip it.
+    opts.onSourceText?.(sourceText);
+    const parsed: unknown = JSON.parse(sourceText);
+    if (!isScenarioDefinitionShape(parsed)) {
+      throw new Error(`file does not contain a scenario definition: ${path}`);
+    }
+    // Issue #214: advisory (warning-only) schema check — never blocks loading.
+    const schemaResult = validateScenarioSchema(parsed);
+    if (!schemaResult.valid) {
+      console.warn(
+        `[RegistryChargePointService] "${path}" does not match packages/core/schema/scenario.schema.json (loading anyway): ${schemaResult.errors.slice(0, 5).join("; ")}`,
+      );
+    }
+    // The auto-start gate is suppressed here on purpose (#314). Left on, a file
+    // with the usual connect-triggered start node is already running by the time
+    // the load returns whenever the charge point is Available — the common case
+    // — and the explicit start below then either threw "already running",
+    // failing an RPC whose scenario was in fact loaded and running, or (once
+    // that throw was skipped) silently dropped the caller's `strict` override
+    // and reported success for a run this call never began. Neither is
+    // distinguishable by the caller. Starting it here instead keeps the
+    // requested options, and leaves "this id was already running before the
+    // call" the honest error it has always been.
+    // Refused *before* anything is installed, not after. `runScenario` has
+    // always thrown on an id that is already running, but by then
+    // `loadScenario` had replaced and persisted the definition — and the
+    // dispatcher registers the new source file only once this method returns,
+    // so a failed call left the new definition live behind the *old* file's
+    // watch, and the next edit to that stale file quietly overwrote it. This
+    // method performs a multi-step mutation with no transaction around it, so
+    // the fix is to have no partial state to undo rather than to compensate for
+    // one. The message is the one `runScenario` would have raised, so a caller
+    // sees no change beyond the side effect disappearing (#314).
+    if (service.isScenarioRunning(parsed.id)) {
+      throw new Error(`Scenario ${parsed.id} is already running`);
+    }
+    const scenarioId = service.loadScenario(connectorId, parsed, {
+      autoStart: false,
+    });
+    if (opts.strict === undefined) {
+      service.runScenario(connectorId, scenarioId);
+    } else {
+      service.runScenario(connectorId, scenarioId, { strict: opts.strict });
+    }
+    return { scenarioId };
+  }
+
+  async runScenarioTemplate(
+    id: string,
+    templateId: string,
+    opts: ScenarioRunOptions = {},
+  ): Promise<{ scenarioId: string }> {
+    const service = this.requireService(id);
+    const connectorId = opts.connectorId ?? 1;
+    // Same shape as runScenarioFile above (#318): the auto-start gate is kept
+    // out of the way of the load, and the explicit start below is the one run
+    // this call makes, with the caller's options. Left on, a connect-triggered
+    // template — every cert16-* template is one — was already running by the
+    // time the load returned whenever the charge point was Available, and the
+    // start then threw "already running" for an RPC whose scenario was in fact
+    // loaded and running. `once` (#352) additionally loads the instance
+    // disabled, so the walker never re-arms it on a later reconnect.
+    const scenarioId = service.loadScenarioTemplate(
+      templateId,
+      connectorId,
+      opts.evSettings,
+      { autoStart: false, ...(opts.once ? { enabled: false } : {}) },
+    );
+    if (opts.strict === undefined) {
+      service.runScenario(connectorId, scenarioId);
+    } else {
+      service.runScenario(connectorId, scenarioId, { strict: opts.strict });
+    }
+    return { scenarioId };
+  }
+
+  async stopScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).stopScenario(connectorId, scenarioId);
+  }
+
+  async resetScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).resetScenario(connectorId, scenarioId);
+  }
+
+  async stepScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    force?: boolean,
+  ): Promise<void> {
+    this.requireService(id).stepScenario(connectorId, scenarioId, force);
+  }
+
+  async extendScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    seconds: number,
+  ): Promise<void> {
+    this.requireService(id).extendScenarioWait(
+      connectorId,
+      scenarioId,
+      seconds,
+    );
+  }
+
+  async retryScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).retryScenarioWait(connectorId, scenarioId);
+  }
+
+  async continueScenarioWait(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).continueScenarioWait(connectorId, scenarioId);
+  }
+
+  async stopAllScenarios(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).stopAllScenarios(connectorId);
+  }
+
+  async removeScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<void> {
+    this.requireService(id).removeScenario(connectorId, scenarioId);
+  }
+
+  async getScenarioStatus(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioExecutionContext | null> {
+    return this.requireService(id).getScenarioStatus(connectorId, scenarioId);
+  }
+
+  async getScenarioReport(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+    runId?: string,
+  ): Promise<ScenarioRunResult | null> {
+    return this.requireService(id).getScenarioReport(
+      connectorId,
+      scenarioId,
+      runId,
+    );
+  }
+
+  async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
+    return this.registry.scenarioRuns.list(query);
+  }
+
+  async getScenario(
+    id: string,
+    connectorId: number,
+    scenarioId: string,
+  ): Promise<ScenarioDefinition | null> {
+    return this.requireService(id).getScenario(connectorId, scenarioId);
+  }
+
+  subscribe(
+    id: string,
+    handler: (event: ChargePointEvent) => void,
+  ): () => void {
+    return this.requireService(id).onEvent((evt) => {
+      const mapped = toChargePointEvent(evt);
+      if (mapped) handler(mapped);
+    });
+  }
+
+  async getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null> {
+    const manager = this.registry.getNetworkSimManager();
+    return manager.getGlobal();
+  }
+
+  async saveNetworkSimGlobal(
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    const manager = this.registry.getNetworkSimManager();
+    manager.saveGlobal(config);
+  }
+
+  async getNetworkSimCp(cpId: string): Promise<{
+    config: NetworkSimLayerConfig | null;
+    resolved: ResolvedNetworkSimConfig;
+  }> {
+    const manager = this.registry.getNetworkSimManager();
+    return {
+      config: manager.getCp(cpId),
+      resolved: manager.resolveFor(cpId),
+    };
+  }
+
+  async saveNetworkSimCp(
+    cpId: string,
+    config: NetworkSimLayerConfig | null,
+  ): Promise<void> {
+    const manager = this.registry.getNetworkSimManager();
+    manager.saveCp(cpId, config);
+  }
+
+  async triggerNetworkSimDisconnect(
+    cpId: string,
+    ruleId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    // Check if CP exists
+    if (!this.registry.has(cpId)) {
+      return { ok: false, error: "cp_not_found" };
+    }
+
+    // Check if CP is SOAP (unsupported)
+    const service = this.registry.get(cpId);
+    if (service?.isSoapChargePoint()) {
+      return { ok: false, error: "soap_unsupported" };
+    }
+
+    // Trigger the disconnect
+    const manager = this.registry.getNetworkSimManager();
+    return manager.triggerDisconnect(cpId, ruleId);
+  }
+
+  private listChargePointSnapshots(selector?: Labels): ChargePointSnapshot[] {
+    return this.registry
+      .selectByLabels(selector)
+      .map((cpId) => this.registry.get(cpId)?.getStatus())
+      .filter((status): status is ChargePointStatus => Boolean(status))
+      .map(toChargePointSnapshot);
+  }
+
+  private requireService(id: string): CLIChargePointService {
+    const service = this.registry.get(id);
+    if (!service) throw new Error(`cpId not found: ${id}`);
+    return service;
+  }
+}
+
+function toInitOptions(
+  params: CreateChargePointParams,
+  existing?: ChargePointInitOptions,
+): ChargePointInitOptions {
+  return {
+    cpId: params.cpId,
+    wsUrl: params.wsUrl,
+    // Without these two the whole feature is inert over the control plane:
+    // `parseCreateBody` would produce the list, the facade would drop it, and
+    // the charge point would come up on the first URL with no pool at all —
+    // while `cp.create` answered success.
+    //
+    // No `existing` fallback, unlike the fields below it. `wsUrl` is required
+    // on `cp.update`, so an update fully specifies the URL configuration:
+    // falling back would leave a charge point updated to a single endpoint
+    // still failing over to the stale pool, and still persisting it.
+    supervisionUrls: params.supervisionUrls,
+    urlDistribution: params.urlDistribution,
+    // Same rule as the URLs above: `cp.update` fully specifies the pool, so
+    // there is no `existing` fallback — an update that drops `idTagPool`
+    // means the charge point no longer has one.
+    idTags: params.idTags,
+    // #314: the path travels with the list. Dropping it here is exactly the
+    // failure #299 shipped with — the create reports success and the feature
+    // (here, the watch) is inert.
+    idTagFile: params.idTagFile,
+    idTagDistribution: params.idTagDistribution,
+    centralSystemUrl: params.centralSystemUrl ?? existing?.centralSystemUrl,
+    // Same rule as the URLs above: an update fully specifies the callback
+    // URL, so there is no `existing` fallback. An update without one asks the
+    // registry to derive it from the daemon's SOAP public base — a cleared
+    // field in the form, or a re-derivation of a URL the registry made up in
+    // the first place, instead of freezing one run's tunnel origin into the
+    // row (#183). Without a base the registry refuses, as `cp.create` does.
+    soapCallbackUrl: params.soapCallbackUrl,
+    soapPath: params.soapPath ?? existing?.soapPath,
+    ocppVersion: params.ocppVersion ?? existing?.ocppVersion ?? "OCPP-1.6J",
+    connectors: params.connectors ?? existing?.connectors ?? 1,
+    vendor: params.vendor ?? existing?.vendor ?? "Server-Vendor",
+    model: params.model ?? existing?.model ?? "Server-Model",
+    basicAuth: toBasicAuth(params.basicAuth, existing?.basicAuth),
+    securityProfile: params.securityProfile ?? existing?.securityProfile,
+    authorizationKey: params.authorizationKey ?? existing?.authorizationKey,
+    cpoName: params.cpoName ?? existing?.cpoName,
+    txUpdatedMeterValues:
+      params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
+    tls: params.tls ?? existing?.tls,
+    tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
+    tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
+    tlsKeyPath: params.tlsKeyPath ?? existing?.tlsKeyPath,
+    bootNotification:
+      params.bootNotification ?? existing?.bootNotification ?? undefined,
+    // #446: no `existing` fallback here — `CPRegistry.update` is the one place
+    // that keeps the current labels when an update omits them.
+    labels: params.labels,
+  };
+}
+
+function toBasicAuth(
+  input: CreateChargePointParams["basicAuth"],
+  existing?: ChargePointInitOptions["basicAuth"],
+): ChargePointInitOptions["basicAuth"] {
+  if (input === null) return null;
+  if (input === undefined) return existing ?? null;
+  if (input.password === undefined && !existing) return null;
+  return {
+    username: input.username,
+    password:
+      input.password === undefined || input.password.length === 0
+        ? (existing?.password ?? input.password ?? "")
+        : input.password,
+  };
+}
+
+function toMembershipSnapshot(
+  event: RegistryMembershipEvent,
+): ChargePointSnapshot {
+  return toChargePointSnapshot(event.service.getStatus());
+}
+
+function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
+  return {
+    id: status.id,
+    status: status.status as OCPPStatus,
+    error: status.error,
+    connectors: status.connectors.map(toConnectorSnapshot),
+    heartbeat: status.heartbeat,
+    networkSim: status.networkSim,
+    config: status.config
+      ? {
+          wsUrl: status.config.wsUrl,
+          centralSystemUrl: status.config.centralSystemUrl,
+          soapCallbackUrl: status.config.soapCallbackUrl,
+          soapCallbackUrlDerived: status.config.soapCallbackUrlDerived,
+          soapPath: status.config.soapPath,
+          ocppVersion: status.config.ocppVersion,
+          connectors: status.config.connectors,
+          vendor: status.config.vendor,
+          model: status.config.model,
+          basicAuth: status.config.basicAuth
+            ? {
+                username: status.config.basicAuth.username,
+                password: status.config.basicAuth.password ?? "",
+              }
+            : null,
+          securityProfile: status.config.securityProfile,
+          cpoName: status.config.cpoName,
+          txUpdatedMeterValues: status.config.txUpdatedMeterValues,
+          tlsCaPath: status.config.tlsCaPath,
+          tlsCertPath: status.config.tlsCertPath,
+          tlsKeyPath: status.config.tlsKeyPath,
+          bootNotification: status.config.bootNotification,
+          labels: status.config.labels,
+        }
+      : undefined,
+  };
+}
+
+function toConnectorSnapshot(
+  connector: ChargePointStatus["connectors"][number],
+): ConnectorSnapshot {
+  return {
+    id: connector.id,
+    status: connector.status as OCPPStatus,
+    availability: connector.availability as OCPPAvailability,
+    meterValue: connector.meterValue,
+    transactionId: connector.transactionId,
+    soc: connector.soc,
+    mode: connector.mode as ScenarioMode,
+    autoResetToAvailable: connector.autoResetToAvailable,
+    autoMeterValueConfig:
+      connector.autoMeterValueConfig as unknown as AutoMeterValueConfig | null,
+    evSettings: connector.evSettings as unknown as EVSettings | null,
+    chargingProfile:
+      connector.chargingProfile as unknown as ActiveChargingProfile | null,
+    chargingProfiles:
+      connector.chargingProfiles as unknown as ActiveChargingProfile[],
+    transactionStartTime: connector.transactionStartTime
+      ? new Date(connector.transactionStartTime)
+      : null,
+    transactionTagId: connector.transactionTagId,
+    transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+  };
+}
+
+function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
+  switch (evt.event) {
+    case "connected":
+      return { type: "connected" };
+    case "disconnected":
+      return {
+        type: "disconnected",
+        code: evt.data.code,
+        reason: evt.data.reason,
+      };
+    case "status_change":
+      return { type: "status", status: evt.data.status as OCPPStatus };
+    case "error":
+      return { type: "error", error: evt.data.error };
+    case "connector_status":
+      return {
+        type: "connector-status",
+        connectorId: evt.data.connectorId,
+        status: evt.data.status as OCPPStatus,
+        previousStatus: evt.data.previousStatus as OCPPStatus,
+      };
+    case "transaction_started":
+      return {
+        type: "connector-transaction",
+        connectorId: evt.data.connectorId,
+        transactionId: evt.data.transactionId,
+      };
+    case "transaction_stopped":
+      return {
+        type: "connector-transaction",
+        connectorId: evt.data.connectorId,
+        transactionId: null,
+      };
+    case "meter_value":
+      return {
+        type: "connector-meter",
+        connectorId: evt.data.connectorId,
+        meterValue: evt.data.meterValue,
+      };
+    case "log":
+      return {
+        type: "log",
+        entry: {
+          timestamp: new Date(),
+          level:
+            typeof evt.data.level === "number"
+              ? (evt.data.level as LogLevel)
+              : LogLevel.INFO,
+          type:
+            typeof evt.data.type === "string"
+              ? (evt.data.type as LogType)
+              : LogType.GENERAL,
+          message: evt.data.message,
+        },
+      };
+    case "scenario_started":
+      return {
+        type: "scenario-started",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+      };
+    case "scenario_completed":
+      return {
+        type: "scenario-completed",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+      };
+    case "scenario_error":
+      return {
+        type: "scenario-error",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+        error: evt.data.error,
+      };
+    case "scenario_node_execute":
+      return {
+        type: "scenario-node-execute",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+        nodeId: evt.data.nodeId,
+      };
+    case "scenario_run_recorded":
+      return {
+        type: "scenario-run-recorded",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+      };
+    case "scenario_wait_changed":
+      return {
+        type: "scenario-wait-changed",
+        connectorId: evt.data.connectorId,
+        scenarioId: evt.data.scenarioId,
+        runId: evt.data.runId,
+        nodeId: evt.data.nodeId,
+        kind: evt.data.kind,
+      };
+    case "connector_availability":
+      return {
+        type: "connector-availability",
+        connectorId: evt.data.connectorId,
+        availability: evt.data.availability as OCPPAvailability,
+      };
+    case "connector_soc":
+      return {
+        type: "connector-soc",
+        connectorId: evt.data.connectorId,
+        soc: evt.data.soc,
+      };
+    case "connector_mode":
+      return {
+        type: "connector-mode",
+        connectorId: evt.data.connectorId,
+        mode: evt.data.mode as ScenarioMode,
+      };
+    case "connector_auto_reset":
+      return {
+        type: "connector-auto-reset-to-available",
+        connectorId: evt.data.connectorId,
+        enabled: evt.data.enabled,
+      };
+    case "connector_auto_meter":
+      return {
+        type: "connector-auto-meter",
+        connectorId: evt.data.connectorId,
+        config: evt.data.config,
+      };
+    case "connector_ev_settings":
+      return {
+        type: "connector-ev-settings",
+        connectorId: evt.data.connectorId,
+        settings: evt.data.settings,
+      };
+    case "connector_charging_profile":
+      return {
+        type: "connector-charging-profile",
+        connectorId: evt.data.connectorId,
+        profile: evt.data.profile,
+      };
+    case "connector_charging_profiles":
+      return {
+        type: "connector-charging-profiles",
+        connectorId: evt.data.connectorId,
+        profiles: [...evt.data.profiles],
+      };
+    case "heartbeat":
+      return {
+        type: "heartbeat",
+        intervalSeconds: evt.data.intervalSeconds,
+        lastSentAt: evt.data.lastSentAt,
+      };
+    case "state_history_entry":
+      return {
+        type: "state-history-entry",
+        entry: evt.data.entry,
+      };
+    case "connector_removed":
+      return {
+        type: "connector-removed",
+        connectorId: evt.data.connectorId,
+      };
+    default:
+      return null;
+  }
+}

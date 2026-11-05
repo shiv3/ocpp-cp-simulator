@@ -1,9 +1,9 @@
 ---
-title: "Source: schema/scenario.schema.json"
+title: "Source: packages/core/schema/scenario.schema.json"
 type: source
 summary: The published JSON Schema (Draft 2020-12) for scenario files v1.4 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
-  - schema/scenario.schema.json
+  - packages/core/schema/scenario.schema.json
 related:
   - ../concepts/scenario-format.md
   - ../entities/scenario-templates.md
@@ -11,7 +11,7 @@ related:
 updated: 2026-10-04
 ---
 
-# Source: `schema/scenario.schema.json`
+# Source: `packages/core/schema/scenario.schema.json`
 
 **What it is.** The machine-readable contract for the
 [scenario file format](../concepts/scenario-format.md), shipped in the npm
@@ -38,7 +38,7 @@ fields the schema deliberately does not reject.
   [Library](../entities/web-console.md#scenario-library) scenario with that
   scenario's `id`; `templateId` likewise names the built-in template an
   instance came from.
-- Mirrors `src/cp/application/scenario/ScenarioTypes.ts`; the closed
+- Mirrors `packages/core/src/cp/application/scenario/ScenarioTypes.ts`; the closed
   vocabularies (node `type`, `OCPPStatus`, …) are enumerated here.
 - Validation is **advisory**: the simulator warns on mismatch but never
   refuses to load — except that the `required` top-level fields (`id`,
@@ -46,8 +46,8 @@ fields the schema deliberately does not reject.
   boundary ([Control plane](../concepts/control-plane.md#cp-command-methods)).
 - The per-action `responseOverride` status matrix is intentionally **not**
   encoded (called out in a `$comment`).
-- `src/scenario/__tests__/scenarioSchema.conformance.test.ts` validates every
+- `packages/core/src/scenario/__tests__/scenarioSchema.conformance.test.ts` validates every
   bundled template and every `docs/examples/scenarios/*.json` against it.
 
 **How to use it.** `validateScenarioSchema()` from
-`src/scenario/scenarioSchemaValidator.ts`, or any Draft 2020-12 validator.
+`packages/core/src/scenario/scenarioSchemaValidator.ts`, or any Draft 2020-12 validator.

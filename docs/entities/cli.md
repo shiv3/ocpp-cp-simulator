@@ -3,10 +3,10 @@ title: CLI (`ocpp-cp-sim`)
 type: entity
 summary: The headless Bun binary — interactive REPL, JSON Lines mode, daemon launcher, and Socket.IO client modes — plus the full flag reference.
 sources:
-  - src/cli/main.ts
-  - src/cli/exportK6/runtimeSources.ts
+  - apps/cli/src/main.ts
+  - apps/cli/src/exportK6/runtimeSources.ts
   - scripts/generate-k6-runtime.ts
-  - src/cli/types.ts
+  - apps/cli/src/types.ts
   - package.json (`bin`, `files`)
   - scripts/verify-cli-tarball.sh
   - scripts/verify-install-urls.sh
@@ -14,7 +14,7 @@ sources:
   - .github/workflows/cli-release.yml
   - "issue #320"
   - "issue #321"
-  - src/cli/vehicleCatalogConfig.ts
+  - apps/cli/src/vehicleCatalogConfig.ts
 related:
   - daemon.md
   - analyze.md
@@ -330,13 +330,13 @@ above) is exempt: it is not an instruction a reader will paste.
 
 | Entry      | What it is                                                                                                                                                                                                                                                                                                     |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dist-cli` | `main.js`, the `bin`: one `bun build --target=bun` bundle of `src/cli/main.ts` (`bun run build:cli`, about 5 MB). Every repository module the CLI imports is inlined — the [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md), `schema/scenario.schema.json` and the scenario templates included |
+| `dist-cli` | `main.js`, the `bin`: one `bun build --target=bun` bundle of `apps/cli/src/main.ts` (`bun run build:cli`, about 5 MB). Every repository module the CLI imports is inlined — the [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md), `packages/core/schema/scenario.schema.json` and the scenario templates included |
 | `dist`     | The Vite-built web console served by `--web-console`                                                                                                                                                                                                                                                           |
 
 Both are built by `prepack` (and explicitly by `cli-release.yml`), never
 committed. The bundle finds `dist/` one level up from itself
 (`resolveBundledDist` in `main.ts`), and `export-k6` writes its k6 runtime
-from an embedded copy (`src/cli/exportK6/runtimeSources.ts`, generated from
+from an embedded copy (`apps/cli/src/exportK6/runtimeSources.ts`, generated from
 `runtime/` by `bun run gen:k6-runtime`; a stale copy fails
 `runtimeManifest.test.ts`). Nothing in the package depends on the source
 layout, which is what lets `src/` move (#578) without the published CLI
@@ -344,7 +344,7 @@ noticing.
 
 Until 2026-11-04 the tarball shipped the sources instead, and `files` listed
 every `src/` directory the CLI imported. Between 2026-07-01 and 2026-09-12
-that list omitted `src/data`, `src/ocpp`, `src/trace` and `vendor`, so the
+that list omitted `apps/web/src/data`, `packages/ocpp/src`, `packages/trace/src` and `vendor`, so the
 tarball the release workflow produced could not start at all (#320). Nothing
 caught it because the only checks on the tarball were `tar -tf | grep`s for
 three filenames that happened to be present — a listing check cannot see a
@@ -356,17 +356,17 @@ must resolve from the installed package), the daemon answering
 `GET /v1/healthz` with a charge point bootstrapped, `export-k6` writing its
 runtime, and, when `dist/` is present, the web console serving its shell. It
 runs on every pull request (`ci.yml`) as well as at release time, so
-packaging breaks on the PR that breaks it. `src/build/__tests__/cliBundle.bun.test.ts`
+packaging breaks on the PR that breaks it. `apps/cli/src/build/__tests__/cliBundle.bun.test.ts`
 pins the same shape without `npm pack`: it builds the bundle into a directory
 outside the checkout and runs it from another one.
 
 The [Docker image](docker-image.md) and the desktop
-[sidecar](desktop-app.md) still run from the sources (`bun src/cli/main.ts`
-and `bun build --compile src/cli/main.ts`); the embedded k6 runtime serves
+[sidecar](desktop-app.md) still run from the sources (`bun apps/cli/src/main.ts`
+and `bun build --compile apps/cli/src/main.ts`); the embedded k6 runtime serves
 the sidecar too.
 
 All flags described below apply whether you run the installed `ocpp-cp-sim`
-command or, from a source checkout, `bun src/cli/main.ts …`.
+command or, from a source checkout, `bun apps/cli/src/main.ts …`.
 
 ## Operation Modes
 
@@ -564,7 +564,7 @@ ocpp-cp-sim --daemon ... --scenario-template-file /path/to/template.json \
 `--scenario-template-file` reads a JSON file shaped like a
 `ScenarioDefinition` (the format the browser Scenario Editor exports — see
 [Scenario format](../concepts/scenario-format.md) for the field reference and
-the published [JSON Schema](../../schema/scenario.schema.json)), then clones it
+the published [JSON Schema](../../packages/core/schema/scenario.schema.json)), then clones it
 per connector — rewriting `targetType`, `targetId`, `id`, and `name` — so each
 connector runs an independent state machine from the same file. `--scenario`
 and `--scenario-template` fan out the same way when `--scenario-connector`
@@ -667,7 +667,7 @@ difference is not discovered one at a time.
 | Behaviour                                                             | In the exported runtime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Auto-meter time curve, session-relative                               | **Yes**, and agreeing: the curve is shifted so its value **at session start** (`t = 0`, not its earliest point) lands on the register the run started from, so a second session never rewinds and a curve beginning above zero is not double-counted. The trajectory between the points agrees too — see the row below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Auto-meter curve shape between its points                             | **Yes**, since #329: both runtimes evaluate the same De Casteljau Bezier over all control points, from [one module](../../src/cli/exportK6/runtime/curve.ts) the bundle copies verbatim. The export used to interpolate piecewise-linearly, which agreed only on a two-point curve and from three points on ran ahead by up to ~15% of the curve's span at its midpoint. **A bundle regenerated after #329 can therefore send different MeterValues** than one generated before it, for a curve with three or more control points. A curve of three or more points **can** send different values, not always: the Bezier and the polyline coincide when the control points are evenly spaced on a straight line (a plain `(0,0) (10,10) (20,20)` ramp) or all carry the same value. Collinearity alone is not enough — `(0,0) (5,5) (20,20)` is collinear, unevenly spaced, and differs by 2.5 kWh at its widest. |
+| Auto-meter curve shape between its points                             | **Yes**, since #329: both runtimes evaluate the same De Casteljau Bezier over all control points, from [one module](../../packages/k6-runtime/src/curve.ts) the bundle copies verbatim. The export used to interpolate piecewise-linearly, which agreed only on a two-point curve and from three points on ran ahead by up to ~15% of the curve's span at its midpoint. **A bundle regenerated after #329 can therefore send different MeterValues** than one generated before it, for a curve with three or more control points. A curve of three or more points **can** send different values, not always: the Bezier and the polyline coincide when the control points are evenly spaced on a straight line (a plain `(0,0) (10,10) (20,20)` ramp) or all carry the same value. Collinearity alone is not enough — `(0,0) (5,5) (20,20)` is collinear, unevenly spaced, and differs by 2.5 kWh at its widest. |
 | Energy register integral on the wire                                  | **Yes**: `meterStart`, `meterStop` and the register sample are rounded at the wire, and the unrounded value is carried between ticks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `maxValue` / `maxTime` / target-SoC stop conditions                   | **Yes**, judged on the delivered value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Battery charging curve (`evSettings.chargingCurve`)                   | **No** — `chargingCurve` is not read; the rate is the scenario's own increment or time curve.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -685,8 +685,8 @@ behaviour has to reach in both places (#301).
 #### The subset, field by field
 
 The tables below are the machine-checked half of the same boundary:
-`src/cli/exportK6/__tests__/documentedSubset.test.ts` reads them out of this
-page and compares them against `schema/scenario.schema.json` and the runtime's
+`apps/cli/src/exportK6/__tests__/documentedSubset.test.ts` reads them out of this
+page and compares them against `packages/core/schema/scenario.schema.json` and the runtime's
 own source, so a scenario node type or an `evSettings` field cannot be added to
 the domain — or quietly implemented in the export — without this page moving
 too. A missing or wrongly-marked row fails that test with a message naming the

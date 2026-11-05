@@ -3,13 +3,13 @@ title: Open EV Directory
 type: entity
 summary: The external vehicle catalog that vehicle profiles are imported from — endpoints the simulator calls, daemon and Local-mode configuration, key handling and redaction, error mapping, the CORS caveat and a reproducible smoke test.
 sources:
-  - src/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient.ts
-  - src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md
-  - src/cp/domain/vehicle/VehicleCatalog.ts
-  - src/cli/vehicleCatalogConfig.ts
-  - src/cli/server/vehicleRpc.ts
-  - src/console/lib/vehicleCatalog.ts
-  - src/protocol/redaction.ts
+  - packages/core/src/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient.ts
+  - packages/core/src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md
+  - packages/core/src/cp/domain/vehicle/VehicleCatalog.ts
+  - apps/cli/src/vehicleCatalogConfig.ts
+  - apps/cli/src/server/vehicleRpc.ts
+  - apps/web/src/console/lib/vehicleCatalog.ts
+  - packages/contracts/src/redaction.ts
   - https://github.com/juherr/open-ev-directory
   - "issue #458"
 related:
@@ -31,9 +31,9 @@ vehicles: makes, models, variants, the specifications each upstream source
 gives (side by side, never merged) and DC charging curves with their quality.
 The simulator reads it **only to import and refresh** [vehicle profiles](../concepts/vehicle-profiles.md)
 (#458); nothing at run time calls it. The simulator side is the `VehicleCatalog`
-port ([`VehicleCatalog.ts`](../../src/cp/domain/vehicle/VehicleCatalog.ts)) and
+port ([`VehicleCatalog.ts`](../../packages/core/src/cp/domain/vehicle/VehicleCatalog.ts)) and
 its adapter
-[`OpenEvDirectoryClient.ts`](../../src/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient.ts),
+[`OpenEvDirectoryClient.ts`](../../packages/core/src/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient.ts),
 which runs in the [daemon](daemon.md) and, in Local mode, in the browser.
 
 ## Endpoints used
@@ -47,7 +47,7 @@ which runs in the [daemon](daemon.md) and, in Local mode, in the browser.
 
 Every successful response is validated against the shapes in `dto.ts`, then
 against the limits the simulator carries a catalog answer under (the
-`src/protocol/vehicle.ts` schemas the daemon's RPC results use: at most 64
+`packages/contracts/src/vehicle.ts` schemas the daemon's RPC results use: at most 64
 records or curves, 512 points, non-negative powers, SoC within 0–100 %, bounded
 strings); a body that is not JSON, does not match or exceeds them is
 `invalid_response`, in both console modes alike. Ids sent as path segments
@@ -55,7 +55,7 @@ must be letters, digits, `_` or `-` (`invalid_request` otherwise, before any
 call). Each request has a **10 s**
 timeout. The adapter is pinned to the API's published response examples by
 contract fixtures in
-[`__fixtures__/`](../../src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md)
+[`__fixtures__/`](../../packages/core/src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/LICENSE.md)
 (copies, reformatted by the repository's formatter; test data only, under the upstream sources' licenses).
 
 ## Configuration
@@ -88,7 +88,7 @@ The console in Remote mode imports through the daemon's
 import is off, the import dialog says so.
 
 **Browser-only Local mode.** The console calls the API directly
-([`vehicleCatalog.ts`](../../src/console/lib/vehicleCatalog.ts)) with a key
+([`vehicleCatalog.ts`](../../apps/web/src/console/lib/vehicleCatalog.ts)) with a key
 you type in the import dialog. The key is held **in memory only** — never in
 `localStorage`, IndexedDB, an export or a URL — so it is gone when the tab
 closes (**Forget** drops it sooner). The base URL starts as the public
@@ -117,7 +117,7 @@ redirect leaves it, which a test pins for the daemon's Bun.
 No error message the adapter builds contains the key: messages carry the
 request path and what the API said, a problem `detail` that echoes the key is
 scrubbed, and the underlying fetch error is not kept as a cause. The shared
-redaction ([`redaction.ts`](../../src/protocol/redaction.ts)) also replaces
+redaction ([`redaction.ts`](../../packages/contracts/src/redaction.ts)) also replaces
 any `Bearer <token>` and any
 `apiKey` / `api_key` assignment in text with `[redacted]`, and drops an
 `apiKey` field (any spelling with `-` / `_`) from redacted objects. That
@@ -165,8 +165,8 @@ Against the public instance, with no setting at all (`bun run build` first,
 so `--web-console` has a `dist/`):
 
 ```bash
-bun src/cli/main.ts --http-port 9700 --web-console
-# optional, a personal key: OED_API_KEY=evd_live_… bun src/cli/main.ts …
+bun apps/cli/src/main.ts --http-port 9700 --web-console
+# optional, a personal key: OED_API_KEY=evd_live_… bun apps/cli/src/main.ts …
 ```
 
 Against a local Open EV Directory (or any stub serving the same paths),
@@ -182,7 +182,7 @@ docker compose up -d --wait   # PostgreSQL on host port 55432
 then point the daemon at it:
 
 ```bash
-bun src/cli/main.ts --http-port 9700 --web-console \
+bun apps/cli/src/main.ts --http-port 9700 --web-console \
   --oed-base-url http://localhost:8080
 ```
 

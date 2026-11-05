@@ -3,9 +3,9 @@ title: OCPP trace format (v1.1)
 type: concept
 summary: Implementation-independent JSON/JSONL record for one OCPP message exchange — the contract between traffic producers (this simulator, via `--trace-output` or the log adapter) and analyzers (OCPP DebugKit).
 sources:
-  - src/trace/OcppTraceRecord.ts
-  - src/trace/logEntryToTrace.ts
-  - src/cli/trace/TraceWriter.ts
+  - packages/trace/src/OcppTraceRecord.ts
+  - packages/trace/src/logEntryToTrace.ts
+  - apps/cli/src/trace/TraceWriter.ts
   - "issue #188"
 related:
   - ../entities/analyze.md
@@ -97,12 +97,12 @@ integration that was originally deferred).
 
 ## Producing records
 
-The adapter in [`src/trace/`](../../src/trace/) maps this simulator's JSONL log
+The adapter in [`packages/trace/src/`](../../packages/trace/src/) maps this simulator's JSONL log
 lines (`--log-format json`, the `logs.get` RPC, or the browser log-viewer
 download) into trace records:
 
 ```ts
-import { logLinesToTrace } from "../../src/trace/logEntryToTrace";
+import { logLinesToTrace } from "../../packages/trace/src/logEntryToTrace";
 
 const records = logLinesToTrace(jsonlLogLines, { ocppVersion: "1.6" });
 ```
@@ -111,7 +111,7 @@ const records = logLinesToTrace(jsonlLogLines, { ocppVersion: "1.6" });
 the `raw` field, and back-fills each CALLRESULT/CALLERROR `action` from the
 CALL that established its `messageId`. `logLineToTraceRecord` converts a single
 line (returning `null` for non-wire lines). The type lives in
-`src/trace/OcppTraceRecord.ts` and `OCPP_TRACE_SCHEMA_VERSION` is the current
+`packages/trace/src/OcppTraceRecord.ts` and `OCPP_TRACE_SCHEMA_VERSION` is the current
 version string.
 
 ## JSON Schema

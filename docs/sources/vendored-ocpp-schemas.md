@@ -1,9 +1,9 @@
 ---
-title: "Source: vendor/ocpp-schemas (OCA OCPP JSON schemas)"
+title: "Source: packages/ocpp/vendor/ocpp-schemas (OCA OCPP JSON schemas)"
 type: source
-summary: The official Open Charge Alliance message schemas for OCPP 1.6, 2.0.1 and 2.1, vendored verbatim from mobilityhouse/ocpp at a pinned commit; generated TypeScript types live in `src/ocpp/`.
+summary: The official Open Charge Alliance message schemas for OCPP 1.6, 2.0.1 and 2.1, vendored verbatim from mobilityhouse/ocpp at a pinned commit; generated TypeScript types live in `packages/ocpp/src/`.
 sources:
-  - vendor/ocpp-schemas/NOTICE
+  - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - scripts/fetch-ocpp-schemas.sh
   - scripts/generate-ocpp.ts
 related:
@@ -11,7 +11,7 @@ related:
 updated: 2026-09-03
 ---
 
-# Source: `vendor/ocpp-schemas/`
+# Source: `packages/ocpp/vendor/ocpp-schemas/`
 
 **What it is.** The official OCA OCPP message JSON Schemas for `v16`, `v201`
 and `v21`, vendored **verbatim** from
@@ -26,7 +26,7 @@ https://github.com/mobilityhouse/ocpp at commit
 - Refresh only through `scripts/fetch-ocpp-schemas.sh` (override the pin with
   `MOBILITYHOUSE_REF=<sha>`), which rewrites `NOTICE` with the new commit.
 - Generated TypeScript types / validators derived from them live under
-  `src/ocpp/` (`scripts/generate-ocpp.ts`) and are this project's own work.
+  `packages/ocpp/src/` (`scripts/generate-ocpp.ts`) and are this project's own work.
 
 **Why it matters for the wiki.** This is the ground truth for message field
 names and enums across the three JSON versions the simulator speaks

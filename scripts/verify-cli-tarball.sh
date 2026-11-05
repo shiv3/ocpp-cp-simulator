@@ -5,7 +5,7 @@
 # Why this exists (#320): the release workflow used to verify the tarball by
 # `tar -tf | grep`-ing for a handful of filenames. Every one of those greps
 # passed while the published package could not start at all, because
-# `package.json#files` omitted `src/data`, `src/ocpp`, `src/trace` and
+# `package.json#files` omitted `apps/web/src/data`, `packages/ocpp/src`, `packages/trace/src` and
 # `vendor/` — paths nothing grepped for. A check that asserts named files are
 # present cannot catch a path nobody thought to name; a check that runs the
 # installed package catches this and every future instance.
@@ -121,7 +121,7 @@ bun build --compile "$PKG_DIR/dist-cli/main.js" --outfile "$SCRATCH/compiled" > 
 
 # ---------------------------------------------------------------------------
 # Stage C — it serves. Boots the daemon WITH a charge point, because creating
-# a CP is what pulls in src/ocpp's validators (ChargePoint -> profiles ->
+# a CP is what pulls in packages/ocpp/src's validators (ChargePoint -> profiles ->
 # OCPPMessageHandlerV201 -> ocpp/validation/v201) — the Dockerfile carries the
 # same warning. The CSMS URL points at a closed port on purpose: the CP fails
 # to connect, which is fine, /v1/healthz must still answer 200.
@@ -155,7 +155,7 @@ DAEMON_PID=""
 
 # ---------------------------------------------------------------------------
 # Stage C2 — export-k6 writes its runtime. The runtime used to be copied from
-# src/cli/exportK6/runtime/ beside the running module, which a bundle does not
+# packages/k6-runtime/src/ beside the running module, which a bundle does not
 # have; it is embedded now (runtimeSources.ts). Run from the installed tree,
 # this is the check that the embedded copy reaches the export.
 # ---------------------------------------------------------------------------

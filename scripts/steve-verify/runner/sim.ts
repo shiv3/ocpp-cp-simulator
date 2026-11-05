@@ -1,5 +1,5 @@
 /**
- * sim.ts -- docker-spawned simulator process: launches `bun src/cli/main.ts
+ * sim.ts -- docker-spawned simulator process: launches `bun apps/cli/src/main.ts
  * --json` inside a container on SteVe's docker network (port of lib.sh's
  * sim_start), feeds it JSON commands directly over the child's stdin (no
  * intermediate feeder shell script -- lib.sh needed one only because its
@@ -54,7 +54,7 @@ export interface SimConfig {
   /** CSMS WebSocket URL, resolved from *inside* the docker network. */
   wsUrl: string;
   /** Repo root, bind-mounted read/write at /app so the container's `bun
-   *  src/cli/main.ts` runs this checkout's own source. */
+   *  apps/cli/src/main.ts` runs this checkout's own source. */
   repoRoot: string;
 }
 
@@ -163,7 +163,7 @@ export async function startSim(
       "/app",
       cfg.image,
       "bun",
-      "src/cli/main.ts",
+      "apps/cli/src/main.ts",
       "--ws-url",
       cfg.wsUrl,
       "--cp-id",

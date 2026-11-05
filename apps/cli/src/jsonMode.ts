@@ -1,0 +1,876 @@
+import {
+  DIAGNOSTICS_STATUSES,
+  FIRMWARE_STATUSES,
+  isOneOf,
+  UPLOAD_LOG_STATUSES,
+} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+import type { DataTransferData } from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+import type { AuthorizationCacheSeedEntry } from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+import * as readline from "readline";
+import * as fs from "fs";
+import {
+  hasStatusNotificationOptions,
+  OCPPStatus,
+  type StatusNotificationOptions,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import {
+  authorizationCacheSeedSchema,
+  dataTransferDataSchema,
+  METHODS,
+  scenarioWaitExtensionSecondsSchema,
+} from "@ocpp-cp-sim/contracts/index";
+import type {
+  OcppCallRequest,
+  RawFrameRequest,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+import { toJsonResponse, toJsonEvent } from "./output";
+import type { JsonCommand } from "./types";
+import type {
+  ScenarioDefinition,
+  ScenarioMode,
+} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+import type { HistoryOptions } from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+import {
+  METER_READING_CONTEXTS,
+  STOP_REASONS,
+  TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+import { SCENARIO_MODES } from "@ocpp-cp-sim/contracts/index";
+import {
+  cleanupSingleCpTarget,
+  getSingleCpCommandOps,
+  getSingleCpEventSource,
+  type SingleCpCommandTarget,
+  type SingleCpProcessTarget,
+} from "./singleCpTarget";
+
+const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = SCENARIO_MODES;
+
+const VALID_STATUSES = new Set(Object.values(OCPPStatus));
+
+function writeLine(obj: unknown): void {
+  process.stdout.write(`${JSON.stringify(obj)}\n`);
+}
+
+export async function startJsonMode(
+  service: SingleCpProcessTarget,
+): Promise<void> {
+  getSingleCpEventSource(service).onEvent((evt) => {
+    if (evt.event === "log") return;
+    writeLine(toJsonEvent(evt.event, evt.data));
+  });
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  });
+
+  rl.on("line", async (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let parsed: JsonCommand;
+    try {
+      parsed = JSON.parse(trimmed) as JsonCommand;
+    } catch {
+      writeLine(toJsonResponse(null, false, "Invalid JSON"));
+      return;
+    }
+
+    const id = parsed.id ?? null;
+
+    try {
+      const result = await handleJsonCommand(service, parsed);
+      writeLine(toJsonResponse(id, true, result));
+    } catch (err) {
+      writeLine(
+        toJsonResponse(
+          id,
+          false,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    }
+  });
+
+  rl.on("close", () => {
+    cleanupSingleCpTarget(service);
+    process.exit(0);
+  });
+}
+
+export async function handleJsonCommand(
+  service: SingleCpCommandTarget,
+  cmd: JsonCommand,
+): Promise<unknown> {
+  const params = cmd.params ?? {};
+  const ops = getSingleCpCommandOps(service);
+
+  switch (cmd.command) {
+    case "connect": {
+      await ops.connect();
+      return undefined;
+    }
+
+    case "disconnect": {
+      await ops.disconnect();
+      return undefined;
+    }
+
+    case "reset": {
+      await ops.reset();
+      return undefined;
+    }
+
+    case "status": {
+      return ops.getStatus();
+    }
+
+    case "start_transaction": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const tagId = requireString(params, "tagId");
+      await ops.startTransaction(connectorId, tagId, {
+        triggerReason: optionalEnum(
+          params,
+          "triggerReason",
+          TRANSACTION_EVENT_TRIGGER_REASONS,
+        ),
+        chargingState: optionalEnum(
+          params,
+          "chargingState",
+          TRANSACTION_CHARGING_STATES,
+        ),
+      });
+      return undefined;
+    }
+
+    case "stop_transaction": {
+      const connectorId = requirePositiveInt(params, "connector");
+      await ops.stopTransaction(connectorId, {
+        reason: optionalEnum(params, "reason", STOP_REASONS),
+        triggerReason: optionalEnum(
+          params,
+          "triggerReason",
+          TRANSACTION_EVENT_TRIGGER_REASONS,
+        ),
+      });
+      return undefined;
+    }
+
+    case "transaction_event": {
+      const connectorId = requirePositiveInt(params, "connector");
+      await ops.sendTransactionUpdate(connectorId, {
+        triggerReason: requireEnum(
+          params,
+          "triggerReason",
+          TRANSACTION_EVENT_TRIGGER_REASONS,
+        ),
+        chargingState: optionalEnum(
+          params,
+          "chargingState",
+          TRANSACTION_CHARGING_STATES,
+        ),
+        meterValues: optionalBoolean(params, "meterValues"),
+        context: optionalEnum(params, "context", METER_READING_CONTEXTS),
+      });
+      return undefined;
+    }
+
+    case "ev_disconnected": {
+      await ops.evDisconnected(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
+    case "set_meter_value": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const value = requireNumber(params, "value");
+      if (value < 0 || !Number.isInteger(value)) {
+        throw new Error("value must be a non-negative integer (Wh)");
+      }
+      await ops.setMeterValue(connectorId, value);
+      return undefined;
+    }
+
+    case "send_meter_value": {
+      const connectorId = requirePositiveInt(params, "connector");
+      await ops.sendMeterValue(
+        connectorId,
+        optionalEnum(params, "context", METER_READING_CONTEXTS),
+      );
+      return undefined;
+    }
+
+    case "heartbeat": {
+      await ops.sendHeartbeat();
+      return undefined;
+    }
+
+    case "diagnostics_status_notification": {
+      const status = requireEnum(params, "status", DIAGNOSTICS_STATUSES);
+      await ops.sendDiagnosticsStatusNotification(status);
+      return undefined;
+    }
+
+    case "firmware_status_notification": {
+      const status = requireEnum(params, "status", FIRMWARE_STATUSES);
+      const requestId =
+        params.requestId === undefined
+          ? undefined
+          : requireNonNegativeInt(params, "requestId");
+      if (requestId === undefined)
+        await ops.sendFirmwareStatusNotification(status);
+      else await ops.sendFirmwareStatusNotification(status, requestId);
+      return undefined;
+    }
+
+    case "log_status_notification": {
+      // #345: LogStatusNotification.req; the daemon's RPC schema holds the
+      // status vocabulary, standalone mode validates the same way here.
+      const status = requireEnum(params, "status", UPLOAD_LOG_STATUSES);
+      const requestId =
+        params.requestId === undefined
+          ? undefined
+          : requireNonNegativeInt(params, "requestId");
+      await ops.sendLogStatusNotification(status, requestId);
+      return undefined;
+    }
+
+    case "security_event_notification": {
+      const type = requireString(params, "type");
+      const techInfo =
+        params.techInfo === undefined
+          ? undefined
+          : requireString(params, "techInfo");
+      await ops.sendSecurityEventNotification(type, techInfo);
+      return undefined;
+    }
+
+    case "sign_certificate": {
+      const csr =
+        params.csr === undefined ? undefined : requireString(params, "csr");
+      await ops.sendSignCertificate(csr);
+      return undefined;
+    }
+
+    case "start_heartbeat": {
+      const interval = requireNumber(params, "interval");
+      if (interval <= 0) {
+        throw new Error("interval must be a positive number");
+      }
+      await ops.startHeartbeat(interval);
+      return undefined;
+    }
+
+    case "stop_heartbeat": {
+      await ops.stopHeartbeat();
+      return undefined;
+    }
+
+    case "authorize": {
+      const tagId = requireString(params, "tagId");
+      await ops.authorize(tagId);
+      return undefined;
+    }
+
+    case "data_transfer": {
+      // #348: station-initiated DataTransfer.req; the CSMS's answer is the
+      // result line. `data` is a string or an object, as the daemon's RPC
+      // schema admits.
+      const vendorId = requireString(params, "vendorId");
+      const messageId = optionalString(params, "messageId");
+      return ops.sendDataTransfer(
+        vendorId,
+        messageId,
+        optionalDataTransferData(params),
+      );
+    }
+
+    case "send_ocpp_call":
+      // #389: validated against the daemon's own schema, so JSON-Lines mode
+      // admits exactly what the control plane admits.
+      return ops.sendOcppCall(ocppCallRequest(params));
+
+    case "send_raw_frame":
+      // #393: same schema as the control plane's.
+      return ops.sendRawFrame(rawFrameRequest(params));
+
+    // #452: the Authorization Cache test seam. Seed and clear act whatever
+    // the cache switch says.
+    case "get_auth_cache":
+      return ops.getAuthorizationCache();
+
+    case "seed_auth_cache":
+      return { seeded: await ops.seedAuthorizationCache(seedEntries(params)) };
+
+    case "clear_auth_cache":
+      return { cleared: await ops.clearAuthorizationCache() };
+
+    case "update_connector_status": {
+      // Connector 0 represents the charge point itself (OCPP 1.6J), so accept
+      // any non-negative integer here, not just positive ones.
+      const connectorId = requireNonNegativeInt(params, "connector");
+      const status = requireString(params, "status");
+      if (!VALID_STATUSES.has(status as OCPPStatus)) {
+        throw new Error(
+          `Invalid status: ${status}. Valid: ${[...VALID_STATUSES].join(", ")}`,
+        );
+      }
+      const opts = readStatusNotificationOptions(params);
+      await ops.updateConnectorStatus(connectorId, status as OCPPStatus, opts);
+      return undefined;
+    }
+
+    case "list_scenario_templates": {
+      return ops.getScenarioTemplates();
+    }
+
+    case "load_scenario_template": {
+      const templateId = requireString(params, "templateId");
+      const connectorId = requirePositiveInt(params, "connector");
+      const evSettings = params.evSettings as Partial<EVSettings> | undefined;
+      const scenarioId = await ops.loadScenarioTemplate(
+        templateId,
+        connectorId,
+        evSettings,
+      );
+      return { scenarioId };
+    }
+
+    case "load_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      if (typeof params.file === "string") {
+        const content = fs.readFileSync(params.file, "utf-8");
+        const definition = JSON.parse(content) as ScenarioDefinition;
+        const scenarioId = await ops.loadScenario(connectorId, definition);
+        return { scenarioId };
+      }
+      if (params.scenario) {
+        const definition = params.scenario as ScenarioDefinition;
+        const scenarioId = await ops.loadScenario(connectorId, definition);
+        return { scenarioId };
+      }
+      throw new Error("Either 'file' or 'scenario' parameter is required");
+    }
+
+    case "list_scenarios": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return ops.listScenarios(connectorId);
+    }
+
+    case "run_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      // Legacy "mode" param is silently ignored — scenarios always run
+      // one-shot now. Kept tolerant so old clients don't break.
+      await ops.runScenario(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "scenario_status": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      return ops.getScenarioStatus(connectorId, scenarioId);
+    }
+
+    case "scenario_report": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const runId =
+        params.runId === undefined ? undefined : requireString(params, "runId");
+      return ops.getScenarioReport(connectorId, scenarioId, runId);
+    }
+
+    case "get_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      return ops.getScenario(connectorId, scenarioId);
+    }
+
+    case "stop_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.stopScenario(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "scenario_reset": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.resetScenario(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "step_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const force = params.force === true;
+      await ops.stepScenario(connectorId, scenarioId, force);
+      return undefined;
+    }
+
+    case "extend_scenario_wait": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const seconds = requireWaitExtensionSeconds(params);
+      await ops.extendScenarioWait(connectorId, scenarioId, seconds);
+      return undefined;
+    }
+
+    case "retry_scenario_wait": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.retryScenarioWait(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "continue_scenario_wait": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      await ops.continueScenarioWait(connectorId, scenarioId);
+      return undefined;
+    }
+
+    case "stop_all_scenarios": {
+      const connectorId = requirePositiveInt(params, "connector");
+      await ops.stopAllScenarios(connectorId);
+      return undefined;
+    }
+
+    case "remove_scenario": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const scenarioId = requireString(params, "scenarioId");
+      const removed = await ops.removeScenario(connectorId, scenarioId);
+      return { removed };
+    }
+
+    case "run_scenario_file": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const filePath = requireString(params, "file");
+      return ops.runScenarioFile(connectorId, filePath);
+    }
+
+    case "run_scenario_template": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const templateId = requireString(params, "templateId");
+      const evSettings = params.evSettings as Partial<EVSettings> | undefined;
+      // `strict` and `once` (#352) ride along exactly as the RPC table
+      // declares them; before, this surface silently dropped `strict`.
+      const strict = optionalBoolean(params, "strict");
+      const once = optionalBoolean(params, "once");
+      return ops.runScenarioTemplate(connectorId, templateId, evSettings, {
+        ...(strict === undefined ? {} : { strict }),
+        ...(once === undefined ? {} : { once }),
+      });
+    }
+
+    case "set_ev_settings": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const settings = requireObject(
+        params,
+        "settings",
+      ) as unknown as EVSettings;
+      await ops.setEVSettings(connectorId, settings);
+      return undefined;
+    }
+
+    case "get_ev_settings": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return ops.getEVSettings(connectorId);
+    }
+
+    case "set_auto_traffic_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const config = requireObject(
+        params,
+        "config",
+      ) as unknown as AutoTrafficConfig;
+      await ops.setAutoTrafficConfig(connectorId, config);
+      return undefined;
+    }
+
+    case "get_auto_traffic_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return ops.getAutoTrafficConfig(connectorId);
+    }
+
+    case "set_auto_meter_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const config = requireObject(
+        params,
+        "config",
+      ) as unknown as AutoMeterValueConfig;
+      await ops.setAutoMeterValueConfig(connectorId, config);
+      return undefined;
+    }
+
+    case "get_auto_meter_config": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return ops.getAutoMeterValueConfig(connectorId);
+    }
+
+    case "set_auto_reset_to_available": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const enabled = requireBoolean(params, "enabled");
+      await ops.setAutoResetToAvailable(connectorId, enabled);
+      return undefined;
+    }
+
+    case "set_mode": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const mode = requireString(params, "mode");
+      if (!VALID_SCENARIO_MODES.includes(mode as ScenarioMode)) {
+        throw new Error(
+          `Invalid mode: ${mode}. Valid: ${VALID_SCENARIO_MODES.join(", ")}`,
+        );
+      }
+      await ops.setConnectorMode(connectorId, mode as ScenarioMode);
+      return undefined;
+    }
+
+    case "set_soc": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const raw = params?.soc;
+      const soc: number | null =
+        raw === null || raw === undefined
+          ? null
+          : typeof raw === "number"
+            ? raw
+            : (() => {
+                throw new Error("'soc' must be a number or null");
+              })();
+      await ops.setConnectorSoc(connectorId, soc);
+      return undefined;
+    }
+
+    case "set_soc_meter_sync": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const enabled = requireBoolean(params, "enabled");
+      await ops.setConnectorSocMeterSync(connectorId, enabled);
+      return undefined;
+    }
+
+    case "get_charging_profiles": {
+      const connectorId = requirePositiveInt(params, "connector");
+      return ops.getChargingProfiles(connectorId);
+    }
+
+    case "remove_connector": {
+      const connectorId = requirePositiveInt(params, "connector");
+      const removed = await ops.removeConnector(connectorId);
+      return { removed };
+    }
+
+    case "get_state_history": {
+      const options = parseHistoryOptions(params.options);
+      return ops.getStateHistory(options);
+    }
+
+    default:
+      throw new Error(`Unknown command: ${cmd.command}`);
+  }
+}
+
+export function requirePositiveInt(
+  params: Record<string, unknown>,
+  key: string,
+): number {
+  const val = params[key];
+  if (typeof val !== "number" || !Number.isInteger(val) || val < 1) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected positive integer)`,
+    );
+  }
+  return val;
+}
+
+export function requireNonNegativeInt(
+  params: Record<string, unknown>,
+  key: string,
+): number {
+  const val = params[key];
+  if (typeof val !== "number" || !Number.isInteger(val) || val < 0) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected non-negative integer)`,
+    );
+  }
+  return val;
+}
+
+export function requireNumber(
+  params: Record<string, unknown>,
+  key: string,
+): number {
+  const val = params[key];
+  if (typeof val !== "number" || isNaN(val)) {
+    throw new Error(`Missing or invalid parameter: ${key} (expected number)`);
+  }
+  return val;
+}
+
+/**
+ * A string parameter that may be absent, but must be a non-empty string when
+ * present. Used where the domain has its own fallback — `tagId`, which a
+ * charge point with an idTag pool fills in itself (#299).
+ */
+export function optionalString(
+  params: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const val = params[key];
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== "string" || val.length === 0) {
+    throw new Error(`Invalid parameter: ${key} (expected non-empty string)`);
+  }
+  return val;
+}
+
+export function requireString(
+  params: Record<string, unknown>,
+  key: string,
+): string {
+  const val = params[key];
+  if (typeof val !== "string" || val.length === 0) {
+    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
+  }
+  return val;
+}
+
+/**
+ * A string parameter that must be one of `allowed` when present. The error
+ * names the vocabulary so a caller who misspelt an OCPP enum value sees the
+ * spelling that would have worked (#335).
+ */
+export function optionalEnum<T extends string>(
+  params: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+): T | undefined {
+  const val = params[key];
+  if (val === undefined || val === null) return undefined;
+  if (!isOneOf(val, allowed)) {
+    throw new Error(
+      `Invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
+    );
+  }
+  return val;
+}
+
+export function requireEnum<T extends string>(
+  params: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+): T {
+  const val = optionalEnum(params, key, allowed);
+  if (val === undefined) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
+    );
+  }
+  return val;
+}
+
+/**
+ * `data_transfer`'s `data` (#348): validated against the daemon's own schema
+ * (`dataTransferDataSchema`), so standalone JSON mode admits exactly what the
+ * control plane admits (#382). `null` counts as absent.
+ */
+export function optionalDataTransferData(
+  params: Record<string, unknown>,
+): DataTransferData | undefined {
+  const val = params.data;
+  if (val === undefined || val === null) return undefined;
+  const parsed = dataTransferDataSchema.safeParse(val);
+  if (!parsed.success) {
+    throw new Error(
+      "Invalid parameter: data (expected a string of at most 64K characters or an object of at most 64 KB)",
+    );
+  }
+  return parsed.data;
+}
+
+/** `seed_auth_cache`'s entries (#452), checked by the control
+ *  plane's own schema (`authorizationCacheSeedSchema`, #382). */
+function seedEntries(
+  params: Record<string, unknown>,
+): AuthorizationCacheSeedEntry[] {
+  const parsed = authorizationCacheSeedSchema.safeParse(params.entries);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(
+        parsed.error.issues.map((issue) =>
+          ["entries", ...issue.path].join("."),
+        ),
+      ),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
+  }
+  return parsed.data;
+}
+
+/** `send_ocpp_call`'s params (#389), checked by `METHODS.send_ocpp_call`. */
+function ocppCallRequest(params: Record<string, unknown>): OcppCallRequest {
+  const parsed = METHODS.send_ocpp_call.params.safeParse(params);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
+  }
+  return parsed.data;
+}
+
+/** `send_raw_frame`'s params (#393), checked by `METHODS.send_raw_frame`. */
+function rawFrameRequest(params: Record<string, unknown>): RawFrameRequest {
+  const parsed = METHODS.send_raw_frame.params.safeParse(params);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join("."))),
+    ];
+    throw new Error(`Missing or invalid parameter: ${fields.join(", ")}`);
+  }
+  return parsed.data;
+}
+
+/** `extend_scenario_wait`'s `seconds`, validated by the control plane's own
+ *  schema (#240); only the error message repeats its 1–3600 bounds. */
+export function requireWaitExtensionSeconds(
+  params: Record<string, unknown>,
+): number {
+  const parsed = scenarioWaitExtensionSecondsSchema.safeParse(params.seconds);
+  if (!parsed.success) {
+    throw new Error(
+      "Missing or invalid parameter: seconds (expected an integer from 1 to 3600)",
+    );
+  }
+  return parsed.data;
+}
+
+export function optionalBoolean(
+  params: Record<string, unknown>,
+  key: string,
+): boolean | undefined {
+  const val = params[key];
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== "boolean") {
+    throw new Error(`Invalid parameter: ${key} (expected boolean)`);
+  }
+  return val;
+}
+
+export function requireBoolean(
+  params: Record<string, unknown>,
+  key: string,
+): boolean {
+  const val = params[key];
+  if (typeof val !== "boolean") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
+  }
+  return val;
+}
+
+export function requireObject(
+  params: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const val = params[key];
+  if (typeof val !== "object" || val === null || Array.isArray(val)) {
+    throw new Error(`Missing or invalid parameter: ${key} (expected object)`);
+  }
+  return val as Record<string, unknown>;
+}
+
+function readStatusNotificationOptions(
+  params: Record<string, unknown>,
+): StatusNotificationOptions | undefined {
+  const opts: StatusNotificationOptions = {};
+  readOptionalString(params, "errorCode", opts);
+  readOptionalString(params, "info", opts);
+  readOptionalString(params, "vendorErrorCode", opts);
+  readOptionalString(params, "vendorId", opts);
+  readOptionalTimestamp(params, "timestamp", opts);
+  readOptionalBoolean(params, "suppressChargingStateTransactionEvent", opts);
+  return hasStatusNotificationOptions(opts) ? opts : undefined;
+}
+
+function readOptionalString(
+  params: Record<string, unknown>,
+  key: "errorCode" | "info" | "vendorErrorCode" | "vendorId",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  if (typeof val !== "string") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
+  }
+  target[key] = val;
+}
+
+function readOptionalTimestamp(
+  params: Record<string, unknown>,
+  key: "timestamp",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  const date =
+    val instanceof Date ? val : typeof val === "string" ? new Date(val) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    throw new Error(
+      `Missing or invalid parameter: ${key} (expected ISO timestamp)`,
+    );
+  }
+  target[key] = date;
+}
+
+function readOptionalBoolean(
+  params: Record<string, unknown>,
+  key: "suppressChargingStateTransactionEvent",
+  target: StatusNotificationOptions,
+): void {
+  const val = params[key];
+  if (val === undefined) return;
+  if (typeof val !== "boolean") {
+    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
+  }
+  target[key] = val;
+}
+
+/**
+ * Convert a HistoryOptions object that arrived over JSON into the in-memory
+ * shape `StateHistory.getHistory` expects. fromTimestamp / toTimestamp are
+ * ISO strings on the wire but the comparator needs Date instances.
+ */
+function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: HistoryOptions = {};
+  if (typeof src.entity === "string") {
+    out.entity = src.entity as HistoryOptions["entity"];
+  }
+  if (typeof src.entityId === "number") {
+    out.entityId = src.entityId;
+  }
+  if (typeof src.transitionType === "string") {
+    out.transitionType = src.transitionType as HistoryOptions["transitionType"];
+  }
+  if (typeof src.limit === "number") {
+    out.limit = src.limit;
+  }
+  if (typeof src.fromTimestamp === "string") {
+    out.fromTimestamp = new Date(src.fromTimestamp);
+  } else if (src.fromTimestamp instanceof Date) {
+    out.fromTimestamp = src.fromTimestamp;
+  }
+  if (typeof src.toTimestamp === "string") {
+    out.toTimestamp = new Date(src.toTimestamp);
+  } else if (src.toTimestamp instanceof Date) {
+    out.toTimestamp = src.toTimestamp;
+  }
+  return out;
+}

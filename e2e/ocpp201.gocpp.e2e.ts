@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { ChargePoint } from "../src/cp/domain/charge-point/ChargePoint";
+import { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
-} from "../src/cp/domain/types/OcppTypes";
+} from "../packages/core/src/cp/domain/types/OcppTypes";
 import {
   startCsms,
   stopAllCsms,

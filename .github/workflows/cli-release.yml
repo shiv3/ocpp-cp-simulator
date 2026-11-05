@@ -116,10 +116,10 @@ jobs:
           ls -lh "${TARBALL}" ocpp-cp-simulator.tgz
 
       # This used to be three `tar -tf | grep` steps asserting that named
-      # files (src/protocol/, src/scenario/scenarioSchemaValidator.ts,
-      # schema/scenario.schema.json) were in the listing. All three passed on
-      # a tarball that could not run at all, because `files` omitted src/data,
-      # src/ocpp, src/trace and vendor/ — paths no grep named (#320). A
+      # files (packages/contracts/src/, packages/core/src/scenario/scenarioSchemaValidator.ts,
+      # packages/core/schema/scenario.schema.json) were in the listing. All three passed on
+      # a tarball that could not run at all, because `files` omitted apps/web/src/data,
+      # packages/ocpp/src, packages/trace/src and vendor/ — paths no grep named (#320). A
       # presence check can only ever catch the omissions someone already
       # thought of. This installs the tarball into a throwaway global prefix
       # and boots it instead: --help, the full import graph, the daemon's

@@ -1,0 +1,852 @@
+// apps/cli/src/exportK6/__tests__/interpreter.test.ts
+import { describe, expect, it, vi } from "vitest";
+import { runScenario } from "@ocpp-cp-sim/k6-runtime/interpreter";
+import { wire16 } from "@ocpp-cp-sim/k6-runtime/wire/v16";
+import type { ScenarioJson } from "@ocpp-cp-sim/k6-runtime/types";
+import { FakeHost } from "./support/fakeHost";
+
+function scenario(
+  nodes: Array<{ id: string; type: string; data?: Record<string, unknown> }>,
+  edges: Array<[string, string]>,
+): ScenarioJson {
+  return {
+    id: "s",
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: n.type,
+      data: n.data ?? { label: n.id },
+    })),
+    edges: edges.map(([source, target]) => ({ source, target })),
+  };
+}
+
+describe("runScenario", () => {
+  it("walks a sequential charge flow and tracks the transaction id", async () => {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      transactionId: 42,
+      idTagInfo: { status: "Accepted" },
+    });
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "statusChange", data: { status: "Preparing" } },
+        { id: "c", type: "transaction", data: { action: "start", tagId: "T" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: { value: 1000, sendMessage: true },
+        },
+        {
+          id: "e",
+          type: "transaction",
+          data: { action: "stop", stopReason: "Local" },
+        },
+        { id: "f", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result).toEqual({ completed: true, steps: 5 });
+    expect(host.sent.map((c) => c.action)).toEqual([
+      "StatusNotification", // Preparing
+      "StartTransaction",
+      "StatusNotification", // Charging (implicit on start)
+      "MeterValues",
+      "StopTransaction",
+      "StatusNotification", // Finishing (implicit on stop)
+    ]);
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(stop?.payload.transactionId).toBe(42);
+    expect(stop?.payload.meterStop).toBe(1000);
+    expect(stop?.payload.reason).toBe("Local");
+  });
+
+  it("delay sleeps for delaySeconds", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "delay", data: { delaySeconds: 3 } },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    expect(host.slept).toEqual([3000]);
+  });
+
+  it("remoteStartTrigger waits and feeds the idTag into transaction start", async () => {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      transactionId: 1,
+      idTagInfo: { status: "Accepted" },
+    });
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "remoteStartTrigger", data: {} },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        { id: "d", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+      ],
+    );
+    const run = runScenario(host, wire16, s);
+    host.emitCsmsCall("RemoteStartTransaction", { idTag: "REMOTE-1" });
+    await run;
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    expect(start?.payload.idTag).toBe("REMOTE-1");
+  });
+
+  it("runs parallel branches and joins before finishing", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "dataTransfer", data: { vendorId: "v1" } },
+        { id: "c", type: "dataTransfer", data: { vendorId: "v2" } },
+      ],
+      [
+        ["a", "b"],
+        ["a", "c"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(true);
+    expect(host.sent.map((c) => c.payload.vendorId).sort()).toEqual([
+      "v1",
+      "v2",
+    ]);
+  });
+
+  it("applies armed nodes to the host", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "unlockOutcome", data: { outcome: "UnlockFailed" } },
+        {
+          id: "c",
+          type: "responseOverride",
+          data: { action: "Reset", status: "Rejected" },
+        },
+        { id: "d", type: "configSet", data: { key: "K", value: "V" } },
+        { id: "e", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    expect(host.unlock).toBe("UnlockFailed");
+    expect(host.overrides).toEqual([["Reset", "Rejected"]]);
+    expect(host.configs).toEqual([["K", "V"]]);
+  });
+
+  it("auto-increment meter stops at maxValue and sends each tick", async () => {
+    // Park the walk on a csmsCallTrigger so the background meter loop runs to
+    // its own maxValue stop condition — no dependence on microtask ordering
+    // between the walk and the loop.
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: {
+            value: 0,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            incrementAmount: 500,
+            stopMode: "manual",
+            maxValue: 1000,
+          },
+        },
+        { id: "c", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "d", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+      ],
+    );
+    const run = runScenario(host, wire16, s);
+    const meterCalls = () =>
+      host.sent.filter((c) => c.action === "MeterValues");
+    // value=0 with sendMessage sends once immediately, then 2 ticks reach maxValue=1000.
+    await vi.waitFor(() => expect(meterCalls().length).toBe(3));
+    host.emitCsmsCall("Ping", {});
+    const result = await run;
+    expect(result.completed).toBe(true);
+    const values = meterCalls().map(
+      (c) =>
+        (
+          c.payload.meterValue as Array<{
+            sampledValue: Array<{ value: string }>;
+          }>
+        )[0].sampledValue[0].value,
+    );
+    expect(values).toEqual(["0", "500", "1000"]);
+  });
+
+  it("stops a still-running auto-meter loop when the scenario ends", async () => {
+    // Unlike the maxValue test above (which parks the walk until the loop
+    // self-terminates), this loop has no maxTime/maxValue/curve and would
+    // run forever unless runScenario's `finally` actively stops it. If the
+    // finally-stop path were broken, this test would hang instead of
+    // resolving — that hang IS the assertion.
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: {
+            value: 0,
+            sendMessage: false,
+            autoIncrement: true,
+            incrementInterval: 1,
+            incrementAmount: 100,
+            stopMode: "manual",
+            // no maxTime/maxValue: the loop would run forever unless stopped
+          },
+        },
+        { id: "c", type: "delay", data: { delaySeconds: 0 } },
+        { id: "d", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(true); // resolving at all proves the finally stopped the loop
+  });
+
+  it("errors on transaction stop without an active transaction", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "transaction", data: { action: "stop" } },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(/transaction/i);
+  });
+
+  it("guards against infinite cycles with maxSteps", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "delay", data: { delaySeconds: 0 } },
+        { id: "c", type: "delay", data: { delaySeconds: 0 } },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "b"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s, { maxSteps: 10 });
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(/steps/);
+  });
+
+  it("sends {} for a notification node with a non-object payload", async () => {
+    const host = new FakeHost();
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "notification",
+          data: { messageType: "DataTransfer", payload: "not-an-object" },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    const sent = host.sent.find((c) => c.action === "DataTransfer");
+    expect(sent?.payload).toEqual({});
+  });
+
+  it("sends an ocppCall node's action and payload as authored (#389)", async () => {
+    const host = new FakeHost();
+    const payload = { connectorId: 1, errorCode: "NoError", status: "Faulted" };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "ocppCall",
+          data: { action: "StatusNotification", payload, skipValidation: true },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    await runScenario(host, wire16, s);
+    expect(host.sent).toContainEqual(
+      expect.objectContaining({ action: "StatusNotification", payload }),
+    );
+  });
+
+  it("an ocppCall answered with a CALLERROR carries on, like the simulator (#389)", async () => {
+    const host = new FakeHost();
+    host.callErrors.set("Heartbeat", "NotImplemented");
+    const result = await runScenario(host, wire16, ocppCallThenDataTransfer());
+    expect(result.completed).toBe(true);
+    expect(host.sent.map((c) => c.action)).toContain("DataTransfer");
+  });
+
+  it("an ocppCall that gets no answer still fails the run (#389)", async () => {
+    const host = new FakeHost();
+    host.failures.set("Heartbeat", new Error("Heartbeat timed out"));
+    const result = await runScenario(host, wire16, ocppCallThenDataTransfer());
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(/timed out/);
+    expect(host.sent.map((c) => c.action)).not.toContain("DataTransfer");
+  });
+
+  it("csmsCallTrigger with a payload condition skips non-matching calls (#240)", async () => {
+    const host = new FakeHost();
+    const events: Array<{ action: string; payload: Record<string, unknown> }> =
+      [
+        {
+          action: "ChangeConfiguration",
+          payload: { key: "Other", value: "1" },
+        },
+        {
+          action: "ChangeConfiguration",
+          payload: { key: "HeartbeatInterval", value: "30" },
+        },
+      ];
+    // host.waitForCsmsCall hands back the next queued event each call.
+    host.waitForCsmsCall = async () => {
+      const evt = events.shift();
+      if (!evt) throw new Error("no more queued CSMS calls");
+      return evt;
+    };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "csmsCallTrigger",
+          data: {
+            action: "ChangeConfiguration",
+            payload: { key: "HeartbeatInterval" },
+            timeout: 0,
+          },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(true);
+    expect(events.length).toBe(0); // both calls were consumed by the re-arm loop
+  });
+
+  it("csmsCallTrigger rejects a malformed payload condition like the CP runtime", async () => {
+    const host = new FakeHost();
+    host.waitForCsmsCall = async () => {
+      throw new Error("must not wait — the malformed condition fails first");
+    };
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "csmsCallTrigger",
+          data: { action: "Reset", payload: "Hard", timeout: 0 },
+        },
+        { id: "c", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+    );
+    const result = await runScenario(host, wire16, s);
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(
+      /csmsCallTrigger\(Reset\): payload condition must be a JSON object/,
+    );
+  });
+
+  it("errors when the scenario has no start node", async () => {
+    const host = new FakeHost();
+    const result = await runScenario(
+      host,
+      wire16,
+      scenario([{ id: "x", type: "end" }], []),
+    );
+    expect(result.completed).toBe(false);
+    expect(result.error).toMatch(/start/);
+  });
+});
+
+describe("k6 auto-meter curve is session-relative (#301)", () => {
+  /**
+   * The exported runtime is a second implementation of the same scenario
+   * semantics, so a change to how a scenario behaves has to reach both. The
+   * curve node used to assign its interpolated value to the register outright,
+   * which is the pre-#301 daemon behaviour: on any session after the first the
+   * meter rewound, and a `meterStop` could land below its own `meterStart`.
+   */
+  function curveScenario(
+    startValueWh: number,
+    points: Array<{ time: number; value: number }> = [
+      { time: 0, value: 0 },
+      { time: 3, value: 3 },
+    ],
+  ) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        // Set the register to where a previous session left it.
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            useCurve: true,
+            curvePoints: points,
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  /** The FakeHost answers `{}` by default, which the interpreter reads as a
+   *  refused StartTransaction; script an acceptance so the walk gets past it. */
+  function acceptTransactions(host: FakeHost): void {
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+  }
+
+  function meterSamples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  it("never reports below the register the session started from", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(5000));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const samples = meterSamples(host);
+    // The curve tops out at 3 kWh, well below the 5 kWh already registered,
+    // so an absolute assignment would send values far under where the session
+    // started — the rewind this guards.
+    for (const value of samples) expect(value).toBeGreaterThanOrEqual(5000);
+    // And it climbs: 1 kWh a second on top of the 5 kWh already registered.
+    expect(samples[samples.length - 1]).toBeGreaterThan(5000);
+  });
+
+  it("never sends a meterStop below its own meterStart", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(5000));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(start).toBeDefined();
+    expect(stop).toBeDefined();
+    expect(Number(stop!.payload.meterStop)).toBeGreaterThanOrEqual(
+      Number(start!.payload.meterStart),
+    );
+  });
+
+  it("still starts from zero on a connector whose register is zero", async () => {
+    const host = new FakeHost();
+    acceptTransactions(host);
+    const run = runScenario(host, wire16, curveScenario(0));
+    await vi.waitFor(() =>
+      expect(meterSamples(host).length).toBeGreaterThan(2),
+    );
+    host.emitCsmsCall("Ping", {});
+    await run;
+    expect(meterSamples(host)[0]).toBe(0);
+  });
+});
+
+describe("k6 puts an integral energy register on the wire (#301)", () => {
+  it("rounds a fractional increment instead of sending a decimal", async () => {
+    // A strict CSMS rejects a fractional meterStop with a FormationViolation.
+    // The interpreter keeps the unrounded value so a sub-watt-hour step still
+    // accumulates — the same carry the daemon performs — and the wire builder
+    // rounds.
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const s = scenario(
+      [
+        { id: "a", type: "start" },
+        { id: "b", type: "transaction", data: { action: "start" } },
+        {
+          id: "c",
+          type: "meterValue",
+          data: {
+            value: 0,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            incrementAmount: 0.4,
+            stopMode: "manual",
+            maxValue: 2,
+          },
+        },
+        { id: "d", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "e", type: "transaction", data: { action: "stop" } },
+        { id: "f", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+      ],
+    );
+    const run = runScenario(host, wire16, s);
+    const values = () =>
+      host.sent
+        .filter((c) => c.action === "MeterValues")
+        .map(
+          (c) =>
+            (
+              c.payload.meterValue as Array<{
+                sampledValue: Array<{ value: string }>;
+              }>
+            )[0].sampledValue[0].value,
+        );
+    await vi.waitFor(() => expect(values().length).toBeGreaterThan(4));
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    // Every sample is an integer string...
+    for (const v of values()) expect(v).toMatch(/^-?\d+$/);
+    // ...and the fraction is carried rather than discarded: 0.4 a tick reaches
+    // 1 by the third tick and 2 by the fifth, instead of sticking at 0.
+    expect(values().slice(0, 6)).toEqual(["0", "0", "1", "1", "2", "2"]);
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    expect(Number.isInteger(Number(stop!.payload.meterStop))).toBe(true);
+  });
+});
+
+describe("k6 offsets a curve by its own start, not by the register (#301)", () => {
+  /**
+   * The same defect the daemon carried: adding the register alone assumes a
+   * zero-based curve, so a run at 5 kWh on a 5→8 kWh curve jumps to 10 kWh
+   * and delivers twice what the curve describes.
+   */
+  function nonZeroCurveScenario(startValueWh: number) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 1,
+            useCurve: true,
+            // 5 → 8 kWh: three kilowatt-hours of delivery, whatever the
+            // register happens to read.
+            curvePoints: [
+              { time: 0, value: 5 },
+              { time: 3, value: 8 },
+            ],
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  function samples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  it("delivers the curve's own span rather than its absolute value", async () => {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const run = runScenario(host, wire16, nonZeroCurveScenario(5000));
+    await vi.waitFor(() => expect(samples(host).length).toBeGreaterThan(3));
+    host.emitCsmsCall("Ping", {});
+    await run;
+
+    const seen = samples(host);
+    // Never jumps by the curve's own 5 kWh ordinate…
+    for (const value of seen) {
+      expect(value).toBeGreaterThanOrEqual(5000);
+      expect(value).toBeLessThanOrEqual(8000);
+    }
+    // …and delivers exactly the 3 kWh the curve spans.
+    const stop = host.sent.find((c) => c.action === "StopTransaction");
+    const start = host.sent.find((c) => c.action === "StartTransaction");
+    expect(
+      Number(stop!.payload.meterStop) - Number(start!.payload.meterStart),
+    ).toBe(3000);
+  });
+});
+
+describe("k6 baselines a curve at session start, not at its earliest point (#301)", () => {
+  /**
+   * `curveStartKwh` asked the interpolator for `-Infinity`, which clamps
+   * to the curve's *earliest* point. `MeterValueScheduler` baselines with
+   * `getMeterValueAtTime(0, config)` — the value at **session start**. The two
+   * are the same answer for any curve beginning at or after `t = 0`, and
+   * different for one that begins before it and crosses session start, which
+   * `packages/core/schema/scenario.schema.json` permits (`curvePoint.time` is a plain
+   * `number`, no minimum) and the curve editor accepts (its time input has no
+   * `min`).
+   *
+   * This is the mirror image of the finding withdrawn on the same file: there
+   * the export reproduced the simulator, so clamping the exporter alone would
+   * have manufactured a divergence. Here it diverges from the simulator, so
+   * the exporter is the defect and the fix removes one.
+   */
+  function straddlingCurveScenario(
+    startValueWh: number,
+    points: Array<{ time: number; value: number }>,
+  ) {
+    return scenario(
+      [
+        { id: "a", type: "start" },
+        {
+          id: "b",
+          type: "meterValue",
+          data: { value: startValueWh, sendMessage: false },
+        },
+        { id: "c", type: "transaction", data: { action: "start" } },
+        {
+          id: "d",
+          type: "meterValue",
+          data: {
+            value: startValueWh,
+            sendMessage: true,
+            autoIncrement: true,
+            incrementInterval: 10,
+            useCurve: true,
+            curvePoints: points,
+          },
+        },
+        { id: "e", type: "csmsCallTrigger", data: { action: "Ping" } },
+        { id: "f", type: "transaction", data: { action: "stop" } },
+        { id: "g", type: "end" },
+      ],
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+        ["d", "e"],
+        ["e", "f"],
+        ["f", "g"],
+      ],
+    );
+  }
+
+  function samples(host: FakeHost): number[] {
+    return host.sent
+      .filter((c) => c.action === "MeterValues")
+      .map((c) =>
+        Number(
+          (
+            c.payload.meterValue as Array<{
+              sampledValue: Array<{ value: string }>;
+            }>
+          )[0].sampledValue[0].value,
+        ),
+      );
+  }
+
+  async function firstSample(
+    startWh: number,
+    points: Array<{ time: number; value: number }>,
+  ): Promise<number> {
+    const host = new FakeHost();
+    host.responses.set("StartTransaction", {
+      idTagInfo: { status: "Accepted" },
+      transactionId: 42,
+    });
+    const run = runScenario(
+      host,
+      wire16,
+      straddlingCurveScenario(startWh, points),
+    );
+    // samples[0] is the node's own initial publish at `startWh`; samples[1]
+    // is the auto-meter's first tick, which is the one the baseline decides.
+    await vi.waitFor(() => expect(samples(host).length).toBeGreaterThan(1));
+    host.emitCsmsCall("Ping", {});
+    await run;
+    return samples(host)[1]!;
+  }
+
+  it("delivers the simulator's 5 kWh, not 10, on a curve that starts before t=0", async () => {
+    // Points (-10s, 5 kWh) and (10s, 15 kWh). At t=0 the curve reads 10 kWh,
+    // so ten seconds in it has delivered 15 − 10 = 5 kWh — which is what
+    // `MeterValueScheduler` does. Baselined at the earliest point (5) the
+    // export delivered 15 − 5 = 10 kWh, twice the simulator's answer.
+    const first = await firstSample(5000, [
+      { time: -10, value: 5 },
+      { time: 10, value: 15 },
+    ]);
+    expect(first).toBe(10_000);
+  });
+
+  it("is unchanged for a curve that begins exactly at t=0", async () => {
+    // Non-discriminating guard: at or after session start the earliest point
+    // and the value at t=0 are the same reading, and this must stay true.
+    const first = await firstSample(5000, [
+      { time: 0, value: 5 },
+      { time: 10, value: 8 },
+    ]);
+    expect(first).toBe(8000);
+  });
+
+  it("is unchanged for a curve that begins after t=0", async () => {
+    // Also non-discriminating: `evaluateCurveKwh` clamps below the first
+    // point, so t=0 reads that point either way.
+    const first = await firstSample(5000, [
+      { time: 5, value: 2 },
+      { time: 10, value: 6 },
+    ]);
+    expect(first).toBe(9000);
+  });
+});
+
+function ocppCallThenDataTransfer(): ScenarioJson {
+  return scenario(
+    [
+      { id: "a", type: "start" },
+      {
+        id: "b",
+        type: "ocppCall",
+        data: { action: "Heartbeat", payload: {} },
+      },
+      { id: "c", type: "dataTransfer", data: { vendorId: "after" } },
+      { id: "d", type: "end" },
+    ],
+    [
+      ["a", "b"],
+      ["b", "c"],
+      ["c", "d"],
+    ],
+  );
+}

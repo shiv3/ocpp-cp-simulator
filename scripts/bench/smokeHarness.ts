@@ -22,7 +22,7 @@ export const RUN_BUDGET_MS = 180_000;
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 const BENCH_SCRIPT = join(import.meta.dir, "fleet-bench.ts");
-const DAEMON_SCRIPT = join(REPO_ROOT, "src", "cli", "main.ts");
+const DAEMON_SCRIPT = join(REPO_ROOT, "apps", "cli", "src", "main.ts");
 
 // ---------------------------------------------------------------------------
 // A mock CSMS that answers the whole transaction cycle.

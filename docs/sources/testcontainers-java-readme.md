@@ -43,4 +43,4 @@ from `examples/testcontainers-java/`.
 
 **Status.** Prototype, not wired into the simulator's own CI. The identical
 RPC sequence is guarded in CI by
-`src/cli/server/__tests__/harnessScenarioVerdict.bun.test.ts`.
+`apps/cli/src/server/__tests__/harnessScenarioVerdict.bun.test.ts`.

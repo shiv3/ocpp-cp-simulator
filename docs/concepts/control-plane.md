@@ -3,9 +3,9 @@ title: Socket.IO control plane
 type: concept
 summary: The one wire contract every client of the daemon uses — `rpc` acks for commands (CP-scoped and daemon-level methods), `event` push envelopes with room-scoped subscriptions, closed error codes, zod-validated schemas.
 sources:
-  - src/protocol/
-  - src/protocol/__tests__/importBoundary.test.ts (#578)
-  - src/cli/server/
+  - packages/contracts/src/
+  - packages/contracts/src/__tests__/importBoundary.test.ts (#578)
+  - apps/cli/src/server/
   - scripts/poc/README.md
 related:
   - ../entities/daemon.md
@@ -73,17 +73,17 @@ wait, or not loaded on that connector — or an extension of a wait that has no
 timeout — answers
 `invalid_params` with the reason (#240). It used to answer `internal`.
 
-The protocol schemas live in `src/protocol/` and are validated with `zod`.
-`src/protocol/` imports nothing from `src/cp/` or any other part of the
+The protocol schemas live in `packages/contracts/src/` and are validated with `zod`.
+`packages/contracts/src/` imports nothing from `packages/core/src/cp/` or any other part of the
 repository (third-party packages only), at runtime or type-only, so it can
 become a standalone package that the charge-point core depends on and never
 the reverse (#578). The vocabularies the schemas share with the charge point
 (connector statuses, transaction reasons, authorization statuses, timeline
 kinds, scenario verdicts, the vehicle profile data model, `idTokenKey`, the
-text redactor) are defined there; the `src/cp` modules that used to define
+text redactor) are defined there; the `packages/core/src/cp` modules that used to define
 them re-export them under their old paths.
-`src/protocol/__tests__/importBoundary.test.ts` fails on any new import from
-outside `src/protocol/`.
+`packages/contracts/src/__tests__/importBoundary.test.ts` fails on any new import from
+outside `packages/contracts/src/`.
 On the daemon, Socket.IO and MCP parse a method's params once, against its
 `METHODS` schema, and the handler receives the parsed value, typed from that
 schema (#383). Keys a schema does not declare are dropped before the handler
@@ -171,7 +171,7 @@ bucket with the same numbers).
 > Scenario definitions (the `scenario` param above, and the file read by
 > `load_scenario`'s `file` param / `run_scenario_file`) follow
 > [Scenario format](scenario-format.md) and its published
-> [JSON Schema](../../schema/scenario.schema.json). Validation against that
+> [JSON Schema](../../packages/core/schema/scenario.schema.json). Validation against that
 > schema is advisory — a mismatch is logged, not rejected — with one exception:
 > the fields the schema marks `required` (`id`, `name`, `targetType`, `nodes`,
 > `edges`) are a hard gate, because the runtime keys on them. Without `id` a
@@ -180,7 +180,7 @@ bucket with the same numbers).
 
 > The exact zod schema of every method is retrievable at runtime through the MCP `list_methods`
 > tool ([MCP endpoint](../entities/mcp-endpoint.md#generic-escape-hatch)) or
-> by reading `src/protocol/`.
+> by reading `packages/contracts/src/`.
 
 #### `cp.create` parameters
 
@@ -368,7 +368,7 @@ See [State persistence](state-persistence.md).
 site, tenant, environment, lab, hardware family, or anything else an operator
 needs — without the simulator modelling any of those concepts (#446). Nothing
 in the charge point reads them: they exist for the control and query surfaces.
-The schema is [`src/protocol/labels.ts`](../../src/protocol/labels.ts).
+The schema is [`packages/contracts/src/labels.ts`](../../packages/contracts/src/labels.ts).
 
 | Rule  | Contract                                                                                                                             |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -492,7 +492,7 @@ profile is the kind of wrong that only shows up in the meter readings.
 
 Five read-only built-ins ship with the daemon (`ac-22kw`, `ac-22kw-x2`,
 `dc-50kw`, `dc-150kw`, `dc-350kw`) — the authoritative mapping is
-[`src/utils/blueprints/README.md`](../../src/utils/blueprints/README.md).
+[`packages/core/src/utils/blueprints/README.md`](../../packages/core/src/utils/blueprints/README.md).
 Saving or deleting a built-in id is refused:
 `blueprint.delete` cannot restore one, so an accidental overwrite would be
 permanent for that daemon.
@@ -569,7 +569,7 @@ Since #335 the OCPP 2.0.1 `TransactionEvent` builder no longer fixes
 `triggerReason`, `stoppedReason` and `chargingState` per command. A caller
 names them; the wire carries them verbatim; every existing caller that names
 nothing gets the historical values. The vocabularies are the 2.0.1 enums in
-full — one definition in `src/protocol/transactionVocabulary.ts`, from which
+full — one definition in `packages/contracts/src/transactionVocabulary.ts`, from which
 the RPC schema, the JSON-Lines parser and the MCP tool schemas all derive.
 
 | Parameter       | On                                                           | Values                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Default                                                               |
@@ -589,8 +589,8 @@ which has no closer value. A value outside both vocabularies is an
 `invalid_params` error that lists the accepted spellings.
 
 The station-initiated status vocabularies are defined in
-`src/protocol/firmwareLogStatus.ts` (re-exported by
-`src/cp/domain/types/FirmwareLogStatus.ts`), shared by this schema,
+`packages/contracts/src/firmwareLogStatus.ts` (re-exported by
+`packages/core/src/cp/domain/types/FirmwareLogStatus.ts`), shared by this schema,
 JSON-Lines mode and the `ChargePointService` port (#377):
 
 - `DiagnosticsStatus`: `Idle`, `Uploaded`, `UploadFailed`, `Uploading`.
@@ -739,7 +739,7 @@ Local mode records no runs ([Local vs Remote mode](local-vs-remote-mode.md#conse
 Daemon-level methods (no `cpId`) behind the console's **Vehicle profiles**
 card (#458); the model is described in [Vehicle profiles](vehicle-profiles.md),
 the catalog in [Open EV Directory](../entities/open-ev-directory.md). Schemas
-are in [`src/protocol/vehicle.ts`](../../src/protocol/vehicle.ts).
+are in [`packages/contracts/src/vehicle.ts`](../../packages/contracts/src/vehicle.ts).
 
 | Method                          | Params                             | Result                                                                                                            |
 | ------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |

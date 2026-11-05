@@ -3,11 +3,11 @@ title: Operational timeline
 type: concept
 summary: Per-charge-point, in-memory projection of domain events (connection, injected network faults and their recovery, status changes, transactions and their rejected or discarded 2.x TransactionEvents, authorization rejections, scenario runs, smart-charging profiles applied / cleared / expired) with stable snake_case kinds, a monotonic `seq`, and incident / run correlation — read with `timeline.get`, the `get_timeline` MCP tool or the console's Operational events tab.
 sources:
-  - src/cp/application/services/OperationalTimeline.ts
-  - src/cp/application/services/OperationalTimelineProjector.ts
-  - src/cli/service.ts (recordScenarioOnTimeline)
-  - src/protocol/methods.ts (timeline.get)
-  - src/cp/domain/charge-point/ChargePoint.ts (applyChargingProfile, clearChargingProfiles)
+  - packages/core/src/cp/application/services/OperationalTimeline.ts
+  - packages/core/src/cp/application/services/OperationalTimelineProjector.ts
+  - apps/cli/src/service.ts (recordScenarioOnTimeline)
+  - packages/contracts/src/methods.ts (timeline.get)
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (applyChargingProfile, clearChargingProfiles)
   - "issue #448"
   - "issue #469"
   - "issue #490"

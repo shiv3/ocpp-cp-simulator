@@ -4,7 +4,7 @@ type: entity
 summary: Third-party failure-pattern analysis engine behind `ocpp-cp-sim analyze`; consumes the shared trace format, understands OCPP 1.6J only, and is pinned to an exact version.
 sources:
   - package.json (`@ocpp-debugkit/toolkit` pin)
-  - src/cli/analyze/
+  - apps/cli/src/analyze/
   - "issue #188"
 related:
   - analyze.md
@@ -39,7 +39,7 @@ timeline and renders Markdown / HTML reports.
 `@ocpp-debugkit/toolkit` is pinned to an exact version (currently `0.4.2`, no
 `^` range). Detection rules can change behavior between versions, so an upgrade
 is a deliberate change that re-verifies the test matrix in
-`src/cli/analyze/__tests__/` — not an automatic dependency bump.
+`apps/cli/src/analyze/__tests__/` — not an automatic dependency bump.
 
 ## Limits to keep in mind
 

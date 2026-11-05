@@ -34,11 +34,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:cli": "bun build --target=bun --outfile=dist-cli/main.js src/cli/main.ts",
+    "build:cli": "bun build --target=bun --outfile=dist-cli/main.js apps/cli/src/main.ts",
     "test": "vitest run && bun test bun.test",
     "test:vitest": "vitest run",
     "test:bun": "bun test bun.test",
-    "test:bun:cli": "bun test src/cli/__tests__",
+    "test:bun:cli": "bun test apps/cli/src/__tests__",
     "test:bench-slow": "bun test ./scripts/bench/fleetBench.slowpath.test-bun.ts",
     "test:e2e": "bun run e2e/support/buildCsms.ts && bun test --timeout 60000 ./e2e/ocpp16.gocpp.e2e.ts ./e2e/chargingProfile.gocpp.e2e.ts ./e2e/ocpp201.gocpp.e2e.ts ./e2e/ocpp21.gocpp.e2e.ts ./e2e/scenario.gocpp.e2e.ts ./e2e/comprehensive.gocpp.e2e.ts",
     "test:coverage": "vitest run --coverage",
@@ -54,7 +54,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "cli": "bun src/cli/main.ts",
+    "cli": "bun apps/cli/src/main.ts",
     "fetch:ocpp": "bash scripts/fetch-ocpp-schemas.sh",
     "gen:ocpp": "bun run scripts/generate-ocpp.ts",
     "gen:k6-runtime": "bun run scripts/generate-k6-runtime.ts"

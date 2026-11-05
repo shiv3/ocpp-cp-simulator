@@ -82,7 +82,7 @@ function hasIndexHtml(dir: string): boolean {
  * Three shapes ship this CLI and each puts `dist/` somewhere different:
  *
  * 1. **Source checkout** — `bun apps/cli/src/main.ts`. `dist/` is `<repo>/dist`
- *    once `bun run build` has run. Two levels up from `apps/cli/src/`.
+ *    once `bun run build` has run. Three levels up from `apps/cli/src/`.
  * 2. **Installed package** — the release tarball ships the CLI as one
  *    `bun build` bundle, `<pkg>/dist-cli/main.js`, beside `<pkg>/dist`
  *    (#578). One level up.
@@ -115,11 +115,11 @@ export function resolveBundledDist(
     // Shape 2 (installed bundle): <pkg>/dist-cli -> <pkg>/dist. First: from
     // the bundle, two levels up is the directory holding the package
     // (node_modules/), and a stray dist/ there must not win over the
-    // package's own. From a source checkout this is <repo>/src/dist, which
+    // package's own. From a source checkout this is <repo>/apps/cli/dist, which
     // does not exist, so shape 1 is reached unchanged.
     path.resolve(import.meta.dir, "../dist"),
-    // Shape 1 (source checkout): <repo>/src/cli -> <repo>/dist.
-    path.resolve(import.meta.dir, "../../dist"),
+    // Shape 1 (source checkout): <repo>/apps/cli/src -> <repo>/dist.
+    path.resolve(import.meta.dir, "../../../dist"),
     // Shape 3 (compiled): a `dist/` shipped beside or one level above the
     // binary, and the macOS .app layout where the sidecar sits in
     // Contents/MacOS/ and Tauri resources in Contents/Resources/.

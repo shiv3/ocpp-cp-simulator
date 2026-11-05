@@ -475,6 +475,48 @@ export const ConfigurationKeys = {
       min: MIN_MONITOR_SEVERITY,
       max: MAX_MONITOR_SEVERITY,
     } as IntegerConfigurationKey,
+    // #537: OCPP 2.x `SecurityCtrlr` variables (2.0.1 / 2.1 Part 2
+    // referenced components §2.2.4, §2.2.7-§2.2.9). 1.6 has none of them,
+    // so only 2.x charge points carry these keys.
+    // CertificateEntries: the number of installed trust anchors, the set
+    // M05.FR.06 limits with CertificateStoreMaxLength. ReadOnly; the
+    // station keeps it current from its certificate store.
+    CertificateEntries: {
+      name: "CertificateEntries",
+      required: false,
+      readonly: true,
+      type: "integer",
+      min: 0,
+    } as IntegerConfigurationKey,
+    // A02.FR.16: the largest CertificateSigned `certificateChain`, in
+    // characters, the station accepts. The default is the spec's maxLimit
+    // and the schema's maxLength, so it refuses nothing a valid frame holds.
+    MaxCertificateChainSize: {
+      name: "MaxCertificateChainSize",
+      required: false,
+      readonly: true,
+      type: "integer",
+      min: 1,
+      max: 10000,
+    } as IntegerConfigurationKey,
+    // A02.FR.17/18: seconds to wait for CertificateSigned after an accepted
+    // SignCertificate before resending it; doubled after every resend.
+    CertSigningWaitMinimum: {
+      name: "CertSigningWaitMinimum",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 1,
+    } as IntegerConfigurationKey,
+    // A02.FR.19: how many times SignCertificate is resent before the
+    // station waits for a TriggerMessage. 0 = never resent.
+    CertSigningRepeatTimes: {
+      name: "CertSigningRepeatTimes",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+    } as IntegerConfigurationKey,
     // #315: sign the energy register in OCMF (German Eichrecht format) and
     // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by
     // default; nothing is generated, and no key is made, while false. The
@@ -677,6 +719,16 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // only Emergency events while offline.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.OfflineQueuingSeverity, 0)]
+      : []),
+    // #537: 2.x only (SecurityCtrlr). CertificateEntries starts at 0; the
+    // charge point sets it from its certificate store once both exist.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [
+          intVal(ConfigurationKeys.Custom.CertificateEntries, 0),
+          intVal(ConfigurationKeys.Custom.MaxCertificateChainSize, 10000),
+          intVal(ConfigurationKeys.Custom.CertSigningWaitMinimum, 60),
+          intVal(ConfigurationKeys.Custom.CertSigningRepeatTimes, 3),
+        ]
       : []),
     boolVal(ConfigurationKeys.Custom.SampledDataSignReadings, false),
     strVal(ConfigurationKeys.Custom.SignedMeterDataMode, "valid"),

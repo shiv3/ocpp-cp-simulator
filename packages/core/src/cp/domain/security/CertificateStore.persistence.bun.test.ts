@@ -160,6 +160,48 @@ describe("CertificateStore persistence", () => {
     db.close();
   });
 
+  // #537: rows written before serialNumber lost its leading zeroes.
+  describe.each(["0a", "a"])(
+    "a persisted root whose serialNumber is stored as 0a, deleted with %s",
+    (sent) => {
+      it("is reported without the leading zero and deleted", async () => {
+        const db = BunSqliteDatabase.open(":memory:");
+        const root = await selfSignedRoot("0a", "Old Root");
+        await new CertificateStore("CP-1", db).installRootCertificate(
+          "CsmsRootCertificate",
+          root.pem,
+          { maxEntries: 10 },
+        );
+        const [row] = db.all<{ body: string }>(
+          "SELECT body FROM certificates WHERE cp_id = ?",
+          ["CP-1"],
+        );
+        const body = JSON.parse(row.body) as {
+          hashData: { serialNumber: string };
+        };
+        body.hashData.serialNumber = "0a";
+        db.run("UPDATE certificates SET body = ? WHERE cp_id = ?", [
+          JSON.stringify(body),
+          "CP-1",
+        ]);
+
+        const reopened = new CertificateStore("CP-1", db);
+        const [entry] = reopened.installedCertificateIds();
+        expect(entry.hashData.serialNumber).toBe("a");
+
+        const deleted = reopened.deleteRootCertificate({
+          ...entry.hashData,
+          serialNumber: sent,
+        });
+        expect(deleted?.use).toBe("CsmsRootCertificate");
+        expect(new CertificateStore("CP-1", db).listRootCertificates()).toEqual(
+          [],
+        );
+        db.close();
+      });
+    },
+  );
+
   it("never writes private key material to JSON, toString or the database", async () => {
     const db = BunSqliteDatabase.open(":memory:");
     const store = new CertificateStore("CP-1", db);
@@ -171,6 +213,8 @@ describe("CertificateStore persistence", () => {
     await store.applySignedChain("ChargingStationCertificate", [
       await leafForCsr("02", csr, root),
     ]);
+    // #537: the accepted chain's key is held for TLS, in memory only.
+    expect(await store.tlsClientIdentity()).toBeDefined();
     await store.generateNewCsr("CP-1", "Example CPO", { keyAlgorithm: "RSA" });
 
     const rows = JSON.stringify(
@@ -184,6 +228,12 @@ describe("CertificateStore persistence", () => {
       expect(text).not.toMatch(/"privateKey"\s*:/i);
       expect(text).not.toMatch(/"d"\s*:\s*"/);
     }
+    // A restart reads the chain back without its key: no TLS identity.
+    const reopened = new CertificateStore("CP-1", db);
+    expect(
+      reopened.listSignedChains("ChargingStationCertificate"),
+    ).toHaveLength(1);
+    expect(await reopened.tlsClientIdentity()).toBeUndefined();
     db.close();
   });
 });

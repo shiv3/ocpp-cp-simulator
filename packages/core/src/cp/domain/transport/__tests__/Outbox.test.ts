@@ -87,6 +87,7 @@ class FakeMessageHandler implements IChargePointMessageHandler {
     >
   ): ReturnType<IChargePointMessageHandler["sendSecurityEventNotification"]> {
     this.record("sendSecurityEventNotification", args);
+    return Promise.resolve();
   }
 
   sendSignCertificate(): ReturnType<
@@ -268,7 +269,10 @@ describe("Outbox", () => {
     void outbox.sendOcppCall(expert);
     expectCall(handler, "sendOcppCall", [expert]);
 
-    outbox.sendSecurityEventNotification("StartupOfTheDevice", "boot accepted");
+    void outbox.sendSecurityEventNotification(
+      "StartupOfTheDevice",
+      "boot accepted",
+    );
     expectCall(handler, "sendSecurityEventNotification", [
       "StartupOfTheDevice",
       "boot accepted",

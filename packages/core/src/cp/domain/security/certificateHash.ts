@@ -13,6 +13,14 @@ export interface CertificateHashData {
   serialNumber: string;
 }
 
+/** Hash data as any side may write it: any algorithm name, any casing. */
+interface WireCertificateHashData {
+  hashAlgorithm: string;
+  issuerNameHash: string;
+  issuerKeyHash: string;
+  serialNumber: string;
+}
+
 function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -38,7 +46,9 @@ function toHex(buffer: ArrayBuffer): string {
  *   content with no ASN.1 framing), and against known-answer hashes
  *   precomputed with `openssl asn1parse` + `openssl dgst -sha256` for a
  *   fixed certificate.
- * - serialNumber: hex string, sign-padding byte stripped by @peculiar/x509.
+ * - serialNumber: lower-case hex without leading zeroes (#537), as the
+ *   1.6 whitepaper and the 2.x CertificateHashDataType require; the
+ *   sign-padding byte is already stripped by @peculiar/x509.
  *
  * `issuerPem`, when given, is the certificate that signed `pem`: its public
  * key feeds issuerKeyHash (a chain member, M03.FR.05). Omitted, the
@@ -62,24 +72,81 @@ export async function computeCertificateHashData(
     hashAlgorithm: "SHA256",
     issuerNameHash: toHex(issuerNameHash),
     issuerKeyHash: toHex(issuerKeyHash),
-    serialNumber: cert.serialNumber,
+    serialNumber: normalizeSerialNumber(cert.serialNumber),
   };
 }
 
-/** Case-insensitive field comparison — CSMS implementations vary on hex casing. */
+/**
+ * A hex serialNumber in its wire form (#537): lower case, no leading
+ * zeroes, and `"0"` for an all-zero value. An empty string stays empty.
+ */
+export function normalizeSerialNumber(hex: string): string {
+  const lower = hex.toLowerCase();
+  const stripped = lower.replace(/^0+/, "");
+  return stripped === "" && lower !== "" ? "0" : stripped;
+}
+
+/**
+ * Case-insensitive field comparison — CSMS implementations vary on hex
+ * casing. serialNumber is compared without leading zeroes (#537), so a
+ * CSMS sending `0a` or `a` matches either stored form.
+ */
 export function certificateHashDataEquals(
-  a: CertificateHashData,
-  b: {
-    hashAlgorithm: string;
-    issuerNameHash: string;
-    issuerKeyHash: string;
-    serialNumber: string;
-  },
+  a: WireCertificateHashData,
+  b: WireCertificateHashData,
 ): boolean {
   return (
     a.hashAlgorithm === b.hashAlgorithm &&
     a.issuerNameHash.toLowerCase() === b.issuerNameHash.toLowerCase() &&
     a.issuerKeyHash.toLowerCase() === b.issuerKeyHash.toLowerCase() &&
-    a.serialNumber.toLowerCase() === b.serialNumber.toLowerCase()
+    normalizeSerialNumber(a.serialNumber) ===
+      normalizeSerialNumber(b.serialNumber)
   );
+}
+
+/** OCPP 2.x `OCSPRequestDataType`: a certificate's hash data plus the
+ *  responder to ask about it (M06). */
+export interface OcspRequestData extends CertificateHashData {
+  responderURL: string;
+}
+
+/**
+ * The OCSP responder URL of `pem`'s Authority Information Access
+ * extension (#537), or `undefined` when it names none. OCPP requires a
+ * responderURL for any certificate whose status is requested (M06
+ * remark), so a certificate without one is never asked about.
+ */
+export function ocspResponderUrl(pem: string): string | undefined {
+  const aia = new x509.X509Certificate(pem).getExtension(
+    x509.AuthorityInfoAccessExtension,
+  );
+  return aia?.ocsp.find((name) => name.type === "url")?.value;
+}
+
+/** Every PEM certificate block of a text (global: use with `match`). */
+export const CERTIFICATE_PEM_RE =
+  /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
+
+export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
+
+/**
+ * Whether `pem` is one of the certificates of `bundle`, a PEM file that may
+ * hold several certificates and text around them (a `--tls-ca` file).
+ * Compared on the DER encoding, so line endings and wrapping do not matter;
+ * a block that does not parse is ignored.
+ */
+export function isCertificateInBundle(pem: string, bundle: string): boolean {
+  const der = new Uint8Array(new x509.X509Certificate(pem).rawData);
+  return (bundle.match(CERTIFICATE_PEM_RE) ?? []).some((block) => {
+    try {
+      return bytesEqual(
+        new Uint8Array(new x509.X509Certificate(block).rawData),
+        der,
+      );
+    } catch {
+      return false;
+    }
+  });
 }

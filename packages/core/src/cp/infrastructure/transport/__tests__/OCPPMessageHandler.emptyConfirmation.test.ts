@@ -120,6 +120,29 @@ describe("empty CALLRESULTs on OCPP 1.6 (#407)", () => {
   });
 });
 
+// #537: only 2.x reports a dropped SecurityEventNotification. 1.6 queues it
+// behind the CALL in flight and answers success as before.
+describe("SecurityEventNotification.req on OCPP 1.6 (#537)", () => {
+  it("resolves as soon as it is queued, before any answer", async () => {
+    const h = harness();
+    await expect(
+      h.handler.sendSecurityEventNotification("StartupOfTheDevice"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("resolves when the boot gate suppresses it", async () => {
+    const h = harness();
+    h.handler.setBootStatus({ status: "Pending" });
+    await expect(
+      h.handler.sendSecurityEventNotification("StartupOfTheDevice"),
+    ).resolves.toBeUndefined();
+    expect(h.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Suppressing SecurityEventNotification"),
+      expect.anything(),
+    );
+  });
+});
+
 describe("SignCertificate.conf on OCPP 1.6 (#410)", () => {
   it("logs Accepted at INFO, not as a missing handler", async () => {
     const h = harness();

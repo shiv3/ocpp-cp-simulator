@@ -292,6 +292,27 @@ describe("send_ocpp_call (#389)", () => {
   });
 });
 
+describe("security_event_notification (#537)", () => {
+  it("answers disconnected for a dropped CALL, like get_15118_ev_certificate", async () => {
+    const thrown = new OcppCallNoAnswerError(
+      "dropped",
+      "dropped (not_connected)",
+    );
+    const error = await rpcError(
+      { sendSecurityEventNotification: vi.fn().mockRejectedValue(thrown) },
+      {
+        cpId: "cp-alpha",
+        method: "security_event_notification",
+        params: { type: "SettingSystemTime" },
+      },
+    );
+    expect(error).toEqual({
+      code: "disconnected",
+      message: "dropped (not_connected)",
+    });
+  });
+});
+
 describe("send_raw_frame (#393)", () => {
   it("passes the parsed request through and returns the outcome", async () => {
     const outcome = {
@@ -347,5 +368,65 @@ describe("send_raw_frame (#393)", () => {
       },
     );
     expect(error).toEqual({ code: "invalid_params", message });
+  });
+});
+
+describe("get_15118_ev_certificate (#537)", () => {
+  const params = {
+    iso15118SchemaVersion: "urn:iso:15118:2:2013:MsgDef",
+    action: "Install",
+    exiRequest: "AAAA",
+  };
+
+  it("passes the parsed request through and returns the answers", async () => {
+    const answer = {
+      responses: [],
+      callError: {
+        errorCode: "InternalError",
+        errorDescription: "pool down",
+        errorDetails: {},
+      },
+    };
+    const get15118EVCertificate = vi.fn().mockResolvedValue(answer);
+    await expect(
+      runRpc(depsWith({ get15118EVCertificate }), {
+        cpId: "cp-alpha",
+        method: "get_15118_ev_certificate",
+        params,
+      }),
+    ).resolves.toEqual(answer);
+    expect(get15118EVCertificate).toHaveBeenCalledWith("cp-alpha", params);
+  });
+
+  it("refuses a non-base64 exiRequest as invalid_params", async () => {
+    const get15118EVCertificate = vi.fn();
+    const error = await rpcError(
+      { get15118EVCertificate },
+      {
+        cpId: "cp-alpha",
+        method: "get_15118_ev_certificate",
+        params: { ...params, exiRequest: "<exi/>" },
+      },
+    );
+    expect(error.code).toBe("invalid_params");
+    expect(get15118EVCertificate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new OcppCallRejectedError(
+        "unsupported_action",
+        "Get15118EVCertificate is not a station-initiated call on OCPP-1.6J; expected one of Authorize, BootNotification",
+      ),
+      "invalid_params",
+    ],
+    [new OcppCallNoAnswerError("timeout", "no answer"), "timeout"],
+    [new OcppCallNoAnswerError("dropped", "dropped"), "disconnected"],
+  ])("maps %s to %s", async (thrown, code) => {
+    const error = await rpcError(
+      { get15118EVCertificate: vi.fn().mockRejectedValue(thrown) },
+      { cpId: "cp-alpha", method: "get_15118_ev_certificate", params },
+    );
+    expect(error).toEqual({ code, message: thrown.message });
   });
 });

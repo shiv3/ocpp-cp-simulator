@@ -367,6 +367,40 @@ export class ConfigurationStore {
     return this.getInteger("CertificateStoreMaxLength") ?? 10;
   }
 
+  /** 2.x `SecurityCtrlr.MaxCertificateChainSize` (#537, A02.FR.16);
+   *  default `10000`, the spec's maxLimit. */
+  maxCertificateChainSize(): number {
+    return this.getInteger("MaxCertificateChainSize") ?? 10000;
+  }
+
+  /** 2.x `SecurityCtrlr.CertSigningWaitMinimum` in seconds (#537,
+   *  A02.FR.17); default `60`. */
+  certSigningWaitMinimum(): number {
+    return this.getInteger("CertSigningWaitMinimum") ?? 60;
+  }
+
+  /** 2.x `SecurityCtrlr.CertSigningRepeatTimes` (#537, A02.FR.19); default
+   *  `3`. */
+  certSigningRepeatTimes(): number {
+    return this.getInteger("CertSigningRepeatTimes") ?? 3;
+  }
+
+  /**
+   * Sets a value the station itself keeps current, such as the ReadOnly
+   * `CertificateEntries` count (#537). Unlike {@link applyChange} it
+   * writes ReadOnly keys and persists nothing: the value is derived again
+   * on every start. Listeners are told only when the value changes.
+   * `false` for an unknown key or a value of the wrong type.
+   */
+  setRuntimeValue(name: string, value: ConfigurationValueType): boolean {
+    const entry = this.values.get(name);
+    if (!entry || !isValueAssignable(entry.key, value)) return false;
+    if (entry.value === value) return true;
+    this.values.set(name, { key: entry.key, value } as ConfigurationValue);
+    this.emit(name, value);
+    return true;
+  }
+
   /**
    * Apply a ChangeConfiguration.req: parses the string value into the key's
    * declared type, persists, fires listeners, and returns the spec-defined

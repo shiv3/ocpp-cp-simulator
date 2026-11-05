@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { createServer, type Server, type Socket } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { neverReachedCsms } from "./OCPPWebSocket";
 import {
   authorizationKeyToBasicPassword,
   buildOcppBasicAuthorization,
@@ -7,6 +9,7 @@ import {
   buildOcppWebSocketUrl,
   classifyBasicAuthSource,
   OcppSecurityProfileConfigError,
+  openOcppWebSocket,
 } from "./wsUrlWithBasic";
 
 describe("OCPP WebSocket Basic auth", () => {
@@ -414,5 +417,55 @@ describe("#178 item F — backward-compat migration at connect time", () => {
         password: "legacy-pass",
       }),
     );
+  });
+});
+
+// #537: the `ws` client closes every failed attempt with 1006 and no reason.
+describe("the close of a failed connection on the `ws` path", () => {
+  const servers: Server[] = [];
+  afterEach(() => {
+    for (const server of servers.splice(0)) server.close();
+  });
+
+  function listen(onConnection: (socket: Socket) => void) {
+    const server = createServer(onConnection);
+    servers.push(server);
+    return new Promise<number>((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        resolve((server.address() as { port: number }).port);
+      });
+    });
+  }
+
+  function closeOf(url: string): Promise<CloseEvent> {
+    return new Promise((resolve) => {
+      openOcppWebSocket({
+        baseUrl: url,
+        chargePointId: "CP",
+        basicAuth: null,
+        onerror: () => {},
+        onclose: resolve,
+      });
+    });
+  }
+
+  it("says it never reached a server when the connection is refused", async () => {
+    const port = await listen(() => {});
+    await new Promise((resolve) => servers.pop()?.close(resolve));
+
+    const close = await closeOf(`wss://127.0.0.1:${port}/ocpp/`);
+
+    expect(close.code).toBe(1006);
+    expect(close.reason).toMatch(/^Failed to connect: connect ECONNREFUSED/);
+    expect(neverReachedCsms(close)).toBe(true);
+  });
+
+  it("does not say so when a server dropped the handshake", async () => {
+    const port = await listen((socket) => socket.destroy());
+
+    const close = await closeOf(`wss://127.0.0.1:${port}/ocpp/`);
+
+    expect(close.code).toBe(1006);
+    expect(neverReachedCsms(close)).toBe(false);
   });
 });

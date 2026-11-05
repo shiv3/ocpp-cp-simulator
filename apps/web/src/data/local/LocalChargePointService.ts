@@ -24,6 +24,10 @@ import type {
   RawFrameOutcome,
   RawFrameRequest,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+import type {
+  Get15118EVCertificateRequest,
+  Get15118EVCertificateResult,
+} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
 import { RpcFailure } from "@ocpp-cp-sim/contracts/errors";
 import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import {
@@ -496,6 +500,15 @@ export class LocalChargePointService implements ChargePointService {
     return this.getExistingChargePointOrThrow(id).sendRawFrame(request);
   }
 
+  async get15118EVCertificate(
+    id: string,
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult> {
+    return this.getExistingChargePointOrThrow(id).get15118EVCertificate(
+      request,
+    );
+  }
+
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
     return this.getExistingChargePointOrThrow(id).authorization.cacheView();
   }
@@ -620,7 +633,7 @@ export class LocalChargePointService implements ChargePointService {
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
+    await this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
       type,
       techInfo,
     );

@@ -1011,11 +1011,15 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     }
   }
 
-  public sendSecurityEventNotification(type: string, techInfo?: string): void {
+  public sendSecurityEventNotification(
+    type: string,
+    techInfo?: string,
+  ): Promise<void> {
     this._logger.warn(
       `${this._dialect.version} SOAP has no security extension; ignoring SecurityEventNotification ${JSON.stringify({ type, techInfo })}`,
       LogType.OCPP,
     );
+    return Promise.resolve();
   }
 
   public sendLogStatusNotification(

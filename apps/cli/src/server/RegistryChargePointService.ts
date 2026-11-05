@@ -14,6 +14,10 @@ import type {
   RawFrameRequest,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
 import type {
+  Get15118EVCertificateRequest,
+  Get15118EVCertificateResult,
+} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
@@ -326,6 +330,13 @@ export class RegistryChargePointService implements ChargePointService {
     return this.requireService(id).sendRawFrame(request);
   }
 
+  async get15118EVCertificate(
+    id: string,
+    request: Get15118EVCertificateRequest,
+  ): Promise<Get15118EVCertificateResult> {
+    return this.requireService(id).get15118EVCertificate(request);
+  }
+
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
     return this.requireService(id).getAuthorizationCache();
   }
@@ -413,7 +424,7 @@ export class RegistryChargePointService implements ChargePointService {
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    this.requireService(id).sendSecurityEventNotification(type, techInfo);
+    await this.requireService(id).sendSecurityEventNotification(type, techInfo);
   }
 
   async sendSignCertificate(id: string, csr?: string): Promise<void> {

@@ -347,6 +347,28 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ]);
     });
 
+    // #537: the renewed-certificate reconnect waits while this is true.
+    it("counts an event held before its write as in flight until the close queues it (#537)", async () => {
+      const { socket, handler, start, close, reconnect } = setup(version);
+      socket.holding = true;
+      start();
+      // Network-sim latency holds it: neither written nor answered yet.
+      expect(socket.transactionEvents()).toEqual([]);
+      expect(handler.hasTransactionMessagesInFlight()).toBe(true);
+
+      close();
+      await settle();
+      // Dropped with socket_closed, it waits in the E11 queue instead.
+      expect(handler.hasTransactionMessagesInFlight()).toBe(false);
+
+      reconnect();
+      expect(
+        socket.transactionPayloads().map((p) => [p.eventType, p.offline]),
+      ).toEqual([["Started", true]]);
+      // The replay awaits its answer: in flight again.
+      expect(handler.hasTransactionMessagesInFlight()).toBe(true);
+    });
+
     it("keeps creation order for an event produced while the socket is closing", async () => {
       const { socket, start, update, handler, reconnect } = setup(version);
       start();

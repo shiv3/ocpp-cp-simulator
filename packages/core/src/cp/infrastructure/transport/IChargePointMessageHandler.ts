@@ -75,7 +75,13 @@ export interface IChargePointMessageHandler {
    * {@link OCPP_CALL_RESPONSE_TIMEOUT_MS}.
    */
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
-  sendSecurityEventNotification(type: string, techInfo?: string): void;
+  /**
+   * Security event (#537). On 2.x, resolves once the CALL is written, not
+   * answered, and rejects with `OcppCallNoAnswerError` when it is dropped.
+   * 1.6 resolves once it is queued or the boot gate suppressed it; SOAP only
+   * logs it.
+   */
+  sendSecurityEventNotification(type: string, techInfo?: string): Promise<void>;
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void;
   /** FirmwareStatusNotification.req. `requestId` is carried on 2.0.1 (from
@@ -108,6 +114,11 @@ export interface IChargePointMessageHandler {
       | { status: "Rejected"; retryAfter: Date },
   ): void;
   getDataTransferHandler(): DataTransferHandler;
+  /** #537: whether a transaction message awaits its write, its answer or
+   *  a resend, which the CSMS may still settle before a close. Implemented
+   *  on 2.x, the only version that reconnects for a renewed client
+   *  certificate; absent means none. */
+  hasTransactionMessagesInFlight?(): boolean;
   onWebSocketClosed(): void;
   flushPendingQueue(): void;
 }

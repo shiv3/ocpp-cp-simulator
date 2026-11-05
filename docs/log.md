@@ -2209,3 +2209,59 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Operational timeline](concepts/operational-timeline.md): the `transaction_message_rejected` and `transaction_message_discarded` rows no longer imply a resend or a last attempt in every case; the prose names the 1.6 exceptions and the `error code not recorded` summary.
 - A connector in `Preparing` goes on to `Charging` after a discarded StartTransaction.req only if that request's transaction still runs once the `transactionMessageDiscarded` listeners have returned.
 - Maintainer's answers on #545: OCPP-S stays out of this PR. The 1.6S deviation from the errata sheet (3.2) is noted in [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16) and tracked in #585.
+
+## [2026-10-30] ingest | Certificate follow-ups, first part (#537)
+
+- 2.x M06: `GetCertificateStatus` for the V2G certificates (after a V2G `CertificateSigned`, every accepted boot, then weekly), `ocspRequestData` from the stored hash data plus the AIA OCSP URL, `ocspResult` cached in memory.
+- 2.x `TriggerMessage` `SignChargingStationCertificate` / `SignV2GCertificate` answer `Accepted` and send a new CSR with the triggered `certificateType` (A02.FR.02/03/13); the A02.FR.17-19 resend back-off (`CertSigningWaitMinimum` 60 s, `CertSigningRepeatTimes` 3).
+- 2.x `security_event_notification` sends `SecurityEventNotificationRequest` (A04) instead of a WARN; new curated MCP tool (31 curated tools).
+- 2.x `SecurityCtrlr` variables `CertificateEntries`, `MaxCertificateChainSize` (enforced, A02.FR.16), `CertSigningWaitMinimum`, `CertSigningRepeatTimes`.
+- `serialNumber` without leading zeroes on 1.6 and 2.x, backward compatible with persisted rows; 1.6 whitepaper M04.FR.06 refuses deleting the `--tls-ca` root of a `wss://` connection.
+- [Security profiles](concepts/security-profiles.md): 2.x behaviour bullets, new [SecurityCtrlr variables](concepts/security-profiles.md#securityctrlr-variables) table, "Not covered yet" list trimmed to the ISO 15118 items. [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool row and count.
+- [GitHub issues](sources/github-issues.md): #537.
+
+## [2026-10-30] ingest | Certificate follow-ups, second part (#537)
+
+- 2.x `get_15118_ev_certificate` relays a caller-supplied base64 EXI request with `Get15118EVCertificate` (M01 / M02) and returns the CSMS answers; on 2.1 an ISO 15118-20 request is repeated while `remainingContracts` > 0 (M01.FR.06). New curated MCP tool (32 curated tools).
+- A security-profile-3 2.x station reconnects with a Charging Station certificate that `CertificateSigned` accepted (A02.FR.08), after its `notBefore` on 2.0.1; failed attempts alternate with the configured certificate until one connects (2.1 A02.FR.28, A02.FR.10). The key stays in memory: a restart presents `--tls-cert` again.
+- 2.1 `GetInstalledCertificateIds` lists `V2G20Certificate` chains under `V2GCertificateChain` (M03.FR.05); 2.0.1 unchanged.
+- [Security profiles](concepts/security-profiles.md): new [Get15118EVCertificate relay](concepts/security-profiles.md#get15118evcertificate-relay) and [Renewed client certificate](concepts/security-profiles.md#renewed-client-certificate) sections; the "Not covered yet" list becomes the [Certificate follow-ups](concepts/security-profiles.md#certificate-follow-ups-537) table, every #537 item implemented, declined or deferred with its requirement id (EV-facing V2G TLS identity declined, A00.FR.428; A04.FR.02 offline queuing deferred until #528).
+- [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): method and tool rows, tool count. [GitHub issues](sources/github-issues.md): #537 row.
+- Review fixes, renewed client certificate: a second renewal falls back to the renewal confirmed before it, not `--tls-cert` (A02.FR.28), and keeps it when the new one is discarded; a manual disconnect no longer cancels the `notBefore` wait; the transport forgets a renewed identity once the store holds no key for its Charging Station chain; the reconnect waits up to 60 s for an active `TransactionEvent` (awaiting its write, answer or resend; the close would queue it for an E11 replay marked offline), and the wiki lists what a reconnect still drops; 2.1 sends `DiscardedRenewedClientCertificate` after the next accepted boot (A02.FR.29). [Security profiles](concepts/security-profiles.md#renewed-client-certificate), [Certificate follow-ups](concepts/security-profiles.md#certificate-follow-ups-537).
+- Review fixes, other items: the SignCertificate back-off arms the doubled wait at each expiry, so a resend answered with a CALLERROR or not at all no longer stalls it (A02.FR.18); `get_15118_ev_certificate` sends no repeated request once its 25 s budget is spent; `security_event_notification` bounds `type` to 50 and `techInfo` to 255 characters on the control plane, JSON Lines and the MCP tool. [Security profiles](concepts/security-profiles.md), [Control plane](concepts/control-plane.md#cp-command-methods).
+- Review fixes, renewed certificate switch: a switch requested while an earlier one reads the store supersedes it, so no orphan `notBefore` timer survives (the timer is unref'd); a `cp.update` ends the wait and drops the in-memory keys of the replaced charge point; a chain replaced while its key is exported is not presented. The wiki states the A02.FR.28 exception to the key/chain rule and the unused chain kept after an A02.FR.10 discard. [Security profiles](concepts/security-profiles.md#renewed-client-certificate).
+
+## [2026-10-30] ingest | Certificate follow-ups, simplification (#537)
+
+- 2.x M06: deleting or replacing a stored chain drops the OCSP responses cached for its certificates.
+- [Security profiles](concepts/security-profiles.md): OCSP cache bullet.
+
+## [2026-10-30] ingest | Certificate follow-ups, third review round (#537)
+
+- `get_15118_ev_certificate` answers `disconnected` when its first CALL is dropped, like `send_ocpp_call`. [MCP endpoint](entities/mcp-endpoint.md), [Control plane](concepts/control-plane.md#rpc).
+- A `CertificateSigned` refused for exceeding `MaxCertificateChainSize` now ends its CSR's resend back-off too. [Security profiles](concepts/security-profiles.md).
+- The renewed-certificate reconnect waits for a `TransactionEvent` that network-simulation latency still holds before its write (an active event since #528); a test pins it, and that the event stops counting once the close queues it for the E11 replay. [Security profiles](concepts/security-profiles.md#renewed-client-certificate).
+- SignCertificate back-off: a wait longer than a timer can hold (about 24.8 days) is waited out in full instead of resending early; an answer to a request whose CSR a newer one replaced no longer starts or ends the back-off. [Security profiles](concepts/security-profiles.md).
+- Rebased on the E11 offline queue (#528): the renewed-certificate reconnect waits, up to 60 s, for the `TransactionEvent`s the CSMS has not settled yet, not for queued ones; past 60 s the close queues them. `SecurityEventNotification` is still dropped while offline: the E11 queue does not take it. [Security profiles](concepts/security-profiles.md).
+
+## [2026-11-04] ingest | Certificate follow-ups, maintainer review (#537)
+
+- SignCertificate back-off: a closed connection holds the wait instead of ending the sequence; it goes on after the next accepted boot with what it had left and the same resend count (A02.FR.17-19). Sequences that reached `CertSigningRepeatTimes` or ended stay stopped. [Security profiles](concepts/security-profiles.md).
+- Renewed client certificate: an attempt that reached no server (connection refused or unreachable, DNS failure) no longer makes the next one present the other certificate, so an unreachable CSMS does not discard a valid renewal (A02.FR.28). A refused upgrade still counts, its status being unknown under Bun. The `ws` client's close reason reports such a failure as `Failed to connect: …`, like Bun's. [Security profiles](concepts/security-profiles.md#renewed-client-certificate).
+
+## [2026-11-04] ingest | Certificate follow-ups, maintainer review, second round (#537)
+
+- SignCertificate back-off: only an `Accepted` `CertificateSigned` ends it. A chain rejected for any reason, an over-long one included, leaves the resends going, up to `CertSigningRepeatTimes`; this reverses the 2026-10-30 entry. The reading is pinned on the page: no rejection can be tied to this CSR yet, so A02.FR.20 has no case to apply to. [Security profiles](concepts/security-profiles.md).
+- Renewed client certificate: once the previous certificate opened after the renewed one failed, the renewed one gets exactly one more attempt before it is discarded, on 2.0.1 and 2.1, through the deferred reconnect, after that connection's boot is `Accepted`. A deliberate departure from 2.1 A02.FR.10; a fallback costs one more full reconnect. A renewal handed over while the previous certificate was connecting is no longer discarded when that connection opens. [Security profiles](concepts/security-profiles.md).
+- 2.x `security_event_notification`: a dropped CALL now answers `disconnected` on the control plane and the MCP tool, and fails in JSON Lines mode, like a dropped first `get_15118_ev_certificate` CALL; success means written, not answered. 1.6 and SOAP are unchanged. [Security profiles](concepts/security-profiles.md), [Control plane](concepts/control-plane.md#rpc), [MCP endpoint](entities/mcp-endpoint.md).
+
+## [2026-11-04] ingest | Renewed client certificate: second attempt dropped (#537)
+
+- Maintainer review: the one further attempt of the 2026-11-04 entry above is removed on 2.0.1 and 2.1. Once the previous certificate opens after the renewed one failed, the renewed one is discarded at once (2.1 A02.FR.10), with `DiscardedRenewedClientCertificate` on 2.1 after the next `Accepted` boot (A02.FR.29); 2.0.1 discards the same way, by choice, and sends no event. An attempt that reached no server still does not count. [Security profiles](concepts/security-profiles.md).
+
+## [2026-11-04] ingest | Certificate follow-ups, CodeRabbit review on the discard change (#537)
+
+- `sign_certificate` with a given CSR that does not parse: still sent with a WARN, but once, and it no longer restarts the back-off or replaces what the back-off resends, so a CSR already pending keeps both. Its answer is logged at INFO and otherwise ignored. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
+- SignCertificate back-off: `CertSigningRepeatTimes` is checked before a resend, so a limit lowered during a wait sends no resend above it. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
+- OCSP cache note: a chain change keeps the response of a certificate another stored chain still holds. [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).
+- 1.6 `security_event_notification`: unchanged, but the wiki now says its success means queued, not written. [Control plane](concepts/control-plane.md#cp-command-methods), [Security profiles](concepts/security-profiles.md#ocpp-201-and-21-behaviour).

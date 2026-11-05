@@ -25,6 +25,7 @@ import {
   OCPPStatus,
   ReservationStatus,
 } from "../../../domain/types/OcppTypes";
+import { LogType } from "../../../shared/Logger";
 
 export const handleResetV201 = (
   payload?: unknown,
@@ -206,6 +207,9 @@ export const handleTriggerMessageV201 = (
   const accepted = {
     status: "Accepted",
   } satisfies TriggerMessageResponseV201;
+  const notImplemented = {
+    response: { status: "NotImplemented" } satisfies TriggerMessageResponseV201,
+  };
 
   if (payload === undefined || ctx === undefined) {
     return { response: accepted };
@@ -248,12 +252,32 @@ export const handleTriggerMessageV201 = (
         },
       };
 
-    default:
+    // #537 A02: a new key pair and CSR once the answer is written
+    // (A02.FR.02, F06.FR.04). SignCombinedCertificate and 2.1's
+    // SignV2G20Certificate stay NotImplemented (F06.FR.08).
+    case "SignChargingStationCertificate":
+    case "SignV2GCertificate": {
+      const signing = ctx.certificateSigning;
+      if (!signing) return notImplemented;
+      const use =
+        req.requestedMessage === "SignV2GCertificate"
+          ? "V2GCertificate"
+          : "ChargingStationCertificate";
       return {
-        response: {
-          status: "NotImplemented",
-        } satisfies TriggerMessageResponseV201,
+        response: accepted,
+        afterResult: () => {
+          signing.requestSignature(use).catch((err: unknown) => {
+            ctx.logger.error(
+              `TriggerMessage ${req.requestedMessage}: could not send SignCertificate: ${err instanceof Error ? err.message : String(err)}`,
+              LogType.OCPP,
+            );
+          });
+        },
       };
+    }
+
+    default:
+      return notImplemented;
   }
 };
 

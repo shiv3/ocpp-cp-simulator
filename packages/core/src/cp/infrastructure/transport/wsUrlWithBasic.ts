@@ -615,6 +615,8 @@ class DeferredNodeWebSocket {
   private pendingClose: { code?: number; reason?: string } | null = null;
   private errorHandler: ((event: Event) => void) | null = null;
   private pendingErrors: Event[] = [];
+  /** Why the connection could not be made, as the close should report it. */
+  private connectFailure = "";
   /** A refused handshake is closed by us; ws may still close later. */
   private closeDispatched = false;
   /** Set once a non-101 response has been reported and the socket torn down. */
@@ -702,6 +704,13 @@ class DeferredNodeWebSocket {
         // error is about our own teardown, not about the CSMS.
         if (this.refusalHandled) return;
         this.state = WebSocket.CLOSING;
+        // `ws` closes with 1006 and no reason. A failure of the connect or
+        // the DNS lookup gets the reason Bun's client gives it, so everything
+        // downstream sees one shape (see `neverReachedCsms`).
+        const { syscall } = error as NodeJS.ErrnoException;
+        if (syscall === "connect" || syscall === "getaddrinfo") {
+          this.connectFailure = `Failed to connect: ${error.message}`;
+        }
         this.dispatchError({
           type: "error",
           error,
@@ -772,7 +781,7 @@ class DeferredNodeWebSocket {
         this.dispatchCloseOnce({
           type: "close",
           code,
-          reason: reasonText,
+          reason: reasonText || this.connectFailure,
           wasClean: code === 1000,
         } as CloseEvent);
       });

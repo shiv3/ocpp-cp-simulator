@@ -4,7 +4,7 @@ import { Buffer } from "node:buffer";
 import * as x509 from "@peculiar/x509";
 
 import type { Logger } from "../../../shared/Logger";
-import { OCPPWebSocket } from "../OCPPWebSocket";
+import { neverReachedCsms, OCPPWebSocket } from "../OCPPWebSocket";
 import { openOcppWebSocket } from "../wsUrlWithBasic";
 import { canBindBunServe } from "../../../../test/bunServe";
 
@@ -318,6 +318,60 @@ describe.skipIf(!canBindBunServe(getAvailablePort()))(
       } finally {
         ws.close();
       }
+    });
+
+    // #537: what the renewed certificate's A02.FR.28 fallback relies on.
+    describe("the close of a failed connection", () => {
+      function closeOf(
+        url: string,
+        tls: { ca: string; serverName: string },
+      ): Promise<CloseEvent> {
+        return new Promise((resolve) => {
+          openOcppWebSocket({
+            baseUrl: url,
+            chargePointId: "CP-CLOSE",
+            basicAuth: null,
+            tls,
+            onerror: () => {},
+            onclose: resolve,
+          });
+        });
+      }
+
+      it("says it never reached a server when the connection is refused", async () => {
+        const certs = await createCertificateFixture();
+        const server = startTlsWebSocketServer({
+          cert: certs.serverCert,
+          key: certs.serverKey,
+          port: getAvailablePort(),
+        });
+        await server.stop();
+
+        const close = await closeOf(server.url, {
+          ca: certs.caCert,
+          serverName: "localhost",
+        });
+
+        expect(neverReachedCsms(close)).toBe(true);
+      });
+
+      it("does not say so when the CSMS refuses the client certificate", async () => {
+        const certs = await createCertificateFixture();
+        const server = startTlsWebSocketServer({
+          cert: certs.serverCert,
+          key: certs.serverKey,
+          clientCa: certs.caCert,
+          port: getAvailablePort(),
+        });
+
+        const close = await closeOf(server.url, {
+          ca: certs.caCert,
+          serverName: "localhost",
+        });
+
+        expect(close.wasClean).toBe(false);
+        expect(neverReachedCsms(close)).toBe(false);
+      });
     });
 
     it("rejects an untrusted server certificate by default", async () => {

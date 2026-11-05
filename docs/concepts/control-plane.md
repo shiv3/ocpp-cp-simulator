@@ -569,7 +569,7 @@ Since #335 the OCPP 2.0.1 `TransactionEvent` builder no longer fixes
 `triggerReason`, `stoppedReason` and `chargingState` per command. A caller
 names them; the wire carries them verbatim; every existing caller that names
 nothing gets the historical values. The vocabularies are the 2.0.1 enums in
-full — one definition in `src/cp/domain/connector/Transaction.ts`, from which
+full — one definition in `src/protocol/transactionVocabulary.ts`, from which
 the RPC schema, the JSON-Lines parser and the MCP tool schemas all derive.
 
 | Parameter       | On                                                           | Values                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Default                                                               |

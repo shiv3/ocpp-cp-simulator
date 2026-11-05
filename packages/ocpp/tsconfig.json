@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.ocpp.tsbuildinfo",
+    "outDir": "../../node_modules/.tmp/out/ocpp",
+    "types": ["bun-types"]
+  },
+  "include": ["src", "vendor/**/*.json"]
+}

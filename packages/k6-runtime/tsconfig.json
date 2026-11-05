@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.k6-runtime.tsbuildinfo",
+    "outDir": "../../node_modules/.tmp/out/k6-runtime",
+    "types": ["bun-types"]
+  },
+  "include": ["src", "k6-types.d.ts"]
+}

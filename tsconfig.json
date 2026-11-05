@@ -2,19 +2,34 @@
   "files": [],
   "references": [
     {
-      "path": "./tsconfig.app.json"
+      "path": "./packages/ocpp"
+    },
+    {
+      "path": "./packages/contracts"
+    },
+    {
+      "path": "./packages/trace"
+    },
+    {
+      "path": "./packages/k6-runtime"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/client"
+    },
+    {
+      "path": "./apps/cli"
+    },
+    {
+      "path": "./apps/web"
     },
     {
       "path": "./tsconfig.node.json"
     },
     {
-      "path": "./tsconfig.cli.json"
-    },
-    {
       "path": "./scripts/bench/tsconfig.json"
-    },
-    {
-      "path": "./scripts/tsconfig.json"
     }
   ]
 }

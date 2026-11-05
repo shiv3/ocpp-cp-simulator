@@ -65,6 +65,11 @@ export const PACKAGE_MAP: readonly MapEntry[] = [
   // --- k6-runtime: dependency-free files copied verbatim into an export.
   // Must precede the apps/cli entry for src/cli/. runtimeManifest.test.ts
   // already enforces that these files import nothing outside themselves.
+  {
+    match: "src/cli/exportK6/k6-types.d.ts",
+    pkg: "k6-runtime",
+    why: "ambient k6/* module declarations the runtime is type-checked against; it sits outside runtime/ because that directory is emitted verbatim",
+  },
   { match: "src/cli/exportK6/runtime/", pkg: "k6-runtime" },
 
   // --- apps/cli: the CLI, the daemon, the MCP endpoint, export-k6, analyze.
@@ -133,6 +138,11 @@ export const PACKAGE_MAP: readonly MapEntry[] = [
     match: "src/test/setup.dom.ts",
     pkg: "apps/web",
     why: "vitest setupFiles: jsdom / testing-library only",
+  },
+  {
+    match: "src/test/domSmoke.dom.test.tsx",
+    pkg: "apps/web",
+    why: "renders React under jsdom to prove setup.dom.ts works",
   },
   {
     match: "src/test/",

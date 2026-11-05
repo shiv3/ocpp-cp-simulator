@@ -27,6 +27,16 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # #578: the repository is to become a Bun workspace in one pull request
+      # that only moves files. That move is mechanical only while the source
+      # tree already obeys the package dependency rules, so the rules are
+      # executable: scripts/check-package-boundaries.ts maps every file under
+      # src/ to its future package and fails on an import the package may not
+      # have (type-only imports included) or a UI / Node / Bun-only specifier
+      # in a package that must run in both Bun and the browser.
+      - name: Package boundaries
+        run: bun run check:boundaries
+
       - name: Format check
         run: bun run format:check
 

@@ -1,16 +1,16 @@
 // Runs under `bun test`: the cleanup-path cases use the `bun:sqlite` built-in.
 import { describe, it, expect } from "bun:test";
 
-import { BunSqliteDatabase } from "../BunSqliteDatabase";
-import { resetSimulatorState } from "../resetState";
+import { BunSqliteDatabase } from "../../../cp/domain/persistence/BunSqliteDatabase";
+import { resetSimulatorState } from "../../../cp/domain/persistence/resetState";
 import {
   SCHEMA_SQL,
   TABLES,
   perChargePointTables,
   tablesResetOnStateReset,
-} from "../schema";
-import { CPRegistry } from "../../../../cli/server/CPRegistry";
-import { EventBus } from "../../../../cli/server/eventBus";
+} from "../../../cp/domain/persistence/schema";
+import { CPRegistry } from "../CPRegistry";
+import { EventBus } from "../eventBus";
 
 /**
  * #326: the table set has one source of truth. `state.reset` used to truncate

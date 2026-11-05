@@ -1,4 +1,4 @@
-import { Node, Edge } from "@xyflow/react";
+import type { Node, Edge } from "@xyflow/react";
 import type { ScenarioMode } from "../../../protocol/scenario";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { CurvePoint } from "../../domain/connector/MeterValueCurve";

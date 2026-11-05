@@ -6,7 +6,7 @@ sources:
   - src/ocpp/ (generated from vendor/ocpp-schemas)
   - vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
-  - src/cli/soapCallbackUrl.ts
+  - src/cp/infrastructure/transport/soap/soapCallbackUrl.ts
   - src/cli/soapTunnel.ts
   - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
@@ -28,7 +28,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # OCPP versions and transports

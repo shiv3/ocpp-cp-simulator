@@ -129,3 +129,60 @@ describe("parseCreateBody labels (#446)", () => {
     );
   });
 });
+
+// Moved from src/data/local/LocalChargePointService.security.test.ts: it only
+// exercises the daemon-side parser, which the web package may not import.
+describe("parseCreateBody TLS profile options", () => {
+  it("leaves the CLI/server create parser able to accept TLS profile options", () => {
+    expect(
+      parseCreateBody({
+        cpId: "CP-SERVER",
+        wsUrl: "ws://localhost:9000/ocpp/",
+        securityProfile: 3,
+        authorizationKey: "AABB",
+        cpoName: "Example CPO",
+        tlsCaPath: "/etc/ocpp/ca.pem",
+        tlsCertPath: "/etc/ocpp/client.pem",
+        tlsKeyPath: "/etc/ocpp/client-key.pem",
+        tls: {
+          ca: "CA PEM",
+          cert: "CERT PEM",
+          key: "KEY PEM",
+          serverName: "localhost",
+        },
+      }),
+    ).toMatchObject({
+      cpId: "CP-SERVER",
+      securityProfile: 3,
+      authorizationKey: "AABB",
+      cpoName: "Example CPO",
+      tlsCaPath: "/etc/ocpp/ca.pem",
+      tlsCertPath: "/etc/ocpp/client.pem",
+      tlsKeyPath: "/etc/ocpp/client-key.pem",
+      tls: {
+        ca: "CA PEM",
+        cert: "CERT PEM",
+        key: "KEY PEM",
+        serverName: "localhost",
+      },
+    });
+  });
+});
+
+// Moved from src/data/local/LocalChargePointService.txUpdatedMeterValues.test.ts
+// for the same reason.
+describe("parseCreateBody txUpdatedMeterValues (#347)", () => {
+  const base = { cpId: "CP", wsUrl: "ws://localhost:9000/ocpp/" };
+
+  it("keeps true and an explicit false, and omits it when absent", () => {
+    expect(
+      parseCreateBody({ ...base, txUpdatedMeterValues: true })
+        .txUpdatedMeterValues,
+    ).toBe(true);
+    expect(
+      parseCreateBody({ ...base, txUpdatedMeterValues: false })
+        .txUpdatedMeterValues,
+    ).toBe(false);
+    expect("txUpdatedMeterValues" in parseCreateBody(base)).toBe(false);
+  });
+});

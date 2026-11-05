@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Log
@@ -2164,3 +2164,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - Every import from `src/cp/` in `src/protocol/` is gone, runtime and type-only. The definitions moved into `src/protocol/` (`firmwareLogStatus.ts`, `transactionVocabulary.ts`, `connectorStatus.ts`, `chargingSession.ts`, `authorization.ts`, `idTokenKey.ts`, `scenario.ts`, `timeline.ts`, `securityProfile.ts`, `vehicleProfile.ts`, `redaction.ts`); the old `src/cp` modules re-export them under the same names, so no other import site changed. Values, schemas, error messages and wire formats are unchanged.
 - `src/protocol/__tests__/importBoundary.test.ts` pins it: no non-test file under `src/protocol/` may import (or `export ... from`, or `import()`) anything that resolves outside `src/protocol/`, by relative path or the `@/` alias; the allow-list of other repository directories is empty. `src/cp/shared/__tests__/protocolContract.test.ts` keeps the literal scenario verdict and execution-state lists equal to the `src/cp` types.
 - [Control plane](concepts/control-plane.md): the dependency rule and where the shared vocabularies live. [Vehicle profiles](concepts/vehicle-profiles.md), [Log format](concepts/log-format.md), [Open EV Directory](entities/open-ev-directory.md), [Local authorization](concepts/local-authorization.md): source paths and links follow the moved definitions.
+
+## [2026-11-05] ingest | Package boundaries are an executable check (#578)
+
+- `scripts/check-package-boundaries.ts` (`bun run check:boundaries`, a `ci.yml` step after Lint) maps every `.ts` / `.tsx` file under `src/` to the package it will become in the workspaces move and fails on an import the package may not have (type-only included) or on a UI / Node / Bun-only specifier in a package that must run in both Bun and the browser. `--json` prints the package × package import counts; `--list <package>` prints a package's files. Covered by `scripts/__tests__/checkPackageBoundaries.bun.test.ts`.
+- Fixed what it found: the SOAP callback-URL and path helpers moved from `src/cli/` to `src/cp/infrastructure/transport/soap/` (old paths re-export), the `Config` types moved from `src/store/store.ts` to `src/data/interfaces/ConfigRepository.ts` (store re-exports), `ScenarioTypes.ts` imports its `@xyflow/react` types with `import type`, and four tests that crossed a boundary moved next to the code that owns the dependency.
+- [Overview](overview.md#source-layout-and-package-boundaries): new section with the package map and the rules.

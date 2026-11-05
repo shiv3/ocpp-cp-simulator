@@ -1,5 +1,5 @@
 import type { SimulatorConfigInput, WireSimulatorConfig } from "../protocol";
-import type { Config } from "../store/store";
+import type { Config } from "./interfaces/ConfigRepository";
 
 export function getConfigBasicAuthPassword(
   config: WireSimulatorConfig | SimulatorConfigInput | null,

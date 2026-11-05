@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCreateBody } from "../../cli/server/httpServer";
 import { DefaultBootNotification } from "../../cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import {
@@ -53,40 +52,5 @@ describe("LocalChargePointService TLS/security-profile gate", () => {
         localDefinition({ tls: { cert: "CERT PEM", key: "KEY PEM" } }),
       ]),
     ).rejects.toMatchObject({ code: "browser_tls_unsupported" });
-  });
-
-  it("leaves the CLI/server create parser able to accept TLS profile options", () => {
-    expect(
-      parseCreateBody({
-        cpId: "CP-SERVER",
-        wsUrl: "ws://localhost:9000/ocpp/",
-        securityProfile: 3,
-        authorizationKey: "AABB",
-        cpoName: "Example CPO",
-        tlsCaPath: "/etc/ocpp/ca.pem",
-        tlsCertPath: "/etc/ocpp/client.pem",
-        tlsKeyPath: "/etc/ocpp/client-key.pem",
-        tls: {
-          ca: "CA PEM",
-          cert: "CERT PEM",
-          key: "KEY PEM",
-          serverName: "localhost",
-        },
-      }),
-    ).toMatchObject({
-      cpId: "CP-SERVER",
-      securityProfile: 3,
-      authorizationKey: "AABB",
-      cpoName: "Example CPO",
-      tlsCaPath: "/etc/ocpp/ca.pem",
-      tlsCertPath: "/etc/ocpp/client.pem",
-      tlsKeyPath: "/etc/ocpp/client-key.pem",
-      tls: {
-        ca: "CA PEM",
-        cert: "CERT PEM",
-        key: "KEY PEM",
-        serverName: "localhost",
-      },
-    });
   });
 });

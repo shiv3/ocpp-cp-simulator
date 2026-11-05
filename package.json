@@ -45,6 +45,7 @@
     "test:coverage:bun": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=./coverage/bun bun.test",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc -b --noEmit",
+    "check:boundaries": "bun run scripts/check-package-boundaries.ts",
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

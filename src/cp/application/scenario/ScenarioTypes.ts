@@ -1,4 +1,5 @@
 import { Node, Edge } from "@xyflow/react";
+import type { ScenarioMode } from "../../../protocol/scenario";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { CurvePoint } from "../../domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../domain/connector/EVSettings";
@@ -15,7 +16,7 @@ import type {
 /**
  * Scenario execution mode
  */
-export type ScenarioMode = "manual" | "scenario";
+export type { ScenarioMode };
 
 /**
  * Scenario execution state

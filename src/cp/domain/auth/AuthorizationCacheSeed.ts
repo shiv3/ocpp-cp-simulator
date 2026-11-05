@@ -1,9 +1,12 @@
 import {
-  DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES,
   type AuthorizationCacheEntry,
   type AuthorizationCacheRecord,
 } from "./AuthorizationCache";
 import { idTokenKey } from "./idTokenKey";
+import {
+  AUTHORIZATION_CACHE_SEED_MAX,
+  AUTHORIZATION_STATUSES,
+} from "../../../protocol/authorization";
 import { OCPP_2_0_1, OCPP_2_1 } from "../types/OcppVersion";
 
 /**
@@ -12,27 +15,10 @@ import { OCPP_2_0_1, OCPP_2_1 } from "../types/OcppVersion";
  * strings here, epoch ms inside the cache.
  */
 
-/** Every authorization status a CSMS can answer: the 1.6 AuthorizationStatus
- *  values (Accepted, Blocked, Expired, Invalid, ConcurrentTx) and the 2.x
- *  AuthorizationStatusEnumType additions. */
-export const AUTHORIZATION_STATUSES = [
-  "Accepted",
-  "Blocked",
-  "ConcurrentTx",
-  "Expired",
-  "Invalid",
-  "NoCredit",
-  "NotAllowedTypeEVSE",
-  "NotAtThisLocation",
-  "NotAtThisTime",
-  "Unknown",
-] as const;
-
 export type AuthorizationStatus = (typeof AUTHORIZATION_STATUSES)[number];
 
-/** At most this many entries in one seed: the cache capacity. */
-export const AUTHORIZATION_CACHE_SEED_MAX =
-  DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES;
+// Defined in `src/protocol` (#578); re-exported for the existing import sites.
+export { AUTHORIZATION_CACHE_SEED_MAX, AUTHORIZATION_STATUSES };
 
 /**
  * The longest identifier a charge point of `ocppVersion` carries, for

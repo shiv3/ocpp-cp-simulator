@@ -7,23 +7,15 @@ import {
   type CancelReservationResponseV16,
 } from "../../../ocpp";
 import { LogLevel, LogType } from "../../shared/Logger";
+import { OCPPStatus } from "../../../protocol/connectorStatus";
+
+// Defined in `src/protocol` (#578); re-exported for the existing import sites.
+export { OCPPStatus };
 
 export enum OCPPMessageType {
   CALL = 2,
   CALLRESULT = 3,
   CALLERROR = 4,
-}
-
-export enum OCPPStatus {
-  Available = "Available",
-  Preparing = "Preparing",
-  Charging = "Charging",
-  SuspendedEVSE = "SuspendedEVSE",
-  SuspendedEV = "SuspendedEV",
-  Finishing = "Finishing",
-  Reserved = "Reserved",
-  Unavailable = "Unavailable",
-  Faulted = "Faulted",
 }
 
 /**

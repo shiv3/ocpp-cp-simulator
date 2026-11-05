@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { VehicleProfile } from "../cp/domain/vehicle/VehicleProfile";
+import type { VehicleProfile } from "./vehicleProfile";
 import { STR_1K, STR_256 } from "./limits";
 
 /**

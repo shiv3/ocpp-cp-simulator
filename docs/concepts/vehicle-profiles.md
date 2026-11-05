@@ -8,6 +8,7 @@ sources:
   - src/cp/domain/vehicle/VehicleCatalog.ts
   - src/cp/domain/persistence/VehicleProfileRepository.ts
   - src/protocol/vehicle.ts
+  - src/protocol/vehicleProfile.ts
   - src/components/vehicle/vehicleChoice.ts
   - "issue #458"
   - "issue #327"
@@ -22,7 +23,7 @@ related:
   - ../entities/daemon.md
   - ../entities/mcp-endpoint.md
   - ../sources/github-issues.md
-updated: 2026-10-11
+updated: 2026-11-05
 ---
 
 # Vehicle profiles
@@ -40,7 +41,10 @@ in [Control plane → Vehicle profiles and catalog](control-plane.md#vehicle-pro
 
 ## The model
 
-[`VehicleProfile.ts`](../../src/cp/domain/vehicle/VehicleProfile.ts):
+[`VehicleProfile.ts`](../../src/cp/domain/vehicle/VehicleProfile.ts)
+(the data types are defined in
+[`src/protocol/vehicleProfile.ts`](../../src/protocol/vehicleProfile.ts) and
+re-exported there, so the wire schema needs nothing from `src/cp`):
 
 | Field                    | Meaning                                                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

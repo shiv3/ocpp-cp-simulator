@@ -1,4 +1,5 @@
 import type { Database } from "../persistence/Database";
+import { AUTHORIZATION_CACHE_SEED_MAX } from "../../../protocol/authorization";
 import { idTokenKey } from "./idTokenKey";
 import { effectiveStatus } from "./LocalAuthorizationResolver";
 
@@ -31,7 +32,8 @@ export interface AuthorizationCacheOptions {
 }
 
 /** Neither 1.6 nor 2.x has a key for the cache capacity in entries. */
-export const DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES = 1000;
+export const DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES =
+  AUTHORIZATION_CACHE_SEED_MAX;
 
 interface CacheRow {
   id_token: string;

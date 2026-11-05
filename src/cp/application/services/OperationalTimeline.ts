@@ -12,38 +12,16 @@
  */
 
 import { selectLogWindow, type LogWindowOptions } from "../../shared/window";
+import {
+  TIMELINE_DEFAULT_CAPACITY,
+  TIMELINE_FORMAT_VERSION,
+  TIMELINE_KINDS,
+} from "../../../protocol/timeline";
 
-/** Bumped by minor for additive changes; consumers ignore unknown kinds. */
-export const TIMELINE_FORMAT_VERSION = "1.3";
-
-export const TIMELINE_KINDS = [
-  "connected",
-  "disconnected",
-  "reconnecting",
-  "boot_notification",
-  "status_change",
-  "connector_status",
-  "network_fault_injected",
-  "recovery_completed",
-  "transaction_started",
-  "transaction_id_assigned",
-  "transaction_stopped",
-  "transaction_rejected",
-  "transaction_message_rejected",
-  "transaction_message_discarded",
-  "authorization_rejected",
-  "scenario_started",
-  "scenario_wait_changed",
-  "scenario_error",
-  "scenario_finished",
-  "charging_profile_applied",
-  "charging_profile_cleared",
-  "charging_profile_expired",
-] as const;
+// Defined in `src/protocol` (#578); re-exported for the existing import sites.
+export { TIMELINE_DEFAULT_CAPACITY, TIMELINE_FORMAT_VERSION, TIMELINE_KINDS };
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
-
-export const TIMELINE_DEFAULT_CAPACITY = 1000;
 
 export interface TimelineEntry {
   /** Per-charge-point, strictly increasing; the ordering contract. */

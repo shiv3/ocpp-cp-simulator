@@ -6,7 +6,7 @@ sources:
   - src/cli/server/ (logs.get / logs.clear)
   - src/trace/logEntryToTrace.ts
   - src/cp/shared/Logger.ts
-  - src/cp/shared/redaction.ts
+  - src/protocol/redaction.ts
 related:
   - ../entities/daemon.md
   - ../entities/docker-image.md
@@ -14,7 +14,7 @@ related:
   - trace-format.md
   - ../entities/analyze.md
   - ../entities/cli.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Log format
@@ -52,7 +52,7 @@ works without a trace file.
 ## Redaction
 
 The charge point's `Logger` runs each message through the shared text
-redactor ([`redaction.ts`](../../src/cp/shared/redaction.ts)) before it
+redactor ([`redaction.ts`](../../src/protocol/redaction.ts)) before it
 reaches the console, the `logs` table or a log listener (the CLI `log` event,
 the Socket.IO log push). In an OCPP-J frame logged as `Sent:` / `Received:`
 it replaces with `[redacted]`:

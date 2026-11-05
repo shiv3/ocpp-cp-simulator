@@ -4,6 +4,7 @@ type: concept
 summary: The one wire contract every client of the daemon uses — `rpc` acks for commands (CP-scoped and daemon-level methods), `event` push envelopes with room-scoped subscriptions, closed error codes, zod-validated schemas.
 sources:
   - src/protocol/
+  - src/protocol/__tests__/importBoundary.test.ts (#578)
   - src/cli/server/
   - scripts/poc/README.md
 related:
@@ -21,7 +22,7 @@ related:
   - operational-timeline.md
   - charging-sessions.md
   - local-authorization.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Socket.IO control plane
@@ -73,6 +74,16 @@ timeout — answers
 `invalid_params` with the reason (#240). It used to answer `internal`.
 
 The protocol schemas live in `src/protocol/` and are validated with `zod`.
+`src/protocol/` imports nothing from `src/cp/` or any other part of the
+repository (third-party packages only), at runtime or type-only, so it can
+become a standalone package that the charge-point core depends on and never
+the reverse (#578). The vocabularies the schemas share with the charge point
+(connector statuses, transaction reasons, authorization statuses, timeline
+kinds, scenario verdicts, the vehicle profile data model, `idTokenKey`, the
+text redactor) are defined there; the `src/cp` modules that used to define
+them re-export them under their old paths.
+`src/protocol/__tests__/importBoundary.test.ts` fails on any new import from
+outside `src/protocol/`.
 On the daemon, Socket.IO and MCP parse a method's params once, against its
 `METHODS` schema, and the handler receives the parsed value, typed from that
 schema (#383). Keys a schema does not declare are dropped before the handler
@@ -577,8 +588,9 @@ name is sent verbatim on 2.x and becomes `Other` on a 1.6 `StopTransaction.req`,
 which has no closer value. A value outside both vocabularies is an
 `invalid_params` error that lists the accepted spellings.
 
-The station-initiated status vocabularies are the domain's
-(`src/cp/domain/types/FirmwareLogStatus.ts`), shared by this schema,
+The station-initiated status vocabularies are defined in
+`src/protocol/firmwareLogStatus.ts` (re-exported by
+`src/cp/domain/types/FirmwareLogStatus.ts`), shared by this schema,
 JSON-Lines mode and the `ChargePointService` port (#377):
 
 - `DiagnosticsStatus`: `Idle`, `Uploaded`, `UploadFailed`, `Uploading`.

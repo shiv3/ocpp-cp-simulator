@@ -2270,3 +2270,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - New root `CONTRIBUTING.md` (not a wiki page): pre-push checks and the wiki update rule, moved from the README's Contributing section, plus the triage convention — one `type:*`, one `area:*`, one `priority:*` label and one milestone per issue; a PR carries its issue's labels, and its `type:*` label picks the release-drafter section and bump.
 - [Wiki conventions](conventions.md) and `CLAUDE.md`: `CONTRIBUTING.md` sits beside `README.md` outside the wiki.
+
+## [2026-11-05] restructure | Remove the one-off workspaces move script (#578)
+
+- `scripts/workspaces-move.ts` and its test are deleted. The script existed to generate the move in #590 and to carry branches opened before it; the move is merged and the last such branches (#545, #548) were carried over and merged, so nothing can run it any more (it refuses a tree already in the workspace layout). It stays reachable in history at `e0c05f9c`.

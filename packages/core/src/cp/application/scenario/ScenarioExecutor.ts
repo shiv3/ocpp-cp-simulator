@@ -1,9 +1,8 @@
-import {
+import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioExecutionState,
   ScenarioExecutionMode,
-  ScenarioNodeType,
   ScenarioExecutorCallbacks,
   ScenarioEvents,
   ScenarioNode,
@@ -34,6 +33,7 @@ import {
   ScenarioExpectation,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
+import { ScenarioNodeType } from "./ScenarioTypes";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {

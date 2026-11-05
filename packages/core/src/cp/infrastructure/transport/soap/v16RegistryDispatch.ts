@@ -1,5 +1,5 @@
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 import type {
   SoapOperation,
   SoapParsedPayload,

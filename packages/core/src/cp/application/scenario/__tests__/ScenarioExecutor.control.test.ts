@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
-import {
-  ScenarioDefinition,
-  ScenarioEvents,
-  ScenarioNodeType,
-} from "../ScenarioTypes";
+import type { ScenarioDefinition, ScenarioEvents } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { EventEmitter } from "../../../shared/EventEmitter";
 import { deferred } from "../../../../test/deferred";

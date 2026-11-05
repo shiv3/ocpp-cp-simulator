@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
-import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
+import type { ScenarioDefinition } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 
 // Regression: stopping a scenario while its auto-meter node is waiting out
 // `maxTime` must (a) stop the auto-meter immediately and (b) never let the

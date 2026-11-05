@@ -1,4 +1,5 @@
-import { Logger, LogType } from "../../shared/Logger";
+import type { Logger } from "../../shared/Logger";
+import { LogType } from "../../shared/Logger";
 import { encodeCallFrame } from "./callFrame";
 import { redactSensitiveText } from "../../shared/redaction";
 import {
@@ -13,11 +14,8 @@ import type {
   OcppTlsOptions,
   OcppWebSocketConnectOptions,
 } from "./wsUrlWithBasic";
-import {
-  OCPPAction,
-  OCPPErrorCode,
-  OCPPMessageType,
-} from "../../domain/types/OcppTypes";
+import type { OCPPErrorCode } from "../../domain/types/OcppTypes";
+import { OCPPAction, OCPPMessageType } from "../../domain/types/OcppTypes";
 import type {
   AuthorizeRequestV16,
   BootNotificationRequestV16,

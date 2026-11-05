@@ -1,4 +1,4 @@
-import {
+import type {
   AutoMeterValueConfig,
   CurvePoint,
 } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";

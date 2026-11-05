@@ -5,7 +5,8 @@ import { Logger, LogLevel } from "../../../shared/Logger";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { ScenarioManager } from "../ScenarioManager";
-import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
+import type { ScenarioDefinition } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 
 // #425: an explicit run starts whatever the charge point's status, like the
 // daemon's runScenario; only the statusChange trigger waits for Available.

@@ -1,5 +1,5 @@
+import type { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
 import {
-  OCPPErrorCodeV16,
   type BootNotificationRequestV16,
   type ReserveNowRequestV16,
   type ReserveNowResponseV16,

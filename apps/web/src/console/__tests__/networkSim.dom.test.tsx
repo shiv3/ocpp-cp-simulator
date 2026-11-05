@@ -13,7 +13,7 @@ import {
   type LocalChargePointDefinition,
 } from "../../data/local/LocalChargePointService";
 import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
 import type { FakeChargePointService as FCS } from "../test/harness";

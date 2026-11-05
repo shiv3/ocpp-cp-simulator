@@ -1,6 +1,7 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
-import { CsmsCallTriggerNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node } from "@xyflow/react";
+import type { CsmsCallTriggerNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
 type CsmsCallTriggerNodeDataWithProgress = CsmsCallTriggerNodeData & {
   progress?: {

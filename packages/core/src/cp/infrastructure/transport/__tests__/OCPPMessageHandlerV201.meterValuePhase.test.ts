@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { MeterValuesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
 

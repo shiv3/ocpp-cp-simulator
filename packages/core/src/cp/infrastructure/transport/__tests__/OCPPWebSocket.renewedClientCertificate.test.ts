@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OCPPWebSocket } from "../OCPPWebSocket";
 import type { OcppTlsOptions } from "../wsUrlWithBasic";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 
 /**
  * #537 A02.FR.08 / A02.FR.10 / A02.FR.28: which client certificate each

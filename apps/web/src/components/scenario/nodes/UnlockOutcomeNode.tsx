@@ -1,6 +1,7 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
-import { UnlockOutcomeNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node } from "@xyflow/react";
+import type { UnlockOutcomeNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * §5.18 / §7.46: pre-arm the connector's next UnlockConnector.req response.

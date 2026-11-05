@@ -17,11 +17,8 @@ import type {
   ConnectorStateSnapshot,
 } from "./types/StateTransition";
 import type { HistoryOptions, StateHistoryEntry } from "./types/StateSnapshot";
-import {
-  ChargePointStatus,
-  LogType,
-  OCPPStatus,
-} from "../../domain/types/OcppTypes";
+import type { ChargePointStatus } from "../../domain/types/OcppTypes";
+import { LogType, OCPPStatus } from "../../domain/types/OcppTypes";
 
 interface ConnectorGetter {
   (id: number):

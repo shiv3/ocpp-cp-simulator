@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import type { Server } from "bun";
-import { CLIChargePointService } from "../service";
+import type { CLIChargePointService } from "../service";
 
 type AnyServer = Server<unknown>;
 import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";

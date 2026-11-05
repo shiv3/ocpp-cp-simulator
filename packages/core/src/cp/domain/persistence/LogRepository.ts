@@ -1,6 +1,6 @@
 import type { Database } from "./Database";
-import type { LogEntry } from "../../shared/Logger";
-import { LogLevel, LogType } from "../../shared/Logger";
+import type { LogEntry, LogType } from "../../shared/Logger";
+import { LogLevel } from "../../shared/Logger";
 
 /**
  * Persists `LogEntry` records to the `logs` table.

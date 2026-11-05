@@ -6,6 +6,13 @@ import React, {
   lazy,
   Suspense,
 } from "react";
+import type {
+  Connection,
+  Edge,
+  NodeProps,
+  NodeTypes,
+  ReactFlowInstance,
+} from "@xyflow/react";
 import {
   ReactFlow,
   Background,
@@ -15,20 +22,15 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
-  Connection,
-  Edge,
-  NodeProps,
-  NodeTypes,
-  ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
+import type {
   ScenarioDefinition,
-  ScenarioNodeType,
   ScenarioNode,
 } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 import {
   meterNodeToCurveConfig,
   applyCurveConfigToMeterNode,

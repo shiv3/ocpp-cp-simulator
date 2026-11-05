@@ -1,5 +1,6 @@
 import { ReservationStatus } from "../types/OcppTypes";
-import { Logger, LogType } from "../../shared/Logger";
+import type { Logger } from "../../shared/Logger";
+import { LogType } from "../../shared/Logger";
 
 /**
  * Reservation data structure

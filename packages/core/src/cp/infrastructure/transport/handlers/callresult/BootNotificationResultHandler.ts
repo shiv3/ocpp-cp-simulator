@@ -1,4 +1,7 @@
-import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type {
+  CallResultHandler,
+  HandlerContext,
+} from "../MessageHandlerRegistry";
 import type { BootNotificationResponseV16 } from "@ocpp-cp-sim/ocpp/index";
 
 /**

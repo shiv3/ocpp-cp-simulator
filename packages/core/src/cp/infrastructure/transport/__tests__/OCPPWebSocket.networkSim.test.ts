@@ -4,7 +4,7 @@ import {
   type OcppMessageErrorPayload,
   type SocketClose,
 } from "../OCPPWebSocket";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 import type {
   Settlement,
   ResolvedNetworkSimConfig,

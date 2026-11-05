@@ -5,7 +5,7 @@ import {
   DEFAULT_AFFINITY_FAILOVER_THRESHOLD,
   SupervisionUrlPool,
 } from "../SupervisionUrlPool";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 
 /**
  * Minimal socket whose `close()` actually fires `onclose`, which is what makes

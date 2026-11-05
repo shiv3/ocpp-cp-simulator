@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
-import {
+import type {
   ScenarioDefinition,
   ScenarioExecutorCallbacks,
   ScenarioNodeData,
-  ScenarioNodeType,
   ScenarioWaitIntervention,
 } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 import { cancellablePromise } from "../cancellable";
 import { deferred, type Deferred } from "../../../../test/deferred";
 import { linearScenario, node } from "./scenarioFixtures";

@@ -43,10 +43,12 @@ import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/res
 import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
-import {
+import type {
   BootNotification,
-  hasStatusNotificationOptions,
   OCPPStatus,
+} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import {
+  hasStatusNotificationOptions,
   type StatusNotificationOptions,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 import type {
@@ -73,7 +75,7 @@ import type {
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import type { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import {
   getDefaultEVSettings,
   type EVSettings,

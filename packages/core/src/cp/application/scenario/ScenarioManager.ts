@@ -1,8 +1,8 @@
-import { Connector } from "../../domain/connector/Connector";
-import { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { Connector } from "../../domain/connector/Connector";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { ScenarioExecutor } from "./ScenarioExecutor";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
-import {
+import type {
   ScenarioDefinition,
   ScenarioExecutorCallbacks,
   ScenarioEvents,

@@ -18,7 +18,7 @@
  *   it), not on the connector's electrical model (#323).
  */
 
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   ClearChargingProfileRequestV16,
   ClearChargingProfileResponseV16,

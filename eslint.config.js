@@ -78,6 +78,16 @@ export default tseslint.config(
           destructuredArrayIgnorePattern: "^_",
         },
       ],
+      // #570: an import used only as a type must say so, or check:boundaries
+      // counts it as a runtime edge. `import("x").T` is type-only by nature.
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        {
+          prefer: "type-imports",
+          fixStyle: "separate-type-imports",
+          disallowTypeAnnotations: false,
+        },
+      ],
       // Empty interfaces are intentional here (generated OCPP empty-payload
       // response types, placeholder prop types); keep the rule for misuse of
       // the `{}` type but allow the interface form. Matches pre-ESLint-9 intent.

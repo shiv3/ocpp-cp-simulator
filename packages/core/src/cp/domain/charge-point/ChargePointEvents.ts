@@ -1,4 +1,4 @@
-import { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
+import type { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 import type { ActiveChargingProfile } from "../connector/Connector";
 
 /** The CSMS's answer to BootNotification.req, as every OCPP version words it. */

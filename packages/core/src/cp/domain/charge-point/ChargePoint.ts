@@ -9,7 +9,8 @@ import type {
   DataTransferData,
   DataTransferResult,
 } from "../types/DataTransfer";
-import { Logger, LogType, LogEntry } from "../../shared/Logger";
+import type { LogEntry } from "../../shared/Logger";
+import { Logger, LogType } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
@@ -63,6 +64,8 @@ import type {
   ChargePointErrorCode,
   OCPPAvailability,
   StatusNotificationOptions,
+  BootNotification,
+  ChargePointStatus,
 } from "../types/OcppTypes";
 import { isOcpp2Version, isSoapVersion, OCPP_2_1 } from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
@@ -72,8 +75,6 @@ import {
   type SoapOperation,
 } from "../../infrastructure/transport/soap/dialect";
 import {
-  BootNotification,
-  ChargePointStatus,
   ChargingProfilePurposeType,
   isChargePointStatus,
   OCPPStatus,

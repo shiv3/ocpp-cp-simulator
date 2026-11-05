@@ -20,7 +20,7 @@ import {
 } from "../../../../domain/security/certificateHash";
 import { LogType } from "../../../../shared/Logger";
 import { rootUseFromV16, rootUseToV16 } from "../../certificateUseMapping";
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 

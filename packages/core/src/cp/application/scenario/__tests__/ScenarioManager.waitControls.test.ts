@@ -5,7 +5,8 @@ import { Logger, LogLevel } from "../../../shared/Logger";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { ScenarioManager } from "../ScenarioManager";
-import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
+import type { ScenarioDefinition } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 
 // Start -> wait for a status this test never reaches -> End.
 function parkingScenario(timeout: number): ScenarioDefinition {

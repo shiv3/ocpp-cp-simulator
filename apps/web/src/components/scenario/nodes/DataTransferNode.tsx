@@ -1,6 +1,7 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
-import { DataTransferNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node } from "@xyflow/react";
+import type { DataTransferNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * §4.3 CP-initiated DataTransfer.req. The vendor / message id / payload

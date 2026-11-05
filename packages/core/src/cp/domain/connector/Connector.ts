@@ -9,21 +9,20 @@ import {
   MeterValueScheduler,
   type MeterValueStrategy,
 } from "./MeterValueScheduler";
-import {
+import type {
   ChargePointErrorCode,
   OCPPAvailability,
-  OCPPStatus,
-  ChargingProfilePurposeType,
   ChargingProfileKindType,
   ChargingRateUnitType,
   RecurrencyKindType,
 } from "../types/OcppTypes";
+import { OCPPStatus, ChargingProfilePurposeType } from "../types/OcppTypes";
 import type { ScenarioManager } from "../../application/scenario/ScenarioManager";
-import {
+import type {
   ScenarioMode,
   ScenarioEvents,
 } from "../../application/scenario/ScenarioTypes";
-import { Transaction } from "./Transaction";
+import type { Transaction } from "./Transaction";
 import {
   type EVSettings,
   type EVSettingsPatch,

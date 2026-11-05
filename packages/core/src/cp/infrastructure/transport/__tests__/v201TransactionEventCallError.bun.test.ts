@@ -81,8 +81,6 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         [];
       cp.events.on("transactionMessageRejected", (e) => rejected.push(e));
       cp.events.on("transactionMessageDiscarded", (e) => discarded.push(e));
-      const failures: unknown[] = [];
-      cp.events.on("transactionStartFailed", (e) => failures.push(e));
       try {
         await setVariables(csms, {
           MessageAttempts: "2",
@@ -137,7 +135,6 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           },
         ]);
         expect(csms.received.filter(started)).toHaveLength(2);
-        expect(failures).toEqual([]);
         const connector = cp.getConnector(1)!;
         expect(connector.status).toBe(OCPPStatus.Charging);
         expect(connector.transaction?.cpTransactionId).toBe(transactionId);

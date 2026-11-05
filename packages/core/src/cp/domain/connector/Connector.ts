@@ -809,9 +809,19 @@ export class Connector {
     });
   }
 
+  /** OCPP 1.6 (#527): a CALLERROR answered the running transaction's
+   *  StartTransaction.req; its `0` id is now a placeholder the CSMS failed
+   *  to process. Emits `transactionChange` so the flag is persisted. */
+  markStartCallError(): void {
+    if (!this.transactionValue || this.transactionValue.startCallError) return;
+    this.transactionValue.startCallError = true;
+    this.markTransactionChanged();
+  }
+
   set transactionId(transactionId: number) {
     if (!this.transactionValue) return;
     this.transactionValue.id = transactionId;
+    delete this.transactionValue.startCallError;
     this.eventsEmitter.emit("transactionIdChange", { transactionId });
   }
 

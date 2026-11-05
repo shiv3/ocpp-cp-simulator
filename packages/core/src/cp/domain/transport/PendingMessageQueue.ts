@@ -18,7 +18,8 @@ export interface PendingMessage<A extends string = OCPPAction> {
   connectorId?: number;
   /** Enqueue timestamp (epoch ms) for retry-interval calculation. */
   queuedAt: number;
-  /** How many send attempts have already been made. */
+  /** How many send attempts have already been made. A 1.6 resend salvaged
+   *  here enqueues with its count so far (#527, §3.7.1). */
   attempts: number;
 }
 
@@ -94,11 +95,15 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     return this.items.length;
   }
 
-  enqueue(message: Omit<PendingMessage<A>, "queuedAt" | "attempts">): void {
+  enqueue(
+    message: Omit<PendingMessage<A>, "queuedAt" | "attempts"> & {
+      attempts?: number;
+    },
+  ): void {
     const row: PendingRow<A> = {
       ...message,
       queuedAt: Date.now(),
-      attempts: 0,
+      attempts: message.attempts ?? 0,
       messageId: this.nextMessageId(),
       seq: this.nextSeq++,
     };

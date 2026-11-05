@@ -194,7 +194,12 @@ export class OperationalTimelineProjector {
       });
     });
     on("transactionMessageDiscarded", ({ connectorId, attempts, ...event }) => {
-      const cause = event.reason === "timeout" ? "no answer" : event.errorCode;
+      // A 1.6 resend replayed from the offline queue lost its last error:
+      // `pending_messages` does not store it (#527).
+      const cause =
+        event.reason === "timeout"
+          ? "no answer"
+          : (event.errorCode ?? "error code not recorded");
       this.timeline.record({
         kind: "transaction_message_discarded",
         connectorId,

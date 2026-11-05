@@ -345,7 +345,9 @@ describe("sendOcppCall (#389)", () => {
             currentTime: "2026-09-30T00:00:00.000Z",
           });
           await next;
-          // StartTransaction's CALLERROR recovery would have reset it.
+          // Nothing reached the station: the connector is as it was. (That
+          // the call is not resent either is pinned with fake timers in
+          // OCPPMessageHandler.transactionRetry.test.ts, #527.)
           expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
         },
       );

@@ -1089,7 +1089,11 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       connectorId,
     );
     this.enqueueRequest("StartTransaction", payload, (env) => {
-      new StartTransactionResultHandler(connectorId, transaction.tagId).handle(
+      new StartTransactionResultHandler(
+        connectorId,
+        transaction.tagId,
+        transaction.startTime.toISOString(),
+      ).handle(
         this.startTransactionResponseFromPayload(env.payload),
         this.handlerContext(),
       );

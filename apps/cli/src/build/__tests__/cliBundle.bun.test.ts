@@ -118,6 +118,65 @@ describe("the CLI bundle runs away from the source tree (#578)", () => {
   });
 
   it(
+    "bootstraps a charge point with no node_modules anywhere around it",
+    async () => {
+      // Creating a charge point is what loads the OCPP validators and the
+      // vendored schemas, and the scenario schema: everything the Docker
+      // runtime image no longer carries beside the bundle. The CSMS URL is a
+      // closed port on purpose; the connection failing is fine.
+      expect(existsSync(join(root, "node_modules"))).toBe(false);
+      expect(existsSync(join(root, "pkg", "node_modules"))).toBe(false);
+      const port = await freePort();
+      const proc = Bun.spawn(
+        [
+          process.execPath,
+          bundle,
+          "--http-port",
+          String(port),
+          "--state-db",
+          ":memory:",
+          "--cp-id",
+          "x",
+          "--connectors",
+          "2",
+          "--ws-url",
+          "ws://127.0.0.1:9/ocpp/",
+        ],
+        { cwd, stdout: "pipe", stderr: "pipe" },
+      );
+      let log = "";
+      const pump = async (stream: ReadableStream<Uint8Array>) => {
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          log += decoder.decode(value, { stream: true });
+        }
+      };
+      void pump(proc.stdout);
+      void pump(proc.stderr);
+      try {
+        const deadline = Date.now() + 30_000;
+        while (
+          Date.now() < deadline &&
+          !log.includes('Bootstrapped CP "x"') &&
+          proc.exitCode === null
+        )
+          await Bun.sleep(100);
+        if (!log.includes('Bootstrapped CP "x"')) console.error(log);
+        expect(log).toContain('Bootstrapped CP "x"');
+        const health = await fetch(`http://127.0.0.1:${port}/v1/healthz`);
+        expect(health.status).toBe(200);
+      } finally {
+        proc.kill();
+        await proc.exited;
+      }
+    },
+    90_000,
+  );
+
+  it(
     "--web-console finds <pkg>/dist beside <pkg>/dist-cli",
     async () => {
       const dist = join(root, "pkg", "dist");

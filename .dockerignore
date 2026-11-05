@@ -23,3 +23,6 @@ src-tauri
 !.env.example
 .DS_Store
 *.log
+
+# Nested workspace node_modules (never part of the image build)
+**/node_modules

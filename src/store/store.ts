@@ -1,40 +1,16 @@
 import { atomWithStorage } from "jotai/utils";
-import { BootNotification } from "../cp/domain/types/OcppTypes";
+import type {
+  AutoMeterValueSetting,
+  BasicAuthSettings,
+  Config,
+  Experimental,
+} from "../data/interfaces/ConfigRepository";
 import type { NetworkSimLayerConfig } from "../cp/infrastructure/transport/network-sim/config";
 
-export interface Config {
-  wsURL: string;
-  ChargePointID: string;
-  connectorNumber: number;
-  tagID: string;
-  ocppVersion: string;
-  basicAuthSettings: BasicAuthSettings;
-  autoMeterValueSetting: AutoMeterValueSetting;
-  Experimental: Experimental | null;
-  BootNotification: BootNotification | null;
-}
-
-export interface BasicAuthSettings {
-  enabled: boolean;
-  username: string;
-  password: string;
-}
-
-export interface AutoMeterValueSetting {
-  enabled: boolean;
-  interval: number;
-  value: number;
-}
-
-export interface Experimental {
-  ChargePointIDs: ExperimentalChargePoint[];
-  TagIDs: string[];
-}
-
-interface ExperimentalChargePoint {
-  ChargePointID: string;
-  ConnectorNumber: number;
-}
+// The config shape is owned by the ConfigRepository port (src/data/interfaces),
+// which the daemon-facing client package also uses; re-exported so the many
+// importers of `Config` from this module keep working.
+export type { AutoMeterValueSetting, BasicAuthSettings, Config, Experimental };
 
 export interface NetworkSimStore {
   version: 1;

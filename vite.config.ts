@@ -62,7 +62,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(__dirname, "./apps/web/src"),
     },
     // Force a single React instance across every chunk. The Scenario Editor is
     // a lazy chunk built around @xyflow/react, which leans heavily on React

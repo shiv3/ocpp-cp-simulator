@@ -9,6 +9,7 @@ import {
   OCPP_WEBSOCKET_PROTOCOL_201,
   ocppVersionToSubprotocol,
 } from "./profile/subprotocols";
+import type { OcppSecurityProfile } from "../../../protocol/securityProfile";
 
 export {
   OCPP_WEBSOCKET_PROTOCOL_16,
@@ -18,7 +19,7 @@ export {
 
 export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
 
-export type OcppSecurityProfile = 0 | 1 | 2 | 3;
+export type { OcppSecurityProfile };
 
 export interface OcppTlsOptions {
   readonly ca?: string;

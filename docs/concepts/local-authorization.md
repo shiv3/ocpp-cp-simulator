@@ -15,7 +15,7 @@ sources:
   - src/cp/infrastructure/transport/v201/coreControlV201.ts (handleClearCacheV201)
   - src/cp/domain/auth/AuthorizationCacheSeed.ts
   - src/protocol/methods.ts (get/seed/clear_auth_cache)
-  - src/cp/domain/auth/idTokenKey.ts
+  - src/protocol/idTokenKey.ts
   - "issue #181"
   - "issue #452"
 related:
@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Local authorization

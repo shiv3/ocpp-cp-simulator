@@ -14,7 +14,7 @@ import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
   UPLOAD_LOG_STATUSES,
-} from "../cp/domain/types/FirmwareLogStatus";
+} from "./firmwareLogStatus";
 import { z } from "zod";
 
 import {
@@ -39,27 +39,29 @@ import { labelsSchema } from "./labels";
 import {
   METER_READING_CONTEXTS,
   STOP_REASONS,
-  TRANSACTION_CHARGING_STATES,
-  TRANSACTION_EVENT_TRIGGER_REASONS,
-} from "../cp/domain/connector/Transaction";
-import { OCPPStatus } from "../cp/domain/types/OcppTypes";
-import { CHARGING_SESSION_OUTCOMES } from "../cp/domain/session/ChargingSession";
+  TRANSACTION_CHARGING_STATE_VALUES as TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASON_VALUES as TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "./transactionVocabulary";
+import { OCPPStatus } from "./connectorStatus";
+import {
+  CHARGING_SESSION_OUTCOMES,
+  MAX_SESSIONS_PER_CP,
+} from "./chargingSession";
 import {
   AUTHORIZATION_CACHE_SEED_MAX,
   AUTHORIZATION_STATUSES,
-} from "../cp/domain/auth/AuthorizationCacheSeed";
-import { idTokenKey } from "../cp/domain/auth/idTokenKey";
-import { MAX_SESSIONS_PER_CP } from "../cp/domain/persistence/ChargingSessionRepository";
-import type { ScenarioMode } from "../cp/application/scenario/ScenarioTypes";
+} from "./authorization";
+import { idTokenKey } from "./idTokenKey";
 import {
   SCENARIO_RUN_EXECUTION_STATES,
   SCENARIO_VERDICTS,
-} from "../cp/application/verification/ScenarioRunSummary";
+  type ScenarioMode,
+} from "./scenario";
 import {
   TIMELINE_DEFAULT_CAPACITY,
   TIMELINE_FORMAT_VERSION,
   TIMELINE_KINDS,
-} from "../cp/application/services/OperationalTimeline";
+} from "./timeline";
 
 const CONN_POS = z.number().int().min(1);
 const CONN_NONNEG = z.number().int().min(0);

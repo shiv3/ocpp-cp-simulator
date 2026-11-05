@@ -9,7 +9,7 @@ sources:
   - src/cli/vehicleCatalogConfig.ts
   - src/cli/server/vehicleRpc.ts
   - src/console/lib/vehicleCatalog.ts
-  - src/cp/shared/redaction.ts
+  - src/protocol/redaction.ts
   - https://github.com/juherr/open-ev-directory
   - "issue #458"
 related:
@@ -20,7 +20,7 @@ related:
   - ../concepts/control-plane.md
   - ../concepts/local-vs-remote-mode.md
   - mcp-endpoint.md
-updated: 2026-10-11
+updated: 2026-11-05
 ---
 
 # Open EV Directory
@@ -117,7 +117,7 @@ redirect leaves it, which a test pins for the daemon's Bun.
 No error message the adapter builds contains the key: messages carry the
 request path and what the API said, a problem `detail` that echoes the key is
 scrubbed, and the underlying fetch error is not kept as a cause. The shared
-redaction ([`redaction.ts`](../../src/cp/shared/redaction.ts)) also replaces
+redaction ([`redaction.ts`](../../src/protocol/redaction.ts)) also replaces
 any `Bearer <token>` and any
 `apiKey` / `api_key` assignment in text with `[redacted]`, and drops an
 `apiKey` field (any spelling with `-` / `_`) from redacted objects. That

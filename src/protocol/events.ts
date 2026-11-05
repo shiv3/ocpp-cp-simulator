@@ -9,10 +9,10 @@
 // `password` and `AuthorizationKey` as a belt-and-suspenders guard.
 
 import { z } from "zod";
-import { normalizeKeyName, redactSensitiveValue } from "../cp/shared/redaction";
+import { normalizeKeyName, redactSensitiveValue } from "./redaction";
 import { OBJ_MAX_BYTES, STR_64K, boundedObject } from "./limits";
 import { labelsSchema, type Labels } from "./labels";
-import type { OcppSecurityProfile } from "../cp/infrastructure/transport/wsUrlWithBasic";
+import type { OcppSecurityProfile } from "./securityProfile";
 
 // ---------------------------------------------------------------------------
 // Redaction helpers

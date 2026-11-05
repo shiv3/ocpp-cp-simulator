@@ -1,0 +1,34 @@
+// Operational timeline vocabulary (#448): the format version, the entry kinds
+// and the default capacity. The timeline itself is
+// `cp/application/services/OperationalTimeline.ts`; the kind vocabulary and the
+// correlation rules are documented in `docs/concepts/operational-timeline.md`.
+
+/** Bumped by minor for additive changes; consumers ignore unknown kinds. */
+export const TIMELINE_FORMAT_VERSION = "1.3";
+
+export const TIMELINE_KINDS = [
+  "connected",
+  "disconnected",
+  "reconnecting",
+  "boot_notification",
+  "status_change",
+  "connector_status",
+  "network_fault_injected",
+  "recovery_completed",
+  "transaction_started",
+  "transaction_id_assigned",
+  "transaction_stopped",
+  "transaction_rejected",
+  "transaction_message_rejected",
+  "transaction_message_discarded",
+  "authorization_rejected",
+  "scenario_started",
+  "scenario_wait_changed",
+  "scenario_error",
+  "scenario_finished",
+  "charging_profile_applied",
+  "charging_profile_cleared",
+  "charging_profile_expired",
+] as const;
+
+export const TIMELINE_DEFAULT_CAPACITY = 1000;

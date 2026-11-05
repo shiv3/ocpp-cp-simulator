@@ -1,3 +1,4 @@
+import { MAX_SESSIONS_PER_CP } from "../../../protocol/chargingSession";
 import type {
   ChargingSession,
   ChargingSessionOutcome,
@@ -18,7 +19,7 @@ import type {
  * that is still active is never evicted. Deleting a charge point, or
  * `state.reset`, drops its sessions.
  */
-export const MAX_SESSIONS_PER_CP = 500;
+export { MAX_SESSIONS_PER_CP };
 
 export interface ChargingSessionQuery {
   cpId: string;

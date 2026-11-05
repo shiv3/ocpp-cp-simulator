@@ -10,12 +10,10 @@
  * Full model and outcome rules: `docs/concepts/charging-sessions.md`.
  */
 
-export const CHARGING_SESSION_OUTCOMES = [
-  "active",
-  "completed",
-  "interrupted",
-  "failed",
-] as const;
+import { CHARGING_SESSION_OUTCOMES } from "../../../protocol/chargingSession";
+
+// Defined in `src/protocol` (#578); re-exported for the existing import sites.
+export { CHARGING_SESSION_OUTCOMES };
 
 /**
  * - `active` — the transaction is still running.

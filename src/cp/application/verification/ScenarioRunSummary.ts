@@ -3,6 +3,13 @@ import type {
   ScenarioVerdict,
 } from "../scenario/ScenarioTypes";
 import type { ScenarioRunResult } from "./ScenarioAssertions";
+import {
+  SCENARIO_RUN_EXECUTION_STATES,
+  SCENARIO_VERDICTS,
+} from "../../../protocol/scenario";
+
+// Defined in `src/protocol` (#578); re-exported for the existing import sites.
+export { SCENARIO_RUN_EXECUTION_STATES, SCENARIO_VERDICTS };
 
 /**
  * The read side of the scenario run history (#388): what `scenario.runs.list`
@@ -11,20 +18,6 @@ import type { ScenarioRunResult } from "./ScenarioAssertions";
  */
 
 export type ScenarioRunExecutionState = ScenarioRunResult["executionState"];
-
-/** Every {@link ScenarioVerdict}, for filters and the control-plane enum. */
-export const SCENARIO_VERDICTS = [
-  "PASS",
-  "FAIL",
-  "BLOCKED",
-  "SKIPPED",
-] as const satisfies readonly ScenarioVerdict[];
-
-/** Every {@link ScenarioRunExecutionState}. */
-export const SCENARIO_RUN_EXECUTION_STATES = [
-  "completed",
-  "error",
-] as const satisfies readonly ScenarioRunExecutionState[];
 
 /** One row of the run listing: the report minus the transcript, snapshots
  *  and per-assertion detail, which `scenario_report` returns on demand. */

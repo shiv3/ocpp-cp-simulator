@@ -77,6 +77,9 @@ COPY vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.
 # "Tsconfig not found /app/scripts/bench/tsconfig.json" — which is how the
 # v0.7.11 image never built. Only the tsconfig is needed, not the bench code.
 COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
+# Same for scripts/tsconfig.json (#578, the package-boundary checker's
+# project): referenced from the root tsconfig.json, so it must be present.
+COPY scripts/tsconfig.json ./scripts/tsconfig.json
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY src ./src

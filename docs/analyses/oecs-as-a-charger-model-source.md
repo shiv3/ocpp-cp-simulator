@@ -7,14 +7,14 @@ sources:
   - "issue #297"
   - "issue #241"
   - https://github.com/ChargePi/oecs
-  - src/protocol/methods.ts
-  - src/utils/blueprints/index.ts
-  - src/cp/domain/charge-point/ConfigurationStore.ts
+  - packages/contracts/src/methods.ts
+  - packages/core/src/utils/blueprints/index.ts
+  - packages/core/src/cp/domain/charge-point/ConfigurationStore.ts
 related:
   - ../concepts/control-plane.md
   - fleet-load-and-observability-roadmap.md
   - ../sources/github-issues.md
-updated: 2026-09-07
+updated: 2026-11-05
 ---
 
 # OECS as a charger model source
@@ -58,14 +58,14 @@ on the _format_, not on either service.
 
 ## The boundary the issue asks us to document
 
-| Layer           | Owns                                                          | Lives in                                                                      |
-| --------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **OECS**        | What a charger model _is_, as the manufacturer specifies it   | External document, imported once                                              |
-| **Blueprint**   | The simulator's reusable hardware description                 | [`blueprintSchema`](../../src/protocol/methods.ts), `blueprints` SQLite table |
-| **ChargePoint** | A running instance: identity, CSMS link, configuration, state | `cp.create` / `cp.create_many`                                                |
+| Layer           | Owns                                                          | Lives in                                                                                |
+| --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **OECS**        | What a charger model _is_, as the manufacturer specifies it   | External document, imported once                                                        |
+| **Blueprint**   | The simulator's reusable hardware description                 | [`blueprintSchema`](../../packages/contracts/src/methods.ts), `blueprints` SQLite table |
+| **ChargePoint** | A running instance: identity, CSMS link, configuration, state | `cp.create` / `cp.create_many`                                                          |
 
 Scenarios stay the behaviour half and are untouched by this — see
-[`src/utils/blueprints/README.md`](../../src/utils/blueprints/README.md).
+[`packages/core/src/utils/blueprints/README.md`](../../packages/core/src/utils/blueprints/README.md).
 
 ## What maps onto today's blueprint
 
@@ -109,7 +109,7 @@ The import adapter itself is thin. The work #331 actually implies is a
 has nowhere to land:
 
 - **Per-connector hardware.** `params.connectors` is an integer. `Connector`
-  (`src/cp/domain/connector/Connector.ts`) models status, availability, error
+  (`packages/core/src/cp/domain/connector/Connector.ts`) models status, availability, error
   codes, meter values and EV state — it carries no connector type, no
   `currentType`, no phases, no rated current/voltage, no per-connector max
   power. So `Type2_Mennekes` vs `CCS2_Combo2`, and the DC example's asymmetric
@@ -126,7 +126,7 @@ has nowhere to land:
   and `software.configuration[]` as `{key, dataType, defaultValue, minValue,
 maxValue, unit, readOnly, rebootRequired}`, which lines up with OCPP 1.6
   configuration keys. The simulator has a
-  [`ConfigurationStore`](../../src/cp/domain/charge-point/ConfigurationStore.ts)
+  [`ConfigurationStore`](../../packages/core/src/cp/domain/charge-point/ConfigurationStore.ts)
   seeded from `defaultConfiguration(cp)`, but neither `cp.create` nor a blueprint
   can override a key at creation time. Seeding it is the single highest-fidelity
   item here — a charge point that answers `GetConfiguration` with the modelled
@@ -140,7 +140,7 @@ maxValue, unit, readOnly, rebootRequired}`, which lines up with OCPP 1.6
 - **`profiles[]` / `smartCharging`.** OCPP feature profiles (`Core`,
   `SmartCharging`, `Reservation`, …) are free strings in OECS, and the names
   match the `SupportedFeatureProfiles` configuration key the simulator already
-  defines (`src/cp/domain/charge-point/Configuration.ts`, read-only array). So
+  defines (`packages/core/src/cp/domain/charge-point/Configuration.ts`, read-only array). So
   they land in _what the charge point reports_, via the same config-seeding path
   as the keys above. They do not land in behaviour: handlers are registered
   unconditionally, so a model that advertises no `Reservation` profile still
@@ -149,7 +149,7 @@ maxValue, unit, readOnly, rebootRequired}`, which lines up with OCPP 1.6
 - **Provenance.** `blueprintSchema` has no `source`-shaped field, and Zod object
   parsing strips unknown keys, so an imported document's origin would be silently
   discarded today. The good news is that
-  [`BlueprintRepository`](../../src/cp/domain/persistence/BlueprintRepository.ts)
+  [`BlueprintRepository`](../../packages/core/src/cp/domain/persistence/BlueprintRepository.ts)
   stores the definition as a JSON blob validated only at the control-plane
   boundary — adding fields needs a `blueprintSchema` change but **no SQLite
   migration**.
@@ -189,7 +189,7 @@ they disagreed, both options are kept.
    pure mapping in a dependency-free module a CLI can wrap later. Both
    objections raised against this in the first draft of this page were wrong:
    Ajv's Draft 2020-12 build is already loaded in the daemon
-   (`src/scenario/scenarioSchemaValidator.ts`), and `mcpToolSchemaParity` only
+   (`packages/core/src/scenario/scenarioSchemaValidator.ts`), and `mcpToolSchemaParity` only
    constrains tools that have been curated — `blueprint.delete` has an RPC and no
    tool, and the suite is green. **The daemon must not fetch source URLs**: the
    caller passes the document.
@@ -333,7 +333,7 @@ factor of 1000 on some real documents.
 
 ## Validation and licensing
 
-OECS is MIT, so unlike [`vendor/ocpp-schemas/`](../../vendor/ocpp-schemas/)
+OECS is MIT, so unlike [`packages/ocpp/vendor/ocpp-schemas/`](../../packages/ocpp/vendor/ocpp-schemas/)
 (CC BY-ND, verbatim-only) the schema may be vendored and adapted — **provided the
 copyright and permission notices travel with it.** MIT requires them in copies and
 in substantial portions, so vendoring the bundles is a two-file step: the schema
@@ -357,12 +357,12 @@ authors a fixture for it.
 ## If it proceeds
 
 Files a first implementation would touch: a mapping module plus fixtures;
-`src/protocol/methods.ts` (blueprint `schemaVersion` + provenance, and
-`blueprint.import_oecs`); `src/cli/server/mcp/tools.ts` if the method gets a
+`packages/contracts/src/methods.ts` (blueprint `schemaVersion` + provenance, and
+`blueprint.import_oecs`); `apps/cli/src/server/mcp/tools.ts` if the method gets a
 curated tool — optional, since `call_method` already reaches it, but worth it
 for a method agents will actually use, and adding one means adding it to the
-parity test's `oneToOneCases`; `src/utils/blueprints/index.ts` if the built-ins
-gain the charger-side power field; `src/cli/main.ts` for an offline wrapper.
+parity test's `oneToOneCases`; `packages/core/src/utils/blueprints/index.ts` if the built-ins
+gain the charger-side power field; `apps/cli/src/main.ts` for an offline wrapper.
 Wiki: the method table in [Control plane](../concepts/control-plane.md), the flag
 table in [CLI](../entities/cli.md), and this page for the OECS ↔ blueprint ↔
 ChargePoint boundary the acceptance criteria ask to be documented.

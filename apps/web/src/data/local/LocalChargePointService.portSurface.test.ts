@@ -1,0 +1,276 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
+import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { LocalChargePointService } from "./LocalChargePointService";
+import type { LocalChargePointDefinition } from "./LocalChargePointService";
+
+function localDefinition(
+  overrides: Partial<LocalChargePointDefinition> = {},
+): LocalChargePointDefinition {
+  return {
+    id: "CP-PORT",
+    connectorNumber: 1,
+    bootNotification: DefaultBootNotification,
+    wsUrl: "ws://localhost:9000/ocpp/",
+    basicAuth: null,
+    autoMeterValueSetting: null,
+    ocppVersion: "OCPP-1.6J",
+    ...overrides,
+  };
+}
+
+async function serviceWithChargePoint(): Promise<{
+  service: LocalChargePointService;
+  chargePoint: ChargePoint;
+}> {
+  const service = new LocalChargePointService();
+  await service.syncLocalChargePoints([localDefinition()]);
+  const chargePoint = service.getLocalChargePoint("CP-PORT") as ChargePoint;
+  return { service, chargePoint };
+}
+
+let service: LocalChargePointService | null = null;
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await service?.syncLocalChargePoints([]).catch(() => undefined);
+  service = null;
+});
+
+describe("LocalChargePointService A1.1d port methods", () => {
+  it("sends DiagnosticsStatusNotification through the local charge point", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendDiagnosticsStatusNotification")
+      .mockImplementation(() => undefined);
+
+    await service.sendDiagnosticsStatusNotification("CP-PORT", "Uploading");
+
+    expect(spy).toHaveBeenCalledWith("Uploading");
+  });
+
+  it("sends an expert OCPP call through the local charge point (#389)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const outcome = {
+      kind: "callResult" as const,
+      messageId: "m1",
+      sentFrame: '[2,"m1","Heartbeat",{}]',
+      payload: {},
+    };
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendOcppCall")
+      .mockResolvedValue(outcome);
+    const request = { action: "Heartbeat", payload: {}, applyResponse: true };
+
+    await expect(service.sendOcppCall("CP-PORT", request)).resolves.toBe(
+      outcome,
+    );
+
+    expect(spy).toHaveBeenCalledWith(request);
+  });
+
+  it("sends a raw frame through the local charge point (#393)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const outcome = {
+      sentFrame: '[2,"r1"]',
+      messageId: "r1",
+      reply: null,
+      closed: null,
+    };
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendRawFrame")
+      .mockResolvedValue(outcome);
+    const request = { frame: '[2,"r1"]', waitMs: 100 };
+
+    await expect(service.sendRawFrame("CP-PORT", request)).resolves.toBe(
+      outcome,
+    );
+
+    expect(spy).toHaveBeenCalledWith(request);
+  });
+
+  it("sends FirmwareStatusNotification through the local charge point", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendFirmwareStatusNotification")
+      .mockImplementation(() => undefined);
+
+    await service.sendFirmwareStatusNotification("CP-PORT", "Downloaded");
+
+    expect(spy).toHaveBeenCalledWith("Downloaded");
+  });
+
+  // #377: same refusal as the daemon's schema; see `requireStatus`.
+  it.each([
+    ["sendDiagnosticsStatusNotification", "Finished"],
+    ["sendFirmwareStatusNotification", "Flashing"],
+    ["sendLogStatusNotification", "Done"],
+  ] as const)(
+    "%s rejects a status outside the vocabulary with invalid_params",
+    async (method, status) => {
+      const setup = await serviceWithChargePoint();
+      service = setup.service;
+      const spy = vi
+        .spyOn(setup.chargePoint, method)
+        .mockImplementation(() => undefined);
+
+      await expect(
+        service[method]("CP-PORT", status as never),
+      ).rejects.toMatchObject({
+        name: "RpcFailure",
+        code: "invalid_params",
+        message: expect.stringContaining("status"),
+      });
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("sends SecurityEventNotification through the local charge point", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendSecurityEventNotification")
+      .mockImplementation(() => undefined);
+
+    await service.sendSecurityEventNotification(
+      "CP-PORT",
+      "SettingSystemTime",
+      "clock adjusted",
+    );
+
+    expect(spy).toHaveBeenCalledWith("SettingSystemTime", "clock adjusted");
+  });
+
+  it("sends SignCertificate through the local charge point", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const spy = vi
+      .spyOn(setup.chargePoint, "sendSignCertificate")
+      .mockResolvedValue(undefined);
+
+    await service.sendSignCertificate("CP-PORT", "-----BEGIN CSR-----");
+
+    expect(spy).toHaveBeenCalledWith("-----BEGIN CSR-----");
+  });
+
+  it("reads EV settings from the local connector snapshot source", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const settings: EVSettings = {
+      modelName: "Test EV",
+      batteryCapacityKwh: 64,
+      maxChargingPowerKw: 90,
+      initialSoc: 12,
+      targetSoc: 88,
+    };
+
+    await service.setEVSettings("CP-PORT", 1, settings);
+
+    await expect(service.getEVSettings("CP-PORT", 1)).resolves.toEqual(
+      settings,
+    );
+  });
+
+  it("reads auto-meter config from the local connector snapshot source", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const config: AutoMeterValueConfig = {
+      enabled: true,
+      curvePoints: [
+        { time: 0, value: 0 },
+        { time: 300, value: 7 },
+      ],
+      intervalSeconds: 10,
+      autoCalculateInterval: false,
+    };
+
+    await service.setAutoMeterValueConfig("CP-PORT", 1, config);
+
+    await expect(
+      service.getAutoMeterValueConfig("CP-PORT", 1),
+    ).resolves.toEqual(config);
+  });
+
+  it("rejects browser-local runScenarioFile with UnsupportedFeatureError", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+
+    await expect(
+      service.runScenarioFile("CP-PORT", "/tmp/scenario.json", {
+        connectorId: 1,
+      }),
+    ).rejects.toMatchObject({
+      name: "UnsupportedFeatureError",
+      code: "browser_scenario_file_unsupported",
+    });
+  });
+
+  it("runs a browser-local scenario template through the connector executor", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const connector = setup.chargePoint.getConnector(1);
+    expect(connector).toBeDefined();
+
+    const loaded: ScenarioDefinition[][] = [];
+    const manager = {
+      setScenario: vi.fn((definition: ScenarioDefinition) => {
+        loaded.push([definition]);
+      }),
+      executeScenario: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn(),
+    } as unknown as ScenarioManager;
+    connector?.setScenarioManager(manager);
+
+    const result = await service.runScenarioTemplate(
+      "CP-PORT",
+      "essential-cp-behavior",
+      { connectorId: 1, evSettings: { maxChargingPowerKw: 3 } },
+    );
+
+    expect(result.scenarioId).toBeTruthy();
+    expect(loaded[0][0]).toMatchObject({
+      id: result.scenarioId,
+      targetId: 1,
+      evSettings: expect.objectContaining({ maxChargingPowerKw: 3 }),
+    });
+    expect(manager.executeScenario).toHaveBeenCalledWith(result.scenarioId);
+  });
+
+  it("forwards the wait controls to the connector's scenario manager (#240)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+    const manager = {
+      extendWait: vi.fn(),
+      retryWait: vi.fn(),
+      continueWait: vi.fn(),
+      destroy: vi.fn(),
+    } as unknown as ScenarioManager;
+    setup.chargePoint.getConnector(1)?.setScenarioManager(manager);
+
+    await service.extendScenarioWait("CP-PORT", 1, "s1", 30);
+    await service.retryScenarioWait("CP-PORT", 1, "s1");
+    await service.continueScenarioWait("CP-PORT", 1, "s1");
+
+    expect(manager.extendWait).toHaveBeenCalledWith("s1", 30);
+    expect(manager.retryWait).toHaveBeenCalledWith("s1");
+    expect(manager.continueWait).toHaveBeenCalledWith("s1");
+  });
+
+  it("rejects a wait control on a scenario that is not running (#240)", async () => {
+    const setup = await serviceWithChargePoint();
+    service = setup.service;
+
+    await expect(
+      service.continueScenarioWait("CP-PORT", 1, "s1"),
+    ).rejects.toThrow("Scenario s1 is not running");
+  });
+});

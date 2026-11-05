@@ -3,19 +3,19 @@ title: Local authorization
 type: concept
 summary: How a charge point decides a local transaction start — Local Authorization List first, then the Authorization Cache, then Authorize.req online or the offline rules (`LocalPreAuthorize`, `LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`) — what the persisted cache stores, how CSMS answers fill it, how ClearCache empties it, the OCPP 2.x device-model mapping, and the control-plane seam that reads, seeds and clears it.
 sources:
-  - src/cp/domain/auth/LocalAuthorizationResolver.ts
-  - src/cp/domain/auth/AuthorizationCache.ts
-  - src/cp/domain/auth/StationAuthorization.ts
-  - src/cp/domain/auth/LocalAuthList.ts
-  - src/cp/domain/charge-point/ChargePoint.ts (authorizeAndWait, startTransaction)
-  - src/cp/infrastructure/transport/handlers/callresult/TransactionResultHandlers.ts
-  - src/cp/infrastructure/transport/handlers/call/OtherCallHandlers.ts (ClearCacheHandler)
-  - src/cp/infrastructure/transport/v201/deviceModelMap.ts
-  - src/cp/infrastructure/transport/v201/authorizationCacheV201.ts
-  - src/cp/infrastructure/transport/v201/coreControlV201.ts (handleClearCacheV201)
-  - src/cp/domain/auth/AuthorizationCacheSeed.ts
-  - src/protocol/methods.ts (get/seed/clear_auth_cache)
-  - src/protocol/idTokenKey.ts
+  - packages/core/src/cp/domain/auth/LocalAuthorizationResolver.ts
+  - packages/core/src/cp/domain/auth/AuthorizationCache.ts
+  - packages/core/src/cp/domain/auth/StationAuthorization.ts
+  - packages/core/src/cp/domain/auth/LocalAuthList.ts
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (authorizeAndWait, startTransaction)
+  - packages/core/src/cp/infrastructure/transport/handlers/callresult/TransactionResultHandlers.ts
+  - packages/core/src/cp/infrastructure/transport/handlers/call/OtherCallHandlers.ts (ClearCacheHandler)
+  - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
+  - packages/core/src/cp/infrastructure/transport/v201/authorizationCacheV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/coreControlV201.ts (handleClearCacheV201)
+  - packages/core/src/cp/domain/auth/AuthorizationCacheSeed.ts
+  - packages/contracts/src/methods.ts (get/seed/clear_auth_cache)
+  - packages/contracts/src/idTokenKey.ts
   - "issue #181"
   - "issue #452"
 related:

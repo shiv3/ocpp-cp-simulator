@@ -3,24 +3,24 @@ title: Built-in scenario templates
 type: entity
 summary: The scenario JSON files shipped inside the package — six general-purpose flows plus the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
 sources:
-  - src/utils/scenarioTemplates.ts
-  - src/utils/scenarios/*.json
-  - src/utils/scenarios/README.md
+  - packages/core/src/utils/scenarioTemplates.ts
+  - packages/core/src/utils/scenarios/*.json
+  - packages/core/src/utils/scenarios/README.md
 related:
   - ../concepts/scenario-format.md
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Built-in scenario templates
 
 Every built-in template is a flat `ScenarioDefinition` JSON file under
-[`src/utils/scenarios/`](../../src/utils/scenarios/) — the same
+[`packages/core/src/utils/scenarios/`](../../packages/core/src/utils/scenarios/) — the same
 [scenario format](../concepts/scenario-format.md) the editor exports and the
 example files under `docs/examples/scenarios/` use — wrapped by
-[`scenarioTemplates.ts`](../../src/utils/scenarioTemplates.ts) into the
+[`scenarioTemplates.ts`](../../packages/core/src/utils/scenarioTemplates.ts) into the
 editor-facing `ScenarioTemplate` interface. Because they are plain files, the
 daemon's `--scenario-template-file` can load any of them straight off disk
 without going through the loader.

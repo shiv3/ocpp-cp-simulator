@@ -3,10 +3,10 @@ title: Log format
 type: concept
 summary: One log-line shape (`timestamp` / `level` / `type` / `message` / `cpId`) shared by daemon stderr in `--log-format json`, the `logs` table, the browser log download and the `logs.get` RPC — plus the newest-first `limit` windowing rules.
 sources:
-  - src/cli/server/ (logs.get / logs.clear)
-  - src/trace/logEntryToTrace.ts
-  - src/cp/shared/Logger.ts
-  - src/protocol/redaction.ts
+  - apps/cli/src/server/ (logs.get / logs.clear)
+  - packages/trace/src/logEntryToTrace.ts
+  - packages/core/src/cp/shared/Logger.ts
+  - packages/contracts/src/redaction.ts
 related:
   - ../entities/daemon.md
   - ../entities/docker-image.md
@@ -52,7 +52,7 @@ works without a trace file.
 ## Redaction
 
 The charge point's `Logger` runs each message through the shared text
-redactor ([`redaction.ts`](../../src/protocol/redaction.ts)) before it
+redactor ([`redaction.ts`](../../packages/contracts/src/redaction.ts)) before it
 reaches the console, the `logs` table or a log listener (the CLI `log` event,
 the Socket.IO log push). In an OCPP-J frame logged as `Sent:` / `Received:`
 it replaces with `[redacted]`:
@@ -155,7 +155,7 @@ again in code, failing closed: the value ends at the first unescaped matching
 quote on its first line, and a PEM value, or one with no such quote, is
 redacted to the end of the message. Where the patterns completed this changes
 nothing. The redaction tests run under both vitest and `bun test`
-(`src/cp/shared/redaction.bun.test.ts`).
+(`packages/core/src/cp/shared/redaction.bun.test.ts`).
 
 ## WebSocket close lines
 

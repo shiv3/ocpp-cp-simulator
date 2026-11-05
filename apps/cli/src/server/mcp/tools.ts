@@ -1,0 +1,1032 @@
+import { z } from "zod";
+import type { McpServer, ToolCallResult } from "mcp-lite";
+import {
+  blueprintSchema,
+  createManyToolSchema,
+  cpBulkParamsSchema,
+  cpLabelsSetParamsSchema,
+  cpListParamsSchema,
+  createParamsSchema,
+  EXPLICIT_METHODS,
+  METHODS,
+  RpcFailure,
+  scenarioWaitExtensionSecondsSchema,
+} from "@ocpp-cp-sim/contracts/index";
+import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
+import {
+  METER_READING_CONTEXTS,
+  STOP_REASONS,
+  TRANSACTION_CHARGING_STATES,
+  TRANSACTION_EVENT_TRIGGER_REASONS,
+} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+import type { RuntimeSocketIoDeps } from "../socketServer";
+
+function successResult(data: unknown): ToolCallResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(data ?? null, null, 2),
+      },
+    ],
+  };
+}
+
+function errorResult(err: unknown): ToolCallResult {
+  if (err instanceof RpcFailure) {
+    const code = errorCodeFrom(err);
+    const message = rpcFailureMessage(err);
+    const text = message ? `${code}: ${message}` : code;
+    return {
+      content: [{ type: "text", text }],
+      isError: true,
+    };
+  }
+  return {
+    content: [{ type: "text", text: "internal" }],
+    isError: true,
+  };
+}
+
+export function registerTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
+  registerCuratedTools(mcp, deps);
+  registerListMethods(mcp, deps);
+  registerCallMethod(mcp, deps);
+}
+
+function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
+  // #446: the selector is `cp.list`'s own schema, so the tool cannot drift
+  // from the method it wraps.
+  mcp.tool("cp_list", {
+    description:
+      'List the registered charge points with their labels. Pass labels (e.g. {"site": "lab-1"}) to return only the charge points carrying every one of those key/value pairs.',
+    inputSchema: cpListParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.list",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #284: derived from `cp.create`'s own schema rather than restating a
+  // subset of it. The hand-written copy declared eight of the eighteen
+  // fields, and because unknown properties are stripped rather than refused,
+  // the two failure modes were both silent-ish: a SOAP charge point could not
+  // be created at all (its companions vanished and the create then failed
+  // `invalid_params`), and `securityProfile` / `authorizationKey` were
+  // dropped while the tool answered success -- the station came up
+  // authenticating differently from what the agent asked for.
+  //
+  // `autoConnect` used to be re-added here because the handler honoured it
+  // while no schema declared it; it now lives on `createParamsSchema`, so
+  // there is nothing left for this tool to add.
+  mcp.tool("cp_create", {
+    description:
+      "Create and register a new charge point. Accepts every parameter the cp.create RPC method does, including the SOAP fields (centralSystemUrl, soapPath, soapCallbackUrl) and the OCPP 1.6 security profile fields (securityProfile, authorizationKey, tls*). It stays disconnected until cp_connect is called (or pass autoConnect: true).",
+    inputSchema: createParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.create",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // Curated tools are registered by hand, so a method added to `METHODS`
+  // alone would only be reachable through the generic `call_method` escape
+  // hatch. Fleet creation is exactly the operation an agent should find by
+  // name, so it gets a tool -- with its schema derived, per #284.
+  mcp.tool("cp_create_many", {
+    description:
+      "Create and register many charge points at once, either from explicit parameters or from a stored blueprint (blueprintId). Every parameter except the id is shared by the batch; ids come from idPattern ({n}, or {n:03} to zero-pad), starting at startIndex (default 1). Returns the ids created and, separately, the ones that failed with the reason -- a partial batch is a normal result, not an error.",
+    inputSchema: createManyToolSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.create_many",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #446: relabelling gets a tool, and `cp.update` deliberately does not —
+  // `cp.update` rebuilds the charge point (its socket closes and a new
+  // instance takes over), which is the wrong price for changing metadata.
+  mcp.tool("cp_labels_set", {
+    description:
+      "Replace a charge point's labels (generic key/value metadata such as site, tenant or environment) with the given map; {} removes them all. Applied in place: the charge point stays connected and running transactions continue.",
+    inputSchema: cpLabelsSetParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.labels.set",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #470: a group operation is what an agent driving a fleet reaches for, and
+  // `call_method` alone would hide it; schema derived from `cp.bulk`'s.
+  mcp.tool("cp_bulk", {
+    description:
+      "Run connect, disconnect or reset on every charge point carrying all the given label pairs (exact match; at least one pair, {} is refused). Returns the matched ids, the ones that succeeded and the ones that failed with the reason -- a partial result is normal, not an error. Each charge point is waited for at most 10 s; a connect still pending then is reported as failed and keeps trying.",
+    inputSchema: cpBulkParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, { method: "cp.bulk", params: args });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("blueprint_list", {
+    description:
+      "List the stored charge point blueprints: named, reusable hardware descriptions that cp_create_many can instantiate by id.",
+    inputSchema: z.object({}),
+    handler: async () => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "blueprint.list", params: {} }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("blueprint_save", {
+    description:
+      "Create or replace a charge point blueprint. A blueprint is the hardware half (what a charge point is); a scenario is the behaviour half (what it does). Instantiate one with cp_create_many { blueprintId, count, idPattern }.",
+    inputSchema: z.object({ blueprint: blueprintSchema }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "blueprint.save", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("cp_delete", {
+    description: "Delete a charge point",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier to delete"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.delete",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("cp_connect", {
+    description: "Connect a charge point to the central system",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "connect",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("cp_disconnect", {
+    description: "Disconnect a charge point from the central system",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "disconnect",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("cp_status", {
+    description: "Get the status of a charge point",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "status",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("start_transaction", {
+    description:
+      "Start a transaction on a connector. tagId is optional (#299): when omitted, the charge point draws one from its idTagPool, falling back to a default idTag if it has none.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      tagId: z
+        .string()
+        .optional()
+        .describe(
+          "RFID tag or user ID for authorization. Omit to draw from the charge point's idTagPool",
+        ),
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Started) triggerReason (#335); default Authorized. Ignored on OCPP 1.6",
+        ),
+      chargingState: z
+        .enum(TRANSACTION_CHARGING_STATES)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Started) chargingState (#335); default Charging. Ignored on OCPP 1.6",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "start_transaction",
+          params: {
+            connector: args.connector,
+            tagId: args.tagId,
+            triggerReason: args.triggerReason,
+            chargingState: args.chargingState,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("stop_transaction", {
+    description:
+      "Stop a transaction on a connector. reason (#335) accepts both the OCPP 1.6 StopTransaction.req and the 2.0.1 stoppedReason vocabularies.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      reason: z
+        .enum(STOP_REASONS)
+        .optional()
+        .describe(
+          "StopTransaction.req reason (1.6) / TransactionEvent(Ended) stoppedReason (2.x); default Local",
+        ),
+      triggerReason: z
+        .enum(TRANSACTION_EVENT_TRIGGER_REASONS)
+        .optional()
+        .describe(
+          "OCPP 2.x TransactionEvent(Ended) triggerReason; default StopAuthorized. Ignored on OCPP 1.6",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "stop_transaction",
+          params: {
+            connector: args.connector,
+            reason: args.reason,
+            triggerReason: args.triggerReason,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("authorize", {
+    description:
+      "Authorize a tag or user. tagId is optional (#299): when omitted, the charge point draws one from its idTagPool, falling back to a default idTag if it has none.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      tagId: z
+        .string()
+        .optional()
+        .describe(
+          "RFID tag or user ID to authorize. Omit to draw from the charge point's idTagPool",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "authorize",
+          params: {
+            tagId: args.tagId,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("send_ocpp_call", {
+    description:
+      "Expert OCPP call (#389): send any station-initiated OCPP CALL (e.g. Heartbeat, StatusNotification, MeterValues, DataTransfer) of the charge point's OCPP-J version with the payload as given, and return the CSMS's CALLRESULT or CALLERROR with the frame as sent. The payload must pass the OCPP schema unless skipValidation is set; the answer changes the charge point's state only with applyResponse. SOAP charge points are refused.",
+    // The method's own schema, so the tool advertises what it enforces.
+    inputSchema: METHODS.send_ocpp_call.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "send_ocpp_call",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("send_raw_frame", {
+    description:
+      'Expert raw frame (#393): write one text frame to the charge point\'s WebSocket exactly as given, valid OCPP-J or not (wrong message type id, missing or extra element, non-string id, invalid JSON, any text), to see how the CSMS reacts. Returns the reply correlated best effort (a CALLRESULT/CALLERROR with the frame\'s id, or a CALLERROR with id "" or "-1") within waitMs, or reply null, and the close cause if the CSMS closed the socket. Bypasses the OCPP 1.6 one-CALL-in-flight queue. SOAP charge points are refused.',
+    inputSchema: METHODS.send_raw_frame.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "send_raw_frame",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #452: the Authorization Cache test seam, one tool per method.
+  mcp.tool("auth_cache_get", {
+    description:
+      "Read a charge point's Authorization Cache: whether it is enabled (1.6 AuthorizationCacheEnabled / 2.x AuthCacheCtrlr.Enabled) and every entry (idToken, status, expiresAt, parentId, insertedAt, updatedAt).",
+    inputSchema: METHODS.get_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "get_auth_cache",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("auth_cache_seed", {
+    description:
+      "Write entries into a charge point's Authorization Cache as if the CSMS had answered them, whether or not the cache is enabled; nothing is sent to the CSMS. One entry per idToken; an invalid entry refuses the whole seed.",
+    inputSchema: METHODS.seed_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "seed_auth_cache",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("auth_cache_clear", {
+    description:
+      "Empty a charge point's Authorization Cache, whether or not it is enabled; nothing is sent to the CSMS (the CSMS's ClearCache follows the OCPP rules instead).",
+    inputSchema: METHODS.clear_auth_cache.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "clear_auth_cache",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("set_connector_status", {
+    description: "Update the status of a connector",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      // Taken from the method so the tool advertises what it enforces (#383).
+      connector:
+        METHODS.update_connector_status.params.shape.connector.describe(
+          "Connector identifier (0 for all)",
+        ),
+      status: METHODS.update_connector_status.params.shape.status.describe(
+        "Connector status (e.g. Available, Charging, Faulted)",
+      ),
+      errorCode: z
+        .string()
+        .optional()
+        .describe("Optional error code if status is Faulted"),
+      info: z.string().optional().describe("Optional free-form status info"),
+      vendorErrorCode: z
+        .string()
+        .optional()
+        .describe("Optional vendor-specific error code"),
+      vendorId: z
+        .string()
+        .optional()
+        .describe("Optional vendor id for vendorErrorCode"),
+      timestamp:
+        METHODS.update_connector_status.params.shape.timestamp.describe(
+          "Optional ISO 8601 timestamp for the status change",
+        ),
+      suppressChargingStateTransactionEvent: z
+        .boolean()
+        .optional()
+        .describe(
+          "OCPP 2.x only: suppress the TransactionEvent a charging-state change would otherwise send",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "update_connector_status",
+          params: {
+            connector: args.connector,
+            status: args.status,
+            errorCode: args.errorCode,
+            info: args.info,
+            vendorErrorCode: args.vendorErrorCode,
+            vendorId: args.vendorId,
+            timestamp: args.timestamp,
+            suppressChargingStateTransactionEvent:
+              args.suppressChargingStateTransactionEvent,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("ev_disconnected", {
+    description:
+      "Unplug the cable on the EV side of a connector. With a running transaction, StopTransactionOnEVSideDisconnect stops it (EVDisconnected) or suspends it (SuspendedEV); without one the connector goes Available",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: METHODS.ev_disconnected.params.shape.connector.describe(
+        "Connector identifier",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "ev_disconnected",
+          params: { connector: args.connector },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("set_meter_value", {
+    description: "Set the meter value for a connector",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      value: z.number().int().min(0).describe("Meter value in Wh"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "set_meter_value",
+          params: {
+            connector: args.connector,
+            value: args.value,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("send_meter_value", {
+    description: "Send the current meter value for a connector",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      context: z
+        .enum(METER_READING_CONTEXTS)
+        .optional()
+        .describe(
+          "sampledValue.context the readings carry (#335); default Sample.Periodic",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "send_meter_value",
+          params: {
+            connector: args.connector,
+            context: args.context,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("scenario_templates", {
+    description: "List available scenario templates",
+    inputSchema: z.object({}),
+    handler: async () => {
+      try {
+        const result = await runRpc(deps, {
+          method: "scenario.templates",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("run_scenario_template", {
+    description: "Run a scenario template on a connector",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      templateId: z.string().describe("Scenario template identifier"),
+      evSettings: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Overrides for the template's EV settings"),
+      strict: z
+        .boolean()
+        .optional()
+        .describe(
+          "Promote warning-severity assertions to failures (see docs/concepts/scenario-format.md#severity-conformance-vs-compatibility)",
+        ),
+      once: z
+        .boolean()
+        .optional()
+        .describe(
+          "Run the template once: the instance is loaded disabled, so it does not re-arm on the next reconnect. Default: re-arms on every connect.",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "run_scenario_template",
+          params: {
+            connector: args.connector,
+            templateId: args.templateId,
+            evSettings: args.evSettings,
+            strict: args.strict,
+            once: args.once,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("scenario_status", {
+    description: "Get the status of a running scenario",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      scenarioId: z.string().describe("Scenario identifier"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: "scenario_status",
+          params: {
+            connector: args.connector,
+            scenarioId: args.scenarioId,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #240: one tool for the three controls on a parked wait; `action` picks
+  // the method, and the method's own schema rejects an extend without
+  // `seconds`.
+  mcp.tool("control_scenario_wait", {
+    description:
+      "Act on the wait a running scenario is parked on (for example a " +
+      "RemoteStart or CSMS-call trigger): 'extend' pushes its timeout back " +
+      "by `seconds`, 'retry' re-arms the wait with its full timeout, " +
+      "'continue' moves on to the next node without the awaited event. " +
+      "Each action is recorded in the run report's `interventions`.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      connector: z.number().int().min(1).describe("Connector identifier"),
+      scenarioId: z.string().min(1).describe("Scenario identifier"),
+      action: z
+        .enum(["extend", "retry", "continue"])
+        .describe("What to do with the parked wait"),
+      seconds: scenarioWaitExtensionSecondsSchema
+        .optional()
+        .describe("Seconds to add to the timeout (required for 'extend')"),
+    }),
+    handler: async ({ cpId, action, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: `${action}_scenario_wait`,
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("get_logs", {
+    description:
+      "Retrieve logs for a charge point. Returns the MOST RECENT entries: " +
+      "`limit` takes the newest N, and `offset` pages backwards from the " +
+      "newest, so {limit:100} is the last 100 and {limit:100, offset:100} the " +
+      "100 before those. Entries come back oldest-first unless order is 'desc'.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Number of most-recent log entries to return"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Skip this many of the newest entries before taking `limit`"),
+      order: z
+        .enum(["asc", "desc"])
+        .optional()
+        .describe(
+          "Order of the returned window: 'asc' (oldest first, default) or 'desc' (newest first)",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "logs.get",
+          params: {
+            cpId: args.cpId,
+            limit: args.limit,
+            offset: args.offset,
+            order: args.order,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  const timeline = METHODS["timeline.get"].params.shape;
+  mcp.tool("get_timeline", {
+    description:
+      "Retrieve a charge point's operational timeline (#448): normalized, " +
+      "ordered events — connection loss and reconnect, injected network " +
+      "faults and the recovery they caused, CP/connector status changes, " +
+      "transactions and their rejected or discarded 2.x TransactionEvents, " +
+      "authorization rejections, scenario runs and " +
+      "smart-charging profiles applied, cleared or expired. Entries " +
+      "are ordered by `seq`; entries of one fault share an `incidentId` and " +
+      "`recovery_completed` reports `durationMs`. Windowed like get_logs: " +
+      "`limit` takes the newest N, `offset` pages backwards.",
+    // The method's own fields, so the tool advertises what it enforces.
+    inputSchema: z.object({
+      cpId: timeline.cpId.describe("Charge point identifier"),
+      connectorId: timeline.connectorId.describe(
+        "Only entries about this connector",
+      ),
+      runId: timeline.runId.describe(
+        "Only entries attributed to this scenario run",
+      ),
+      incidentId: timeline.incidentId.describe(
+        "Only entries of this network-fault incident",
+      ),
+      kinds: timeline.kinds.describe("Only these entry kinds"),
+      limit: timeline.limit.describe(
+        "Number of most-recent matching entries to return",
+      ),
+      offset: timeline.offset.describe(
+        "Skip this many of the newest entries before taking `limit`",
+      ),
+      order: timeline.order.describe(
+        "'asc' (oldest first, default) or 'desc' (newest first)",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "timeline.get",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  const sessions = METHODS["sessions.list"].params.shape;
+  mcp.tool("list_charging_sessions", {
+    description:
+      "List a charge point's charging sessions (#447): one normalized record " +
+      "per transaction, the same shape for OCPP 1.6 and 2.x — connector, " +
+      "transaction id, idTag, start/end, duration, meter start/stop, energy " +
+      "(Wh), stop reason and an outcome (active, completed, interrupted, " +
+      "failed). Unknown values are null, never guessed. Newest first; no " +
+      "billing or tariff data.",
+    inputSchema: z.object({
+      cpId: sessions.cpId.describe("Charge point identifier"),
+      connectorId: sessions.connectorId.describe(
+        "Only sessions on this connector",
+      ),
+      outcomes: sessions.outcomes.describe("Only sessions with these outcomes"),
+      limit: sessions.limit.describe(
+        "How many of the newest matching sessions to return (default 50)",
+      ),
+      offset: sessions.offset.describe(
+        "Skip this many of the newest matching sessions (pages back in time)",
+      ),
+      order: sessions.order.describe(
+        "Order of the returned page by start time: 'desc' (newest first, default) or 'asc'; it does not change which sessions are selected",
+      ),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "sessions.list",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("network_sim_get", {
+    description:
+      "Get the network-simulation config: the global layer (omit cpId) or a charge point's layer + resolved config (with cpId).",
+    inputSchema: z.object({
+      cpId: z
+        .string()
+        .optional()
+        .describe("Charge point id; omit for the global config"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: args.cpId ? "network_sim.cp.get" : "network_sim.global.get",
+          params: args.cpId ? { cpId: args.cpId } : {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("network_sim_set", {
+    description:
+      "Set the network-simulation layer config. Rules apply to WebSocket CPs only. Passing null for config clears/deletes it.",
+    inputSchema: z.object({
+      cpId: z
+        .string()
+        .optional()
+        .describe("Charge point id; omit to set the global config"),
+      config: z
+        .record(z.string(), z.unknown())
+        .nullable()
+        .describe("Network-sim layer config, or null to delete/clear"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: args.cpId ? "network_sim.cp.save" : "network_sim.global.save",
+          params: args.cpId
+            ? { cpId: args.cpId, config: args.config }
+            : { config: args.config },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("network_sim_trigger_disconnect", {
+    description:
+      "Trigger a manual-disconnect rule's forced disconnection on a charge point.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point id"),
+      ruleId: z
+        .string()
+        .describe("Id of a manual-disconnect rule in the CP's resolved config"),
+    }),
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "network_sim.disconnect.trigger",
+          params: {
+            cpId: args.cpId,
+            ruleId: args.ruleId,
+          },
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+}
+
+function registerListMethods(mcp: McpServer, _deps: RuntimeSocketIoDeps): void {
+  mcp.tool("list_methods", {
+    description:
+      "List all available RPC methods or get details for a specific method",
+    inputSchema: z.object({
+      method: z
+        .string()
+        .optional()
+        .describe(
+          "Optional method name to get details; if omitted, returns catalog of all methods",
+        ),
+    }),
+    handler: async (args) => {
+      try {
+        if (args.method) {
+          if (!(args.method in METHODS)) {
+            return errorResult(new RpcFailure("not_found", "Method not found"));
+          }
+          const methodSchema = METHODS[args.method as keyof typeof METHODS];
+          const paramsSchema = methodSchema.params;
+          return successResult({
+            method: args.method,
+            paramsSchema: z.toJSONSchema(paramsSchema),
+          });
+        }
+
+        const methodSet = new Set(Object.keys(METHODS));
+        methodSet.delete("events.subscribe");
+        methodSet.delete("events.unsubscribe");
+
+        const catalog = Array.from(methodSet).map((name) => {
+          const isExplicit = (EXPLICIT_METHODS as readonly string[]).includes(
+            name,
+          );
+          const cpIdRequired =
+            !isExplicit && !["cp.list", "scenario.templates"].includes(name);
+          return {
+            method: name,
+            cpIdRequired,
+          };
+        });
+
+        return successResult(catalog);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+}
+
+function registerCallMethod(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
+  mcp.tool("call_method", {
+    description:
+      "Call any RPC method directly. WARNING: methods like server.shutdown and state.reset are destructive and irreversible.",
+    inputSchema: z.object({
+      method: z.string().describe("RPC method name"),
+      cpId: z
+        .string()
+        .optional()
+        .describe(
+          "Charge point identifier (required for CP-specific methods, omitted for daemon-level methods)",
+        ),
+      params: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Method parameters as a key-value object"),
+    }),
+    handler: async (args) => {
+      try {
+        if (
+          args.method === "events.subscribe" ||
+          args.method === "events.unsubscribe"
+        ) {
+          return errorResult(
+            new RpcFailure(
+              "not_found",
+              "events.subscribe/unsubscribe are only available over socket.io",
+            ),
+          );
+        }
+
+        const result = await runRpc(deps, {
+          cpId: args.cpId,
+          method: args.method,
+          params: args.params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+}

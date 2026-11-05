@@ -1,13 +1,12 @@
 {
-  "extends": "../tsconfig.app.json",
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "composite": false,
-    "baseUrl": "..",
-    "paths": {
-      "@/*": ["./src/*"]
-    },
-    "types": ["bun-types"],
-    "noEmit": true
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun-types"]
   },
   "include": ["**/*.ts"]
 }

@@ -11,7 +11,7 @@ related:
   - ../entities/scenario-templates.md
   - ../entities/docker-image.md
   - e2e-readme.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Source: `docs/examples/scenarios/`
@@ -20,7 +20,7 @@ Both files are cpId-independent `ScenarioDefinition` documents in the
 [scenario format](../concepts/scenario-format.md), meant for
 `--scenario-template-file <path> --scenario-connector all` (they are cloned per
 connector). They are validated against the JSON Schema by
-`src/scenario/__tests__/scenarioSchema.conformance.test.ts` and baked into the
+`packages/core/src/scenario/__tests__/scenarioSchema.conformance.test.ts` and baked into the
 [Docker image](../entities/docker-image.md#image-details) at
 `/app/docs/examples/scenarios/`.
 
@@ -30,7 +30,7 @@ OCPP 1.6 §4.9 lifecycle demo (8 nodes). Starts on connect, stays in
 `Available` after boot until the CSMS sends `RemoteStartTransaction`; from
 there the domain auto-drives Preparing → Charging → Finishing → Available.
 Carries `evSettings` (Tesla Model 3, 75 kWh, 250 kW, SoC 20 → 80 %). Used by
-the README quick start and by `src/utils/scenarioTemplates.ts` as the
+the README quick start and by `packages/core/src/utils/scenarioTemplates.ts` as the
 reference shape for built-in templates.
 
 ## `all-cases.json` — node-type catalogue

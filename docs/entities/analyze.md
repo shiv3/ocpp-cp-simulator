@@ -3,16 +3,16 @@ title: analyze subcommand
 type: entity
 summary: "`ocpp-cp-sim analyze` — OCPP DebugKit failure-pattern reports over a v1.1 trace file or a running daemon's stored logs, with per-charge-point / per-connector splitting."
 sources:
-  - src/cli/analyze/
-  - src/cli/analyze/__tests__/
-  - src/trace/logEntryToTrace.ts
+  - apps/cli/src/analyze/
+  - apps/cli/src/analyze/__tests__/
+  - packages/trace/src/logEntryToTrace.ts
   - "issue #188"
 related:
   - cli.md
   - ocpp-debugkit.md
   - ../concepts/trace-format.md
   - ../concepts/log-format.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # `analyze` subcommand
@@ -63,7 +63,7 @@ daemon already persists every log line it produces and exposes them per
 charge point over the `logs.get` RPC
 ([Log format → Related RPC methods](../concepts/log-format.md#related-rpc-methods)),
 and that log line shape (`{timestamp, level, type, message, cpId}`) is exactly
-what [`logEntryToTrace.ts`](../../src/trace/logEntryToTrace.ts) already adapts
+what [`logEntryToTrace.ts`](../../packages/trace/src/logEntryToTrace.ts) already adapts
 into trace records for `--log-format json` and the browser log-viewer
 download (see
 [Trace format → Producing records](../concepts/trace-format.md#producing-records)).
@@ -248,7 +248,7 @@ transaction-focused, not as a complete blow-by-blow of every wire message
 (currently `0.4.2`, no `^` range) in `package.json` — this is a third-party
 analysis engine whose detection rules can change behavior between versions,
 so upgrades are a deliberate, coordinated change (re-verify the test matrix
-in `src/cli/analyze/__tests__/`), not an automatic dependency bump. The
+in `apps/cli/src/analyze/__tests__/`), not an automatic dependency bump. The
 toolkit's `/core` and `/reporter` entry points are loaded via dynamic
 `import()` only inside the `analyze` code path, so every other CLI mode is
 unaffected if the dependency is ever missing. See [OCPP DebugKit](ocpp-debugkit.md).

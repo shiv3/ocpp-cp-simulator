@@ -3,10 +3,10 @@ title: File hot-reload (`--watch`)
 type: concept
 summary: Why `--watch` behaves as it does — the derivation behind each reload rule, and how a watched file's origin survives a daemon restart. The operator-facing contract and the supported-layouts table stay on the daemon page.
 sources:
-  - src/cli/server/FileWatcher.ts
-  - src/cli/server/FileReloadManager.ts
-  - src/cli/server/startServer.ts
-  - src/cli/service.ts
+  - apps/cli/src/server/FileWatcher.ts
+  - apps/cli/src/server/FileReloadManager.ts
+  - apps/cli/src/server/startServer.ts
+  - apps/cli/src/service.ts
   - GitHub issue #314
   - GitHub issue #338
 related:
@@ -15,7 +15,7 @@ related:
   - state-persistence.md
   - control-plane.md
   - scenario-format.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # File hot-reload (`--watch`)

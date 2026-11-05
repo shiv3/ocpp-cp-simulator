@@ -28,6 +28,6 @@ OCPP and its schemas are (c) Open Charge Alliance. The OCPP 2.1 schemas are lice
 Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0). The files
 here are redistributed unmodified, with attribution; they are NOT modified (no patches/
 overrides applied). Generated TypeScript types/validators derived from them live under
-src/ocpp/ and are this project's own work.
+packages/ocpp/src/ and are this project's own work.
 EOF
 echo "Wrote $DEST/NOTICE"

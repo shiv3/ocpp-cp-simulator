@@ -3,7 +3,7 @@ title: Web console (browser UI)
 type: entity
 summary: The React + TypeScript web console at `/` (the classic UI was retired in #426) — served from GitHub Pages (Local mode) or by the daemon / Docker image / desktop app (Remote mode).
 sources:
-  - src/ (React app)
+  - apps/web/src/ (React app)
   - index.html
   - vite.config.ts
 related:
@@ -18,7 +18,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Web console (browser UI)
@@ -34,9 +34,9 @@ plus plain text, never a filled pill (one color map for charge point statuses
 and scenario run states: green, blue, amber, red, gray, purple for stepping).
 Text is IBM Plex Sans, with IBM Plex Mono for ids, versions and numbers; the
 font files are bundled with the app (`@fontsource/ibm-plex-*`, imported in
-[`src/main.tsx`](../../src/main.tsx)), so the console looks the same offline,
+[`apps/web/src/main.tsx`](../../apps/web/src/main.tsx)), so the console looks the same offline,
 in the daemon image and in the desktop app. Light and dark themes both come
-from the palette variables in [`src/index.css`](../../src/index.css) (`--cx-*`,
+from the palette variables in [`apps/web/src/index.css`](../../apps/web/src/index.css) (`--cx-*`,
 exposed to Tailwind as `bg-cx-card`, `text-cx-muted`, …), which also retune the
 shared shadcn variables, so dialogs, menus and the graph editor follow.
 
@@ -154,7 +154,7 @@ in the side panel's header and the **All charge points** menu. Status colors, fo
 the pill, the dots and the icon: Available and Connected green; Charging blue;
 Preparing, Finishing, Reserved, SuspendedEV and SuspendedEVSE amber; Faulted
 and Unavailable red; Disconnected gray
-([`statusColor.ts`](../../src/console/components/statusColor.ts)).
+([`statusColor.ts`](../../apps/web/src/console/components/statusColor.ts)).
 
 A **connector cell** shows little text: `#<n>`, the status with a colored dot,
 a small play icon in the run state's color while a scenario runs on it, and at
@@ -192,7 +192,7 @@ end the counter reads `<n> CPs · <m> connectors` for what is shown. When
 nothing matches, the list says **No charge points match the current
 filters.**; with no charge point at all it keeps **No charge points** and the
 add action. The filter logic is a pure module,
-[`cpListFilters.ts`](../../src/console/pages/dashboard/cpListFilters.ts).
+[`cpListFilters.ts`](../../apps/web/src/console/pages/dashboard/cpListFilters.ts).
 
 Clicking a charge point — its row, its id, a table row or a connector cell —
 opens it in a **side panel** beside the list, without leaving the page. The
@@ -311,7 +311,7 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   for 1.5 s; it does nothing when the browser has no clipboard API). It is not
   an input: the value is edited in the WebSocket URL and Basic Auth fields
   only. The Add dialog opens with the Charge Point ID focused. The helpers are in
-  [`chargePointConfig.ts`](../../src/components/chargePointConfig.ts).
+  [`chargePointConfig.ts`](../../apps/web/src/components/chargePointConfig.ts).
 - **Charge point (connector 0)**, a card above the connectors (below).
 - **The connectors.** The full page shows **every connector at once**, like the
   classic UI: one [connector card](#connector-card) per connector, each followed
@@ -395,7 +395,7 @@ configuration has not loaded, instead of saving one without any charge point.
 On a failure the page stays open and says why.
 
 The **Charge point (connector 0)** card
-([`ChargePointControls.tsx`](../../src/console/pages/cp/ChargePointControls.tsx),
+([`ChargePointControls.tsx`](../../apps/web/src/console/pages/cp/ChargePointControls.tsx),
 #420) has the charge-point-level calls of the classic charge point card in the
 connector card's shape. Its header reads `Charge point` / `connector 0` and
 carries a **Heartbeat** figure (the interval, `30 s`, or `—` when none is
@@ -415,13 +415,13 @@ charge point is disconnected.
 Each group shows its own failure; a failed **Send Heartbeat** from the header
 also shows under the header while the block is folded, so it is never
 invisible. `Figure`, `Group`, `Row` and `Hint` are shared with the connector
-card ([`Figure.tsx`](../../src/console/pages/cp/Figure.tsx),
-[`controlPrimitives.tsx`](../../src/console/pages/cp/controlPrimitives.tsx)).
+card ([`Figure.tsx`](../../apps/web/src/console/pages/cp/Figure.tsx),
+[`controlPrimitives.tsx`](../../apps/web/src/console/pages/cp/controlPrimitives.tsx)).
 
 #### Connector card
 
 A connector card is the connector as a charging session
-([`ConnectorCard.tsx`](../../src/console/pages/cp/ConnectorCard.tsx)), top to
+([`ConnectorCard.tsx`](../../apps/web/src/console/pages/cp/ConnectorCard.tsx)), top to
 bottom:
 
 - **Header**: `Connector <n>`, its status, its availability (`Operative` /
@@ -490,7 +490,7 @@ bottom:
 #### Config dialog
 
 **⚙ Config** opens _Connector n · Config_
-([`ConnectorConfigDialog.tsx`](../../src/console/pages/cp/ConnectorConfigDialog.tsx)),
+([`ConnectorConfigDialog.tsx`](../../apps/web/src/console/pages/cp/ConnectorConfigDialog.tsx)),
 a dialog with a vertical tab rail (`role="tablist"`, `aria-orientation="vertical"`;
 it lies across the top on a narrow screen). It reads the connector's settings
 when it opens; **Save** applies only what changed and closes, **Cancel** drops
@@ -534,7 +534,7 @@ it. A failed or refused value keeps the dialog open with the reason.
 The connector's `AutoMeterValueConfig.curvePoints` is **cumulative energy**
 (kWh over seconds) that the simulator evaluates as one Bézier over all its
 control points, not power samples, so the editor converts at the boundary
-([`powerCurve.ts`](../../src/console/pages/cp/powerCurve.ts)): a constant power
+([`powerCurve.ts`](../../apps/web/src/console/pages/cp/powerCurve.ts)): a constant power
 is written as the exact two-point line; any other shape as its energy integral
 sampled once a minute (at most 240 points, uniform times), which the Bézier
 follows within a few percent, smoothed over a couple of minutes around a
@@ -568,7 +568,7 @@ failure (`role="alert"`) and wait for their own call:
 #### Scenario card
 
 Under each connector card, its **scenario card**
-([`ScenarioCard.tsx`](../../src/console/pages/cp/ScenarioCard.tsx)) shows the
+([`ScenarioCard.tsx`](../../apps/web/src/console/pages/cp/ScenarioCard.tsx)) shows the
 scenario run executing or parked on that connector, else its
 [Library](#scenario-library) scenario:
 
@@ -689,7 +689,7 @@ the OCPP message log.
 
 The global **Message Log** (`/logs`) is the old log screen's shape, restyled
 with the console's tokens: the `LogViewer`
-([`log-viewer.tsx`](../../src/components/ui/log-viewer.tsx)) fills the window
+([`log-viewer.tsx`](../../apps/web/src/components/ui/log-viewer.tsx)) fills the window
 under a header that keeps **Pause** / **Resume** (it stops the console's log
 buffer from taking new lines, so it belongs to the page, not to the view).
 The viewer has three parts:
@@ -820,7 +820,7 @@ retargeted to the connector, with `libraryId` naming the Library scenario
 `<libraryId>@<cpId>#<connector>`, so assigning the same scenario again replaces
 the copy rather than adding one. That copy is what the runtime, auto-start and
 `listScenarios` read. The data model is kept behind the helpers of
-[`src/console/lib/scenarioLibrary.ts`](../../src/console/lib/scenarioLibrary.ts).
+[`apps/web/src/console/lib/scenarioLibrary.ts`](../../apps/web/src/console/lib/scenarioLibrary.ts).
 
 **The tab.** The template gallery (the first eight [templates](scenario-templates.md)
 as cards; **Browse all N templates** above it opens the template browser, see
@@ -848,7 +848,7 @@ them (their other definitions stay), then the Library scenario.
 **Template browser.** The gallery only shows eight cards, so **Browse all N
 templates** (N is every built-in template, 40+ with the `cert16-*` suites)
 opens a dialog, **Scenario templates**
-([`TemplateBrowserDialog.tsx`](../../src/console/pages/scenarios/TemplateBrowserDialog.tsx)):
+([`TemplateBrowserDialog.tsx`](../../apps/web/src/console/pages/scenarios/TemplateBrowserDialog.tsx)):
 a search box (focused on open; matches the name or the description,
 case-insensitive), the count `N of M`, and a scrollable list with one row per
 template: name, target type chip (`chargePoint` / `connector`), the description
@@ -932,7 +932,7 @@ their end (END, a step with no next step, or an edge to a missing node). A
 scenario with a join (two branches reaching one step), a loop, a second fork,
 or a step no path reaches is shown as a flat list in definition order instead,
 marked "order approximate". The layout is a pure function,
-[`deriveStepLayout`](../../src/console/lib/stepLayout.ts).
+[`deriveStepLayout`](../../apps/web/src/console/lib/stepLayout.ts).
 
 ### Scenario editor: steps and graph
 
@@ -946,7 +946,7 @@ Library tab for a [Library scenario](#scenario-library)
 Library copy, and in a [side panel](#editing-in-the-side-panel). **Edit
 scenario** everywhere edits the Library entry when the scenario is a Library
 scenario or a copy of one (`libraryId`). All use the same content
-([`ScenarioEditorContent`](../../src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
+([`ScenarioEditorContent`](../../apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
 
 - **Steps** — the step boxes of the run views' Steps view: the chain, then at
   most one fork with its branches side by side. A click selects a step: its
@@ -992,10 +992,10 @@ scenario or a copy of one (`libraryId`). All use the same content
   a reading is not an edit — no unsaved change, no undo step.
 
 The two views share the drag
-([`useLaneDrag`](../../src/console/lib/useLaneDrag.ts), pointer events, no
+([`useLaneDrag`](../../apps/web/src/console/lib/useLaneDrag.ts), pointer events, no
 drag-and-drop library) and the insert picker, so they behave the same. The
 edits rebuild the graph's edges and positions
-([`scenarioSteps.ts`](../../src/console/lib/scenarioSteps.ts),
+([`scenarioSteps.ts`](../../apps/web/src/console/lib/scenarioSteps.ts),
 `insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
 
 Both views edit the same definition: unsaved changes survive a switch, and
@@ -1110,7 +1110,7 @@ The console shows the running build as
 `ocpp-cp-simulator · ui vX.Y.Z · daemon vX.Y.Z · GitHub` in a footer under the
 page, as the classic UI's footer did (#93); it first sat at the bottom of the
 sidebar (#364), whose 220px width wrapped it one item per line. Each version is
-labelled with its side. The `ui` value comes from `src/lib/appBuildLabel.ts`: the package
+labelled with its side. The `ui` value comes from `apps/web/src/lib/appBuildLabel.ts`: the package
 version stamped by the release tooling (`__APP_VERSION__`, shown `vX.Y.Z`),
 falling back to `<sha7>-dev` when the build stamped a commit (`__APP_COMMIT__`:
 the GitHub Pages deploy and the GHCR branch images, both built from `main`),
@@ -1119,7 +1119,7 @@ line also shows the connected daemon's version, `· daemon …`, from the
 `version` of [`server.info`](../concepts/control-plane.md) (re-read on
 reconnect), since the UI bundle and the daemon can be different builds — e.g.
 the hosted console pointed at a self-hosted daemon. The daemon follows the same
-rule (`src/protocol/buildVersion.ts`, see
+rule (`packages/contracts/src/buildVersion.ts`, see
 [Daemon](daemon.md)): `1.2.3`, `<sha7>-dev` or `local-dev`. A `v` is
 prepended to a semver only, so a dev build reads `daemon 1a2b3c4-dev`; an older
 daemon still reporting `0.0.0-dev` reads `daemon v0.0.0-dev`. Local mode has no
@@ -1128,7 +1128,7 @@ daemon and shows no daemon version; neither does a daemon that predates
 
 The console's dashboard (the connector cells and the Connectors view) and the connector cards format a connector's live readings
 with
-`src/lib/connectorFormat.ts`: the meter value, which is in Wh, as kWh with
+`apps/web/src/lib/connectorFormat.ts`: the meter value, which is in Wh, as kWh with
 2 decimals (`16208` → `16.21 kWh`), and the SoC with 1 decimal (`20.5%`). The
 console's connector card shows `—` when no SoC is reported (#368).
 
@@ -1144,8 +1144,8 @@ and **Reset all simulator data**, which also deletes the saved vehicle
 profiles ([State persistence → Reset](../concepts/state-persistence.md#reset)).
 
 **Vehicle profiles** (`/settings#vehicle-profiles`, #458;
-[`VehicleProfilesCard.tsx`](../../src/console/components/vehicle/VehicleProfilesCard.tsx),
-[`ImportVehicleDialog.tsx`](../../src/console/components/vehicle/ImportVehicleDialog.tsx))
+[`VehicleProfilesCard.tsx`](../../apps/web/src/console/components/vehicle/VehicleProfilesCard.tsx),
+[`ImportVehicleDialog.tsx`](../../apps/web/src/console/components/vehicle/ImportVehicleDialog.tsx))
 lists the saved [vehicle profiles](../concepts/vehicle-profiles.md) — name,
 specs, curve preview, origin and **Attribution** — and manages them:
 

@@ -75,6 +75,25 @@ TARBALL="$(cd "$(dirname "$TARBALL")" && pwd)/$(basename "$TARBALL")"
 echo "==> tarball: $TARBALL ($(wc -c < "$TARBALL") bytes)"
 
 # ---------------------------------------------------------------------------
+# Stage P — the repository is a Bun workspace (#578) and the root package.json
+# carries a "workspaces" field, but the package it publishes is the CLI bundle
+# alone. The tarball must therefore hold no workspace member (packages/,
+# apps/) and its manifest must not depend on one: a `workspace:*` range, or a
+# file that only exists in the repository, would install nowhere else. The
+# `workspaces` field itself is harmless to both installers; stages A (bun) and
+# A2 (npm) below install the manifest as packed and run it.
+# ---------------------------------------------------------------------------
+echo "==> [P] packed manifest and file list"
+if tar -tzf "$TARBALL" | grep -E '^package/(packages|apps)/' > "$SCRATCH/members.log"; then
+  fail "the tarball ships workspace members (packages/ or apps/)" "$SCRATCH/members.log"
+fi
+tar -xzOf "$TARBALL" package/package.json > "$SCRATCH/packed-package.json" \
+  || fail "the tarball has no package/package.json"
+if grep -n 'workspace:' "$SCRATCH/packed-package.json" > "$SCRATCH/workspace-refs.log"; then
+  fail "the packed package.json uses a workspace: dependency; it could not install outside the repository" "$SCRATCH/workspace-refs.log"
+fi
+
+# ---------------------------------------------------------------------------
 # Install into a sandboxed global prefix. BUN_INSTALL relocates bun's whole
 # global tree (bin/ + install/global/node_modules), so this never touches the
 # developer's or the runner's real global installs.
@@ -108,6 +127,25 @@ echo "==> [A] ocpp-cp-sim --help"
 grep -q "Usage: ocpp-cp-sim" "$SCRATCH/help.log" || fail "--help printed no usage banner" "$SCRATCH/help.log"
 
 # ---------------------------------------------------------------------------
+# Stage A2 — the same tarball through npm, which is how most users install it
+# (`npm install -g`). npm reads the "workspaces" field of a package it installs
+# too, so this is the check that it neither errors nor skips the bin. Skipped
+# where npm is not installed.
+# ---------------------------------------------------------------------------
+if command -v npm > /dev/null 2>&1; then
+  echo "==> [A2] npm install -g $TARBALL"
+  NPM_PREFIX="$SCRATCH/npm-global"
+  mkdir -p "$NPM_PREFIX"
+  npm install -g --prefix "$NPM_PREFIX" --no-audit --no-fund "$TARBALL" > "$SCRATCH/npm-install.log" 2>&1
+  [ $? -eq 0 ] || fail "npm install -g" "$SCRATCH/npm-install.log"
+  "$NPM_PREFIX/bin/ocpp-cp-sim" --help > "$SCRATCH/npm-help.log" 2>&1
+  [ $? -eq 0 ] || fail "the npm-installed 'ocpp-cp-sim --help' exited non-zero" "$SCRATCH/npm-help.log"
+  grep -q "Usage: ocpp-cp-sim" "$SCRATCH/npm-help.log" || fail "the npm-installed --help printed no usage banner" "$SCRATCH/npm-help.log"
+else
+  echo "==> [A2] skipped: npm is not installed"
+fi
+
+# ---------------------------------------------------------------------------
 # Stage B — the installed bundle is self-contained: `bun build --compile`
 # over it resolves every import it still makes. The bundle inlines the
 # repository's modules, so what is left are external packages; a bare
@@ -121,7 +159,7 @@ bun build --compile "$PKG_DIR/dist-cli/main.js" --outfile "$SCRATCH/compiled" > 
 
 # ---------------------------------------------------------------------------
 # Stage C — it serves. Boots the daemon WITH a charge point, because creating
-# a CP is what pulls in src/ocpp's validators (ChargePoint -> profiles ->
+# a CP is what pulls in packages/ocpp/src's validators (ChargePoint -> profiles ->
 # OCPPMessageHandlerV201 -> ocpp/validation/v201) — the Dockerfile carries the
 # same warning. The CSMS URL points at a closed port on purpose: the CP fails
 # to connect, which is fine, /v1/healthz must still answer 200.

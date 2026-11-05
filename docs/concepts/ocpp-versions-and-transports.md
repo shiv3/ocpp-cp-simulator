@@ -3,17 +3,17 @@ title: OCPP versions and transports
 type: concept
 summary: What the simulator speaks — OCPP-J 1.6J (default), 2.0.1 and 2.1 over WebSocket, and OCPP-S 1.2 / 1.5 / 1.6S over SOAP 1.2 + WS-Addressing — and which surfaces support which.
 sources:
-  - src/ocpp/ (generated from vendor/ocpp-schemas)
-  - vendor/ocpp-schemas/NOTICE
+  - packages/ocpp/src/ (generated from packages/ocpp/vendor/ocpp-schemas)
+  - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
-  - src/cp/infrastructure/transport/soap/soapCallbackUrl.ts
-  - src/cli/soapTunnel.ts
-  - src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
-  - src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
-  - src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
-  - src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
-  - src/cp/domain/transport/PendingMessageQueue.ts
-  - src/cli/server/CPRegistry.ts (SOAP public base derivation)
+  - packages/core/src/cp/infrastructure/transport/soap/soapCallbackUrl.ts
+  - apps/cli/src/soapTunnel.ts
+  - packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
+  - packages/core/src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
+  - packages/core/src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
+  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
+  - packages/core/src/cp/domain/transport/PendingMessageQueue.ts
+  - apps/cli/src/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
   - e2e/README.md
 related:
@@ -67,7 +67,7 @@ is the node-type catalogue exercised across all three versions by
 
 The same rule covers the nodes that **name a CSMS→CP action** —
 `csmsCallTrigger`, `responseOverride`, `inboundPolicy` (#349). A scenario may spell the action in either version's vocabulary; a 2.x station looks an incoming CALL up under its own name and its 1.6 alias, and a trigger spelled `RemoteStartTransaction` releases on `RequestStartTransaction`. A 1.6 station translates nothing: there `GetDiagnostics` / `GetLog`, `TriggerMessage` / `ExtendedTriggerMessage` and `UpdateFirmware` / `SignedUpdateFirmware` are distinct messages on the same wire, and a node keeps matching exactly what it names. When an override was armed under both spellings, one CALL consumes both. The pairs
-whose spelling differs (`src/cp/domain/types/csmsActionNames.ts`; every other
+whose spelling differs (`packages/core/src/cp/domain/types/csmsActionNames.ts`; every other
 action is spelled identically in both versions):
 
 | OCPP 1.6                 | OCPP 2.0.1                | Note                                                                                                                                                                                                                                                             |
@@ -459,7 +459,7 @@ charge point on.
 **OCPP 1.2:**
 
 ```bash
-bun src/cli/main.ts \
+bun apps/cli/src/main.ts \
   --cp-id CP-001 --ocpp-version OCPP-1.2 \
   --ws-url http://csms-host:8180/services/CentralSystemService \
   --soap-callback-url http://this-host:9700/ocpp/soap/CP-001/ChargePointService \
@@ -472,7 +472,7 @@ LocalAuthList, or Reservation messages; status values are limited to a 4-value s
 **OCPP 1.5:**
 
 ```bash
-bun src/cli/main.ts \
+bun apps/cli/src/main.ts \
   --cp-id CP-001 --ocpp-version OCPP-1.5 \
   --ws-url http://csms-host:8180/steve/services/CentralSystemService \
   --soap-callback-url http://this-host:9700/ocpp/soap/CP-001/ChargePointService \
@@ -482,7 +482,7 @@ bun src/cli/main.ts \
 **OCPP 1.6 (SOAP):**
 
 ```bash
-bun src/cli/main.ts \
+bun apps/cli/src/main.ts \
   --cp-id CP-001 --ocpp-version OCPP-1.6S \
   --ws-url http://csms-host:8180/steve/services/CentralSystemService \
   --soap-callback-url http://this-host:9700/ocpp/soap/CP-001/ChargePointService \

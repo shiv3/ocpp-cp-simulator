@@ -11,7 +11,7 @@ related:
   - ../entities/docker-image.md
   - ../concepts/scenario-format.md
   - ../analyses/testing-strategy.md
-updated: 2026-09-03
+updated: 2026-11-05
 ---
 
 # Source: `examples/testcontainers-java/README.md`
@@ -43,4 +43,4 @@ from `examples/testcontainers-java/`.
 
 **Status.** Prototype, not wired into the simulator's own CI. The identical
 RPC sequence is guarded in CI by
-`src/cli/server/__tests__/harnessScenarioVerdict.bun.test.ts`.
+`apps/cli/src/server/__tests__/harnessScenarioVerdict.bun.test.ts`.

@@ -44,4 +44,4 @@ bun.lock
 # Tauri generated files
 src-tauri/target/
 # Vendored OCA OCPP schemas — kept VERBATIM (do not reformat; ND license + reproducibility)
-vendor/ocpp-schemas/
+packages/ocpp/vendor/ocpp-schemas/

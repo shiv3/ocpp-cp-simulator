@@ -1,11 +1,11 @@
-import { ScenarioExecutor } from "../../src/cp/application/scenario/ScenarioExecutor";
-import { createScenarioExecutorCallbacks } from "../../src/cp/application/scenario/ScenarioRuntime";
+import { ScenarioExecutor } from "../../packages/core/src/cp/application/scenario/ScenarioExecutor";
+import { createScenarioExecutorCallbacks } from "../../packages/core/src/cp/application/scenario/ScenarioRuntime";
 import type {
   ScenarioDefinition,
   ScenarioEvents,
-} from "../../src/cp/application/scenario/ScenarioTypes";
-import { EventEmitter } from "../../src/cp/shared/EventEmitter";
-import type { ChargePoint } from "../../src/cp/domain/charge-point/ChargePoint";
+} from "../../packages/core/src/cp/application/scenario/ScenarioTypes";
+import { EventEmitter } from "../../packages/core/src/cp/shared/EventEmitter";
+import type { ChargePoint } from "../../packages/core/src/cp/domain/charge-point/ChargePoint";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const WAIT_TIMEOUT_MS = 10_000;

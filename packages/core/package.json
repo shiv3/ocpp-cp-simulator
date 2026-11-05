@@ -1,0 +1,20 @@
+{
+  "name": "@ocpp-cp-sim/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts",
+    "./utils/scenarios/essential-cp-behavior.json": "./src/utils/scenarios/essential-cp-behavior.json",
+    "./utils/scenarios/multi-status-monitor.json": "./src/utils/scenarios/multi-status-monitor.json",
+    "./utils/scenarios/status-triggered-actions.json": "./src/utils/scenarios/status-triggered-actions.json",
+    "./cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxChargingCurves.json": "./src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxChargingCurves.json",
+    "./cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxVariant.json": "./src/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxVariant.json",
+    "./schema/scenario.schema.json": "./schema/scenario.schema.json"
+  },
+  "dependencies": {
+    "@ocpp-cp-sim/contracts": "workspace:*",
+    "@ocpp-cp-sim/k6-runtime": "workspace:*",
+    "@ocpp-cp-sim/ocpp": "workspace:*"
+  }
+}

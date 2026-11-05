@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ChargePoint } from "../src/cp/domain/charge-point/ChargePoint";
+import { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
-} from "../src/cp/domain/types/OcppTypes";
-import type { ScenarioDefinition } from "../src/cp/application/scenario/ScenarioTypes";
+} from "../packages/core/src/cp/domain/types/OcppTypes";
+import type { ScenarioDefinition } from "../packages/core/src/cp/application/scenario/ScenarioTypes";
 import {
   startCsms,
   stopAllCsms,

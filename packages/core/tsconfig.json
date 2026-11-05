@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.core.tsbuildinfo",
+    "outDir": "../../node_modules/.tmp/out/core",
+    "types": ["bun-types"]
+  },
+  "include": ["src", "src/**/*.json", "schema/*.json"],
+  "references": [
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../k6-runtime"
+    },
+    {
+      "path": "../ocpp"
+    }
+  ],
+  "exclude": [
+    "src/cp/infrastructure/transport/__tests__/OCPPMessageHandler.settlement.test.ts"
+  ]
+}

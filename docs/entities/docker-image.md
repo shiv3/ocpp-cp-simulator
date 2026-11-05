@@ -16,7 +16,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Docker image
@@ -29,11 +29,11 @@ full UI talking to the Socket.IO control plane on the same origin.
 Hosted images live at **`ghcr.io/shiv3/ocpp-cp-simulator`** (built by
 [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml)
 on push to `main` and on `v*` / `cli-v*` tags). Every pull request also
-builds the image for one arch, starts it and waits for the health path
-(`docker-build` job in [`ci.yml`](../../.github/workflows/ci.yml)), so a
-Dockerfile copy set that no longer matches the source tree fails on the pull
-request rather than on the first `main` build after merge (#302 is the case
-that slipped through before this guard).
+builds the image for one arch, starts it with a charge point and waits for the
+health path and the daemon's `Bootstrapped CP` log line (`docker-build` job in
+[`ci.yml`](../../.github/workflows/ci.yml)), so a build or boot problem in the
+image fails on the pull request rather than on the first `main` build after
+merge (#302 is the case that slipped through before this guard).
 
 ## Image tags
 
@@ -64,7 +64,7 @@ docker pull ghcr.io/shiv3/ocpp-cp-simulator:1.2.3
 
 The web console's footer label and the daemon's version (`/v1/healthz`,
 `server.info`, MCP, `scenario_report`) follow one rule
-(`src/protocol/buildVersion.ts`):
+(`packages/contracts/src/buildVersion.ts`):
 
 | Build                                                      | Reports      |
 | ---------------------------------------------------------- | ------------ |
@@ -76,7 +76,7 @@ The web console's footer label and the daemon's version (`/v1/healthz`,
 `docker-publish.yml` passes `APP_COMMIT=${{ github.sha }}` on every build; the
 stamped semver wins on a tag build. The Dockerfile feeds the build arg to the UI
 stage (Vite bakes it into the bundle) and re-exports it as a runtime env for the
-daemon, which runs from source without `.git`. A deployment that builds its own
+daemon, which runs from the CLI bundle without `.git`. A deployment that builds its own
 image must pass the build arg: a runtime `-e APP_COMMIT=…` alone changes the
 daemon but not the UI bundle, which is fixed at build time.
 
@@ -250,17 +250,19 @@ Notes:
   `-e HTTP_PORT=8080 -p 9700:8080` keeps the console at
   `http://localhost:9700/` while the daemon listens on 8080 internally.
 
-The image **doesn't** contain Vite / Tauri / dev dependencies — Vite builds the
-browser UI in a separate stage and only `dist/` ships in the runtime layer.
-
-The runtime stage's `COPY` list and `package.json`'s `files` field are the same
-set of directories and are meant to stay in step: both answer "what does the
-daemon need in order to boot?". The canonical table, with the reason each entry
-is load-bearing, is on the CLI page under
-[What the package ships](cli.md#what-the-package-ships) — the npm tarball once
-drifted from this list and could not start (#320). The image carries one extra
-directory the tarball does not, `docs/examples/scenarios/`, purely as a
-convenience mount point.
+The image **doesn't** contain Vite / Tauri / dev dependencies, sources or
+`node_modules`: the build stage runs `bun run build` (the web console, `dist/`)
+and `bun run build:cli` (the CLI and daemon as one bundle,
+`dist-cli/main.js`), and the runtime layer holds only those two, the scenario
+examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`. That
+is the same pair the npm tarball ships, so the two cannot drift apart the way
+the source-based image and the tarball once did (#320); see
+[What the package ships](cli.md#what-the-package-ships). The image carries one
+extra directory the tarball does not, `docs/examples/scenarios/`, purely as a
+convenience mount point. Because the bundle has no files beside it to
+fall short, the check that matters is booting it with a charge point (the
+`docker-build` job and `cliBundle.bun.test.ts` do), which is what loads the
+OCPP validators and schemas.
 
 ## Building locally
 

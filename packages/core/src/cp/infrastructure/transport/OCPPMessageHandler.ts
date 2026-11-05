@@ -1,0 +1,1533 @@
+import {
+  DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+  type DataTransferData,
+  type DataTransferResult,
+} from "../../domain/types/DataTransfer";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../domain/types/FirmwareLogStatus";
+import type {
+  AuthorizeRequestV16,
+  AuthorizeResponseV16,
+  BootNotificationResponseV16,
+  CancelReservationRequestV16,
+  CertificateSignedRequestV16,
+  ChangeAvailabilityRequestV16,
+  ChangeConfigurationRequestV16,
+  ChangeConfigurationResponseV16,
+  ClearCacheRequestV16,
+  ClearChargingProfileRequestV16,
+  DataTransferRequestV16,
+  DataTransferResponseV16,
+  DeleteCertificateRequestV16,
+  DiagnosticsStatusNotificationRequestV16,
+  DiagnosticsStatusNotificationResponseV16,
+  ExtendedTriggerMessageRequestV16,
+  FirmwareStatusNotificationResponseV16,
+  GetCompositeScheduleRequestV16,
+  GetConfigurationRequestV16,
+  GetDiagnosticsRequestV16,
+  GetInstalledCertificateIdsRequestV16,
+  GetLocalListVersionRequestV16,
+  GetLogRequestV16,
+  HeartbeatRequestV16,
+  HeartbeatResponseV16,
+  InstallCertificateRequestV16,
+  LogStatusNotificationResponseV16,
+  MeterValuesRequestV16,
+  MeterValuesResponseV16,
+  RemoteStartTransactionRequestV16,
+  RemoteStopTransactionRequestV16,
+  ReserveNowRequestV16,
+  ResetRequestV16,
+  SendLocalListRequestV16,
+  SetChargingProfileRequestV16,
+  SecurityEventNotificationRequestV16,
+  SecurityEventNotificationResponseV16,
+  SignCertificateRequestV16,
+  SignCertificateResponseV16,
+  SignedFirmwareStatusNotificationRequestV16,
+  SignedFirmwareStatusNotificationResponseV16,
+  SignedUpdateFirmwareRequestV16,
+  StartTransactionRequestV16,
+  StartTransactionResponseV16,
+  StatusNotificationRequestV16,
+  StatusNotificationResponseV16,
+  StopTransactionRequestV16,
+  StopTransactionResponseV16,
+  TriggerMessageRequestV16,
+  UnlockConnectorRequestV16,
+  UpdateFirmwareRequestV16,
+} from "@ocpp-cp-sim/ocpp/index";
+import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+import type {
+  OcppMessageErrorPayload,
+  OcppMessagePayload,
+  OcppMessageRequestPayload,
+  OcppMessageResponsePayload,
+  OCPPWebSocket,
+} from "./OCPPWebSocket";
+import type { Settlement } from "./network-sim";
+import {
+  ResponseEffectQueue,
+  normalizeHandlerResult,
+  type HandlerResult,
+} from "./network-sim";
+import type { ProtocolCodec } from "./profile/ProtocolProfile";
+import { CallWaiters } from "./CallWaiters";
+import { ExpertCalls } from "./ExpertCalls";
+import {
+  type OcppCallOutcome,
+  type OcppCallRequest,
+} from "../../domain/types/OcppCall";
+import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import {
+  Transaction,
+  type TransactionUpdateOptions,
+} from "../../domain/connector/Transaction";
+import {
+  buildSampledValues,
+  type MeterSampleOverrides,
+  type ReadingContext,
+} from "../../domain/connector/MeterValueBuilder";
+import {
+  signReading,
+  toOcpp16SampledValue,
+} from "../../domain/connector/SignedMeterData";
+import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
+import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
+import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
+import { Logger, LogType } from "../../shared/Logger";
+import {
+  BootNotification,
+  ChargePointErrorCode,
+  OCPPAction,
+  OCPPErrorCode,
+  OCPPMessageType,
+  OCPPStatus,
+} from "../../domain/types/OcppTypes";
+import { BootGate } from "../../application/state/machines/BootGate";
+
+// Import handler registry and handlers
+import {
+  MessageHandlerRegistry,
+  HandlerContext,
+  buildV16CallHandlerRegistry,
+  StartTransactionResultHandler,
+  StopTransactionResultHandler,
+  MeterValuesResultHandler,
+  AuthorizeResultHandler,
+  DataTransferHandler,
+} from "./handlers";
+
+/** Actions the 1.6 handler queues offline and replays (§4.7 / §4.8 /
+ *  §4.10). Any other row in `pending_messages` was queued by the 2.x
+ *  handler under the same charge point id: the queue deletes it on load
+ *  (#528). */
+const QUEUED_ON_OCPP16: ReadonlySet<OCPPAction> = new Set([
+  OCPPAction.StartTransaction,
+  OCPPAction.StopTransaction,
+  OCPPAction.MeterValues,
+]);
+
+type CoreOcppMessagePayloadCall =
+  | ChangeAvailabilityRequestV16
+  | ChangeConfigurationRequestV16
+  | ClearCacheRequestV16
+  | GetConfigurationRequestV16
+  | RemoteStartTransactionRequestV16
+  | RemoteStopTransactionRequestV16
+  | ResetRequestV16
+  | UnlockConnectorRequestV16;
+
+type FirmwareManagementOcppMessagePayloadCall =
+  | GetDiagnosticsRequestV16
+  | UpdateFirmwareRequestV16
+  | SignedUpdateFirmwareRequestV16;
+
+type LocalAuthListManagementOcppMessagePayloadCall =
+  GetLocalListVersionRequestV16 | SendLocalListRequestV16;
+
+type ReservationOcppMessagePayloadCall =
+  CancelReservationRequestV16 | ReserveNowRequestV16;
+
+type SmartChargingOcppMessagePayloadCall =
+  | ClearChargingProfileRequestV16
+  | GetCompositeScheduleRequestV16
+  | SetChargingProfileRequestV16;
+
+type RemoteTriggerOcppMessagePayloadCall =
+  TriggerMessageRequestV16 | ExtendedTriggerMessageRequestV16;
+
+type SecurityExtensionOcppMessagePayloadCall =
+  | CertificateSignedRequestV16
+  | InstallCertificateRequestV16
+  | GetInstalledCertificateIdsRequestV16
+  | DeleteCertificateRequestV16
+  | GetLogRequestV16;
+
+type OcppMessagePayloadCall =
+  | CoreOcppMessagePayloadCall
+  | FirmwareManagementOcppMessagePayloadCall
+  | LocalAuthListManagementOcppMessagePayloadCall
+  | ReservationOcppMessagePayloadCall
+  | SmartChargingOcppMessagePayloadCall
+  | RemoteTriggerOcppMessagePayloadCall
+  | SecurityExtensionOcppMessagePayloadCall;
+
+type CoreOcppMessagePayloadCallResult =
+  | AuthorizeResponseV16
+  | BootNotificationResponseV16
+  | ChangeConfigurationResponseV16
+  | DataTransferResponseV16
+  | HeartbeatResponseV16
+  | MeterValuesResponseV16
+  | StartTransactionResponseV16
+  | StatusNotificationResponseV16
+  | StopTransactionResponseV16;
+
+type FirmwareManagementOcppMessagePayloadCallResult =
+  | DiagnosticsStatusNotificationResponseV16
+  | FirmwareStatusNotificationResponseV16
+  | SignedFirmwareStatusNotificationResponseV16;
+
+type SecurityExtensionOcppMessagePayloadCallResult =
+  | SecurityEventNotificationResponseV16
+  | SignCertificateResponseV16
+  | LogStatusNotificationResponseV16;
+
+type OcppMessagePayloadCallResult =
+  | CoreOcppMessagePayloadCallResult
+  | FirmwareManagementOcppMessagePayloadCallResult
+  | SecurityExtensionOcppMessagePayloadCallResult;
+
+interface OCPPRequest {
+  type: OCPPMessageType;
+  action: OCPPAction;
+  id: string;
+  payload: OcppMessagePayload;
+  connectorId?: number | null;
+}
+
+/**
+ * Predicate for "is this CALL a transaction-related message that must be
+ * queued on offline" (§4.7/§4.8/§4.10). MeterValues without a transaction
+ * id are informational and intentionally NOT queued — see §4.7.
+ */
+function isTransactionRelated(action: OCPPAction): boolean {
+  return QUEUED_ON_OCPP16.has(action);
+}
+
+class RequestHistory {
+  private _currentId: string = "";
+  private _requests: Map<string, OCPPRequest> = new Map();
+
+  public add(request: OCPPRequest): void {
+    this._currentId = request.id;
+    this._requests.set(request.id, request);
+  }
+
+  public current(): OCPPRequest | undefined {
+    return this._requests.get(this._currentId);
+  }
+
+  public get(id: string): OCPPRequest | undefined {
+    return this._requests.get(id);
+  }
+
+  public remove(id: string): void {
+    this._requests.delete(id);
+  }
+}
+
+/** A CALL waiting for, or holding, the §4.1.1 serialization slot. */
+interface SerialEntry {
+  action: OCPPAction;
+  id: string;
+  payload: OcppMessageRequestPayload;
+  connectorId?: number;
+  /** A caller waits for this CALL's answer: when it is dropped the caller
+   *  is told, instead of the CALL being salvaged or silently discarded. */
+  onDropped?: (reason: string) => void;
+}
+
+export class OCPPMessageHandler {
+  private _chargePoint: ChargePoint;
+  private _webSocket: OCPPWebSocket;
+  private _logger: Logger;
+  private readonly _codec: ProtocolCodec;
+  private _requests: RequestHistory = new RequestHistory();
+  private _registry: MessageHandlerRegistry = new MessageHandlerRegistry();
+  // Stored as a field so scenarios / tests can register vendor responders
+  // after construction via `getDataTransferHandler().registerVendor(...)`.
+  private _dataTransferHandler: DataTransferHandler = new DataTransferHandler();
+  /** Control-plane `data_transfer` callers waiting for the CSMS's answer
+   *  (#348), keyed by CALL id. Settled by handleCallResult / handleCallError,
+   *  rejected when the CALL is dropped, or by their own timer. */
+  private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
+    DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
+    (id) =>
+      new Error(
+        `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
+      ),
+  );
+
+  /** Expert calls (#389) in flight; their answers are routed here first. */
+  private readonly _expertCalls = new ExpertCalls((id) =>
+    this.withdrawQueued(id),
+  );
+
+  // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
+  // arrives we restrict outgoing CALLs. The BootNotification.req itself
+  // is exempt so the handshake can complete.
+  private _bootGate: BootGate = new BootGate();
+
+  // §4.7/§4.8/§4.10 + errata 3.18: transaction-related messages that fail
+  // to deliver are queued and retried. Persists across reboots so power
+  // outages don't lose StartTransaction.req for an in-flight transaction.
+  private _pendingQueue: PendingMessageQueue;
+
+  // OCPP-J §4.1.1 (Synchronicity): "A Charge Point or Central System
+  // SHOULD NOT send a CALL message to the other party unless all the
+  // CALL messages it sent before have been responded to or have timed
+  // out." We serialize outgoing CALLs through this queue so only one is
+  // in-flight at a time. Without this, real CSMS implementations drop
+  // post-Boot StatusNotification fan-outs at the application layer and
+  // then issue TriggerMessage to recover (observed in dev env).
+  private _serialQueue: SerialEntry[] = [];
+  private _serialInFlight:
+    | { phase: "queued"; action: OCPPAction; id: string }
+    | {
+        phase: "written";
+        action: OCPPAction;
+        id: string;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | null = null;
+  // §4.1.1 lets the implementation pick the CALL timeout. 30s is a common
+  // CSMS default and roughly matches Configuration's default
+  // TransactionMessageRetryInterval (60s).
+  private static readonly SERIAL_CALL_TIMEOUT_MS = 30_000;
+
+  // Response effect queue for deferred handler side effects
+  private _responseEffectQueue: ResponseEffectQueue;
+
+  constructor(
+    chargePoint: ChargePoint,
+    webSocket: OCPPWebSocket,
+    logger: Logger,
+    codec: ProtocolCodec,
+  ) {
+    this._chargePoint = chargePoint;
+    this._webSocket = webSocket;
+    this._logger = logger;
+    this._codec = codec;
+    this._pendingQueue = new PendingMessageQueue(
+      chargePoint.id,
+      chargePoint.database,
+      QUEUED_ON_OCPP16,
+    );
+    // #528: `cp.update` can switch ocppVersion over the same --state-db,
+    // leaving rows (e.g. TransactionEvent) a 1.6 CSMS does not know.
+    const dropped = this._pendingQueue.droppedOnLoad;
+    if (dropped.length > 0) {
+      this._logger.warn(
+        `Dropped ${dropped.length} queued message(s) not replayed on OCPP 1.6: ${dropped.join(", ")}`,
+        LogType.OCPP,
+      );
+    }
+
+    // Initialize response effect queue with deps
+    this._responseEffectQueue = new ResponseEffectQueue({
+      isGenerationCurrent: (gen) =>
+        gen.gen === this._webSocket.currentGeneration().gen,
+      defer: (run) => queueMicrotask(run),
+      log: (message) => this._logger.info(message, LogType.OCPP),
+    });
+
+    // Register close-transaction callback for effect flushing (if available)
+    if (this._webSocket.onCloseTransaction) {
+      this._webSocket.onCloseTransaction((finalized) =>
+        this._responseEffectQueue.flushAfterCloseFinalization(finalized),
+      );
+    }
+
+    this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
+    this.initializeHandlers();
+  }
+
+  /**
+   * Initialize all message handlers using the registry pattern
+   */
+  private initializeHandlers(): void {
+    // Use the shared factory to populate the registry with all OCPP 1.6
+    // CALL and CALLRESULT handlers. This factory creates stateless handler
+    // instances that can be reused by multiple transports (WebSocket, SOAP).
+    this._registry = buildV16CallHandlerRegistry();
+
+    // Register the instance-specific DataTransferHandler so scenarios can
+    // register vendor responders via getDataTransferHandler().
+    // §4.3/§5.6: DataTransfer is a Core message. Without this handler the
+    // registry returns NotImplemented, which is wrong — CSMS-side
+    // DataTransfer should be answered with UnknownVendorId at minimum.
+    this._registry.registerCallHandler(
+      OCPPAction.DataTransfer,
+      this._dataTransferHandler,
+    );
+  }
+
+  /** Expose the DataTransfer handler so scenarios can register vendor
+   *  responders without reaching into the private registry. */
+  public getDataTransferHandler(): DataTransferHandler {
+    return this._dataTransferHandler;
+  }
+
+  /** Update the boot gate. Called by BootNotificationResultHandler. */
+  public setBootStatus(
+    status:
+      | { status: "Accepted" }
+      | { status: "Pending" }
+      | { status: "Rejected"; retryAfter: Date },
+  ): void {
+    this._bootGate.set(status);
+    if (status.status === "Accepted") {
+      // Drain anything that was queued behind the boot gate while we
+      // waited for BootNotification.conf. Microtask so the BootNotification
+      // CALLRESULT flow finishes settling before we start sending.
+      queueMicrotask(() => this.pumpSerialQueue());
+    }
+  }
+
+  /**
+   * §4.2: outgoing CALLs are restricted while BootNotification has not yet
+   * been Accepted. BootNotification itself + the CALLRESULT replies are
+   * always permitted (they're how the handshake unblocks).
+   *
+   * - Pending: only allow BootNotification (e.g. TriggerMessage-driven
+   *   resend). Other CALLs are dropped with a warning.
+   * - Rejected: nothing goes out at all until retryAfter elapses.
+   * - Idle (pre-handshake): allow BootNotification only.
+   */
+  private isCallAllowed(action: OCPPAction): boolean {
+    return this._bootGate.isCallAllowed(action);
+  }
+
+  public authorize(tagId: string): void {
+    const messageId = this.generateMessageId();
+    const payload: AuthorizeRequestV16 = { idTag: tagId };
+    this.sendRequest(OCPPAction.Authorize, messageId, payload);
+  }
+
+  private sendStartTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: StartTransactionRequestV16 = {
+      connectorId: connectorId,
+      idTag: transaction.tagId,
+      meterStart: transaction.meterStart,
+      timestamp: transaction.startTime.toISOString(),
+      // §4.8 MUST: include reservationId when this transaction ends a
+      // reservation. Domain layer populates this on the Transaction.
+      ...(transaction.reservationId !== undefined
+        ? { reservationId: transaction.reservationId }
+        : {}),
+    };
+    // #315: 1.6 StartTransaction has no field for it, so the signed begin
+    // reading waits on the transaction for StopTransaction.transactionData.
+    const signedBegin = signReading(
+      this._chargePoint,
+      connectorId,
+      transaction.tagId,
+      {
+        reason: "B",
+        energyWh: transaction.meterStart,
+        at: transaction.startTime,
+      },
+    );
+    if (signedBegin) transaction.signedBeginOcmf = signedBegin.ocmf;
+    this.sendRequest(
+      OCPPAction.StartTransaction,
+      messageId,
+      payload,
+      connectorId,
+    );
+  }
+
+  private sendStopTransaction(
+    transaction: Transaction,
+    connectorId: number,
+  ): void {
+    const messageId = this.generateMessageId();
+    // §4.10: reason MAY be omitted when "Local" (the default), but SHOULD
+    // be set to a correct value otherwise. The domain layer assigns
+    // transaction.stopReason in non-default stop paths (Remote / Reset /
+    // EVDisconnected / UnlockCommand / DeAuthorized / …).
+    const reason = transaction.stopReason;
+    const transactionData = this.signedTransactionData(
+      transaction,
+      connectorId,
+    );
+    const payload: StopTransactionRequestV16 = {
+      transactionId: transaction.id,
+      idTag: transaction.tagId,
+      meterStop: transaction.meterStop!,
+      timestamp: transaction.stopTime!.toISOString(),
+      ...(reason && reason !== "Local" ? { reason } : {}),
+      ...(transactionData ? { transactionData } : {}),
+    };
+    this.sendRequest(
+      OCPPAction.StopTransaction,
+      messageId,
+      payload,
+      connectorId,
+    );
+  }
+
+  /**
+   * #315: StopTransaction.transactionData carrying the signed begin reading
+   * (signed when the transaction started) and a freshly signed end reading,
+   * each as a `format: "SignedData"` sample. A stored begin reading is sent
+   * even if signing was turned off since; `undefined` when there is neither.
+   */
+  private signedTransactionData(
+    transaction: Transaction,
+    connectorId: number,
+  ): StopTransactionRequestV16["transactionData"] {
+    if (transaction.meterStop === null || transaction.stopTime === null)
+      return undefined;
+    const end = signReading(this._chargePoint, connectorId, transaction.tagId, {
+      reason: "E",
+      energyWh: transaction.meterStop,
+      at: transaction.stopTime,
+    });
+    if (!end && !transaction.signedBeginOcmf) return undefined;
+    const data = [
+      ...(transaction.signedBeginOcmf
+        ? [
+            {
+              timestamp: transaction.startTime.toISOString(),
+              sampledValue: [
+                toOcpp16SampledValue(
+                  transaction.signedBeginOcmf,
+                  "Transaction.Begin",
+                ),
+              ],
+            },
+          ]
+        : []),
+      ...(end
+        ? [
+            {
+              timestamp: transaction.stopTime.toISOString(),
+              sampledValue: [toOcpp16SampledValue(end.ocmf, "Transaction.End")],
+            },
+          ]
+        : []),
+    ];
+    // Same strict-unit-union cast as sendMeterValue below.
+    return data as unknown as StopTransactionRequestV16["transactionData"];
+  }
+
+  public sendTransactionEvent(event: TransactionLifecycleEvent): void {
+    if (event.phase === "started")
+      this.sendStartTransaction(event.transaction, event.connectorId);
+    else this.sendStopTransaction(event.transaction, event.connectorId);
+  }
+
+  public sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    // OCPP 1.6 has no TransactionEvent; in-transaction state is carried by
+    // StatusNotification and MeterValues (#335). Refuse loudly rather than
+    // emit a frame the CSMS cannot parse.
+    this._logger.warn(
+      `[v1.6] transaction_event (${options.triggerReason}) on connector ${connectorId} ignored: TransactionEvent is an OCPP 2.x message`,
+      LogType.TRANSACTION,
+    );
+  }
+
+  public sendBootNotification(bootPayload: BootNotification): void {
+    const messageId = this.generateMessageId();
+    // bootPayload is already in the correct format (BootNotificationRequest from ts-ocpp)
+    this.sendRequest(OCPPAction.BootNotification, messageId, bootPayload);
+  }
+
+  public sendHeartbeat(): void {
+    const messageId = this.generateMessageId();
+    const payload: HeartbeatRequestV16 = {};
+    this.sendRequest(OCPPAction.Heartbeat, messageId, payload);
+  }
+
+  /**
+   * §4.3 CP-initiated DataTransfer.req. The vendor / message id / payload
+   * semantics are entirely vendor-specific; the CP just packages them and
+   * lets the CSMS respond with Accepted / Rejected / UnknownVendorId /
+   * UnknownMessageId.
+   */
+  public sendDataTransfer(
+    vendorId: string,
+    messageId?: string,
+    data?: DataTransferData,
+  ): Promise<DataTransferResult> {
+    // sendRequest suppresses a gated CALL with a warning and nothing else;
+    // a caller waiting for an answer needs the refusal as a rejection.
+    if (!this.isCallAllowed(OCPPAction.DataTransfer)) {
+      return Promise.reject(
+        new Error(
+          "DataTransfer blocked by the boot gate — BootNotification not yet Accepted",
+        ),
+      );
+    }
+    const id = this.generateMessageId();
+    // 1.6 §7.18: `data` is a string. An object from a 2.0.1-shaped caller is
+    // JSON-encoded rather than refused, so one command shape serves both.
+    const wireData =
+      data === undefined
+        ? undefined
+        : typeof data === "string"
+          ? data
+          : JSON.stringify(data);
+    const payload: DataTransferRequestV16 = {
+      vendorId,
+      ...(messageId !== undefined ? { messageId } : {}),
+      ...(wireData !== undefined ? { data: wireData } : {}),
+    };
+    const answer = this._dataTransferWaiters.register(id);
+    this.sendRequest(
+      OCPPAction.DataTransfer,
+      id,
+      payload,
+      undefined,
+      (reason) =>
+        this._dataTransferWaiters.reject(
+          id,
+          new Error(`DataTransfer ${id} dropped (${reason})`),
+        ),
+    );
+    return answer;
+  }
+
+  /** Expert OCPP call (#389). Rides the §4.1.1 serial queue like any CALL,
+   *  but its answer goes to the caller, and to the result handlers only
+   *  when `applyResponse` is set. */
+  public async sendOcppCall(
+    request: OcppCallRequest,
+  ): Promise<OcppCallOutcome> {
+    // ChargePoint.sendOcppCall checked the action against the 1.6 catalog,
+    // every entry of which is an OCPPAction.
+    const action = request.action as OCPPAction;
+    if (!this.isCallAllowed(action)) {
+      throw new OcppCallRejectedError(
+        "boot_gate",
+        `${action} blocked by the boot gate — BootNotification not yet Accepted`,
+      );
+    }
+    const warning = this._codec.outgoingWarning(action, request.payload);
+    if (warning && !request.skipValidation) {
+      throw new OcppCallRejectedError("invalid_payload", warning);
+    }
+    const id = this.generateMessageId();
+    const answer = this._expertCalls.start(id, request);
+    // Deliberately unchecked when skipValidation is set: sendRequest logs the
+    // codec warning, as for every CALL.
+    this.sendRequest(
+      action,
+      id,
+      request.payload as unknown as OcppMessageRequestPayload,
+      this.connectorOf(request.payload),
+      (reason) => this._expertCalls.onDropped(id, reason),
+    );
+    return answer;
+  }
+
+  /** The connector an expert call concerns, for the result handlers that
+   *  key on it when `applyResponse` is set: the payload's `connectorId`
+   *  (StartTransaction, MeterValues, StatusNotification), else the connector
+   *  running its `transactionId` (StopTransaction). */
+  private connectorOf(payload: Record<string, unknown>): number | undefined {
+    if (typeof payload.connectorId === "number") return payload.connectorId;
+    if (typeof payload.transactionId !== "number") return undefined;
+    for (const connector of this._chargePoint.connectors.values()) {
+      if (connector.transaction?.id === payload.transactionId) {
+        return connector.id;
+      }
+    }
+    return undefined;
+  }
+
+  /** OCPP 1.6 Security Whitepaper: CP-initiated security event. */
+  public sendSecurityEventNotification(type: string, techInfo?: string): void {
+    const messageId = this.generateMessageId();
+    const payload: SecurityEventNotificationRequestV16 = {
+      type,
+      timestamp: new Date().toISOString(),
+      ...(techInfo !== undefined ? { techInfo } : {}),
+    };
+    this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
+  }
+
+  /** Generate or forward a CSR for the charge point certificate signing flow. */
+  public async sendSignCertificate(csr?: string): Promise<void> {
+    const cpoName = this._chargePoint.configuration.getString("CpoName") ?? "";
+    const quirks = this._chargePoint.certificateQuirks;
+
+    let payloadCsr: string;
+    if (csr) {
+      payloadCsr = csr;
+    } else {
+      // Log when a non-default key algorithm is used
+      if (quirks.csrKeyAlgorithm === "RSA") {
+        this._logger.info(
+          "SignCertificate: generating RSA CSR (certificate quirk)",
+          LogType.OCPP,
+        );
+      }
+
+      payloadCsr = await this._chargePoint.certificateStore.generateNewCsr(
+        this._chargePoint.id,
+        cpoName,
+        {
+          keyAlgorithm: quirks.csrKeyAlgorithm,
+          pemLineEndings: quirks.csrPemLineEndings,
+        },
+      );
+    }
+
+    const messageId = this.generateMessageId();
+    const payload: SignCertificateRequestV16 = { csr: payloadCsr };
+    this.sendRequest(OCPPAction.SignCertificate, messageId, payload);
+  }
+
+  /**
+   * §4.4 DiagnosticsStatusNotification.req. `Idle` is sent only in
+   * response to TriggerMessage when no upload is in progress; other
+   * statuses (Uploading/Uploaded/UploadFailed) fire from GetDiagnostics
+   * progression.
+   */
+  public sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void {
+    const messageId = this.generateMessageId();
+    const payload: DiagnosticsStatusNotificationRequestV16 = { status };
+    this.sendRequest(
+      OCPPAction.DiagnosticsStatusNotification,
+      messageId,
+      payload,
+    );
+  }
+
+  /**
+   * §4.5 FirmwareStatusNotification.req. Same semantics as
+   * DiagnosticsStatusNotification — `Idle` only in response to
+   * TriggerMessage; other statuses (Downloading/Downloaded/Installing/
+   * Installed/...) fire from UpdateFirmware progression.
+   */
+  public sendFirmwareStatusNotification(
+    status: FirmwareStatus,
+    requestId?: number,
+  ): void {
+    // 1.6 §6.24 FirmwareStatusNotification.req has no requestId (only the
+    // Whitepaper's Signed variant does), and its status set is the first
+    // seven of 2.0.1's. Anything wider is sent as given: the codec's
+    // outgoing check warns, and a CSMS that rejects it is the honest
+    // answer for a 2.0.1-only status on a 1.6 wire (#345).
+    if (requestId !== undefined) {
+      this._logger.debug(
+        `FirmwareStatusNotification carries no requestId on OCPP 1.6; dropping requestId=${requestId}`,
+        LogType.OCPP,
+      );
+    }
+    const messageId = this.generateMessageId();
+    const payload = { status };
+    this.sendRequest(OCPPAction.FirmwareStatusNotification, messageId, payload);
+  }
+
+  /**
+   * OCPP 1.6 Security Whitepaper LogStatusNotification.req. `requestId`
+   * carries the id from the triggering GetLog.req (TriggerMessage-driven
+   * `Idle` sends have none). The 2.0.1-only `AcceptedCanceled` is sent as
+   * given, as for firmware above.
+   */
+  public sendLogStatusNotification(
+    status: UploadLogStatus,
+    requestId?: number,
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload = {
+      status,
+      ...(requestId !== undefined ? { requestId } : {}),
+    };
+    this.sendRequest(OCPPAction.LogStatusNotification, messageId, payload);
+  }
+
+  /**
+   * OCPP 1.6 Security Whitepaper SignedFirmwareStatusNotification.req —
+   * the signed counterpart to FirmwareStatusNotification, carrying the
+   * `requestId` from the triggering SignedUpdateFirmware.req.
+   */
+  public sendSignedFirmwareStatusNotification(
+    status: FirmwareStatus,
+    requestId?: number,
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: SignedFirmwareStatusNotificationRequestV16 = {
+      status,
+      ...(requestId !== undefined ? { requestId } : {}),
+    };
+    this.sendRequest(
+      OCPPAction.SignedFirmwareStatusNotification,
+      messageId,
+      payload,
+    );
+  }
+
+  /** OCPP 1.6 has no NotifyEvent; 2.x variable monitoring never runs on
+   *  1.6, so nothing reaches this (#457). */
+  public sendNotifyEvent(_events: readonly MonitoringEvent[]): void {
+    this._logger.debug(
+      "NotifyEvent is OCPP 2.x only; ignoring it on OCPP 1.6",
+      LogType.OCPP,
+    );
+  }
+
+  /** Same as above: nothing to queue on 1.6 (#538). */
+  public queueNotifyEvent(events: readonly MonitoringEvent[]): void {
+    this.sendNotifyEvent(events);
+  }
+
+  public highestQueuedNotifyEventId(): number {
+    return 0;
+  }
+
+  /**
+   * §4.7 MeterValues.req. The measurand list is driven by the
+   * `MeterValuesSampledData` Configuration key (defaults to
+   * `Energy.Active.Import.Register`). Synthesized values are produced by
+   * `MeterValueBuilder` so CSMS sees Voltage / Current / Power / SoC etc.
+   * alongside the energy register.
+   */
+  public sendMeterValue(
+    transactionId: number | undefined,
+    connectorId: number,
+    context: ReadingContext = "Sample.Periodic",
+    overrides: MeterSampleOverrides = {},
+  ): void {
+    const messageId = this.generateMessageId();
+    const connector = this._chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this._logger.warn(
+        `sendMeterValue: connector ${connectorId} not found`,
+        LogType.METER_VALUE,
+      );
+      return;
+    }
+
+    const measurands =
+      overrides.measurands ??
+      this._chargePoint.configuration.meterValuesSampledData();
+    const sampledValue = buildSampledValues(connector, measurands, context);
+    const timestamp = overrides.timestamp ?? new Date();
+    // #315: during a transaction, also send the energy register signed.
+    // Clock-aligned samples are not signed (no aligned/fiscal records yet).
+    const transaction = connector.transaction;
+    if (
+      context !== "Sample.Clock" &&
+      transactionId !== undefined &&
+      transaction &&
+      !transaction.stopTime
+    ) {
+      const signed = signReading(
+        this._chargePoint,
+        connectorId,
+        transaction.tagId,
+        {
+          reason: "C",
+          energyWh: connector.meterValue,
+          at: timestamp,
+        },
+      );
+      if (signed) sampledValue.push(toOcpp16SampledValue(signed.ocmf, context));
+    }
+
+    const payload: MeterValuesRequestV16 = {
+      transactionId,
+      connectorId,
+      meterValue: [
+        {
+          timestamp: timestamp.toISOString(),
+          // The builder produces a structurally-compatible SampledValue
+          // shape, but its `unit` is a plain `string` whereas ts-ocpp's
+          // generated type is a strict union. Cast at this boundary
+          // rather than mirror the entire enum.
+          sampledValue:
+            sampledValue as unknown as MeterValuesRequestV16["meterValue"][0]["sampledValue"],
+        },
+      ],
+    };
+    this.sendRequest(OCPPAction.MeterValues, messageId, payload);
+  }
+
+  /**
+   * §4.9 StatusNotification.req. `errorCode` defaults to NoError when the
+   * status is Operative; for Faulted (or warnings during Preparing/Suspended
+   * /Finishing) pass the appropriate ChargePointErrorCode via `opts`.
+   */
+  public sendStatusNotification(
+    connectorId: number,
+    status: OCPPStatus,
+    opts?: {
+      errorCode?: ChargePointErrorCode;
+      info?: string;
+      vendorErrorCode?: string;
+      vendorId?: string;
+      timestamp?: Date;
+      suppressChargingStateTransactionEvent?: boolean;
+    },
+  ): void {
+    const messageId = this.generateMessageId();
+    const payload: StatusNotificationRequestV16 = {
+      connectorId,
+      errorCode: opts?.errorCode ?? "NoError",
+      status,
+      ...(opts?.info ? { info: opts.info } : {}),
+      ...(opts?.vendorErrorCode
+        ? { vendorErrorCode: opts.vendorErrorCode }
+        : {}),
+      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
+      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
+    };
+    this.sendRequest(OCPPAction.StatusNotification, messageId, payload);
+  }
+
+  private sendRequest(
+    action: OCPPAction,
+    id: string,
+    payload: OcppMessageRequestPayload,
+    connectorId?: number,
+    onDropped?: (reason: string) => void,
+  ): void {
+    if (!this.isCallAllowed(action)) {
+      this._logger.warn(
+        `Suppressing ${action}: blocked by the boot gate — BootNotification not yet Accepted (status=${this._bootGate.status.status})`,
+        LogType.OCPP,
+      );
+      return;
+    }
+    const warning = this._codec.outgoingWarning(action, payload);
+    if (warning) {
+      this._logger.warn(warning, LogType.OCPP);
+    }
+    // §4.1.1: queue here, pumpSerialQueue does the actual `ws.sendAction`
+    // one CALL at a time. The previous CALL's CALLRESULT/CALLERROR (or
+    // timeout) releases the slot via `settleSerialInFlight`.
+    this._serialQueue.push({ action, id, payload, connectorId, onDropped });
+    this.pumpSerialQueue();
+  }
+
+  /**
+   * Centralize custody: a CALL with a waiting caller tells it; otherwise
+   * transaction-related messages (StartTransaction/StopTransaction/MeterValues)
+   * are queued for retry and others are logged and discarded.
+   */
+  private salvageOrDiscard(entry: SerialEntry, reason: string): void {
+    if (entry.onDropped) {
+      this._logger.warn(
+        `Dropping ${entry.action} (${reason}); its caller is told`,
+        LogType.OCPP,
+      );
+      entry.onDropped(reason);
+      return;
+    }
+    if (isTransactionRelated(entry.action)) {
+      this._pendingQueue.enqueue({
+        action: entry.action,
+        payload: entry.payload,
+        connectorId: entry.connectorId,
+      });
+      this._logger.warn(
+        `Salvaged ${entry.action} to PendingMessageQueue (${reason}); size=${this._pendingQueue.size()}`,
+        LogType.OCPP,
+      );
+    } else {
+      this._logger.warn(
+        `Dropping ${entry.action} (informational, ${reason})`,
+        LogType.OCPP,
+      );
+    }
+  }
+
+  /**
+   * Drain one CALL off `_serialQueue` and put it in flight. No-op when
+   * another CALL is already in flight (queued OR written); the eventual
+   * settlement callback will pump us again when the in-flight CALL transitions
+   * from "written" → timeout/CALLRESULT.
+   */
+  private pumpSerialQueue(): void {
+    if (this._serialInFlight) return;
+    while (this._serialQueue.length > 0) {
+      const head = this._serialQueue[0];
+      if (!this.isCallAllowed(head.action)) {
+        // Boot gate currently blocks this action — leave it at the front
+        // of the queue. `setBootStatus` re-pumps us when the gate opens.
+        return;
+      }
+      this._serialQueue.shift();
+      this._requests.add({
+        type: OCPPMessageType.CALL,
+        action: head.action,
+        id: head.id,
+        payload: head.payload,
+        connectorId: head.connectorId,
+      });
+
+      // Create the slot in "queued" phase BEFORE sendAction, because the settlement
+      // callback may fire SYNCHRONOUSLY (disabled path) and must find a slot to transition.
+      this._serialInFlight = {
+        phase: "queued",
+        action: head.action,
+        id: head.id,
+      };
+
+      const gen = this._webSocket.currentGeneration();
+      const accepted = this._webSocket.sendAction(
+        head.id,
+        head.action,
+        head.payload,
+        gen,
+        (settlement) => this.onSerialSettled(head, settlement),
+      );
+
+      if (!accepted) {
+        // send-false: the pre-created slot must be cleared; the request never went out.
+        this._serialInFlight = null;
+        this._requests.remove(head.id);
+        this.salvageOrDiscard(head, "send-false");
+        continue;
+      }
+      // Accepted. If the settlement already fired synchronously (disabled), onSerialSettled
+      // has already transitioned the slot to "written" (armed timer + notifyOutgoingCall).
+      // If async (enabled/delayed), the slot stays "queued" and holds the serializer.
+      return;
+    }
+  }
+
+  /**
+   * Settlement callback for the in-flight serialized CALL. Fires exactly once per
+   * sendAction, either when the frame is physically written or when a drop occurs
+   * (socket_closed, disposed, write_failed). Handles the phase transition from
+   * "queued" → "written" and manages custody (salvage vs. drop) on failure.
+   */
+  private onSerialSettled(head: SerialEntry, settlement: Settlement): void {
+    const cur = this._serialInFlight;
+    // Staleness guard: ignore a settlement that no longer matches the current slot.
+    if (!cur || cur.id !== head.id) return;
+
+    if (settlement.outcome === "written") {
+      // Now it is physically on the wire: NOW arm the 30s response timeout and count heartbeat activity.
+      this._chargePoint.notifyOutgoingCall(
+        head.action === OCPPAction.Heartbeat,
+      );
+      const timer = setTimeout(
+        () => this.handleSerialTimeout(head.id),
+        OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS,
+      );
+      this._serialInFlight = {
+        phase: "written",
+        action: head.action,
+        id: head.id,
+        timer,
+      };
+      return;
+    }
+
+    // Drop outcomes: the frame never physically went out (or its write failed).
+    this._serialInFlight = null;
+    this._requests.remove(head.id);
+    this.salvageOrDiscard(head, settlement.outcome);
+
+    if (
+      settlement.outcome === "socket_closed" ||
+      settlement.outcome === "disposed"
+    ) {
+      // Do NOT pump here. The close/teardown path (onWebSocketClosed) owns salvaging the
+      // remaining _serialQueue in order; pumping now could write into a closing socket
+      // or reorder salvage. Just release the slot.
+      return;
+    }
+    if (settlement.outcome === "write_failed") {
+      // Salvaged above; defer a pump that re-checks the socket is still open before releasing the next CALL.
+      queueMicrotask(() => {
+        if (this._webSocket.isConnected()) this.pumpSerialQueue();
+      });
+      return;
+    }
+    // queue_overflow cannot occur for a CALL (sendAction returns false on overflow -> the send-false path).
+  }
+
+  /** Take an expert CALL back out of the serial queue if it has not been
+   *  sent yet (#389): its caller has already been told "no answer". */
+  private withdrawQueued(messageId: string): boolean {
+    const index = this._serialQueue.findIndex(
+      (entry) => entry.id === messageId,
+    );
+    if (index === -1) return false;
+    this._serialQueue.splice(index, 1);
+    return true;
+  }
+
+  /** An answered CALL whose answer stops here (#389 expert call without
+   *  `applyResponse`): forget it and free the serialization slot. */
+  private forgetAnsweredCall(messageId: string): void {
+    this._requests.remove(messageId);
+    this.settleSerialInFlight(messageId);
+  }
+
+  /** Release the serialization slot when a response settles the in-flight
+   *  CALL. The caller is responsible for invoking this from
+   *  handleCallResult / handleCallError. */
+  private settleSerialInFlight(messageId: string): void {
+    const cur = this._serialInFlight;
+    if (!cur || cur.id !== messageId) return;
+    if (cur.phase === "written") clearTimeout(cur.timer);
+    this._serialInFlight = null;
+    this.pumpSerialQueue();
+  }
+
+  /** Per-CALL watchdog. §4.1.1 says implementations choose the timeout;
+   *  on expiry we proceed to the next CALL so a stuck CSMS doesn't deadlock
+   *  the queue forever. The dead CALL is dropped (transaction-related
+   *  ones are also tracked via the persistent PendingMessageQueue). This timer
+   *  only fires when the slot is in "written" phase (that is the only phase
+   *  with an armed timer). */
+  private handleSerialTimeout(messageId: string): void {
+    const cur = this._serialInFlight;
+    if (!cur || cur.id !== messageId) return;
+    this._logger.warn(
+      `CALL ${messageId} (${cur.action}) timed out after ${OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS}ms — releasing serialization slot`,
+      LogType.OCPP,
+    );
+    this._serialInFlight = null;
+    this.pumpSerialQueue();
+  }
+
+  /** Called by the ChargePoint after the WebSocket has closed (during teardown,
+   *  after the pipeline drain in Task 7 ordering). Cancels the in-flight timer,
+   *  salvages unsent queued CALLs, and clears the queue. The written-but-unanswered
+   *  in-flight CALL is not salvaged here (it keeps existing discard behavior);
+   *  it was already handled via onSerialSettled during the drain when the
+   *  settlement fired (socket_closed). */
+  public onWebSocketClosed(): void {
+    if (this._serialInFlight) {
+      if (this._serialInFlight.phase === "written") {
+        clearTimeout(this._serialInFlight.timer);
+      }
+      // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation).
+      this._serialInFlight = null;
+    }
+    // No answer can reach a waiter over a closed socket; say so now rather
+    // than at the timer.
+    this._dataTransferWaiters.rejectAll(
+      (id) => new Error(`DataTransfer ${id} dropped (socket_closed)`),
+    );
+    this._expertCalls.onClosed();
+    // Salvage every UNSENT queued CALL (they never reached the wire) in FIFO order.
+    for (const entry of this._serialQueue) {
+      this.salvageOrDiscard(entry, "socket_closed");
+    }
+    this._serialQueue = [];
+  }
+
+  /**
+   * Re-attempt delivery of every queued transaction-related message.
+   * Called from `ChargePoint.connect`'s onopen handler after a successful
+   * BootNotification round-trip. Respects `TransactionMessageAttempts`
+   * from Configuration; messages exceeding that count are dropped.
+   */
+  public flushPendingQueue(): void {
+    if (this._pendingQueue.size() === 0) return;
+    const maxAttempts =
+      this._chargePoint.configuration.transactionMessageAttempts();
+    // Route flushed messages through `sendRequest` so they take the same
+    // §4.1.1 serialization path as fresh CALLs. The PendingMessageQueue's
+    // `flush` callback returns true for every entry (we're handing
+    // delivery to the serializer); it'll re-enqueue on actual send
+    // failure via the path in `pumpSerialQueue` below.
+    const delivered = this._pendingQueue.flush((message) => {
+      const messageId = this.generateMessageId();
+      this.sendRequest(
+        message.action,
+        messageId,
+        message.payload as OcppMessageRequestPayload,
+        message.connectorId,
+      );
+      return true;
+    }, maxAttempts);
+    if (delivered > 0) {
+      this._logger.info(
+        `Flushed ${delivered} queued transaction message(s)`,
+        LogType.OCPP,
+      );
+    }
+  }
+
+  private handleIncomingMessage(
+    messageType: OCPPMessageType,
+    messageId: string,
+    action: OCPPAction,
+    payload: OcppMessagePayload,
+  ): void {
+    this._logger.info(
+      `Handling incoming message: ${messageType}, ${messageId}, ${action}`,
+      LogType.OCPP,
+    );
+    switch (messageType) {
+      case OCPPMessageType.CALL:
+        // Not awaited: each CALL starts at once, without waiting for the
+        // previous one's answer; handleCall awaits `handler.handle()`
+        // internally. An async handler (InstallCertificate and
+        // CertificateSigned hash via WebCrypto) can therefore be overtaken
+        // by a later CALL. Handlers that need the order keep it themselves:
+        // the certificate handlers run through CertificateStore, which
+        // completes its operations one at a time (#456).
+        void this.handleCall(
+          messageId,
+          action,
+          payload as OcppMessagePayloadCall,
+        );
+        break;
+      case OCPPMessageType.CALLRESULT:
+        this.handleCallResult(
+          messageId,
+          payload as OcppMessagePayloadCallResult,
+        );
+        break;
+      case OCPPMessageType.CALLERROR:
+        this.handleCallError(messageId, payload as OcppMessageErrorPayload);
+        break;
+      default:
+        this._logger.error(
+          `Unknown message type: ${messageType}`,
+          LogType.OCPP,
+        );
+    }
+  }
+
+  private async handleCall(
+    messageId: string,
+    action: OCPPAction,
+    payload: OcppMessagePayloadCall,
+  ): Promise<void> {
+    // Capture the generation at dispatch time (before the await) so a response
+    // produced by an async handler settles against its originating generation.
+    const gen = this._webSocket.currentGeneration();
+
+    // Issue #110: surface every incoming CSMS call to the scenario layer
+    // (csmsCallTrigger nodes), regardless of handler outcome. #396: the
+    // control plane announces it too, and every answer below reports
+    // itself through sendCallResult / sendCallError.
+    this._chargePoint.notifyIncomingCall(action, payload, messageId);
+
+    // Issue #247: inbound call policy — if set, enforce it before handler lookup.
+    // Unlike responseOverride (one-shot), policies are sticky and survive reconnects.
+    const inboundPolicy = this._chargePoint.getInboundCallPolicy(action);
+    if (inboundPolicy) {
+      if (inboundPolicy.kind === "callerror") {
+        this._logger.warn(
+          `Inbound policy: replied CallError(${inboundPolicy.errorCode}) to ${action}`,
+          LogType.OCPP,
+        );
+        this.sendCallError(
+          action,
+          messageId,
+          inboundPolicy.errorCode as OCPPErrorCode,
+          inboundPolicy.errorDescription,
+          gen,
+        );
+        return;
+      } else if (inboundPolicy.kind === "ignore") {
+        this._logger.warn(
+          `Inbound policy: ignored ${action} (no response)`,
+          LogType.OCPP,
+        );
+        this.ignoreCall(action, messageId);
+        return;
+      }
+    }
+
+    // Issue #110: a scenario responseOverride node may have armed a
+    // one-shot canned response for this action (e.g. RemoteStartTransaction
+    // → Rejected for TC_026). It replaces the handler entirely, so the legacy
+    // remoteStartReceived/remoteStopReceived delegation never fires — scenarios
+    // combining an override with a wait must use the generic csmsCallTrigger.
+    const overrideStatus = this._chargePoint.consumeResponseOverride(action);
+    if (overrideStatus !== null) {
+      this._logger.info(
+        `Response override: ${action} → { status: "${overrideStatus}" }`,
+        LogType.OCPP,
+      );
+      // Response overrides intentionally carry a caller-chosen status
+      // string (e.g. "Rejected" for TC_026); the closed response union
+      // can't express that, so assert the shape at this one call site.
+      this.sendCallResult(
+        action,
+        messageId,
+        {
+          status: overrideStatus,
+        } as OcppMessageResponsePayload,
+        gen,
+      );
+      return;
+    }
+
+    // Use registry to get handler
+    const handler = this._registry.getCallHandler(action);
+
+    if (!handler) {
+      this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
+      this.sendCallError(
+        action,
+        messageId,
+        OCPPErrorCodeV16.NotImplemented,
+        "This action is not supported",
+        gen,
+      );
+      return;
+    }
+
+    try {
+      const context: HandlerContext = {
+        chargePoint: this._chargePoint,
+        logger: this._logger,
+      };
+      // `handle()` may return its response synchronously or as a Promise
+      // (see `CallHandler` in MessageHandlerRegistry.ts) — `await` resolves
+      // a plain value immediately, so this is a no-op for sync handlers.
+      const rawResult = await handler.handle(payload, context);
+      const { payload: normalizedPayload, effect } = normalizeHandlerResult(
+        rawResult as HandlerResult,
+      );
+      const onSettled = effect
+        ? this._responseEffectQueue.register(gen, effect)
+        : undefined;
+      this.sendCallResult(
+        action,
+        messageId,
+        normalizedPayload as OcppMessageResponsePayload,
+        gen,
+        onSettled,
+      );
+    } catch (error) {
+      this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
+      this.sendCallError(
+        action,
+        messageId,
+        OCPPErrorCodeV16.InternalError,
+        String(error),
+        gen,
+      );
+    }
+  }
+
+  private handleCallResult(
+    messageId: string,
+    payload: OcppMessagePayloadCallResult,
+  ): void {
+    if (this._expertCalls.claimResult(messageId, payload)) {
+      this.forgetAnsweredCall(messageId);
+      return;
+    }
+    const request = this._requests.get(messageId);
+    if (!request) {
+      this._logger.warn(
+        `Received unexpected CallResult: ${messageId}`,
+        LogType.OCPP,
+      );
+      return;
+    }
+
+    const action = request.action;
+    let handler = this._registry.getCallResultHandler(action);
+
+    // For transaction-related handlers that need connector info, create them dynamically
+    if (!handler) {
+      if (action === OCPPAction.StartTransaction) {
+        handler = new StartTransactionResultHandler(
+          request.connectorId || 1,
+          (request.payload as StartTransactionRequestV16).idTag,
+        );
+      } else if (action === OCPPAction.StopTransaction) {
+        handler = new StopTransactionResultHandler(
+          request.connectorId || 1,
+          (request.payload as StopTransactionRequestV16).idTag,
+        );
+      } else if (action === OCPPAction.MeterValues) {
+        handler = new MeterValuesResultHandler(
+          (request.payload as MeterValuesRequestV16).connectorId,
+        );
+      } else if (action === OCPPAction.Authorize) {
+        handler = new AuthorizeResultHandler(
+          request.payload as AuthorizeRequestV16,
+        );
+      }
+    }
+
+    if (handler) {
+      try {
+        const context: HandlerContext = {
+          chargePoint: this._chargePoint,
+          logger: this._logger,
+        };
+        handler.handle(payload, context);
+      } catch (error) {
+        this._logger.error(
+          `Error handling ${action} result: ${error}`,
+          LogType.OCPP,
+        );
+      }
+    } else {
+      this._logger.warn(
+        `No handler for action result: ${action}`,
+        LogType.OCPP,
+      );
+    }
+
+    if (action === OCPPAction.DataTransfer) {
+      const answer = payload as DataTransferResponseV16;
+      this._dataTransferWaiters.resolve(messageId, {
+        status: answer.status,
+        ...(answer.data !== undefined ? { data: answer.data } : {}),
+      });
+    }
+
+    this._requests.remove(messageId);
+    // §4.1.1: response received — release the serialization slot so the
+    // next queued CALL can go out.
+    this.settleSerialInFlight(messageId);
+  }
+
+  private handleCallError(
+    messageId: string,
+    error: OcppMessageErrorPayload,
+  ): void {
+    const request = this._requests.get(messageId);
+    this._logger.error(
+      `Received CALLERROR for message ${messageId} (action=${request?.action ?? "unknown"}): ${JSON.stringify(error)}`,
+      LogType.OCPP,
+    );
+    if (this._expertCalls.claimError(messageId, error)) {
+      this.forgetAnsweredCall(messageId);
+      return;
+    }
+
+    // Recover connector state when StartTransaction fails
+    if (request?.action === OCPPAction.StartTransaction) {
+      const connectorId = request.connectorId ?? 1;
+      this._logger.info(
+        `Recovering connector ${connectorId} after StartTransaction CALLERROR`,
+        LogType.TRANSACTION,
+      );
+      this._chargePoint.cleanTransaction(connectorId);
+      this._chargePoint.notifyTransactionStartFailed(
+        connectorId,
+        error.errorCode,
+      );
+      this._chargePoint.updateConnectorStatus(
+        connectorId,
+        OCPPStatus.Available,
+      );
+    }
+
+    // Issue #181: a CALLERROR answering Authorize.req is a definite
+    // protocol failure, unlike the authorizeAndWait paths where the CSMS
+    // said nothing at all (#452: a disconnect applies the offline rules;
+    // a timeout refuses a tag known locally as NOT valid and otherwise
+    // proceeds as "Accepted"). Here the CSMS *did* respond, and what it
+    // said was "I couldn't process this" — so treat it as fail-CLOSED:
+    // synthesize a denial ("Invalid") rather than let authorizeAndWait
+    // burn its full timeout waiting for a CALLRESULT that will never
+    // arrive.
+    if (request?.action === OCPPAction.Authorize) {
+      const idTag = (request.payload as AuthorizeRequestV16).idTag;
+      this._chargePoint.notifyAuthorizeResult(idTag, "Invalid");
+    }
+
+    this._dataTransferWaiters.reject(
+      messageId,
+      new Error(
+        `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode}: ${error.errorDescription}`,
+      ),
+    );
+
+    this._requests.remove(messageId);
+    // §4.1.1: CALLERROR also settles the in-flight CALL.
+    this.settleSerialInFlight(messageId);
+  }
+
+  // All handler methods have been moved to individual handler classes
+  // See packages/core/src/cp/handlers/ directory
+
+  private sendCallResult(
+    action: string,
+    messageId: string,
+    payload: OcppMessageResponsePayload,
+    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
+    onSettled?: (s: Settlement) => void,
+  ): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "CallResult",
+    });
+    // Callers without a dispatch-captured generation (response overrides,
+    // unsupported-action errors) respond in the current generation.
+    this._webSocket.sendResult(
+      messageId,
+      payload,
+      gen ?? this._webSocket.currentGeneration(),
+      onSettled,
+    );
+  }
+
+  /** Leave an inbound CSMS CALL unanswered, announcing it (#396). */
+  private ignoreCall(action: string, messageId: string): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "NoResponse",
+    });
+  }
+
+  private sendCallError(
+    action: string,
+    messageId: string,
+    errorCode: OCPPErrorCode,
+    errorDescription: string,
+    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
+    onSettled?: (s: Settlement) => void,
+  ): void {
+    this._chargePoint.notifyIncomingCallCompleted({
+      action,
+      messageId,
+      outcome: "CallError",
+      errorCode,
+    });
+    const errorDetails = {
+      errorCode: errorCode,
+      errorDescription: errorDescription,
+    };
+    this._webSocket.sendError(
+      messageId,
+      errorDetails,
+      gen ?? this._webSocket.currentGeneration(),
+      onSettled,
+    );
+  }
+
+  private generateMessageId(): string {
+    return crypto.randomUUID();
+  }
+}

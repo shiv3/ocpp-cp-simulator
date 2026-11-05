@@ -3,7 +3,7 @@ title: State persistence
 type: concept
 summary: Both the daemon (`bun:sqlite` via `--state-db`) and the browser (sql.js + IndexedDB) back their state with the same SQLite schema — scenarios, configuration overrides, charging profiles, availability, pending messages, the authorization cache, CP registry, logs, saved vehicle profiles, charging sessions, installed certificates, variable monitors and the daemon's scenario run history survive restart / reload.
 sources:
-  - src/ (persistence layer, CPRegistry.restoreFromDatabase)
+  - packages/core/src/cp/domain/persistence/ (persistence layer, CPRegistry.restoreFromDatabase)
   - docker-compose.yml (`STATE_DB`)
 related:
   - ../entities/daemon.md
@@ -17,7 +17,7 @@ related:
   - local-authorization.md
   - security-profiles.md
   - variable-monitoring.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # State persistence
@@ -86,7 +86,7 @@ await rpc({ method: "state.reset", params: {} });
 `state.reset` truncates every simulator-owned table (schema preserved) and
 disconnects / forgets every in-memory CP. "Every" is enforced, not
 remembered (#326): the table set is one list, `TABLES` in
-`src/cp/domain/persistence/schema.ts`, with a flag per table for the two
+`packages/core/src/cp/domain/persistence/schema.ts`, with a flag per table for the two
 cleanup paths — `state.reset` truncates every table flagged for it (all but
 `schema_meta`), and `cp.delete` removes the charge point's rows from every
 `cp_id`-keyed table (`charge_points`, `charge_point_state`, `connector_runtime`,

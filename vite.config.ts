@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react-swc";
 
 // Surface the package version to the app (footer link, issue #93). Stays
 // "0.0.0" in dev and is stamped by the release tooling; unstamped, the label
-// falls back to the commit, then to "local-dev" (src/protocol/buildVersion.ts).
+// falls back to the commit, then to "local-dev" (packages/contracts/src/buildVersion.ts).
 const pkgVersion = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 ).version as string;
@@ -44,7 +44,7 @@ export default defineConfig({
     environment: "node",
     // vitest 4 removed environmentMatchGlobs; the dom tests select jsdom via a
     // `// @vitest-environment jsdom` docblock instead.
-    setupFiles: ["src/test/setup.dom.ts"],
+    setupFiles: ["apps/web/src/test/setup.dom.ts"],
     // In CI, also emit a JUnit report next to coverage so it can be uploaded
     // to Codecov (test analytics / flaky-test surfacing, issue #131). Local
     // runs keep the plain default reporter.
@@ -62,7 +62,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(__dirname, "./apps/web/src"),
     },
     // Force a single React instance across every chunk. The Scenario Editor is
     // a lazy chunk built around @xyflow/react, which leans heavily on React

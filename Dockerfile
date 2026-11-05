@@ -40,14 +40,28 @@ ARG HEALTH_PATH=/v1/healthz
 ARG APP_COMMIT=""
 
 
-# ----- Stage 1: build the browser UI (Vite -> dist/) -----------------
-FROM oven/bun:${BUN_VERSION}-alpine AS ui
+# ----- Stage 1: build the browser UI and the CLI bundle ---------------
+# One stage builds both artifacts the runtime image ships:
+#   dist/            the web console (Vite)
+#   dist-cli/main.js the CLI + daemon as one `bun build` bundle (#578)
+FROM oven/bun:${BUN_VERSION}-alpine AS build
 ARG HEALTH_PATH
 WORKDIR /app
 
 # Need every dep (including devDependencies: vite, plugins, tailwind).
-# --ignore-scripts skips husky/postinstall hooks.
-COPY package.json bun.lock ./
+# --ignore-scripts skips husky/postinstall hooks. bunfig.toml pins the hoisted
+# linker, and `bun install --frozen-lockfile` needs every workspace member's
+# package.json to match bun.lock, so the manifests come first and the install
+# layer stays cached until one of them (or the lockfile) changes.
+COPY package.json bun.lock bunfig.toml ./
+COPY packages/ocpp/package.json ./packages/ocpp/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/trace/package.json ./packages/trace/package.json
+COPY packages/k6-runtime/package.json ./packages/k6-runtime/package.json
+COPY packages/core/package.json ./packages/core/package.json
+COPY packages/client/package.json ./packages/client/package.json
+COPY apps/cli/package.json ./apps/cli/package.json
+COPY apps/web/package.json ./apps/web/package.json
 # `bun install` reaches the network for every package, and a transient
 # tarball-extraction failure there fails the whole build:
 #
@@ -68,109 +82,56 @@ RUN for attempt in 1 2 3; do \
       sleep $((attempt * 5)); \
     done
 
-# Source for the UI build: index.html + src/ + Vite/Tailwind/TS configs.
+# Source for both builds: index.html + the Vite/Tailwind/TS configs, then the
+# workspace. The root tsconfig.json references every package's tsconfig and
+# scripts/bench/tsconfig.json (#302, composite projects); Vite's rolldown
+# resolves each reference at build time, so the files must be present or
+# `bun run build` fails with "Tsconfig not found" — which is how the v0.7.11
+# image never built. Only that tsconfig is needed from scripts/, not the bench
+# code. Everything a package imports (the vendored OCA schemas under
+# packages/ocpp/vendor, the scenario schema under packages/core/schema) lives
+# inside its package, so copying the two directories is the whole list; the
+# hand-maintained per-directory COPY lines of the source-based image are gone.
 COPY index.html ./
-COPY vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.cli.json ./
-# tsconfig.json references scripts/bench/tsconfig.json (#302, composite
-# project). Vite's rolldown resolves every project reference at build time,
-# so the file must be present or `bun run build` fails with
-# "Tsconfig not found /app/scripts/bench/tsconfig.json" — which is how the
-# v0.7.11 image never built. Only the tsconfig is needed, not the bench code.
+COPY vite.config.ts tsconfig.json tsconfig.base.json tsconfig.node.json ./
 COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 # Same for scripts/tsconfig.json (#578, the package-boundary checker's
 # project): referenced from the root tsconfig.json, so it must be present.
 COPY scripts/tsconfig.json ./scripts/tsconfig.json
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
-COPY src ./src
-# src/ocpp/v{16,201,21}/schemas.ts import the vendored OCA JSON schemas
-# (../../../vendor/ocpp-schemas/**). Vite resolves these JSON imports at
-# build time, so the vendor tree must be present or `bun run build` fails
-# with "Could not resolve ../../../vendor/ocpp-schemas/...".
-COPY vendor ./vendor
-# src/scenario/scenarioSchemaValidator.ts imports the scenario JSON Schema
-# (../../schema/scenario.schema.json, #214) and reaches the browser bundle via
-# src/utils/scenarioFile.ts -> ScenarioLibraryPage. Vite resolves that JSON
-# import at build time, so schema/ must be present or `bun run build` fails
-# with "[UNRESOLVED_IMPORT] Could not resolve ../../schema/scenario.schema.json".
-COPY schema ./schema
+COPY packages ./packages
+COPY apps ./apps
 
-# VITE_HEALTH_PATH is read by src/data/healthPath.ts at build time and
+# VITE_HEALTH_PATH is read by apps/web/src/data/healthPath.ts at build time and
 # inlined into the bundle so the static UI knows which path to probe for
 # Remote-mode auto-detect (and for the Navbar's health poll).
 ENV VITE_HEALTH_PATH=$HEALTH_PATH
 # Declared after the install layers so a new commit only rebuilds from here.
-# vite.config.ts reads APP_COMMIT into the bundle's build label.
+# vite.config.ts reads APP_COMMIT into the bundle's build label; the CLI
+# bundle inlines package.json's version the same way and reads APP_COMMIT at
+# run time (see the runtime stage).
 ARG APP_COMMIT
 ENV APP_COMMIT=$APP_COMMIT
-RUN bun run build
+RUN bun run build && bun run build:cli
 
 
-# ----- Stage 2: production deps only, for the runtime image ----------
-FROM oven/bun:${BUN_VERSION}-alpine AS deps
-WORKDIR /app
-COPY package.json bun.lock ./
-# Same retry as the ui stage, and for the same reason (#281).
-RUN for attempt in 1 2 3; do \
-      bun install --frozen-lockfile --production --ignore-scripts && break; \
-      [ "$attempt" = 3 ] && { echo "bun install failed 3 times; giving up"; exit 1; }; \
-      echo "bun install failed (attempt $attempt/3); retrying"; \
-      rm -rf /root/.bun/install/cache node_modules; \
-      sleep $((attempt * 5)); \
-    done
-
-
-# ----- Stage 3: the runtime image -------------------------------------
+# ----- Stage 2: the runtime image -------------------------------------
+# The CLI is one bundle with every dependency inlined, so the image carries
+# no node_modules, no package.json and no sources: dist-cli/main.js, dist/
+# and the scenario examples. (apps/cli/src/build/__tests__/cliBundle.bun.test.ts
+# runs the bundle with nothing else around it, charge point included.)
 FROM oven/bun:${BUN_VERSION}-alpine AS runtime
 WORKDIR /app
 
-# Production node_modules (no React tooling, no Tauri, etc.).
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json bun.lock ./
-
-# Only the files the CLI / daemon needs at runtime.
-COPY src/cli ./src/cli
-COPY src/cp ./src/cp
-# src/ocpp holds the self-generated OCPP types/validators. src/cp's transport
-# layer statically imports them on the daemon boot path
-# (ChargePoint -> profile/profiles -> OCPPMessageHandlerV201 ->
-# v201/inboundRegistryV201 -> ocpp/validation/v201), so without it the daemon
-# crashes when a charge point is created with a "Cannot find module
-# ../../../../ocpp/validation/v201" resolution error.
-COPY src/ocpp ./src/ocpp
-# The validators above import the vendored OCA JSON schemas
-# (src/ocpp/v{16,201,21}/schemas.ts -> ../../../vendor/ocpp-schemas/**); bun
-# resolves those JSON imports at runtime, so the vendor tree must ship too.
-COPY vendor ./vendor
-# src/protocol holds the socket.io control-plane zod schemas imported by the
-# daemon (src/cli/server/*). Without it the daemon crashes on boot with a
-# "Cannot find package '../../protocol'" resolution error.
-COPY src/protocol ./src/protocol
-COPY src/data ./src/data
-# scenarioTemplates.ts statically imports built-in templates from
-# src/utils/scenarios/*.json (extracted in PR #54). Copying the whole utils/
-# subtree keeps those imports resolvable at runtime — copying only
-# scenarioTemplates.ts left the daemon crashing on boot with
-# "Cannot find module './scenarios/essential-cp-behavior.json'".
-COPY src/utils ./src/utils
-# src/cli/server/{socketServer,startServer,RegistryChargePointService}.ts all
-# statically import ../../scenario/scenarioSchemaValidator (#214), which in turn
-# imports ../../schema/scenario.schema.json. Both must ship or the daemon
-# crashes on boot with "Cannot find module '../../scenario/
-# scenarioSchemaValidator'" — the same class of miss as src/protocol and
-# src/utils above. package.json's `files` already lists them for the npm
-# package; this keeps the image in step.
-COPY src/scenario ./src/scenario
-COPY schema ./schema
-# src/cli/analyze/runAnalyze.ts imports ../../trace/analysisDisclaimer (#188),
-# so the `analyze` subcommand's module graph is pulled in on CLI startup.
-COPY src/trace ./src/trace
+COPY --from=build /app/dist-cli ./dist-cli
 
 # Built-in scenario examples — kept handy under /app/docs.
 COPY docs/examples/scenarios ./docs/examples/scenarios
 
-# The browser UI produced in stage 1.
-COPY --from=ui /app/dist ./dist
+# The browser UI produced in stage 1. main.ts finds it at ../dist from the
+# bundle (<pkg>/dist-cli -> <pkg>/dist).
+COPY --from=build /app/dist ./dist
 
 # Persistent state lands at /data when the operator passes
 # `--state-db /data/state.db` (the entrypoint wires this from $STATE_DB).
@@ -215,7 +176,7 @@ ARG HEALTH_PATH
 ENV HEALTH_PATH=$HEALTH_PATH
 # The daemon runs from source with no .git, so the commit must reach it as a
 # runtime env too — otherwise the UI says `<sha7>-dev` next to a daemon that
-# says `local-dev` (src/cli/appVersion.ts).
+# says `local-dev` (apps/cli/src/appVersion.ts).
 ARG APP_COMMIT
 ENV APP_COMMIT=$APP_COMMIT
 EXPOSE 9700
@@ -224,7 +185,7 @@ EXPOSE 9700
 #   1. Fix up /data ownership when a host bind-mount overlayed root:root.
 #   2. Compose --http-host 0.0.0.0 --unix-socket none --web-console
 #      $HTTP_PORT [--state-db $STATE_DB] and append any user CMD args.
-#   3. Exec bun src/cli/main.ts as the non-root `bun` user.
+#   3. Exec bun dist-cli/main.js as the non-root `bun` user.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp

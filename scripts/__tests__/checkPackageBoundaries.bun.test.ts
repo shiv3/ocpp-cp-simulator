@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 
 import {
   DEFAULT_CONFIG,
+  PACKAGE_DIRS,
   PACKAGE_MAP,
+  PACKAGE_NAMES,
   REPO_ROOT,
   checkBoundaries,
   extractImports,
@@ -10,7 +12,10 @@ import {
   loadConfig,
   loadSnapshot,
   readAliases,
+  resolveExport,
+  resolveSpecifier,
   validatePackageMap,
+  type PackageManifest,
   type Snapshot,
 } from "../check-package-boundaries";
 
@@ -36,7 +41,14 @@ describe("package boundaries of the real tree (#578)", () => {
       unmapped: report.unmapped,
       unresolved: report.unresolved,
       stale: report.staleAllowances,
-    }).toEqual({ violations: [], unmapped: [], unresolved: [], stale: [] });
+      manifests: report.manifestProblems,
+    }).toEqual({
+      violations: [],
+      unmapped: [],
+      unresolved: [],
+      stale: [],
+      manifests: [],
+    });
     expect(hasFailures(report)).toBe(false);
   });
 
@@ -46,8 +58,19 @@ describe("package boundaries of the real tree (#578)", () => {
       expect(n).toBeGreaterThan(0);
   });
 
-  it("reads the @/ alias from tsconfig.app.json", () => {
-    expect(loadConfig(REPO_ROOT).aliases).toEqual({ "@/": "src/" });
+  it("reads the @/ alias from apps/web/tsconfig.json", () => {
+    expect(loadConfig(REPO_ROOT).aliases).toEqual({ "@/": "apps/web/src/" });
+  });
+
+  it("has one map entry per workspace directory, and the manifests agree", () => {
+    expect(PACKAGE_MAP.map((e) => e.match)).toEqual(
+      PACKAGE_NAMES.map((p) => `${PACKAGE_DIRS[p]}/`),
+    );
+    const snap = loadSnapshot(REPO_ROOT);
+    expect([...snap.manifests!.keys()].sort()).toEqual(
+      [...PACKAGE_NAMES].sort(),
+    );
+    expect(snap.manifests!.get("core")!.name).toBe("@ocpp-cp-sim/core");
   });
 });
 
@@ -55,13 +78,17 @@ describe("package boundaries on synthetic input", () => {
   it("catches a forbidden edge", () => {
     const r = checkBoundaries(
       snapshot({
-        "src/protocol/a.ts":
-          'import { x } from "../cp/b";\nexport const y = x;',
-        "src/cp/b.ts": "export const x = 1;",
+        "packages/contracts/src/a.ts":
+          'import { x } from "@ocpp-cp-sim/core/cp/b";\nexport const y = x;',
+        "packages/core/src/cp/b.ts": "export const x = 1;",
       }),
     );
     expect(r.violations.map((v) => [v.group, v.file, v.target])).toEqual([
-      ["contracts → core", "src/protocol/a.ts", "src/cp/b.ts"],
+      [
+        "contracts → core",
+        "packages/contracts/src/a.ts",
+        "packages/core/src/cp/b.ts",
+      ],
     ]);
     expect(hasFailures(r)).toBe(true);
   });
@@ -69,14 +96,14 @@ describe("package boundaries on synthetic input", () => {
   it("catches a type-only forbidden edge, in every spelling", () => {
     const r = checkBoundaries(
       snapshot({
-        "src/data/interfaces/a.ts": [
-          'import type { A } from "../../store/s";',
-          'import { type B } from "../../store/s";',
-          'export type { C } from "../../store/s";',
-          'export type D = import("../../store/s").D;',
-          'export const e = () => import("../../store/s");',
+        "packages/client/src/interfaces/a.ts": [
+          'import type { A } from "../../../../apps/web/src/store/s";',
+          'import { type B } from "../../../../apps/web/src/store/s";',
+          'export type { C } from "../../../../apps/web/src/store/s";',
+          'export type D = import("../../../../apps/web/src/store/s").D;',
+          'export const e = () => import("../../../../apps/web/src/store/s");',
         ].join("\n"),
-        "src/store/s.ts": "export type A = 1, B = 1, C = 1, D = 1;",
+        "apps/web/src/store/s.ts": "export type A = 1, B = 1, C = 1, D = 1;",
       }),
     );
     expect(r.violations.map((v) => v.typeOnly)).toEqual([
@@ -94,16 +121,17 @@ describe("package boundaries on synthetic input", () => {
   it("resolves the @/ alias and new URL(..., import.meta.url)", () => {
     const r = checkBoundaries(
       snapshot({
-        "src/trace/a.ts": [
+        "packages/trace/src/a.ts": [
           'import { x } from "@/cp/b";',
-          'export const u = new URL("../cp/b.ts", import.meta.url);',
+          'export const u = new URL("../../core/src/cp/b.ts", import.meta.url);',
         ].join("\n"),
-        "src/cp/b.ts": "export const x = 1;",
+        "apps/web/src/cp/b.ts": "export const x = 1;",
+        "packages/core/src/cp/b.ts": "export const x = 1;",
       }),
     );
     expect(r.violations).toHaveLength(2);
     expect(r.violations.map((v) => v.group)).toEqual([
-      "trace → core",
+      "trace → apps/web",
       "trace → core",
     ]);
   });
@@ -111,19 +139,22 @@ describe("package boundaries on synthetic input", () => {
   it("catches a forbidden specifier in a portable package, not in a test or an app", () => {
     const r = checkBoundaries(
       snapshot({
-        "src/cp/a.ts":
+        "packages/core/src/cp/a.ts":
           'import { useState } from "react";\nimport fs from "node:fs";',
-        "src/cp/a.test.ts": 'import fs from "node:fs";',
-        "src/cli/a.ts": 'import fs from "node:fs";',
-        "src/components/a.tsx": 'import { useState } from "react";',
-        "src/cp/types.ts": 'import type { Node } from "@xyflow/react";',
+        "packages/core/src/cp/a.test.ts": 'import fs from "node:fs";',
+        "apps/cli/src/a.ts": 'import fs from "node:fs";',
+        "apps/web/src/components/a.tsx": 'import { useState } from "react";',
+        "packages/core/src/cp/types.ts":
+          'import type { Node } from "@xyflow/react";',
       }),
     );
     expect(r.violations.map((v) => [v.group, v.file])).toEqual([
-      ["core ⊅ react", "src/cp/a.ts"],
-      ["core ⊅ node", "src/cp/a.ts"],
+      ["core ⊅ react", "packages/core/src/cp/a.ts"],
+      ["core ⊅ node", "packages/core/src/cp/a.ts"],
     ]);
-    expect(r.typeOnlyForbidden.map((t) => t.file)).toEqual(["src/cp/types.ts"]);
+    expect(r.typeOnlyForbidden.map((t) => t.file)).toEqual([
+      "packages/core/src/cp/types.ts",
+    ]);
   });
 
   it("honours the specifier allow-list and flags stale entries", () => {
@@ -131,16 +162,21 @@ describe("package boundaries on synthetic input", () => {
       ...DEFAULT_CONFIG,
       testAllowList: [],
       specifierAllowList: {
-        "src/cp/a.ts": { specifiers: ["bun:sqlite", "bun:ffi"], why: "test" },
+        "packages/core/src/cp/a.ts": {
+          specifiers: ["bun:sqlite", "bun:ffi"],
+          why: "test",
+        },
       },
     };
     const r = checkBoundaries(
-      snapshot({ "src/cp/a.ts": 'import { Database } from "bun:sqlite";' }),
+      snapshot({
+        "packages/core/src/cp/a.ts": 'import { Database } from "bun:sqlite";',
+      }),
       config,
     );
     expect(r.violations).toEqual([]);
     expect(r.staleAllowances).toEqual([
-      'SPECIFIER_ALLOW_LIST src/cp/a.ts "bun:ffi"',
+      'SPECIFIER_ALLOW_LIST packages/core/src/cp/a.ts "bun:ffi"',
     ]);
   });
 
@@ -150,18 +186,18 @@ describe("package boundaries on synthetic input", () => {
     );
     expect(r.unmapped).toEqual(["src/newdir/a.ts"]);
     const r2 = checkBoundaries(
-      snapshot({ "src/cp/a.ts": 'import "./missing";' }),
+      snapshot({ "packages/core/src/cp/a.ts": 'import "./missing";' }),
     );
     expect(r2.unresolved).toEqual([
-      { file: "src/cp/a.ts", specifier: "./missing" },
+      { file: "packages/core/src/cp/a.ts", specifier: "./missing" },
     ]);
   });
 
   it("rejects a map whose broad entry shadows a specific one", () => {
     expect(() =>
       validatePackageMap([
-        { match: "src/cli/", pkg: "apps/cli" },
-        { match: "src/cli/exportK6/runtime/", pkg: "k6-runtime" },
+        { match: "apps/", pkg: "apps/cli" },
+        { match: "apps/web/", pkg: "apps/web" },
       ]),
     ).toThrow(/shadowed/);
     expect(() => validatePackageMap(PACKAGE_MAP)).not.toThrow();
@@ -197,7 +233,185 @@ describe("extractImports", () => {
     expect(
       readAliases(
         '{ /* c */ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }',
+        "apps/web",
       ),
-    ).toEqual({ "@/": "src/" });
+    ).toEqual({ "@/": "apps/web/src/" });
+  });
+});
+
+describe("workspace package specifiers", () => {
+  const files = new Set([
+    "packages/core/src/cp/b.ts",
+    "packages/core/src/cp/index.ts",
+    "packages/core/src/utils/scenarios/x.json",
+    "packages/core/schema/scenario.schema.json",
+  ]);
+  const coreExports = {
+    "./*": "./src/*.ts",
+    "./utils/scenarios/x.json": "./src/utils/scenarios/x.json",
+    "./schema/scenario.schema.json": "./schema/scenario.schema.json",
+  };
+
+  it("maps a subpath through exports: exact keys beat the pattern", () => {
+    expect(resolveExport(coreExports, "./cp/b")).toBe("./src/cp/b.ts");
+    expect(resolveExport(coreExports, "./utils/scenarios/x.json")).toBe(
+      "./src/utils/scenarios/x.json",
+    );
+    expect(
+      resolveExport({ "./a/*": "./x/*.ts", "./*": "./y/*.ts" }, "./a/b"),
+    ).toBe("./x/b.ts");
+    expect(resolveExport({ "./a": "./a.ts" }, "./b")).toBeNull();
+  });
+
+  it("resolves @ocpp-cp-sim/<pkg>/<path> to a file, or reports it unresolved", () => {
+    const manifests = new Map<string, PackageManifest>([
+      ["@ocpp-cp-sim/core", { dir: "packages/core", exports: coreExports }],
+    ]);
+    const at = (spec: string) =>
+      resolveSpecifier("apps/cli/src/a.ts", spec, files, {}, manifests);
+    expect(at("@ocpp-cp-sim/core/cp/b")).toEqual({
+      path: "packages/core/src/cp/b.ts",
+      viaPackage: true,
+    });
+    expect(at("@ocpp-cp-sim/core/schema/scenario.schema.json")).toEqual({
+      path: "packages/core/schema/scenario.schema.json",
+      viaPackage: true,
+    });
+    // a directory import has to say /index: the pattern is a file pattern
+    expect(at("@ocpp-cp-sim/core/cp")).toEqual({
+      unresolved: "@ocpp-cp-sim/core/cp",
+    });
+    expect(at("@ocpp-cp-sim/core/cp/index")).toEqual({
+      path: "packages/core/src/cp/index.ts",
+      viaPackage: true,
+    });
+    expect(at("@ocpp-cp-sim/core/cp/missing")).toEqual({
+      unresolved: "@ocpp-cp-sim/core/cp/missing",
+    });
+    expect(at("@ocpp-cp-sim/nope/x")).toEqual({
+      unresolved: "@ocpp-cp-sim/nope/x",
+    });
+    expect(at("zod")).toBeNull();
+  });
+
+  it("an allowed edge must use the package specifier, not a path", () => {
+    const r = checkBoundaries(
+      snapshot({
+        "apps/cli/src/a.ts":
+          'import { x } from "../../../packages/core/src/cp/b";',
+        "apps/cli/src/c.ts": 'import { x } from "@ocpp-cp-sim/core/cp/b";',
+        "packages/core/src/cp/b.ts": "export const x = 1;",
+      }),
+    );
+    expect(r.violations.map((v) => [v.type, v.group, v.file])).toEqual([
+      ["relative", "apps/cli → core (by path)", "apps/cli/src/a.ts"],
+    ]);
+  });
+});
+
+describe("package manifests", () => {
+  const manifest = (
+    pkg: string,
+    extra: Partial<PackageManifest> = {},
+  ): PackageManifest => ({
+    dir: pkg,
+    name: `@ocpp-cp-sim/${pkg.split("/")[1]}`,
+    private: true,
+    exports: pkg.startsWith("packages/") ? { "./*": "./src/*.ts" } : undefined,
+    ...extra,
+  });
+  const all = (overrides: Record<string, Partial<PackageManifest>> = {}) =>
+    new Map(
+      PACKAGE_NAMES.map((p) => [
+        p,
+        manifest(PACKAGE_DIRS[p], overrides[p] ?? {}),
+      ]),
+    );
+  const sources = {
+    "apps/cli/src/a.ts": 'import { x } from "@ocpp-cp-sim/core/cp/b";',
+    "packages/core/src/cp/b.ts": "export const x = 1;",
+  };
+  const run = (manifests: ReturnType<typeof all>, rootManifestText = "{}") =>
+    checkBoundaries({ ...snapshot(sources), manifests, rootManifestText })
+      .manifestProblems;
+
+  it("accepts manifests that declare exactly what is imported", () => {
+    expect(
+      run(
+        all({
+          "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "workspace:*" } },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports a missing, an unused and a wrongly ranged dependency", () => {
+    expect(run(all())).toEqual([
+      'apps/cli/package.json: 1 import(s) of @ocpp-cp-sim/core but it is not in "dependencies"',
+    ]);
+    expect(
+      run(
+        all({
+          "apps/cli": {
+            dependencies: {
+              "@ocpp-cp-sim/core": "workspace:*",
+              "@ocpp-cp-sim/trace": "workspace:*",
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      "apps/cli/package.json: declares @ocpp-cp-sim/trace but nothing imports it",
+    ]);
+    expect(
+      run(
+        all({
+          "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "^1.0.0" } },
+        }),
+      ),
+    ).toEqual([
+      'apps/cli/package.json: @ocpp-cp-sim/core must be "workspace:*", not "^1.0.0"',
+    ]);
+  });
+
+  it("reports a wrong name, a public package, a missing exports map and a missing manifest", () => {
+    const m = all({
+      "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "workspace:*" } },
+      trace: { name: "trace", private: false, exports: undefined },
+    });
+    m.delete("ocpp");
+    expect(run(m)).toEqual([
+      "packages/ocpp/package.json is missing",
+      'packages/trace/package.json: name is "trace", expected "@ocpp-cp-sim/trace"',
+      'packages/trace/package.json: "private" must be true',
+      'packages/trace/package.json: a package needs an "exports" map',
+    ]);
+  });
+
+  it("an edge that is itself a violation does not count as a dependency", () => {
+    const r = checkBoundaries({
+      ...snapshot({
+        "packages/contracts/src/a.ts":
+          'import { x } from "@ocpp-cp-sim/core/cp/b";',
+        "packages/core/src/cp/b.ts": "export const x = 1;",
+      }),
+      manifests: all(),
+      rootManifestText: "{}",
+    });
+    expect(r.violations).toHaveLength(1);
+    expect(r.manifestProblems).toEqual([]);
+  });
+
+  it("the published root package must not depend on a workspace package", () => {
+    expect(
+      run(
+        all({
+          "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "workspace:*" } },
+        }),
+        '{ "dependencies": { "@ocpp-cp-sim/core": "workspace:*" } }',
+      ),
+    ).toEqual([
+      'package.json: the published root package must not use any "workspace:" dependency',
+    ]);
   });
 });

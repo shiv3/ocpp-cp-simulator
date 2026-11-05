@@ -8,7 +8,7 @@ import {
   SUPPORTED_OCPP_VERSIONS,
   isSoapVersion,
   type OcppVersion,
-} from "../../src/cp/domain/types/OcppVersion.ts";
+} from "../../packages/core/src/cp/domain/types/OcppVersion.ts";
 
 /** Fleet sizes above this are almost certainly a typo, not a plan — the
  *  daemon enforces no hard cap on registered charge points, but this script
@@ -28,7 +28,7 @@ export const MAX_INTERVAL_SEC = 3600;
 export const MIN_SETTLE_TIMEOUT_SEC = 1;
 export const MAX_SETTLE_TIMEOUT_SEC = 600;
 /** Bytes/characters, matching the caps `STR_64K`/`STR_1K`-shaped fields use
- *  elsewhere in the control plane (`src/protocol/limits.ts`) — a URL is
+ *  elsewhere in the control plane (`packages/contracts/src/limits.ts`) — a URL is
  *  identifier-shaped, not a payload, so 2048 is generous. */
 export const MAX_URL_LENGTH = 2048;
 
@@ -109,7 +109,7 @@ export function benchIdPattern(runId: string): string {
 /** Expand {@link benchIdPattern} for one index.
  *
  *  A deliberate local copy of what `expandIdPattern` in
- *  `src/protocol/methods.ts` does for this one pattern: importing that module
+ *  `packages/contracts/src/methods.ts` does for this one pattern: importing that module
  *  would pull zod and the whole protocol graph into a bench project whose
  *  point is to be dependency-free. The authority is still the daemon, so
  *  `growFleet` compares every answered batch's real ids against the predicted
@@ -332,7 +332,7 @@ export function staggerOffsetsMs(
 
 /**
  * How long `ChargePoint.authorizeAndWait` may take, in seconds — its
- * `timeoutMs` default in `src/cp/domain/charge-point/ChargePoint.ts`.
+ * `timeoutMs` default in `packages/core/src/cp/domain/charge-point/ChargePoint.ts`.
  *
  * It **never rejects**: on timeout or disconnect it warns and resolves as
  * `"Accepted"`. So a local start is always definitively resolved within this
@@ -491,7 +491,7 @@ export interface StartDisposition {
  * `Connector.startConfiguredMeterValue` needs `autoConfig.enabled` or an
  * increment fallback, `cp.create` accepts no field that sets either, and the
  * daemon constructs every charge point with `autoMeterValueSetting = null`
- * (`src/cli/service.ts`). The exception is the moment the late conf lands:
+ * (`apps/cli/src/service.ts`). The exception is the moment the late conf lands:
  * `StartTransactionResultHandler` drives the connector to `Charging`, which
  * emits one `StatusNotification`. One frame per retired charge point, against
  * the whole transaction cycle it no longer runs. Teardown's closing sweep
@@ -1278,9 +1278,9 @@ export function assertDaemonEmpty(
 
 /** The most charge points an `events.subscribe` ack can carry.
  *
- *  `subscribeResultSchema` (`src/protocol/envelope.ts`) puts `snapshot.cps`
- *  through `ARRAY_1000` (`src/protocol/limits.ts`), and
- *  `captureSubscribeSnapshot` (`src/cli/server/socketServer.ts`) fills that
+ *  `subscribeResultSchema` (`packages/contracts/src/envelope.ts`) puts `snapshot.cps`
+ *  through `ARRAY_1000` (`packages/contracts/src/limits.ts`), and
+ *  `captureSubscribeSnapshot` (`apps/cli/src/server/socketServer.ts`) fills that
  *  snapshot with the daemon's whole registry **regardless of the requested
  *  scope** — the client uses it unconditionally to refresh its cache. So there
  *  is no narrower subscription the bench could ask for instead: over 1000
@@ -1392,7 +1392,7 @@ export function diffHistogram(
 
 /** Merge per-action deltas into one series (all actions share the same
  *  fixed bucket edges — `CALL_DURATION_BUCKETS_SECONDS` in
- *  `src/cli/server/metrics/MetricsRecorder.ts` — so summing counts per `le`
+ *  `apps/cli/src/server/metrics/MetricsRecorder.ts` — so summing counts per `le`
  *  across actions is a valid histogram merge). */
 export function mergeHistogramDeltas(
   deltas: ReadonlyMap<string, HistogramSeriesDelta>,
@@ -1466,7 +1466,7 @@ export function sleep(ms: number): Promise<void> {
 /** Simple token bucket: `ratePerSec` tokens/second, refilled continuously,
  *  capped at `ratePerSec` (no burst beyond one second's worth). Used to keep
  *  this script's own control-plane RPC traffic under the daemon's per-socket
- *  `RPC_RATE_PER_SEC` (`src/protocol/limits.ts`), which bounds how fast the
+ *  `RPC_RATE_PER_SEC` (`packages/contracts/src/limits.ts`), which bounds how fast the
  *  bench can arm CPs, not the OCPP traffic being measured. */
 export class TokenBucket {
   private tokens: number;
@@ -2250,7 +2250,7 @@ const BARE_RPC_CODES = new Set([
  * An extra sentence for a `cp.create_many` failure whose reason is a bare
  * error code.
  *
- * `createFailureReason` in `src/cli/server/socketServer.ts` answers
+ * `createFailureReason` in `apps/cli/src/server/socketServer.ts` answers
  * `err.message || err.code`, and the already-exists collision carries no
  * message — so the operator sees `invalid_params` and nothing else. That code
  * covers several unrelated causes, and after a run that also printed "this run

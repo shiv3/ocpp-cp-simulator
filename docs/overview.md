@@ -1,7 +1,7 @@
 ---
 title: Overview
 type: overview
-summary: Master summary of the OCPP CP Simulator — what it is, how the pieces fit together, the source-package boundaries, and where to read next.
+summary: Master summary of the OCPP CP Simulator — what it is, how the pieces fit together, the workspace packages and their boundaries, and where to read next.
 sources:
   - scripts/check-package-boundaries.ts
   - "issue #578"
@@ -13,7 +13,7 @@ updated: 2026-11-05
 **What it is.** A charge-point (CP) simulator for OCPP — primarily 1.6J, also
 2.0.1 / 2.1 over WebSocket and 1.2 / 1.5 / 1.6S over SOAP — built for
 **AI-agent testing, CI automation and CSMS development**. One TypeScript core
-(the `ChargePoint` domain under `src/cp/`) is exposed through several
+(the `ChargePoint` domain under `packages/core/src/cp/`) is exposed through several
 interfaces: a browser console, a desktop app, a headless CLI, a multi-CP
 daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
 
@@ -49,7 +49,7 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
   `POST /mcp`, exposing the same daemon methods as tools
   ([MCP endpoint](entities/mcp-endpoint.md)); it has no event push.
 - **Scenarios** — scripted CP behavior is a node-graph JSON
-  ([Scenario format](concepts/scenario-format.md), JSON Schema in `schema/`),
+  ([Scenario format](concepts/scenario-format.md), JSON Schema in `packages/core/schema/`),
   authored in the editor or loaded from files / [built-in templates](entities/scenario-templates.md)
   (including 47 OCPP 1.6 certification test cases). Runs produce a
   machine-readable verdict with conformance and compatibility axes.
@@ -79,33 +79,51 @@ daemon with a Socket.IO control plane and an MCP endpoint, and a Docker image.
 
 ## Source layout and package boundaries
 
-Everything lives under `src/` today, but the repository is planned to become a
-Bun workspace ([#578](https://github.com/shiv3/ocpp-cp-simulator/issues/578)),
-moved in one pull request that only renames files and import specifiers. To
-keep that move mechanical, the tree already obeys the dependency rules of the
-packages it will be split into, and CI enforces them (`bun run check:boundaries`).
-[`scripts/check-package-boundaries.ts`](../scripts/check-package-boundaries.ts)
-is the canonical definition: its `PACKAGE_MAP` assigns every `.ts` / `.tsx`
-file under `src/` to a future package (and says why, where it is not obvious),
-`ALLOWED_DEPENDENCIES` is the dependency table below, and `--list <package>`
-and `--json` print the files and the package-to-package import counts.
+The repository is a Bun workspace
+([#578](https://github.com/shiv3/ocpp-cp-simulator/issues/578)): `packages/*`
+hold the code that runs in both Bun and the browser, `apps/*` the two programs
+built from it, and the root `package.json` stays the published
+`ocpp-cp-simulator` package (the CLI bundle plus the web console). Everything
+else at the root — `index.html`, `public/`, `vite.config.ts`, `src-tauri/`,
+`docs/`, `e2e/`, `scripts/`, `examples/`, `docker/` — is shared tooling and
+keeps its place; Vite's root is the repository root.
 
-| Future package | Sources today                                                                                                                | May depend on                      |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `ocpp`         | `src/ocpp/`, `vendor/ocpp-schemas/`                                                                                          | nothing                            |
-| `contracts`    | `src/protocol/` (the wire contract, [control plane](concepts/control-plane.md))                                              | nothing                            |
-| `trace`        | `src/trace/` ([trace format](concepts/trace-format.md))                                                                      | nothing                            |
-| `k6-runtime`   | `src/cli/exportK6/runtime/`                                                                                                  | nothing                            |
-| `core`         | `src/cp/`, `src/scenario/`, `schema/`, scenario templates and blueprints in `src/utils/`                                     | ocpp, contracts, trace, k6-runtime |
-| `client`       | `src/data/interfaces/`, `src/data/remote/`, `configPort.ts`, `RuntimeMode.ts`, `sqlite/SqliteConnectorSettingsRepository.ts` | core, contracts, ocpp, trace       |
-| `apps/cli`     | the rest of `src/cli/`                                                                                                       | every package except `apps/web`    |
-| `apps/web`     | the rest of `src/` (console, components, hooks, providers, store, `lib`)                                                     | every package except `apps/cli`    |
+Dependency rules between the packages are executable (`bun run check:boundaries`
+in CI). [`scripts/check-package-boundaries.ts`](../scripts/check-package-boundaries.ts)
+is the canonical definition: `PACKAGE_MAP` assigns every file under
+`packages/` and `apps/` to its package, `ALLOWED_DEPENDENCIES` is the
+dependency table below, and `--list <package>` and `--json` print the files and
+the package-to-package import counts.
+
+| Package (`@ocpp-cp-sim/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `packages/ocpp`                | the generated OCPP message types and validators (`src/`) and the vendored OCA schemas (`vendor/ocpp-schemas/`)                                                                                          | nothing                            |
+| `packages/contracts`           | the wire contract of the daemon (`src/`; [control plane](concepts/control-plane.md))                                                                                                                    | nothing                            |
+| `packages/trace`               | the trace reader/writer (`src/`; [trace format](concepts/trace-format.md))                                                                                                                              | nothing                            |
+| `packages/k6-runtime`          | the k6 runtime files copied verbatim into an export (`src/`) and the ambient k6 module types (`k6-types.d.ts`)                                                                                          | nothing                            |
+| `packages/core`                | the charge point and the scenario engine (`src/cp/`, `src/scenario/`), scenario templates and blueprints (`src/utils/`), the shared test helpers (`src/test/`) and the scenario JSON Schema (`schema/`) | ocpp, contracts, trace, k6-runtime |
+| `packages/client`              | how a UI or tool talks to a daemon or to an in-process engine (`src/interfaces/`, `src/remote/`, `src/configPort.ts`, `src/RuntimeMode.ts`, `src/sqlite/SqliteConnectorSettingsRepository.ts`)          | core, contracts, ocpp, trace       |
+| `apps/cli`                     | the CLI, the daemon, the MCP endpoint, `export-k6` and `analyze` (`src/`), and the tests that build the CLI bundle and the Tauri sidecar (`src/build/`)                                                 | every package except `apps/web`    |
+| `apps/web`                     | the browser console: components, console pages, hooks and providers (`src/data/`), store, `lib`, assets, and the jsdom test setup                                                                       | every package except `apps/cli`    |
+
+Packages are private, versionless and have no build step: each `package.json`
+exposes its sources through `"exports": { "./*": "./src/*.ts" }` (plus explicit
+entries for the few JSON files other packages import), so a specifier mirrors
+the path under `src/` — `@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint`.
+Bun, Vite and `tsc` (`moduleResolution: bundler`) read the TypeScript directly
+through the workspace links; curated public entry points are future work.
+Third-party dependencies are still declared once, in the root `package.json`.
+Each package has a composite `tsconfig.json` that extends
+`tsconfig.base.json` and references the packages it depends on; `bun run
+typecheck` is `tsc -b`.
 
 Rules the check enforces:
 
-- An import (value, `import type`, `export … from`, `import()`, `new URL("./x", import.meta.url)`, relative or `@/`) from a package into one that is not in its "may depend on" column fails, **type-only imports included**: TypeScript project references forbid cycles at the type level too. Test files are checked like any other and belong to the package of the directory they sit in.
-- `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `src/cp/domain/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
-- A file under `src/` that matches no `PACKAGE_MAP` entry fails the check, so a new directory has to be placed on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
+- An import (value, `import type`, `export … from`, `import()`, `new URL("./x", import.meta.url)`, relative, `@/` or `@ocpp-cp-sim/…`) from a package into one that is not in its "may depend on" column fails, **type-only imports included**: TypeScript project references forbid cycles at the type level too. Test files are checked like any other and belong to the package of the directory they sit in.
+- Across packages the import must be an `@ocpp-cp-sim/<package>/…` specifier that resolves through the package's `exports`, never a relative path into another package. Inside one package imports stay relative (inside `apps/web` the `@/` alias, `apps/web/src`, also works).
+- Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
+- `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
+- A file under `packages/` or `apps/` that matches no `PACKAGE_MAP` entry fails the check, so a new workspace directory has to be registered on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
 
 ## Where to read next
 

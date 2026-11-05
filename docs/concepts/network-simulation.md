@@ -3,8 +3,8 @@ title: Network simulation
 type: concept
 summary: Phase-1 in-process fault injection for WebSocket charge points — seeded latency/jitter, manual and periodic disconnects, delayed reconnect — configured at runtime (UI, RPC, MCP) as a global layer with per-CP null-tombstone overrides.
 sources:
-  - src/ (network-sim rule engine; issue #242)
-  - src/cli/server/__tests__/networkSimMcp.bun.test.ts
+  - packages/core/src/cp/infrastructure/transport/network-sim/ (rule engine; issue #242)
+  - apps/cli/src/server/__tests__/networkSimMcp.bun.test.ts
 related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
@@ -12,7 +12,7 @@ related:
   - state-persistence.md
   - scenario-format.md
   - operational-timeline.md
-updated: 2026-10-27
+updated: 2026-11-05
 ---
 
 # Network simulation

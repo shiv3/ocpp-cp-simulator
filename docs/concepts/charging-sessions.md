@@ -3,18 +3,18 @@ title: Charging sessions
 type: concept
 summary: Version-independent read model of the transactions a charge point ran (OCPP 1.6 StartTransaction/StopTransaction and 2.x TransactionEvent map onto one ChargingSession), with derived duration and energy, the stop reason as sent, an outcome (active, completed, interrupted, failed), persistence in `charging_sessions` and restart reconciliation — read with `sessions.list`, the `list_charging_sessions` MCP tool or the console's Transactions tab.
 sources:
-  - src/cp/domain/session/ChargingSession.ts
-  - src/cp/application/services/ChargingSessionRecorder.ts
-  - src/cp/domain/persistence/ChargingSessionRepository.ts
-  - src/cp/domain/persistence/SqliteChargingSessionRepository.ts
-  - src/protocol/methods.ts (sessions.list)
+  - packages/core/src/cp/domain/session/ChargingSession.ts
+  - packages/core/src/cp/application/services/ChargingSessionRecorder.ts
+  - packages/core/src/cp/domain/persistence/ChargingSessionRepository.ts
+  - packages/core/src/cp/domain/persistence/SqliteChargingSessionRepository.ts
+  - packages/contracts/src/methods.ts (sessions.list)
   - "issue #447"
   - "issue #491"
   - "issue #490"
   - "issue #488"
   - "issue #528"
   - "issue #549"
-  - src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
 related:
   - operational-timeline.md
   - state-persistence.md
@@ -25,7 +25,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Charging sessions

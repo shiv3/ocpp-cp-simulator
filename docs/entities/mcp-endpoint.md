@@ -3,10 +3,10 @@ title: MCP endpoint (`POST /mcp`)
 type: entity
 summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 30 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
-  - src/cli/server/mcp/tools.ts
-  - src/cli/server/__tests__/mcp.test.ts
-  - src/cli/server/__tests__/networkSimMcp.bun.test.ts
-  - src/cli/server/__tests__/mcpToolSchemaParity.test.ts
+  - apps/cli/src/server/mcp/tools.ts
+  - apps/cli/src/server/__tests__/mcp.test.ts
+  - apps/cli/src/server/__tests__/networkSimMcp.bun.test.ts
+  - apps/cli/src/server/__tests__/mcpToolSchemaParity.test.ts
 related:
   - daemon.md
   - ../concepts/control-plane.md
@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # MCP endpoint (`POST /mcp`)

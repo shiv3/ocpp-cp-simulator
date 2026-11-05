@@ -13,7 +13,7 @@ related:
   - cli.md
   - ../concepts/local-vs-remote-mode.md
   - ../analyses/testing-strategy.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Desktop app (Tauri)
@@ -57,7 +57,7 @@ appends it to `DAEMON_ARGS`. It is the only platform-independent answer, so
 the desktop app never relies on the CLI's own search. When the directory has
 no `index.html` — a `tauri dev` build before `npm run build` — the flag is
 dropped and the daemon falls back to its search, which is correct for the
-debug path (`bun src/cli/main.ts`, where `dist/` is just `<repo>/dist`).
+debug path (`bun apps/cli/src/main.ts`, where `dist/` is just `<repo>/dist`).
 
 ### Why it was broken from v0.3.2 to v0.7.8 (#319)
 
@@ -76,7 +76,7 @@ Three things changed:
    real path) as well as `import.meta.dir`, and accepts `--web-console-dist`.
 2. `tauri.conf.json` ships `dist/` as the `web-console` resource and `lib.rs`
    passes its path.
-3. `src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` compiles the
+3. `apps/cli/src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` compiles the
    sidecar and **launches** it, with the arguments parsed out of `lib.rs`'s
    `DAEMON_ARGS` and the readiness budget read from `splash.html`, so the
    test cannot drift away from either. It runs on every pull request under
@@ -139,7 +139,7 @@ Available for:
 npm install
 
 # Desktop dev mode (requires Rust + Bun)
-#   In debug builds the desktop shell spawns `bun src/cli/main.ts ...`
+#   In debug builds the desktop shell spawns `bun apps/cli/src/main.ts ...`
 #   directly, so iteration on the daemon stays fast — no need to
 #   re-compile the sidecar between edits.
 npm run tauri:dev
@@ -154,7 +154,7 @@ npm run tauri:build
 ### Prerequisites
 
 - Node.js (v18 or later)
-- Bun (used to compile the CLI sidecar for `tauri:build`; needed for `tauri:dev` too since the desktop shell spawns `bun src/cli/main.ts`)
+- Bun (used to compile the CLI sidecar for `tauri:build`; needed for `tauri:dev` too since the desktop shell spawns `bun apps/cli/src/main.ts`)
 - Rust (latest stable, desktop only)
 - Platform-specific dependencies:
   - **Linux**: `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`

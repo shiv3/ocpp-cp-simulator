@@ -1,0 +1,6 @@
+[install]
+# Hoist every dependency into the root node_modules (the layout before the
+# workspace move). Bun defaults to the isolated linker for workspaces, which
+# hides transitive packages such as bun-types from the TypeScript projects
+# and the tools that look them up beside the root.
+linker = "hoisted"

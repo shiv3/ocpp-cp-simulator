@@ -48,4 +48,4 @@ if [ -n "${HEALTH_PATH}" ]; then
   ARGS="${ARGS} --health-path ${HEALTH_PATH}"
 fi
 
-exec su-exec bun:bun bun src/cli/main.ts ${ARGS} "$@"
+exec su-exec bun:bun bun dist-cli/main.js ${ARGS} "$@"

@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Index
@@ -52,30 +52,30 @@ Start at [Overview](overview.md). Conventions for pages are in
 
 ## Sources (`sources/`)
 
-| Page                                                                            | Summary                                                                                               |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| [schema/scenario.schema.json](sources/scenario-json-schema.md)                  | Published scenario JSON Schema v1.4 — strict on known fields, permissive on unknown, advisory at load |
-| [vendor/ocpp-schemas](sources/vendored-ocpp-schemas.md)                         | OCA OCPP 1.6 / 2.0.1 / 2.1 message schemas, vendored verbatim at a pinned commit; never modify        |
-| [docs/examples/scenarios](sources/example-scenarios.md)                         | `demo-charging.json` (lifecycle demo) and `all-cases.json` (node-type catalogue, cross-version e2e)   |
-| [Reverse-proxy + SSO example](sources/reverse-proxy-sso-example.md)             | nginx + Authelia compose showing `--trust-forwarded-headers` behind a proxy                           |
-| [e2e/README.md](sources/e2e-readme.md)                                          | Local-only gocpp CSMS e2e suite across 1.6 / 2.0.1 / 2.1                                              |
-| [scripts/steve-verify/README.md](sources/steve-verify-readme.md)                | Runner verifying all 47 cert16 templates against real SteVe via REST, with capability probe           |
-| [examples/testcontainers-java/README.md](sources/testcontainers-java-readme.md) | JVM Testcontainers prototype driving the control plane and asserting a verdict                        |
-| [scripts/poc/README.md](sources/socketio-bun-poc.md)                            | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |
-| [src/utils/scenarios/README.md](sources/cert16-templates-readme.md)             | Authoritative cert16 ↔ test-case mapping, side effects, responseOverride matrix, out-of-scope list    |
-| [scripts/bench/README.md](sources/bench-readme.md)                              | Fleet scale benchmark: sweeps N vs. p50/p95 OCPP call latency via cp.create_many + /metrics diffing   |
-| [GitHub issues](sources/github-issues.md)                                       | Index of issue / PR numbers the wiki cites, with the pages that cite them                             |
+| Page                                                                              | Summary                                                                                               |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| [packages/core/schema/scenario.schema.json](sources/scenario-json-schema.md)      | Published scenario JSON Schema v1.4 — strict on known fields, permissive on unknown, advisory at load |
+| [packages/ocpp/vendor/ocpp-schemas](sources/vendored-ocpp-schemas.md)             | OCA OCPP 1.6 / 2.0.1 / 2.1 message schemas, vendored verbatim at a pinned commit; never modify        |
+| [docs/examples/scenarios](sources/example-scenarios.md)                           | `demo-charging.json` (lifecycle demo) and `all-cases.json` (node-type catalogue, cross-version e2e)   |
+| [Reverse-proxy + SSO example](sources/reverse-proxy-sso-example.md)               | nginx + Authelia compose showing `--trust-forwarded-headers` behind a proxy                           |
+| [e2e/README.md](sources/e2e-readme.md)                                            | Local-only gocpp CSMS e2e suite across 1.6 / 2.0.1 / 2.1                                              |
+| [scripts/steve-verify/README.md](sources/steve-verify-readme.md)                  | Runner verifying all 47 cert16 templates against real SteVe via REST, with capability probe           |
+| [examples/testcontainers-java/README.md](sources/testcontainers-java-readme.md)   | JVM Testcontainers prototype driving the control plane and asserting a verdict                        |
+| [scripts/poc/README.md](sources/socketio-bun-poc.md)                              | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |
+| [packages/core/src/utils/scenarios/README.md](sources/cert16-templates-readme.md) | Authoritative cert16 ↔ test-case mapping, side effects, responseOverride matrix, out-of-scope list    |
+| [scripts/bench/README.md](sources/bench-readme.md)                                | Fleet scale benchmark: sweeps N vs. p50/p95 OCPP call latency via cp.create_many + /metrics diffing   |
+| [GitHub issues](sources/github-issues.md)                                         | Index of issue / PR numbers the wiki cites, with the pages that cite them                             |
 
 ## Analyses (`analyses/`)
 
-| Page                                                                                      | Summary                                                                                                                                                                   |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Choosing an interface](analyses/choosing-an-interface.md)                                | Use-case → interface table and a feature-coverage matrix across web / desktop / daemon / CLI                                                                              |
-| [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)                          | Feature checklist, minimal setup, MCP vs CLI vs socket.io-client, assertion patterns                                                                                      |
-| [REST → Socket.IO migration](analyses/rest-to-socketio-migration.md)                      | Endpoint-by-endpoint mapping from the removed REST / WebSocket / Unix-socket control surface                                                                              |
-| [Testing strategy](analyses/testing-strategy.md)                                          | Blocking type-check, Vitest vs Bun test, what the two runners must agree on in `src/cli/__tests__`, merged coverage, and the e2e / steve-verify / Testcontainers layers   |
-| [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) | Sequenced plan for fleet-scale work: bulk create and blueprints, `/metrics`, seeded background traffic, charging-curve meter values, a measured scale ceiling, hot-reload |
-| [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md)              | What the OECS charger-spec schema holds, which fields map onto a blueprint, what has nowhere to land, and the decisions an importer (#331) must settle                    |
+| Page                                                                                      | Summary                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Choosing an interface](analyses/choosing-an-interface.md)                                | Use-case → interface table and a feature-coverage matrix across web / desktop / daemon / CLI                                                                                 |
+| [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)                          | Feature checklist, minimal setup, MCP vs CLI vs socket.io-client, assertion patterns                                                                                         |
+| [REST → Socket.IO migration](analyses/rest-to-socketio-migration.md)                      | Endpoint-by-endpoint mapping from the removed REST / WebSocket / Unix-socket control surface                                                                                 |
+| [Testing strategy](analyses/testing-strategy.md)                                          | Blocking type-check, Vitest vs Bun test, what the two runners must agree on in `apps/cli/src/__tests__`, merged coverage, and the e2e / steve-verify / Testcontainers layers |
+| [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) | Sequenced plan for fleet-scale work: bulk create and blueprints, `/metrics`, seeded background traffic, charging-curve meter values, a measured scale ceiling, hot-reload    |
+| [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md)              | What the OECS charger-spec schema holds, which fields map onto a blueprint, what has nowhere to land, and the decisions an importer (#331) must settle                       |
 
 ## Raw assets kept under `docs/`
 

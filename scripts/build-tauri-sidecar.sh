@@ -47,7 +47,7 @@ OUT="$OUT_DIR/ocpp-cp-sim-${TARGET}${EXT}"
 mkdir -p "$OUT_DIR"
 
 echo "Building Bun sidecar for $TARGET ($BUN_TARGET) → $OUT"
-bun build --compile --target="$BUN_TARGET" --outfile="$OUT" src/cli/main.ts
+bun build --compile --target="$BUN_TARGET" --outfile="$OUT" apps/cli/src/main.ts
 
 # Ensure the bin is executable on macOS/Linux. Bun does this for us in
 # practice, but be explicit so a fresh CI checkout never trips on a

@@ -15,26 +15,32 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Testing strategy
 
 ## Type-checking
 
-`bun run typecheck` (`tsc -b --noEmit`) checks every project the root
-`tsconfig.json` references: the web app (`tsconfig.app.json`, all of `src/`),
-the CLI / daemon (`tsconfig.cli.json`, under `bun-types` and without the DOM
-lib), `vite.config.ts` and `scripts/bench`. It is a **blocking** CI step and
+`bun run typecheck` (`tsc -b`) checks every project the root `tsconfig.json`
+references: one composite project per workspace package and app
+(`packages/*/tsconfig.json`, `apps/*/tsconfig.json`, all extending
+`tsconfig.base.json`), `vite.config.ts` and `scripts/bench`. The packages
+compile under `bun-types` without the DOM lib; `apps/web` adds the DOM lib and
+JSX, and `apps/cli` adds the DOM lib for one test that reads `fetch().json()`
+as `any`. (`--noEmit` is not an option: project references need the referenced
+projects to emit declarations, which land in `node_modules/.tmp/out`.) It is a **blocking** CI step and
 runs in the `pre-push` hook. Neither Vite nor Bun type-checks — both strip the
 types and run — so before this gate the code base had drifted to ~380 errors,
 several of them real bugs (#374).
 
-Test files are type-checked too. A file under `src/cli`, `src/cp` or the other
-CLI `include` paths is checked by both projects, so it must compile against
-both the DOM lib and `bun-types`. `tsc -b` also requires every file a project
-imports to be in that project's `include`: a new directory imported by the
-daemon goes into `tsconfig.cli.json`.
+Test files are type-checked too, by the project of the package they live in.
+`tsc -b` also requires every file a project imports to be in that project's
+`include` (JSON next to the sources included): the one test that crosses a
+package boundary on the allow-list in `scripts/check-package-boundaries.ts`,
+`packages/core/src/cp/infrastructure/transport/__tests__/OCPPMessageHandler.settlement.test.ts`,
+is excluded from `packages/core` and listed by `apps/cli/tsconfig.json`, which
+is why that project's `rootDir` is the repository root.
 
 ## Vitest vs. Bun test
 
@@ -69,7 +75,7 @@ Bun-only-covered code, not a fully-representative number.
 The split above is enforced by **filename only** — `vite.config.ts` excludes
 `**/*.bun.test.ts` from Vitest, and `test:bun` passes `bun.test` to `bun test`
 as a path filter. Nothing stops a developer from typing the obvious command,
-`bun test src/cli/__tests__`, which runs _every_ file in that directory in one
+`bun test apps/cli/src/__tests__`, which runs _every_ file in that directory in one
 Bun process regardless of its name. On a clean tree that command failed
 (#339) and neither gate saw it, because neither gate runs it.
 
@@ -96,7 +102,7 @@ Three distinct defects were stacked behind it, each masked by the one before:
   red exit code is the worst of the three: CI would have failed with nothing
   in the log to point at.
 
-`bun run test:bun:cli` (`bun test src/cli/__tests__`) now runs in CI, so the
+`bun run test:bun:cli` (`bun test apps/cli/src/__tests__`) now runs in CI, so the
 overlap is checked on every pull request. The rules that follow from it, for
 anything added to that directory:
 
@@ -138,7 +144,7 @@ already covers all 7) and so would not have caught either defect.
 | [Testcontainers (Java)](../sources/testcontainers-java-readme.md)                            | no (proto)  | A CSMS project can embed the Docker image and assert a scenario verdict; the same RPC sequence is guarded in CI by `harnessScenarioVerdict.bun.test.ts` |
 | Scenario assertions ([Scenario format](../concepts/scenario-format.md#assertions--verdicts)) | at run time | Declarative pass/fail over the OCPP transcript of any scenario run, with conformance vs compatibility axes                                              |
 
-The `analyze` test matrix (`src/cli/analyze/__tests__/`) is the gate that
+The `analyze` test matrix (`apps/cli/src/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes
 ([OCPP DebugKit](../entities/ocpp-debugkit.md)).
 
@@ -150,12 +156,12 @@ spawn for about 30 releases. CI compiled the sidecar (`bun build --compile`,
 the "release smoke" step added for #281) but never ran it, so a failure that
 only exists in the compiled binary was invisible.
 
-`src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` closes that class.
+`apps/cli/src/build/__tests__/tauriSidecarWebConsole.bun.test.ts` closes that class.
 It runs under `bun run test:bun` on every pull request, takes ~12 s
 (the compile dominates; the binary is built once in `beforeAll` and reused),
 and it:
 
-- compiles `src/cli/main.ts` the way `scripts/build-tauri-sidecar.sh` does;
+- compiles `apps/cli/src/main.ts` the way `scripts/build-tauri-sidecar.sh` does;
 - **parses the arguments out of `src-tauri/src/lib.rs`'s `DAEMON_ARGS`**
   rather than keeping its own copy, so the test cannot silently disagree with
   what Tauri spawns;

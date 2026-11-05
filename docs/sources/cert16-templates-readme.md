@@ -1,20 +1,20 @@
 ---
-title: "Source: src/utils/scenarios/README.md (cert16 template catalogue)"
+title: "Source: packages/core/src/utils/scenarios/README.md (cert16 template catalogue)"
 type: source
 summary: The authoritative mapping of the 47 `cert16-*` templates to OCPP 1.6 certification test cases (TC id, title, profile, CSMS-side operator action), plus numbering notes, configuration side effects, the responseOverride status matrix and the out-of-scope list.
 sources:
-  - src/utils/scenarios/README.md
-  - src/utils/scenarios/cert16-*.json
+  - packages/core/src/utils/scenarios/README.md
+  - packages/core/src/utils/scenarios/cert16-*.json
   - "issues #110, #181"
 related:
   - ../entities/scenario-templates.md
   - ../concepts/scenario-format.md
   - steve-verify-readme.md
   - ../concepts/local-authorization.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
-# Source: `src/utils/scenarios/README.md`
+# Source: `packages/core/src/utils/scenarios/README.md`
 
 **What it is.** The catalogue that ships next to the template JSON files. The
 wiki does **not** duplicate its 47-row mapping table — read the file for the

@@ -13,7 +13,7 @@ related:
   - ../concepts/log-format.md
   - ../sources/testcontainers-java-readme.md
   - ../concepts/charging-sessions.md
-updated: 2026-10-30
+updated: 2026-11-05
 ---
 
 # Driving the simulator from an AI agent or test harness
@@ -32,7 +32,7 @@ any AI agent or test harness can drive.
 | `scenario_report` + assertions       | Machine-readable PASS/FAIL verdict per run ([Scenario format → Assertions](../concepts/scenario-format.md#assertions--verdicts)) |
 | `GET /v1/healthz`                    | Unauthenticated readiness detection and Docker healthcheck                                                                       |
 | `--state-db`                         | Persist CP state across restarts — no re-bootstrap needed ([State persistence](../concepts/state-persistence.md))                |
-| `socket.io-client` + `zod` contracts | Use the same typed contract as the browser UI and CLI (`src/protocol/`)                                                          |
+| `socket.io-client` + `zod` contracts | Use the same typed contract as the browser UI and CLI (`packages/contracts/src/`)                                                |
 | Network simulation                   | Inject latency / disconnects deterministically for resilience tests ([Network simulation](../concepts/network-simulation.md))    |
 
 ## Minimal setup

@@ -1,0 +1,383 @@
+import type {
+  OcppSecurityProfile,
+  OcppTlsOptions,
+} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
+import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+
+export interface SoapTunnelConfig {
+  readonly provider: "ngrok";
+  /** `--ngrok-auth-token`; never logged, handed to ngrok via its environment. */
+  readonly authToken: string | null;
+  /** `--ngrok-domain`: reserved domain requested from ngrok. */
+  readonly domain: string | null;
+  /** `--ngrok-api-url`: attach to a running agent instead of spawning one. */
+  readonly apiUrl: string | null;
+  /**
+   * `--soap-tunnel-port`: local port of the SOAP-only listener the tunnel
+   * forwards to. 0 (the default) picks a free port, which is fine when the
+   * daemon spawns the agent; an attached agent forwards to a port configured
+   * where it runs, so attach mode requires an explicit one.
+   */
+  readonly localPort: number;
+}
+
+export interface CLIOptions {
+  readonly wsUrl: string;
+  readonly cpId: string | null;
+  /**
+   * How many charge points `--cp-id` stands for. 1 (the default) keeps the
+   * historical single-CP behaviour; above 1 the daemon bootstraps a fleet
+   * whose ids come from `cpIdPattern`.
+   */
+  readonly cpCount: number;
+  /**
+   * Id template for a fleet, e.g. `CP{n:03}`. Defaults to `<cpId>{n:03}` so
+   * `--cp-id CP --cp-count 3` yields CP001..CP003.
+   */
+  readonly cpIdPattern: string | null;
+  /**
+   * `--label key=value` (#472): labels every bootstrapped charge point is
+   * created with. A charge point restored from `--state-db` keeps its own.
+   */
+  readonly labels?: Labels;
+  /**
+   * `--soap-callback-url` as given, before `resolveSoapCallbackUrl` folded it
+   * together with the public base. A fleet has to re-derive the callback per
+   * charge point, so it needs the inputs, not just the resolved result.
+   */
+  readonly soapCallbackUrlExplicit: string | null;
+  readonly soapPublicBaseUrl: string | null;
+  /**
+   * #458: `--oed-base-url`, the Open EV Directory API the daemon imports
+   * vehicles from. `OED_BASE_URL` is read at startup when this is null.
+   */
+  readonly oedBaseUrl: string | null;
+  /**
+   * #458: `--oed-api-key-file`, a file holding the API key. There is no flag
+   * carrying the key itself; see `vehicleCatalogConfig.ts`.
+   */
+  readonly oedApiKeyFile: string | null;
+  /**
+   * `--soap-tunnel ngrok` with its `--ngrok-*` options, or null (#183):
+   * expose the SOAP callback endpoint through a tunnel and derive the public
+   * base from it. parseArgs refuses it alongside an explicit callback /
+   * public base URL.
+   */
+  readonly soapTunnel: SoapTunnelConfig | null;
+  /** Serve `GET /metrics` (Prometheus text exposition) in server mode. */
+  readonly metrics: boolean;
+  /**
+   * Serve `/metrics` outside the Basic Auth gate. Implies `metrics`. Opt-in:
+   * unlike the health path, the gate covers `/metrics` by default because it
+   * exposes fleet size and traffic shape.
+   */
+  readonly metricsNoAuth: boolean;
+  /**
+   * Server mode: re-read the idTag and scenario files this process loaded when
+   * they change on disk (#314). Off by default — a daemon that silently
+   * re-reads files under the operator is surprising, and the agent-driven
+   * workflows go through the control plane instead.
+   *
+   * **Refused**, not ignored, outside a server mode and alongside a client mode
+   * (`--send`, `--stop`, `--events`): the watcher lives in the daemon, so a
+   * flag that cannot take effect is an error.
+   *
+   * The two watched kinds behave differently on purpose. An **idTag pool
+   * applies live** — it is drawn once per session, so a transaction already
+   * under way keeps the tag it presented and only the next draw sees the new
+   * list. A **scenario reload is held** while the connector has an open
+   * transaction *or* a run of that scenario is in flight, and installed when
+   * that session ends.
+   */
+  readonly watch: boolean;
+  readonly connectors: number;
+  readonly jsonMode: boolean;
+  readonly daemon: boolean;
+  readonly send: string | null;
+  readonly events: boolean;
+  readonly stop: boolean;
+  readonly basicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
+  /** Optional Basic Auth gate for the HTTP web console and non-health HTTP.
+   *  Unrelated to `basicAuth` above (which is for the *outgoing* CP →
+   *  CSMS WebSocket). When set, every request to the daemon's HTTP server
+   *  except the configured health path must carry a matching
+   *  `Authorization: Basic <base64(user:pass)>` header; otherwise the
+   *  server returns 401 + `WWW-Authenticate: Basic realm="..."` so
+   *  browsers prompt for credentials. Socket.IO authenticates in its
+   *  handshake. */
+  readonly webConsoleBasicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
+  readonly vendor: string;
+  readonly model: string;
+  readonly ocppVersion?: string;
+  readonly scenario: string | null;
+  readonly scenarioTemplate: string | null;
+  /** Path to a JSON file containing a cpId-independent scenario template.
+   *  Each entry in `scenarioConnectors` instantiates an independent copy. */
+  readonly scenarioTemplateFile: string | null;
+  /** Raw connector selector: "all" | "1,2,3" | "1". Resolved at startup
+   *  once the bootstrap CP's connector count is known. */
+  readonly scenarioConnector: string;
+  readonly httpPort: number | null;
+  readonly httpHost: string;
+  readonly unixSocket: string | null;
+  readonly httpUrl: string | null;
+  /** Basic Auth credentials the CLI *client* modes (`--send` / `--stop` /
+   *  `--events`) send to a daemon that was started with
+   *  `--web-console-basic-auth-*`. Set via `--http-basic-auth-user/pass`.
+   *  Null = send no Authorization header. */
+  readonly httpBasicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
+  readonly allEvents: boolean;
+  /** Explicit opt-out for the startup guard that blocks unauthenticated
+   *  non-loopback daemon binds. Use only on trusted networks. */
+  readonly unsafeRemote: boolean;
+  readonly corsOrigins: ReadonlyArray<string>;
+  /** When true, the same-origin CORS default also trusts a reverse proxy's
+   *  `X-Forwarded-Proto`/`X-Forwarded-Host` to reconstruct the public origin.
+   *  Only safe when a trusted proxy sets those headers (the daemon must not be
+   *  reachable directly). Set by `--trust-forwarded-headers`. */
+  readonly trustForwardedHeaders: boolean;
+  /** Absolute or relative path of a directory the daemon serves as static
+   *  files (SPA-aware). Null disables static hosting. */
+  readonly serveStatic: string | null;
+  /** TCP port for the bundled web console. When set, the daemon stands up
+   *  an HTTP listener on this port serving socket.io, health, and the UI. May
+   *  share a port with `httpPort` (one listener) or use its own. */
+  readonly webConsolePort: number | null;
+  /** Filesystem path for the SQLite state DB. When set, ConfigurationStore
+   *  overrides, charging-profile availability, scenario state, and the
+   *  pending-message queue all persist there across daemon restarts. When
+   *  `null`, the daemon runs entirely in memory (lost on exit) — useful
+   *  for tests and one-off CSMS probes. */
+  readonly stateDb: string | null;
+  /** Console log format. `"plain"` (default) writes the legacy
+   *  `[timestamp] [LEVEL] [TYPE] message` lines; `"json"` writes one JSON
+   *  object per line for structured-log collectors. */
+  readonly logFormat: "plain" | "json";
+  /** Absolute path the daemon serves the health-check JSON on. Default
+   *  `/v1/healthz`. Made configurable so deployments behind a proxy that
+   *  reserves specific paths (e.g. Google Front End in front of Cloud Run)
+   *  can move the endpoint off a conflicting path. The same value must be
+   *  set as `VITE_HEALTH_PATH` at UI build time so the browser auto-detect
+   *  probe targets the same endpoint. */
+  readonly healthPath: string;
+  /** Repeatable `--header KEY:VALUE` — extra HTTP headers attached to
+   *  the WS upgrade. CLI runtime only. See ChargePointInitOptions. */
+  readonly extraWsHeaders: Record<string, string>;
+  /** Repeatable `--ws-subprotocol TOKEN` — extra subprotocols appended
+   *  to the OCPP version subprotocol in the WS upgrade. */
+  readonly extraWsSubprotocols: ReadonlyArray<string>;
+  /** OCPP 1.5 SOAP callback URL advertised in WS-Addressing From. */
+  readonly soapCallbackUrl: string | null;
+  /** Base path reserved for the later CSMS→CP SOAP callback server. */
+  readonly soapPath: string;
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly authorizationKey?: string;
+  readonly cpoName?: string;
+  /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
+  readonly txUpdatedMeterValues?: boolean;
+  readonly tls?: OcppTlsOptions;
+  readonly tlsCaPath?: string;
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
+  readonly insecureTlsKeyPerms: boolean;
+  /** Filesystem path to append every OCPP wire message to as a JSONL trace
+   *  record (docs/concepts/trace-format.md), streamed live during the run. `null`
+   *  (default) disables trace output entirely. */
+  readonly traceOutput: string | null;
+}
+
+export interface ChargePointInitOptions {
+  readonly cpId: string;
+  /**
+   * The supervision URL in play. When `supervisionUrls` is set this is the
+   * first of them; the transport picks per connection attempt, so this is what
+   * gets persisted and reported rather than what is necessarily connected.
+   */
+  readonly wsUrl: string;
+  /** All supervision URLs, when more than one was given. OCPP-J only. */
+  readonly supervisionUrls?: readonly string[];
+  readonly urlDistribution?: UrlDistribution;
+  /**
+   * Resolved idTags this charge point draws from when a call names none. The
+   * `file` form is resolved at creation, so what is stored and persisted is
+   * always the list itself — a file that changes later does not change a
+   * running charge point unless the daemon was started with `--watch` (#314).
+   */
+  readonly idTags?: readonly string[];
+  /**
+   * The `idTagPool.file` this charge point's `idTags` were read from, when it
+   * came from a file rather than an inline list (#314).
+   *
+   * Persisted so a daemon restarted with `--watch` and `--state-db` can watch
+   * the same file again; without it a restored charge point would come back
+   * holding the tags but unwatched, which is the silent half-feature the flag
+   * exists to avoid.
+   */
+  readonly idTagFile?: string;
+  readonly idTagDistribution?: IdTagDistribution;
+  readonly connectors: number;
+  readonly vendor: string;
+  readonly model: string;
+  readonly basicAuth: {
+    readonly username: string;
+    readonly password: string;
+  } | null;
+  readonly ocppVersion?: string;
+  readonly bootNotification?: {
+    readonly firmwareVersion?: string;
+    readonly chargePointSerialNumber?: string;
+    readonly chargeBoxSerialNumber?: string;
+    readonly meterSerialNumber?: string;
+    readonly meterType?: string;
+    readonly iccid?: string;
+    readonly imsi?: string;
+  };
+  /** Extra HTTP headers attached to every WS upgrade request (CLI runtime
+   *  only — the browser WebSocket constructor can't set arbitrary headers).
+   *  Useful for driving a header-routing proxy in front of the CSMS. */
+  readonly extraWsHeaders?: Record<string, string>;
+  /** Extra Sec-WebSocket-Protocol tokens appended after the OCPP version
+   *  subprotocol. OCPP servers pick the first recognised version token
+   *  (ocpp1.6 / ocpp2.0.1) and ignore the rest, so any extras are visible
+   *  to upstream routers but harmless for OCPP negotiation. */
+  readonly extraWsSubprotocols?: ReadonlyArray<string>;
+  /** For OCPP 1.5 SOAP, the CSMS CentralSystemService URL. Defaults to wsUrl. */
+  readonly centralSystemUrl?: string;
+  /** For OCPP 1.5 SOAP, the CP ChargePointService callback URL in WS-A From. */
+  readonly soapCallbackUrl?: string;
+  /**
+   * `soapCallbackUrl` was not given but derived by the registry from the
+   * daemon's SOAP public base (`--soap-public-base-url` or the tunnel of
+   * `--soap-tunnel`). Such a URL is never persisted: a free-tier tunnel URL
+   * changes between runs, so it is re-derived from the current base each
+   * time the charge point is instantiated (#183).
+   */
+  readonly soapCallbackUrlDerived?: boolean;
+  /** Base path reserved for the later CSMS→CP SOAP callback server. */
+  readonly soapPath?: string;
+  readonly securityProfile?: OcppSecurityProfile;
+  readonly authorizationKey?: string;
+  readonly cpoName?: string;
+  /**
+   * OCPP 2.x: the meter-value scheduler's samples taken during a transaction
+   * ride TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues
+   * (#347). Absent means off.
+   */
+  readonly txUpdatedMeterValues?: boolean;
+  readonly tls?: OcppTlsOptions;
+  readonly tlsCaPath?: string;
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
+  /**
+   * Operator labels (#446). Metadata only: nothing in the charge point reads
+   * them, which is why `cp.labels.set` can replace them without a rebuild.
+   */
+  readonly labels?: Labels;
+}
+
+export interface JsonCommand {
+  readonly id?: string;
+  readonly command: string;
+  readonly params?: Record<string, unknown>;
+}
+
+export interface JsonResponse {
+  readonly id: string | null;
+  readonly ok: boolean;
+  readonly data?: unknown;
+  readonly error?: string;
+}
+
+export interface JsonEvent {
+  readonly event: string;
+  readonly data: unknown;
+  readonly timestamp: string;
+}
+
+// Re-exported for use across server/browser snapshots. The snapshot fields are
+// intentionally untyped beyond `unknown`/`Record` at this layer so the wire
+// shape stays JSON-friendly; consumers narrow them to their domain types.
+export interface ConnectorStatus {
+  readonly id: number;
+  readonly status: string;
+  readonly availability: string;
+  readonly meterValue: number;
+  readonly transactionId: number | null;
+  readonly soc: number | null;
+  readonly mode: string;
+  readonly autoResetToAvailable: boolean;
+  readonly autoMeterValueConfig: Record<string, unknown> | null;
+  readonly evSettings: Record<string, unknown> | null;
+  readonly chargingProfile: Record<string, unknown> | null;
+  readonly chargingProfiles: ReadonlyArray<Record<string, unknown>>;
+  readonly transactionStartTime: string | null;
+  readonly transactionTagId: string | null;
+  readonly transactionBatteryCapacityKwh: number | null;
+}
+
+export interface ChargePointStatus {
+  readonly id: string;
+  readonly status: string;
+  readonly error: string;
+  readonly connectors: ReadonlyArray<ConnectorStatus>;
+  /** §4.6 Heartbeat state. `intervalSeconds=0` means the CSMS has not
+   *  configured a heartbeat (or set it to 0). `lastSentAt` is an ISO-8601
+   *  string, or null if no Heartbeat.req has been sent since the daemon
+   *  started. Included so the browser can show "last heartbeat 30s ago"
+   *  without a separate request. */
+  readonly heartbeat?: {
+    readonly intervalSeconds: number;
+    readonly lastSentAt: string | null;
+  };
+  /** Network simulation summary: { enabled, manualRuleIds } when a config has
+   *  been applied, null for SOAP CPs or when no config has been applied. */
+  readonly networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
+  /** Snapshot of the init the CP was constructed with. Surfaced so the
+   *  web console can prefill the "Edit CP" modal in Remote mode without
+   *  needing a second roundtrip — local-mode persistence is already in
+   *  the browser, so this field is only meaningful when talking to the
+   *  daemon. Optional for back-compat with older daemons. */
+  readonly config?: {
+    readonly wsUrl: string;
+    readonly connectors: number;
+    readonly vendor: string;
+    readonly model: string;
+    readonly basicAuth: {
+      readonly username: string;
+      readonly password?: string;
+    } | null;
+    readonly centralSystemUrl?: string;
+    readonly soapCallbackUrl?: string;
+    /** See ChargePointInitOptions.soapCallbackUrlDerived. */
+    readonly soapCallbackUrlDerived?: boolean;
+    readonly soapPath?: string;
+    readonly securityProfile?: OcppSecurityProfile;
+    readonly cpoName?: string;
+    readonly txUpdatedMeterValues?: boolean;
+    readonly tlsCaPath?: string;
+    readonly tlsCertPath?: string;
+    readonly tlsKeyPath?: string;
+    readonly ocppVersion?: string;
+    readonly bootNotification: {
+      readonly firmwareVersion?: string;
+      readonly chargePointSerialNumber?: string;
+      readonly chargeBoxSerialNumber?: string;
+      readonly meterSerialNumber?: string;
+      readonly meterType?: string;
+      readonly iccid?: string;
+      readonly imsi?: string;
+    } | null;
+    readonly labels?: Labels;
+  };
+}

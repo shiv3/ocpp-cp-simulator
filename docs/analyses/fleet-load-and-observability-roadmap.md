@@ -3,12 +3,12 @@ title: Fleet, load and observability roadmap
 type: analysis
 summary: Sequenced plan for the capabilities this simulator does not yet have — bulk CP creation and blueprints, a metrics endpoint, seeded background traffic with an idTag pool, a charging-curve EV model, a measured scale ceiling, and file hot-reload — with the files and RPCs each phase touches, acceptance criteria, and dependencies.
 sources:
-  - src/protocol/methods.ts
-  - src/cli/server/socketServer.ts
-  - src/cli/server/httpServer.ts
-  - src/cp/domain/connector/EVSettings.ts
-  - src/cp/domain/connector/MeterValueBuilder.ts
-  - src/cp/infrastructure/transport/network-sim/SeededRng.ts
+  - packages/contracts/src/methods.ts
+  - apps/cli/src/server/socketServer.ts
+  - apps/cli/src/server/httpServer.ts
+  - packages/core/src/cp/domain/connector/EVSettings.ts
+  - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
+  - packages/core/src/cp/infrastructure/transport/network-sim/SeededRng.ts
   - scripts/bench/README.md
 related:
   - ../concepts/control-plane.md
@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-10-29
+updated: 2026-11-05
 ---
 
 # Fleet, load and observability roadmap
@@ -104,18 +104,18 @@ One loose end to close while here: `autoConnect` is declared in no schema —
 (`rawParamsAsRecord(rawParams).autoConnect`). Bulk creation should declare it
 rather than copy that.
 
-**Touches.** `src/protocol/methods.ts`, `src/cli/server/socketServer.ts`
-(`dispatchRpcCore`), `src/cli/server/CPRegistry.ts`, a curated tool in
-`src/cli/server/mcp/tools.ts`, and a CLI flag pair (`--cp-count`,
-`--cp-id-pattern`) in `src/cli/main.ts`.
+**Touches.** `packages/contracts/src/methods.ts`, `apps/cli/src/server/socketServer.ts`
+(`dispatchRpcCore`), `apps/cli/src/server/CPRegistry.ts`, a curated tool in
+`apps/cli/src/server/mcp/tools.ts`, and a CLI flag pair (`--cp-count`,
+`--cp-id-pattern`) in `apps/cli/src/main.ts`.
 
 **Acceptance.**
 
-- A `cp_create_many` tool is registered in `src/cli/server/mcp/tools.ts` — the
+- A `cp_create_many` tool is registered in `apps/cli/src/server/mcp/tools.ts` — the
   curated tools are registered by hand there, so adding the method to `METHODS`
   alone would only reach it through the generic `call_method` — and its schema
   is _derived_, not restated (the lesson from #284).
-- A documented, enforced `count` ceiling (`src/protocol/limits.ts`), and a row
+- A documented, enforced `count` ceiling (`packages/contracts/src/limits.ts`), and a row
   in [Control plane](../concepts/control-plane.md).
 - e2e against gocpp: create 20 CPs, all reach BootNotification Accepted.
 
@@ -138,8 +138,8 @@ opposite of the implementation.
 
 **Scope it to OCPP-J, and resolve before persisting.** `wsUrl` is a `string`
 well past the schema: `buildBaseUrl(wsUrl: string, cpId: string)` in
-`src/cli/service.ts`, the `ChargePoint` init options, the status snapshot, and
-`charge_points.ws_url TEXT NOT NULL` in `src/cp/domain/persistence/schema.ts`.
+`apps/cli/src/service.ts`, the `ChargePoint` init options, the status snapshot, and
+`charge_points.ws_url TEXT NOT NULL` in `packages/core/src/cp/domain/persistence/schema.ts`.
 So:
 
 - The list is an **OCPP-J** concept. SOAP takes `centralSystemUrl` and has no
@@ -153,9 +153,9 @@ So:
   need columns of their own and a schema bump; `ws_url` keeps its meaning, so
   no existing reader changes.
 
-**Touches.** `cpParamsBaseSchema` in `src/protocol/methods.ts`, the resolution
-step in `src/cli/service.ts`, and URL selection in
-`src/cp/infrastructure/transport/OCPPWebSocket.ts` beside the existing
+**Touches.** `cpParamsBaseSchema` in `packages/contracts/src/methods.ts`, the resolution
+step in `apps/cli/src/service.ts`, and URL selection in
+`packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts` beside the existing
 exponential-backoff logic (~L820).
 
 **Acceptance.** After a forced disconnect (reusing
@@ -185,8 +185,8 @@ A blueprint holds the `cp.create` parameter block plus connector count,
 `vendor` / `model` / firmware / serial prefixes, default EV settings, an
 optional startup scenario template id, and (after 3b) an auto-traffic config.
 
-**Touches.** `src/protocol/methods.ts`, `src/cli/server/socketServer.ts`,
-`src/cp/domain/persistence/schema.ts` (new table + migration — see
+**Touches.** `packages/contracts/src/methods.ts`, `apps/cli/src/server/socketServer.ts`,
+`packages/core/src/cp/domain/persistence/schema.ts` (new table + migration — see
 [State persistence](../concepts/state-persistence.md)), and a browser editor
 alongside the scenario editor.
 
@@ -204,8 +204,8 @@ from the equivalent explicit call.
 mirroring the instance semantics scenario templates already use: loading one
 copies it, edits never mutate the built-in.
 
-**Touches.** A new `src/utils/blueprints/` directory with a README that is the
-authoritative id ↔ hardware mapping, exactly as `src/utils/scenarios/README.md`
+**Touches.** A new `packages/core/src/utils/blueprints/` directory with a README that is the
+authoritative id ↔ hardware mapping, exactly as `packages/core/src/utils/scenarios/README.md`
 is for cert16.
 
 ## Phase 2 — Metrics endpoint
@@ -237,13 +237,13 @@ that is unbounded by construction once phase 1 lands. Per-CP numbers stay in
 
 **Latency source.** Both message handlers already track in-flight CALLs —
 `_requests` / `_serialInFlight` in
-`src/cp/infrastructure/transport/OCPPMessageHandler.ts` and `_pendingRequests`
+`packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts` and `_pendingRequests`
 in `OCPPMessageHandlerV201.ts`. Observe the histogram where those entries are
 resolved. The [trace record](../concepts/trace-format.md) carries no duration
 field, so this is a separate tap, not a trace consumer.
 
-**Touches.** A route in `src/cli/server/httpServer.ts` beside the health probe
-(~L483/565), a counter registry in `src/cli/server/`, and a CLI flag
+**Touches.** A route in `apps/cli/src/server/httpServer.ts` beside the health probe
+(~L483/565), a counter registry in `apps/cli/src/server/`, and a CLI flag
 (`--metrics` / `--no-metrics`).
 
 **Access control — decide explicitly.** `/v1/healthz` is deliberately
@@ -277,7 +277,7 @@ different seam.
 plus `distribution: "round-robin" | "random" | "connector-affinity"`. Random
 draws come from the seeded RNG (below), so a seeded run replays exactly.
 
-**Touches.** `src/protocol/methods.ts`, `CPRegistry`, and a `tagId` resolution
+**Touches.** `packages/contracts/src/methods.ts`, `CPRegistry`, and a `tagId` resolution
 hook in the transaction path so both scenarios and auto-traffic can say "next
 tag from the pool".
 
@@ -292,7 +292,7 @@ precedent already exists in the codebase: auto-meter is a per-connector
 behavior configured by RPC (`set_auto_meter_config`), persisted under
 `connector_settings.auto_meter.*`, and independent of whether a scenario is
 running (`AutoMeterValueConfig` in
-`src/cp/domain/connector/Connector.ts`). Auto-traffic mirrors it exactly:
+`packages/core/src/cp/domain/connector/Connector.ts`). Auto-traffic mirrors it exactly:
 
 ```
 cp command:  set_auto_traffic_config { connector, config }
@@ -313,7 +313,7 @@ AutoTrafficConfig {
 ```
 
 Reuse `deriveSeed32` / the PRNG in
-`src/cp/infrastructure/transport/network-sim/SeededRng.ts` — the same mechanism
+`packages/core/src/cp/infrastructure/transport/network-sim/SeededRng.ts` — the same mechanism
 that already makes [network simulation](../concepts/network-simulation.md)
 replayable — deriving each connector's stream from `seed:cpId:connectorId` so
 CPs do not correlate.
@@ -345,7 +345,7 @@ against. Today `MeterValueBuilder` derives everything from a flat auto-meter
 rate with fixed 230 V / 25 °C / 50 Hz constants and no phase model.
 
 **Shape.** Extend `EVSettings`
-(`src/cp/domain/connector/EVSettings.ts`, currently `modelName`,
+(`packages/core/src/cp/domain/connector/EVSettings.ts`, currently `modelName`,
 `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`):
 
 ```
@@ -372,7 +372,7 @@ other rather than being independently plausible.
 **Composition rule — state it in code and docs.** Effective power is
 **`min(curve-derived power, ChargingScheduleResolver limit)`**. The smart
 charging cap already works
-(`src/cp/domain/connector/ChargingScheduleResolver.ts` →
+(`packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts` →
 `Connector.resolveEffectiveLimitWatts`) and must keep winning; the curve only
 lowers demand, never raises it above a profile.
 
@@ -391,17 +391,17 @@ section](../concepts/scenario-format.md#charging-curve-v12).)
 **This is the fan-out item.** It reaches `EVSettings.ts`,
 `MeterValueBuilder.ts`, the `evSettings` block in the
 [scenario format](../concepts/scenario-format.md) — which needs a **schema
-version bump and a changelog entry** — `schema/scenario.schema.json`,
+version bump and a changelog entry** — `packages/core/schema/scenario.schema.json`,
 [state persistence](../concepts/state-persistence.md), the browser EV settings
-UI, and `EvSettingsJson` in `src/cli/exportK6/runtime/types.ts`. Decide up
+UI, and `EvSettingsJson` in `packages/k6-runtime/src/types.ts`. Decide up
 front: **the k6 export ignores the curve in v1** and keeps its flat rate,
 rather than porting the model into the k6 runtime.
 
 (As shipped: the browser EV settings UI landed too —
-`src/components/Settings.tsx`'s "Default EV Settings" panel and the
+`apps/web/src/components/Settings.tsx`'s "Default EV Settings" panel and the
 "Scenario EV Settings" panel (then in `ScenarioEditor.tsx`'s settings
 dialog; since #443 only the web console's scenario editor,
-`src/components/scenario/ScenarioEvSettingsFields.tsx`) both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
+`apps/web/src/components/scenario/ScenarioEvSettingsFields.tsx`) both expose `currentType`, `phases`, `voltageV`, `powerFactor` and an
 editable `chargingCurve` point list, not just the five pre-1.2 fields.
 `powerFactor` shipped as `(0, 1]`, not `[0, 1]`: cos φ = 0 makes the AC
 current derivation infinite, so 0 is invalid per the schema — which warns,
@@ -469,7 +469,7 @@ too low for real use.
 plane staying on the main thread and forwarding commands. The hard parts are
 real and should be scoped before any code: `@socket.io/bun-engine` on the main
 thread only, SQLite access from multiple threads
-(`src/cp/domain/persistence/BunSqliteDatabase.ts` — one writer, or route all
+(`packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts` — one writer, or route all
 writes through the main thread), and keeping the event stream ordered per CP.
 
 **Decide after 5a.** If the ceiling is comfortably above what CI jobs ask for,

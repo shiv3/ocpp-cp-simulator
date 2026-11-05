@@ -1,0 +1,199 @@
+import { Server as SocketIoServer } from "socket.io";
+
+import type { CLIChargePointService } from "../service";
+import {
+  eventEnvelopeSchema,
+  eventToWire,
+  redactSimulatorConfig,
+  registryCpToWire,
+  statusToWire,
+  type SimulatorConfigInput,
+} from "@ocpp-cp-sim/contracts/index";
+import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { FileReloadEvent } from "./FileReloadManager";
+import type { CPRegistry } from "./CPRegistry";
+import type { EventBus, EventEnvelope as BusEventEnvelope } from "./eventBus";
+
+type FullCp = Parameters<typeof registryCpToWire>[0];
+
+export interface RegistryEventBridge {
+  emitReset(): void;
+  emitConfigChanged(config: SimulatorConfigInput | null): void;
+  emitScenarioDefinitionsChanged(
+    cpId: string,
+    connectorId: number | null,
+    definitions: readonly ScenarioDefinition[],
+  ): void;
+  emitFileReloaded(event: FileReloadEvent): void;
+  close(): void;
+}
+
+export function createRegistryEventBridge(
+  io: SocketIoServer,
+  deps: { registry: CPRegistry; bus: EventBus },
+): RegistryEventBridge {
+  const lastSummaryByCp = new Map<string, string>();
+
+  const unsubscribeRegistry = deps.registry.onRegistryMembership((event) => {
+    const cp = cpForWire(event.cpId, event.service);
+    if (event.change === "removed") {
+      lastSummaryByCp.delete(event.cpId);
+    } else {
+      lastSummaryByCp.set(event.cpId, summaryJson(event.service.getStatus()));
+    }
+    emitRegistry(io, event.change, cp);
+  });
+
+  const unsubscribeBus = deps.bus.subscribe("*", (env) => {
+    emitCp(io, env);
+    maybeEmitUpdated(io, deps.registry, lastSummaryByCp, env.cpId);
+  });
+
+  return {
+    emitReset() {
+      lastSummaryByCp.clear();
+      emitRegistry(io, "reset");
+    },
+    emitConfigChanged(config) {
+      emitConfigChanged(io, config);
+    },
+    emitScenarioDefinitionsChanged(cpId, connectorId, definitions) {
+      emitScenarioDefinitionsChanged(io, cpId, connectorId, definitions);
+    },
+    emitFileReloaded(event) {
+      emitFileReloaded(io, event);
+    },
+    close() {
+      unsubscribeBus();
+      unsubscribeRegistry();
+      lastSummaryByCp.clear();
+    },
+  };
+}
+
+function maybeEmitUpdated(
+  io: SocketIoServer,
+  registry: CPRegistry,
+  lastSummaryByCp: Map<string, string>,
+  cpId: string,
+): void {
+  const service = registry.get(cpId);
+  if (!service) {
+    lastSummaryByCp.delete(cpId);
+    return;
+  }
+
+  const next = summaryJson(service.getStatus());
+  if (lastSummaryByCp.get(cpId) === next) return;
+
+  lastSummaryByCp.set(cpId, next);
+  emitRegistry(io, "updated", cpForWire(cpId, service));
+}
+
+function emitCp(io: SocketIoServer, env: BusEventEnvelope): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "cp",
+    cpId: env.cpId,
+    evt: eventToWire(env.evt),
+  });
+  io.to(env.cpId).to("*").emit("event", envelope);
+}
+
+function emitRegistry(
+  io: SocketIoServer,
+  change: "added" | "removed" | "updated" | "reset",
+  cp?: FullCp,
+): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "registry",
+    change,
+    ...(cp ? { cp: registryCpToWire(cp) } : {}),
+  });
+  io.to("registry").to("*").emit("event", envelope);
+}
+
+function emitConfigChanged(
+  io: SocketIoServer,
+  config: SimulatorConfigInput | null,
+): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "config",
+    event: "config-changed",
+    config: config ? redactSimulatorConfig(config) : null,
+  });
+  io.to("config").to("*").emit("event", envelope);
+}
+
+function emitScenarioDefinitionsChanged(
+  io: SocketIoServer,
+  cpId: string,
+  connectorId: number | null,
+  definitions: readonly ScenarioDefinition[],
+): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "scenario-definitions",
+    event: "scenario-definitions-changed",
+    cpId,
+    connectorId,
+    definitions,
+  });
+  io.to("scenario-definitions").to(cpId).to("*").emit("event", envelope);
+}
+
+function emitFileReloaded(io: SocketIoServer, event: FileReloadEvent): void {
+  const envelope = eventEnvelopeSchema.parse({
+    kind: "file-reload",
+    event: "file-reloaded",
+    target: event.target,
+    path: event.path,
+    cpId: event.cpId,
+    connectorId: event.connectorId,
+    scenarioId: event.scenarioId,
+    outcome: event.outcome,
+    error: event.error,
+  });
+  // Delivered to the dedicated scope, to the affected charge point's room, and
+  // to "*": an operator watching one charge point should see its files reload
+  // without having to know the scope exists.
+  io.to("file-reload").to(event.cpId).to("*").emit("event", envelope);
+}
+
+function cpForWire(cpId: string, service: CLIChargePointService): FullCp {
+  const status = service.getStatus();
+  const init = service.getInit();
+  return {
+    id: cpId,
+    status: status.status,
+    config: status.config ?? {
+      wsUrl: init.wsUrl,
+      centralSystemUrl: init.centralSystemUrl,
+      soapCallbackUrl: init.soapCallbackUrl,
+      soapPath: init.soapPath,
+      connectors: init.connectors,
+      vendor: init.vendor,
+      model: init.model,
+      basicAuth: init.basicAuth,
+      ocppVersion: init.ocppVersion,
+      bootNotification: init.bootNotification ?? null,
+      labels: init.labels,
+    },
+  };
+}
+
+function summaryJson(
+  status: ReturnType<CLIChargePointService["getStatus"]>,
+): string {
+  const wire = statusToWire(status);
+  const connectors = wire.connectors
+    .map((connector) => ({
+      id: connector.id,
+      status: connector.status,
+    }))
+    .sort((a, b) => a.id - b.id);
+
+  return JSON.stringify({
+    status: wire.status,
+    connectorCount: connectors.length,
+    connectors,
+  });
+}

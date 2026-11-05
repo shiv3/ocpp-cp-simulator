@@ -27,13 +27,15 @@ jobs:
       - name: Lint
         run: bun run lint
 
-      # #578: the repository is to become a Bun workspace in one pull request
-      # that only moves files. That move is mechanical only while the source
-      # tree already obeys the package dependency rules, so the rules are
-      # executable: scripts/check-package-boundaries.ts maps every file under
-      # src/ to its future package and fails on an import the package may not
-      # have (type-only imports included) or a UI / Node / Bun-only specifier
-      # in a package that must run in both Bun and the browser.
+      # #578: the repository is a Bun workspace (packages/*, apps/*), and the
+      # dependency rules between the packages are executable:
+      # scripts/check-package-boundaries.ts maps every file under packages/ and
+      # apps/ to its package and fails on an import the package may not have
+      # (type-only imports included), on a cross-package import that is not an
+      # @ocpp-cp-sim/<package> specifier, on a package.json whose workspace:*
+      # dependencies differ from what the package imports, or on a UI / Node /
+      # Bun-only specifier in a package that must run in both Bun and the
+      # browser.
       - name: Package boundaries
         run: bun run check:boundaries
 
@@ -43,8 +45,10 @@ jobs:
       # Neither Vite nor Bun type-checks: both strip the types and run, so type
       # errors shipped unnoticed until the code base carried ~380 of them, some
       # of them real bugs (#374). `tsc -b` checks every project the root
-      # tsconfig.json references (web app, CLI / daemon, vite config, bench
-      # scripts); any error fails the build.
+      # tsconfig.json references (each package and app, vite config, bench
+      # scripts); any error fails the build. (Not `--noEmit`: project
+      # references need the referenced projects to emit declarations, which go
+      # to node_modules/.tmp.)
       - name: Typecheck
         run: bun run typecheck
 
@@ -63,9 +67,12 @@ jobs:
       # No CI job used to touch the npm tarball at all — the only checks on it
       # lived in cli-release.yml and ran on the `cli-v*` tag, so a PR that
       # broke packaging stayed green and the breakage surfaced weeks later at
-      # release time. It did: package.json#files lost track of apps/web/src/data,
-      # packages/ocpp/src, packages/trace/src and vendor/, and the published CLI could not run
-      # (#320). Pack it and boot it here, on the pull request.
+      # release time. It did: package.json#files lost track of src/data,
+      # src/ocpp, src/trace and vendor/, and the published CLI could not run
+      # (#320). Pack it and boot it here, on the pull request. (The package
+      # is a single bundle now, but the root package.json also carries the
+      # "workspaces" field; the script checks that bun and npm still install
+      # the packed manifest outside the repository.)
       #
       # Packed with --ignore-scripts, so no vite build and no dist/ — the
       # script skips its web-console stage for exactly that reason and does
@@ -149,14 +156,15 @@ jobs:
   # docker-publish.yml builds the image on pushes to `main` and on tags, not
   # on pull requests, so a change that breaks only the container build is
   # first seen after merge: a referenced tsconfig the `ui` stage did not copy
-  # left v0.7.11 without an image (#302), and the same shape of miss is what
-  # the `COPY src/...` list in the Dockerfile exists to prevent. This job
-  # builds the full image for the host arch on every pull request, starts it
-  # and waits for the health endpoint, so a build-time or boot-time miss
-  # fails here (#578 lists it as a prerequisite of the workspaces move:
-  # the `deps` stage copies only root package.json + bun.lock today). One
-  # arch and no push keep it to a few minutes; the gha cache is shared with
-  # docker-publish.yml, which uses the same cache scope.
+  # left v0.7.11 without an image (#302). This job builds the full image for
+  # the host arch on every pull request, starts it with a charge point and
+  # waits for the health endpoint and for the charge point to bootstrap, so a
+  # build-time or boot-time miss fails here. The runtime image holds only the
+  # CLI bundle, dist/ and the scenario examples (no node_modules), and
+  # creating a charge point is what loads the OCPP validators and schemas
+  # inside the bundle. One arch and no push keep it to a few minutes; the gha
+  # cache is shared with docker-publish.yml, which uses the same cache
+  # scope.
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -180,24 +188,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The daemon comes up empty (no --cp-id), serves the web console and
-      # answers the health path the Dockerfile's HEALTHCHECK polls. Thirty
-      # attempts a second apart, each capped at 2 s, is generous: the
-      # entrypoint execs bun directly and the daemon answers /v1/healthz
-      # within a second or two on the runner. No --rm, so the failure branch
-      # can still read the logs of a container that exited; the step below
-      # removes it either way.
-      - name: Image boots and answers the health path
+      # The daemon comes up with one charge point (the CSMS URL is a closed
+      # port on purpose: the connection fails, which is fine), serves the web
+      # console and answers the health path the Dockerfile's HEALTHCHECK
+      # polls. Thirty attempts a second apart, each capped at 2 s, is
+      # generous: the entrypoint execs bun directly and the daemon answers
+      # /v1/healthz within a second or two on the runner. The charge point
+      # has to have bootstrapped as well: that is what imports the OCPP
+      # validators, so a schema or module the bundle lost shows up as a
+      # missing `Bootstrapped CP` line, not as a healthy empty daemon. No
+      # --rm, so the failure branch can still read the logs of a container
+      # that exited; the step below removes it either way.
+      - name: Image boots, bootstraps a charge point and answers the health path
         run: |
           docker run -d --name ocpp-cp-sim-ci -p 9700:9700 \
-            -e STATE_DB=:memory: ocpp-cp-sim:ci
+            -e STATE_DB=:memory: ocpp-cp-sim:ci \
+            --cp-id ci-smoke --connectors 2 --ws-url ws://127.0.0.1:9/ocpp/
+          healthy=0
           for i in $(seq 1 30); do
-            if curl -fsS --max-time 2 http://127.0.0.1:9700/v1/healthz; then echo; exit 0; fi
+            if curl -fsS --max-time 2 http://127.0.0.1:9700/v1/healthz; then echo; healthy=1; break; fi
             sleep 1
           done
-          echo "daemon did not answer /v1/healthz after 30 attempts"
-          docker logs ocpp-cp-sim-ci
-          exit 1
+          if [ "$healthy" != 1 ]; then
+            echo "daemon did not answer /v1/healthz after 30 attempts"
+            docker logs ocpp-cp-sim-ci
+            exit 1
+          fi
+          if ! docker logs ocpp-cp-sim-ci 2>&1 | grep -q 'Bootstrapped CP "ci-smoke"'; then
+            echo "daemon never bootstrapped the charge point"
+            docker logs ocpp-cp-sim-ci
+            exit 1
+          fi
 
       - name: Stop the container
         if: always()

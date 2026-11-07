@@ -162,4 +162,81 @@ describe("NODE_FORM_REGISTRY", () => {
       expect(data.payload).toBe(saved);
     },
   );
+
+  it("round-trips callResponse nodes of every kind and drops runtime fields (#566)", () => {
+    const forms: NodeFormData[] = [
+      {
+        label: "Answer",
+        kind: "result",
+        payload: { requestId: { $from: "call.payload.requestId" } },
+        skipValidation: true,
+      },
+      {
+        label: "Refuse",
+        kind: "error",
+        errorCode: "NotSupported",
+        errorDescription: "no",
+      },
+      { label: "Silence", kind: "none" },
+    ];
+    for (const formData of forms) {
+      expectFormRoundTrip(ScenarioNodeType.CALL_RESPONSE, formData);
+      expectUnknownFieldsDropped(
+        ScenarioNodeType.CALL_RESPONSE,
+        NODE_FORM_REGISTRY[ScenarioNodeType.CALL_RESPONSE].formToNodeData(
+          formData,
+        ),
+      );
+    }
+  });
+
+  it("round-trips a useBehavior node (#566)", () => {
+    const formData: NodeFormData = { label: "Use", behaviorId: "my-behavior" };
+    expectFormRoundTrip(ScenarioNodeType.USE_BEHAVIOR, formData);
+    expectUnknownFieldsDropped(
+      ScenarioNodeType.USE_BEHAVIOR,
+      NODE_FORM_REGISTRY[ScenarioNodeType.USE_BEHAVIOR].formToNodeData(
+        formData,
+      ),
+    );
+  });
+
+  describe("csmsCallTrigger behavior (#566)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.CSMS_CALL_TRIGGER];
+
+    it("keeps the default observe absent so saved scenarios are unchanged", () => {
+      const legacy = { label: "w", action: "Reset", timeout: 5 };
+      const saved = entry.formToNodeData(
+        entry.nodeDataToForm(legacy as unknown as ScenarioNodeData),
+      );
+      expect(saved).toEqual(legacy);
+      for (const behavior of [undefined, "observe", "junk"]) {
+        const data = entry.formToNodeData({
+          label: "w",
+          action: "Reset",
+          behavior,
+          onBusy: { kind: "none" },
+        });
+        expect(data).not.toHaveProperty("behavior");
+        expect(data).not.toHaveProperty("onBusy");
+      }
+    });
+
+    it("round-trips replace with onBusy", () => {
+      const formData: NodeFormData = {
+        label: "w",
+        action: "Reset",
+        behavior: "replace",
+        onBusy: { kind: "error", errorCode: "GenericError" },
+      };
+      expectFormRoundTrip(ScenarioNodeType.CSMS_CALL_TRIGGER, formData);
+      const bare = entry.formToNodeData({
+        label: "w",
+        action: "Reset",
+        behavior: "replace",
+      });
+      expect(bare).toHaveProperty("behavior", "replace");
+      expect(bare).not.toHaveProperty("onBusy");
+    });
+  });
 });

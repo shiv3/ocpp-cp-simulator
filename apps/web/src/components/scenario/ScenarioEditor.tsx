@@ -68,6 +68,8 @@ import UnlockOutcomeNode from "./nodes/UnlockOutcomeNode";
 import ConfigSetNode from "./nodes/ConfigSetNode";
 import DataTransferNode from "./nodes/DataTransferNode";
 import OcppCallNode from "./nodes/OcppCallNode";
+import CallResponseNode from "./nodes/CallResponseNode";
+import UseBehaviorNode from "./nodes/UseBehaviorNode";
 import ConnectionTriggerNode from "./nodes/ConnectionTriggerNode";
 import { LiveMeterReadingContext } from "./nodes/liveMeterReading";
 
@@ -132,6 +134,8 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.CONFIG_SET]: ConfigSetNode,
   [ScenarioNodeType.DATA_TRANSFER]: DataTransferNode,
   [ScenarioNodeType.OCPP_CALL]: OcppCallNode,
+  [ScenarioNodeType.CALL_RESPONSE]: CallResponseNode,
+  [ScenarioNodeType.USE_BEHAVIOR]: UseBehaviorNode,
   [ScenarioNodeType.CONNECTION_TRIGGER]: ConnectionTriggerNode,
   [ScenarioNodeType.START]: StartScenarioNode,
   [ScenarioNodeType.END]: EndScenarioNode,
@@ -161,6 +165,8 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   [ScenarioNodeType.CONFIG_SET]: "#6b7280",
   [ScenarioNodeType.DATA_TRANSFER]: "#a8a29e",
   [ScenarioNodeType.OCPP_CALL]: "#78716c",
+  [ScenarioNodeType.CALL_RESPONSE]: "#78716c",
+  [ScenarioNodeType.USE_BEHAVIOR]: "#78716c",
   [ScenarioNodeType.CERT_QUIRKS]: "#f59e0b",
 };
 
@@ -801,6 +807,16 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 label="OCPP Call"
                 icon="🧪"
               />
+              <NodePaletteItem
+                type={ScenarioNodeType.CALL_RESPONSE}
+                label="Call Response"
+                icon="↩️"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.USE_BEHAVIOR}
+                label="Use Behavior"
+                icon="🎭"
+              />
             </div>
           </div>
 
@@ -1137,6 +1153,27 @@ function createNodeByType(
           label: "OCPP call",
           action: "Heartbeat",
           payload: {},
+        },
+      };
+    case ScenarioNodeType.CALL_RESPONSE:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Call response",
+          kind: "result",
+          payload: {},
+        },
+      };
+    case ScenarioNodeType.USE_BEHAVIOR:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Use behavior",
+          behaviorId: "",
         },
       };
     case ScenarioNodeType.START:

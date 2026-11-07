@@ -2,24 +2,34 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { GetDiagnosticsHandler } from "../GetDiagnosticsHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 type DiagStatus = "Idle" | "Uploaded" | "UploadFailed" | "Uploading";
 
 function buildContext() {
   const sent: DiagStatus[] = [];
-  const logger = new Logger();
-  const chargePoint = {
-    sendDiagnosticsStatusNotification: (status: DiagStatus) => {
+  const chargePoint = new ChargePoint(
+    "test-cp-diagnostics",
+    DefaultBootNotification,
+    1,
+    "ws://localhost:8080",
+    null,
+    null,
+    null,
+    {},
+    [],
+    "OCPP-1.6J",
+    {},
+  );
+  vi.spyOn(chargePoint, "sendDiagnosticsStatusNotification").mockImplementation(
+    (status) => {
       sent.push(status);
     },
-  };
+  );
   return {
-    ctx: {
-      chargePoint: chargePoint as unknown as ChargePoint,
-      logger,
-    } as HandlerContext,
+    ctx: { chargePoint, logger: new Logger() } as HandlerContext,
     sent,
   };
 }

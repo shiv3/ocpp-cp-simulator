@@ -505,6 +505,10 @@ describe("inbound request validation (#285)", () => {
     connectors: new Map(),
     getConnector: () => undefined,
     status: "Available",
+    // The default behavior of GetDiagnostics lives in the charger engine.
+    engine: {
+      runDefault: () => ({ response: { fileName: "diagnostics.txt" } }),
+    },
   } as unknown as ChargePoint;
 
   // The table from the issue, one mandatory element removed per request.

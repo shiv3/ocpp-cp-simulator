@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { GetLogHandler } from "../GetLogHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 type LogStatus =
@@ -16,16 +17,25 @@ type LogStatus =
 
 function buildContext() {
   const sent: Array<{ status: LogStatus; requestId?: number }> = [];
-  const chargePoint = {
-    id: "CP-LOG-TEST",
-    sendLogStatusNotification: (status: LogStatus, requestId?: number) => {
-      sent.push({ status, requestId });
+  const chargePoint = new ChargePoint(
+    "CP-LOG-TEST",
+    DefaultBootNotification,
+    1,
+    "ws://localhost:8080",
+    null,
+    null,
+    null,
+    {},
+    [],
+    "OCPP-1.6J",
+    {},
+  );
+  vi.spyOn(chargePoint, "sendLogStatusNotification").mockImplementation(
+    (status, requestId) => {
+      sent.push({ status: status as LogStatus, requestId });
     },
-  };
-  const ctx: HandlerContext = {
-    chargePoint: chargePoint as unknown as ChargePoint,
-    logger: new Logger(),
-  };
+  );
+  const ctx: HandlerContext = { chargePoint, logger: new Logger() };
   return { ctx, sent };
 }
 
@@ -57,7 +67,7 @@ describe("GetLogHandler", () => {
     }
   });
 
-  it("emits Uploading then Uploaded carrying requestId, after the CALLRESULT microtask", async () => {
+  it("emits Uploading then Uploaded carrying requestId, after the CALLRESULT", async () => {
     const { ctx, sent } = buildContext();
     const handler = new GetLogHandler();
     const res = handler.handle(
@@ -75,11 +85,30 @@ describe("GetLogHandler", () => {
       res.afterResponseSettled();
       expect(sent).toEqual([{ status: "Uploading", requestId: 42 }]);
 
-      vi.advanceTimersByTime(2000);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(sent).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(sent).toEqual([
         { status: "Uploading", requestId: 42 },
         { status: "Uploaded", requestId: 42 },
       ]);
     }
+  });
+
+  it("stops the sequence when the connection closes before the upload ends", () => {
+    const { ctx, sent } = buildContext();
+    const res = new GetLogHandler().handle(
+      {
+        logType: "SecurityLog",
+        requestId: 3,
+        log: { remoteLocation: "http://x" },
+      },
+      ctx,
+    );
+    if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
+    res.afterResponseSettled();
+    ctx.chargePoint.disconnect();
+    vi.advanceTimersByTime(10_000);
+    expect(sent).toEqual([{ status: "Uploading", requestId: 3 }]);
   });
 });

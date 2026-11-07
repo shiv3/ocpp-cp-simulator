@@ -315,7 +315,16 @@ design left open:
 - **Moved so far** (each with its old code deleted): `default.firmware` (`UpdateFirmware`: the 1.6 status
   train with the one-shot `SimulatedFirmwareUpdateFailure`, the 2.x acknowledgement that stays
   ack-only; a user behavior opts in to a 2.x train) and `default.signedFirmware` (`SignedUpdateFirmware` on
-  1.6: the signed status train carrying `requestId`).
+  1.6: the signed status train carrying `requestId`), `default.diagnostics` (`GetDiagnostics` on 1.6:
+  file name, then `Uploading` and `Uploaded` or `UploadFailed` around a real multipart POST) and
+  `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x ack-only with a
+  file name, a user behavior opts in). The diagnostics behavior imports `infrastructure/file_upload`, the one
+  place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
+  own.
+- **Start of a follow-up.** `after` starts in the turn the response settled, up to its first wait, as the
+  effects it replaced did (`Uploading` still goes out in the turn of the settlement). Its later steps run
+  as promise continuations, so a test that drives them with synchronous fake timers needs the async
+  variant (`advanceTimersByTimeAsync`).
 - **Connection close.** The follow-up (`after`) of an answer ends when the connection closes, as the
   timers of the old firmware simulation did. It also ends when the behavior is unloaded or the station is
   disposed.

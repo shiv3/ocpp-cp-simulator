@@ -472,8 +472,15 @@ export class ChargerEngine {
     ctx: BehaviorContext,
     after: () => Promise<void>,
   ): void {
-    void Promise.resolve()
-      .then(after)
+    // Started in the turn the response settled (as the effects it replaces
+    // were), up to its first wait.
+    let running: Promise<void>;
+    try {
+      running = Promise.resolve(after());
+    } catch (error) {
+      running = Promise.reject(error);
+    }
+    void running
       .catch((error: unknown) => {
         if (error instanceof BehaviorStopped) return;
         this.warn(

@@ -1,6 +1,8 @@
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargerEngine } from "../ChargerEngine";
+import { diagnosticsBehavior } from "./diagnostics";
 import { firmwareBehavior } from "./firmware";
+import { logsBehavior } from "./logs";
 import { signedFirmwareBehavior } from "./signedFirmware";
 
 /**
@@ -16,4 +18,6 @@ export function registerDefaultBehaviors(
 ): void {
   engine.registerDefault(firmwareBehavior(cp));
   engine.registerDefault(signedFirmwareBehavior(cp));
+  engine.registerDefault(diagnosticsBehavior(cp));
+  engine.registerDefault(logsBehavior(cp));
 }

@@ -7,6 +7,8 @@ import { GetLogHandler } from "../handlers/call/GetLogHandler";
 import { UpdateFirmwareHandler } from "../handlers/call/UpdateFirmwareHandler";
 import { SignedUpdateFirmwareHandler } from "../handlers/call/SignedUpdateFirmwareHandler";
 import { Logger } from "../../../shared/Logger";
+import { realClock } from "../../../shared/clock";
+import { ChargerEngine } from "../../../application/engine/ChargerEngine";
 import type { HandlerContext } from "../handlers/MessageHandlerRegistry";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isHandlerOutcome } from "../network-sim/ResponseEffectQueue";
@@ -35,24 +37,38 @@ function buildContext() {
     sendSignedFirmwareStatusNotification: record(
       "sendSignedFirmwareStatusNotification",
     ),
-    // The charger engine runs the default behavior; a stub that records the
-    // call and hands back an effect stands in for it here.
-    engine: {
-      runDefault: (action: string, payload: unknown) => {
-        record("runDefault")(action, payload);
-        return {
-          response: action === "UpdateFirmware" ? {} : { status: "Accepted" },
-          effect: record(`effect:${action}`),
-        };
-      },
+    clock: realClock,
+    logger: new Logger(),
+    ocppVersion: "OCPP-1.6J",
+    configuration: {
+      getString: () => undefined,
+      applyChange: () => "Accepted",
     },
+    // The charger engine runs the default behaviors. The firmware ones are
+    // stubbed (recording the call and handing back an effect); the others
+    // run for real against this mock station.
+    engine: undefined as unknown as ChargerEngine,
     connectors: new Map([
       [1, { id: 1 }],
       [2, { id: 2 }],
     ]),
   };
 
-  const logger = new Logger();
+  const realEngine = new ChargerEngine(chargePoint as unknown as ChargePoint);
+  chargePoint.engine = {
+    runDefault: (action: string, payload: unknown) => {
+      if (action !== "UpdateFirmware" && action !== "SignedUpdateFirmware") {
+        return realEngine.runDefault(action, payload);
+      }
+      record("runDefault")(action, payload);
+      return {
+        response: action === "UpdateFirmware" ? {} : { status: "Accepted" },
+        effect: record(`effect:${action}`),
+      };
+    },
+  } as unknown as ChargerEngine;
+
+  const logger = chargePoint.logger;
 
   const ctx: HandlerContext = {
     chargePoint: chargePoint as unknown as ChargePoint,
@@ -428,7 +444,7 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect sends Uploading, then Uploaded once the upload window elapses", () => {
+    it("effect sends Uploading, then Uploaded once the upload window elapses", async () => {
       vi.useFakeTimers();
       try {
         const { ctx, chargePointCalls } = buildContext();
@@ -452,7 +468,7 @@ describe("responseEffects.handlers", () => {
             ["Uploading", 123],
           ]);
 
-          vi.advanceTimersByTime(2000);
+          await vi.advanceTimersByTimeAsync(2000);
 
           expect(chargePointCalls.sendLogStatusNotification).toEqual([
             ["Uploading", 123],

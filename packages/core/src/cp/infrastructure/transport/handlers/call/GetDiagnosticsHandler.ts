@@ -4,18 +4,13 @@ import type {
   GetDiagnosticsRequestV16,
   GetDiagnosticsResponseV16,
 } from "@ocpp-cp-sim/ocpp/index";
-import { UploadFile } from "../../../file_upload";
-import { LogType } from "../../../../shared/Logger";
+import { defaultBehavior16 } from "./defaultBehavior";
 
 /**
- * §4.4 + §6.7 GetDiagnostics.req: the CALLRESULT returns the upload's
- * target filename, then the CP follows up with a DiagnosticsStatusNotification
- * train — `Uploading` while the POST is in flight, then `Uploaded` /
- * `UploadFailed` on resolution. The actual upload uses
- * `UploadFile(location, file)` which POSTs a multipart form to whatever
- * URL the CSMS supplied (typical scheme: `file://`, `ftp://`, `http://`).
- * Non-HTTP schemes will throw inside `fetch` and we surface that as
- * UploadFailed.
+ * §4.4 + §6.7 GetDiagnostics.req: translation only. The charger engine's
+ * `default.diagnostics` behavior answers with the file name and follows up
+ * with the DiagnosticsStatusNotification train
+ * (`application/engine/behaviors/diagnostics.ts`).
  */
 export class GetDiagnosticsHandler implements CallHandler<
   GetDiagnosticsRequestV16,
@@ -25,50 +20,7 @@ export class GetDiagnosticsHandler implements CallHandler<
     payload: GetDiagnosticsRequestV16,
     context: HandlerContext,
   ): GetDiagnosticsResponseV16 | HandlerOutcome {
-    context.logger.info(
-      `Get diagnostics request received: ${payload.location}`,
-      LogType.DIAGNOSTICS,
-    );
-
-    const logs = context.logger.getLogs().join("\n");
-    const blob = new Blob([logs], { type: "text/plain" });
-    const file = new File([blob], "diagnostics.txt");
-
-    const response = { fileName: "diagnostics.txt" } as const;
-    const outcome: HandlerOutcome = {
-      kind: "handler-outcome",
-      payload: response,
-      afterResponseSettled: () => {
-        // §4.4: status notifications must follow the CALLRESULT, not precede
-        // it. The effect defers Uploading until the response has been
-        // settled on the wire (same pattern as TriggerMessage).
-        context.chargePoint.sendDiagnosticsStatusNotification("Uploading");
-        void (async () => {
-          try {
-            const res = await UploadFile(payload.location, file);
-            if (!res.ok) {
-              context.logger.warn(
-                `Diagnostics upload returned HTTP ${res.status}`,
-                LogType.DIAGNOSTICS,
-              );
-              context.chargePoint.sendDiagnosticsStatusNotification(
-                "UploadFailed",
-              );
-              return;
-            }
-            context.chargePoint.sendDiagnosticsStatusNotification("Uploaded");
-          } catch (err) {
-            context.logger.warn(
-              `Diagnostics upload failed: ${err instanceof Error ? err.message : String(err)}`,
-              LogType.DIAGNOSTICS,
-            );
-            context.chargePoint.sendDiagnosticsStatusNotification(
-              "UploadFailed",
-            );
-          }
-        })();
-      },
-    };
-    return outcome;
+    return defaultBehavior16(context.chargePoint, "GetDiagnostics", payload) as
+      GetDiagnosticsResponseV16 | HandlerOutcome;
   }
 }

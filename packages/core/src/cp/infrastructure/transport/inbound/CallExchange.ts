@@ -36,9 +36,11 @@ export interface AnswerOptions {
   /**
    * Work that follows the answer once the transport settled it; it runs under
    * the rules of the {@link ResponseEffectQueue} (not on a stale connection,
-   * not after a station-initiated close).
+   * not after a station-initiated close). It is told how the response ended:
+   * `written` when the answer reached the wire, anything else when the effect
+   * runs although the answer did not (a failed write, a network close).
    */
-  readonly effect?: () => void;
+  readonly effect?: (outcome: Settlement["outcome"]) => void;
   /** Told once if `effect` will not run. */
   readonly onEffectDropped?: EffectDroppedHandler;
 }

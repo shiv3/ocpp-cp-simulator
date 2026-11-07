@@ -143,7 +143,9 @@ describe("InboundCallGate", () => {
     g.admit(exchangeFor("Reset", rec), { type: "Soft" });
     expect(calls.map((c) => [c.action, c.connectorId])).toEqual([
       ["UnlockConnector", 2],
-      ["TriggerMessage", 3],
+      // The EVSE names the connector (this simulator maps them one to one);
+      // `evse.connectorId` is the index within the EVSE.
+      ["TriggerMessage", 1],
       ["Reset", undefined],
     ]);
   });

@@ -728,6 +728,56 @@ Tests that target code this stage changes: none was deleted or weakened. `method
 tests with hand-written station doubles needed nothing: the transports read the engine through `behaviorTapOf`, which
 passes everything through for a double without an engine.
 
+### Status (review fixes 1): core regressions
+
+An independent review of stages A to E found defects in the engine and in the way it reaches the wire. The
+golden wire test was strengthened first (see [testing strategy](testing-strategy.md#golden-wire-test)): the
+new fixtures were recorded on ca01d302, and the cases that failed on this branch were the regressions.
+Decisions the design left open:
+
+- **Rule 4 is judged against ca01d302.** A default behavior's follow-up binds to the connection when it
+  starts, and only for the firmware trains (see "Connection close" above). One unit test pinned the
+  regression (`GetLogHandler` "stops the sequence when the connection closes before the upload ends"); it now
+  expects the base behavior, and nothing else was deleted.
+- **A cut-off context does nothing.** Once the scope of a context was cancelled (unload, a grace time over, the
+  connection of a CALL's handler), `ctx.send`, the physical verbs, `ctx.raw` and `ctx.notify.*` throw
+  `BehaviorStopped`, which the engine swallows; `ctx.state` of an unloaded behavior is a loose object, not the
+  engine's entry. A handler cut off while its CALL is still open answers InternalError (also after a reload let
+  go of the rule that held it).
+- **`after` needs a delivered answer.** The follow-up a _user_ behavior attached to an answer runs only when the
+  answer was written (`written`); after a failed write, a queue overflow or a network close it is skipped with a
+  warning. A `noResponse` on a CALL that was abandoned runs nothing. The follow-up of the default behaviors
+  `ctx.defaultBehavior` starts keeps the response queue's rules (it ran in those cases before the engine).
+- **Reload keeps the ranking.** A reloaded behavior's rules take the place of the old ones in the ranking
+  (`BehaviorRegistry.ranks` / `register(rule, { rank })`). `onResume` is tracked like `main`: it is stopped by
+  an unload and asked to stop by a reload, and a dormant behavior gets none. Selecting a dormant behavior again
+  under the same owner (`useBehavior` in a loop) replaces its rules, and starts its `main` the first time.
+- **Ids.** A behavior id starting with `default.` is refused at load (the prefix belongs to the built-in
+  behaviors), and so is an id that names a member of every object (`constructor`, `toString`, `__proto__`).
+  Stored state is looked up by own property and copied with `defineProperty`.
+- **`mode: "extend"` needs a default.** An `onCall` entry that extends an action no default behavior answers
+  (`GetConfiguration`, `TriggerMessage`, `GetVariables`, ...) is refused at load, with the action named.
+- **Spelling.** On a 1.6 station the 2.x spelling of a one-to-one pair (`RequestStartTransaction`,
+  `RequestStopTransaction`, `SetVariables`, `GetVariables`) names the 1.6 action in an `onCall` key. The folded
+  pairs (`GetLog`, `UpdateFirmware`, `TriggerMessage`) are distinct messages on 1.6 and are not translated.
+- **Connector of a 2.x CALL.** The gate ranks rules by `evseId`, then `evse.id`, then `connectorId`: this
+  simulator maps an EVSE to a connector one to one.
+- **Hook payloads.** `transactionStarted` is built when it is delivered, so a 2.x transaction carries its
+  UUID; `ctx.connector(id).transactionId` is the UUID on 2.x; `transactionStopped.reason` is the reason on the
+  wire (`stoppedReason` before `stopReason`). `transactionStarted` also fires when a new transaction replaces a
+  closed one that was still attached.
+- **Persistence timing.** State written by an async hook after its last await, and by a `beforeSend`, is
+  persisted when the hook settles / the call returns.
+- **`ctx.state` is `readonly`** in the contract: change its keys, do not assign it.
+- **The simulation clock and random streams** reach the two JSON message handlers (see "Clock and random").
+  `VirtualClock` refuses a non-finite target and a storm of zero-delay timers, runs advances one after the
+  other and clamps an interval to 1 ms; `RealClock` waits delays past 2^31 ms in links; `Rng.int` throws unless
+  `max > min`.
+- **`cp.update`** disposes the discarded instance's engine and detaches its persist listener, so its `main`
+  stops and it no longer writes the `engine_state` row (the row is kept).
+- **Tests changed because they pinned a defect:** `InboundCallGate.test.ts` expected `evse.connectorId` to pick
+  the connector.
+
 ## Verification results
 
 All numbers were measured in the stage D2 container (4 cores, 11 GiB RAM, Linux x86_64, Bun 1.3.14), on

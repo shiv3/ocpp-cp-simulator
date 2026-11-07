@@ -144,7 +144,7 @@ export function reduceChargerState(
         diagnostics: event.diagnostics,
       };
     case "behavior.loaded":
-      return state.behaviors[event.behaviorId]
+      return Object.hasOwn(state.behaviors, event.behaviorId)
         ? state
         : {
             ...state,
@@ -216,6 +216,9 @@ export function parsePersistedEngineState(
   const behaviors: Record<string, Record<string, JsonValue>> = {};
   if (v.behaviors && typeof v.behaviors === "object") {
     for (const [id, data] of Object.entries(v.behaviors)) {
+      // An id that names a member of every object is no behavior's: it could
+      // only have been written by hand, and it must not reach a lookup.
+      if (id in Object.prototype) continue;
       if (data && typeof data === "object" && !Array.isArray(data)) {
         try {
           assertJsonSerializable(data);

@@ -2815,6 +2815,12 @@ export class CLIChargePointService {
       // is stopping: its wait, store listener and in-memory keys go too.
       this._chargePoint.releaseRenewedClientCertificate();
       this._chargePoint.disconnect();
+      // The engine of a discarded instance stops with it: its `main` loops,
+      // hooks and open exchanges would run on beside the replacement, and its
+      // persist listener would keep overwriting the `engine_state` row the
+      // replacement owns now. The row itself stays (an update keeps it).
+      this._chargePoint.engine.onPersist(null);
+      this._chargePoint.engine.dispose();
     }
     this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {

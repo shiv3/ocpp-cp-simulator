@@ -107,11 +107,14 @@ export class ResponseEffectQueue {
    */
   public register(
     gen: GenerationToken,
-    effect: () => void,
+    effect: (outcome: Settlement["outcome"]) => void,
     onDropped?: EffectDroppedHandler,
   ): (s: Settlement) => void {
     return (settlement: Settlement) => {
       const outcome = settlement.outcome;
+      // The effect is told how its response ended, so work that must follow a
+      // delivered answer only can tell (`written`) from one that ran anyway.
+      const run = (): void => effect(outcome);
 
       if (
         outcome === "written" ||
@@ -127,19 +130,19 @@ export class ResponseEffectQueue {
             this.reportDropped(onDropped, "stale");
             return;
           }
-          this.runEffect(effect);
+          this.runEffect(run);
         });
       } else if (outcome === "socket_closed") {
         // Check if this generation has already been finalized
         if (this.isGenerationFinalized(gen.gen)) {
           // Late registration: resolve immediately using latched closeCause
-          this.resolveLateSocketClosedEffect(gen, effect, onDropped);
+          this.resolveLateSocketClosedEffect(gen, run, onDropped);
         } else {
           // Hold the effect until flushAfterCloseFinalization is called
           if (!this.heldEffects.has(gen.gen)) {
             this.heldEffects.set(gen.gen, []);
           }
-          this.heldEffects.get(gen.gen)!.push({ effect, onDropped });
+          this.heldEffects.get(gen.gen)!.push({ effect: run, onDropped });
         }
       } else if (outcome === "disposed") {
         this.deps.log(

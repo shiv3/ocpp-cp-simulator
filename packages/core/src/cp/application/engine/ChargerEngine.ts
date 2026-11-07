@@ -22,6 +22,8 @@ import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { isOcpp2Version, isSoapVersion } from "../../domain/types/OcppVersion";
 import { LogType } from "../../shared/Logger";
 import type { SimClock, TimerHandle } from "../../shared/clock";
+import { csmsActionAliases } from "../../domain/types/csmsActionNames";
+import { ruleKey, ruleOwnerKey } from "../behavior/BehaviorRegistry";
 import type {
   BehaviorCall,
   BehaviorRule,
@@ -38,6 +40,9 @@ import {
 } from "./ChargerState";
 import { registerDefaultBehaviors } from "./behaviors";
 import { cannedResponse, responseProblems } from "./responseValidation";
+
+/** Ids with this prefix belong to the built-in behaviors; none can be loaded. */
+const RESERVED_PREFIX = "default.";
 
 /** Thrown into a behavior's waits when it is unloaded or its connection ends. */
 export class BehaviorStopped extends Error {
@@ -171,6 +176,8 @@ export class ChargerEngine {
   /** Ids of behaviors loaded `dormant`. */
   private readonly dormant = new Set<string>();
   private readonly mainScopes = new Map<string, Scope>();
+  /** The scope of each behavior's `onResume`. */
+  private readonly resumeScopes = new Map<string, Scope>();
   /** The promise of each running `main`, for a reload to wait on. */
   private readonly mainRuns = new Map<string, Promise<void>>();
   /** A reload waiting out the grace time of the old `main`: cancels the wait. */
@@ -188,6 +195,7 @@ export class ChargerEngine {
   /** Event hooks waiting for delivery, oldest first. */
   private readonly hookQueue: Array<{
     name: keyof BehaviorEvents;
+    /** The event, or a function that builds it at delivery. */
     event: unknown;
   }> = [];
   private hookScheduled = false;
@@ -289,10 +297,19 @@ export class ChargerEngine {
 
   /** Replace the `ctx.state` of a loaded behavior in place; false if none. */
   private adoptState(id: string, data: Record<string, JsonValue>): boolean {
-    const target = this._state.behaviors[id];
-    if (!target) return false;
+    if (!Object.hasOwn(this._state.behaviors, id)) return false;
+    const target = this._state.behaviors[id]!;
     for (const key of Object.keys(target)) delete target[key];
-    Object.assign(target, data);
+    // Own properties, not assignments: a stored key named `__proto__` must not
+    // reach the setter.
+    for (const [key, value] of Object.entries(data)) {
+      Object.defineProperty(target, key, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
     return true;
   }
 
@@ -392,10 +409,14 @@ export class ChargerEngine {
     }
     const before = previous.transaction;
     const after = now.transaction;
-    if (!before && after) {
-      this.emitHook(
-        "transactionStarted",
-        this.transactionEvent(connectorId, after),
+    if ((!before || before.stopTime) && after && !after.stopTime) {
+      // Built when the hook is delivered: a 2.x transaction gets its id after
+      // the write that attaches it.
+      this.emitHook("transactionStarted", () =>
+        this.transactionEvent(
+          connectorId,
+          this._state.connectors[connectorId]?.transaction ?? after,
+        ),
       );
     } else if (
       before &&
@@ -413,7 +434,9 @@ export class ChargerEngine {
     connectorId: number,
     tx: NonNullable<ConnectorRecord["transaction"]>,
   ): TransactionEvent {
-    const reason = tx.stopReason ?? tx.stoppedReason;
+    // 2.x names its own reason (`stoppedReason`); `stopReason` is the 1.6 one
+    // the record also carries, and not what the Ended event says.
+    const reason = tx.stoppedReason ?? tx.stopReason;
     return {
       connectorId,
       transactionId: tx.cpTransactionId ?? tx.id,
@@ -503,6 +526,8 @@ export class ChargerEngine {
         for (const scope of [...this.callScopes]) this.endScope(scope);
         for (const scope of this.mainScopes.values()) scope.cancel();
         this.mainScopes.clear();
+        for (const scope of this.resumeScopes.values()) scope.cancel();
+        this.resumeScopes.clear();
         break;
       default:
         break;
@@ -629,6 +654,7 @@ export class ChargerEngine {
           continue;
         } finally {
           this.interceptDepth--;
+          this.touch();
         }
         if (returned === undefined) continue;
         if (isThenable(returned)) {
@@ -716,7 +742,12 @@ export class ChargerEngine {
           this.hookQueue.length = 0;
           return;
         }
-        this.deliverHook(next.name, next.event);
+        this.deliverHook(
+          next.name,
+          typeof next.event === "function"
+            ? (next.event as () => unknown)()
+            : next.event,
+        );
       }
     } finally {
       this.hookDraining = false;
@@ -733,12 +764,17 @@ export class ChargerEngine {
       try {
         const returned = hook.call(behavior.on, event, ctx);
         if (isThenable(returned)) {
-          returned.then(undefined, (error: unknown) => {
-            if (error instanceof BehaviorStopped) return;
-            this.warn(
-              `Behavior ${behavior.id}: ${name} hook failed: ${describe(error)}`,
-            );
-          });
+          // State written after the hook's last await settles with it.
+          returned.then(
+            () => this.touch(),
+            (error: unknown) => {
+              this.touch();
+              if (error instanceof BehaviorStopped) return;
+              this.warn(
+                `Behavior ${behavior.id}: ${name} hook failed: ${describe(error)}`,
+              );
+            },
+          );
         }
       } catch (error) {
         this.warn(
@@ -777,6 +813,23 @@ export class ChargerEngine {
       );
     }
     if (!behavior.id) throw new Error("A behavior needs an id");
+    if (behavior.id.startsWith(RESERVED_PREFIX)) {
+      throw new Error(
+        `Behavior id "${behavior.id}" is reserved: ids starting with "${RESERVED_PREFIX}" belong to the built-in behaviors`,
+      );
+    }
+    if (behavior.id in Object.prototype) {
+      throw new Error(
+        `Behavior id "${behavior.id}" is not allowed: it names a member of every object`,
+      );
+    }
+    for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
+      if (call.mode === "extend" && !this.hasDefaultFor(action)) {
+        throw new Error(
+          `Behavior ${behavior.id}: onCall.${action} uses mode "extend", but ${action} has no default behavior to extend; use mode "replace"`,
+        );
+      }
+    }
     if (behavior.beforeSend && isSoapVersion(this.host.ocppVersion)) {
       throw new Error(
         `Behavior ${behavior.id} uses beforeSend, which needs an OCPP-J station; ${this.host.ocppVersion} is SOAP`,
@@ -852,16 +905,21 @@ export class ChargerEngine {
     if (!dormant) {
       // Register the new rules in place of the old ones; the exchanges the old
       // rules hold open are left to finish (their closures keep the old code).
-      this.host.behaviors.release(
-        (owner) => owner.kind === "code" && owner.behaviorId === next.id,
-      );
+      const owned = (owner: RuleOwner): boolean =>
+        owner.kind === "code" && owner.behaviorId === next.id;
+      // The new rules take the place of the old ones in the ranking: a reload
+      // must not make this behavior win or lose against another one.
+      const ranks = this.host.behaviors.ranks(owned);
+      this.host.behaviors.release(owned);
       try {
-        this.registerRules(next, { kind: "code", behaviorId: next.id });
+        this.registerRules(next, { kind: "code", behaviorId: next.id }, ranks);
       } catch (error) {
-        this.host.behaviors.release(
-          (owner) => owner.kind === "code" && owner.behaviorId === next.id,
+        this.host.behaviors.release(owned);
+        this.registerRules(
+          previous,
+          { kind: "code", behaviorId: next.id },
+          ranks,
         );
-        this.registerRules(previous, { kind: "code", behaviorId: next.id });
         throw error;
       }
     }
@@ -874,6 +932,8 @@ export class ChargerEngine {
     this.mainScopes.delete(next.id);
     const oldRun = this.mainRuns.get(next.id);
     this.mainRuns.delete(next.id);
+    const oldResume = this.resumeScopes.get(next.id);
+    this.resumeScopes.delete(next.id);
     this.pendingMains.get(next.id)?.();
     this.pendingMains.delete(next.id);
 
@@ -890,7 +950,7 @@ export class ChargerEngine {
         this.runDetached(next.id, scope, (ctx) => next.main!(ctx)),
       );
     };
-    const winding = [oldMain, oldHooks?.scope].filter(
+    const winding = [oldMain, oldResume, oldHooks?.scope].filter(
       (scope): scope is Scope => scope !== undefined,
     );
     for (const scope of winding) scope.requestStop();
@@ -931,23 +991,44 @@ export class ChargerEngine {
       throw new Error(`No behavior with id "${id}" is loaded on this station`);
     }
     if (!this.dormant.has(id)) return;
+    // Selecting a behavior again under the same owner (a `useBehavior` node
+    // in a loop) replaces its rules instead of registering them twice.
+    const key = ruleOwnerKey(owner);
+    this.host.behaviors.release((held) => ruleOwnerKey(held) === key);
     this.registerRules(behavior, owner);
+    // `main` of a behavior loaded dormant starts when a scenario first selects it.
+    if (behavior.main && !this.mainScopes.has(id) && !this.disposed) {
+      const scope = new Scope(id, false);
+      this.mainScopes.set(id, scope);
+      this.mainRuns.set(
+        id,
+        this.runDetached(id, scope, (ctx) => behavior.main!(ctx)),
+      );
+    }
   }
 
-  private registerRules(behavior: Behavior, owner: RuleOwner): void {
+  private registerRules(
+    behavior: Behavior,
+    owner: RuleOwner,
+    ranks?: ReadonlyMap<string, number>,
+  ): void {
     const unregister: Array<() => void> = [];
     try {
       for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
+        const rank = ranks?.get(ruleKey(owner, action));
         unregister.push(
-          this.host.behaviors.register({
-            owner,
-            action,
-            ...(call.match ? { match: call.match } : {}),
-            mode: call.mode,
-            ...(call.onBusy ? { onBusy: call.onBusy } : {}),
-            take: (callInfo, exchange) =>
-              this.runCall(behavior, call, callInfo, exchange),
-          } satisfies BehaviorRule),
+          this.host.behaviors.register(
+            {
+              owner,
+              action,
+              ...(call.match ? { match: call.match } : {}),
+              mode: call.mode,
+              ...(call.onBusy ? { onBusy: call.onBusy } : {}),
+              take: (callInfo, exchange) =>
+                this.runCall(behavior, call, callInfo, exchange),
+            } satisfies BehaviorRule,
+            rank === undefined ? undefined : { rank },
+          ),
         );
       }
     } catch (error) {
@@ -968,6 +1049,8 @@ export class ChargerEngine {
     this.pendingMains.delete(id);
     this.mainScopes.get(id)?.cancel();
     this.mainScopes.delete(id);
+    this.resumeScopes.get(id)?.cancel();
+    this.resumeScopes.delete(id);
     for (const scope of [...this.callScopes]) {
       if (scope.behaviorId === id) this.endScope(scope);
     }
@@ -987,9 +1070,10 @@ export class ChargerEngine {
   /** Run `onResume` of every loaded behavior; call it after state was restored. */
   resume(): void {
     for (const behavior of this.loaded.values()) {
-      if (!behavior.onResume) continue;
+      if (!behavior.onResume || this.dormant.has(behavior.id)) continue;
+      this.resumeScopes.get(behavior.id)?.cancel();
       const scope = new Scope(behavior.id, false);
-      this.mainScopes.set(`${behavior.id}#resume`, scope);
+      this.resumeScopes.set(behavior.id, scope);
       this.runDetached(behavior.id, scope, (ctx) => behavior.onResume!(ctx));
     }
   }
@@ -1045,12 +1129,22 @@ export class ChargerEngine {
     const fail = (error: unknown): void => {
       this.touch();
       this.endScope(scope);
-      if (error instanceof BehaviorStopped) return;
-      this.warn(
-        `Behavior ${behavior.id} failed on ${info.action}: ${describe(error)}`,
-      );
+      const stopped = error instanceof BehaviorStopped;
+      if (!stopped) {
+        this.warn(
+          `Behavior ${behavior.id} failed on ${info.action}: ${describe(error)}`,
+        );
+      }
+      // A handler cut off while its CALL is still open (the behavior was
+      // unloaded after a reload had let go of the rule that held the CALL)
+      // answers InternalError, as an unload with the rule in place does.
       if (exchange.state === "open") {
-        exchange.replyError("InternalError", describe(error).slice(0, 255));
+        exchange.replyError(
+          "InternalError",
+          stopped
+            ? `Behavior ${behavior.id} was stopped`
+            : describe(error).slice(0, 255),
+        );
       }
     };
     const finish = (outcome: CallOutcome): void => {
@@ -1091,11 +1185,19 @@ export class ChargerEngine {
       return;
     }
     const afterUser = outcome.after;
-    const effect = (): void => {
+    const effect = (settled?: string): void => {
+      // The follow-up the default behaviors of ctx.defaultBehavior started
+      // keeps the rules of the response queue (as before the engine). The
+      // follow-up of the behavior itself needs its answer on the wire.
       for (const defaultEffect of env.defaultEffects) defaultEffect();
-      if (afterUser) {
+      if (afterUser && (settled === undefined || settled === "written")) {
         this.runAfter(behaviorId, scope, ctx, afterUser);
       } else {
+        if (afterUser) {
+          this.warn(
+            `Behavior ${behaviorId}: the answer to ${info.action} was not delivered (${settled}); its follow-up is skipped`,
+          );
+        }
         this.endScope(scope);
       }
     };
@@ -1106,6 +1208,12 @@ export class ChargerEngine {
       this.endScope(scope);
     };
     if ("noResponse" in outcome) {
+      if (exchange.state !== "open") {
+        // The CALL was abandoned (the connection closed) while the handler
+        // ran: nothing was suppressed, so nothing follows.
+        dropped("the connection closed");
+        return;
+      }
       void exchange.suppress();
       effect();
       return;
@@ -1184,6 +1292,11 @@ export class ChargerEngine {
     return this.defaults.has(action);
   }
 
+  /** Does a default behavior answer `action` or one of its spellings? */
+  private hasDefaultFor(action: string): boolean {
+    return csmsActionAliases(action).some((name) => this.defaults.has(name));
+  }
+
   /**
    * Run the default behavior of `action` for a request that reached the
    * default path. Written for the handlers: the response, and the effect that
@@ -1260,6 +1373,12 @@ export class ChargerEngine {
       }
     };
     const stopped = (): Promise<never> => Promise.reject(new BehaviorStopped());
+    // A context outlives its scope in a closure the behavior kept: once the
+    // scope was cut off (unload, a grace time over, a closed connection for a
+    // CALL's handler) it may no longer act on the station.
+    const live = (): void => {
+      if (scope.cancelled) throw new BehaviorStopped();
+    };
     const connectorSnapshot = (id: number): ConnectorSnapshot | undefined => {
       const connector = host.getConnector(id);
       if (!connector) return undefined;
@@ -1267,7 +1386,9 @@ export class ChargerEngine {
         id: connector.id,
         status: connector.status,
         availability: connector.availability,
-        transactionId: connector.transaction?.id ?? null,
+        transactionId: connector.transaction
+          ? (connector.transaction.cpTransactionId ?? connector.transaction.id)
+          : null,
         idTag: connector.transaction?.tagId ?? null,
       };
     };
@@ -1329,13 +1450,25 @@ export class ChargerEngine {
         return scope.stopping;
       },
       get state(): Record<string, JsonValue> {
-        return (readState().behaviors[behaviorId] ??= {});
+        const all = readState().behaviors;
+        // A context kept past the unload of its behavior must not bring the
+        // entry back (it would be stored again): it gets a loose object.
+        if (
+          scope.cancelled &&
+          !behaviorId.startsWith(RESERVED_PREFIX) &&
+          all[behaviorId] === undefined
+        ) {
+          return {};
+        }
+        return (all[behaviorId] ??= {});
       },
       send: async (action, payload, opts) => {
         touch();
+        live();
         // From inside a beforeSend the CALL waits for its turn, so it goes
         // out after the CALL being intercepted.
         if (this.interceptDepth > 0) await Promise.resolve();
+        live();
         const request = host.sendOcppCall({
           action,
           payload: payload as Record<string, unknown>,
@@ -1358,6 +1491,7 @@ export class ChargerEngine {
       },
       raw: (frame) => {
         needs("raw-frames", "ctx.raw");
+        live();
         host
           .sendRawFrame({ frame })
           .catch((error: unknown) =>
@@ -1368,20 +1502,24 @@ export class ChargerEngine {
       },
       plugIn: (connectorId) => {
         needs("physical", "ctx.plugIn");
+        live();
         host.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
       },
       unplug: (connectorId) => {
         needs("physical", "ctx.unplug");
+        live();
         // The EV side of the cable: a running transaction is stopped or
         // suspended per StopTransactionOnEVSideDisconnect, as for any unplug.
         host.evDisconnected(connectorId);
       },
       authorize: (idTag) => {
         needs("physical", "ctx.authorize");
+        live();
         host.authorize(idTag);
       },
       startCharging: (connectorId, idTag) => {
         needs("physical", "ctx.startCharging");
+        live();
         host
           .startTransaction(host.resolveIdTag(idTag, connectorId), connectorId)
           .catch((error: unknown) =>
@@ -1392,6 +1530,7 @@ export class ChargerEngine {
       },
       stopCharging: (connectorId, reason) => {
         needs("physical", "ctx.stopCharging");
+        live();
         const connector = host.getConnector(connectorId);
         if (connector?.transaction) {
           host.stopTransaction(connector, (reason ?? "Local") as never);
@@ -1399,10 +1538,12 @@ export class ChargerEngine {
       },
       setConnectorStatus: (connectorId, status) => {
         needs("physical", "ctx.setConnectorStatus");
+        live();
         host.updateConnectorStatus(connectorId, status as OCPPStatus);
       },
       notify: {
-        firmwareStatus: (status, opts) =>
+        firmwareStatus: (status, opts) => {
+          live();
           dispatch({
             type: "notified",
             kind: "firmware",
@@ -1410,15 +1551,19 @@ export class ChargerEngine {
             ...(opts?.requestId === undefined
               ? {}
               : { requestId: opts.requestId }),
-          }),
-        signedFirmwareStatus: (status, requestId) =>
+          });
+        },
+        signedFirmwareStatus: (status, requestId) => {
+          live();
           dispatch({
             type: "notified",
             kind: "signedFirmware",
             status,
             requestId,
-          }),
-        logStatus: (status, opts) =>
+          });
+        },
+        logStatus: (status, opts) => {
+          live();
           dispatch({
             type: "notified",
             kind: "log",
@@ -1426,9 +1571,12 @@ export class ChargerEngine {
             ...(opts?.requestId === undefined
               ? {}
               : { requestId: opts.requestId }),
-          }),
-        diagnosticsStatus: (status) =>
-          dispatch({ type: "notified", kind: "diagnostics", status }),
+          });
+        },
+        diagnosticsStatus: (status) => {
+          live();
+          dispatch({ type: "notified", kind: "diagnostics", status });
+        },
       },
       defaultBehavior: (req) => {
         if (!env || env.mode !== "extend") {

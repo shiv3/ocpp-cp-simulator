@@ -87,7 +87,8 @@ describe("beforeSend and resends", () => {
     await charge(run);
     run.cp.stopTransaction(run.cp.getConnector(1)!);
     await run.settle();
-    await new Promise((r) => setTimeout(r, 30));
+    // The retry timer runs on the station's (virtual) clock.
+    await run.advance(1000);
     await run.settle();
     expect(run.callsOf("StopTransaction").length).toBe(2);
     expect(seen).toBe(2);

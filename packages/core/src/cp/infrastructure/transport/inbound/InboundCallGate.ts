@@ -139,10 +139,20 @@ export class InboundCallGate {
 
 function connectorIdOf(payload: unknown): number | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
-  const direct = (payload as { connectorId?: unknown }).connectorId;
-  if (typeof direct === "number") return direct;
-  const evse = (payload as { evse?: { connectorId?: unknown } }).evse;
-  return typeof evse?.connectorId === "number" ? evse.connectorId : undefined;
+  const body = payload as {
+    connectorId?: unknown;
+    evseId?: unknown;
+    evse?: { id?: unknown; connectorId?: unknown };
+  };
+  // This simulator maps an EVSE to a connector one to one, so on 2.x the EVSE
+  // names the connector; `evse.connectorId` and `connectorId` are the index
+  // within the EVSE, and only a CALL that names no EVSE falls back to them.
+  if (typeof body.evseId === "number") return body.evseId;
+  if (typeof body.evse?.id === "number") return body.evse.id;
+  if (typeof body.connectorId === "number") return body.connectorId;
+  return typeof body.evse?.connectorId === "number"
+    ? body.evse.connectorId
+    : undefined;
 }
 
 /** The ports of a 1.6 charge point: one spelling per action. */

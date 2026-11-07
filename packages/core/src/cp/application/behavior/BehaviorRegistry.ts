@@ -1,5 +1,5 @@
 import type { CallAnswer, CallBehavior } from "@ocpp-cp-sim/contracts/behavior";
-import { csmsActionMatches } from "../../domain/types/csmsActionNames";
+import { behaviorActionMatches } from "../../domain/types/csmsActionNames";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 
 /**
@@ -133,6 +133,11 @@ export function ruleOwnerKey(owner: RuleOwner): string {
     : `scenario:${owner.scenarioId}:${owner.connectorId}:${owner.nodeId}`;
 }
 
+/** The identity of a rule: its owner and its action. */
+export function ruleKey(owner: RuleOwner, action: string): string {
+  return `${ruleOwnerKey(owner)}|${action}`;
+}
+
 export class BehaviorRegistry {
   private readonly entries: Entry[] = [];
   private seq = 0;
@@ -147,19 +152,35 @@ export class BehaviorRegistry {
   /**
    * Register a rule. A rule is identified by its owner and action: the same
    * pair twice throws (a provider releases before it registers again).
-   * Returns a function that removes the rule.
+   * Returns a function that removes the rule. `options.rank` is the sequence
+   * number of a rule this one replaces (see {@link ranks}): it takes that
+   * place in the ranking instead of the newest one.
    */
-  register(rule: BehaviorRule): () => void {
-    const key = `${ruleOwnerKey(rule.owner)}|${rule.action}`;
+  register(rule: BehaviorRule, options?: { rank?: number }): () => void {
+    const key = ruleKey(rule.owner, rule.action);
     if (this.entries.some((entry) => entry.key === key)) {
       throw new Error(`A behavior rule is already registered for ${key}`);
     }
-    const entry: Entry = { rule, seq: this.seq++, key, held: null };
+    const entry: Entry = {
+      rule,
+      seq: options?.rank ?? this.seq++,
+      key,
+      held: null,
+    };
     this.entries.push(entry);
     return () => {
       const at = this.entries.indexOf(entry);
       if (at >= 0) this.entries.splice(at, 1);
     };
+  }
+
+  /** The ranking position of every rule whose owner satisfies `owned`, by rule key. */
+  ranks(owned: (owner: RuleOwner) => boolean): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const entry of this.entries) {
+      if (owned(entry.rule.owner)) out.set(entry.key, entry.seq);
+    }
+    return out;
   }
 
   /**
@@ -192,7 +213,9 @@ export class BehaviorRegistry {
     if (this.entries.length === 0) return DEFAULT_RESOLUTION;
     const version = this.options.ocppVersion?.() ?? "OCPP-1.6J";
     const candidates = this.entries.filter(({ rule }) => {
-      if (!csmsActionMatches(rule.action, call.action, version)) return false;
+      if (!behaviorActionMatches(rule.action, call.action, version)) {
+        return false;
+      }
       return (
         rule.match === undefined || deepPartialMatch(rule.match, call.payload)
       );

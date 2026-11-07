@@ -335,8 +335,9 @@ design left open:
 
 - **State so far.** `ChargerState` holds `schema`, the last firmware, signed firmware, log and
   diagnostics status the station reported (`{ status, requestId }`), and `behaviors`, the `ctx.state`
-  of every loaded behavior. Connector status, availability, transactions and reservations move into it
-  with their default behaviors in stage C; until then they stay in `Connector` and the managers.
+  of every loaded behavior. Stage C added `connectors` (see "Status (stage C)"). Transactions and
+  reservations move into it with their default behaviors later; until then they stay in `Connector` and the
+  managers.
   `engine.snapshot()` returns a deep copy after checking it is JSON-serializable.
 - **The queue.** `engine.dispatch(event)` is synchronous: an event dispatched while the queue is idle is
   reduced and acted on before the call returns, so a notification still goes out in the turn that asked
@@ -419,3 +420,38 @@ is used where `setImmediate` is absent) and k6.
 
 QuickJS or any sandbox, remote delivery of code, an external-process plugin protocol, a console UI for
 writing behaviors, and retiring `export-k6`'s separate implementation.
+
+Status (stage C1): connector status, availability and error info are engine state, with one writer.
+Decisions the design left open:
+
+- **State.** `ChargerState.connectors[id]` is a `ConnectorRecord` (`domain/connector/ConnectorRecord.ts`):
+  `status`, `availability`, `scheduledAvailability`, `errorCode`, `errorInfo`, `vendorErrorCode`. The record
+  type and its reducer live in the domain so that `Connector` can use them without importing the engine.
+- **Events.** `connector.added`, `connector.removed` and `connector.write` (a `ConnectorWrite`: `status`,
+  `availability`, `scheduledAvailability`, `errorCode`, `errorInfo`, `vendorErrorCode`, `restore`).
+  `engine.attachConnector(connector)` runs when `ChargePoint` creates a connector; `detachConnector` when it
+  removes one (the connector keeps its last record in a private cell).
+- **Connector writes nest.** The one exception to "runs right after the current event": a `connector.*`
+  event is reduced and acted on at once, even from inside the listeners of an earlier write. Today's code
+  nests exactly so (a `statusChange` listener may call `updateConnectorStatus`), and the order of
+  StatusNotifications on the wire follows that nesting; a deferred write would also break
+  read-after-write. Errors a listener or the outbox throws reach the caller of the write, as before.
+- **Three scopes of a status write** (the wire depends on them): `local` (a bare `connector.status = …`:
+  only the connector's own `statusChange` listeners), `event` (also `ChargePointEvents.connectorStatusChange`;
+  the offline teardown), `full` (also the connection-timeout timer and the StatusNotification;
+  `ChargePoint.updateConnectorStatus`, which now only dispatches). The timer and notification are
+  `ChargePoint.afterConnectorStatus`, called by the engine.
+- **`Connector` is a read view.** Its getters read the record from the engine; its setters (kept so that
+  callers and tests need not change) dispatch a `connector.write`. A connector with no charge point keeps
+  the record in a private cell with the same reducer. Only code under `application/engine/` may use the
+  setters: `scripts/check-single-writer.ts` (in `check:boundaries`) fails on any other non-test write. It is
+  syntactic: the receiver's text must mention "connector". The exemption list is empty.
+- **Transition table.** `ConnectorStateMachine` is deleted. `ALLOWED_CONNECTOR_STATUS_TRANSITIONS` moved to
+  `domain/connector/ConnectorTransitions.ts`; the engine logs a warning for a `full` write outside it
+  (including legitimate flows the table never listed, e.g. Preparing to Finishing on ConnectionTimeOut) and
+  applies the write anyway.
+- **`StateManager`** keeps `StateHistory` and records `connectorStatusChange` and the charge point's own
+  status changes. It no longer has a state machine, `initializeConnector`, `transitionConnectorStatus` or the
+  state snapshots.
+- **Not in C1.** Transactions, persistence of engine state and resume. The connector-runtime snapshot still
+  goes through `restoreRuntimeSnapshot`, which now writes a `restore` event (silent).

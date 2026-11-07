@@ -2323,3 +2323,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | Acceptance tests for #566 (charger engine stage B)
 
 - `acceptance566.bun.test.ts`: a JSON scenario and a code behavior each own an incoming `UpdateFirmware` on 1.6 and 2.0.1, replace it completely and control notification payloads, order and delays; concurrent calls, cancellation and disconnect cleanup; `UnlockConnector` as a second action. [Testing strategy](analyses/testing-strategy.md#behavior-tests).
+
+## [2026-11-07] ingest | Connector status in engine state (charger engine stage C1)
+
+- `ChargerState.connectors` holds status, availability and error info; `Connector` reads and writes it through the engine, `updateConnectorStatus` only dispatches; `check-single-writer.ts` enforces one writer; `ConnectorStateMachine` is deleted and `StateManager` only records history. [Charger engine design](analyses/charger-engine.md), [Overview](overview.md#source-layout-and-package-boundaries).

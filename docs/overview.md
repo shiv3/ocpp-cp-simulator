@@ -104,7 +104,10 @@ The script lists every direct `Date.now()`, argument-less `new Date()`,
 `performance.now()`, `Math.random()`, `crypto.randomUUID()` and global timer
 call that is left, against a shrinking exemption list (`EXEMPTIONS`): it fails
 on a use the list does not allow and on an entry that allows more than the file
-has.
+has. It also runs [`scripts/check-single-writer.ts`](../scripts/check-single-writer.ts):
+only `packages/core/src/cp/application/engine/` may assign a connector's `status`,
+`availability`, `scheduledAvailability`, `currentErrorCode`, `errorInfo` or
+`vendorErrorCode` ([Charger engine design](analyses/charger-engine.md#charger-engine-applicationengine)).
 
 | Package (`@ocpp-cp-sim/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                      |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |

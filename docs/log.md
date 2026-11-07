@@ -2284,3 +2284,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `SeededRng` (the seeded PRNG behind network simulation, the idTag pool, background traffic and supervision URL rotation) moves to `packages/core/src/cp/shared/SeededRng.ts`; the `network-sim` barrel no longer re-exports it. [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) points at the new path.
 - The outbound port `IChargePointMessageHandler` moves to `packages/core/src/cp/domain/transport/`, beside `Outbox`. `getDataTransferHandler()` now returns the domain interface `DataTransferVendorRegistry` (`registerVendor` / `unregisterVendor`) instead of the infrastructure `DataTransferHandler`, and `DataTransferResponder` moves to `domain/types/DataTransfer.ts`. No behaviour change. [GitHub issues](sources/github-issues.md): #572, #574.
+
+## [2026-11-07] fix | OCPP 2.x Reset OnIdle follow-ups (#635)
+
+- Reset OnIdle now checks for running transactions rather than retained stopped transaction objects, rechecks immediately after scheduling, and is reevaluated when a connector is removed. Scoped Immediate resets cancel only the pending reset in their scope; other EVSE resets remain queued. An Inoperative connector stays Unavailable after the accepted reboot. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).

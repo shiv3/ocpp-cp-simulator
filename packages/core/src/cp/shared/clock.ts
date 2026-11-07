@@ -27,6 +27,25 @@ export interface SimClock {
   clearInterval(handle: TimerHandle): void;
 }
 
+/** The longest delay the platform timers honour; above it they fire at once. */
+const MAX_PLATFORM_DELAY_MS = 2_147_483_647;
+
+/** A timeout longer than the platform allows, armed link by link. */
+class ChainedTimer {
+  link: unknown;
+  cancelled = false;
+  private unrefd = false;
+
+  unref(): void {
+    this.unrefd = true;
+    (this.link as { unref?: () => void } | undefined)?.unref?.();
+  }
+
+  get isUnrefd(): boolean {
+    return this.unrefd;
+  }
+}
+
 /**
  * The platform clock. It reads `Date`, `setTimeout` and `setInterval` from the
  * global object at call time, not at load time, so a test that fakes the
@@ -40,15 +59,45 @@ export class RealClock implements SimClock {
   }
 
   setTimeout(fn: () => void, ms: number): TimerHandle {
-    return globalThis.setTimeout(fn, ms) as unknown as TimerHandle;
+    if (!(ms > MAX_PLATFORM_DELAY_MS)) {
+      return globalThis.setTimeout(fn, ms) as unknown as TimerHandle;
+    }
+    // The platform would fire a delay past 2^31-1 ms at once. Wait in links
+    // against the deadline, so `ctx.sleep(30 days)` sleeps for 30 days.
+    const deadline = this.now() + ms;
+    const chain = new ChainedTimer();
+    const arm = (): void => {
+      const left = deadline - this.now();
+      if (left <= 0) {
+        fn();
+        return;
+      }
+      chain.link = globalThis.setTimeout(
+        arm,
+        Math.min(left, MAX_PLATFORM_DELAY_MS),
+      );
+      if (chain.isUnrefd) {
+        (chain.link as { unref?: () => void }).unref?.();
+      }
+    };
+    arm();
+    return chain as unknown as TimerHandle;
   }
 
   clearTimeout(handle: TimerHandle): void {
+    if (handle instanceof ChainedTimer) {
+      handle.cancelled = true;
+      globalThis.clearTimeout(handle.link as number);
+      return;
+    }
     globalThis.clearTimeout(handle as unknown as number);
   }
 
   setInterval(fn: () => void, ms: number): TimerHandle {
-    return globalThis.setInterval(fn, ms) as unknown as TimerHandle;
+    return globalThis.setInterval(
+      fn,
+      Math.min(ms, MAX_PLATFORM_DELAY_MS),
+    ) as unknown as TimerHandle;
   }
 
   clearInterval(handle: TimerHandle): void {
@@ -120,6 +169,9 @@ export function drainMicrotasks(): Promise<void> {
   });
 }
 
+/** Timers one instant may fire, on top of ten per pending timer, before the run is stopped. */
+const ZERO_DELAY_STORM_BASE = 10_000;
+
 interface VirtualTimer {
   time: number;
   readonly owner: string;
@@ -171,6 +223,8 @@ export class VirtualClock implements SimClock {
   private readonly heap: VirtualTimer[] = [];
   private live = 0;
   private firedCount = 0;
+  /** The advance in progress or last queued; the next one waits for it. */
+  private chain: Promise<void> = Promise.resolve();
 
   constructor(options: VirtualClockOptions = {}) {
     this.current = options.start ?? Date.UTC(2030, 0, 1);
@@ -217,24 +271,69 @@ export class VirtualClock implements SimClock {
     this.cancel(handle);
   }
 
-  /** Move time forward by `ms`, firing every timer that falls due. */
+  /**
+   * Move time forward by `ms`, firing every timer that falls due. Advances
+   * run one after the other, in call order: two `advanceBy(100)` made at once
+   * move time by 200, and one made from inside a timer callback runs after
+   * the advance that fired it. `ms` must be a finite number.
+   */
   advanceBy(ms: number): Promise<void> {
-    return this.advanceTo(this.current + ms);
+    return this.serially(() => this.advance(this.current + ms));
   }
 
-  /** Move time to `target` (never backwards), firing every timer due up to it. */
-  async advanceTo(target: number): Promise<void> {
+  /**
+   * Move time to `target` (never backwards), firing every timer due up to it.
+   * `target` must be a finite number; see {@link advanceBy} for the order of
+   * concurrent advances.
+   */
+  advanceTo(target: number): Promise<void> {
+    return this.serially(() => this.advance(target));
+  }
+
+  /** Fire timers until none is left. Throws if `maxTimers` fire first. */
+  runUntilIdle(options: RunUntilIdleOptions = {}): Promise<void> {
+    return this.serially(() => this.drain(options));
+  }
+
+  private serially<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.chain.then(run, run);
+    this.chain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private async advance(target: number): Promise<void> {
+    if (!Number.isFinite(target)) {
+      throw new RangeError(
+        `VirtualClock: cannot advance to ${String(target)}; the target must be a finite number`,
+      );
+    }
     await drainMicrotasks();
+    let atInstant = 0;
+    let instant = this.current;
     for (;;) {
       const next = this.peek();
       if (!next || next.time > target) break;
+      // A timer that re-arms itself with no delay never lets time move: stop
+      // it instead of hanging. A fleet may legitimately put many timers on
+      // one instant, so the allowance grows with the timers pending.
+      if (next.time > instant) {
+        instant = next.time;
+        atInstant = 0;
+      }
+      if (++atInstant > ZERO_DELAY_STORM_BASE + 10 * this.live) {
+        throw new Error(
+          `VirtualClock: more than ${atInstant - 1} timers fired at one instant; a timer re-arms itself with no delay`,
+        );
+      }
       await this.fire(next);
     }
     if (target > this.current) this.current = target;
   }
 
-  /** Fire timers until none is left. Throws if `maxTimers` fire first. */
-  async runUntilIdle(options: RunUntilIdleOptions = {}): Promise<void> {
+  private async drain(options: RunUntilIdleOptions): Promise<void> {
     const limit = options.maxTimers ?? 10_000_000;
     await drainMicrotasks();
     let count = 0;
@@ -274,12 +373,19 @@ export class VirtualClock implements SimClock {
     period: number | undefined,
   ): TimerHandle {
     const delay = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+    // An interval is at least 1 ms, as on the platform; a NaN period is 1 ms.
+    const interval =
+      period === undefined
+        ? undefined
+        : Number.isFinite(period)
+          ? Math.max(1, period)
+          : 1;
     const timer: VirtualTimer = {
       time: this.current + delay,
       owner,
       seq: this.seq++,
       fn,
-      period,
+      period: interval,
       cancelled: false,
     };
     this.live++;

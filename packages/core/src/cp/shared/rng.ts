@@ -12,7 +12,7 @@
 export interface Rng {
   /** Uniform in [0, 1). */
   next(): number;
-  /** Uniform integer in [min, max). */
+  /** Uniform integer in [min, max). Throws a `RangeError` unless `max > min`. */
   int(min: number, max: number): number;
   /** An element of a non-empty array. */
   pick<T>(items: readonly T[]): T;
@@ -23,6 +23,14 @@ export interface Rng {
 export interface RngSource {
   /** The stream `name` of charger `chargerId`; the same stream on every call. */
   stream(chargerId: string, name: string): Rng;
+}
+
+function checkRange(min: number, max: number): void {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !(max > min)) {
+    throw new RangeError(
+      `Rng.int: the range [${String(min)}, ${String(max)}) is empty or not finite`,
+    );
+  }
 }
 
 // cyrb128: a small string hash with 128 bits of state.
@@ -82,6 +90,7 @@ class SeededRng implements Rng {
   }
 
   int(min: number, max: number): number {
+    checkRange(min, max);
     return min + Math.floor(this.next() * (max - min));
   }
 
@@ -109,6 +118,7 @@ class SystemRng implements Rng {
   }
 
   int(min: number, max: number): number {
+    checkRange(min, max);
     return min + Math.floor(Math.random() * (max - min));
   }
 

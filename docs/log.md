@@ -2301,3 +2301,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | Behavior types, BehaviorRegistry and ChargerEngine (charger engine stage B)
 
 - `@ocpp-cp-sim/contracts/behavior` holds the behavior API types; `BehaviorRegistry` now selects between code behaviors and scenario rules (exact connector, oldest registration, `onBusy`, release by owner); `ChargerEngine` and `ChargerState` own the event queue, the `ctx` implementation and the behaviors loaded with `cp.loadBehavior()`. `runBehavior()` drives them on a `VirtualClock`. [Charger engine design](analyses/charger-engine.md#behavior-api-packagescontracts-types-only) records the decisions, [Testing strategy](analyses/testing-strategy.md#behavior-tests) the harness.
+
+## [2026-11-07] ingest | Default behaviors move into the engine (charger engine stage B)
+
+- `application/engine/behaviors/firmware.ts` is the default behavior of `UpdateFirmware` on 1.6 (status train, `SimulatedFirmwareUpdateFailure`) and 2.x (ack-only); the 1.6 handler and the 2.x acknowledgement only translate, `ChargePoint.simulateFirmwareUpdate` is gone. The train now stops when the connection closes through the engine, as the old timers did. [Charger engine design](analyses/charger-engine.md#charger-engine-applicationengine).

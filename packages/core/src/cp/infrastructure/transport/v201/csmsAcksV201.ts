@@ -14,7 +14,6 @@ import type {
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
   UpdateFirmwareResponseV201,
-  UpdateFirmwareRequestV201,
   GetLogRequestV201,
 } from "@ocpp-cp-sim/ocpp/index";
 import type {
@@ -191,25 +190,26 @@ export const handleUnpublishFirmwareAckV201 = (() => ({
 })) satisfies V201AckHandler;
 
 /**
- * L01 UpdateFirmware.req (#345). Accepted, and the `requestId` is remembered
- * so the FirmwareStatusNotification reports that follow can name this
- * lifecycle without the caller repeating it. Nothing is downloaded: unlike the
- * 1.6 handler, the 2.0.1 station does not walk the status machine on its own —
- * the reports are driven over the control plane (`firmware_status_notification`),
- * which is what a conformance suite needs to say the right things in the
- * right order. Before, this answered `Rejected`, so no lifecycle could start.
+ * L01 UpdateFirmware.req (#345): translation only. The `default.firmware`
+ * behavior of the charger engine accepts the request and remembers its
+ * `requestId`; nothing is downloaded, and the reports that follow are driven
+ * over the control plane (`firmware_status_notification`). A user behavior
+ * can opt in to a status train.
  */
 export const handleUpdateFirmwareAckV201 = ((
   payload: unknown,
   ctx?: V201InboundContext,
 ): V201HandlerResult => {
-  const request = payload as UpdateFirmwareRequestV201;
-  if (ctx && typeof request?.requestId === "number") {
-    ctx.chargePoint.noteFirmwareRequest(request.requestId);
+  if (!ctx) {
+    return {
+      response: { status: "Accepted" } satisfies UpdateFirmwareResponseV201,
+    };
   }
-  return {
-    response: { status: "Accepted" } satisfies UpdateFirmwareResponseV201,
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "UpdateFirmware",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 }) satisfies V201AckHandler;
 
 export const handleGetLocalListVersionAckV201 = ((

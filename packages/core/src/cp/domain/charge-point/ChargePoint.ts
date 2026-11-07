@@ -2147,86 +2147,6 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
-  /** Set while a simulated firmware update is in flight, so a second
-   *  UpdateFirmware.req (the spec allows the CSMS to re-issue) doesn't
-   *  fork a parallel status train. */
-  private _firmwareUpdateInFlight = false;
-  /** Reference kept so disconnect/dispose can cancel a pending start
-   *  before `retrieveDate`. */
-  private _firmwareUpdateTimers: TimerHandle[] = [];
-
-  /**
-   * §4.5 / §6.19: schedule a simulated firmware update progression. After
-   * `retrieveDate` is reached, fires FirmwareStatusNotification.req in
-   * sequence — Downloading → Downloaded → Installing → Installed — with
-   * `intervalMs` between each transition.
-   *
-   * Real charge points download a binary, install it, and reboot. The
-   * simulator just walks the status machine so the CSMS observes the
-   * full happy-path by default. Failure paths are also reachable via
-   * TriggerMessage(FirmwareStatusNotification) for tests that want to
-   * drive them manually, or pre-armed for certification scenarios (cert
-   * 1.6 Firmware TC_044_2 / TC_044_3) via the `SimulatedFirmwareUpdateFailure`
-   * custom config key (set through a scenario `configSet` node before
-   * UpdateFirmware fires): `"DownloadFailed"` diverts at the Downloaded
-   * step, `"InstallationFailed"` diverts at the Installed step. The armed
-   * value is one-shot: it is consumed and cleared on the next UpdateFirmware,
-   * so a second UpdateFirmware without re-arming will run the happy path.
-   */
-  simulateFirmwareUpdate(retrieveDate: Date, intervalMs = 2000): void {
-    if (this._firmwareUpdateInFlight) {
-      this._logger.warn(
-        "UpdateFirmware: a previous simulated update is still in flight; ignoring",
-        LogType.OCPP,
-      );
-      return;
-    }
-    this._firmwareUpdateInFlight = true;
-
-    const startDelay = Math.max(0, retrieveDate.getTime() - this._clock.now());
-    const sequence: readonly FirmwareStatus[] = [
-      "Downloading",
-      "Downloaded",
-      "Installing",
-      "Installed",
-    ];
-    const failureMode = this._configuration.getString(
-      "SimulatedFirmwareUpdateFailure",
-    );
-    // One-shot: clear the armed failure immediately so the next UpdateFirmware
-    // runs the happy path unless re-armed.
-    if (failureMode) {
-      this._configuration.applyChange("SimulatedFirmwareUpdateFailure", "");
-    }
-
-    const fireStep = (index: number) => {
-      if (index >= sequence.length) {
-        this._firmwareUpdateInFlight = false;
-        this._firmwareUpdateTimers = [];
-        return;
-      }
-      const step = sequence[index];
-      if (step === "Downloaded" && failureMode === "DownloadFailed") {
-        this.sendFirmwareStatusNotification("DownloadFailed");
-        this._firmwareUpdateInFlight = false;
-        this._firmwareUpdateTimers = [];
-        return;
-      }
-      if (step === "Installed" && failureMode === "InstallationFailed") {
-        this.sendFirmwareStatusNotification("InstallationFailed");
-        this._firmwareUpdateInFlight = false;
-        this._firmwareUpdateTimers = [];
-        return;
-      }
-      this.sendFirmwareStatusNotification(step);
-      const t = this._clock.setTimeout(() => fireStep(index + 1), intervalMs);
-      this._firmwareUpdateTimers.push(t);
-    };
-
-    const startTimer = this._clock.setTimeout(() => fireStep(0), startDelay);
-    this._firmwareUpdateTimers.push(startTimer);
-  }
-
   /** Mirrors `_firmwareUpdateInFlight` / `_firmwareUpdateTimers` for the
    *  signed variant — kept separate so a SignedUpdateFirmware.req can't
    *  collide with (or be blocked by) a plain UpdateFirmware.req train. */
@@ -2503,11 +2423,8 @@ export class ChargePoint {
     // connection is down (§3.5.3, LocalAuthorizeOffline), so a connection
     // loss must not empty it (#534). Only dispose() drops it.
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
-    // Cancel any pending firmware-update simulation so its status train
-    // doesn't keep firing against a dead WebSocket.
-    this._firmwareUpdateTimers.forEach((t) => this._clock.clearTimeout(t));
-    this._firmwareUpdateTimers = [];
-    this._firmwareUpdateInFlight = false;
+    // The engine stops the follow-up of every answer (the firmware status
+    // train among them) so it doesn't keep firing against a dead WebSocket.
     // ...and the signed variant's simulation too.
     this._signedFirmwareUpdateTimers.forEach((t) =>
       this._clock.clearTimeout(t),

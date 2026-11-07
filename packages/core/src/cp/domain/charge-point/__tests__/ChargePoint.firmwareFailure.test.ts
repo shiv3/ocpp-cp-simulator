@@ -5,7 +5,7 @@ import { DefaultBootNotification } from "../../types/OcppTypes";
 
 /**
  * Cert 1.6 Firmware TC_044_2 (Download Failed) / TC_044_3 (Installation
- * Failed): `simulateFirmwareUpdate` normally walks the happy-path status
+ * Failed): the `default.firmware` behavior normally walks the happy-path status
  * train (Downloading → Downloaded → Installing → Installed). Setting the
  * `SimulatedFirmwareUpdateFailure` custom config key — the same seam a
  * scenario's `configSet` node writes through before UpdateFirmware fires —
@@ -13,6 +13,15 @@ import { DefaultBootNotification } from "../../types/OcppTypes";
  */
 
 const bootNotification: BootNotification = DefaultBootNotification;
+
+/** An UpdateFirmware.req whose retrieveDate has passed, answered and settled. */
+function startUpdateFirmware(cp: ChargePoint): void {
+  const { effect } = cp.engine.runDefault("UpdateFirmware", {
+    location: "http://fw.example/f.bin",
+    retrieveDate: new Date(Date.now() - 1000).toISOString(),
+  });
+  effect?.();
+}
 
 function buildChargePoint(): ChargePoint {
   return new ChargePoint(
@@ -30,7 +39,7 @@ function buildChargePoint(): ChargePoint {
   );
 }
 
-describe("ChargePoint.simulateFirmwareUpdate — pre-armed failure outcomes", () => {
+describe("default.firmware — pre-armed failure outcomes", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -51,7 +60,7 @@ describe("ChargePoint.simulateFirmwareUpdate — pre-armed failure outcomes", ()
       sent.push(s);
     });
 
-    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    startUpdateFirmware(cp);
     await vi.advanceTimersByTimeAsync(0);
     expect(sent).toEqual(["Downloading"]);
 
@@ -76,7 +85,7 @@ describe("ChargePoint.simulateFirmwareUpdate — pre-armed failure outcomes", ()
       sent.push(s);
     });
 
-    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    startUpdateFirmware(cp);
     await vi.advanceTimersByTimeAsync(0);
     expect(sent).toEqual(["Downloading"]);
 
@@ -102,7 +111,7 @@ describe("ChargePoint.simulateFirmwareUpdate — pre-armed failure outcomes", ()
       sent.push(s);
     });
 
-    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    startUpdateFirmware(cp);
     await vi.advanceTimersByTimeAsync(6000);
     expect(sent).toEqual([
       "Downloading",
@@ -124,14 +133,14 @@ describe("ChargePoint.simulateFirmwareUpdate — pre-armed failure outcomes", ()
       "SimulatedFirmwareUpdateFailure",
       "DownloadFailed",
     );
-    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    startUpdateFirmware(cp);
     await vi.advanceTimersByTimeAsync(4000);
     expect(sent).toEqual(["Downloading", "DownloadFailed"]);
 
     // Second UpdateFirmware: no re-arm — arm was auto-cleared by the first call
     // Should now complete the happy path
     sent.length = 0;
-    cp.simulateFirmwareUpdate(new Date(Date.now() - 1000));
+    startUpdateFirmware(cp);
     await vi.advanceTimersByTimeAsync(8000);
     expect(sent).toEqual([
       "Downloading",

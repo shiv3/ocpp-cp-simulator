@@ -4,17 +4,12 @@ import type {
   UpdateFirmwareRequestV16,
   UpdateFirmwareResponseV16,
 } from "@ocpp-cp-sim/ocpp/index";
-import { LogType } from "../../../../shared/Logger";
+import { defaultBehavior16 } from "./defaultBehavior";
 
 /**
- * §6.19 UpdateFirmware.req — the spec's response is an empty payload; the
- * actual update progresses asynchronously via FirmwareStatusNotification.
- * Because the simulator has no real binary to fetch, we just schedule the
- * status sequence (Downloading → Downloaded → Installing → Installed) so
- * the CSMS sees the same external observable as a real CP would on the
- * happy path. `retries` / `retryInterval` are logged but not exercised —
- * the simulated flow never fails. CSMS can still test the failure paths
- * via TriggerMessage(FirmwareStatusNotification).
+ * §6.19 UpdateFirmware.req: translation only. The charger engine's
+ * `default.firmware` behavior answers and walks the status train
+ * (`application/engine/behaviors/firmware.ts`).
  */
 export class UpdateFirmwareHandler implements CallHandler<
   UpdateFirmwareRequestV16,
@@ -24,35 +19,7 @@ export class UpdateFirmwareHandler implements CallHandler<
     payload: UpdateFirmwareRequestV16,
     context: HandlerContext,
   ): UpdateFirmwareResponseV16 | HandlerOutcome {
-    const retrieveDate = new Date(payload.retrieveDate);
-    if (Number.isNaN(retrieveDate.getTime())) {
-      context.logger.warn(
-        `UpdateFirmware: invalid retrieveDate '${payload.retrieveDate}', starting immediately`,
-        LogType.OCPP,
-      );
-    }
-    context.logger.info(
-      `UpdateFirmware received: location=${payload.location}, retrieveDate=${payload.retrieveDate}` +
-        (payload.retries != null ? `, retries=${payload.retries}` : "") +
-        (payload.retryInterval != null
-          ? `, retryInterval=${payload.retryInterval}s`
-          : ""),
-      LogType.OCPP,
-    );
-
-    // §6.19: response is empty and sent immediately. The effect defers the
-    // simulated download train so the CALLRESULT goes out first — same
-    // pattern as TriggerMessage handler.
-    const startAt = Number.isNaN(retrieveDate.getTime())
-      ? new Date()
-      : retrieveDate;
-    const response = {} as const;
-    const outcome: HandlerOutcome = {
-      kind: "handler-outcome",
-      payload: response,
-      afterResponseSettled: () =>
-        context.chargePoint.simulateFirmwareUpdate(startAt),
-    };
-    return outcome;
+    return defaultBehavior16(context.chargePoint, "UpdateFirmware", payload) as
+      UpdateFirmwareResponseV16 | HandlerOutcome;
   }
 }

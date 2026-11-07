@@ -26,6 +26,7 @@ import {
   type ChargerState,
   type EngineEvent,
 } from "./ChargerState";
+import { registerDefaultBehaviors } from "./behaviors";
 import { responseProblems } from "./responseValidation";
 
 /** Thrown into a behavior's waits when it is unloaded or its connection ends. */
@@ -125,7 +126,9 @@ export class ChargerEngine {
     { behavior: Behavior; call: CallBehavior }
   >();
 
-  constructor(private readonly host: ChargePoint) {}
+  constructor(private readonly host: ChargePoint) {
+    registerDefaultBehaviors(this, host);
+  }
 
   /** The current state. Do not mutate it. */
   get state(): ChargerState {

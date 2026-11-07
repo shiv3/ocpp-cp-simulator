@@ -35,7 +35,17 @@ function buildContext() {
     sendSignedFirmwareStatusNotification: record(
       "sendSignedFirmwareStatusNotification",
     ),
-    simulateFirmwareUpdate: record("simulateFirmwareUpdate"),
+    // The charger engine runs the default behavior; a stub that records the
+    // call and hands back an effect stands in for it here.
+    engine: {
+      runDefault: (action: string, payload: unknown) => {
+        record("runDefault")(action, payload);
+        return {
+          response: action === "UpdateFirmware" ? {} : { status: "Accepted" },
+          effect: record(`effect:${action}`),
+        };
+      },
+    },
     simulateSignedFirmwareUpdate: record("simulateSignedFirmwareUpdate"),
     connectors: new Map([
       [1, { id: 1 }],
@@ -474,7 +484,7 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect calls simulateFirmwareUpdate on settlement", () => {
+    it("effect starts the default behavior's follow-up on settlement", () => {
       const { ctx, chargePointCalls } = buildContext();
       const handler = new UpdateFirmwareHandler();
       const now = new Date();
@@ -488,9 +498,10 @@ describe("responseEffects.handlers", () => {
 
       expect(isHandlerOutcome(result)).toBe(true);
       if (isHandlerOutcome(result)) {
-        expect(chargePointCalls.simulateFirmwareUpdate).toBeUndefined();
+        expect(chargePointCalls["effect:UpdateFirmware"]).toBeUndefined();
+        expect(chargePointCalls.runDefault[0][0]).toBe("UpdateFirmware");
         result.afterResponseSettled();
-        expect(chargePointCalls.simulateFirmwareUpdate).toHaveLength(1);
+        expect(chargePointCalls["effect:UpdateFirmware"]).toHaveLength(1);
       }
     });
   });

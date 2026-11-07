@@ -312,6 +312,9 @@ design left open:
   existing `ResponseEffectQueue`. A default answers synchronously (#456). The ones moved so far reach
   `ChargePoint` internals through the station they were built for, because the connector and
   transaction paths are not engine-owned yet.
+- **Moved so far** (each with its old code deleted): `default.firmware` (`UpdateFirmware`: the 1.6 status
+  train with the one-shot `SimulatedFirmwareUpdateFailure`, the 2.x acknowledgement that stays
+  ack-only; a user behavior opts in to a 2.x train).
 - **Connection close.** The follow-up (`after`) of an answer ends when the connection closes, as the
   timers of the old firmware simulation did. It also ends when the behavior is unloaded or the station is
   disposed.

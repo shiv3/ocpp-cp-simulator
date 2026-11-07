@@ -1006,6 +1006,9 @@ export class CLIChargePointService {
         tlsKeyPath: this._init.tlsKeyPath,
         bootNotification: this._init.bootNotification ?? null,
         labels: this._init.labels,
+        ...(this._init.behaviors === undefined
+          ? {}
+          : { behaviors: [...this._init.behaviors] }),
       },
     };
   }
@@ -3185,6 +3188,47 @@ export class CLIChargePointService {
    */
   loadBehaviors(behaviors: readonly Behavior[]): void {
     for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
+  }
+
+  /** Ids of the code behaviors loaded on this charge point, in load order. */
+  behaviorIds(): string[] {
+    return [...this._chargePoint.engine.behaviorIds];
+  }
+
+  /**
+   * Make `wanted` the set of code behaviors running here (a run-time
+   * selection): the ones loaded and not wanted are unloaded, the wanted ones
+   * not loaded yet are loaded after those already running. `selection` is
+   * what is recorded as the charge point's `behaviors` (`undefined`: all).
+   */
+  setBehaviors(
+    wanted: readonly Behavior[],
+    selection: readonly string[] | undefined,
+  ): void {
+    const engine = this._chargePoint.engine;
+    const keep = new Set(wanted.map((b) => b.id));
+    const have = new Set(engine.behaviorIds);
+    // Check first, so a behavior this station cannot run changes nothing.
+    for (const behavior of wanted) {
+      if (!have.has(behavior.id)) engine.assertLoadable(behavior);
+    }
+    for (const id of [...have]) {
+      if (!keep.has(id)) this._chargePoint.unloadBehavior(id);
+    }
+    for (const behavior of wanted) {
+      if (!have.has(behavior.id)) this._chargePoint.loadBehavior(behavior);
+    }
+    this._init = {
+      ...this._init,
+      ...(selection === undefined
+        ? { behaviors: undefined }
+        : { behaviors: [...selection] }),
+    };
+  }
+
+  /** Put a new version of a loaded behavior in its place (a reload). */
+  replaceBehavior(behavior: Behavior): void {
+    this._chargePoint.engine.replaceBehavior(behavior);
   }
 
   /**

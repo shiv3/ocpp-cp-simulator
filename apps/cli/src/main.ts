@@ -37,8 +37,7 @@ import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
 import { runAnalyze } from "./analyze/runAnalyze";
 import { behaviorFlagProblem } from "./behavior/flags";
 import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
-import { loadBehaviorFiles } from "./behavior/loadBehaviorFile";
+import { BehaviorLibrary } from "./behavior/BehaviorLibrary";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
 import {
@@ -227,6 +226,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let allEvents = false;
   let unsafeRemote = false;
   const behaviorFiles: string[] = [];
+  const useBehaviors: string[] = [];
+  let watchBehaviors = false;
   let allowBehaviorCode = false;
   let serveStatic: string | null = null;
   // --web-console: enabled flag + optional explicit port. When the port is
@@ -460,6 +461,19 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--allow-behavior-code":
         allowBehaviorCode = true;
+        break;
+      case "--use-behavior":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --use-behavior requires a behavior id\n",
+          );
+          process.exit(1);
+        }
+        useBehaviors.push(next);
+        i++;
+        break;
+      case "--watch-behaviors":
+        watchBehaviors = true;
         break;
       case "--cors-origin":
         if (!next || next.startsWith("--")) {
@@ -1037,15 +1051,32 @@ export function parseArgs(argv: string[]): CLIOptions {
     behaviorFiles,
     allowBehaviorCode,
     unsafeRemote,
+    useBehaviors,
+    watchBehaviors,
   });
   if (behaviorProblem) {
     process.stderr.write(`${behaviorProblem}\n`);
     process.exit(1);
   }
-  if (isClientMode && (behaviorFiles.length > 0 || allowBehaviorCode)) {
+  if (
+    isClientMode &&
+    (behaviorFiles.length > 0 ||
+      allowBehaviorCode ||
+      useBehaviors.length > 0 ||
+      watchBehaviors)
+  ) {
     process.stderr.write(
-      "Error: --behavior and --allow-behavior-code apply to a running charge " +
-        "point, not to --send / --stop / --events\n",
+      "Error: --behavior, --allow-behavior-code, --use-behavior and " +
+        "--watch-behaviors apply to a running charge point, not to " +
+        "--send / --stop / --events\n",
+    );
+    process.exit(1);
+  }
+  if (useBehaviors.length > 0 && !cpId) {
+    // Same reasoning as --label: without a cpId nothing is bootstrapped, so
+    // the selection would have no charge point to land on.
+    process.stderr.write(
+      "Error: --use-behavior requires --cp-id (it selects the behaviors of the bootstrapped charge points)\n",
     );
     process.exit(1);
   }
@@ -1157,6 +1188,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     unsafeRemote,
     behaviorFiles,
     allowBehaviorCode,
+    useBehaviors,
+    watchBehaviors,
     corsOrigins,
     trustForwardedHeaders,
     serveStatic,
@@ -1320,6 +1353,16 @@ Options:
                            process's full authority; see docs/entities/cli.md.
   --allow-behavior-code    A daemon's explicit opt-in to --behavior. Refused
                            together with --unsafe-remote.
+  --use-behavior <id>      Run only the loaded behavior with this id on the
+                           charge points started from --cp-id (repeatable;
+                           default: every --behavior). Charge points created
+                           later pick theirs with the "behaviors" parameter
+                           or cp.behaviors.set; ids only, never code.
+  --watch-behaviors        Reload a --behavior file when it (or a file in its
+                           directory) changes: new calls use the new code,
+                           exchanges in flight finish on the old one, ctx.state
+                           stays. A file that does not build keeps the old
+                           version. Daemon: also the behavior.reload method.
   --cors-origin <origin>   Restrict CORS to this origin (repeatable). Pass "*"
                            for open CORS. Default: open on a loopback bind;
                            same-origin-only when bound to a non-loopback host
@@ -1548,6 +1591,9 @@ export function buildBootstrap(
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...((options.useBehaviors?.length ?? 0) > 0
+      ? { behaviors: [...options.useBehaviors!] }
+      : {}),
     tls: options.tls,
     tlsCaPath: options.tlsCaPath,
     tlsCertPath: options.tlsCertPath,
@@ -1558,10 +1604,13 @@ export function buildBootstrap(
 
 async function loadBehavesOrExit(
   files: readonly string[],
-): Promise<Behavior[]> {
-  if (files.length === 0) return [];
+  useBehaviors: readonly string[] = [],
+): Promise<BehaviorLibrary> {
+  if (files.length === 0) return BehaviorLibrary.of([]);
   try {
-    return await loadBehaviorFiles(files);
+    const library = await BehaviorLibrary.fromFiles(files);
+    library.check(useBehaviors);
+    return library;
   } catch (err) {
     process.stderr.write(
       `Error: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -1573,7 +1622,7 @@ async function loadBehavesOrExit(
 function createStandaloneChargePointRuntime(
   options: CLIOptions,
   database: Database | null,
-  behaviors: readonly Behavior[] = [],
+  behaviors: BehaviorLibrary = BehaviorLibrary.of([]),
 ): SingleCpRuntimeTarget {
   const bootstrap = buildBootstrap(options);
   if (!bootstrap) {
@@ -1598,7 +1647,13 @@ function createStandaloneChargePointRuntime(
     connectorSettingsRepository,
   });
   const standalone = CLIChargePointService.fromOptions(options, database);
-  standalone.loadBehaviors(behaviors);
+  standalone.loadBehaviors(
+    behaviors.select(
+      (options.useBehaviors?.length ?? 0) > 0
+        ? options.useBehaviors
+        : undefined,
+    ),
+  );
   const eventSource = registry.registerExisting(standalone);
 
   return {
@@ -1724,9 +1779,13 @@ async function main(): Promise<void> {
     options.webConsolePort != null;
 
   if (isServerMode) {
-    const behaviors = await loadBehavesOrExit(options.behaviorFiles);
+    const behaviors = await loadBehavesOrExit(
+      options.behaviorFiles,
+      options.useBehaviors,
+    );
     await startServer({
       behaviors,
+      watchBehaviors: options.watchBehaviors,
       allowBehaviorCode: options.allowBehaviorCode,
       httpPort: options.httpPort,
       httpHost: options.httpHost,
@@ -1769,7 +1828,11 @@ async function main(): Promise<void> {
   if (options.stateDb) {
     replDatabase = BunSqliteDatabase.open(options.stateDb);
   }
-  const behaviors = await loadBehavesOrExit(options.behaviorFiles);
+  const behaviors = await loadBehavesOrExit(
+    options.behaviorFiles,
+    options.useBehaviors,
+  );
+  if (options.watchBehaviors) behaviors.watch();
   const service = createStandaloneChargePointRuntime(
     options,
     replDatabase,

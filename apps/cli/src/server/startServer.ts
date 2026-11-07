@@ -10,6 +10,7 @@ import {
 } from "@ocpp-cp-sim/contracts/labels";
 import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+import { BehaviorLibrary } from "../behavior/BehaviorLibrary";
 import { CPRegistry } from "./CPRegistry";
 import { NetworkSimManager } from "./NetworkSimManager";
 import { EventBus } from "./eventBus";
@@ -135,7 +136,9 @@ export interface ServerOptions {
    * process's authority, so the daemon refuses it unless
    * {@link allowBehaviorCode} is set (`--allow-behavior-code`).
    */
-  readonly behaviors?: readonly Behavior[];
+  readonly behaviors?: BehaviorLibrary | readonly Behavior[];
+  /** `--watch-behaviors`: reload a behavior file when it changes. */
+  readonly watchBehaviors?: boolean;
   readonly allowBehaviorCode?: boolean;
   readonly autoConnect: boolean;
   readonly startupScenario: {
@@ -207,7 +210,11 @@ export async function startServer(
     inputOpts.startupScenario,
   );
   if (startupConflict) throw new Error(startupConflict);
-  if ((inputOpts.behaviors?.length ?? 0) > 0 && !inputOpts.allowBehaviorCode) {
+  const behaviorCount =
+    inputOpts.behaviors instanceof BehaviorLibrary
+      ? inputOpts.behaviors.size
+      : (inputOpts.behaviors?.length ?? 0);
+  if (behaviorCount > 0 && !inputOpts.allowBehaviorCode) {
     throw new Error(
       "Behavior code is loaded only with allowBehaviorCode (--allow-behavior-code)",
     );
@@ -313,6 +320,13 @@ export async function startServer(
     },
     connectorSettingsRepository,
   );
+  // --watch-behaviors: the registry's library re-reads the files given at
+  // start when one changes; the registry applies the new version to every
+  // charge point running it.
+  const stopBehaviorWatch =
+    opts.watchBehaviors && registry.library.size > 0
+      ? registry.library.watch()
+      : () => undefined;
   // Create network simulation manager and wire it to the registry BEFORE
   // restoring CPs so they get their config attached before connect().
   const networkSimManager = new NetworkSimManager(database, {
@@ -507,6 +521,7 @@ export async function startServer(
     pidPath: opts.pidPath,
     registry,
     onShutdownStart: () => {
+      stopBehaviorWatch();
       fileReload?.close();
       void socketIo.close();
       // Sync kill, so the agent is gone before process.exit() below.
@@ -715,6 +730,7 @@ export async function startServer(
     httpPort: boundHttpPort,
     soapCallbackPort: soapCallbackServer?.port ?? null,
     stop() {
+      stopBehaviorWatch();
       fileReload?.close();
       void socketIo.close();
       soapTunnel?.close();

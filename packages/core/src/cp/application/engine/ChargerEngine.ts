@@ -76,7 +76,10 @@ export interface DefaultResult {
  * has one that also ends when the connection does.
  */
 class Scope {
+  /** `ctx.stopping`: the owner asked the work to wind down. */
   stopping = false;
+  /** Waits reject: the work is cut off. A scope can be stopping a while before. */
+  cancelled = false;
   private readonly cancels = new Map<TimerHandle, () => void>();
 
   constructor(
@@ -92,8 +95,14 @@ class Scope {
     this.cancels.delete(handle);
   }
 
+  /** Ask the work to finish (`ctx.stopping` turns true); its waits keep working. */
+  requestStop(): void {
+    this.stopping = true;
+  }
+
   cancel(): void {
     this.stopping = true;
+    this.cancelled = true;
     for (const cancel of [...this.cancels.values()]) cancel();
     this.cancels.clear();
   }
@@ -150,6 +159,10 @@ export class ChargerEngine {
   /** Ids of behaviors loaded `dormant`. */
   private readonly dormant = new Set<string>();
   private readonly mainScopes = new Map<string, Scope>();
+  /** The promise of each running `main`, for a reload to wait on. */
+  private readonly mainRuns = new Map<string, Promise<void>>();
+  /** A reload waiting out the grace time of the old `main`: cancels the wait. */
+  private readonly pendingMains = new Map<string, () => void>();
   private readonly callScopes = new Set<Scope>();
   private readonly defaults = new Map<
     string,
@@ -473,6 +486,8 @@ export class ChargerEngine {
         this.hooked = false;
         this.hookQueue.length = 0;
         for (const id of [...this.hookContexts.keys()]) this.endHookContext(id);
+        for (const cancel of this.pendingMains.values()) cancel();
+        this.pendingMains.clear();
         for (const scope of [...this.callScopes]) this.endScope(scope);
         for (const scope of this.mainScopes.values()) scope.cancel();
         this.mainScopes.clear();
@@ -742,21 +757,14 @@ export class ChargerEngine {
 
   // ---- code behaviors -----------------------------------------------------
 
-  /**
-   * Load a behavior: check its `requires`, register the rule of every
-   * `onCall` entry, and start `main`. Throws on a duplicate id or a capability
-   * this station cannot meet; nothing is registered then.
-   */
-  loadBehavior(behavior: Behavior, options: LoadBehaviorOptions = {}): void {
+  /** Throws if this station cannot run `behavior`. */
+  assertLoadable(behavior: Behavior): void {
     if (behavior.api !== 1) {
       throw new Error(
         `Behavior ${behavior.id}: unsupported api ${String(behavior.api)}`,
       );
     }
     if (!behavior.id) throw new Error("A behavior needs an id");
-    if (this.loaded.has(behavior.id)) {
-      throw new Error(`Behavior ${behavior.id} is already loaded`);
-    }
     if (behavior.beforeSend && isSoapVersion(this.host.ocppVersion)) {
       throw new Error(
         `Behavior ${behavior.id} uses beforeSend, which needs an OCPP-J station; ${this.host.ocppVersion} is SOAP`,
@@ -769,6 +777,18 @@ export class ChargerEngine {
           `Behavior ${behavior.id} requires ${capability}: ${problem}`,
         );
       }
+    }
+  }
+
+  /**
+   * Load a behavior: check its `requires`, register the rule of every
+   * `onCall` entry, and start `main`. Throws on a duplicate id or a capability
+   * this station cannot meet; nothing is registered then.
+   */
+  loadBehavior(behavior: Behavior, options: LoadBehaviorOptions = {}): void {
+    this.assertLoadable(behavior);
+    if (this.loaded.has(behavior.id)) {
+      throw new Error(`Behavior ${behavior.id} is already loaded`);
     }
     if (!options.dormant) {
       this.registerRules(behavior, { kind: "code", behaviorId: behavior.id });
@@ -785,8 +805,105 @@ export class ChargerEngine {
     if (behavior.main && !options.dormant) {
       const scope = new Scope(behavior.id, false);
       this.mainScopes.set(behavior.id, scope);
-      this.runDetached(behavior.id, scope, (ctx) => behavior.main!(ctx));
+      this.mainRuns.set(
+        behavior.id,
+        this.runDetached(behavior.id, scope, (ctx) => behavior.main!(ctx)),
+      );
     }
+  }
+
+  /** How long a running `main` gets to finish once a reload asked it to stop. */
+  static readonly RELOAD_GRACE_MS = 5_000;
+
+  /**
+   * Replace a loaded behavior with a new version of the same id (a reload).
+   * It is atomic: a version the station cannot take (`requires`, `beforeSend`
+   * on SOAP, a rule that cannot be registered) throws, and the old one keeps
+   * running untouched.
+   *
+   * Exchanges in flight finish on the old code; a CALL that arrives after this
+   * returns, a hook event and a `beforeSend` use the new one. `ctx.state`
+   * survives. A running `main` sees `ctx.stopping` and gets
+   * {@link ChargerEngine.RELOAD_GRACE_MS} on the station's clock to return,
+   * after which its waits are cut off; the new `main` starts when the old one
+   * has returned or the grace time is over, whichever is first.
+   */
+  replaceBehavior(next: Behavior): void {
+    const previous = this.loaded.get(next.id);
+    if (!previous) {
+      throw new Error(
+        `No behavior with id "${next.id}" is loaded on this station`,
+      );
+    }
+    this.assertLoadable(next);
+    const dormant = this.dormant.has(next.id);
+    if (!dormant) {
+      // Register the new rules in place of the old ones; the exchanges the old
+      // rules hold open are left to finish (their closures keep the old code).
+      this.host.behaviors.release(
+        (owner) => owner.kind === "code" && owner.behaviorId === next.id,
+      );
+      try {
+        this.registerRules(next, { kind: "code", behaviorId: next.id });
+      } catch (error) {
+        this.host.behaviors.release(
+          (owner) => owner.kind === "code" && owner.behaviorId === next.id,
+        );
+        this.registerRules(previous, { kind: "code", behaviorId: next.id });
+        throw error;
+      }
+    }
+    this.loaded.set(next.id, next);
+    this.refreshHooked();
+    // The hooks of the old version wind down like its main.
+    const oldHooks = this.hookContexts.get(next.id);
+    this.hookContexts.delete(next.id);
+    const oldMain = this.mainScopes.get(next.id);
+    this.mainScopes.delete(next.id);
+    const oldRun = this.mainRuns.get(next.id);
+    this.mainRuns.delete(next.id);
+    this.pendingMains.get(next.id)?.();
+    this.pendingMains.delete(next.id);
+
+    let startedNew = false;
+    const startNew = (): void => {
+      if (startedNew) return;
+      startedNew = true;
+      if (dormant || !next.main || this.disposed) return;
+      if (this.loaded.get(next.id) !== next) return;
+      const scope = new Scope(next.id, false);
+      this.mainScopes.set(next.id, scope);
+      this.mainRuns.set(
+        next.id,
+        this.runDetached(next.id, scope, (ctx) => next.main!(ctx)),
+      );
+    };
+    const winding = [oldMain, oldHooks?.scope].filter(
+      (scope): scope is Scope => scope !== undefined,
+    );
+    for (const scope of winding) scope.requestStop();
+    if (winding.length === 0) {
+      startNew();
+    } else {
+      const clock = this.host.clock;
+      const endGrace = (): void => {
+        clock.clearTimeout(timer);
+        this.pendingMains.delete(next.id);
+        for (const scope of winding) scope.cancel();
+        startNew();
+      };
+      const timer = clock.setTimeout(endGrace, ChargerEngine.RELOAD_GRACE_MS);
+      // Unload, dispose or another reload before the grace time is over: cut
+      // the old work off now, and the new main (if not started) never starts.
+      this.pendingMains.set(next.id, () => {
+        clock.clearTimeout(timer);
+        for (const scope of winding) scope.cancel();
+        startedNew = true;
+      });
+      if (oldRun) void oldRun.then(startNew);
+      else startNew();
+    }
+    this.dispatch({ type: "behavior.loaded", behaviorId: next.id });
   }
 
   /**
@@ -835,6 +952,8 @@ export class ChargerEngine {
     this.dormant.delete(id);
     this.refreshHooked();
     this.endHookContext(id);
+    this.pendingMains.get(id)?.();
+    this.pendingMains.delete(id);
     this.mainScopes.get(id)?.cancel();
     this.mainScopes.delete(id);
     for (const scope of [...this.callScopes]) {
@@ -883,9 +1002,9 @@ export class ChargerEngine {
     behaviorId: string,
     scope: Scope,
     run: (ctx: BehaviorContext) => Promise<void>,
-  ): void {
+  ): Promise<void> {
     const ctx = this.makeContext(behaviorId, scope);
-    void Promise.resolve()
+    return Promise.resolve()
       .then(() => run(ctx))
       .catch((error: unknown) => {
         if (error instanceof BehaviorStopped) return;
@@ -1135,7 +1254,7 @@ export class ChargerEngine {
       now: () => clock.now(),
       sleep: (ms: number): Promise<void> => {
         touch();
-        if (scope.stopping) return stopped();
+        if (scope.cancelled) return stopped();
         return new Promise<void>((resolve, reject) => {
           const handle = clock.setTimeout(() => {
             scope.untrack(handle);
@@ -1149,7 +1268,7 @@ export class ChargerEngine {
       },
       until: <T>(promise: Promise<T>, opts: { ms: number }): Promise<T> => {
         touch();
-        if (scope.stopping) return stopped();
+        if (scope.cancelled) return stopped();
         return new Promise<T>((resolve, reject) => {
           const handle = clock.setTimeout(() => {
             scope.untrack(handle);

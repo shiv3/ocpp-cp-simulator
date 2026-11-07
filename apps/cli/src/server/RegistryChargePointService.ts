@@ -1072,6 +1072,7 @@ function toInitOptions(
     // #446: no `existing` fallback here — `CPRegistry.update` is the one place
     // that keeps the current labels when an update omits them.
     labels: params.labels,
+    ...(params.behaviors === undefined ? {} : { behaviors: params.behaviors }),
   };
 }
 
@@ -1130,6 +1131,9 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           tlsKeyPath: status.config.tlsKeyPath,
           bootNotification: status.config.bootNotification,
           labels: status.config.labels,
+          ...(status.config.behaviors === undefined
+            ? {}
+            : { behaviors: status.config.behaviors }),
         }
       : undefined,
   };

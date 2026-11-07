@@ -18,6 +18,7 @@ import {
 } from "../soapPath";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "@ocpp-cp-sim/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-sim/contracts/labels";
+import { behaviorIdsSchema } from "@ocpp-cp-sim/contracts/methods";
 import { appVersion } from "../appVersion";
 import { MAX_ID_TAGS, readIdTagsFile } from "./idTagFile";
 
@@ -1037,6 +1038,16 @@ export function parseCreateBody(
     : undefined;
   // #446. Absent stays absent so `cp.update` keeps the current labels; a
   // given map (`{}` included) replaces them.
+  let behaviors: string[] | undefined;
+  if (body.behaviors !== undefined) {
+    // Ids only. A string that is not a loaded id fails later, in the
+    // registry, with the loaded ids named; it is never read as code or a path.
+    const parsed = behaviorIdsSchema.safeParse(body.behaviors);
+    if (!parsed.success) {
+      throw new Error("behaviors must be an array of behavior ids");
+    }
+    behaviors = parsed.data;
+  }
   let labels: ChargePointInitOptions["labels"];
   if (body.labels !== undefined) {
     const parsed = labelsSchema.safeParse(body.labels);
@@ -1071,5 +1082,6 @@ export function parseCreateBody(
     tlsKeyPath,
     ...(bootNotification ? { bootNotification } : {}),
     ...(labels !== undefined ? { labels } : {}),
+    ...(behaviors !== undefined ? { behaviors } : {}),
   };
 }

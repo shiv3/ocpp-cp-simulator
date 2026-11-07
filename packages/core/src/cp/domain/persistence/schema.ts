@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 23;
+export const SCHEMA_VERSION = 24;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -179,6 +179,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- Operator labels as a JSON object of string values (#446), e.g.
   -- {"site":"oberkirch-01","env":"lab"}. NULL when the charge point has none.
   labels         TEXT,
+  -- Ids of the loaded behaviors (--behavior) this charge point runs, a JSON
+  -- array of strings. NULL: every loaded behavior (the default).
+  behaviors      TEXT,
   -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
   -- TransactionEvent(Updated); NULL (a row older than the column) is off.
   tx_updated_meter_values INTEGER
@@ -725,6 +728,16 @@ export function runMigrations(db: Database): void {
   // and behavior `ctx.state`), `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
   // Additive: a database of an earlier version loads with no row, which reads
   // as the initial state.
+
+  // v23 → v24: `charge_points.behaviors`, the ids of the loaded behaviors a
+  // charge point runs. NULL (every row of an older database) means all of
+  // them, which is what ran before. Guarded like the v16 column.
+  if (stored < 24) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("behaviors")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN behaviors TEXT");
+    }
+  }
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

@@ -84,7 +84,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(46);
+    expect(EXPLICIT_METHODS).toHaveLength(49);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -332,5 +332,74 @@ describe("cp.bulk (#470)", () => {
         failed: [{ cpId: "B", reason: "Connection timeout" }],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("behavior assignment", () => {
+  it.each(["cp.create", "cp.update"] as const)(
+    "%s takes behavior ids",
+    (method) => {
+      const parsed = METHODS[method].params.parse({
+        cpId: "CP",
+        wsUrl: "ws://h",
+        behaviors: ["a", "b"],
+      });
+      expect(parsed.behaviors).toEqual(["a", "b"]);
+      expect(
+        METHODS[method].params.safeParse({
+          cpId: "CP",
+          wsUrl: "ws://h",
+          behaviors: [""],
+        }).success,
+      ).toBe(false);
+      expect(
+        METHODS[method].params.safeParse({
+          cpId: "CP",
+          wsUrl: "ws://h",
+          behaviors: "export default {}",
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it("cp.create_many and blueprints take them", () => {
+    expect(
+      METHODS["cp.create_many"].params.safeParse({
+        wsUrl: "ws://h",
+        count: 2,
+        behaviors: ["a"],
+      }).success,
+    ).toBe(true);
+    expect(
+      METHODS["blueprint.save"].params.safeParse({
+        blueprint: { id: "b", name: "b", params: { behaviors: ["a"] } },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("cp.behaviors.set takes ids or null and nothing else", () => {
+    const schema = METHODS["cp.behaviors.set"].params;
+    expect(schema.safeParse({ cpId: "C", behaviors: ["a"] }).success).toBe(
+      true,
+    );
+    expect(schema.safeParse({ cpId: "C", behaviors: [] }).success).toBe(true);
+    expect(schema.safeParse({ cpId: "C", behaviors: null }).success).toBe(true);
+    expect(schema.safeParse({ cpId: "C" }).success).toBe(false);
+    expect(
+      schema.safeParse({ cpId: "C", behaviors: [], source: "x" }).success,
+    ).toBe(false);
+  });
+
+  it("behavior.reload and behavior.list take no parameters", () => {
+    expect(METHODS["behavior.reload"].params.safeParse({}).success).toBe(true);
+    for (const method of ["behavior.reload", "behavior.list"] as const) {
+      expect(
+        METHODS[method].params.safeParse({ file: "/tmp/x.ts" }).success,
+      ).toBe(false);
+      expect(
+        METHODS[method].params.safeParse({ source: "export default {}" })
+          .success,
+      ).toBe(false);
+    }
   });
 });

@@ -262,6 +262,17 @@ const LOADABLE_SCENARIO_OBJ = () =>
   );
 
 /**
+ * Which of the loaded behaviors a charge point runs (`--behavior` loads code
+ * into a library at start; a charge point selects from it by id). Ids are data:
+ * nothing here, and no other method, accepts behavior source or a path. An
+ * unknown id is refused with the loaded ids named. Absent means every loaded
+ * behavior (today's behavior); `[]` means none.
+ */
+export const behaviorIdsSchema = ARRAY_1000(STR_256.min(1)).describe(
+  "Ids of the loaded behaviors (--behavior) this charge point runs; absent: every loaded behavior, []: none. Ids only, never code: an unknown id is an error naming the loaded ids. On cp.update an omitted list keeps the current selection",
+);
+
+/**
  * Every field `cp.create` / `cp.update` accept, described in place.
  *
  * The descriptions are here rather than at a call site because the MCP
@@ -388,6 +399,7 @@ const cpParamsBaseSchema = z.object({
   // #446. On cp.update an omitted map keeps the current labels and a given one
   // replaces it whole; cp.labels.set changes them without rebuilding the CP.
   labels: labelsSchema.optional(),
+  behaviors: behaviorIdsSchema.optional(),
 });
 
 const scenarioTemplateInfoSchema = z.object({
@@ -514,6 +526,59 @@ export const cpLabelsSetParamsSchema = z.object({
   cpId: NON_EMPTY_STR.describe("Charge point identifier"),
   labels: labelsSchema.describe(
     "The complete new label map; {} removes every label",
+  ),
+});
+
+/**
+ * `cp.behaviors.set`: change which loaded behaviors a charge point runs, in
+ * place (no rebuild, the connection stays). `null` goes back to "every loaded
+ * behavior". Only ids; see {@link behaviorIdsSchema}.
+ */
+export const cpBehaviorsSetParamsSchema = z
+  .object({
+    cpId: NON_EMPTY_STR.describe("Charge point identifier"),
+    behaviors: behaviorIdsSchema
+      .nullable()
+      .describe(
+        "The behavior ids to run; [] runs none, null runs every loaded behavior",
+      ),
+  })
+  .strict();
+
+/** The library `--behavior` loaded: ids and where each came from. */
+export const behaviorListResultSchema = z.object({
+  behaviors: ARRAY_1000(
+    z.object({
+      id: STR_256,
+      /** The file it was loaded from, as given on the command line. */
+      file: STR_64K.nullable(),
+    }),
+  ),
+  /** Whether `--watch-behaviors` is on. */
+  watching: z.boolean(),
+});
+
+/**
+ * `behavior.reload` takes no parameters on purpose: it re-reads the files
+ * given on the command line and nothing else, so no path and no code can come
+ * from the caller.
+ */
+export const behaviorReloadParamsSchema = z.object({}).strict();
+
+export const behaviorReloadResultSchema = z.object({
+  files: ARRAY_1000(
+    z.object({
+      file: STR_64K,
+      ids: ARRAY_1000(STR_256),
+      ok: z.boolean(),
+      /** The bundle equals the one in use: nothing was replaced. */
+      unchanged: z.boolean(),
+      error: STR_64K.optional(),
+      /** Charge points now running the new version. */
+      applied: z.number().int().min(0),
+      /** Charge points that kept the old version, with the reason. */
+      failures: ARRAY_1000(STR_64K),
+    }),
   ),
 });
 
@@ -1155,6 +1220,22 @@ export const METHODS = {
     params: cpLabelsSetParamsSchema,
     result: z.object({ cpId: STR_64K }),
   },
+  "cp.behaviors.set": {
+    params: cpBehaviorsSetParamsSchema,
+    result: z.object({
+      cpId: STR_64K,
+      /** The ids the charge point runs now. */
+      behaviors: ARRAY_1000(STR_256),
+    }),
+  },
+  "behavior.list": {
+    params: z.object({}).strict(),
+    result: behaviorListResultSchema,
+  },
+  "behavior.reload": {
+    params: behaviorReloadParamsSchema,
+    result: behaviorReloadResultSchema,
+  },
   // #470: partial success is the result, like `cp.create_many`: every
   // selected id is in `matched`, then in exactly one of the other two.
   "cp.bulk": { params: cpBulkParamsSchema, result: cpBulkResultSchema },
@@ -1336,6 +1417,9 @@ export const EXPLICIT_METHODS = [
   "cp.update",
   "cp.delete",
   "cp.labels.set",
+  "cp.behaviors.set",
+  "behavior.list",
+  "behavior.reload",
   "cp.bulk",
   "logs.get",
   "logs.clear",

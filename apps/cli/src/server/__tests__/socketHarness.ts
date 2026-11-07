@@ -9,6 +9,7 @@ import {
 
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
+import type { BehaviorLibrary } from "../../behavior/BehaviorLibrary";
 import { CPRegistry } from "../CPRegistry";
 import { FileReloadManager } from "../FileReloadManager";
 import { FileWatcher, type WatchFactory } from "../FileWatcher";
@@ -37,6 +38,8 @@ export interface TestServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms?: boolean;
+  /** Behaviors loaded as `--behavior` would (the library charge points select from). */
+  readonly behaviors?: BehaviorLibrary;
   /**
    * Run this test daemon as if it had been started with `--watch` (#314).
    * `debounceMs` is exposed so a test does not have to sleep for the
@@ -81,6 +84,7 @@ export async function startTestServer(
   const database = options.database ?? null;
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms ?? false,
+    ...(options.behaviors ? { behaviors: options.behaviors } : {}),
   });
   const configRepository = createSocketConfigRepository(database);
   // #495: the registry's, as in `startServer`.

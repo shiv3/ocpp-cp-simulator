@@ -28,6 +28,13 @@ export interface CLIOptions {
   readonly behaviorFiles: readonly string[];
   /** `--allow-behavior-code`: the daemon's explicit opt-in to run it. */
   readonly allowBehaviorCode: boolean;
+  /**
+   * `--use-behavior <id>`, repeatable: the ids of the loaded behaviors the
+   * charge points this process bootstraps run. Empty: all of them.
+   */
+  readonly useBehaviors?: readonly string[];
+  /** `--watch-behaviors`: reload a behavior file when it changes. */
+  readonly watchBehaviors?: boolean;
   readonly wsUrl: string;
   readonly cpId: string | null;
   /**
@@ -288,6 +295,12 @@ export interface ChargePointInitOptions {
    * them, which is why `cp.labels.set` can replace them without a rebuild.
    */
   readonly labels?: Labels;
+  /**
+   * Ids of the loaded behaviors (`--behavior`) this charge point runs. Absent:
+   * every loaded behavior. Ids only; the code was loaded from a local file at
+   * start.
+   */
+  readonly behaviors?: readonly string[];
 }
 
 export interface JsonCommand {
@@ -383,5 +396,6 @@ export interface ChargePointStatus {
       readonly imsi?: string;
     } | null;
     readonly labels?: Labels;
+    readonly behaviors?: readonly string[];
   };
 }

@@ -282,6 +282,13 @@ export class LocalChargePointService implements ChargePointService {
    * the user picked, never from the network. The bundle is a Blob (or its
    * text); it is imported through a blob URL, which is revoked afterwards.
    * Behaviors are not persisted: reload the page and load them again.
+   *
+   * Calling it again with a bundle whose behavior id is already loaded on
+   * that charge point replaces that behavior (a reload), under the engine's
+   * rules: new CALLs use the new code, exchanges in flight finish on the old
+   * one, `ctx.state` stays, a running `main` is asked to stop and gets a grace
+   * time before the new `main` starts. A version the station cannot take
+   * leaves everything as it was.
    */
   async loadBehaviorBundle(
     id: string,
@@ -298,17 +305,25 @@ export class LocalChargePointService implements ChargePointService {
     try {
       const mod: unknown = await import(/* @vite-ignore */ url);
       const behaviors = behaviorsOfModule("behavior bundle", mod);
-      const loaded: string[] = [];
+      const running = new Set(cp.engine.behaviorIds);
+      // Check every behavior before changing anything.
+      for (const behavior of behaviors) {
+        if (running.has(behavior.id)) cp.engine.assertLoadable(behavior);
+      }
+      const added: string[] = [];
       try {
         for (const behavior of behaviors) {
-          cp.loadBehavior(behavior);
-          loaded.push(behavior.id);
+          if (running.has(behavior.id)) cp.engine.replaceBehavior(behavior);
+          else {
+            cp.loadBehavior(behavior);
+            added.push(behavior.id);
+          }
         }
       } catch (error) {
-        for (const behaviorId of loaded) cp.unloadBehavior(behaviorId);
+        for (const behaviorId of added) cp.unloadBehavior(behaviorId);
         throw error;
       }
-      return loaded;
+      return behaviors.map((behavior) => behavior.id);
     } finally {
       URL.revokeObjectURL(url);
     }

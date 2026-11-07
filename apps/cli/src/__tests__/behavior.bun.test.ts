@@ -41,6 +41,21 @@ describe("behaviorFlagProblem", () => {
     );
     expect(behaviorFlagProblem(base)).toBeNull();
   });
+  test("--use-behavior and --watch-behaviors need a --behavior file", () => {
+    expect(
+      behaviorFlagProblem({ ...base, behaviorFiles: [], useBehaviors: ["a"] }),
+    ).toMatch(/--use-behavior/);
+    expect(
+      behaviorFlagProblem({ ...base, behaviorFiles: [], watchBehaviors: true }),
+    ).toMatch(/--watch-behaviors/);
+    expect(
+      behaviorFlagProblem({
+        ...base,
+        useBehaviors: ["a"],
+        watchBehaviors: true,
+      }),
+    ).toBeNull();
+  });
   test("a single charge point does not need the opt-in", () => {
     expect(
       behaviorFlagProblem({
@@ -95,6 +110,60 @@ describe("the real CLI refuses", () => {
     const r = run("--stop", "--behavior", example);
     expect(r.exitCode).toBe(1);
     expect(r.stderr.toString()).toContain("--behavior");
+  });
+  test("--use-behavior and --watch-behaviors need --behavior", () => {
+    const use = run(
+      "--cp-id",
+      "X",
+      "--ws-url",
+      "ws://127.0.0.1:1/",
+      "--use-behavior",
+      "a",
+    );
+    expect(use.exitCode).toBe(1);
+    expect(use.stderr.toString()).toContain("no --behavior file was given");
+    const watch = run(
+      "--cp-id",
+      "X",
+      "--ws-url",
+      "ws://127.0.0.1:1/",
+      "--watch-behaviors",
+    );
+    expect(watch.exitCode).toBe(1);
+    expect(watch.stderr.toString()).toContain("--watch-behaviors");
+  });
+  test("--use-behavior with an id nothing loaded names the loaded ids", () => {
+    const r = run(
+      "--cp-id",
+      "X",
+      "--ws-url",
+      "ws://127.0.0.1:1/",
+      "--json",
+      "--behavior",
+      example,
+      "--use-behavior",
+      "nope",
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr.toString()).toContain(
+      'Unknown behavior id "nope"; loaded behaviors: flaky-firmware',
+    );
+  });
+  test("--use-behavior and --watch-behaviors with a client mode", () => {
+    const r = run("--stop", "--use-behavior", "a");
+    expect(r.exitCode).toBe(1);
+  });
+  test("--use-behavior without --cp-id", () => {
+    const r = run(
+      "--daemon",
+      "--behavior",
+      example,
+      "--allow-behavior-code",
+      "--use-behavior",
+      "flaky-firmware",
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr.toString()).toContain("--use-behavior requires --cp-id");
   });
   test("a behavior file that does not load stops the start", () => {
     const bad = write("bad.ts", "export default { nope: true };\n");

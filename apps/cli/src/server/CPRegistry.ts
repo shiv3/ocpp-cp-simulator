@@ -3,6 +3,10 @@ import * as fs from "fs";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import {
+  BehaviorLibrary,
+  type ReplaceOutcome,
+} from "../behavior/BehaviorLibrary";
 import type { ChargePointInitOptions } from "../types";
 import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
@@ -82,6 +86,7 @@ interface ChargePointRow {
   boot_notif: string | null;
   created_at: string;
   labels: string | null;
+  behaviors: string | null;
   tx_updated_meter_values: number | null;
 }
 
@@ -96,11 +101,12 @@ interface CPRegistryOptions {
   /** Default `<soapPath>` for that derivation; a charge point's own wins. */
   readonly soapPath?: string;
   /**
-   * Behaviors (`--behavior`) loaded onto every charge point this registry
-   * builds, in order. The same module instance serves all of them; a behavior
-   * keeps its state in `ctx.state`, never at module scope.
+   * The behaviors (`--behavior`) this registry's charge points select from,
+   * by id. A charge point without a `behaviors` list runs all of them, in
+   * load order. The same module instance serves every charge point; a
+   * behavior keeps its state in `ctx.state`, never at module scope.
    */
-  readonly behaviors?: readonly Behavior[];
+  readonly behaviors?: BehaviorLibrary | readonly Behavior[];
 }
 
 export class CPRegistry {
@@ -126,6 +132,8 @@ export class CPRegistry {
    *  RPC (the Library included) or loaded by a charge point is there to read
    *  back without `--state-db` too. */
   readonly scenarioDefinitions: ScenarioRepository;
+  /** The loaded behaviors; a charge point selects from it by id. */
+  readonly library: BehaviorLibrary;
 
   constructor(
     private readonly bus: EventBus,
@@ -145,6 +153,13 @@ export class CPRegistry {
       ): Promise<AutoTrafficConfig | null>;
     },
   ) {
+    this.library =
+      options.behaviors instanceof BehaviorLibrary
+        ? options.behaviors
+        : BehaviorLibrary.of(options.behaviors ?? []);
+    this.library.onReplace((id, behavior) =>
+      this.replaceBehaviorEverywhere(id, behavior),
+    );
     this.scenarioRuns = createScenarioRunRepository(database);
     this.chargingSessions = createChargingSessionRepository(database);
     this.scenarioDefinitions = createScenarioRepository(database);
@@ -217,7 +232,7 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, tx_updated_meter_values " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -276,6 +291,7 @@ export class CPRegistry {
             row.boot_notif,
           ) ?? undefined,
         labels: restoreLabels(row),
+        ...restoreBehaviors(row, this.library),
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
@@ -516,6 +532,52 @@ export class CPRegistry {
   }
 
   /**
+   * Change which loaded behaviors a charge point runs, in place: the ones no
+   * longer selected are unloaded, the newly selected ones are loaded after
+   * those already running. `undefined` selects every loaded behavior. Persisted
+   * before the live service changes. Throws {@link UnknownBehaviorError}
+   * (naming the loaded ids) for an id that is not loaded, before anything
+   * changes. Returns the ids the charge point runs now, or `null` when no such
+   * charge point is registered.
+   */
+  setBehaviors(
+    cpId: string,
+    ids: readonly string[] | undefined,
+  ): string[] | null {
+    const svc = this.services.get(cpId);
+    if (!svc) return null;
+    const wanted = this.library.select(ids);
+    this.database?.run(
+      "UPDATE charge_points SET behaviors = ? WHERE cp_id = ?",
+      [ids ? JSON.stringify(ids) : null, cpId],
+    );
+    svc.setBehaviors(wanted, ids);
+    this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
+    return svc.behaviorIds();
+  }
+
+  /** The library listener: put a reloaded behavior on every charge point running it. */
+  private replaceBehaviorEverywhere(
+    id: string,
+    behavior: Behavior,
+  ): ReplaceOutcome {
+    let applied = 0;
+    const failures: string[] = [];
+    for (const [cpId, svc] of this.services) {
+      if (!svc.behaviorIds().includes(id)) continue;
+      try {
+        svc.replaceBehavior(behavior);
+        applied++;
+      } catch (error) {
+        failures.push(
+          `${cpId} keeps the old version of ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return { applied, failures };
+  }
+
+  /**
    * Attach an already-constructed single-CP service to the registry without
    * persisting, preparing, or seeding it. Standalone CLI mode uses this to
    * preserve the legacy `CLIChargePointService.fromOptions` bootstrap while
@@ -672,7 +734,7 @@ export class CPRegistry {
       unsub();
       unsubSettled();
     });
-    svc.loadBehaviors(this.options.behaviors ?? []);
+    svc.loadBehaviors(this.library.select(init.behaviors));
     if (reconcileSessions) svc.reconcileChargingSessions();
     // The single choke point for "a service now exists under this init" —
     // create(), update() and restoreFromDatabase() all land here.
@@ -713,6 +775,9 @@ export class CPRegistry {
    * instead of it falling through to an opaque, unlogged "internal error".
    */
   private prepareInit(init: ChargePointInitOptions): ChargePointInitOptions {
+    // Ids only: an id that names no loaded behavior is refused here, before
+    // anything is persisted, with the loaded ids in the message.
+    if (init.behaviors !== undefined) this.library.check(init.behaviors);
     if (
       (init.securityProfile === 1 || init.securityProfile === 2) &&
       !init.authorizationKey
@@ -762,8 +827,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, tx_updated_meter_values) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -785,6 +850,7 @@ export class CPRegistry {
         "tls_key_path = excluded.tls_key_path, " +
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
         "labels = excluded.labels, " +
+        "behaviors = excluded.behaviors, " +
         "tx_updated_meter_values = excluded.tx_updated_meter_values",
       [
         init.cpId,
@@ -811,6 +877,7 @@ export class CPRegistry {
         init.bootNotification ? JSON.stringify(init.bootNotification) : null,
         new Date().toISOString(),
         labelsColumn(init.labels),
+        init.behaviors ? JSON.stringify(init.behaviors) : null,
         init.txUpdatedMeterValues ? 1 : null,
       ],
     );
@@ -996,6 +1063,39 @@ function restoreLabels(row: ChargePointRow): Labels | undefined {
   return parsed.data;
 }
 
+/**
+ * Read the stored selection back. An id the library no longer has (the
+ * daemon was started with fewer `--behavior` files) is dropped with a
+ * warning rather than failing the restore: the charge point comes back
+ * without that behavior.
+ */
+function restoreBehaviors(
+  row: ChargePointRow,
+  library: BehaviorLibrary,
+): { behaviors?: string[] } {
+  const raw = safeJsonParse<unknown>(row.behaviors);
+  if (!Array.isArray(raw) || !raw.every((x) => typeof x === "string")) {
+    if (raw !== null) {
+      console.warn(
+        `[CPRegistry] ignoring invalid stored behaviors for ${row.cp_id}`,
+      );
+    }
+    return {};
+  }
+  const ids = raw as string[];
+  const known = ids.filter((id) => library.get(id) !== undefined);
+  if (known.length !== ids.length) {
+    console.warn(
+      `[CPRegistry] ${row.cp_id}: behaviors ${ids
+        .filter((id) => !known.includes(id))
+        .join(
+          ", ",
+        )} are not loaded in this run (loaded: ${library.ids().join(", ") || "none"})`,
+    );
+  }
+  return { behaviors: known };
+}
+
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
@@ -1057,6 +1157,7 @@ function preserveOmittedInit(
     tlsCertPath: next.tlsCertPath ?? existing.tlsCertPath,
     tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
     labels: next.labels ?? existing.labels,
+    behaviors: next.behaviors ?? existing.behaviors,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
   };

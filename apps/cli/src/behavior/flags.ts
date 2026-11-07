@@ -7,6 +7,8 @@ export interface BehaviorFlags {
   readonly behaviorFiles: readonly string[];
   readonly allowBehaviorCode: boolean;
   readonly unsafeRemote: boolean;
+  readonly useBehaviors?: readonly string[];
+  readonly watchBehaviors?: boolean;
 }
 
 /** An error message, or null when the combination is allowed. */
@@ -26,6 +28,21 @@ export function behaviorFlagProblem(flags: BehaviorFlags): string | null {
     return (
       "Error: --behavior runs the file's code with this process's full " +
       "authority. A daemon needs --allow-behavior-code to say so."
+    );
+  }
+  if (
+    (flags.useBehaviors?.length ?? 0) > 0 &&
+    flags.behaviorFiles.length === 0
+  ) {
+    return (
+      "Error: --use-behavior selects among the behaviors loaded with " +
+      "--behavior; no --behavior file was given."
+    );
+  }
+  if (flags.watchBehaviors && flags.behaviorFiles.length === 0) {
+    return (
+      "Error: --watch-behaviors reloads the files given with --behavior; " +
+      "no --behavior file was given."
     );
   }
   return null;

@@ -79,6 +79,7 @@ import {
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
 } from "../soapPath";
 import { appVersion } from "../appVersion";
+import { UnknownBehaviorError } from "../behavior/BehaviorLibrary";
 import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
 import {
@@ -536,6 +537,15 @@ export async function dispatchRpcCore(
       return deleteCp(deps, call.params);
     case "cp.labels.set":
       return setCpLabels(deps, call.params);
+    case "cp.behaviors.set":
+      return setCpBehaviors(deps, call.params);
+    case "behavior.list":
+      return {
+        behaviors: deps.registry.library.describe(),
+        watching: deps.registry.library.watching,
+      };
+    case "behavior.reload":
+      return reloadBehaviors(deps);
     case "cp.bulk":
       return bulkCps(deps, call.params);
     case "logs.get":
@@ -1093,6 +1103,44 @@ async function setCpLabels(
     deps.chargePointService.setChargePointLabels(params.cpId, params.labels),
   );
   return { cpId: params.cpId };
+}
+
+/**
+ * `cp.behaviors.set`: pick, by id, which loaded behaviors a charge point runs.
+ * In place: no rebuild, the connection and any transaction stay. The ids are
+ * looked up in the library `--behavior` filled at start; nothing in the
+ * request is read as code.
+ */
+async function setCpBehaviors(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"cp.behaviors.set">,
+): Promise<{ cpId: string; behaviors: string[] }> {
+  const behaviors = await runFacadeOperation(() =>
+    deps.registry.setBehaviors(params.cpId, params.behaviors ?? undefined),
+  );
+  if (behaviors === null) throw new RpcFailure("not_found", "");
+  return { cpId: params.cpId, behaviors };
+}
+
+/**
+ * `behavior.reload`: re-read the files given at start. It takes no parameters,
+ * so neither a path nor code can come from the caller.
+ */
+async function reloadBehaviors(
+  deps: RuntimeSocketIoDeps,
+): Promise<Result<"behavior.reload">> {
+  const files = await deps.registry.library.reload();
+  return {
+    files: files.map((f) => ({
+      file: f.file,
+      ids: [...f.ids],
+      ok: f.ok,
+      unchanged: f.unchanged,
+      ...(f.error === undefined ? {} : { error: f.error.slice(0, 60_000) }),
+      applied: f.applied,
+      failures: f.failures.map((m) => m.slice(0, 60_000)),
+    })),
+  };
 }
 
 async function deleteCp(
@@ -2402,6 +2450,11 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   if (err instanceof OcppSecurityProfileConfigError) {
     return new RpcFailure("invalid_params", err.message);
   }
+  // An id in `behaviors` that names no loaded behavior; the message lists
+  // the loaded ids.
+  if (err instanceof UnknownBehaviorError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
   // #458: a set_ev_settings patch that would remove a required field.
   if (err instanceof InvalidEvSettingsPatchError) {
     return new RpcFailure("invalid_params", err.message);
@@ -2660,6 +2713,7 @@ function mergeUpdateParams(
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);
   preserveWhenMissing(merged, "tls", init.tls);
+  preserveWhenMissing(merged, "behaviors", init.behaviors);
 
   if (isRecord(merged.basicAuth) && init.basicAuth) {
     const basicAuth = { ...merged.basicAuth };

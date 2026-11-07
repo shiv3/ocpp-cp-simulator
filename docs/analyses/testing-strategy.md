@@ -17,7 +17,7 @@ related:
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
   - charger-engine.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Testing strategy

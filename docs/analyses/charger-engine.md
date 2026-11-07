@@ -18,7 +18,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/cli.md
   - ../sources/bench-readme.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Charger engine design

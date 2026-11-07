@@ -9,7 +9,6 @@ import type {
   ResetResponseV201,
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
-  UnlockConnectorRequestV201,
   UnlockConnectorResponseV201,
 } from "@ocpp-cp-sim/ocpp/index";
 import type {
@@ -60,6 +59,10 @@ export const handleChangeAvailabilityV201 = (
   return { response, ...(effect ? { afterResult: effect } : {}) };
 };
 
+/**
+ * F05 UnlockConnector.req: translation only. The `default.unlock` behavior of
+ * the charger engine decides (`application/engine/behaviors/unlock.ts`).
+ */
 export function handleUnlockConnectorV201(): V201HandlerResult;
 export function handleUnlockConnectorV201(
   payload: unknown,
@@ -74,32 +77,11 @@ export function handleUnlockConnectorV201(
       response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,
     };
   }
-
-  const req = payload as UnlockConnectorRequestV201;
-  const connector = ctx.chargePoint.getConnector(req.evseId);
-  if (!connector) {
-    return {
-      response: {
-        status: "UnknownConnector",
-      } satisfies UnlockConnectorResponseV201,
-    };
-  }
-
-  if (connector.transaction) {
-    // OCPP 2.0.1: do not unlock or stop an ongoing authorized transaction.
-    return {
-      response: {
-        status: "OngoingAuthorizedTransaction",
-      } satisfies UnlockConnectorResponseV201,
-    };
-  }
-
-  return {
-    response: {
-      status:
-        connector.unlockResponse === "Unlocked" ? "Unlocked" : "UnlockFailed",
-    } satisfies UnlockConnectorResponseV201,
-  };
+  const { response } = ctx.chargePoint.engine.runDefault(
+    "UnlockConnector",
+    payload,
+  );
+  return { response };
 }
 
 export const handleTriggerMessageV201 = (

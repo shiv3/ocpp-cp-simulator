@@ -3,6 +3,11 @@ import type {
   OCPPAvailability,
 } from "../types/OcppTypes";
 import { OCPPStatus } from "../types/OcppTypes";
+import {
+  reduceTransactionPatch,
+  type TransactionPatch,
+  type TransactionRecord,
+} from "./TransactionRecord";
 
 /**
  * What the charger engine owns about one connector
@@ -19,6 +24,11 @@ export interface ConnectorRecord {
   readonly errorCode: ChargePointErrorCode;
   readonly errorInfo: string | null;
   readonly vendorErrorCode: string | null;
+  /**
+   * The transaction on this connector, running or closed-but-not-detached
+   * (`cleanTransaction` stamps `stopTime` without detaching). Plain JSON.
+   */
+  readonly transaction: TransactionRecord | null;
 }
 
 export function initialConnectorRecord(): ConnectorRecord {
@@ -29,6 +39,7 @@ export function initialConnectorRecord(): ConnectorRecord {
     errorCode: "NoError",
     errorInfo: null,
     vendorErrorCode: null,
+    transaction: null,
   };
 }
 
@@ -63,12 +74,21 @@ export type ConnectorWrite =
       readonly kind: "vendorErrorCode";
       readonly vendorErrorCode: string | null;
     }
+  /** A transaction begins, or the connector's transaction is replaced or removed. */
+  | {
+      readonly kind: "transaction.set";
+      readonly transaction: TransactionRecord | null;
+    }
+  /** Fields of the connector's transaction change; no-op without one. */
+  | { readonly kind: "transaction.patch"; readonly patch: TransactionPatch }
   /** A snapshot taken before a restart: no listener hears of it. */
   | {
       readonly kind: "restore";
       readonly status: OCPPStatus;
       readonly availability: OCPPAvailability;
       readonly scheduledAvailability: OCPPAvailability | null;
+      /** Absent: the transaction is left as it is. */
+      readonly transaction?: TransactionRecord | null;
     };
 
 export function reduceConnectorRecord(
@@ -88,12 +108,28 @@ export function reduceConnectorRecord(
       return { ...record, errorInfo: write.errorInfo };
     case "vendorErrorCode":
       return { ...record, vendorErrorCode: write.vendorErrorCode };
+    case "transaction.set":
+      return { ...record, transaction: write.transaction };
+    case "transaction.patch":
+      return record.transaction
+        ? {
+            ...record,
+            transaction: reduceTransactionPatch(
+              record.transaction,
+              write.patch,
+            ),
+          }
+        : record;
     case "restore":
       return {
         ...record,
         status: write.status,
         availability: write.availability,
         scheduledAvailability: write.scheduledAvailability,
+        transaction:
+          write.transaction === undefined
+            ? record.transaction
+            : write.transaction,
       };
   }
 }

@@ -2594,6 +2594,9 @@ export class ChargePoint {
     }
 
     connector.beginTransaction(transaction);
+    // From here on the transaction is the connector's live view, so that what
+    // the outbox stamps on it (2.x ids, seqNo) lands in the engine state.
+    const live = connector.transaction ?? transaction;
     // Drive Preparing before enqueueing StartTransaction.req: the outbound
     // CALL queue is strictly serial/FIFO, so whichever we queue first is
     // what the wire sees first. Sending Preparing's StatusNotification.req
@@ -2612,7 +2615,7 @@ export class ChargePoint {
     }
     this._outbox.sendTransactionEvent({
       phase: "started",
-      transaction,
+      transaction: live,
       connectorId,
     });
 

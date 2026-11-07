@@ -42,6 +42,7 @@ describe("connector state in the charger engine", () => {
       errorCode: "GroundFailure",
       errorInfo: "trip",
       vendorErrorCode: "V-7",
+      transaction: null,
     });
     expect(cp.engine.state.connectors["2"].status).toBe(OCPPStatus.Unavailable);
     // The connector reads the same record back.

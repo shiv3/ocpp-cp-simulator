@@ -1,3 +1,4 @@
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -3147,10 +3148,25 @@ export class CLIChargePointService {
       }
       restored += 1;
     });
-    // The connector records are back in the charger engine's state: let the
-    // loaded behaviors know (`onResume`). Async positions are not restored.
-    this._chargePoint.engine.resume();
     return restored;
+  }
+
+  /**
+   * Load behavior code (`--behavior`) onto this charge point. A behavior that
+   * cannot load (duplicate id, unmet `requires`) throws; the ones before it
+   * stay loaded.
+   */
+  loadBehaviors(behaviors: readonly Behavior[]): void {
+    for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
+  }
+
+  /**
+   * Run `onResume` of the loaded behaviors. Call it once, after
+   * {@link restoreConnectorRuntimeFromDatabase} and
+   * {@link reconcileChargingSessions}.
+   */
+  resumeEngine(): void {
+    this._chargePoint.engine.resume();
   }
 
   /**

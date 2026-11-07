@@ -35,6 +35,10 @@ import { setGlobalLogFormat } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
 import { runAnalyze } from "./analyze/runAnalyze";
+import { behaviorFlagProblem } from "./behavior/flags";
+import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import { loadBehaviorFiles } from "./behavior/loadBehaviorFile";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
 import {
@@ -222,6 +226,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let httpUrl: string | null = null;
   let allEvents = false;
   let unsafeRemote = false;
+  const behaviorFiles: string[] = [];
+  let allowBehaviorCode = false;
   let serveStatic: string | null = null;
   // --web-console: enabled flag + optional explicit port. When the port is
   // omitted (`--web-console` alone), the UI shares the --http-port listener.
@@ -443,6 +449,17 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--unsafe-remote":
         unsafeRemote = true;
+        break;
+      case "--behavior":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --behavior requires a file path\n");
+          process.exit(1);
+        }
+        behaviorFiles.push(next);
+        i++;
+        break;
+      case "--allow-behavior-code":
+        allowBehaviorCode = true;
         break;
       case "--cors-origin":
         if (!next || next.startsWith("--")) {
@@ -1015,6 +1032,24 @@ export function parseArgs(argv: string[]): CLIOptions {
         }
       : null;
 
+  const behaviorProblem = behaviorFlagProblem({
+    serverMode: isServerMode,
+    behaviorFiles,
+    allowBehaviorCode,
+    unsafeRemote,
+  });
+  if (behaviorProblem) {
+    process.stderr.write(`${behaviorProblem}\n`);
+    process.exit(1);
+  }
+  if (isClientMode && (behaviorFiles.length > 0 || allowBehaviorCode)) {
+    process.stderr.write(
+      "Error: --behavior and --allow-behavior-code apply to a running charge " +
+        "point, not to --send / --stop / --events\n",
+    );
+    process.exit(1);
+  }
+
   if (
     !isClientMode &&
     isServerMode &&
@@ -1120,6 +1155,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     httpBasicAuth,
     allEvents,
     unsafeRemote,
+    behaviorFiles,
+    allowBehaviorCode,
     corsOrigins,
     trustForwardedHeaders,
     serveStatic,
@@ -1277,6 +1314,12 @@ Options:
   --unsafe-remote          Allow a non-loopback daemon bind without
                            --web-console-basic-auth-user/pass. Use only on
                            trusted networks.
+  --behavior <file>        Load behavior code (a TypeScript or JavaScript
+                           module whose default export is a behavior) onto
+                           every charge point (repeatable). It runs with this
+                           process's full authority; see docs/entities/cli.md.
+  --allow-behavior-code    A daemon's explicit opt-in to --behavior. Refused
+                           together with --unsafe-remote.
   --cors-origin <origin>   Restrict CORS to this origin (repeatable). Pass "*"
                            for open CORS. Default: open on a loopback bind;
                            same-origin-only when bound to a non-loopback host
@@ -1329,6 +1372,8 @@ Options:
                            docs/entities/analyze.md -> "Splitting by
                            connector" for what gets replicated into every
                            connector's report and why.
+  behavior build <file> [--out <file>]
+                           Type-check a behavior and bundle it (ES2017, k6/* external).
   export-k6 --scenario <file.json> [-o <dir>] [--ocpp-version 1.6] [--force]
                            Export a scenario as a runnable k6 load-test
                            bundle (entry script + self-contained OCPP
@@ -1510,9 +1555,24 @@ export function buildBootstrap(
   };
 }
 
+async function loadBehavesOrExit(
+  files: readonly string[],
+): Promise<Behavior[]> {
+  if (files.length === 0) return [];
+  try {
+    return await loadBehaviorFiles(files);
+  } catch (err) {
+    process.stderr.write(
+      `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(1);
+  }
+}
+
 function createStandaloneChargePointRuntime(
   options: CLIOptions,
   database: Database | null,
+  behaviors: readonly Behavior[] = [],
 ): SingleCpRuntimeTarget {
   const bootstrap = buildBootstrap(options);
   if (!bootstrap) {
@@ -1522,6 +1582,7 @@ function createStandaloneChargePointRuntime(
   const bus = new EventBus();
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms,
+    behaviors,
   });
   const configRepository = createSocketConfigRepository(database);
   // #495: the registry's, which its charge points write to as well.
@@ -1535,9 +1596,9 @@ function createStandaloneChargePointRuntime(
     scenarioRepository,
     connectorSettingsRepository,
   });
-  const eventSource = registry.registerExisting(
-    CLIChargePointService.fromOptions(options, database),
-  );
+  const standalone = CLIChargePointService.fromOptions(options, database);
+  standalone.loadBehaviors(behaviors);
+  const eventSource = registry.registerExisting(standalone);
 
   return {
     chargePointService,
@@ -1575,6 +1636,24 @@ async function main(): Promise<void> {
     }
     const code = await runExportK6(parsed.args);
     process.exit(code);
+  }
+
+  // `behavior build` is a subcommand like `export-k6`.
+  if (process.argv[2] === "behavior") {
+    const parsed = parseBehaviorArgs(process.argv.slice(3));
+    if (!parsed.ok) {
+      process.stderr.write(`${parsed.message}\n`);
+      process.exit(1);
+    }
+    const result = await buildBehaviorFile(parsed.file, parsed.out);
+    if (!result.ok) {
+      process.stderr.write(
+        `Error: cannot build ${parsed.file}:\n  ${result.problems.join("\n  ")}\n`,
+      );
+      process.exit(1);
+    }
+    process.stdout.write(`${result.outFile}\n`);
+    process.exit(0);
   }
 
   const options = parseArgs(process.argv);
@@ -1644,7 +1723,10 @@ async function main(): Promise<void> {
     options.webConsolePort != null;
 
   if (isServerMode) {
+    const behaviors = await loadBehavesOrExit(options.behaviorFiles);
     await startServer({
+      behaviors,
+      allowBehaviorCode: options.allowBehaviorCode,
       httpPort: options.httpPort,
       httpHost: options.httpHost,
       pidPath: options.daemon ? DEFAULT_PID_PATH : null,
@@ -1686,7 +1768,12 @@ async function main(): Promise<void> {
   if (options.stateDb) {
     replDatabase = BunSqliteDatabase.open(options.stateDb);
   }
-  const service = createStandaloneChargePointRuntime(options, replDatabase);
+  const behaviors = await loadBehavesOrExit(options.behaviorFiles);
+  const service = createStandaloneChargePointRuntime(
+    options,
+    replDatabase,
+    behaviors,
+  );
 
   let shuttingDown = false;
   const shutdown = () => {

@@ -46,6 +46,7 @@ import {
 import { renderMetrics } from "./metrics/render";
 import { VehicleProfileRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/VehicleProfileRepository";
 import { OpenEvDirectoryClient } from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
 import { BlueprintRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
@@ -128,6 +129,14 @@ export interface ServerOptions {
    * network — the default is that the gate covers it, unlike the health path.
    */
   readonly metricsNoAuth?: boolean;
+  /**
+   * Behavior code (`--behavior`) loaded onto every charge point of the
+   * daemon, restored and created over RPC included. It runs with the
+   * process's authority, so the daemon refuses it unless
+   * {@link allowBehaviorCode} is set (`--allow-behavior-code`).
+   */
+  readonly behaviors?: readonly Behavior[];
+  readonly allowBehaviorCode?: boolean;
   readonly autoConnect: boolean;
   readonly startupScenario: {
     readonly scenario: string | null;
@@ -198,6 +207,11 @@ export async function startServer(
     inputOpts.startupScenario,
   );
   if (startupConflict) throw new Error(startupConflict);
+  if ((inputOpts.behaviors?.length ?? 0) > 0 && !inputOpts.allowBehaviorCode) {
+    throw new Error(
+      "Behavior code is loaded only with allowBehaviorCode (--allow-behavior-code)",
+    );
+  }
 
   // #183, in the issue's order: the SOAP callback listener, then the tunnel
   // that forwards to it, then everything that needs the tunnel's origin. The
@@ -295,6 +309,7 @@ export async function startServer(
       // restored or created over RPC — derives one from this base (#183).
       soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
       soapPath: opts.soapPath,
+      behaviors: opts.behaviors ?? [],
     },
     connectorSettingsRepository,
   );

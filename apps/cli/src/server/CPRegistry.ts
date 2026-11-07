@@ -2,6 +2,7 @@ import * as fs from "fs";
 
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePointInitOptions } from "../types";
 import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
@@ -94,6 +95,12 @@ interface CPRegistryOptions {
   readonly soapPublicBaseUrl?: string | null;
   /** Default `<soapPath>` for that derivation; a charge point's own wins. */
   readonly soapPath?: string;
+  /**
+   * Behaviors (`--behavior`) loaded onto every charge point this registry
+   * builds, in order. The same module instance serves all of them; a behavior
+   * keeps its state in `ctx.state`, never at module scope.
+   */
+  readonly behaviors?: readonly Behavior[];
 }
 
 export class CPRegistry {
@@ -309,6 +316,9 @@ export class CPRegistry {
       const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
       // #447: after the restore, so a restored transaction keeps its session.
       svc.reconcileChargingSessions();
+      // After the reconcile, which only reads the connectors: `onResume` may
+      // start a transaction, and it must see the restored sessions settled.
+      svc.resumeEngine();
       if (restoredConnectors > 0) {
         console.log(
           `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
@@ -662,6 +672,7 @@ export class CPRegistry {
       unsub();
       unsubSettled();
     });
+    svc.loadBehaviors(this.options.behaviors ?? []);
     if (reconcileSessions) svc.reconcileChargingSessions();
     // The single choke point for "a service now exists under this init" —
     // create(), update() and restoreFromDatabase() all land here.

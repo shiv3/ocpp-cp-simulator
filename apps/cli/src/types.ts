@@ -24,6 +24,10 @@ export interface SoapTunnelConfig {
 }
 
 export interface CLIOptions {
+  /** `--behavior <file>`, repeatable: behavior code loaded at start. */
+  readonly behaviorFiles: readonly string[];
+  /** `--allow-behavior-code`: the daemon's explicit opt-in to run it. */
+  readonly allowBehaviorCode: boolean;
   readonly wsUrl: string;
   readonly cpId: string | null;
   /**

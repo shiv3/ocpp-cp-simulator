@@ -86,6 +86,10 @@ describe("engine state across a restart", () => {
     });
 
     expect(svc.restoreConnectorRuntimeFromDatabase()).toBe(1);
+    // The registry's order: restore, reconcile, then resume.
+    expect(resumed).toEqual([]);
+    svc.reconcileChargingSessions();
+    svc.resumeEngine();
 
     const record = cp.engine.state.connectors["1"];
     expect(record.status).toBe("Charging");

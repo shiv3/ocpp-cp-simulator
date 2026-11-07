@@ -1,105 +1,38 @@
 import type {
   GetTransactionStatusRequestV201,
   GetTransactionStatusResponseV201,
-  RequestStartTransactionRequestV201,
-  RequestStartTransactionResponseV201,
-  RequestStopTransactionRequestV201,
-  RequestStopTransactionResponseV201,
 } from "@ocpp-cp-sim/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
 
+/** Translation only: `default.transaction` decides (see
+ *  `application/engine/behaviors/transaction.ts`). */
+function runTransactionDefault(
+  action: string,
+  payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult {
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    action,
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
+}
+
 export function handleRequestStartTransactionV201(
   payload: unknown,
   ctx: V201InboundContext,
 ): V201HandlerResult {
-  const req = payload as RequestStartTransactionRequestV201;
-  const connectorId = req.evseId ?? 1;
-  const connector = ctx.chargePoint.getConnector(connectorId);
-
-  if (!connector || connector.availability !== "Operative") {
-    return {
-      response: {
-        status: "Rejected",
-      } satisfies RequestStartTransactionResponseV201,
-    };
-  }
-
-  return {
-    response: {
-      status: "Accepted",
-    } satisfies RequestStartTransactionResponseV201,
-    afterResult: () => {
-      const idTag = req.idToken.idToken;
-      if (ctx.chargePoint.configuration.authorizeRemoteTxRequests()) {
-        ctx.chargePoint.authorize(idTag);
-      }
-      if (ctx.chargePoint.isScenarioHandled(connectorId)) {
-        ctx.chargePoint.notifyRemoteStartReceived(
-          connectorId,
-          idTag,
-          req.remoteStartId,
-        );
-      } else {
-        // Not scenario-handled: note it so a scenario that arms on this
-        // connector shortly after can tell it raced this exact call and
-        // warn instead of silently parking forever (see
-        // ScenarioRuntime.waitForRemoteStart).
-        ctx.chargePoint.noteDefaultHandledRemoteStart(connectorId);
-        ctx.chargePoint.startTransaction(
-          idTag,
-          connectorId,
-          undefined,
-          undefined,
-          {
-            triggerReason: "RemoteStart",
-            remoteStartId: req.remoteStartId,
-          },
-        );
-      }
-    },
-  };
+  return runTransactionDefault("RequestStartTransaction", payload, ctx);
 }
 
 export function handleRequestStopTransactionV201(
   payload: unknown,
   ctx: V201InboundContext,
 ): V201HandlerResult {
-  const req = payload as RequestStopTransactionRequestV201;
-  const connector = Array.from(ctx.chargePoint.connectors.values()).find(
-    (candidate) => candidate.transaction?.cpTransactionId === req.transactionId,
-  );
-
-  if (!connector) {
-    return {
-      response: {
-        status: "Rejected",
-      } satisfies RequestStopTransactionResponseV201,
-    };
-  }
-
-  const txId = connector.transaction?.id ?? 0;
-  return {
-    response: {
-      status: "Accepted",
-    } satisfies RequestStopTransactionResponseV201,
-    afterResult: () => {
-      if (ctx.chargePoint.isScenarioStopHandled(connector.id)) {
-        ctx.chargePoint.notifyRemoteStopReceived(connector.id, txId);
-      } else {
-        // Not scenario-handled: note it so a scenario that arms
-        // registerScenarioStopHandler on this connector shortly after can
-        // tell it raced this exact call and warn instead of silently
-        // parking forever (see ScenarioRuntime.waitForRemoteStop).
-        ctx.chargePoint.noteDefaultHandledRemoteStop(connector.id);
-        ctx.chargePoint.stopTransaction(connector.id, "Remote", {
-          triggerReason: "RemoteStop",
-        });
-      }
-    },
-  };
+  return runTransactionDefault("RequestStopTransaction", payload, ctx);
 }
 
 export function handleGetTransactionStatusV201(

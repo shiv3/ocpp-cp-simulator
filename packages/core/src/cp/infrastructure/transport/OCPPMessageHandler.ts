@@ -117,6 +117,7 @@ import { BootGate } from "../../application/state/machines/BootGate";
 
 // Import handler registry and handlers
 import type { HandlerContext } from "./handlers";
+import { patchTransaction } from "./handlers/patchTransaction";
 import {
   MessageHandlerRegistry,
   buildV16CallHandlerRegistry,
@@ -513,7 +514,11 @@ export class OCPPMessageHandler {
         at: transaction.startTime,
       },
     );
-    if (signedBegin) transaction.signedBeginOcmf = signedBegin.ocmf;
+    if (signedBegin) {
+      patchTransaction(this._chargePoint, connectorId, transaction, {
+        signedBeginOcmf: signedBegin.ocmf,
+      });
+    }
     this.sendRequest(
       OCPPAction.StartTransaction,
       messageId,

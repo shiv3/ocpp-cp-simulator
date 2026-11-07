@@ -6,6 +6,7 @@ import { firmwareBehavior } from "./firmware";
 import { logsBehavior } from "./logs";
 import { reservationBehavior } from "./reservation";
 import { resetBehavior } from "./reset";
+import { transactionBehavior } from "./transaction";
 import { unlockBehavior } from "./unlock";
 import { signedFirmwareBehavior } from "./signedFirmware";
 
@@ -28,4 +29,5 @@ export function registerDefaultBehaviors(
   engine.registerDefault(availabilityBehavior(cp));
   engine.registerDefault(reservationBehavior(cp));
   engine.registerDefault(unlockBehavior(cp));
+  engine.registerDefault(transactionBehavior(cp));
 }

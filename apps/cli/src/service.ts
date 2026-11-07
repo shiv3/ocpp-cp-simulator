@@ -2618,7 +2618,7 @@ export class CLIChargePointService {
     const connector = this._chargePoint.connectors.get(connectorId);
     if (!connector) return;
 
-    connector.transaction = null;
+    connector.detachTransaction();
     // The setter does not emit `transactionChange`, so nothing else would
     // announce this one (#314) — but only announce it here when there was no
     // run to stop. `stopScenario` drops the executor synchronously and leaves

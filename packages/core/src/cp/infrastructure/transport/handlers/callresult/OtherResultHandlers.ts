@@ -33,7 +33,7 @@ export class MeterValuesResultHandler implements CallResultHandler<MeterValuesRe
     if (this.connectorId !== undefined) {
       const connector = context.chargePoint.getConnector(this.connectorId);
       if (connector && connector.transaction) {
-        connector.transaction.meterSent = true;
+        connector.patchTransaction({ meterSent: true });
       }
     }
     context.logger.debug(

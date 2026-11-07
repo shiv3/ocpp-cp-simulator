@@ -88,6 +88,7 @@ import {
 import { isQueuedOffline } from "../../domain/monitoring/monitoringCtrlrKeys";
 import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
+import { patchTransaction } from "./handlers/patchTransaction";
 import {
   v201MeterEvseId,
   v201StatusEvse,
@@ -850,9 +851,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       `[v2.0.1] TransactionEvent idTokenInfo ${status} for transaction ${transactionId}; StopTxOnInvalidId=${stopOnInvalid}`,
       LogType.TRANSACTION,
     );
-    connector.transaction!.authorizationStatus = status;
-    connector.transaction!.authorizationRejectedMidSession =
-      request.eventType !== "Started";
+    this.patchTx(connector.id, connector.transaction!, {
+      authorizationStatus: status,
+      authorizationRejectedMidSession: request.eventType !== "Started",
+    });
     if (stopOnInvalid) {
       this._chargePoint.stopTransaction(connector, "DeAuthorized", {
         triggerReason: "Deauthorized",
@@ -1178,21 +1180,33 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.send("Authorize", messageId, payload);
   }
 
+  private patchTx(
+    connectorId: number,
+    transaction: Transaction,
+    fields: Partial<Record<keyof Transaction, unknown>>,
+  ): void {
+    patchTransaction(this._chargePoint, connectorId, transaction, fields);
+  }
+
   private sendStartTransaction(
     transaction: Transaction,
     connectorId: number,
   ): void {
     if (!transaction.cpTransactionId) {
-      transaction.cpTransactionId = crypto.randomUUID();
+      this.patchTx(connectorId, transaction, {
+        cpTransactionId: crypto.randomUUID(),
+      });
     }
-    const transactionId = transaction.cpTransactionId;
+    const transactionId = transaction.cpTransactionId as string;
     const seqNo = transaction.cpNextSeqNo ?? 0;
-    transaction.cpNextSeqNo = seqNo + 1;
+    this.patchTx(connectorId, transaction, { cpNextSeqNo: seqNo + 1 });
     // #335: a driven start may name the state the transaction opens in
     // (e.g. `EVConnected` for a cable-first session); `Charging` is the
     // historical default and stays so for every existing caller.
     const chargingState = transaction.startChargingState ?? "Charging";
-    transaction.cpLastTransactionEventChargingState = chargingState;
+    this.patchTx(connectorId, transaction, {
+      cpLastTransactionEventChargingState: chargingState,
+    });
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
@@ -1249,16 +1263,22 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const lastChargingState =
       transaction.cpLastTransactionEventChargingState ?? "Charging";
     if (lastChargingState === chargingState) {
-      transaction.cpLastTransactionEventChargingState = lastChargingState;
+      this.patchTx(connectorId, transaction, {
+        cpLastTransactionEventChargingState: lastChargingState,
+      });
       return;
     }
 
     if (!transaction.cpTransactionId) {
-      transaction.cpTransactionId = crypto.randomUUID();
+      this.patchTx(connectorId, transaction, {
+        cpTransactionId: crypto.randomUUID(),
+      });
     }
     const seqNo = transaction.cpNextSeqNo ?? 0;
-    transaction.cpNextSeqNo = seqNo + 1;
-    transaction.cpLastTransactionEventChargingState = chargingState;
+    this.patchTx(connectorId, transaction, {
+      cpNextSeqNo: seqNo + 1,
+      cpLastTransactionEventChargingState: chargingState,
+    });
     connector.markTransactionChanged();
     const payload: TransactionEventRequestV201 = {
       eventType: "Updated",
@@ -1266,7 +1286,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       triggerReason: "ChargingStateChanged",
       seqNo,
       transactionInfo: {
-        transactionId: transaction.cpTransactionId,
+        transactionId: transaction.cpTransactionId as string,
         chargingState,
       },
       ...(transaction.reservationId !== undefined
@@ -1284,7 +1304,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
     const timestamp = (transaction.stopTime ?? new Date()).toISOString();
     const seqNo = transaction.cpNextSeqNo ?? 0;
-    transaction.cpNextSeqNo = seqNo + 1;
+    this.patchTx(connectorId, transaction, { cpNextSeqNo: seqNo + 1 });
     const payload: TransactionEventRequestV201 = {
       eventType: "Ended",
       timestamp,
@@ -1362,7 +1382,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
     if (!transaction.cpTransactionId) {
-      transaction.cpTransactionId = crypto.randomUUID();
+      this.patchTx(connectorId, transaction, {
+        cpTransactionId: crypto.randomUUID(),
+      });
     }
     const timestamp = (options.timestamp ?? new Date()).toISOString();
 
@@ -1411,10 +1433,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
 
     const seqNo = transaction.cpNextSeqNo ?? 0;
-    transaction.cpNextSeqNo = seqNo + 1;
-    if (options.chargingState) {
-      transaction.cpLastTransactionEventChargingState = options.chargingState;
-    }
+    this.patchTx(connectorId, transaction, {
+      cpNextSeqNo: seqNo + 1,
+      ...(options.chargingState
+        ? { cpLastTransactionEventChargingState: options.chargingState }
+        : {}),
+    });
     connector.markTransactionChanged();
 
     const payload: TransactionEventRequestV201 = {
@@ -1423,7 +1447,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       triggerReason: options.triggerReason,
       seqNo,
       transactionInfo: {
-        transactionId: transaction.cpTransactionId,
+        transactionId: transaction.cpTransactionId as string,
         ...(options.chargingState
           ? { chargingState: options.chargingState }
           : {}),

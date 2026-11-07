@@ -47,6 +47,41 @@ export const GUARDED_FIELDS = new Set([
   "currentErrorCode",
   "errorInfo",
   "vendorErrorCode",
+  "transaction",
+  "transactionId",
+]);
+
+/**
+ * The fields of a `Transaction` (a connector's transaction is part of its
+ * engine record). Guarded on a receiver whose text mentions "transaction" or
+ * "tx": `transaction.stopTime = …`, `connector.transaction!.id = …`. Change
+ * them with `connector.patchTransaction({...})`.
+ */
+export const TRANSACTION_FIELDS = new Set([
+  "id",
+  "startCallError",
+  "connectorId",
+  "tagId",
+  "meterStart",
+  "meterStop",
+  "startTime",
+  "stopTime",
+  "meterSent",
+  "cpTransactionId",
+  "cpNextSeqNo",
+  "cpLastTransactionEventChargingState",
+  "reservationId",
+  "remoteStartId",
+  "startTriggerReason",
+  "startChargingState",
+  "signedBeginOcmf",
+  "stopTriggerReason",
+  "stopReason",
+  "stoppedReason",
+  "authorizationStatus",
+  "authorizationRejectedMidSession",
+  "batteryCapacityKwh",
+  "initialSoc",
 ]);
 
 export interface Write {
@@ -104,8 +139,10 @@ export function scanSource(fileName: string, text: string): Write[] {
       }
       if (
         ts.isPropertyAccessExpression(expression) &&
-        GUARDED_FIELDS.has(expression.name.text) &&
-        /connector/i.test(expression.expression.getText(source))
+        ((GUARDED_FIELDS.has(expression.name.text) &&
+          /connector/i.test(expression.expression.getText(source))) ||
+          (TRANSACTION_FIELDS.has(expression.name.text) &&
+            /transaction|\btx\b/i.test(expression.expression.getText(source))))
       ) {
         writes.push({
           field: expression.name.text,

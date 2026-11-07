@@ -49,6 +49,12 @@ import type {
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
+import {
+  cleanTransaction as cleanTransactionDefault,
+  startTransaction as startTransactionDefault,
+  stopTransaction as stopTransactionDefault,
+  type TransactionPorts,
+} from "../../application/engine/behaviors/transaction";
 import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
 import {
   type OcppCallOutcome,
@@ -86,7 +92,6 @@ import {
 } from "../types/OcppTypes";
 import type {
   StopTransactionReason,
-  Transaction,
   TransactionChargingState,
   TransactionStartTriggerReason,
   TransactionStopTriggerReason,
@@ -181,7 +186,7 @@ export interface AutoMeterValueSetting {
   value: number;
 }
 
-interface StartTransactionOptions {
+export interface StartTransactionOptions {
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
@@ -201,7 +206,7 @@ export interface StartTransactionOutcome {
   denialStatus?: string;
 }
 
-interface StopTransactionOptions {
+export interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
   /** OCPP 2.x Ended-event stoppedReason named explicitly (#335); when
    *  absent the encoder derives it from the 1.6 `reason`. */
@@ -2494,138 +2499,24 @@ export class ChargePoint {
     });
   }
 
-  async startTransaction(
+  /** Start a transaction on a connector; the default lives in the engine
+   *  (`application/engine/behaviors/transaction.ts`). */
+  startTransaction(
     tagId: string,
     connectorId: number,
     batteryCapacityKwh?: number,
     initialSoc?: number,
     options: StartTransactionOptions = {},
   ): Promise<StartTransactionOutcome> {
-    const connector = this.getConnector(connectorId);
-    if (!connector) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.TRANSACTION,
-      );
-      return { started: false };
-    }
-
-    if (connector.transaction && connector.transaction.stopTime === null) {
-      // Only a NOT-yet-stopped transaction blocks a new start. A closed one
-      // still attached (cleanTransaction sets stopTime without detaching; a
-      // snapshot persisted before #491 restores one) must NOT block a retry.
-      this._logger.warn(
-        `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
-        LogType.TRANSACTION,
-      );
-      return { started: false };
-    }
-
-    if (connector.availability !== "Operative") {
-      this._logger.warn(
-        `Connector ${connectorId} is ${connector.availability}; refusing to start transaction`,
-        LogType.TRANSACTION,
-      );
-      return { started: false };
-    }
-
-    // Issue #181: gate LOCAL (non-remote-start) starts on Authorize.conf.
-    // "RemoteStart" means either RemoteStartTransactionHandler's direct
-    // path (which already applies AuthorizeRemoteTxRequests semantics) or
-    // a scenario that captured a RemoteStartTrigger node — both already
-    // went through CSMS-driven authorization, so they're excluded here.
-    const isLocalStart = options.triggerReason !== "RemoteStart";
-    if (isLocalStart && this._configuration.authorizeBeforeLocalStart()) {
-      const status = await this.authorizeAndWait(tagId);
-      // Any non-"Accepted" idTagInfo/idTokenInfo status denies the local
-      // start. Deliberately NOT an allowlist of specific denial strings —
-      // OCPP 2.0.1/2.1's AuthorizationStatusEnumType has more denial values
-      // than 1.6's AuthorizationStatus (ConcurrentTx, NoCredit,
-      // NotAllowedTypeEVSE, NotAtThisLocation, NotAtThisTime, Unknown), and
-      // a hardcoded 1.6-shaped list would silently let those through.
-      if (status !== "Accepted") {
-        this._logger.warn(
-          `Authorize.conf ${status} for ${tagId}; refusing local transaction start on connector ${connectorId}`,
-          LogType.TRANSACTION,
-        );
-        this._events.emit("authorizeDenied", {
-          connectorId,
-          tagId,
-          status,
-        });
-        return { started: false, denialStatus: status };
-      }
-    }
-
-    // §5.13: if the connector was Reserved (or the reservation is for
-    // connectorId=0 with this idTag), consume that reservation and carry
-    // its id into StartTransaction.req so CSMS can close it out.
-    const reservation =
-      this._reservationManager.getReservationForConnector(connectorId);
-    const reservationId = reservation?.reservationId;
-
-    const transaction: Transaction = {
-      id: 0,
-      connectorId,
+    return startTransactionDefault(
+      this,
+      this.transactionPorts,
       tagId,
-      meterStart: connector.meterValue,
-      meterStop: null,
-      startTime: this._nowDate(),
-      stopTime: null,
-      meterSent: false,
-      reservationId,
-      remoteStartId: options.remoteStartId,
-      startTriggerReason: options.triggerReason,
-      startChargingState: options.chargingState,
+      connectorId,
       batteryCapacityKwh,
       initialSoc,
-    };
-
-    // Set initial SoC on connector if provided
-    if (initialSoc !== undefined) {
-      connector.soc = initialSoc;
-    }
-
-    if (reservation) {
-      // The reservation is fulfilled the moment we send StartTransaction —
-      // §5.13 says the reservation terminates when a transaction is started
-      // for the reserved idTag.
-      this._reservationManager.cancelReservation(reservation.reservationId);
-    }
-
-    connector.beginTransaction(transaction);
-    // From here on the transaction is the connector's live view, so that what
-    // the outbox stamps on it (2.x ids, seqNo) lands in the engine state.
-    const live = connector.transaction ?? transaction;
-    // Drive Preparing before enqueueing StartTransaction.req: the outbound
-    // CALL queue is strictly serial/FIFO, so whichever we queue first is
-    // what the wire sees first. Sending Preparing's StatusNotification.req
-    // ahead of StartTransaction.req makes the OCPP-conformant wire order
-    // (Preparing precedes StartTransaction) intrinsic to the domain rather
-    // than an accident of scenario node ordering (#176). A connector already
-    // in Preparing (plugged in first) has sent it: a second
-    // StatusNotification(Preparing) is a Preparing → Preparing transition
-    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts; on 1.x
-    // the transaction set above now runs, so the restart only clears it
-    // (#527). On 2.x EVConnectionTimeOut targets this very transaction.
-    if (connector.status === OCPPStatus.Preparing) {
-      this.startConnectionTimeout(connectorId);
-    } else {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
-    }
-    this._outbox.sendTransactionEvent({
-      phase: "started",
-      transaction: live,
-      connectorId,
-    });
-
-    this._events.emit("transactionStarted", {
-      connectorId,
-      transactionId: 0,
-      tagId,
-    });
-
-    return { started: true };
+      options,
+    );
   }
 
   stopTransaction(
@@ -2633,94 +2524,13 @@ export class ChargePoint {
     reason?: StopTransactionReason,
     options: StopTransactionOptions = {},
   ): void {
-    const connector =
-      typeof connectorOrId === "number"
-        ? this.getConnector(connectorOrId)
-        : connectorOrId;
-    if (!connector) {
-      const connId =
-        typeof connectorOrId === "number" ? connectorOrId : connectorOrId.id;
-      this._logger.error(`Connector ${connId} not found`, LogType.TRANSACTION);
-      return;
-    }
-
-    const transaction = connector.transaction;
-    // A closed transaction (`stopTime` set) is no transaction: stopping it
-    // again would send a second StopTransaction.req for it (#491).
-    if (!transaction || !connector.hasRunningTransaction) {
-      this._logger.warn(
-        `No active transaction for connector ${connector.id} when stopping`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-
-    connector.stopAutoMeterValue();
-    transaction.stopTime = this._nowDate();
-    transaction.meterStop = connector.meterValue;
-    if (reason) {
-      transaction.stopReason = reason;
-    }
-    if (options.triggerReason) {
-      transaction.stopTriggerReason = options.triggerReason;
-    }
-    if (options.stoppedReason) {
-      transaction.stoppedReason = options.stoppedReason;
-    }
-
-    this._outbox.sendTransactionEvent({
-      phase: "ended",
-      transaction,
-      connectorId: connector.id,
-    });
-
-    this._events.emit("transactionStopped", {
-      connectorId: connector.id,
-      transactionId: transaction.id,
-      reason: transaction.stoppedReason ?? transaction.stopReason,
-    });
-
-    // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)
-    // NOTE: Only TxProfile is cleared. TxDefaultProfile persists for future transactions.
-    // ChargePointMaxProfile also persists as it applies to the entire station.
-    const [cleared] = this.clearChargingProfiles(
-      connector.id,
-      { purpose: ChargingProfilePurposeType.TxProfile },
-      "TransactionEnded",
+    stopTransactionDefault(
+      this,
+      this.transactionPorts,
+      connectorOrId,
+      reason,
+      options,
     );
-    if (cleared) {
-      this._logger.info(
-        `Cleared ${cleared.profiles.length} TxProfile(s) after transaction end on connector ${connector.id}`,
-        LogType.TRANSACTION,
-      );
-    }
-
-    this.cleanTransaction(connector);
-    connector.stopTransaction();
-    if (connector.autoResetToAvailable) {
-      this.updateConnectorStatus(connector.id, OCPPStatus.Available);
-    }
-
-    // §5.2: if ChangeAvailability arrived while this transaction was
-    // running we returned `Scheduled`; now that it stopped, finalize the
-    // deferred availability flip and fire the follow-up StatusNotification.
-    const scheduled = connector.scheduledAvailability;
-    if (scheduled && scheduled !== connector.availability) {
-      this.writeConnector(connector.id, {
-        kind: "availability",
-        availability: scheduled,
-      });
-      const next =
-        scheduled === "Operative"
-          ? OCPPStatus.Available
-          : OCPPStatus.Unavailable;
-      this.updateConnectorStatus(connector.id, next);
-      this.persistAvailability();
-    }
-    this.writeConnector(connector.id, {
-      kind: "scheduledAvailability",
-      value: null,
-    });
   }
 
   /**
@@ -2793,24 +2603,14 @@ export class ChargePoint {
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
-    const connector =
-      typeof connectorOrId === "number"
-        ? this.getConnector(connectorOrId)
-        : connectorOrId;
-    if (!connector) return;
-
-    const transaction = connector.transaction;
-    if (transaction) {
-      transaction.meterSent = false;
-      transaction.stopTime = this._nowDate();
-      transaction.meterStop = connector.meterValue;
-
-      // Emit Finishing state for scenarios that rely on the transitional status
-      this.updateConnectorStatus(connector.id, OCPPStatus.Finishing);
-    }
-
-    connector.stopAutoMeterValue();
+    cleanTransactionDefault(this, connectorOrId);
   }
+
+  private readonly transactionPorts: TransactionPorts = {
+    sendTransactionEvent: (event) => this._outbox.sendTransactionEvent(event),
+    startConnectionTimeout: (connectorId) =>
+      this.startConnectionTimeout(connectorId),
+  };
 
   startHeartbeat(period: number): void {
     this._heartbeat.startHeartbeat(period);

@@ -920,6 +920,23 @@ export class Connector {
     });
   }
 
+  /** Detach the transaction without announcing it (no `transactionChange`). */
+  detachTransaction(): void {
+    this.store.write({ kind: "transaction.set", transaction: null });
+  }
+
+  /**
+   * Change fields of the transaction on this connector, through the engine
+   * (an `undefined` value removes the field). No-op without a transaction.
+   */
+  patchTransaction(fields: Partial<Record<keyof Transaction, unknown>>): void {
+    if (!this.txTarget) return;
+    this.store.write({
+      kind: "transaction.patch",
+      patch: patchOfFields(fields),
+    });
+  }
+
   markTransactionChanged(): void {
     this.eventsEmitter.emit("transactionChange", {
       transaction: this.transaction,
@@ -939,6 +956,11 @@ export class Connector {
   }
 
   set transactionId(transactionId: number) {
+    this.assignTransactionId(transactionId);
+  }
+
+  /** The CSMS assigned `transactionId` (StartTransaction.conf). */
+  assignTransactionId(transactionId: number): void {
     if (!this.txTarget) return;
     this.store.write({
       kind: "transaction.patch",
@@ -1294,7 +1316,7 @@ export class Connector {
       // and where they could, the connector's own value is the later statement
       // and the one the operator can see.
       if (this.socPercent !== null) {
-        transaction.initialSoc = this.socPercent;
+        this.patchTransaction({ initialSoc: this.socPercent });
       }
       return;
     }

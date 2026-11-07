@@ -73,7 +73,7 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
 
     if (idTagInfo.status === "Accepted") {
       if (connector) {
-        connector.transactionId = transactionId;
+        connector.assignTransactionId(transactionId);
         // #175: a scenario's own explicit `statusChange` node typically
         // drives Preparing -> Charging itself right after StartTransaction
         // is sent (scenario continuation is synchronous; this CALLRESULT
@@ -112,11 +112,11 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
         // Record the CSMS-assigned transactionId regardless of outcome —
         // §4.8 guarantees it's present even on rejection, and the
         // DeAuthorized StopTransaction.req below needs it to correlate.
-        connector.transactionId = transactionId;
+        connector.assignTransactionId(transactionId);
         // #447: the verdict rides on the transaction, so whoever reads the
         // stop below already sees why it happened.
         if (connector.transaction) {
-          connector.transaction.authorizationStatus = status;
+          connector.patchTransaction({ authorizationStatus: status });
         }
         if (stopOnInvalid) {
           context.chargePoint.stopTransaction(connector, "DeAuthorized");

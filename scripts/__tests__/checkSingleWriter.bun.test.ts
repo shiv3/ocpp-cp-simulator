@@ -33,12 +33,30 @@ describe("scanSource", () => {
     ]);
   });
 
+  it("finds assignments to a connector's transaction and its fields", () => {
+    expect(
+      fields(`
+        connector.transaction = null;
+        connector.transactionId = 3;
+        connector.transaction!.stopTime = new Date();
+        transaction.meterStop = 5;
+        this.tx.stopReason = "Local";
+      `),
+    ).toEqual([
+      "transaction",
+      "transactionId",
+      "stopTime",
+      "meterStop",
+      "stopReason",
+    ]);
+  });
+
   it("ignores reads, comparisons, other fields and other receivers", () => {
     expect(
       fields(`
         const s = connector.status;
         if (connector.status === OCPPStatus.Available) {}
-        connector.transaction = null;
+        connector.patchTransaction({ meterSent: true });
         this.status = status;
         server.status = 1;
         const o = { status: 1 };

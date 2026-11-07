@@ -295,7 +295,13 @@ class RequestHistory {
 interface SerialEntry {
   action: OCPPAction;
   id: string;
+  /** The payload as the station built it. It is what the request history
+   *  keeps (so an answer is matched against the CALL as it was meant), what
+   *  the offline queue stores and what a resend starts from. */
   payload: OcppMessageRequestPayload;
+  /** What the behaviors' beforeSend made of it, when they changed it: the
+   *  payload written to the socket. */
+  wire?: OcppMessageRequestPayload;
   connectorId?: number;
   /** A caller waits for this CALL's answer: when it is dropped the caller
    *  is told, instead of the CALL being salvaged or silently discarded. */
@@ -1016,29 +1022,16 @@ export class OCPPMessageHandler {
       );
       return;
     }
-    if (!intercepted) {
-      const decision = behaviorTapOf(this._chargePoint).beforeSend(
-        action,
-        payload,
-      );
-      if ("drop" in decision) {
-        // Nothing is queued and nothing is written: the caller (if any) is
-        // told, the serial queue is not held up.
-        this._logger.warn(
-          `Dropping ${action}: a behavior's beforeSend dropped it`,
-          LogType.OCPP,
-        );
-        onDropped?.("dropped_by_behavior");
-        // A dropped Heartbeat is a Heartbeat the CSMS never answered: the
-        // idle timer still goes on, or the periodic Heartbeat would stop for good.
-        if (action === OCPPAction.Heartbeat) {
-          this._chargePoint.notifyOutgoingCall(false);
-        }
-        return;
-      }
-      payload = decision.payload as OcppMessageRequestPayload;
+    // A CALL handed over while the socket is down is not transmitted, so
+    // beforeSend does not see it: it is queued as built and intercepted when
+    // it is replayed (once per transmission, like the 2.x handler).
+    let wire: OcppMessageRequestPayload | undefined;
+    if (!intercepted && this._webSocket.isConnected()) {
+      const decision = this.interceptOutgoing(action, payload, onDropped);
+      if (decision === "dropped") return;
+      wire = decision;
     }
-    const warning = this._codec.outgoingWarning(action, payload);
+    const warning = this._codec.outgoingWarning(action, wire ?? payload);
     if (warning) {
       this._logger.warn(warning, LogType.OCPP);
     }
@@ -1049,11 +1042,43 @@ export class OCPPMessageHandler {
       action,
       id,
       payload,
+      ...(wire !== undefined && { wire }),
       connectorId,
       onDropped,
       attempt,
     });
     this.pumpSerialQueue();
+  }
+
+  /**
+   * The behaviors' beforeSend for one transmission. Returns the payload to
+   * write when a behavior changed it (`undefined`: unchanged), or "dropped"
+   * after telling the caller: nothing is queued and nothing is written, the
+   * serial queue is not held up.
+   */
+  private interceptOutgoing(
+    action: OCPPAction,
+    payload: OcppMessageRequestPayload,
+    onDropped?: (reason: string) => void,
+  ): OcppMessageRequestPayload | undefined | "dropped" {
+    const decision = behaviorTapOf(this._chargePoint).beforeSend(
+      action,
+      payload,
+    );
+    if ("drop" in decision) {
+      this._logger.warn(
+        `Dropping ${action}: a behavior's beforeSend dropped it`,
+        LogType.OCPP,
+      );
+      onDropped?.("dropped_by_behavior");
+      // A dropped Heartbeat is a Heartbeat the CSMS never answered: the
+      // idle timer still goes on, or the periodic Heartbeat would stop for good.
+      if (action === OCPPAction.Heartbeat) {
+        this._chargePoint.notifyOutgoingCall(false);
+      }
+      return "dropped";
+    }
+    return decision.payload as OcppMessageRequestPayload;
   }
 
   /**
@@ -1135,7 +1160,7 @@ export class OCPPMessageHandler {
       const accepted = this._webSocket.sendAction(
         head.id,
         head.action,
-        head.payload,
+        head.wire ?? head.payload,
         gen,
         (settlement) => this.onSerialSettled(head, settlement),
       );
@@ -1714,7 +1739,26 @@ export class OCPPMessageHandler {
         this.salvageOrDiscard(resend, "boot gate");
         return;
       }
-      this._serialQueue.push({ ...resend, id: this.generateMessageId() });
+      // A resend is a new transmission: the behaviors see it again, starting
+      // from the payload as built (the same rule as a replay from the offline
+      // queue, and as on 2.x).
+      let wire: OcppMessageRequestPayload | undefined;
+      if (this._webSocket.isConnected()) {
+        const decision = this.interceptOutgoing(resend.action, resend.payload);
+        if (decision === "dropped") {
+          this._logger.warn(
+            `${resend.action} resend dropped by a behavior's beforeSend; the message is not sent again`,
+            LogType.TRANSACTION,
+          );
+          return;
+        }
+        wire = decision;
+      }
+      this._serialQueue.push({
+        ...resend,
+        ...(wire !== undefined && { wire }),
+        id: this.generateMessageId(),
+      });
       this.pumpSerialQueue();
     }, delayMs);
     unrefTimer(timer);

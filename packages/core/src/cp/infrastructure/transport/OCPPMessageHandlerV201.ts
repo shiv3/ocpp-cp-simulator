@@ -178,6 +178,9 @@ interface TransactionEventMessage {
   /** The resend waiting out `MessageAttemptInterval`, if any. */
   resend?: ReturnType<typeof setTimeout>;
   done: boolean;
+  /** A behavior's beforeSend dropped a transmission: the message was not
+   *  refused by the socket, it was withdrawn on purpose. */
+  droppedByBehavior?: boolean;
 }
 
 /** Actions the 2.x handler queues offline and replays (#528, E11; #538,
@@ -992,6 +995,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       if (this._outageHandled) this.queueTransactionEvent(message);
       return;
     }
+    if (reason === "dropped_by_behavior") message.droppedByBehavior = true;
     if (attempt === 1) {
       if (!message.done) this.forgetTransactionEvent(message);
       return;
@@ -2225,6 +2229,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         // it again), the message is open. Done right away means the socket
         // refused it while staying up: keep the row instead of losing it.
         if (message.done && this._webSocket.isConnected()) {
+          if (message.droppedByBehavior) {
+            // Withdrawn on purpose by a behavior's beforeSend, not refused:
+            // the row is spent, or it would block every later event.
+            this._logger.warn(
+              `[v2.0.1] Replay of ${describeTransactionEvent(payload)} dropped by a behavior's beforeSend; removed from the queue`,
+              LogType.TRANSACTION,
+            );
+            return "replayed";
+          }
           this._awaitingReplay = true;
           this._logger.warn(
             `[v2.0.1] Replay of ${describeTransactionEvent(payload)} refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,

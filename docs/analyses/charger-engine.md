@@ -643,7 +643,17 @@ normalization hides and the 175 cases added later), and the hot paths cost one b
   returning nothing leaves the CALL as it was (mutating the copy changes nothing). A returned promise, a throw or a
   non-object is a warning and the CALL goes on unchanged. Behaviors chain in load order, each seeing the result of
   the one before. A rewritten payload goes through the existing outgoing schema warning (a warning, the CALL is
-  still sent). A resend (1.6 transaction retries) is intercepted again as the new CALL it is.
+  still sent).
+- **One rule on both versions: every transmission is intercepted once, starting from the payload as the station
+  built it.** A resend after a CALLERROR (1.6 and 2.x transaction retries) and a replay from the offline queue are
+  new transmissions, so a behavior sees them again; the queue and the request history keep the payload _as built_,
+  never the rewritten one, so a rewrite is applied once to what goes on the wire and a behavior never rewrites its
+  own output. A CALL handed over while the socket is down is not transmitted: beforeSend does not see it until it
+  is replayed (a CALL already queued behind another when the socket closes may be seen twice, once for the
+  attempt that never left and once on the replay). The answer is matched with the CALL as built, so rewriting a
+  `StartTransaction` `idTag` or `timestamp`, or an `Authorize` `idTag`, does not cut the CALL from its answer.
+- A `beforeSend` drop of a replayed 2.x `TransactionEvent` removes its row from the offline queue (it is not a
+  refusal by the socket, which keeps the row at the head).
 - A `ctx.send` made from inside a `beforeSend` waits one microtask, so it is queued after the CALL being intercepted.
 - **Dropped CALL.** Nothing is queued and nothing is written. Whoever waits is told through the path a CALL that
   never reached the wire already had: `OcppCallNoAnswerError("dropped")` for `ctx.send` / `ocppCall` / expert calls,

@@ -2147,60 +2147,6 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
-  /** Mirrors `_firmwareUpdateInFlight` / `_firmwareUpdateTimers` for the
-   *  signed variant — kept separate so a SignedUpdateFirmware.req can't
-   *  collide with (or be blocked by) a plain UpdateFirmware.req train. */
-  private _signedFirmwareUpdateInFlight = false;
-  private _signedFirmwareUpdateTimers: TimerHandle[] = [];
-
-  /**
-   * OCPP 1.6 Security Whitepaper SignedUpdateFirmware.req: schedules a
-   * simulated signed firmware update progression. After `retrieveDate` is
-   * reached, fires SignedFirmwareStatusNotification.req in sequence —
-   * Downloading → Downloaded → SignatureVerified → Installing → Installed
-   * — with `intervalMs` between each transition, carrying `requestId` on
-   * every notification. Same "no real binary, just walk the status
-   * machine" approach as `simulateFirmwareUpdate` — no signature is
-   * actually verified.
-   */
-  simulateSignedFirmwareUpdate(
-    retrieveDate: Date,
-    requestId: number,
-    intervalMs = 2000,
-  ): void {
-    if (this._signedFirmwareUpdateInFlight) {
-      this._logger.warn(
-        "SignedUpdateFirmware: a previous simulated update is still in flight; ignoring",
-        LogType.OCPP,
-      );
-      return;
-    }
-    this._signedFirmwareUpdateInFlight = true;
-
-    const startDelay = Math.max(0, retrieveDate.getTime() - this._clock.now());
-    const sequence: readonly FirmwareStatus[] = [
-      "Downloading",
-      "Downloaded",
-      "SignatureVerified",
-      "Installing",
-      "Installed",
-    ];
-
-    const fireStep = (index: number) => {
-      if (index >= sequence.length) {
-        this._signedFirmwareUpdateInFlight = false;
-        this._signedFirmwareUpdateTimers = [];
-        return;
-      }
-      this.sendSignedFirmwareStatusNotification(sequence[index], requestId);
-      const t = this._clock.setTimeout(() => fireStep(index + 1), intervalMs);
-      this._signedFirmwareUpdateTimers.push(t);
-    };
-
-    const startTimer = this._clock.setTimeout(() => fireStep(0), startDelay);
-    this._signedFirmwareUpdateTimers.push(startTimer);
-  }
-
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
@@ -2425,12 +2371,6 @@ export class ChargePoint {
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // The engine stops the follow-up of every answer (the firmware status
     // train among them) so it doesn't keep firing against a dead WebSocket.
-    // ...and the signed variant's simulation too.
-    this._signedFirmwareUpdateTimers.forEach((t) =>
-      this._clock.clearTimeout(t),
-    );
-    this._signedFirmwareUpdateTimers = [];
-    this._signedFirmwareUpdateInFlight = false;
     this._engine.connectionClosed();
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();

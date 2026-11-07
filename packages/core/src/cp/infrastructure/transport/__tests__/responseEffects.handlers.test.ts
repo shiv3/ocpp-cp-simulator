@@ -46,7 +46,6 @@ function buildContext() {
         };
       },
     },
-    simulateSignedFirmwareUpdate: record("simulateSignedFirmwareUpdate"),
     connectors: new Map([
       [1, { id: 1 }],
       [2, { id: 2 }],
@@ -529,7 +528,7 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect calls simulateSignedFirmwareUpdate with requestId on settlement", () => {
+    it("effect starts the signed follow-up on settlement", () => {
       const { ctx, chargePointCalls } = buildContext();
       const handler = new SignedUpdateFirmwareHandler();
       const now = new Date();
@@ -548,12 +547,15 @@ describe("responseEffects.handlers", () => {
 
       expect(isHandlerOutcome(result)).toBe(true);
       if (isHandlerOutcome(result)) {
-        expect(chargePointCalls.simulateSignedFirmwareUpdate).toBeUndefined();
+        expect(chargePointCalls["effect:SignedUpdateFirmware"]).toBeUndefined();
+        // The request, requestId (789) included, goes to the default behavior.
+        expect(chargePointCalls.runDefault[0][0]).toBe("SignedUpdateFirmware");
+        expect(
+          (chargePointCalls.runDefault[0][1] as { requestId: number })
+            .requestId,
+        ).toBe(789);
         result.afterResponseSettled();
-        const calls = chargePointCalls.simulateSignedFirmwareUpdate;
-        expect(calls).toHaveLength(1);
-        // Verify that requestId (789) is passed as the second argument
-        expect(calls?.[0][1]).toBe(789);
+        expect(chargePointCalls["effect:SignedUpdateFirmware"]).toHaveLength(1);
       }
     });
   });

@@ -1,6 +1,7 @@
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargerEngine } from "../ChargerEngine";
 import { firmwareBehavior } from "./firmware";
+import { signedFirmwareBehavior } from "./signedFirmware";
 
 /**
  * The default behaviors, written against the same `ctx` as user behaviors.
@@ -14,4 +15,5 @@ export function registerDefaultBehaviors(
   cp: ChargePoint,
 ): void {
   engine.registerDefault(firmwareBehavior(cp));
+  engine.registerDefault(signedFirmwareBehavior(cp));
 }

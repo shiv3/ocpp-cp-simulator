@@ -138,7 +138,7 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
   // Firmware management
   // §6.19 FirmwareManagement: UpdateFirmware. (GetDiagnostics is registered
   // above; the matching outbound status notifications fire from inside
-  // ChargePoint.simulateFirmwareUpdate / the GetDiagnostics handler — there
+  // the default.firmware behavior / the GetDiagnostics handler — there
   // is no CALLRESULT counterpart to register.)
   registry.registerCallHandler(
     OCPPAction.UpdateFirmware,
@@ -155,7 +155,7 @@ export function buildV16CallHandlerRegistry(): MessageHandlerRegistry {
   // ExtendedTriggerMessage/InstallCertificate/GetInstalledCertificateIds/
   // DeleteCertificate/GetLog/SignedUpdateFirmware. Matching outbound
   // status notifications fire from inside the handlers themselves (or,
-  // for SignedUpdateFirmware, ChargePoint.simulateSignedFirmwareUpdate) —
+  // for SignedUpdateFirmware, the default.signedFirmware behavior) —
   // there is no CALLRESULT counterpart to register for any of these.
   registry.registerCallHandler(
     OCPPAction.ExtendedTriggerMessage,

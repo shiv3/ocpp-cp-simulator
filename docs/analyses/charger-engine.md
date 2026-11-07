@@ -314,7 +314,8 @@ design left open:
   transaction paths are not engine-owned yet.
 - **Moved so far** (each with its old code deleted): `default.firmware` (`UpdateFirmware`: the 1.6 status
   train with the one-shot `SimulatedFirmwareUpdateFailure`, the 2.x acknowledgement that stays
-  ack-only; a user behavior opts in to a 2.x train).
+  ack-only; a user behavior opts in to a 2.x train) and `default.signedFirmware` (`SignedUpdateFirmware` on
+  1.6: the signed status train carrying `requestId`).
 - **Connection close.** The follow-up (`after`) of an answer ends when the connection closes, as the
   timers of the old firmware simulation did. It also ends when the behavior is unloaded or the station is
   disposed.

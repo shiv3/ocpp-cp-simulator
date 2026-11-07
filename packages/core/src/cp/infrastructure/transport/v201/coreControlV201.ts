@@ -9,7 +9,6 @@ import type {
   ClearCacheResponseV201,
   ReserveNowRequestV201,
   ReserveNowResponseV201,
-  ResetRequestV201,
   ResetResponseV201,
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
@@ -24,6 +23,11 @@ import type { OCPPAvailability } from "../../../domain/types/OcppTypes";
 import { OCPPStatus, ReservationStatus } from "../../../domain/types/OcppTypes";
 import { LogType } from "../../../shared/Logger";
 
+/**
+ * B11 / B12 Reset.req: translation only. The `default.reset` behavior of the
+ * charger engine answers and resets once the answer settled
+ * (`application/engine/behaviors/reset.ts`).
+ */
 export const handleResetV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -33,43 +37,11 @@ export const handleResetV201 = (
       response: { status: "Accepted" } satisfies ResetResponseV201,
     };
   }
-
-  const req = payload as ResetRequestV201;
-  const type: string = req.type;
-  const { evseId } = req;
-  const all = [...ctx.chargePoint.connectors.values()];
-  const targets =
-    evseId === undefined
-      ? all
-      : all.filter((connector) => connector.id === evseId);
-
-  if (evseId !== undefined && targets.length === 0) {
-    return {
-      response: { status: "Rejected" } satisfies ResetResponseV201,
-    };
-  }
-
-  if (type === "OnIdle" && targets.some((connector) => connector.transaction)) {
-    return {
-      response: { status: "Scheduled" } satisfies ResetResponseV201,
-    };
-  }
-
-  return {
-    response: { status: "Accepted" } satisfies ResetResponseV201,
-    afterResult: () => {
-      if (type !== "ImmediateAndResume") {
-        for (const connector of targets) {
-          if (connector.transaction) {
-            ctx.chargePoint.stopTransaction(connector.id, "HardReset", {
-              triggerReason: "ResetCommand",
-            });
-          }
-        }
-      }
-      ctx.chargePoint.boot();
-    },
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "Reset",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };
 
 function availabilityStatus(target: OCPPAvailability): OCPPStatus {

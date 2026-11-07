@@ -321,7 +321,8 @@ design left open:
   file name, a user behavior opts in). The diagnostics behavior imports `infrastructure/file_upload`, the one
   place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
   own, and `default.reset` (`Reset`: the 1.6 `Accepted` and reset after the answer; the 2.x
-  `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer).
+  `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer) and `default.availability`
+  (`ChangeAvailability`: 1.6 applies the change while it builds the answer, 2.x once the answer settled).
 - **Start of a follow-up.** `after` starts in the turn the response settled, up to its first wait, as the
   effects it replaced did (`Uploading` still goes out in the turn of the settlement). Its later steps run
   as promise continuations, so a test that drives them with synchronous fake timers needs the async

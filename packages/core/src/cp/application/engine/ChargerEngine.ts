@@ -11,6 +11,7 @@ import type {
 } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
+import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
 import { LogType } from "../../shared/Logger";
@@ -205,6 +206,15 @@ export class ChargerEngine {
     connector.applyWrite(previous, event.write);
     const { write } = event;
     if (write.kind !== "status" || write.scope === "local") return;
+    if (
+      write.scope === "full" &&
+      !isAllowedConnectorStatusTransition(previous.status, write.status)
+    ) {
+      // Only a warning: scenarios and tests may force any transition.
+      this.warn(
+        `Connector ${event.connectorId} status ${previous.status} → ${write.status} is not an expected transition`,
+      );
+    }
     this.host.events.emit("connectorStatusChange", {
       connectorId: event.connectorId,
       status: write.status,

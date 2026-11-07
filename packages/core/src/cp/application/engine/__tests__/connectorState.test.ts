@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { Logger } from "../../../shared/Logger";
+import { Logger, LogLevel } from "../../../shared/Logger";
 import { Connector } from "../../../domain/connector/Connector";
 import {
   DefaultBootNotification,
@@ -97,6 +97,30 @@ describe("connector state in the charger engine", () => {
 
     expect(cp.engine.state.connectors["2"]).toBeUndefined();
     expect(connector.status).toBe(OCPPStatus.Faulted);
+  });
+
+  it("only warns about a transition outside the allowed table", () => {
+    const cp = station(1);
+    const warnings: string[] = [];
+    cp.logger.loggingCallback = (entry) => {
+      if (
+        entry.level === LogLevel.WARN &&
+        entry.message.includes("expected transition")
+      )
+        warnings.push(entry.message);
+    };
+    cp.updateConnectorStatus(1, OCPPStatus.Available);
+    warnings.length = 0;
+
+    cp.updateConnectorStatus(1, OCPPStatus.Charging); // not listed after Available
+
+    expect(cp.getConnector(1)!.status).toBe(OCPPStatus.Charging);
+    expect(warnings).toEqual([
+      expect.stringContaining("not an expected transition"),
+    ]);
+    warnings.length = 0;
+    cp.updateConnectorStatus(1, OCPPStatus.Finishing); // listed
+    expect(warnings).toEqual([]);
   });
 
   it("works without a charge point", () => {

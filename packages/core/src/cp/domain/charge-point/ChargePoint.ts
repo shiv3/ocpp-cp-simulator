@@ -607,16 +607,6 @@ export class ChargePoint {
       this._logger,
       this._events,
       () => ({ status: this._status, error: this._error }),
-      (connectorId) => {
-        const connector = this._connectors.get(connectorId);
-        if (!connector) return undefined;
-        return {
-          status: connector.status,
-          availability: connector.availability,
-          transaction: connector.transaction,
-          meterValue: connector.meterValue,
-        };
-      },
       this._clock,
       this.rng("state-history"),
     );
@@ -630,14 +620,6 @@ export class ChargePoint {
       this._clock,
       this.rng("timeline"),
     );
-
-    this._connectors.forEach((connector, connectorId) => {
-      this._stateManager.initializeConnector(
-        connectorId,
-        connector.status,
-        connector.availability,
-      );
-    });
 
     // ConfigurationStore is constructed last because it depends on `this`
     // (via the `defaultConfiguration(cp)` factory which reads

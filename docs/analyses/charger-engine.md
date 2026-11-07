@@ -211,6 +211,32 @@ Behavior modules import types only. They must not use module-scope mutable state
 k6: no `AbortController`, `URL`, `structuredClone`, `queueMicrotask`, `performance`, async generators or
 `for await`.
 
+Status (stage B): the types are in `packages/contracts/src/behavior.ts` (import them as
+`@ocpp-cp-sim/contracts/behavior`; they are not re-exported from the package index, whose names would
+collide). Decisions the design left open:
+
+- **`CallAnswer`** (what `onBusy` is) is a `CallOutcome` without `after`.
+- **`ctx.defaultBehavior(req)`** is synchronous and returns the default response. It is available in
+  `extend` handlers only and throws elsewhere. A default behavior that answers with an error makes it
+  throw. The default's follow-up (its `after`) runs when the response settled, before the handler's own
+  `after`.
+- **`after` and no answer.** `after` runs once the response settled on the wire. For `noResponse` there
+  is nothing to settle, so it runs at once. When the response is not delivered (stale connection, socket
+  closed) it is skipped with a warning.
+- **Response checking.** A `response` is checked against the bundled JSON schema of the action's
+  response (`<action>Response<V16|V201|V21>`), using the wire spelling of the CALL. A violation answers
+  CALLERROR `InternalError` and logs a warning; `skipValidation: true` sends it as given. An action with
+  no bundled response schema is not checked.
+- **`requires` is enforced.** `loadBehavior` refuses a behavior whose `requires` the station cannot
+  meet (`ocpp1.6` on a 2.x station, `ocpp2.x` on 1.6, `virtual-time` on a real-time clock). A behavior
+  that calls a physical verb or `ctx.raw` without listing `physical` or `raw-frames` gets an error at the
+  call. `raw-frames` is a capability name added to the design's list.
+- **Waits.** `ctx.sleep` and `ctx.until` run on the charge point's clock. When the behavior is unloaded,
+  the station disposes, or (for a CALL's handler and `after`) the connection closes, a pending wait
+  rejects with `BehaviorStopped`, which the engine swallows. `ctx.until` rejects with `BehaviorTimeout`.
+- **`ctx.random(stream)`** draws from the charge point's streams under the name `<behaviorId>/<stream>`,
+  so two behaviors never share numbers by accident.
+
 ### BehaviorRegistry (`application/behavior/`)
 
 One per charge point. Holds rules from two providers: code behaviors, and scenario rules.
@@ -264,6 +290,34 @@ diagnostics and logs, reset, availability, reservation, unlock, then transaction
 Each move deletes the old code in the same commit. Calculations are called as services.
 
 Resume: state is restored, and `onResume` runs. Async positions are not restored.
+
+Status (stage B): `ChargerEngine` and `ChargerState` are in `application/engine/`; `ChargePoint` owns one
+(`cp.engine`) and offers `cp.loadBehavior(behavior)` and `cp.unloadBehavior(id)`. Decisions the
+design left open:
+
+- **State so far.** `ChargerState` holds `schema`, the last firmware, signed firmware, log and
+  diagnostics status the station reported (`{ status, requestId }`), and `behaviors`, the `ctx.state`
+  of every loaded behavior. Connector status, availability, transactions and reservations move into it
+  with their default behaviors in stage C; until then they stay in `Connector` and the managers.
+  `engine.snapshot()` returns a deep copy after checking it is JSON-serializable.
+- **The queue.** `engine.dispatch(event)` is synchronous: an event dispatched while the queue is idle is
+  reduced and acted on before the call returns, so a notification still goes out in the turn that asked
+  for it (the wire order does not change); one dispatched meanwhile runs right after the current event.
+  Events: `notified` (firmware / signed firmware / log / diagnostics status, reduced into the state, then
+  sent), `behavior.loaded`, `behavior.unloaded`, `connection.closed`, `disposed`. `ctx.state` is the
+  one thing a behavior mutates in place; it is not an event.
+- **Default behaviors** are `Behavior` objects registered with `engine.registerDefault`, keyed by wire
+  action and written against the same `ctx`. Handlers call `engine.runDefault(action, payload)` and get
+  `{ response, effect }`: the effect starts the behavior's `after` once the response settled, through the
+  existing `ResponseEffectQueue`. A default answers synchronously (#456). The ones moved so far reach
+  `ChargePoint` internals through the station they were built for, because the connector and
+  transaction paths are not engine-owned yet.
+- **Connection close.** The follow-up (`after`) of an answer ends when the connection closes, as the
+  timers of the old firmware simulation did. It also ends when the behavior is unloaded or the station is
+  disposed.
+- **Test harness.** `runBehavior()` is `packages/core/src/test/behavior/runBehavior.ts`; see the
+  [testing strategy](testing-strategy.md#behavior-tests). Time is virtual, but the socket and the fake
+  CSMS are real I/O, so the effect hash covers the ordered, normalized frames and not their timing.
 
 ### Determinism
 

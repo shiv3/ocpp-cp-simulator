@@ -37,13 +37,39 @@ export type RuleOwner =
  * What the registry needs from the exchange of a CALL. `CallExchange`
  * satisfies it; the registry does not import the transport.
  */
+export interface HeldAnswerOptions {
+  /** Work that follows the answer once it settled on the wire. */
+  readonly effect?: () => void;
+  /** Told once if `effect` will not run. */
+  readonly onEffectDropped?: (reason: string) => void;
+}
+
+/** How an observed answer ended; always resolves. */
+export type HeldSettlement =
+  | { readonly delivered: true }
+  | { readonly delivered: false; readonly reason: string };
+
 export interface HeldExchange {
   readonly state: "open" | "answered" | "suppressed" | "abandoned";
   readonly action: string;
   readonly messageId: string;
   onClosed(listener: () => void): void;
-  reply(payload: unknown): void;
-  replyError(errorCode: string, errorDescription: string): void;
+  reply(payload: unknown, options?: HeldAnswerOptions): void;
+  replyError(
+    errorCode: string,
+    errorDescription: string,
+    options?: HeldAnswerOptions,
+  ): void;
+  /** Like `reply`, and says whether the frame was written. */
+  respond(
+    payload: unknown,
+    options?: HeldAnswerOptions,
+  ): Promise<HeldSettlement>;
+  respondError(
+    errorCode: string,
+    errorDescription: string,
+    options?: HeldAnswerOptions,
+  ): Promise<HeldSettlement>;
   suppress(): unknown;
 }
 

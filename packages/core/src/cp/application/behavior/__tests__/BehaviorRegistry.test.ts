@@ -31,6 +31,17 @@ class FakeExchange implements HeldExchange {
     this.answers.push({ error: code, description });
     this.close("answered");
   }
+  respond(payload: unknown): Promise<{ delivered: true }> {
+    this.reply(payload);
+    return Promise.resolve({ delivered: true });
+  }
+  respondError(
+    code: string,
+    description: string,
+  ): Promise<{ delivered: true }> {
+    this.replyError(code, description);
+    return Promise.resolve({ delivered: true });
+  }
   suppress(): void {
     this.answers.push({ none: true });
     this.close("suppressed");

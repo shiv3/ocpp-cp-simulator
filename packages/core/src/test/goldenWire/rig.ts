@@ -1,4 +1,7 @@
-import { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import {
+  ChargePoint,
+  type ChargePointSimulationOptions,
+} from "../../cp/domain/charge-point/ChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -24,6 +27,10 @@ export interface RigOptions {
   readonly beforeConnect?: (cp: ChargePoint) => void;
   /** Leave the station unconnected; the case connects it itself. */
   readonly noConnect?: boolean;
+  /** A clock and a seed for the station (the behavior test harness). */
+  readonly simulation?: ChargePointSimulationOptions;
+  /** How long traffic must be quiet before a step counts as settled. */
+  readonly quietMs?: number;
 }
 
 /** A real ChargePoint wired to a fake CSMS, one per golden case. */
@@ -53,6 +60,11 @@ export class Rig {
       [],
       OCPP_VERSION_STRING[options.version],
       {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      options.simulation ?? {},
     );
     cp.logger.setEnabledTypes();
     cp.events.on("error", () => undefined);

@@ -147,6 +147,8 @@ import {
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
 import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
+import { ChargerEngine } from "../../application/engine/ChargerEngine";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
@@ -284,6 +286,8 @@ export class ChargePoint {
     ocppVersion: () => this._ocppVersion,
     warn: (message) => this._logger.warn(message, LogType.OCPP),
   });
+  /** Owner of the engine-held state and the behaviors (stage B). */
+  private readonly _engine = new ChargerEngine(this);
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
@@ -712,6 +716,26 @@ export class ChargePoint {
   /** Rules that may take an inbound CSMS CALL over from the default path. */
   get behaviors(): BehaviorRegistry {
     return this._behaviors;
+  }
+
+  /** The charger engine: event queue, engine state and behavior runner. */
+  get engine(): ChargerEngine {
+    return this._engine;
+  }
+
+  /**
+   * Load a behavior object (docs/analyses/charger-engine.md, "Behavior API")
+   * into this station: its `onCall` rules take the matching inbound CALLs over
+   * from the default behavior, and `main` starts. Throws on a duplicate id or
+   * a `requires` this station cannot meet.
+   */
+  loadBehavior(behavior: Behavior): void {
+    this._engine.loadBehavior(behavior);
+  }
+
+  /** Unload a behavior loaded with {@link loadBehavior}; false if none has that id. */
+  unloadBehavior(id: string): boolean {
+    return this._engine.unloadBehavior(id);
   }
 
   /** The random stream `name` of this charge point (see `RngStreams`). */
@@ -2490,6 +2514,7 @@ export class ChargePoint {
     );
     this._signedFirmwareUpdateTimers = [];
     this._signedFirmwareUpdateInFlight = false;
+    this._engine.connectionClosed();
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
     this._lastDefaultHandledRemoteStart.clear();
@@ -2542,6 +2567,7 @@ export class ChargePoint {
     this.releaseRenewedClientCertificate();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    this._engine.dispose();
     // Offline monitoring keeps the periodic timers running: stop them.
     this.stopMonitoring();
     this._localAuthListManager.dispose();

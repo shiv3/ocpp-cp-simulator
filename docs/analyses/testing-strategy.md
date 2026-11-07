@@ -200,6 +200,17 @@ effect hash), once with another (different hash), with a control on unseeded str
 hash for a small fleet. The result and its limits are in the
 [Charger engine design](charger-engine.md#determinism).
 
+## Behavior tests
+
+`runBehavior()` (`packages/core/src/test/behavior/runBehavior.ts`, Bun only) builds a real `ChargePoint`
+on a `VirtualClock` with a seed, wired to the fake CSMS of the golden wire test, loads behaviors with
+`cp.loadBehavior()` and offers `advance(ms)`, `call()`, `callsOf()` and `effectHash()`. `advance` moves
+virtual time, then waits for the traffic that follows to go quiet (a short real-time wait: the socket
+and the fake CSMS are real I/O). A delay is therefore asserted by stepping time (`advance(499)`: nothing
+yet; `advance(1)`: the frame), not by reading a timestamp off a frame. The engine's own tests are
+`engine.bun.test.ts` there, and `BehaviorRegistry.test.ts` and `ChargerState.test.ts` under
+`packages/core/src/cp/application/`.
+
 ## Does anything actually launch the desktop daemon?
 
 Yes, since #319 — and the answer used to be no, which is why the

@@ -2287,7 +2287,11 @@ export class ChargePoint {
       // (See `restoreConnectorRuntimeFromDatabase` for the persisted
       // shape and `Connector.restoreRuntimeSnapshot` for how the
       // private fields are restored ahead of this StatusNotification.)
-      if (connector.autoResetToAvailable && connector.transaction === null) {
+      if (
+        connector.availability !== "Inoperative" &&
+        connector.autoResetToAvailable &&
+        !connector.hasRunningTransaction
+      ) {
         this.updateConnectorStatus(connector.id, OCPPStatus.Available);
         return;
       }
@@ -2777,6 +2781,10 @@ export class ChargePoint {
    */
   scheduleResetOnIdle(evseId?: number): void {
     this._pendingResetsOnIdle.push({ evseId });
+    // The transaction can end after the handler decided to answer Scheduled
+    // but before this callback runs. Recheck after enqueueing to avoid leaving
+    // an already-runnable reset stranded until a later transaction ends.
+    this.runPendingResetOnIdle();
   }
 
   /**
@@ -2784,8 +2792,13 @@ export class ChargePoint {
    * station now, which already satisfies them; keeping them would boot
    * again on a later transaction end.
    */
-  cancelPendingResetsOnIdle(): void {
-    this._pendingResetsOnIdle = [];
+  cancelPendingResetsOnIdle(evseId?: number): void {
+    this._pendingResetsOnIdle =
+      evseId === undefined
+        ? []
+        : this._pendingResetsOnIdle.filter(
+            (pending) => pending.evseId !== evseId,
+          );
   }
 
   /**
@@ -2800,7 +2813,7 @@ export class ChargePoint {
       [...this._connectors.values()].some(
         (connector) =>
           (pending.evseId === undefined || connector.id === pending.evseId) &&
-          connector.transaction,
+          connector.hasRunningTransaction,
       );
     const remaining = this._pendingResetsOnIdle.filter(isBusy);
     if (remaining.length === this._pendingResetsOnIdle.length) return;
@@ -3033,6 +3046,10 @@ export class ChargePoint {
     const removed = this._connectors.delete(connectorId);
     if (removed) {
       this._events.emit("connectorRemoved", { connectorId });
+      // Removing a busy connector may make a station-wide OnIdle reset
+      // runnable. runPendingResetOnIdle still waits if any remaining target
+      // has a running transaction.
+      this.runPendingResetOnIdle();
     }
     return removed;
   }

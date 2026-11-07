@@ -803,16 +803,24 @@ export class Connector {
     const target = transactionOfRecord(record);
     this.txTarget = target;
     this.txView = new Proxy(target, {
-      set: (_target, key, value) => {
+      // A view kept past the end of its transaction is detached: it writes
+      // into its own record, never into the transaction that replaced it.
+      set: (viewTarget, key, value) => {
         if (typeof key !== "string") return false;
+        if (this.txTarget !== viewTarget) {
+          return Reflect.set(viewTarget, key, value);
+        }
         this.store.write({
           kind: "transaction.patch",
           patch: patchOfFields({ [key]: value }),
         });
         return true;
       },
-      deleteProperty: (_target, key) => {
+      deleteProperty: (viewTarget, key) => {
         if (typeof key !== "string") return false;
+        if (this.txTarget !== viewTarget) {
+          return Reflect.deleteProperty(viewTarget, key);
+        }
         this.store.write({
           kind: "transaction.patch",
           patch: patchOfFields({ [key]: undefined }),

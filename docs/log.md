@@ -2319,3 +2319,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | Scenario schema 1.5 (charger engine stage B)
 
 - `csmsCallTrigger.behavior` / `onBusy`, the `callResponse` and `useBehavior` nodes and `{ "$from": … }` are in `scenario.schema.json`, `ScenarioTypes`, the executor (branch-scoped CALL), the runtime and the web editor; `SCENARIO_SCHEMA_VERSION` is `1.5`. `export-k6` refuses them. [Scenario format](concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15), [export-k6](entities/cli.md).
+
+## [2026-11-07] ingest | Acceptance tests for #566 (charger engine stage B)
+
+- `acceptance566.bun.test.ts`: a JSON scenario and a code behavior each own an incoming `UpdateFirmware` on 1.6 and 2.0.1, replace it completely and control notification payloads, order and delays; concurrent calls, cancellation and disconnect cleanup; `UnlockConnector` as a second action. [Testing strategy](analyses/testing-strategy.md#behavior-tests).

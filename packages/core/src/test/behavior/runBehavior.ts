@@ -40,6 +40,13 @@ export interface BehaviorRun {
   callsOf(action: string): WireFrame[];
   /** Move virtual time forward and wait for the traffic that follows. */
   advance(ms: number): Promise<void>;
+  /**
+   * Like `advance`, in steps of `stepMs` with the traffic settled after each.
+   * A behavior or scenario that waits for an answer of the (real) fake CSMS
+   * between two waits only arms its next timer once that answer arrived, so a
+   * single long jump would sweep past it.
+   */
+  advanceInSteps(ms: number, stepMs?: number): Promise<void>;
   /** Let pending traffic settle without moving time. */
   settle(): Promise<void>;
   /** A CSMS CALL; resolves with the station's answer. */
@@ -98,6 +105,12 @@ export async function runBehavior(
     async advance(ms) {
       await clock.advanceBy(ms);
       await settle();
+    },
+    async advanceInSteps(ms, stepMs = 500) {
+      for (let left = ms; left > 0; left -= stepMs) {
+        await clock.advanceBy(Math.min(stepMs, left));
+        await settle();
+      }
     },
     settle,
     call: (action, payload) => csms.call(action, payload),

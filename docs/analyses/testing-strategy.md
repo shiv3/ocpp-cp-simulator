@@ -207,9 +207,21 @@ on a `VirtualClock` with a seed, wired to the fake CSMS of the golden wire test,
 `cp.loadBehavior()` and offers `advance(ms)`, `call()`, `callsOf()` and `effectHash()`. `advance` moves
 virtual time, then waits for the traffic that follows to go quiet (a short real-time wait: the socket
 and the fake CSMS are real I/O). A delay is therefore asserted by stepping time (`advance(499)`: nothing
-yet; `advance(1)`: the frame), not by reading a timestamp off a frame. The engine's own tests are
+yet; `advance(1)`: the frame), not by reading a timestamp off a frame. A behavior or scenario that waits for
+an answer of the fake CSMS between two timed waits arms its next timer only once that real answer arrived,
+so a long sequence is advanced with `advanceInSteps` (500 ms by default) instead of one jump.
+`runScenario.ts` next to it runs a scenario definition on the same station and clock. The engine's own tests are
 `engine.bun.test.ts` there, and `BehaviorRegistry.test.ts` and `ChargerState.test.ts` under
 `packages/core/src/cp/application/`.
+
+The tests of the scenario 1.5 features are `scenario15.bun.test.ts` (one test per row of the runtime
+contract in the [Charger engine design](charger-engine.md#scenario-schema-15-additive)) and
+`ScenarioExecutor`-level `callResponse.test.ts`. The acceptance tests for #566 are
+`acceptance566.bun.test.ts`: for OCPP 1.6 and 2.0.1 and for a JSON scenario and a code behavior alike, an
+incoming `UpdateFirmware` is matched, replaced completely, answered and followed by notifications whose
+payloads, order and delays the owner chose (the default sequence never runs); concurrent calls, cancellation
+(of an open CALL and of a running sequence) and disconnect cleanup are covered, and `UnlockConnector` shows
+the mechanism is not specific to firmware.
 
 ## Does anything actually launch the desktop daemon?
 

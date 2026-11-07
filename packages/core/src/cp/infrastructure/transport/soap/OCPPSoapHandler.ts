@@ -59,7 +59,7 @@ import {
 } from "../../../domain/types/statusProjection";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
-import type { IChargePointMessageHandler } from "../IChargePointMessageHandler";
+import type { IChargePointMessageHandler } from "../../../domain/transport/IChargePointMessageHandler";
 import { DataTransferHandler } from "../handlers";
 import {
   AuthorizeResultHandler,

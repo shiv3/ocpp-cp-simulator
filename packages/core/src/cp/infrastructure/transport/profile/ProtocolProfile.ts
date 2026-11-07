@@ -1,7 +1,7 @@
 import type { OcppVersion } from "../../../domain/types/OcppVersion";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";
-import type { IChargePointMessageHandler } from "../IChargePointMessageHandler";
+import type { IChargePointMessageHandler } from "../../../domain/transport/IChargePointMessageHandler";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { OcppSubprotocol } from "./subprotocols";
 

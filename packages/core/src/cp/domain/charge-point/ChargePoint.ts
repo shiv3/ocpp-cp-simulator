@@ -280,7 +280,10 @@ export class ChargePoint {
   private readonly _webSocket: OCPPWebSocket | null;
   private readonly _clock: SimClock;
   private readonly _rngSource: RngSource;
-  private readonly _behaviors = new BehaviorRegistry();
+  private readonly _behaviors = new BehaviorRegistry({
+    ocppVersion: () => this._ocppVersion,
+    warn: (message) => this._logger.warn(message, LogType.OCPP),
+  });
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;

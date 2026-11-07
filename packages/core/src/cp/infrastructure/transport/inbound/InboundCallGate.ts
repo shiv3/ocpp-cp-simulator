@@ -122,11 +122,14 @@ export class InboundCallGate {
     }
 
     const connectorId = connectorIdOf(payload);
-    const resolution = this.registry.resolve({
-      action,
-      payload,
-      ...(connectorId === undefined ? {} : { connectorId }),
-    });
+    const resolution = this.registry.resolve(
+      {
+        action,
+        payload,
+        ...(connectorId === undefined ? {} : { connectorId }),
+      },
+      exchange,
+    );
     if (resolution.kind !== "default") {
       return { kind: "settled" };
     }

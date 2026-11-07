@@ -1,8 +1,4 @@
-import {
-  cyrb128,
-  draw,
-  xoshiro128ss,
-} from "../../infrastructure/transport/network-sim/SeededRng";
+import { cyrb128, draw, xoshiro128ss } from "../../shared/SeededRng";
 
 /**
  * How a charge point picks an idTag when a call does not name one.

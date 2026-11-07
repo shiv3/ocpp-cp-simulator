@@ -27,7 +27,7 @@ import type {
   RegistrationStatus,
 } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
-import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
+import type { IChargePointMessageHandler } from "../transport/IChargePointMessageHandler";
 import {
   OCPPWebSocket,
   type SocketClose,

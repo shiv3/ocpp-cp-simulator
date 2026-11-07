@@ -27,6 +27,18 @@ export interface DataTransferResult {
  */
 export type DataTransferData = string | Record<string, unknown>;
 
+/**
+ * Per-vendor DataTransfer responder. Implementations decide whether a given
+ * `messageId` is supported; returning `null` lets the handler fall through
+ * to `UnknownMessageId`.
+ */
+export interface DataTransferResponder {
+  handle(
+    messageId: string | undefined,
+    data: string | undefined,
+  ): { status: "Accepted" | "Rejected"; data?: string } | null;
+}
+
 /** How long a control-plane `data_transfer` waits for the CSMS's answer
  *  before its promise rejects. The CALL itself is not withdrawn: a late
  *  CALLRESULT is still logged by the ordinary result handler. Kept under the

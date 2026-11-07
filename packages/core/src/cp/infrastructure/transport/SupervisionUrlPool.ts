@@ -1,4 +1,4 @@
-import { cyrb128, draw, xoshiro128ss } from "./network-sim/SeededRng";
+import { cyrb128, draw, xoshiro128ss } from "../../shared/SeededRng";
 
 /**
  * How a charge point picks among several supervision URLs.

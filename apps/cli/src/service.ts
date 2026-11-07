@@ -3249,9 +3249,32 @@ export class CLIChargePointService {
     };
   }
 
-  /** Put a new version of a loaded behavior in its place (a reload). */
-  replaceBehavior(behavior: Behavior): void {
-    this._chargePoint.engine.replaceBehavior(behavior);
+  /**
+   * Put new versions of loaded behaviors in their place (a reload), all or
+   * none: each is checked before any is replaced, and if one still fails the
+   * ones already replaced go back to the version they had.
+   */
+  replaceBehaviors(next: readonly Behavior[]): void {
+    const engine = this._chargePoint.engine;
+    for (const behavior of next) engine.assertLoadable(behavior);
+    const done: Behavior[] = [];
+    try {
+      for (const behavior of next) {
+        const previous = engine.behaviorOf(behavior.id);
+        engine.replaceBehavior(behavior);
+        if (previous) done.push(previous);
+      }
+    } catch (error) {
+      for (const previous of done.reverse()) {
+        try {
+          engine.replaceBehavior(previous);
+        } catch {
+          // The old version ran here a moment ago; if it cannot be put back
+          // the original error is still the one to report.
+        }
+      }
+      throw error;
+    }
   }
 
   /**

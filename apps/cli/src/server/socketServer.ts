@@ -1125,6 +1125,18 @@ async function setCpBehaviors(
   return { cpId: params.cpId, behaviors };
 }
 
+/** The result schema holds 1000 entries; a large fleet can refuse more. */
+const MAX_RELOAD_FAILURES = 1000;
+
+function capFailures(failures: readonly string[]): string[] {
+  const text = (m: string): string => m.slice(0, 60_000);
+  if (failures.length <= MAX_RELOAD_FAILURES) return failures.map(text);
+  return [
+    ...failures.slice(0, MAX_RELOAD_FAILURES - 1).map(text),
+    `... and ${failures.length - (MAX_RELOAD_FAILURES - 1)} more charge points kept the old version`,
+  ];
+}
+
 /**
  * `behavior.reload`: re-read the files given at start. It takes no parameters,
  * so neither a path nor code can come from the caller.
@@ -1141,7 +1153,7 @@ async function reloadBehaviors(
       unchanged: f.unchanged,
       ...(f.error === undefined ? {} : { error: f.error.slice(0, 60_000) }),
       applied: f.applied,
-      failures: f.failures.map((m) => m.slice(0, 60_000)),
+      failures: capFailures(f.failures),
     })),
   };
 }

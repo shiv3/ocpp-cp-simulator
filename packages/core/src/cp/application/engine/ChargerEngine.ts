@@ -341,6 +341,11 @@ export class ChargerEngine {
     return true;
   }
 
+  /** The loaded behavior with this id, if any. */
+  behaviorOf(id: string): Behavior | undefined {
+    return this.loaded.get(id);
+  }
+
   /** Ids of the loaded code behaviors. */
   get behaviorIds(): readonly string[] {
     return [...this.loaded.keys()];

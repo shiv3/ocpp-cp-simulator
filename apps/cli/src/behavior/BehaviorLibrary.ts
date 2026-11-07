@@ -67,10 +67,13 @@ export class BehaviorLibrary {
   private readonly fileIds = new Map<string, string[]>();
   private readonly hashes = new Map<string, string>();
   private readonly listeners = new Set<
-    (id: string, behavior: Behavior) => ReplaceOutcome
+    (behaviors: readonly Behavior[]) => ReplaceOutcome
   >();
   private queue: Promise<unknown> = Promise.resolve();
   private watchers: FSWatcher[] = [];
+
+  /** How long a reloaded module's top level may take before the reload fails. */
+  importTimeoutMs = 2_000;
 
   constructor(
     private readonly log: (message: string) => void = (message) =>
@@ -163,11 +166,12 @@ export class BehaviorLibrary {
   }
 
   /**
-   * Register a function that applies a reloaded behavior to the charge points
-   * running it. Returns the unsubscribe function.
+   * Register a function that applies the reloaded behaviors of one file to the
+   * charge points running them, all or none on each charge point. Returns the
+   * unsubscribe function.
    */
   onReplace(
-    listener: (id: string, behavior: Behavior) => ReplaceOutcome,
+    listener: (behaviors: readonly Behavior[]) => ReplaceOutcome,
   ): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -191,7 +195,10 @@ export class BehaviorLibrary {
       const oldIds = this.fileIds.get(file) ?? [];
       let contents;
       try {
-        contents = await readBehaviorFile(file);
+        contents = await readBehaviorFile(file, {
+          previousHash: this.hashes.get(file),
+          timeoutMs: this.importTimeoutMs,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.log(
@@ -208,7 +215,7 @@ export class BehaviorLibrary {
         });
         continue;
       }
-      if (contents.hash === this.hashes.get(file)) {
+      if (contents.unchanged) {
         results.push({
           file,
           ids: oldIds,
@@ -220,11 +227,16 @@ export class BehaviorLibrary {
         continue;
       }
       const nextIds = contents.behaviors.map((b) => b.id);
+      const duplicate = nextIds.find((id, i) => nextIds.indexOf(id) !== i);
       if (
+        duplicate !== undefined ||
         nextIds.length !== oldIds.length ||
         nextIds.some((id) => !oldIds.includes(id))
       ) {
-        const message = `the behavior ids of ${file} changed from [${oldIds.join(", ")}] to [${nextIds.join(", ")}]; restart to add or remove behaviors`;
+        const message =
+          duplicate !== undefined
+            ? `${file} declares the behavior id "${duplicate}" twice`
+            : `the behavior ids of ${file} changed from [${oldIds.join(", ")}] to [${nextIds.join(", ")}]; restart to add or remove behaviors`;
         this.log(
           `[behavior] reload refused, keeping the old version: ${message}`,
         );
@@ -239,24 +251,28 @@ export class BehaviorLibrary {
         });
         continue;
       }
-      this.hashes.set(file, contents.hash);
       let applied = 0;
       const failures: string[] = [];
-      for (const behavior of contents.behaviors) {
-        const entry = this.entries.get(behavior.id);
-        if (entry) entry.behavior = behavior;
-        for (const listener of [...this.listeners]) {
-          try {
-            const outcome = listener(behavior.id, behavior);
-            applied += outcome.applied;
-            failures.push(...outcome.failures);
-          } catch (error) {
-            failures.push(
-              error instanceof Error ? error.message : String(error),
-            );
-          }
+      for (const listener of [...this.listeners]) {
+        try {
+          const outcome = listener(contents.behaviors);
+          applied += outcome.applied;
+          failures.push(...outcome.failures);
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : String(error));
         }
       }
+      // The file counts as the version in use only when no charge point kept
+      // the old one: otherwise the next reload must try again, not call it
+      // unchanged. A new charge point takes the new code as soon as one runs it.
+      const refusedEverywhere = failures.length > 0 && applied === 0;
+      if (!refusedEverywhere) {
+        for (const behavior of contents.behaviors) {
+          const entry = this.entries.get(behavior.id);
+          if (entry) entry.behavior = behavior;
+        }
+      }
+      if (failures.length === 0) this.hashes.set(file, contents.hash);
       for (const failure of failures) {
         this.log(`[behavior] ${failure}`);
       }
@@ -266,7 +282,7 @@ export class BehaviorLibrary {
       results.push({
         file,
         ids: nextIds,
-        ok: true,
+        ok: failures.length === 0,
         unchanged: false,
         applied,
         failures,
@@ -280,26 +296,41 @@ export class BehaviorLibrary {
    * imports are bundled in, so they count). Editors that save by renaming
    * are covered because the directory is watched, not the file. Returns a
    * function that stops watching.
+   *
+   * A reload waits for `debounceMs` of quiet, but never longer than
+   * `maxWaitMs` after the first change, so a busy neighbor (a state database
+   * in the same directory) cannot starve it. Database and log files are not
+   * behavior inputs and are ignored; an unrelated write that gets through
+   * costs a bundle and a hash comparison, not a run of the module.
    */
-  watch(debounceMs = 150): () => void {
+  watch(debounceMs = 150, maxWaitMs = 1_000): () => void {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const trigger = (): void => {
+    let firstAt = 0;
+    const fire = (): void => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        void this.reload().catch((error: unknown) =>
-          this.log(
-            `[behavior] reload failed: ${error instanceof Error ? error.message : String(error)}`,
-          ),
-        );
-      }, debounceMs);
+      timer = null;
+      firstAt = 0;
+      void this.reload().catch((error: unknown) =>
+        this.log(
+          `[behavior] reload failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    };
+    const trigger = (): void => {
+      const now = Date.now();
+      if (firstAt === 0) firstAt = now;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(
+        fire,
+        Math.max(0, Math.min(debounceMs, firstAt + maxWaitMs - now)),
+      );
     };
     const dirs = new Set(this.files.map((f) => path.dirname(path.resolve(f))));
     for (const dir of dirs) {
       try {
         this.watchers.push(
           watch(dir, { recursive: true }, (_event, name) => {
-            if (name && /node_modules|\.git[\\/]/.test(String(name))) return;
+            if (name && IGNORED_WATCH_NAME.test(String(name))) return;
             trigger();
           }),
         );
@@ -316,3 +347,7 @@ export class BehaviorLibrary {
     };
   }
 }
+
+/** Paths whose changes never concern a behavior bundle. */
+const IGNORED_WATCH_NAME =
+  /node_modules|\.git[\\/]|\.(db|sqlite3?|log|jsonl)(-wal|-shm|-journal)?$|-(wal|shm|journal)$/;

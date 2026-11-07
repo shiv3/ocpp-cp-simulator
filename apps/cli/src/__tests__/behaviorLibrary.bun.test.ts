@@ -59,8 +59,8 @@ describe("BehaviorLibrary", () => {
     const before = leftovers().length;
     const library = await BehaviorLibrary.fromFiles([file], () => undefined);
     const seen: string[] = [];
-    library.onReplace((id) => {
-      seen.push(id);
+    library.onReplace((behaviors) => {
+      seen.push(...behaviors.map((b) => b.id));
       return { applied: 1, failures: [] };
     });
     expect((await library.reload())[0]).toMatchObject({

@@ -166,8 +166,8 @@ export class CPRegistry {
       options.behaviors instanceof BehaviorLibrary
         ? options.behaviors
         : BehaviorLibrary.of(options.behaviors ?? []);
-    this.library.onReplace((id, behavior) =>
-      this.replaceBehaviorEverywhere(id, behavior),
+    this.library.onReplace((behaviors) =>
+      this.replaceBehaviorsEverywhere(behaviors),
     );
     this.scenarioRuns = createScenarioRunRepository(database);
     this.chargingSessions = createChargingSessionRepository(database);
@@ -602,21 +602,26 @@ export class CPRegistry {
     }
   }
 
-  /** The library listener: put a reloaded behavior on every charge point running it. */
-  private replaceBehaviorEverywhere(
-    id: string,
-    behavior: Behavior,
+  /**
+   * The library listener: put the reloaded behaviors of one file on every
+   * charge point running them. All or none on each charge point: every new
+   * version is checked first, and a failure part-way puts the old versions back.
+   */
+  private replaceBehaviorsEverywhere(
+    behaviors: readonly Behavior[],
   ): ReplaceOutcome {
     let applied = 0;
     const failures: string[] = [];
     for (const [cpId, svc] of this.services) {
-      if (!svc.behaviorIds().includes(id)) continue;
+      const running = svc.behaviorIds();
+      const mine = behaviors.filter((b) => running.includes(b.id));
+      if (mine.length === 0) continue;
       try {
-        svc.replaceBehavior(behavior);
+        svc.replaceBehaviors(mine);
         applied++;
       } catch (error) {
         failures.push(
-          `${cpId} keeps the old version of ${id}: ${error instanceof Error ? error.message : String(error)}`,
+          `${cpId} keeps the old version of ${mine.map((b) => b.id).join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }

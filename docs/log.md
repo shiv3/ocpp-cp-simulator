@@ -2311,3 +2311,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `availability.ts` does the same for `ChangeAvailability` (1.6 applies the change before the answer, 2.x after it, as before).
 - `reservation.ts` does the same for `ReserveNow` and `CancelReservation`. Hand-written charge point stubs in tests get a real engine from `packages/core/src/test/withEngine.ts`.
 - `unlock.ts` does the same for `UnlockConnector`. Every handler of the seven moved defaults now translates and calls `engine.runDefault`.
+
+## [2026-11-07] ingest | extend mode (charger engine stage B)
+
+- `ctx.defaultBehavior(req)` in an `extend` handler returns the default response and registers the default's follow-up; a user behavior can opt a 2.x `UpdateFirmware` in to a status train this way. [Charger engine design](analyses/charger-engine.md#behavior-api-packagescontracts-types-only).

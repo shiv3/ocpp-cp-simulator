@@ -223,6 +223,12 @@ collide). Decisions the design left open:
 - **`after` and no answer.** `after` runs once the response settled on the wire. For `noResponse` there
   is nothing to settle, so it runs at once. When the response is not delivered (stale connection, socket
   closed) it is skipped with a warning.
+- **extend mode.** `ctx.defaultBehavior(req)` runs the default behavior of the CALL's action on the `req`
+  the handler passes (it may be a changed copy) and registers its follow-up. Calling it commits to that
+  follow-up: a handler that then answers something else still gets the default's effect. The request is
+  not schema-checked first (the registry runs before 2.x validation, so a behavior can own a malformed
+  CALL); a default that cannot read a malformed `req` fails and the CSMS gets `InternalError`. The
+  tests are `packages/core/src/test/behavior/extend.bun.test.ts`.
 - **Response checking.** A `response` is checked against the bundled JSON schema of the action's
   response (`<action>Response<V16|V201|V21>`), using the wire spelling of the CALL. A violation answers
   CALLERROR `InternalError` and logs a warning; `skipValidation: true` sends it as given. An action with

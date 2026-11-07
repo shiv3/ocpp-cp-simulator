@@ -25,6 +25,12 @@
   // listed. The two files borrowed from src/ are CP_CREATE_MANY_MAX (the
   // batch size `cp.create_many` accepts) and the OCPP version list
   // `--ocpp-version` validates against — both dependency-free constants.
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/k6-runtime" },
+    { "path": "../../packages/ocpp" }
+  ],
   "include": [
     "**/*.ts",
     "../../packages/contracts/src/limits.ts",

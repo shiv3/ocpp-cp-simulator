@@ -13,6 +13,8 @@ export interface FakeCsmsOptions {
   logFile?: string;
   /** Send UpdateFirmware to each charge point after its BootNotification. */
   updateFirmware?: boolean;
+  /** Keep every frame in `frames` (default true); off for a large fleet. */
+  keepFrames?: boolean;
 }
 
 export interface FrameRecord {
@@ -39,8 +41,9 @@ export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
   const connected = new Set<string>();
   if (opts.logFile) writeFileSync(opts.logFile, "");
   const record = (cp: string, dir: "in" | "out", frame: unknown): void => {
+    if (opts.keepFrames === false && !opts.logFile) return;
     const rec: FrameRecord = { t: Date.now(), cp, dir, frame };
-    frames.push(rec);
+    if (opts.keepFrames !== false) frames.push(rec);
     if (opts.logFile) appendFileSync(opts.logFile, `${JSON.stringify(rec)}\n`);
   };
   const server = Bun.serve<Socket>({
@@ -128,6 +131,10 @@ if (import.meta.main) {
     port: Number(arg("--port") ?? 9100),
     logFile: arg("--log"),
     updateFirmware: process.argv.includes("--update-firmware"),
+    keepFrames: !process.argv.includes("--no-frames"),
   });
   console.log(`fake CSMS on ws://127.0.0.1:${handle.port}`);
+  if (process.argv.includes("--report")) {
+    setInterval(() => console.log(`connected ${handle.connected.size}`), 500);
+  }
 }

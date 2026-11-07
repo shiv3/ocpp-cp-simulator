@@ -58,8 +58,11 @@ Rules:
 4. **No behavior change unless configured.** With no behavior configured, the bytes on the wire and
    their order are the same as before. In particular 2.x `UpdateFirmware` stays ack-only by default.
 5. **No code over the wire.** Socket.IO, MCP and OCPP accept JSON only (#569 forbids executable
-   content). Code loads only from local files at start, behind an explicit flag. Plain execution has
-   no isolation: `vm`, Worker and ShadowRealm are not called isolation anywhere.
+   content). Code loads only from local files named on the command line, behind an explicit flag. It
+   enters a running daemon only by a re-read of those files that the operator asked for with
+   `--watch-behaviors` or `--allow-behavior-reload`; the `behavior.reload` method is refused otherwise.
+   A daemon that runs code answers cross-origin browser requests with `same-origin` CORS by default.
+   Plain execution has no isolation: `vm`, Worker and ShadowRealm are not called isolation anywhere.
 
 ## Parts
 
@@ -438,7 +441,8 @@ k6 runs on real time and promises only explanation through seed and trace.
 - CLI and daemon: `--behavior <file>`, repeatable (stage D1: done, see its Status). The daemon needs `--allow-behavior-code` and refuses
   the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`, into a library
   by behavior id. Which charge point runs which behavior is data, chosen by id (stage E: done); `--watch-behaviors` and
-  `behavior.reload` re-read the same files (stage E: done).
+  `behavior.reload` re-read the same files (stage E: done); `behavior.reload` answers only with `--watch-behaviors` or
+  `--allow-behavior-reload` (review fixes 2).
 - `ocpp-cp-sim behavior build <file>` type-checks and writes one ESM bundle with `--external 'k6/*'`.
 - Web (stage D2: done): `LocalChargePointService.loadBehaviorBundle(id, blob | text)` loads a built bundle through
   `import(blobUrl)`, in the local runtime only.
@@ -596,7 +600,7 @@ Status (stage D2): k6, browser and scale. Decisions the design left open:
   schema-checked on k6.
 - **An iteration always ends.** Env: `RUN_FOR_MS` (a length), `CHARGERS_PER_VU` (ids get `-1`, `-2`, …), `SEED`.
   Without `RUN_FOR_MS`, a behavior with a `main` ends with its mains, one without serves CALLs for 60 s. On a
-  `steady` / `soak` profile the iteration also stops 2 s before the end of `DURATION`, so k6's `gracefulStop`
+  `steady` / `soak` profile the iteration also stops 2 s before the end of `DURATION` (its default, 5 m / 1 h, when it is not set), so k6's `gracefulStop`
   is never needed, and an iteration that would start in the last 2 s waits the run out instead of looping.
   A `main` that waits on something outside the host is abandoned after 1.5 s and the iteration is reported failed.
 - **`ctx.random(...).int` is inclusive at both ends**, as the contract says. The core adapter passed the
@@ -777,6 +781,62 @@ Decisions the design left open:
   stops and it no longer writes the `engine_state` row (the row is kept).
 - **Tests changed because they pinned a defect:** `InboundCallGate.test.ts` expected `evse.connectorId` to pick
   the connector.
+
+### Status (review fixes 2): CLI, daemon, persistence, security, k6
+
+The same review's findings outside the engine core. Decisions the design left open:
+
+- **A selection is checked before it is written.** `behaviorFitProblem` (`application/engine/behaviorFit.ts`)
+  answers from the version alone (`requires`, `beforeSend` on SOAP). `cp.create`, `cp.update` and
+  `cp.behaviors.set` call it first (a failure is `invalid_params`), and a station that still cannot load (an
+  `extend` rule without a default is only known to the engine) is rolled back: `create` removes its row,
+  `update` puts the old row and station back.
+- **Restore never stops the daemon.** Per behavior: an id this run does not have, or one the station cannot run,
+  is left out of memory with a warning. Per row: any other failure skips that station with a warning and leaves
+  its row. The stored `behaviors` value is kept (`CPRegistry.storedSelection`) and written back by a rebuild
+  that names no selection, so a run with fewer files does not shrink it; `NULL` stays `NULL`. A value that
+  cannot be read selects **none** (fail closed).
+- **`--use-behavior` replaces the stored selection** of a bootstrap station the state database restored (logged),
+  as `cp.behaviors.set` would; if the station cannot take it, the old one stays and a line says so.
+- **`behavior.reload` is opt-in** (rule 5): `--watch-behaviors` or the new `--allow-behavior-reload`; otherwise
+  `unavailable`. A library built by a test or an embedder allows it.
+- **CORS with code.** `--allow-behavior-code` without `--cors-origin` makes the CORS policy `same-origin` on every
+  bind (one stderr line); non-browser callers (no `Origin`) are unaffected. `--cors-origin <origin>` or `"*"`
+  widens it. A daemon without `--allow-behavior-code` is unchanged.
+- **Reload.** The listener gets the whole file; a station takes all of it or none (every version is checked first,
+  a late failure puts the old versions back). `ok` is false and the hash is not recorded while any station kept the
+  old version, so the next reload tries again (stations that already run the new one get it again, and their `main`
+  restarts); the library's own entry follows the new version as soon as one station runs it. An unchanged bundle
+  is hashed before it is imported. A top level that has not finished in 2 s fails the reload (the pending import
+  cannot be cancelled and stays in memory). The watcher fires at most 1 s after the first change and ignores
+  `*.db`, `*.sqlite`, `*.log`, `*.jsonl` and their `-wal`/`-shm`/`-journal` files. The failure list is cut at 1000
+  entries, the last one counting the rest.
+- **`onResume` runs when the boot is accepted** (`engine.resumeAfterBoot()`, `bootAccepted()` from
+  `ChargePoint.markBootAccepted`, after the post-boot fan-out). With no behavior nothing changes. A station that
+  never boots never resumes. Two unit tests that expected it at restore now call `bootAccepted()`.
+- **Engine state.** An entry that is not JSON keeps its last storable value with a warning, the others save. The
+  stored entry of a behavior being loaded wins until it is adopted. A permanently deleted station detaches its
+  writer. Without `--state-db`, `cp.update` carries the engine state into the new station in memory.
+- **k6.** The host is attached before the socket opens. Main failures and a connection the CSMS closes before
+  the stop end the iteration and fail it. `ctx.random(name)` is one stream per name; `handle` is called on the
+  rule's own object; a handler that returns nothing is answered InternalError and frees its rule; `ctx.raw`
+  needs `raw-frames` and warns on a closed socket; a pending `ctx.send` is cut at stop (S2). The default
+  `DURATION` of the profile (`steady` 5 m, `soak` 1 h) bounds the iteration; with no `main`, no `RUN_FOR_MS` and
+  no explicit `DURATION` it still holds 60 s. Duplicate ids are refused by the host, the export and the web
+  loader; the web loader is all or nothing.
+- **The two source checks** (S1) also see: `Date()`, `globalThis.Date.now()`, `x["now"]`, references
+  (`map(Math.random)`, `const t = setTimeout`), `setImmediate`, `process.hrtime`, `Bun.sleep`, imported
+  `randomUUID` / `randomBytes` and `node:timers/promises`; and for connector writes `delete`, destructuring
+  targets, string-keyed access, `Object.assign` / `Reflect.set` and a variable initialized from a connector
+  expression. **Accepted limits:** an alias passed through a function or property (`const g = globalThis;
+g.Date.now()`), `eval`, a connector reached through a parameter or `this`, and the whole transitive import
+  closure outside the scanned directories. They guard against the easy slip; the golden wire test and the
+  virtual-time tests are what catch the rest. No AST checker with type information was built.
+- **Tests changed because they pinned the old behavior:** `behaviorLibrary.bun.test.ts` (the `onReplace`
+  listener takes the file's behaviors), `behaviorRun.test.ts` (no `DURATION` now ends the iteration),
+  `behaviorHost.test.ts` (`ctx.raw` lists `raw-frames`; a host with no hooks passes the wire through instead of
+  installing no observer), `service.engineResume` and `service.engineStatePersistence` (they call
+  `bootAccepted()`). The reviewer's A4 (a `default.` id keeps its state) now asserts the load is refused.
 
 ## Verification results
 

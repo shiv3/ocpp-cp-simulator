@@ -22,7 +22,7 @@ related:
   - operational-timeline.md
   - charging-sessions.md
   - local-authorization.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Socket.IO control plane
@@ -373,23 +373,27 @@ only **selects from that library by id**; no method takes source text, a path or
 method loads, uploads or evaluates anything (`behaviorCodeIsNotRemote.bun.test.ts`,
 `behaviorAssignment.bun.test.ts`).
 
-| Method / parameter                                                                      | Meaning                                                                                                                                                                                                                                                                                                                               |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `behaviors` on `cp.create`, `cp.create_many`, `cp.update` and in a blueprint's `params` | `string[]` of behavior ids. Absent: **every loaded behavior** (what a daemon did before the parameter existed). `[]`: none. `cp.update` keeps the selection when the list is omitted; a blueprint's list is replaced by a request's.                                                                                                  |
-| `cp.behaviors.set { cpId, behaviors }`                                                  | Change the selection **in place**: no rebuild, the connection and any transaction stay. Unselected behaviors are unloaded (their `ctx.state` goes with them), newly selected ones are loaded after those already running. `behaviors: null` goes back to "every loaded behavior". Answers `{ cpId, behaviors }`, the ids now running. |
-| `behavior.list {}`                                                                      | `{ behaviors: [{ id, file }], watching }`: the library and whether `--watch-behaviors` is on.                                                                                                                                                                                                                                         |
-| `behavior.reload {}`                                                                    | Re-read **the files given at start** and apply the changed ones (below). Takes no parameters at all: a `file`, a `source` or any other field is refused (`strict`), so neither a path nor code can come from the caller. Answers `{ files: [{ file, ids, ok, unchanged, error?, applied, failures }] }`.                              |
+| Method / parameter                                                                      | Meaning                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `behaviors` on `cp.create`, `cp.create_many`, `cp.update` and in a blueprint's `params` | `string[]` of behavior ids. Absent: **every loaded behavior** (what a daemon did before the parameter existed). `[]`: none. `cp.update` keeps the selection when the list is omitted; a blueprint's list is replaced by a request's.                                                                                                                                                          |
+| `cp.behaviors.set { cpId, behaviors }`                                                  | Change the selection **in place**: no rebuild, the connection and any transaction stay. Unselected behaviors are unloaded (their `ctx.state` goes with them), newly selected ones are loaded after those already running. `behaviors: null` goes back to "every loaded behavior". Answers `{ cpId, behaviors }`, the ids now running.                                                         |
+| `behavior.list {}`                                                                      | `{ behaviors: [{ id, file }], watching }`: the library and whether `--watch-behaviors` is on.                                                                                                                                                                                                                                                                                                 |
+| `behavior.reload {}`                                                                    | **Only with `--watch-behaviors` or `--allow-behavior-reload`** (else `unavailable`). Re-read **the files given at start** and apply the changed ones (below). Takes no parameters at all: a `file`, a `source` or any other field is refused (`strict`), so neither a path nor code can come from the caller. Answers `{ files: [{ file, ids, ok, unchanged, error?, applied, failures }] }`. |
 
 An id that names no loaded behavior is `invalid_params` with the loaded ids in the message
 (`Unknown behavior id "x"; loaded behaviors: a, b`), before anything is created or changed.
 `behaviors` is stored with the charge point (`charge_points.behaviors`, schema v24, JSON array;
-`NULL` = all) and restored with it; an id the restarted daemon no longer has is dropped with a warning.
+`NULL` = all) and restored with it. A selection is checked against the station's version (`requires`, `beforeSend` on SOAP)
+before it is written: `cp.create`, `cp.update` and `cp.behaviors.set` that a station cannot take answer `invalid_params` and change
+nothing (no row, no ghost id; `cp.update` keeps the old station). On restore, an id the restarted daemon does not have and a
+behavior the station cannot run are left out of memory with a warning, **the stored list stays as it was** (a later run with the
+file brings them back), one such station never stops the others or the daemon, and a stored value that cannot be read selects none.
 MCP: `cp_behaviors_set`, `behavior_list` and `behavior_reload`; `cp_create` takes `behaviors` from the schema.
 
 **Reload.** `behavior.reload` and `--watch-behaviors` (which watches the directories of the files and
 calls the same code after a 150 ms debounce) rebuild each file and compare its bundle with the one in
 use. An unchanged bundle is left alone (`unchanged: true`). A file that does not build or load, or
-whose set of behavior ids changed, keeps its old version: the error is logged and returned (`ok:
+whose set of behavior ids changed (or repeats an id), keeps its old version: the error is logged and returned (`ok:
 false`); a reload is all or nothing per file. Otherwise every charge point running a behavior of the file
 switches to the new version: exchanges in flight finish on the old code, a CALL that arrives later gets the
 new one, `ctx.state` stays, hooks and `beforeSend` use the new version at once. A running `main` sees

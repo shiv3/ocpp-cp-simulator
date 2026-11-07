@@ -30,7 +30,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
   - ../analyses/charger-engine.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -701,13 +701,15 @@ ocpp-cp-sim --http-port 8080 --allow-behavior-code --watch-behaviors --behavior 
 ```
 
 - `--use-behavior <id>` (repeatable) selects the behaviors of the charge points the command line itself
-  starts (`--cp-id`, `--cp-count`); it needs `--behavior` and `--cp-id`. An unknown id stops the start with
+  starts (`--cp-id`, `--cp-count`); for one the state database restored under that id it replaces the stored
+  selection (logged); it needs `--behavior` and `--cp-id`. An unknown id stops the start with
   exit code 1 and `Unknown behavior id "x"; loaded behaviors: a, b`. Charge points created later choose with
   the `behaviors` parameter of `cp.create` / `cp.create_many` / `cp.update` / a blueprint, or `cp.behaviors.set`
   ([Control plane → Behaviors](../concepts/control-plane.md#behaviors)).
 - `--watch-behaviors` re-bundles a behavior file when a file in its directory changes (150 ms debounce) and
-  applies the new version without a restart; the daemon method `behavior.reload` does the same on demand and
-  accepts no path or code. Reload is atomic per file (a file that fails to build or load keeps the old version
+  applies the new version without a restart; the daemon method `behavior.reload` does the same on demand
+  (only with `--watch-behaviors` or `--allow-behavior-reload`) and accepts no path or code. A file whose bundle did not change is
+  not imported again. A top level that has not finished after 2 s fails the reload. Reload is atomic per file (a file that fails to build or load keeps the old version
   and logs the error), exchanges in flight finish on the old code, `ctx.state` stays, and a running `main` is
   asked to stop (`ctx.stopping`) and gets 5 s before the new `main` starts. A reload cannot add or remove
   behavior ids (restart for that). Each reload imports a fresh bundle from a new temporary directory, which is
@@ -830,7 +832,7 @@ scenario interpreter drives. `ctx.sleep` and `ctx.until` are timers of the host,
 drive several charge points (`CHARGERS_PER_VU`) and stopping rejects every pending wait.
 
 What an iteration does: each VU connects its charge points, starts every `main` and `onCall` rule, and stops when
-every `main` returned, at `RUN_FOR_MS`, or 2 s before the end of a `steady` / `soak` run, whichever is first (a
+every `main` returned, at `RUN_FOR_MS`, or 2 s before the end of a `steady` / `soak` run (`DURATION`, or its default of 5 m / 1 h), whichever is first (a
 behavior with no `main` and no `RUN_FOR_MS` serves CALLs for 60 s). Stopping sets `ctx.stopping`, rejects the waits
 and closes the sockets before k6's `gracefulStop` starts counting; a `main` that waits on something the host does
 not own is abandoned after 1.5 s and the iteration is reported failed. `SEED` seeds `ctx.random` (same algorithm and
@@ -984,6 +986,7 @@ the OCPP answer are unchanged.
 | `--behavior <file>`                 | No       | -                                       | Load behavior code into the library (every charge point runs all of it unless `--use-behavior` / `behaviors` picks); repeatable. Runs with the process's full authority. A daemon also needs `--allow-behavior-code`. See [Behavior code](#behavior-code---behavior-and-behavior-build).                                                                                                                                                                                                      |
 | `--allow-behavior-code`             | No       | -                                       | A daemon's explicit opt-in to `--behavior`. Refused together with `--unsafe-remote`.                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--use-behavior <id>`               | No       | all loaded                              | Run only the loaded behavior with this id on the charge points started from `--cp-id`; repeatable. Needs `--behavior` and `--cp-id`. See [Choosing behaviors per charge point](#choosing-behaviors-per-charge-point-and-reloading-them).                                                                                                                                                                                                                                                      |
+| `--allow-behavior-reload`           | No       | -                                       | Daemon only: answer the `behavior.reload` method without watching (it re-reads the `--behavior` files). Without it or `--watch-behaviors` the method is refused. Needs `--behavior`.                                                                                                                                                                                                                                                                                                          |
 | `--watch-behaviors`                 | No       | -                                       | Reload a `--behavior` file when it (or a file in its directory) changes; in a daemon `behavior.reload` does the same on demand.                                                                                                                                                                                                                                                                                                                                                               |
 | `--unsafe-remote`                   | No       | -                                       | Allow a non-loopback daemon bind without `--web-console-basic-auth-user/pass`. Use only on trusted networks.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `--unix-socket <path\|none>`        | No       | deprecated no-op                        | Accepted for launcher compatibility, prints one warning, and is ignored.                                                                                                                                                                                                                                                                                                                                                                                                                      |

@@ -21,7 +21,7 @@ related:
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
   - ../analyses/charger-engine.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Daemon (server mode)
@@ -81,6 +81,7 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--watch`                           | off                          | Re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. Off by default; **refused outside a server mode** (`--daemon`, `--http-port`, `--web-console`) rather than accepted and ignored. See [File hot-reload](#file-hot-reload) (#314).                                                                                                                                                                                                                                                                                                                   |
 | `--behavior <file>`                 | -                            | Load [behavior code](cli.md#behavior-code---behavior-and-behavior-build) into the library; a charge point runs all of it unless its `behaviors` list picks ids (restored and RPC-created ones included; repeatable. Needs `--allow-behavior-code`.                                                                                                                                                                                                                                                                                                                                              |
 | `--allow-behavior-code`             | -                            | Explicit opt-in to run code from disk. Refused together with `--unsafe-remote`, with exit code 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `--allow-behavior-reload`           | off                          | Answer the `behavior.reload` method without watching the files (it re-reads the `--behavior` files and runs their code). Without this flag or `--watch-behaviors` the method is refused (`unavailable`), so new code enters a running daemon only when the operator asked for it. Needs `--behavior`.                                                                                                                                                                                                                                                                                           |
 | `--watch-behaviors`                 | off                          | Reload a `--behavior` file when it (or a file in its directory) changes, debounced; the new version reaches every charge point running it with no restart. A file that does not build keeps the old version. `behavior.reload` does the same on demand ([Control plane → Behaviors](../concepts/control-plane.md#behaviors)).                                                                                                                                                                                                                                                                   |
 | `--unsafe-remote`                   | -                            | Allows a non-loopback daemon bind without web-console Basic Auth. Use only on trusted networks or when another boundary handles access.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `--web-console [<port>]`            | -                            | Serve the bundled browser UI alongside health and Socket.IO. Without a port, shares `--http-port`; with a port, serves the UI on that listener.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -272,12 +273,15 @@ proxies — are in [Access control](../concepts/access-control.md).
 Behavior code is the one thing that gives a file the process's full authority, so
 the daemon takes it from its command line only: `--behavior <file>` needs
 `--allow-behavior-code`, and `--allow-behavior-code` is refused together with
-`--unsafe-remote`. No Socket.IO method, MCP tool or OCPP message loads code; a
+`--unsafe-remote`. With `--allow-behavior-code` the default CORS policy is
+same-origin on every bind (see [Access control](../concepts/access-control.md#cors)).
+No Socket.IO method, MCP tool or OCPP message loads code; a
 scenario sent over `load_scenario` is data even if it contains code-like fields
 ([CLI → Behavior code](cli.md#behavior-code---behavior-and-behavior-build)).
 What the control plane can do with behaviors is **select by id** (`behaviors` on
 `cp.create` / `cp.create_many` / `cp.update` / blueprints, `cp.behaviors.set`), list them
-(`behavior.list`) and re-read the files given at start (`behavior.reload`, no parameters:
+(`behavior.list`) and, when the daemon was started with `--watch-behaviors` or
+`--allow-behavior-reload`, re-read the files given at start (`behavior.reload`, no parameters:
 no path and no code from the caller) — see
 [Control plane → Behaviors](../concepts/control-plane.md#behaviors). A daemon started
 with `--cp-id` can pick the bootstrap charge points' behaviors with `--use-behavior <id>`.

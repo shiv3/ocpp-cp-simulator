@@ -17,7 +17,7 @@ related:
   - local-authorization.md
   - security-profiles.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # State persistence
@@ -77,15 +77,22 @@ ocpp-cp-sim --daemon ...
 `connector_runtime` is the persisted form of the connector's record in the charger engine's state
 ([Charger engine design](../analyses/charger-engine.md)): `transaction_json` has the shape of the engine's
 transaction record (ISO instants), so rows written by earlier builds load unchanged. After the rows are
-restored and the interrupted sessions reconciled, the daemon calls `engine.resume()`, which runs `onResume` of the loaded
-behaviors (the reconcile only reads the connectors, so the order is safe, and `onResume` may start a transaction).
-Behavior `ctx.state` and the firmware / log / diagnostics statuses persist in `engine_state`; in-flight waits do not.
+restored and the interrupted sessions reconciled, the daemon arms `engine.resumeAfterBoot()`: `onResume` of the loaded
+behaviors runs once the CSMS has accepted the next BootNotification (the boot gate refuses a `ctx.send` before that), after the
+post-boot status fan-out. The reconcile only reads the connectors, so `onResume` may start a transaction. A station that never
+boots never runs it.
+Behavior `ctx.state` and the firmware / log / diagnostics statuses persist in `engine_state`; in-flight waits do not. One behavior whose
+`ctx.state` holds a value that is not JSON keeps its last storable value (and a warning); it never stops the others from being
+saved. Deleting a station detaches its writer, so a `main` that writes while it stops cannot bring the row back. Without
+`--state-db`, `cp.update` carries `ctx.state` into the rebuilt station in memory, as it carries scenarios.
 A `cp.update` rebuild keeps that row, so a behavior's data continues across it.
 
 The `charge_points.behaviors` column (schema v24) holds the ids of the loaded behaviors a charge point runs, as a JSON
 array; `NULL` (every row of an older database) means all of them, which is what ran before. It is written by
 `cp.create` / `cp.update` and by `cp.behaviors.set`, and read back on restore: an id the restarted daemon did not
-load (fewer `--behavior` files) is dropped with a warning. Only ids are stored, never code
+load (fewer `--behavior` files), or a behavior the station cannot run, is left out of that run with a warning, and the stored
+value is kept as it is until a selection is set (a `cp.update` that names none writes it back unchanged). A value that cannot be
+read selects no behavior. Only ids are stored, never code
 ([Control plane → Behaviors](control-plane.md#behaviors)).
 
 ## Reset

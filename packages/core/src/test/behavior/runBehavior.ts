@@ -25,7 +25,14 @@ export interface RunBehaviorOptions {
   readonly responders?: Readonly<Record<string, CsmsResponder>>;
   /** Run before the station connects (policies, configuration). */
   readonly beforeConnect?: (cp: ChargePoint) => void;
-  /** Real milliseconds of silence that end a step; default 60. */
+  /**
+   * `memory` (default): the station and the fake CSMS talk over an in-memory
+   * socket, so a virtual-time run waits for no real I/O and no real time.
+   * `socket`: a real WebSocket on a loopback port, as the golden wire test
+   * uses (the transport itself under test).
+   */
+  readonly transport?: "memory" | "socket";
+  /** Socket transport only: real milliseconds of silence that end a step; default 60. */
   readonly quietMs?: number;
 }
 
@@ -74,6 +81,7 @@ export async function runBehavior(
     ...(options.beforeConnect === undefined
       ? {}
       : { beforeConnect: options.beforeConnect }),
+    ...(options.transport === "socket" ? {} : { memory: true }),
     simulation: { clock, seed: options.seed ?? "behavior-harness" },
     noConnect: true,
   });
@@ -85,6 +93,11 @@ export async function runBehavior(
   // once, and the work that follows a virtual timer (scenario nodes, behavior
   // continuations) still needs its turn.
   const settle = async (): Promise<void> => {
+    if (csms.memory) {
+      await csms.settle();
+      await drainMicrotasks();
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 5));
     await csms.settle(quietMs);
     await drainMicrotasks();

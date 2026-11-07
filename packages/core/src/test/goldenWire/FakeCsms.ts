@@ -4,6 +4,14 @@
 // test` only (Bun.serve).
 import type { ServerWebSocket } from "bun";
 import { tcpPort } from "../bunServe";
+import { drainMicrotasks } from "../../cp/shared/clock";
+import {
+  installMemoryTransport,
+  type MemoryServerSocket,
+} from "./memoryTransport";
+
+type MemorySocketLike = MemoryServerSocket;
+let memoryCount = 0;
 
 export type WireVersion = "1.6" | "2.0.1";
 
@@ -40,6 +48,11 @@ export interface FakeCsmsOptions {
   readonly responders?: Readonly<Record<string, CsmsResponder>>;
   /** Fixed clock string used in every `currentTime` the script answers. */
   readonly currentTime?: string;
+  /**
+   * Talk to the station over an in-memory socket instead of a real one: no
+   * listening port, no real I/O. For virtual-time runs.
+   */
+  readonly memory?: boolean;
 }
 
 const FIXED_TIME = "2030-01-01T00:00:00.000Z";
@@ -62,8 +75,11 @@ function isReply(value: unknown): value is CsmsReply {
 export class FakeCsms {
   readonly frames: WireFrame[] = [];
   readonly url: string;
-  private readonly server: ReturnType<typeof Bun.serve>;
-  private socket: ServerWebSocket<unknown> | null = null;
+  private readonly server: ReturnType<typeof Bun.serve> | null;
+  private socket: ServerWebSocket<unknown> | MemorySocketLike | null = null;
+  private uninstallMemory: (() => void) | null = null;
+  /** True when the station is wired through the in-memory transport. */
+  readonly memory: boolean;
   private readonly waiters = new Set<Waiter>();
   private readonly connectionWaiters = new Set<() => void>();
   private readonly callCounts = new Map<string, number>();
@@ -82,6 +98,13 @@ export class FakeCsms {
     this.currentTime = options.currentTime ?? FIXED_TIME;
     this.responders = { ...(options.responders ?? {}) };
     const protocol = this.version === "1.6" ? "ocpp1.6" : "ocpp2.0.1";
+    this.memory = options.memory === true;
+    if (this.memory) {
+      this.server = null;
+      this.url = `ws://memory-csms-${++memoryCount}.invalid/`;
+      this.uninstallMemory = installMemoryTransport(this);
+      return;
+    }
     this.server = Bun.serve({
       port: 0,
       fetch: (req, srv) => {
@@ -110,6 +133,25 @@ export class FakeCsms {
       },
     });
     this.url = `ws://127.0.0.1:${tcpPort(this.server)}/`;
+  }
+
+  /** In-memory transport: the station's socket opened. */
+  attachMemoryClient(socket: MemoryServerSocket): void {
+    this.socket = socket;
+    this.opens++;
+    for (const wake of [...this.connectionWaiters]) wake();
+  }
+
+  /** In-memory transport: a frame arrived from the station. */
+  receiveFromClient(raw: string): void {
+    this.onMessage(raw);
+  }
+
+  /** In-memory transport: the connection ended. Counts once per connection. */
+  memoryClientClosed(): void {
+    if (!this.socket) return;
+    this.closes++;
+    this.socket = null;
   }
 
   get openCount(): number {
@@ -342,12 +384,31 @@ export class FakeCsms {
    * decides the order of frames, only when the next step starts.
    */
   async settle(quietMs = 250, maxMs = 20_000): Promise<void> {
+    if (this.memory) return this.settleMemory();
     const deadline = Date.now() + maxMs;
     while (Date.now() < deadline) {
       if (Date.now() - this.lastFrameAt >= quietMs) return;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     throw new Error("fake CSMS: traffic never settled");
+  }
+
+  /**
+   * In-memory transport: wait until a few turns of the event loop moved no
+   * frame. Takes no real time; the turns are the only waiting.
+   */
+  private async settleMemory(): Promise<void> {
+    let quiet = 0;
+    let seen = this.frames.length;
+    for (let turns = 0; quiet < 3; turns++) {
+      if (turns > 100_000) throw new Error("fake CSMS: traffic never settled");
+      await drainMicrotasks();
+      if (this.frames.length === seen) quiet++;
+      else {
+        quiet = 0;
+        seen = this.frames.length;
+      }
+    }
   }
 
   /**
@@ -393,6 +454,9 @@ export class FakeCsms {
       waiter.reject(new Error("fake CSMS stopped"));
     }
     this.waiters.clear();
+    this.uninstallMemory?.();
+    this.uninstallMemory = null;
+    if (!this.server) return;
     await Promise.race([
       this.server.stop(true),
       new Promise<void>((resolve) => setTimeout(resolve, 50)),

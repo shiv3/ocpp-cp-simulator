@@ -29,6 +29,8 @@ export interface RigOptions {
   readonly noConnect?: boolean;
   /** A clock and a seed for the station (the behavior test harness). */
   readonly simulation?: ChargePointSimulationOptions;
+  /** Wire the station to the fake CSMS in memory (virtual-time runs). */
+  readonly memory?: boolean;
   /** How long traffic must be quiet before a step counts as settled. */
   readonly quietMs?: number;
 }
@@ -47,6 +49,7 @@ export class Rig {
     const csms = new FakeCsms({
       version: options.version,
       responders: options.responders,
+      ...(options.memory ? { memory: true } : {}),
     });
     const cp = new ChargePoint(
       "CP-GOLDEN",

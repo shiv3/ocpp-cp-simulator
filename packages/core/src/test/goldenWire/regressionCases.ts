@@ -25,6 +25,13 @@ const both = (name: string, run: Case["run"], options?: Case["options"]) => {
 };
 const cfg = (r: Rig, k: string, v: string) =>
   (r.cp as any).configuration.applyChange(k, v);
+// The key is read-only for the CSMS (ChangeConfiguration is Rejected): it is
+// the station's own choice, set here the way a scenario or the CLI sets it.
+const authorizeRemote = (r: Rig, on: boolean) => {
+  if (!r.cp.configuration.setRuntimeValue("AuthorizeRemoteTxRequests", on)) {
+    throw new Error("AuthorizeRemoteTxRequests cannot be set");
+  }
+};
 async function charging(r: Rig, tag = "TAG-1", c = 1) {
   r.plugIn(c);
   await settle(r);
@@ -94,7 +101,7 @@ c16("diagnostics-disconnect", async (r) => {
 });
 // --- remote start
 both("remote-authorize-first", async (r) => {
-  cfg(r, "AuthorizeRemoteTxRequests", "true");
+  authorizeRemote(r, true);
   await r.remoteStart("TAG-A");
   r.cp.updateConnectorStatus(1, OCPPStatus.Charging);
   await settle(r);
@@ -1054,7 +1061,7 @@ strict("offline-flush-order", "2.0.1", async (r) => {
 both(
   "remote-start-authorize-denied",
   async (r) => {
-    cfg(r, "AuthorizeRemoteTxRequests", "true");
+    authorizeRemote(r, true);
     r.plugIn();
     await settle(r);
     await r.remoteStart("CERT023-INV");
@@ -1070,7 +1077,7 @@ both(
   },
 );
 both("remote-start-no-authorize", async (r) => {
-  cfg(r, "AuthorizeRemoteTxRequests", "false");
+  authorizeRemote(r, false);
   r.plugIn();
   await settle(r);
   await r.remoteStart("TAG-NA");

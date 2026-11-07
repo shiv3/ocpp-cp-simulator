@@ -121,7 +121,79 @@ function isAssignment(node: ts.Node): ts.Expression | null {
   return null;
 }
 
-/** The writes to guarded connector fields in one source text. */
+/** The expressions an assignment-like node writes to (destructuring unpacked). */
+function writtenTargets(node: ts.Node): ts.Expression[] {
+  const out: ts.Expression[] = [];
+  const add = (e: ts.Expression): void => {
+    let expression = e;
+    while (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isNonNullExpression(expression) ||
+      ts.isAsExpression(expression)
+    ) {
+      expression = expression.expression;
+    }
+    if (ts.isArrayLiteralExpression(expression)) {
+      for (const element of expression.elements) {
+        add(ts.isSpreadElement(element) ? element.expression : element);
+      }
+    } else if (ts.isObjectLiteralExpression(expression)) {
+      for (const property of expression.properties) {
+        if (ts.isPropertyAssignment(property)) add(property.initializer);
+        else if (ts.isSpreadAssignment(property)) add(property.expression);
+      }
+    } else if (ts.isBinaryExpression(expression)) {
+      // `[x = 1] = ...`: the default is not a target, the left side is.
+      if (expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        add(expression.left);
+      }
+    } else {
+      out.push(expression);
+    }
+  };
+  const target = isAssignment(node);
+  if (target) add(target);
+  if (
+    (ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
+    !ts.isVariableDeclarationList(node.initializer)
+  ) {
+    add(node.initializer);
+  }
+  if (ts.isDeleteExpression(node)) add(node.expression);
+  return out;
+}
+
+/** The member a property or string-keyed element access names, with its object. */
+function memberOf(
+  expression: ts.Expression,
+): { name: string; object: ts.Expression } | null {
+  if (ts.isPropertyAccessExpression(expression)) {
+    return { name: expression.name.text, object: expression.expression };
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return {
+      name: expression.argumentExpression.text,
+      object: expression.expression,
+    };
+  }
+  return null;
+}
+
+/**
+ * The writes to guarded connector fields in one source text.
+ *
+ * Seen: `=`, compound assignment, `++`/`--`, `delete`, a destructuring
+ * assignment or `for (x.status of ...)` target, `x["status"]`, and
+ * `Object.assign(x, { status })` / `Reflect.set(x, "status", v)`, on a receiver
+ * whose text mentions "connector" (or "transaction" / "tx" / "txn" for the
+ * transaction fields), or a variable the file initializes from such an
+ * expression (`const c = cp.getConnector(1)!`). Not seen: a receiver that
+ * reaches the connector through a function parameter or a property under
+ * another name, `this` inside `Connector`, and `Object.defineProperty`.
+ */
 export function scanSource(fileName: string, text: string): Write[] {
   const source = ts.createSourceFile(
     fileName,
@@ -130,26 +202,82 @@ export function scanSource(fileName: string, text: string): Write[] {
     true,
   );
   const writes: Write[] = [];
-  const visit = (node: ts.Node): void => {
-    const target = isAssignment(node);
-    if (target) {
-      let expression = target;
-      while (ts.isParenthesizedExpression(expression)) {
+  const connectorNames = new Set<string>();
+  const transactionNames = new Set<string>();
+  const mentions = (
+    receiver: ts.Expression,
+    pattern: RegExp,
+    names: Set<string>,
+  ) =>
+    pattern.test(receiver.getText(source)) ||
+    (ts.isIdentifier(receiver) && names.has(receiver.text));
+  const CONNECTOR = /connector/i;
+  const TRANSACTION = /transaction|\btxn?\b/i;
+  const guarded = (field: string, receiver: ts.Expression): boolean =>
+    (GUARDED_FIELDS.has(field) &&
+      mentions(receiver, CONNECTOR, connectorNames)) ||
+    (TRANSACTION_FIELDS.has(field) &&
+      mentions(receiver, TRANSACTION, transactionNames));
+  const record = (node: ts.Node, field: string): void => {
+    writes.push({
+      field,
+      line:
+        source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+    });
+  };
+  // Aliases first: `const c = cp.getConnector(1)!` makes `c` a connector.
+  const collect = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      // The expression itself, not a type written after `as`.
+      let expression = node.initializer;
+      while (
+        ts.isAsExpression(expression) ||
+        ts.isSatisfiesExpression(expression)
+      ) {
         expression = expression.expression;
       }
-      if (
-        ts.isPropertyAccessExpression(expression) &&
-        ((GUARDED_FIELDS.has(expression.name.text) &&
-          /connector/i.test(expression.expression.getText(source))) ||
-          (TRANSACTION_FIELDS.has(expression.name.text) &&
-            /transaction|\btx\b/i.test(expression.expression.getText(source))))
+      const init = expression.getText(source);
+      if (CONNECTOR.test(init)) connectorNames.add(node.name.text);
+      if (TRANSACTION.test(init)) transactionNames.add(node.name.text);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+  const visit = (node: ts.Node): void => {
+    for (const target of writtenTargets(node)) {
+      const member = memberOf(target);
+      if (member && guarded(member.name, member.object)) {
+        record(node, member.name);
+      }
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression.getText(source);
+      const [receiver, second, third] = node.arguments;
+      if (callee === "Object.assign" && receiver && second) {
+        if (ts.isObjectLiteralExpression(second)) {
+          for (const property of second.properties) {
+            const name = property.name;
+            if (
+              name &&
+              (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) &&
+              guarded(name.text, receiver)
+            ) {
+              record(node, name.text);
+            }
+          }
+        }
+      } else if (
+        (callee === "Reflect.set" || callee === "Reflect.deleteProperty") &&
+        receiver &&
+        second &&
+        ts.isStringLiteralLike(second) &&
+        (callee === "Reflect.deleteProperty" || third)
       ) {
-        writes.push({
-          field: expression.name.text,
-          line:
-            source.getLineAndCharacterOfPosition(node.getStart(source)).line +
-            1,
-        });
+        if (guarded(second.text, receiver)) record(node, second.text);
       }
     }
     ts.forEachChild(node, visit);

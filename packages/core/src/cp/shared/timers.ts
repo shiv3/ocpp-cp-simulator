@@ -1,3 +1,6 @@
+import { realClock, unrefTimerHandle } from "./clock";
+import type { SimClock, TimerHandle } from "./clock";
+
 /**
  * The longest delay `setTimeout` / `setInterval` honour. Node and Bun clamp
  * anything above 2^31-1 ms to 1 ms, so a longer delay fires immediately.
@@ -13,7 +16,12 @@ export function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
 }
 
 export interface TimeoutAtOptions {
-  /** The clock `fireAt` is read against; `Date.now` by default. */
+  /** The clock the timers are armed on and `fireAt` is read against. */
+  readonly clock?: SimClock;
+  /**
+   * The clock `fireAt` is read against; `clock.now` by default. A test seam
+   * that predates {@link TimeoutAtOptions.clock}.
+   */
   readonly now?: () => number;
   /** Unref every timer of the chain (see {@link unrefTimer}). */
   readonly unref?: boolean;
@@ -31,18 +39,19 @@ export function setTimeoutAt(
   callback: () => void,
   options: TimeoutAtOptions = {},
 ): () => void {
-  const now = options.now ?? Date.now;
-  let timer: ReturnType<typeof setTimeout>;
+  const clock = options.clock ?? realClock;
+  const now = options.now ?? (() => clock.now());
+  let timer: TimerHandle;
   const arm = () => {
-    timer = setTimeout(
+    timer = clock.setTimeout(
       () => {
         if (now() < fireAt) arm();
         else callback();
       },
       Math.min(Math.max(0, fireAt - now()), MAX_TIMER_MS),
     );
-    if (options.unref) unrefTimer(timer);
+    if (options.unref) unrefTimerHandle(timer);
   };
   arm();
-  return () => clearTimeout(timer);
+  return () => clock.clearTimeout(timer);
 }

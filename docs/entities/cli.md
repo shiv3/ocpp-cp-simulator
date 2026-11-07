@@ -15,6 +15,9 @@ sources:
   - "issue #320"
   - "issue #321"
   - apps/cli/src/vehicleCatalogConfig.ts
+  - apps/cli/src/behavior/
+  - packages/contracts/eslint/behavior.js
+  - examples/behaviors/
 related:
   - daemon.md
   - analyze.md
@@ -26,6 +29,7 @@ related:
   - ../concepts/charging-sessions.md
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
+  - ../analyses/charger-engine.md
 updated: 2026-11-07
 ---
 
@@ -634,6 +638,46 @@ detection over a [trace file](../concepts/trace-format.md) or a running
 daemon's stored logs and writes a Markdown / HTML report. It has its own page:
 [analyze](analyze.md).
 
+### Behavior code: `--behavior` and `behavior build`
+
+A [behavior](../analyses/charger-engine.md#behavior-api-packagescontracts-types-only) is a TypeScript or
+JavaScript module whose default export is a behavior (`{ api: 1, id, requires?, onCall?, main?, onResume? }`)
+or an array of them. It answers CSMS CALLs and drives the station through a narrow `ctx` port.
+
+```shell
+ocpp-cp-sim --cp-id CP001 --ws-url ws://localhost:9000 --behavior examples/behaviors/flaky-firmware.ts
+ocpp-cp-sim behavior build examples/behaviors/flaky-firmware.ts --out dist/flaky-firmware.js
+```
+
+- `--behavior <file>` (repeatable) bundles the file with `Bun.build` (TypeScript is read directly, relative
+  imports are followed, `k6/*` stays external), imports it and loads every behavior onto every charge point
+  the process runs: the one of a single-CP session, and in a daemon the bootstrap, the restored and the ones
+  created over RPC. A file that does not load (syntax error, bad default export, a duplicate id, a `requires`
+  the station cannot meet) stops the start with exit code 1 and the file's name.
+- **The code runs with this process's full authority.** It comes from the command line and nowhere else:
+  Socket.IO, MCP and OCPP carry data, never code, and there is no RPC method that loads a behavior. A scenario
+  that arrives over `load_scenario` with fields that look like code is stored or refused as data
+  (`behaviorCodeIsNotRemote.bun.test.ts`).
+- A **daemon** (`--daemon`, `--http-port`, `--web-console`) additionally needs `--allow-behavior-code`, and
+  refuses `--allow-behavior-code` together with `--unsafe-remote`: a daemon that runs code from disk must not
+  also drop its network protections. Both refusals exit with code 1 and say which flag to remove. The flag
+  has no effect on a single-CP session. `--behavior` is refused with `--send`, `--stop` and `--events`.
+- `behavior build <file> [--out <file>]` type-checks the behavior (strict, **ES2017 libraries only**, so
+  `AbortController`, `structuredClone`, `performance` and the like are errors, as on k6; `k6` and `k6/*` need no
+  types), then writes one ESM bundle with ES2017 output and `k6/*` external. Default output: `<name>.bundle.js`
+  next to the source. It fails, naming `file:line:column`, on `for await`, async generators and `using` /
+  `await using`, in the file or in anything it imports: k6 hangs silently on them. The syntax check runs
+  before the type check, because the ES2017 library turns the same constructs into confusing "cannot find
+  name" errors.
+- The ESLint config `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
+  config array) reports `Date`, `performance`, `Math.random`, `crypto.randomUUID`, timers, module-scope `let` /
+  `var`, module-scope empty arrays / objects and `new Map` / `Set`, and the three syntaxes above. Spread it
+  after your own TypeScript parser setup.
+- `examples/behaviors/flaky-firmware.ts` is a template (UpdateFirmware with a seeded failure) and
+  `flaky-firmware.bun.test.ts` beside it shows the same-seed test on `runBehavior()`.
+- A behavior's `ctx.state` and the notification statuses survive a restart with `--state-db`:
+  [State persistence](../concepts/state-persistence.md).
+
 ### export-k6
 
 Export a scenario JSON as a runnable [k6](https://k6.io) load-test bundle:
@@ -859,6 +903,8 @@ the OCPP answer are unchanged.
 | `--daemon`                          | No       | -                                       | Server daemon. With no `--http-port`, listens on `http://127.0.0.1:9700`.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `--http-port <port>`                | No       | `9700` with bare `--daemon`             | Enable the TCP health / Socket.IO server on this port                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `--http-host <addr>`                | No       | `127.0.0.1`                             | Bind address for HTTP. Non-loopback binds require web-console Basic Auth or `--unsafe-remote`.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `--behavior <file>`                 | No       | -                                       | Load behavior code onto every charge point; repeatable. Runs with the process's full authority. A daemon also needs `--allow-behavior-code`. See [Behavior code](#behavior-code---behavior-and-behavior-build).                                                                                                                                                                                                                                                                               |
+| `--allow-behavior-code`             | No       | -                                       | A daemon's explicit opt-in to `--behavior`. Refused together with `--unsafe-remote`.                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--unsafe-remote`                   | No       | -                                       | Allow a non-loopback daemon bind without `--web-console-basic-auth-user/pass`. Use only on trusted networks.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `--unix-socket <path\|none>`        | No       | deprecated no-op                        | Accepted for launcher compatibility, prints one warning, and is ignored.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `--web-console [<port>]`            | No       | -                                       | Serve the bundled browser UI alongside Socket.IO. Without a port, shares `--http-port`; with a port, serves on that listener. Needs a directory with `index.html`: `<repo>/dist` after `bun run build`, the `dist/` a release package ships, a `dist/` beside the binary, or `--web-console-dist`. On failure it names every path it searched.                                                                                                                                                |

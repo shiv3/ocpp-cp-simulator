@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Log
@@ -2331,3 +2331,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | Transactions, persistence and resume (charger engine stage C2)
 
 - `ConnectorRecord.transaction` holds the transaction as JSON; `Connector.transaction` is a live view; `default.transaction` owns start, stop and the four remote actions on both versions; `check-single-writer.ts` guards the transaction fields; `connector_runtime` restore fills engine state and `engine.resume()` runs `onResume`. Scenario registry and `ReservationManager` stay. [Charger engine design](analyses/charger-engine.md), [Overview](overview.md#source-layout-and-package-boundaries).
+
+## [2026-11-07] ingest | Loading behavior code (charger engine stage D1)
+
+- `--behavior` / `--allow-behavior-code` on the CLI and daemon, `behavior build`, the `@ocpp-cp-sim/contracts/eslint-behavior` config and `examples/behaviors/flaky-firmware.ts`; `engine_state` (schema 23) persists behavior `ctx.state` and the notification statuses and `engine.resume()` runs after the session reconcile; `runBehavior` talks to the fake CSMS over an in-memory socket by default. [Charger engine design](analyses/charger-engine.md), [CLI](entities/cli.md#behavior-code---behavior-and-behavior-build), [Daemon](entities/daemon.md), [State persistence](concepts/state-persistence.md), [Testing strategy](analyses/testing-strategy.md#behavior-tests).

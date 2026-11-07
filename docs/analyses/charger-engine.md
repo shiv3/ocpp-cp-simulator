@@ -406,7 +406,7 @@ is used where `setImmediate` is absent) and k6.
 
 ### Loading code
 
-- CLI and daemon: `--behavior <file>`, repeatable. The daemon needs `--allow-behavior-code` and refuses
+- CLI and daemon: `--behavior <file>`, repeatable (stage D1: done, see its Status). The daemon needs `--allow-behavior-code` and refuses
   the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`.
 - `ocpp-cp-sim behavior build <file>` type-checks and writes one ESM bundle with `--external 'k6/*'`.
 - Web: load a built bundle from a local file through `import(blobUrl)`, in the local runtime only.
@@ -494,3 +494,53 @@ Status (stage C2): transactions, persistence and resume. Decisions the design le
 - **Reservations stay** in `ReservationManager`: it owns a map of `Date`-carrying records, an expiry
   interval and a callback, and is used on its own by scenarios and tests; moving it needs a store port and a
   codec like the transaction's, which is not a small change.
+
+Status (stage D1): loading behavior code. Decisions the design left open:
+
+- **Loading.** `--behavior <file>` (repeatable) goes through `apps/cli/src/behavior/`: `Bun.build` bundles the
+  file (`target: "bun"`, ESM, `k6` and `k6/*` external), the bundle is written to a temporary directory,
+  imported and removed. The default export is one behavior or an array. Every charge point of the process gets
+  every behavior, in the order given: the single-CP session's, and in a daemon the bootstrapped, the restored
+  and the RPC-created ones (`CPRegistry` option `behaviors`, applied in `instantiate`, so a `cp.update` rebuild
+  loads them again). One module instance serves all stations, which is one more reason for the rule against
+  module-scope state. A load error stops the start (exit 1) with the file's name; a duplicate id across files
+  is refused.
+- **The authority flags.** A daemon needs `--allow-behavior-code`; `--allow-behavior-code` with
+  `--unsafe-remote` is refused whether or not `--behavior` is given (a daemon that runs code from disk must not
+  drop its network protections). `startServer` also refuses `behaviors` without `allowBehaviorCode`, so other
+  callers meet the same door. A single-CP session needs no opt-in: the operator ran it. `--behavior` is refused
+  with the client modes. No RPC method, MCP tool or OCPP message loads code; `behaviorCodeIsNotRemote.bun.test.ts`
+  shows a `load_scenario` full of code-like fields is data.
+- **`behavior build`.** First the syntax check (`for await`, async generators, `using`, over every non-library
+  source of the TypeScript program), then the type check (strict, `lib.es2017.d.ts` only, no ambient types, so
+  `AbortController`, `structuredClone`, `performance` are errors; `k6` and `k6/*` imports need no types), then
+  `Bun.build` with a plugin that lowers every project source with `ts.transpileModule` to ES2017 (Bun itself
+  does not lower) and checks the syntax again for `.js` sources. The syntax check goes first because the ES2017
+  library reports the same constructs as "cannot find name".
+- **ESLint config.** `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, plain
+  JavaScript so that a user's config can import it without a TypeScript loader). Syntax rules only: it needs the
+  user's parser. Module-scope state is reported as `let` / `var`, `new Map|Set|WeakMap|WeakSet|Array|Object`,
+  and an empty `[]` or `{}`; a non-empty constant table is allowed.
+- **The template.** `examples/behaviors/flaky-firmware.ts` and its test. It does not list `virtual-time` in
+  `requires`: that capability means "needs a virtual clock" and a station on real time refuses the behavior
+  (found by the end-to-end run, where the first version failed to load).
+- **Persistence.** One additive table `engine_state` (schema 23), a JSON row per charge point holding the
+  statuses and `behaviors[id]` (`PersistedEngineState`). The engine calls an `onPersist` listener after every
+  processed event and whenever a behavior yields (`ctx.sleep`, `until`, `send`, end of a handler, `main` or
+  follow-up); the service compares the JSON and writes only changes, so a behavior's `ctx.state` writes settle
+  at its next yield and a crash loses at most what it wrote since. The row is read in the service constructor
+  (`engine.restoreState`): statuses are set without sending anything, `ctx.state` is filled in place, and the
+  state of a behavior that is not loaded yet or this run is kept as an orphan, adopted when it loads and kept in
+  the row if it never does. A row that does not parse is ignored. The row also survives a `cp.update`.
+- **Resume order.** `engine.resume()` moved out of `restoreConnectorRuntimeFromDatabase` into
+  `CLIChargePointService.resumeEngine()`, which `CPRegistry.restoreFromDatabase` calls after
+  `reconcileChargingSessions`. The reconcile only reads the connectors and writes the session history, so the
+  order is safe, and an `onResume` that starts a transaction now sees the restored sessions settled.
+- **Harness without real I/O.** `runBehavior` defaults to `transport: "memory"`: a `MemoryWebSocket`
+  (`goldenWire/memoryTransport.ts`) replaces `globalThis.WebSocket` for the fake CSMS's address only and
+  delivers frames through promise jobs; `FakeCsms.settle` waits for event-loop turns (`setImmediate`, the same
+  hop `VirtualClock` uses) instead of real milliseconds. A single `advance(6 hours)` over a behavior that waits
+  for each answer works. `transport: "socket"` keeps the real WebSocket. The golden wire test is unchanged and
+  still on the real socket. Limit: the HTTP upload sink used by diagnostics and logs (`Rig.uploadUrl`) is still
+  a real server, so a test of those two uploads is not free of real I/O.
+- **Not in D1.** Web loading of a bundle, `export-k6 --behavior` and a k6 `ctx` host (stage E).

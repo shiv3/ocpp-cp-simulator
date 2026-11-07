@@ -20,7 +20,8 @@ related:
   - ../sources/bench-readme.md
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-11-05
+  - ../analyses/charger-engine.md
+updated: 2026-11-07
 ---
 
 # Daemon (server mode)
@@ -78,6 +79,8 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--metrics`                         | off                          | Serve `GET /metrics` (Prometheus text exposition). Off by default; the path 404s without it. See [Metrics](#metrics).                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `--metrics-no-auth`                 | off                          | Implies `--metrics` and serves it outside the Basic Auth gate. Trusted networks only; exempts nothing else.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `--watch`                           | off                          | Re-read the idTag and scenario files this daemon loaded when they change on disk, debounced. Off by default; **refused outside a server mode** (`--daemon`, `--http-port`, `--web-console`) rather than accepted and ignored. See [File hot-reload](#file-hot-reload) (#314).                                                                                                                                                                                                                                                                                                                   |
+| `--behavior <file>`                 | -                            | Load [behavior code](cli.md#behavior-code---behavior-and-behavior-build) onto every charge point, restored and RPC-created ones included; repeatable. Needs `--allow-behavior-code`.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `--allow-behavior-code`             | -                            | Explicit opt-in to run code from disk. Refused together with `--unsafe-remote`, with exit code 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--unsafe-remote`                   | -                            | Allows a non-loopback daemon bind without web-console Basic Auth. Use only on trusted networks or when another boundary handles access.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `--web-console [<port>]`            | -                            | Serve the bundled browser UI alongside health and Socket.IO. Without a port, shares `--http-port`; with a port, serves the UI on that listener.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `--web-console-dist <dir>`          | -                            | Serve the console from this directory instead of searching for a bundled `dist/`. Must contain `index.html`; a path that does not is a startup error, not a fallback. The [desktop app](desktop-app.md#how-the-sidecar-finds-the-web-console) passes its Tauri resource dir here (#319).                                                                                                                                                                                                                                                                                                        |
@@ -264,6 +267,13 @@ requires either `--web-console-basic-auth-user/pass` or `--unsafe-remote`, and
 should be paired with a tight `--cors-origin` allowlist when browsers can reach
 the daemon. The full rules — bind gate, Basic Auth, CORS modes, reverse
 proxies — are in [Access control](../concepts/access-control.md).
+
+Behavior code is the one thing that gives a file the process's full authority, so
+the daemon takes it from its command line only: `--behavior <file>` needs
+`--allow-behavior-code`, and `--allow-behavior-code` is refused together with
+`--unsafe-remote`. No Socket.IO method, MCP tool or OCPP message loads code; a
+scenario sent over `load_scenario` is data even if it contains code-like fields
+([CLI → Behavior code](cli.md#behavior-code---behavior-and-behavior-build)).
 
 The [Open EV Directory](open-ev-directory.md#keys-and-redaction) API key
 (#458) is read from a file or the environment, never from a flag; it is sent

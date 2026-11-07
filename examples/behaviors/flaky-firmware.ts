@@ -35,7 +35,6 @@ async function report(
 export const flakyFirmware: Behavior = {
   api: 1,
   id: "flaky-firmware",
-  requires: ["virtual-time"],
   onCall: {
     UpdateFirmware: {
       mode: "replace",

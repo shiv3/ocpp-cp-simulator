@@ -205,14 +205,24 @@ hash for a small fleet. The result and its limits are in the
 `runBehavior()` (`packages/core/src/test/behavior/runBehavior.ts`, Bun only) builds a real `ChargePoint`
 on a `VirtualClock` with a seed, wired to the fake CSMS of the golden wire test, loads behaviors with
 `cp.loadBehavior()` and offers `advance(ms)`, `call()`, `callsOf()` and `effectHash()`. `advance` moves
-virtual time, then waits for the traffic that follows to go quiet (a short real-time wait: the socket
-and the fake CSMS are real I/O). A delay is therefore asserted by stepping time (`advance(499)`: nothing
+virtual time, then waits for the traffic that follows to go quiet. By default the station and the fake CSMS
+talk over an in-memory socket (`goldenWire/memoryTransport.ts`, installed in place of `globalThis.WebSocket`
+for the fake CSMS's address only): no port, no real time, only event-loop turns, so one `advance(6 * 3_600_000)`
+over a behavior that waits for every answer works (`memoryTransport.bun.test.ts`). `transport: "socket"`
+keeps a real loopback WebSocket, with its short real-time wait, for tests of the transport itself; both give
+the same frames. A delay is therefore asserted by stepping time (`advance(499)`: nothing
 yet; `advance(1)`: the frame), not by reading a timestamp off a frame. A behavior or scenario that waits for
 an answer of the fake CSMS between two timed waits arms its next timer only once that real answer arrived,
-so a long sequence is advanced with `advanceInSteps` (500 ms by default) instead of one jump.
+so on the socket transport a long sequence is advanced with `advanceInSteps` (500 ms by default) instead of
+one jump; the memory transport has no such limit.
 `runScenario.ts` next to it runs a scenario definition on the same station and clock. The engine's own tests are
 `engine.bun.test.ts` there, and `BehaviorRegistry.test.ts` and `ChargerState.test.ts` under
 `packages/core/src/cp/application/`.
+
+The tests of loading code are `apps/cli/src/__tests__/behavior.bun.test.ts` (flags, loader, `behavior build`
+including the k6 refusals), `behaviorCodeIsNotRemote.bun.test.ts` (code-like `load_scenario` data stays data),
+`scripts/__tests__/behaviorEslint.bun.test.ts` (the ESLint config), `service.engineStatePersistence.bun.test.ts`
+and the template's own `examples/behaviors/flaky-firmware.bun.test.ts` (same seed, same frames).
 
 The tests of the scenario 1.5 features are `scenario15.bun.test.ts` (one test per row of the runtime
 contract in the [Charger engine design](charger-engine.md#scenario-schema-15-additive)) and

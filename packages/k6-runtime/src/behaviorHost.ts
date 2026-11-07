@@ -27,7 +27,7 @@ import type {
   CallOutcome,
   JsonValue,
 } from "./behaviorTypes.ts";
-import type { WireCall } from "./types.ts";
+import type { CallObserver, WireCall } from "./types.ts";
 
 /** What the host needs from the charge point: a subset of OcppChargePoint. */
 export interface BehaviorCp {
@@ -36,6 +36,8 @@ export interface BehaviorCp {
   call(c: WireCall): Promise<Record<string, unknown>>;
   sendRaw(frame: string): void;
   setCallHandler(handler: CallHandler | null): void;
+  /** Watch the wire for `beforeSend` and the call hooks; absent: none fire. */
+  setObserver?(observer: CallObserver | null): void;
   getLocalStatus(): string;
 }
 
@@ -91,7 +93,22 @@ export const UNSUPPORTED_CTX_MEMBERS: readonly string[] = [
   "setConnectorStatus",
 ];
 
-/** What the host cannot meet: `requires` it lacks and `extend` rules. */
+/** Event hooks the k6 host delivers. */
+export const SUPPORTED_HOOKS = [
+  "connected",
+  "disconnected",
+  "callResult",
+  "callReceived",
+] as const;
+
+/** Event hooks that need a connector or transaction model the host lacks. */
+const UNSUPPORTED_HOOKS = [
+  "connectorStatus",
+  "transactionStarted",
+  "transactionStopped",
+] as const;
+
+/** What the host cannot meet: `requires` it lacks, `extend` rules and hooks it cannot feed. */
 export function unmetBy(behavior: Behavior): string[] {
   const problems: string[] = [];
   for (const need of behavior.requires ?? []) {
@@ -99,6 +116,15 @@ export function unmetBy(behavior: Behavior): string[] {
       problems.push(
         `behavior "${behavior.id}" requires "${need}", which the k6 host cannot meet` +
           ` (it provides: ${K6_CAPABILITIES.join(", ")})`,
+      );
+    }
+  }
+  for (const hook of UNSUPPORTED_HOOKS) {
+    if (behavior.on?.[hook] !== undefined) {
+      problems.push(
+        `behavior "${behavior.id}" on.${hook} is not supported by the k6 host` +
+          ` (it has no connector or transaction model); the hooks it has are` +
+          ` ${SUPPORTED_HOOKS.join(", ")}`,
       );
     }
   }
@@ -163,12 +189,20 @@ export class BehaviorHost {
   private readonly contexts = new Map<string, BehaviorContext>();
   private readonly waits = new Map<number, () => void>();
   private isStopping = false;
+  private readonly hookQueue: Array<{ name: string; event: unknown }> = [];
+  private hookScheduled = false;
+  private hookDraining = false;
+  private interceptDepth = 0;
+  private readonly hooked: boolean;
+  private readonly intercepting: boolean;
 
   constructor(private readonly opts: BehaviorHostOptions) {
     this.cp = opts.cp;
     this.timers = opts.timers;
     this.seed = opts.seed;
     this.log = opts.log ?? ((): void => undefined);
+    this.hooked = opts.behaviors.some((b) => b.on !== undefined);
+    this.intercepting = opts.behaviors.some((b) => b.beforeSend !== undefined);
     for (const behavior of opts.behaviors) {
       const problems = unmetBy(behavior);
       if (problems.length > 0) throw new Error(problems.join("\n"));
@@ -193,6 +227,17 @@ export class BehaviorHost {
   /** Claim the CALLs of the rules and start every `main`. */
   start(): void {
     this.cp.setCallHandler((action, payload) => this.claim(action, payload));
+    if (this.hooked || this.intercepting) {
+      this.cp.setObserver?.({
+        beforeSend: (action, payload) => this.runBeforeSend(action, payload),
+        callResult: (event) => this.emitHook("callResult", event),
+        callReceived: (event) => this.emitHook("callReceived", event),
+        disconnected: (event) =>
+          this.emitHook("disconnected", { at: Date.now(), ...event }),
+      });
+      // The host starts once the socket is up and booted.
+      this.emitHook("connected", { at: Date.now() });
+    }
     for (const behavior of this.opts.behaviors) {
       const main = behavior.main;
       if (main === undefined) continue;
@@ -231,6 +276,8 @@ export class BehaviorHost {
   async stop(graceMs: number): Promise<string[]> {
     this.isStopping = true;
     this.cp.setCallHandler(null);
+    this.cp.setObserver?.(null);
+    this.hookQueue.length = 0;
     for (const cancel of [...this.waits.values()]) cancel();
     this.waits.clear();
     const pending = new Set(this.mains.map((m) => m.id));
@@ -248,6 +295,122 @@ export class BehaviorHost {
     await Promise.race([settled, grace]);
     this.timers.clearTimeout(timeoutId);
     return [...pending];
+  }
+
+  // ---- event hooks and beforeSend ----------------------------------------
+
+  /**
+   * Queue a hook event. As in the simulator, hooks never run inside the turn
+   * that caused the event: the queue is drained in a microtask, FIFO, and an
+   * event raised by a hook waits until that hook returned.
+   */
+  private emitHook(name: string, event: unknown): void {
+    if (!this.hooked || this.isStopping) return;
+    this.hookQueue.push({ name, event: jsonCopy(event) });
+    if (this.hookScheduled || this.hookDraining) return;
+    this.hookScheduled = true;
+    void Promise.resolve().then(() => this.drainHooks());
+  }
+
+  private drainHooks(): void {
+    this.hookScheduled = false;
+    if (this.hookDraining) return;
+    this.hookDraining = true;
+    try {
+      for (
+        let next = this.hookQueue.shift();
+        next !== undefined;
+        next = this.hookQueue.shift()
+      ) {
+        if (this.isStopping) {
+          this.hookQueue.length = 0;
+          return;
+        }
+        this.deliverHook(next.name, next.event);
+      }
+    } finally {
+      this.hookDraining = false;
+    }
+  }
+
+  private deliverHook(name: string, event: unknown): void {
+    for (const behavior of this.opts.behaviors) {
+      const table = behavior.on as
+        | Record<
+            string,
+            ((e: unknown, c: BehaviorContext) => unknown) | undefined
+          >
+        | undefined;
+      const hook = table?.[name];
+      if (typeof hook !== "function") continue;
+      try {
+        const returned = hook.call(table, event, this.contextOf(behavior));
+        if (isPromiseLike(returned)) {
+          returned.then(undefined, (err: unknown) => {
+            if (!(err instanceof BehaviorStopped)) {
+              this.log(
+                `behavior ${behavior.id}: ${name} hook failed: ${describe(err)}`,
+              );
+            }
+          });
+        }
+      } catch (err) {
+        this.log(
+          `behavior ${behavior.id}: ${name} hook failed: ${describe(err)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * The `beforeSend` chain over a CALL about to be queued, in the order the
+   * behaviors were given. A function that throws, returns a promise or returns
+   * something that is not an object is logged and skipped.
+   */
+  private runBeforeSend(
+    action: string,
+    payload: Record<string, unknown>,
+  ): { drop: true } | { payload: Record<string, unknown> } {
+    let current = payload;
+    for (const behavior of this.opts.behaviors) {
+      const fn = behavior.beforeSend?.[action];
+      if (typeof fn !== "function") continue;
+      let returned: unknown;
+      this.interceptDepth++;
+      try {
+        returned = fn(
+          jsonCopy(current) as Record<string, unknown>,
+          this.contextOf(behavior),
+        );
+      } catch (err) {
+        this.log(
+          `behavior ${behavior.id}: beforeSend.${action} failed: ${describe(err)}; the CALL goes out as it was`,
+        );
+        continue;
+      } finally {
+        this.interceptDepth--;
+      }
+      if (returned === undefined) continue;
+      if (isPromiseLike(returned)) {
+        this.log(
+          `behavior ${behavior.id}: beforeSend.${action} returned a promise; it must be synchronous, so the CALL goes out as it was`,
+        );
+        continue;
+      }
+      if (typeof returned !== "object" || returned === null) {
+        this.log(
+          `behavior ${behavior.id}: beforeSend.${action} returned neither a payload object nor { drop: true }; ignored`,
+        );
+        continue;
+      }
+      if ((returned as { drop?: unknown }).drop === true) {
+        this.log(`behavior ${behavior.id}: beforeSend.${action} dropped it`);
+        return { drop: true };
+      }
+      if (Array.isArray(returned)) continue;
+      current = returned as Record<string, unknown>;
+    }
+    return { payload: current };
   }
 
   // ---- inbound CALLs ------------------------------------------------------
@@ -435,6 +598,9 @@ export class BehaviorHost {
       },
       async send(action, payload, opts) {
         if (host.isStopping) throw new BehaviorStopped();
+        // From inside a beforeSend the CALL waits for its turn, so it goes out
+        // after the CALL being intercepted.
+        if (host.interceptDepth > 0) await Promise.resolve();
         const request = cp.call({
           action,
           payload: payload as Record<string, unknown>,
@@ -510,6 +676,19 @@ function answerOf(outcome: CallOutcome | CallAnswer): CallAnswerToSend {
         ? (payload as Record<string, unknown>)
         : {},
   };
+}
+
+function jsonCopy(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }
 
 function describe(err: unknown): string {

@@ -77,6 +77,28 @@ describe("export-k6 --behavior", () => {
     expect(r.stderr).toContain("ctx.defaultBehavior");
   });
 
+  it("refuses the connector and transaction hooks, never ignoring them", async () => {
+    const r = await exportK6(
+      "--behavior",
+      path.join(fixtures, "usesConnectorHook.ts"),
+    );
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("on.connectorStatus");
+    expect(r.stderr).toContain("on.transactionStarted");
+    expect(existsSync(r.dir)).toBe(false);
+  });
+
+  it("exports the call hooks, beforeSend and ctx.accepted, with the canned answers", async () => {
+    const r = await exportK6(
+      "--behavior",
+      path.join(fixtures, "usesCallHooks.ts"),
+    );
+    expect(r.code).toBe(0);
+    const entry = readFileSync(path.join(r.dir, "behavior.k6.ts"), "utf8");
+    expect(entry).toContain('"UpdateFirmware":{"accepted":{}}');
+    expect(entry).toContain('"Reset":{"accepted":{"status":"Accepted"}');
+  });
+
   it("refuses unsupported ctx members, also destructured", async () => {
     const plug = await exportK6(
       "--behavior",

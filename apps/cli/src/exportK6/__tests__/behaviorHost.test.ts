@@ -12,7 +12,7 @@ import {
 } from "@ocpp-cp-sim/k6-runtime/behaviorHost";
 import { seededStream } from "@ocpp-cp-sim/k6-runtime/behaviorRandom";
 import type { Behavior } from "@ocpp-cp-sim/k6-runtime/behaviorTypes";
-import type { WireCall } from "@ocpp-cp-sim/k6-runtime/types";
+import type { CallObserver, WireCall } from "@ocpp-cp-sim/k6-runtime/types";
 
 const timers = {
   setTimeout: (fn: () => void, ms: number) =>
@@ -24,6 +24,7 @@ function fakeCp() {
   const calls: WireCall[] = [];
   const raws: string[] = [];
   let handler: CallHandler | null = null;
+  let observer: CallObserver | null = null;
   const cp: BehaviorCp = {
     cpId: "CP-1",
     connectorId: 1,
@@ -35,9 +36,12 @@ function fakeCp() {
     setCallHandler: (h) => {
       handler = h;
     },
+    setObserver: (o) => {
+      observer = o;
+    },
     getLocalStatus: () => "Available",
   };
-  return { cp, calls, raws, handler: () => handler };
+  return { cp, calls, raws, handler: () => handler, observer: () => observer };
 }
 
 function host(behaviors: Behavior[], cp: BehaviorCp) {
@@ -316,5 +320,262 @@ describe("unmetBy", () => {
     expect(() =>
       host([{ api: 1, id: "x", requires: ["physical"] }], f.cp),
     ).toThrow(/requires "physical"/);
+  });
+});
+
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+describe("BehaviorHost event hooks", () => {
+  it("delivers connected, callResult, callReceived and disconnected, after the turn", async () => {
+    const f = fakeCp();
+    const seen: string[] = [];
+    const h = host(
+      [
+        {
+          api: 1,
+          id: "obs",
+          on: {
+            connected: () => void seen.push("connected"),
+            callResult: (e) =>
+              void seen.push(`result ${e.action} ${e.outcome}`),
+            callReceived: (e) => void seen.push(`received ${e.action}`),
+            disconnected: (e) => void seen.push(`disconnected ${e.code}`),
+          },
+        },
+      ],
+      f.cp,
+    );
+    h.start();
+    f.observer()?.callReceived({
+      action: "Reset",
+      messageId: "1",
+      payload: {},
+    });
+    expect(seen).toEqual([]); // never inside the turn that caused it
+    await tick();
+    f.observer()?.callResult({
+      action: "Heartbeat",
+      messageId: "2",
+      outcome: "error",
+      payload: { errorCode: "X" },
+    });
+    f.observer()?.disconnected({ code: 1006 });
+    await tick();
+    expect(seen).toEqual([
+      "connected",
+      "received Reset",
+      "result Heartbeat error",
+      "disconnected 1006",
+    ]);
+  });
+
+  it("a hook that throws or rejects does not stop the others; load order holds", async () => {
+    const f = fakeCp();
+    const seen: string[] = [];
+    const logs: string[] = [];
+    const h = new BehaviorHost({
+      cp: f.cp,
+      timers,
+      seed: "s",
+      log: (m) => void logs.push(m),
+      behaviors: [
+        {
+          api: 1,
+          id: "bad",
+          on: {
+            callReceived: () => {
+              throw new Error("boom");
+            },
+          },
+        },
+        {
+          api: 1,
+          id: "rejects",
+          on: { callReceived: () => Promise.reject(new Error("later")) },
+        },
+        {
+          api: 1,
+          id: "good",
+          on: { callReceived: () => void seen.push("good") },
+        },
+      ],
+    });
+    h.start();
+    f.observer()?.callReceived({
+      action: "Reset",
+      messageId: "1",
+      payload: {},
+    });
+    await tick();
+    expect(seen).toEqual(["good"]);
+    expect(logs.join("\n")).toContain("callReceived hook failed: boom");
+    expect(logs.join("\n")).toContain("callReceived hook failed: later");
+  });
+
+  it("a hook that sends runs after the current hook; no hooks, no observer", async () => {
+    const f = fakeCp();
+    const none = host([{ api: 1, id: "plain" }], f.cp);
+    none.start();
+    expect(f.observer()).toBeNull();
+  });
+
+  it("refuses the connector and transaction hooks", () => {
+    for (const hook of [
+      "connectorStatus",
+      "transactionStarted",
+      "transactionStopped",
+    ] as const) {
+      const problems = unmetBy({
+        api: 1,
+        id: "x",
+        on: { [hook]: () => undefined },
+      });
+      expect(problems.join()).toContain(`on.${hook}`);
+    }
+    expect(
+      unmetBy({ api: 1, id: "ok", on: { callResult: () => undefined } }),
+    ).toEqual([]);
+  });
+});
+
+describe("BehaviorHost beforeSend", () => {
+  const chain = (behaviors: Behavior[]) => {
+    const f = fakeCp();
+    host(behaviors, f.cp).start();
+    return f.observer()!;
+  };
+
+  it("rewrites in load order, drops, and ignores a throw, a promise and junk", () => {
+    const observer = chain([
+      {
+        api: 1,
+        id: "a",
+        beforeSend: {
+          MeterValues: (p) => ({ ...p, n: `${String(p.n ?? "")}a` }),
+        },
+      },
+      {
+        api: 1,
+        id: "b",
+        beforeSend: {
+          MeterValues: (p) => ({ ...p, n: `${String(p.n ?? "")}b` }),
+        },
+      },
+      {
+        api: 1,
+        id: "bad",
+        beforeSend: {
+          MeterValues: () => {
+            throw new Error("x");
+          },
+          Heartbeat: (async () => ({ drop: true })) as never,
+          StatusNotification: (() => "nope") as never,
+          Authorize: () => ({ drop: true }),
+        },
+      },
+    ]);
+    expect(observer.beforeSend("MeterValues", { v: 1 })).toEqual({
+      payload: { v: 1, n: "ab" },
+    });
+    expect(observer.beforeSend("Heartbeat", {})).toEqual({ payload: {} });
+    expect(observer.beforeSend("StatusNotification", { s: 1 })).toEqual({
+      payload: { s: 1 },
+    });
+    expect(observer.beforeSend("Authorize", { idTag: "T" })).toEqual({
+      drop: true,
+    });
+    expect(observer.beforeSend("Other", { z: 1 })).toEqual({
+      payload: { z: 1 },
+    });
+  });
+
+  it("hands over a copy", () => {
+    const observer = chain([
+      {
+        api: 1,
+        id: "m",
+        beforeSend: {
+          MeterValues: (p) => {
+            p.v = 99;
+          },
+        },
+      },
+    ]);
+    expect(observer.beforeSend("MeterValues", { v: 1 })).toEqual({
+      payload: { v: 1 },
+    });
+  });
+
+  it("a ctx.send from inside beforeSend waits until the intercepted CALL is queued", async () => {
+    const f = fakeCp();
+    const order: string[] = [];
+    f.cp.call = (c) => {
+      order.push(c.action);
+      return Promise.resolve({});
+    };
+    host(
+      [
+        {
+          api: 1,
+          id: "o",
+          beforeSend: {
+            StatusNotification: (_p, ctx) => {
+              void ctx.send("DataTransfer", { vendorId: "x" });
+            },
+          },
+        },
+      ],
+      f.cp,
+    ).start();
+    const observer = f.observer()!;
+    observer.beforeSend("StatusNotification", {});
+    order.push("StatusNotification queued");
+    await tick();
+    expect(order).toEqual(["StatusNotification queued", "DataTransfer"]);
+  });
+});
+
+describe("BehaviorHost ctx.accepted / ctx.rejected", () => {
+  it("answers from the table the export wrote, and throws for an action without one", async () => {
+    const f = fakeCp();
+    const seen: unknown[] = [];
+    const h = new BehaviorHost({
+      cp: f.cp,
+      timers,
+      seed: "s",
+      canned: {
+        Reset: {
+          accepted: { status: "Accepted" },
+          rejected: { status: "Rejected" },
+        },
+        UpdateFirmware: { accepted: {} },
+      },
+      behaviors: [
+        {
+          api: 1,
+          id: "c",
+          onCall: {
+            Reset: {
+              mode: "replace",
+              handle: (_r, ctx) => {
+                seen.push(ctx.accepted("Reset"), ctx.rejected("Reset"));
+                try {
+                  ctx.rejected("UpdateFirmware");
+                } catch (error) {
+                  seen.push((error as Error).message);
+                }
+                return { response: ctx.accepted("UpdateFirmware") };
+              },
+            },
+          },
+        },
+      ],
+    });
+    h.start();
+    const claimed = f.handler()?.("Reset", {});
+    expect(await claimed?.answer).toEqual({ kind: "result", payload: {} });
+    expect(seen[0]).toEqual({ status: "Accepted" });
+    expect(seen[1]).toEqual({ status: "Rejected" });
+    expect(seen[2]).toContain("has no Rejected answer");
   });
 });

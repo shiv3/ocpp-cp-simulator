@@ -19,7 +19,9 @@ export type WireVersion = "1.6" | "2.0.1";
 export interface WireFrame {
   /** `CP>` arrived from the charge point; `CSMS>` was sent by the fake CSMS. */
   readonly dir: "CP>" | "CSMS>";
-  readonly kind: "call" | "result" | "error";
+  /** `raw` is a frame that is not a valid OCPP-J message (not JSON, not an
+   *  array, or an unknown message type); `payload` is the received text. */
+  readonly kind: "call" | "result" | "error" | "raw";
   readonly id: string;
   readonly action?: string;
   readonly payload: unknown;
@@ -74,6 +76,9 @@ function isReply(value: unknown): value is CsmsReply {
 /** Deterministic id for the next CSMS-initiated CALL: `csms-1`, `csms-2`, ... */
 export class FakeCsms {
   readonly frames: WireFrame[] = [];
+  private readonly token = crypto.randomUUID();
+  /** The path of every WebSocket upgrade request (not part of the transcript). */
+  readonly requestPaths: string[] = [];
   readonly url: string;
   private readonly server: ReturnType<typeof Bun.serve> | null;
   private socket: ServerWebSocket<unknown> | MemorySocketLike | null = null;
@@ -108,6 +113,14 @@ export class FakeCsms {
     this.server = Bun.serve({
       port: 0,
       fetch: (req, srv) => {
+        // A station left over from an earlier case can still be retrying a
+        // port that this server was given later; only this server's own token
+        // is let in, so no case can see another case's frames.
+        const path = new URL(req.url).pathname;
+        if (!path.startsWith(`/${this.token}/`)) {
+          return new Response("not this server's station", { status: 404 });
+        }
+        this.requestPaths.push(path.slice(this.token.length + 1));
         const upgraded = srv.upgrade(req, {
           data: undefined,
           headers: { "Sec-WebSocket-Protocol": protocol },
@@ -132,7 +145,7 @@ export class FakeCsms {
         },
       },
     });
-    this.url = `ws://127.0.0.1:${tcpPort(this.server)}/`;
+    this.url = `ws://127.0.0.1:${tcpPort(this.server)}/${this.token}/`;
   }
 
   /** In-memory transport: the station's socket opened. */
@@ -183,9 +196,17 @@ export class FakeCsms {
     try {
       parsed = JSON.parse(raw);
     } catch {
+      this.record({ dir: "CP>", kind: "raw", id: "", payload: raw });
       return;
     }
-    if (!Array.isArray(parsed)) return;
+    if (
+      !Array.isArray(parsed) ||
+      ![2, 3, 4].includes(parsed[0] as number) ||
+      typeof parsed[1] !== "string"
+    ) {
+      this.record({ dir: "CP>", kind: "raw", id: "", payload: raw });
+      return;
+    }
     const [type, id] = parsed as [number, string];
     if (type === 2) {
       const action = parsed[2] as string;

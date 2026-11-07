@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { normalizeFrames } from "./normalize";
 import { Rig } from "./rig";
@@ -12,7 +18,7 @@ export async function recordCase(c: GoldenCase): Promise<string[]> {
   try {
     await c.run(rig);
     await rig.csms.settle(400);
-    return normalizeFrames(rig.csms.frames);
+    return normalizeFrames(rig.csms.frames, { strict: c.strict === true });
   } finally {
     await rig.dispose();
   }
@@ -39,4 +45,12 @@ export function recordMissingFixture(name: string, lines: string[]): boolean {
   mkdirSync(FIXTURE_DIR, { recursive: true });
   writeFileSync(fixturePath(name), lines.join("\n") + "\n");
   return true;
+}
+
+/** Names of the fixture files on disk (without the extension). */
+export function fixtureNames(): string[] {
+  return readdirSync(FIXTURE_DIR)
+    .filter((f) => f.endsWith(".jsonl"))
+    .map((f) => f.slice(0, -".jsonl".length))
+    .sort();
 }

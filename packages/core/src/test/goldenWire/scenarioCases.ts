@@ -314,6 +314,68 @@ async function runTemplate(rig: Rig, templateId: string): Promise<void> {
   await rig.csms.settle(400);
 }
 
+/**
+ * The built-in template ids the base commit shipped. The golden test fails if
+ * the set of templates differs, so removing or adding one is a deliberate edit
+ * here (and a fixture), never a silent change of what "every template" covers.
+ */
+export const PINNED_TEMPLATE_IDS: readonly string[] = [
+  "cert16-octt-strictness-probe",
+  "cert16-reservation-basic",
+  "cert16-tc001-cold-boot",
+  "cert16-tc003-charging-plugin-first",
+  "cert16-tc004-charging-id-first",
+  "cert16-tc005-ev-side-disconnect",
+  "cert16-tc010-remote-start",
+  "cert16-tc011-remote-start-stop",
+  "cert16-tc012-remote-stop",
+  "cert16-tc013-hard-reset",
+  "cert16-tc014-soft-reset",
+  "cert16-tc017-unlock-occupied",
+  "cert16-tc018-unlock-failure",
+  "cert16-tc019-get-configuration-all",
+  "cert16-tc019-get-configuration-key",
+  "cert16-tc021-change-configuration",
+  "cert16-tc023-1-authorize-invalid",
+  "cert16-tc023-2-authorize-expired",
+  "cert16-tc023-3-authorize-blocked",
+  "cert16-tc024-lock-failure",
+  "cert16-tc026-remote-start-rejected",
+  "cert16-tc028-remote-stop-rejected",
+  "cert16-tc031-unlock-unknown-connector",
+  "cert16-tc042-1-get-local-list-version-not-supported",
+  "cert16-tc042-2-get-local-list-version-empty",
+  "cert16-tc043-1-send-local-list-not-supported",
+  "cert16-tc043-3-send-local-list-failed",
+  "cert16-tc043-4-send-local-list-full",
+  "cert16-tc043-5-send-local-list-differential",
+  "cert16-tc044-1-firmware-update",
+  "cert16-tc044-2-firmware-download-failed",
+  "cert16-tc044-3-firmware-install-failed",
+  "cert16-tc045-1-get-diagnostics",
+  "cert16-tc048-1-reserve-now-faulted",
+  "cert16-tc048-2-reserve-now-occupied",
+  "cert16-tc048-3-reserve-now-unavailable",
+  "cert16-tc048-4-reserve-now-rejected",
+  "cert16-tc051-cancel-reservation",
+  "cert16-tc052-cancel-reservation-rejected",
+  "cert16-tc054-trigger-message",
+  "cert16-tc055-trigger-message-rejected",
+  "cert16-tc056-central-smart-charging-txdefault",
+  "cert16-tc057-central-smart-charging-txprofile",
+  "cert16-tc059-remote-start-with-profile",
+  "cert16-tc061-clear-cache",
+  "cert16-tc064-data-transfer",
+  "cert16-tc066-get-composite-schedule",
+  "cert16-tc067-clear-charging-profile",
+  "essential-cp-behavior",
+  "full-charging-cycle",
+  "multi-status-monitor",
+  "remote-start-auto-meter",
+  "smart-charging",
+  "status-triggered-actions",
+];
+
 export const scenarioCases: GoldenCase[] = scenarioTemplates.map((t) => ({
   name: `16-scenario-${t.id}`,
   version: "1.6",

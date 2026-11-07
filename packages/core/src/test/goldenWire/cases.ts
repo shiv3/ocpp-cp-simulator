@@ -8,6 +8,8 @@ export interface GoldenCase {
   readonly name: string;
   readonly version: WireVersion;
   readonly options?: Partial<Omit<RigOptions, "version">>;
+  /** Record with strict normalization (relative timestamps, id shape). */
+  readonly strict?: boolean;
   readonly run: (rig: Rig) => Promise<void>;
 }
 

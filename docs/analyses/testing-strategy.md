@@ -159,17 +159,45 @@ in-process fake CSMS (`FakeCsms.ts`, `Bun.serve`) on OCPP 1.6 and 2.0.1, records
 in both directions in arrival order, normalizes it, and compares it with a committed fixture under
 `goldenWire/fixtures/` (one `.jsonl` file per case, one frame per line).
 
-- **Normalization** (`normalize.ts`) only replaces what changes between runs: message ids become `id-N` by
-  first appearance, UUIDs `<uuid-N>`, ISO timestamps `<ts>`, `127.0.0.1:<port>` the fake CSMS port, and a
-  generated CSR `<csr>`. Key order, numbers and the order of frames are part of the contract.
-- **Cases**: `cases.ts` holds 99 scripted cases over both versions (boot including Pending and
-  Rejected, status walk, authorize, local and remote start / stop, meter values, EV disconnect, reset,
-  `UpdateFirmware` including `SimulatedFirmwareUpdateFailure`, `SignedUpdateFirmware`,
+- **What normalization hides** (`normalize.ts`), exhaustively; everything else is compared byte for byte
+  (key order, numbers, strings, the order of frames):
+  - message ids become `id-N` by first appearance, so _which_ frame answers which survives but the value
+    and its form (UUID or not) do not;
+  - UUID-shaped strings become `<uuid-N>` by first appearance;
+  - every ISO-8601 timestamp becomes `<ts>`: its value, its millisecond part and its zone are hidden;
+  - `127.0.0.1:<port>` replaces the port of the fake CSMS (and the per-server token in its path), and a
+    generated CSR becomes `<csr>`;
+  - the text of an uncaught JavaScript error in a CALLERROR (`TypeError: ...`) becomes
+    `<javascript error>`: it names local variables of the implementation, only the code is contract;
+  - **timing**: no frame carries a time, so delays between frames are not compared. Where the pace is the
+    behavior (boot retry, heartbeat period, reconnect, a future firmware date), the case itself bounds it
+    (a wait with a timeout, or a probe frame sent between two steps of a train).
+  - **Strict cases** (`strict: true`, five of them) hide less: a CP timestamp becomes its distance in
+    whole seconds from the first CP timestamp plus its digit-masked shape
+    (`<ts+2s 9999-99-99T99:99:99.999Z>`), so a wrong stop time or a lost millisecond part shows, and a
+    message id that is not UUID-shaped is marked `(raw)`. The fixtures of the first set are not strict.
+- **Frames the fake CSMS cannot parse** (not JSON, not an array, an unknown message type) are recorded as
+  `raw` frames, not dropped, so a station that emits one fails the case.
+- **Cases**: three sets, 332 in all. `cases.ts` holds 103 scripted cases over both versions (boot
+  including Pending and Rejected, status walk, authorize, local and remote start / stop, meter values, EV
+  disconnect, reset, `UpdateFirmware` including `SimulatedFirmwareUpdateFailure`, `SignedUpdateFirmware`,
   `GetDiagnostics` / `GetLog`, `ChangeAvailability` including `Scheduled`, reservations, unlock,
   `TriggerMessage`, `inboundPolicy`, `responseOverride`, configuration / variables, data transfer, local
   list, smart charging, disconnect and reconnect, transactions stopped offline). `scenarioCases.ts` runs
-  all 58 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
+  the 54 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
   [scenario README](../../packages/core/src/utils/scenarios/README.md) describes.
+  `regressionCases.ts` holds 175 more, **recorded on ca01d302 (the commit before the charger engine),
+  never on the branch**, after a review found 29 of 63 mutants of the engine survived the first set
+  (no retry after CALLERROR, an offline queue flushed in the wrong order, follow-ups of a close, policy
+  versus override, a TxProfile surviving its transaction, a whole-station `ChangeAvailability` during a
+  transaction, `AuthorizeRemoteTxRequests`, a reservation not consumed, `ConnectionTimeOut`, the stop
+  time, `GetLog` and firmware across a disconnect, ...). Those cases are the regression oracle: a case
+  that fails on the branch is a regression to fix, not a fixture to record again.
+- **Harness checks** (they fail when the oracle itself shrinks): a fixture file without a case fails
+  (`every fixture belongs to a case`); the set of built-in template ids is pinned in `scenarioCases.ts`
+  (`PINNED_TEMPLATE_IDS`), so removing a template cannot silently shrink the scenario set; the fake CSMS
+  only accepts upgrades on its own URL token, so a station left over from an earlier case cannot add
+  frames to another case; the path of the upgrade request is checked by the `connection-handshake` case.
 - **Not unattended**: five templates cannot run to their `End` node without a person or a
   stop, because an Auto MeterValue node blocks for minutes or a loop never ends
   (`status-triggered-actions`, `full-charging-cycle`, `essential-cp-behavior`, `smart-charging`,

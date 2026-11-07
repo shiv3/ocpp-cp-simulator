@@ -107,6 +107,7 @@ async function bootAcceptedAfter(
 function newChargePoint(
   id: string,
   version = "OCPP-2.0.1",
+  connectorCount = 1,
 ): {
   csms: MockCsms;
   cp: ChargePoint;
@@ -115,7 +116,7 @@ function newChargePoint(
   const cp = new ChargePoint(
     id,
     DefaultBootNotification,
-    1,
+    connectorCount,
     csms.url,
     null,
     null,
@@ -210,6 +211,237 @@ describe("OCPP 2.0.1 Reset", () => {
       await expectNoFrame(
         csms,
         callFrameAfter(csms, csms.received.indexOf(result), "BootNotification"),
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("runs a scheduled OnIdle reset once the last transaction ends (#597)", async () => {
+    const { csms, cp } = newChargePoint("CP201-RESET-ONIDLE-RUNS");
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-201", 1);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const result = await sendReset(csms, "reset-onidle-runs", {
+        type: "OnIdle",
+      });
+      expect(result).toEqual([3, "reset-onidle-runs", { status: "Scheduled" }]);
+
+      const resultIndex = csms.received.indexOf(result);
+      cp.stopTransaction(1, "Local");
+      const endedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(csms, resultIndex, "Ended"),
+      );
+      const boot = await csms.waitForFrame(
+        callFrameAfter(
+          csms,
+          csms.received.indexOf(endedFrame),
+          "BootNotification",
+        ),
+      );
+      expect(csms.received.indexOf(boot)).toBeGreaterThan(
+        csms.received.indexOf(endedFrame),
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("runs an EVSE-scoped OnIdle reset once that EVSE's transaction ends (#597)", async () => {
+    const { csms, cp } = newChargePoint("CP201-RESET-ONIDLE-EVSE");
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-201", 1);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const result = await sendReset(csms, "reset-onidle-evse", {
+        type: "OnIdle",
+        evseId: 1,
+      });
+      expect(result).toEqual([3, "reset-onidle-evse", { status: "Scheduled" }]);
+
+      const resultIndex = csms.received.indexOf(result);
+      cp.stopTransaction(1, "Local");
+      const endedFrame = await csms.waitForFrame(
+        transactionEventFrameAfter(csms, resultIndex, "Ended"),
+      );
+      await csms.waitForFrame(
+        callFrameAfter(
+          csms,
+          csms.received.indexOf(endedFrame),
+          "BootNotification",
+        ),
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("keeps a scheduled OnIdle reset pending while another targeted transaction runs (#597)", async () => {
+    const { csms, cp } = newChargePoint(
+      "CP201-RESET-ONIDLE-WAITS",
+      "OCPP-2.0.1",
+      2,
+    );
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-201", 1);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+      cp.startTransaction("TAG-202", 2);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const result = await sendReset(csms, "reset-onidle-waits", {
+        type: "OnIdle",
+      });
+      expect(result).toEqual([
+        3,
+        "reset-onidle-waits",
+        { status: "Scheduled" },
+      ]);
+
+      const resultIndex = csms.received.indexOf(result);
+      cp.stopTransaction(1, "Local");
+      const firstEnded = await csms.waitForFrame(
+        transactionEventFrameAfter(csms, resultIndex, "Ended"),
+      );
+      await expectNoFrame(
+        csms,
+        callFrameAfter(
+          csms,
+          csms.received.indexOf(firstEnded),
+          "BootNotification",
+        ),
+      );
+
+      cp.stopTransaction(2, "Local");
+      const secondEnded = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(firstEnded),
+          "Ended",
+        ),
+      );
+      await csms.waitForFrame(
+        callFrameAfter(
+          csms,
+          csms.received.indexOf(secondEnded),
+          "BootNotification",
+        ),
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("keeps two scheduled OnIdle resets for different EVSEs until each runs (#597)", async () => {
+    const { csms, cp } = newChargePoint(
+      "CP201-RESET-ONIDLE-TWO",
+      "OCPP-2.0.1",
+      2,
+    );
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-201", 1);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+      cp.startTransaction("TAG-202", 2);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const first = await sendReset(csms, "reset-onidle-evse1", {
+        type: "OnIdle",
+        evseId: 1,
+      });
+      expect(first).toEqual([3, "reset-onidle-evse1", { status: "Scheduled" }]);
+      const second = await sendReset(csms, "reset-onidle-evse2", {
+        type: "OnIdle",
+        evseId: 2,
+      });
+      expect(second).toEqual([
+        3,
+        "reset-onidle-evse2",
+        { status: "Scheduled" },
+      ]);
+
+      // EVSE 1 is idle first: its reset must still run although EVSE 2
+      // was scheduled after it.
+      cp.stopTransaction(1, "Local");
+      const firstEnded = await csms.waitForFrame(
+        transactionEventFrameAfter(
+          csms,
+          csms.received.indexOf(second),
+          "Ended",
+        ),
+      );
+      await csms.waitForFrame(
+        callFrameAfter(
+          csms,
+          csms.received.indexOf(firstEnded),
+          "BootNotification",
+        ),
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("an Immediate reset supersedes a scheduled OnIdle reset: one reboot, no later one (#597)", async () => {
+    const { csms, cp } = newChargePoint("CP201-RESET-ONIDLE-SUPERSEDED");
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-201", 1);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const scheduled = await sendReset(csms, "reset-onidle-first", {
+        type: "OnIdle",
+      });
+      expect(scheduled).toEqual([
+        3,
+        "reset-onidle-first",
+        { status: "Scheduled" },
+      ]);
+
+      const immediate = await sendReset(csms, "reset-immediate-second", {
+        type: "Immediate",
+      });
+      expect(immediate).toEqual([
+        3,
+        "reset-immediate-second",
+        { status: "Accepted" },
+      ]);
+
+      const immediateIndex = csms.received.indexOf(immediate);
+      const ended = await csms.waitForFrame(
+        transactionEventFrameAfter(csms, immediateIndex, "Ended"),
+      );
+      const boot = await csms.waitForFrame(
+        callFrameAfter(csms, csms.received.indexOf(ended), "BootNotification"),
+      );
+      const bootIndex = csms.received.indexOf(boot);
+      csms.replyCallResult(boot[1] as string, {
+        status: "Accepted",
+        currentTime: "2026-06-24T00:00:00.000Z",
+        interval: 0,
+      });
+
+      await expectNoFrame(
+        csms,
+        callFrameAfter(csms, bootIndex, "BootNotification"),
       );
     } finally {
       cp.disconnect();

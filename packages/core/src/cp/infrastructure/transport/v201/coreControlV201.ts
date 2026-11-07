@@ -52,6 +52,7 @@ export const handleResetV201 = (
   if (type === "OnIdle" && targets.some((connector) => connector.transaction)) {
     return {
       response: { status: "Scheduled" } satisfies ResetResponseV201,
+      afterResult: () => ctx.chargePoint.scheduleResetOnIdle(evseId),
     };
   }
 
@@ -59,6 +60,7 @@ export const handleResetV201 = (
     response: { status: "Accepted" } satisfies ResetResponseV201,
     afterResult: () => {
       if (type !== "ImmediateAndResume") {
+        ctx.chargePoint.cancelPendingResetsOnIdle();
         for (const connector of targets) {
           if (connector.transaction) {
             ctx.chargePoint.stopTransaction(connector.id, "HardReset", {

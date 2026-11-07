@@ -285,6 +285,8 @@ export class ChargePoint {
   private readonly _timelineProjector: OperationalTimelineProjector;
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
+  /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
+  private _pendingResetsOnIdle: { evseId?: number }[] = [];
   private readonly _localAuthListManager: LocalAuthListManager;
   private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
@@ -2764,6 +2766,46 @@ export class ChargePoint {
       this.persistAvailability();
     }
     connector.scheduledAvailability = null;
+
+    this.runPendingResetOnIdle();
+  }
+
+  /**
+   * #597: record a Reset OnIdle that was answered `Scheduled`. `evseId`
+   * undefined targets every connector. It runs when the last targeted
+   * transaction ends (see {@link runPendingResetOnIdle}).
+   */
+  scheduleResetOnIdle(evseId?: number): void {
+    this._pendingResetsOnIdle.push({ evseId });
+  }
+
+  /**
+   * #597: drop every pending Reset OnIdle. An Immediate reset reboots the
+   * station now, which already satisfies them; keeping them would boot
+   * again on a later transaction end.
+   */
+  cancelPendingResetsOnIdle(): void {
+    this._pendingResetsOnIdle = [];
+  }
+
+  /**
+   * #597: boot again once a pending reset has no targeted connector left
+   * with a transaction. Called from {@link stopTransaction}. Each pending
+   * reset stays queued while its targets are still busy; the station
+   * boots once if any of them became runnable.
+   */
+  private runPendingResetOnIdle(): void {
+    if (this._pendingResetsOnIdle.length === 0) return;
+    const isBusy = (pending: { evseId?: number }): boolean =>
+      [...this._connectors.values()].some(
+        (connector) =>
+          (pending.evseId === undefined || connector.id === pending.evseId) &&
+          connector.transaction,
+      );
+    const remaining = this._pendingResetsOnIdle.filter(isBusy);
+    if (remaining.length === this._pendingResetsOnIdle.length) return;
+    this._pendingResetsOnIdle = remaining;
+    this.boot();
   }
 
   /**

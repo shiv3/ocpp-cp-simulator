@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { Logger } from "../../../shared/Logger";
 import { Connector } from "../../../domain/connector/Connector";
 import {
   DefaultBootNotification,
@@ -99,7 +100,7 @@ describe("connector state in the charger engine", () => {
   });
 
   it("works without a charge point", () => {
-    const connector = new Connector(1);
+    const connector = new Connector(1, new Logger());
     const seen: string[] = [];
     connector.events.on("statusChange", ({ status }) => seen.push(status));
     connector.status = OCPPStatus.Charging;

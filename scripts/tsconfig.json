@@ -23,7 +23,9 @@
   "include": [
     "check-package-boundaries.ts",
     "check-direct-time.ts",
+    "check-single-writer.ts",
     "__tests__/checkPackageBoundaries.bun.test.ts",
-    "__tests__/checkDirectTime.bun.test.ts"
+    "__tests__/checkDirectTime.bun.test.ts",
+    "__tests__/checkSingleWriter.bun.test.ts"
   ]
 }

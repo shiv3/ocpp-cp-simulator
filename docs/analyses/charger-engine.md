@@ -81,6 +81,32 @@ reconnect timers in `infrastructure/transport` may stay on real time only where 
 A CI check lists direct `Date.now`, `new Date()`, `setTimeout`, `setInterval` and `Math.random` in
 `domain/` and `application/` against a shrinking exemption list.
 
+Status (stage A): `clock.ts` and `rng.ts` exist, `ChargePoint` takes them as its last constructor
+argument (`{ clock, seed }`), and the check is `scripts/check-direct-time.ts`, run by
+`bun run check:boundaries`. Decisions the design left open:
+
+- **`TimerHandle`** is an opaque branded type. `RealClock` returns the platform's own timer object
+  and reads `Date` and the timer functions from the global object at call time, so fake timers
+  still steer it. `RealClock.now()` reads through `new Date().getTime()`, the way the code it
+  replaced read `new Date()`, so a test that stubs the global `Date` constructor steers it too.
+- **`VirtualClock`** is itself the root `SimClock`; `scoped(chargerId)` returns the view whose timers
+  carry the charger id used by the (time, charger id, sequence) order. The microtask drain between
+  two timers is one macrotask hop (`setImmediate`, else `setTimeout(0)`, captured at load so fake
+  timers cannot replace it): it is the only way to be sure every queued continuation has run. A
+  virtual run therefore must not wait on real I/O of its own process. A timer callback that throws
+  fails the `advance*` call that fired it. `runUntilIdle` ends with an error after `maxTimers`
+  timers, because an interval never lets the queue run dry.
+- **`RngStreams`** hashes `(seed, chargerId, streamName)` with cyrb128 into an sfc32 generator.
+  `systemRngStreams` is the unseeded variant (`Math.random`, `crypto.randomUUID`), which is what a
+  charge point without a seed uses, so the default stays as before. `Rng` has `next`, `int`,
+  `pick` and `uuid`.
+- **What the check covers**: `Date.now`, argument-less `new Date()` (default parameters too),
+  `performance.now`, `Math.random`, `crypto.randomUUID` and `getRandomValues`, and the global
+  `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`. Exempt, with reasons in the script:
+  the repositories' row bookkeeping stamps, the log flush pacing, and the `now` defaults of the pure
+  schedule resolvers (their production callers pass the clock). Not covered: `infrastructure/`
+  (the 2.x handler still mints transaction UUIDs with `crypto.randomUUID`) and the apps.
+
 ### CallExchange and InboundCallGate
 
 `CallExchange` is one inbound CALL. State: `open | answered | suppressed | abandoned`. The first answer

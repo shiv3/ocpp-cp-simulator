@@ -22,6 +22,8 @@
   // scripts/ is either shell or has its own project (bench/).
   "include": [
     "check-package-boundaries.ts",
-    "__tests__/checkPackageBoundaries.bun.test.ts"
+    "check-direct-time.ts",
+    "__tests__/checkPackageBoundaries.bun.test.ts",
+    "__tests__/checkDirectTime.bun.test.ts"
   ]
 }

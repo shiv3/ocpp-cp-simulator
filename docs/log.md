@@ -2284,3 +2284,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - New [Charger engine design](analyses/charger-engine.md): the target architecture and migration plan for moving charge point behavior out of the OCPP handlers. It is the contract for the `feat/charger-engine` stages.
 - [Testing strategy](analyses/testing-strategy.md): the golden wire test, the regression oracle for that work.
+
+## [2026-11-07] ingest | Injectable clock and seeded random streams (charger engine stage A)
+
+- `packages/core/src/cp/shared/clock.ts` (`SimClock`, `RealClock`, `VirtualClock`) and `rng.ts` (`RngStreams`); `ChargePoint` and everything it builds under `domain/` and `application/` read time, timers, random numbers and ids through them, defaulting to the platform clock. [Charger engine design](analyses/charger-engine.md#clock-and-random-packagescoresrccpsharedclockts-rngts) records the decisions.
+- New `scripts/check-direct-time.ts`, run by `bun run check:boundaries`, with a shrinking exemption list. [Overview](overview.md#source-layout-and-package-boundaries).

@@ -143,6 +143,15 @@ export interface BehaviorContext {
    * its effect, and return the default response.
    */
   defaultBehavior(req: unknown): unknown;
+  /**
+   * The valid "accepted" response of `action` for this station's OCPP version:
+   * `{}` for 1.6 `UpdateFirmware`, `{ status: "Accepted" }` on 2.x. `action`
+   * may be spelled as either version spells it. Throws when the action has no
+   * such response.
+   */
+  accepted(action: string): Record<string, unknown>;
+  /** Likewise `{ status: "Rejected" }` where the action has that status. */
+  rejected(action: string): Record<string, unknown>;
   connector(id: number): ConnectorSnapshot | undefined;
   readonly charger: ChargerSnapshot;
   log(message: string): void;

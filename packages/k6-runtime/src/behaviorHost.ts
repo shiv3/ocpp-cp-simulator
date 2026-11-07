@@ -120,8 +120,25 @@ export interface BehaviorHostOptions {
   timers: Timers;
   /** The seed of the random streams. */
   seed: string;
+  /**
+   * The canned answers of `ctx.accepted` / `ctx.rejected`, per action, written
+   * by the export from the bundled 1.6 response schemas. A missing entry means
+   * the action has no such answer.
+   */
+  canned?: CannedResponses;
   log?: (message: string) => void;
 }
+
+/** `ctx.accepted` / `ctx.rejected` answers of the 1.6 actions that have one. */
+export type CannedResponses = Readonly<
+  Record<
+    string,
+    {
+      readonly accepted?: Record<string, unknown>;
+      readonly rejected?: Record<string, unknown>;
+    }
+  >
+>;
 
 interface Rule {
   behavior: Behavior;
@@ -344,6 +361,18 @@ export class BehaviorHost {
         `ctx.${member} is not supported by the k6 host (behavior "${behavior.id}")`,
       );
     };
+    const canned = (
+      action: string,
+      kind: "accepted" | "rejected",
+    ): Record<string, unknown> => {
+      const answer = host.opts.canned?.[action]?.[kind];
+      if (answer === undefined) {
+        throw new Error(
+          `ctx.${kind}("${action}"): the ${action} response on OCPP-1.6J has no ${kind === "accepted" ? "Accepted" : "Rejected"} answer; build the response by hand`,
+        );
+      }
+      return { ...answer };
+    };
     let state = this.states.get(behavior.id);
     if (state === undefined) {
       state = {};
@@ -448,6 +477,8 @@ export class BehaviorHost {
           host.notifyCall("DiagnosticsStatusNotification", { status }),
       },
       defaultBehavior: () => unsupported("defaultBehavior"),
+      accepted: (action) => canned(action, "accepted"),
+      rejected: (action) => canned(action, "rejected"),
       connector: () => unsupported("connector"),
       get charger() {
         return {

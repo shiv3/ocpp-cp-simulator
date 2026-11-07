@@ -31,7 +31,7 @@ import {
   type EngineEvent,
 } from "./ChargerState";
 import { registerDefaultBehaviors } from "./behaviors";
-import { responseProblems } from "./responseValidation";
+import { cannedResponse, responseProblems } from "./responseValidation";
 
 /** Thrown into a behavior's waits when it is unloaded or its connection ends. */
 export class BehaviorStopped extends Error {
@@ -955,6 +955,10 @@ export class ChargerEngine {
         if (result.effect) env.defaultEffects.push(result.effect);
         return result.response;
       },
+      accepted: (action) =>
+        cannedResponse(action, host.ocppVersion, "accepted"),
+      rejected: (action) =>
+        cannedResponse(action, host.ocppVersion, "rejected"),
       connector: connectorSnapshot,
       get charger(): ChargerSnapshot {
         return {

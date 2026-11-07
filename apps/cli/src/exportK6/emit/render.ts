@@ -186,7 +186,7 @@ export function renderIdsExample(): string {
 /** The entry script of a behavior export: a static import of every bundle. */
 export function renderBehaviorEntry(
   bundles: readonly string[],
-  opts: { ocppVersion: string },
+  opts: { ocppVersion: string; canned?: unknown },
 ): string {
   const imports = bundles
     .map(
@@ -216,12 +216,15 @@ const behaviors: Behavior[] = ([] as Behavior[]).concat(
   ...([${list}] as Array<Behavior | Behavior[]>),
 );
 const identities = loadIdentities(__ENV);
+// The answers of ctx.accepted / ctx.rejected, written at export time from the bundled 1.6 schemas.
+const canned = ${JSON.stringify(opts.canned ?? {})};
 
 export const options = buildOptions(__ENV);
 
 export default async function (): Promise<void> {
   const result = await runBehaviorIteration({
     behaviors,
+    canned,
     env: __ENV,
     vu: __VU,
     url: requiredEnv(__ENV, "CSMS_URL"),

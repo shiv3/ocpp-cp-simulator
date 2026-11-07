@@ -14,6 +14,7 @@ import {
   unmetBy,
 } from "@ocpp-cp-sim/k6-runtime/behaviorHost";
 import ts from "typescript";
+import { cannedResponses16 } from "@ocpp-cp-sim/core/cp/application/engine/responseValidation";
 import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { bundleBehavior, typecheckBehavior } from "../behavior/bundleBehavior";
 import {
@@ -146,7 +147,10 @@ export async function runExportK6Behavior(args: ExportK6Args): Promise<number> {
     const names = built.map((b) => b.outName);
     fs.writeFileSync(
       path.join(outDir, "behavior.k6.ts"),
-      renderBehaviorEntry(names, { ocppVersion: args.ocppVersion }),
+      renderBehaviorEntry(names, {
+        ocppVersion: args.ocppVersion,
+        canned: cannedResponses16(),
+      }),
     );
     fs.writeFileSync(
       path.join(outDir, "README.md"),

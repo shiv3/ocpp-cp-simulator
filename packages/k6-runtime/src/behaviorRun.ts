@@ -5,7 +5,7 @@
 // iteration can always be stopped.
 import exec from "k6/execution";
 import { clearTimeout, setTimeout } from "k6/timers";
-import { BehaviorHost } from "./behaviorHost.ts";
+import { BehaviorHost, type CannedResponses } from "./behaviorHost.ts";
 import type { Behavior } from "./behaviorTypes.ts";
 import { OcppChargePoint } from "./ocppClient.ts";
 import type { CpIdentity, Wire } from "./types.ts";
@@ -18,6 +18,8 @@ const STOP_MARGIN_MS = 2_000;
 
 export interface BehaviorRunOptions {
   behaviors: readonly Behavior[];
+  /** See BehaviorHostOptions.canned. */
+  canned?: CannedResponses;
   env: Record<string, string | undefined>;
   vu: number;
   url: string;
@@ -167,6 +169,7 @@ export async function runBehaviorIteration(
         behaviors: opts.behaviors,
         timers,
         seed,
+        ...(opts.canned === undefined ? {} : { canned: opts.canned }),
         log: (m) => log(`[${cp.cpId}] ${m}`),
       });
       host.start();

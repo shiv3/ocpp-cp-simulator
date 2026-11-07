@@ -50,11 +50,9 @@ export const flakyFirmware: Behavior = {
           ["Installing", 500],
           [fails ? "InstallationFailed" : "Installed", draws.int(2000, 5000)],
         ];
-        // 1.6 answers with an empty object, 2.x with a status.
-        const response =
-          ctx.charger.ocppVersion === "OCPP-1.6J" ? {} : { status: "Accepted" };
+        // `{}` on 1.6, `{ status: "Accepted" }` on 2.x.
         return {
-          response,
+          response: ctx.accepted("UpdateFirmware"),
           after: () => report(ctx, requestId, plan),
         };
       },

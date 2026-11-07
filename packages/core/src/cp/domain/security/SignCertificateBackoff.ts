@@ -1,5 +1,7 @@
 import { setTimeoutAt } from "../../shared/timers";
 import type { SignedCertificateUse } from "./certificateUse";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 /** The two SecurityCtrlr variables the back-off reads on every step. */
 export interface SignCertificateBackoffSettings {
@@ -15,6 +17,8 @@ export interface SignCertificateBackoffDeps {
   readonly isPending: (use: SignedCertificateUse) => boolean;
   /** Sends the SignCertificateRequest for `use` again, same CSR. */
   readonly resend: (use: SignedCertificateUse) => void;
+  /** The clock waits are armed on; the platform clock by default. */
+  readonly clock?: SimClock;
 }
 
 interface Sequence {
@@ -60,7 +64,11 @@ interface Sequence {
 export class SignCertificateBackoff {
   readonly #sequences = new Map<SignedCertificateUse, Sequence>();
 
-  constructor(private readonly deps: SignCertificateBackoffDeps) {}
+  private readonly clock: SimClock;
+
+  constructor(private readonly deps: SignCertificateBackoffDeps) {
+    this.clock = deps.clock ?? realClock;
+  }
 
   /** The CSMS accepted a SignCertificateRequest for `use`. */
   accepted(use: SignedCertificateUse): void {
@@ -93,7 +101,7 @@ export class SignCertificateBackoff {
     for (const sequence of this.#sequences.values()) {
       if (!sequence.wait) continue;
       sequence.wait.cancel();
-      sequence.heldMs = Math.max(0, sequence.wait.fireAt - Date.now());
+      sequence.heldMs = Math.max(0, sequence.wait.fireAt - this.clock.now());
       sequence.wait = undefined;
     }
   }
@@ -124,9 +132,10 @@ export class SignCertificateBackoff {
     sequence: Sequence,
     ms: number,
   ): void {
-    const fireAt = Date.now() + ms;
+    const fireAt = this.clock.now() + ms;
     // A pending wait must not keep a CLI process alive on its own.
     const cancel = setTimeoutAt(fireAt, () => this.expire(use, sequence), {
+      clock: this.clock,
       unref: true,
     });
     sequence.wait = { fireAt, cancel };

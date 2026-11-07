@@ -5,6 +5,10 @@ import type {
 } from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { setTimeoutAt } from "../../shared/timers";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { RngStreams, systemRngStreams } from "../../shared/rng";
+import type { Rng, RngSource } from "../../shared/rng";
 import type {
   DataTransferData,
   DataTransferResult,
@@ -232,6 +236,19 @@ export interface CertificateQuirks {
   hiddenConfigurationKeys?: string[];
 }
 
+/**
+ * What makes a run replayable (docs/analyses/charger-engine.md): the clock
+ * every timer and timestamp of the charge point reads, and the seed its
+ * random streams derive from. With neither, the platform clock and
+ * `Math.random` are used and nothing differs from a charge point built
+ * without this argument.
+ */
+export interface ChargePointSimulationOptions {
+  readonly clock?: SimClock;
+  /** A seed (a string or a number) or ready-made streams. */
+  readonly seed?: string | number | RngSource;
+}
+
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
@@ -260,6 +277,8 @@ export class ChargePoint {
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket | null;
+  private readonly _clock: SimClock;
+  private readonly _rngSource: RngSource;
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
@@ -347,7 +366,7 @@ export class ChargePoint {
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
-  private readonly _connectionTimeoutTimers: Map<number, NodeJS.Timeout> =
+  private readonly _connectionTimeoutTimers: Map<number, TimerHandle> =
     new Map();
   // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
   // send-only (browser local mode). For non-SOAP versions, always false.
@@ -382,13 +401,25 @@ export class ChargePoint {
     authorizationKey?: string,
     cpoName?: string,
     tls?: OcppTlsOptions,
+    simulation: ChargePointSimulationOptions = {},
   ) {
+    this._clock = simulation.clock ?? realClock;
+    this._rngSource =
+      simulation.seed === undefined
+        ? systemRngStreams
+        : typeof simulation.seed === "object"
+          ? simulation.seed
+          : new RngStreams(simulation.seed);
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
-    this._certificateStore = new CertificateStore(this._id, this._database);
+    this._certificateStore = new CertificateStore(
+      this._id,
+      this._database,
+      this._clock,
+    );
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
     this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
@@ -412,6 +443,7 @@ export class ChargePoint {
         connectorId,
         this._logger,
         () => this._stationProfiles,
+        this._clock,
       );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
@@ -507,10 +539,11 @@ export class ChargePoint {
     }
     this._outbox = new Outbox(this._messageHandler);
 
-    this._heartbeat = new HeartbeatService(this._logger);
+    this._heartbeat = new HeartbeatService(this._logger, this._clock);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
-    this._clockAligned = new ClockAlignedMeterScheduler((boundary) =>
-      this.emitClockAlignedSamples(boundary),
+    this._clockAligned = new ClockAlignedMeterScheduler(
+      (boundary) => this.emitClockAlignedSamples(boundary),
+      this._clock,
     );
 
     // #299: a charge point that draws from a pool when a call names no tag.
@@ -527,13 +560,16 @@ export class ChargePoint {
     this._reservationManager = new ReservationManager(
       this._logger,
       (connectorId) => this.onReservationExpired(connectorId),
+      this._clock,
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
     // #452: the policy is read on every decision, so ChangeConfiguration
     // applies at once. `_configuration` is assigned further down; nothing
     // reads the policy before the constructor returns.
     this._authorization = new StationAuthorization({
-      cache: new AuthorizationCache(this._id, this._database),
+      cache: new AuthorizationCache(this._id, this._database, {
+        clock: this._clock,
+      }),
       localList: this._localAuthListManager,
       policy: () => ({
         cacheEnabled: this._configuration.authorizationCacheEnabled(),
@@ -547,6 +583,7 @@ export class ChargePoint {
         localListChecksExpiry: true,
       }),
       idTokenMaxLength: idTokenMaxLength(this._ocppVersion),
+      clock: this._clock,
     });
 
     this._stateManager = new StateManager(
@@ -563,14 +600,18 @@ export class ChargePoint {
           meterValue: connector.meterValue,
         };
       },
+      this._clock,
+      this.rng("state-history"),
     );
 
     // #448: subscribed before any connection or status event can fire.
-    this._timeline = new OperationalTimeline(this._id);
+    this._timeline = new OperationalTimeline(this._id, { clock: this._clock });
     this._timelineProjector = new OperationalTimelineProjector(
       this._timeline,
       this._events,
       this._connectors,
+      this._clock,
+      this.rng("timeline"),
     );
 
     this._connectors.forEach((connector, connectorId) => {
@@ -658,6 +699,21 @@ export class ChargePoint {
     );
   }
 
+  /** The clock every timer and timestamp of this charge point reads. */
+  get clock(): SimClock {
+    return this._clock;
+  }
+
+  /** The random stream `name` of this charge point (see `RngStreams`). */
+  rng(name: string): Rng {
+    return this._rngSource.stream(this._id, name);
+  }
+
+  /** The current instant of {@link clock} as a `Date`. */
+  private _nowDate(): Date {
+    return new Date(this._clock.now());
+  }
+
   /** Exposed so OCPPMessageHandler (PendingMessageQueue) can share the
    *  same Database instance. `null` means the CP is running in-memory. */
   get database(): Database | null {
@@ -743,6 +799,7 @@ export class ChargePoint {
           repository.setTriggered(id, triggered),
         // The reports a previous run queued keep their eventIds (#538).
         lastQueuedEventId: () => this._outbox.highestQueuedNotifyEventId(),
+        clock: this._clock,
       },
       new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
     );
@@ -1372,7 +1429,7 @@ export class ChargePoint {
   /** Convenience: the currently active ChargePointMaxProfile (highest
    *  stackLevel) at the station level. Returns `null` if none. */
   getActiveChargePointMaxProfile(
-    now: Date = new Date(),
+    now: Date = this._nowDate(),
   ): ActiveChargingProfile | null {
     return this._stationProfiles.getActive(
       ChargingProfilePurposeType.ChargePointMaxProfile,
@@ -1413,7 +1470,7 @@ export class ChargePoint {
    *  by the default (non-scenario) path — i.e. isScenarioHandled(connectorId)
    *  was false at delivery time. See _lastDefaultHandledRemoteStart. */
   noteDefaultHandledRemoteStart(connectorId: number): void {
-    this._lastDefaultHandledRemoteStart.set(connectorId, Date.now());
+    this._lastDefaultHandledRemoteStart.set(connectorId, this._clock.now());
   }
 
   /** Consume (and remove) the timestamp recorded by
@@ -1456,7 +1513,7 @@ export class ChargePoint {
 
   /** Mirror of noteDefaultHandledRemoteStart for the stop side. */
   noteDefaultHandledRemoteStop(connectorId: number): void {
-    this._lastDefaultHandledRemoteStop.set(connectorId, Date.now());
+    this._lastDefaultHandledRemoteStop.set(connectorId, this._clock.now());
   }
 
   /** Mirror of takeDefaultHandledRemoteStart for the stop side. */
@@ -1554,12 +1611,12 @@ export class ChargePoint {
 
     return new Promise<string>((resolve) => {
       let settled = false;
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let timeoutId: TimerHandle | null = null;
 
       const cleanup = () => {
         if (settled) return;
         settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
+        if (timeoutId) this._clock.clearTimeout(timeoutId);
         this._events.off("authorizeResult", handler);
         this._events.off("disconnected", disconnectHandler);
       };
@@ -1590,7 +1647,7 @@ export class ChargePoint {
       this._events.on("authorizeResult", handler);
       this._events.on("disconnected", disconnectHandler);
 
-      timeoutId = setTimeout(() => {
+      timeoutId = this._clock.setTimeout(() => {
         cleanup();
         if (!this.isOnline()) {
           decideOffline(`Timeout (${timeoutMs}ms) and offline`);
@@ -1870,7 +1927,10 @@ export class ChargePoint {
       request,
       (payload) =>
         this.sendOcppCall({ action: "Get15118EVCertificate", payload }),
-      { warn: (message) => this._logger.warn(message, LogType.OCPP) },
+      {
+        warn: (message) => this._logger.warn(message, LogType.OCPP),
+        clock: this._clock,
+      },
     );
   }
 
@@ -1903,7 +1963,7 @@ export class ChargePoint {
       webSocket.clearRenewedClientCertificate();
       return;
     }
-    const wait = identity.notBefore.getTime() - Date.now();
+    const wait = identity.notBefore.getTime() - this._clock.now();
     if (wait > 0) {
       this._logger.info(
         `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
@@ -1916,7 +1976,7 @@ export class ChargePoint {
           if (request !== this._clientCertificateSwitchSeq) return;
           void this.useRenewedClientCertificate();
         },
-        { unref: true },
+        { clock: this._clock, unref: true },
       );
       return;
     }
@@ -1932,7 +1992,7 @@ export class ChargePoint {
     }
     this.reconnectWithRenewedCertificate(
       webSocket.currentGeneration(),
-      Date.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
     );
   }
 
@@ -1949,11 +2009,15 @@ export class ChargePoint {
     if (webSocket.currentGeneration() !== generation) return;
     if (
       this._outbox.hasTransactionMessagesInFlight() &&
-      Date.now() < deadline
+      this._clock.now() < deadline
     ) {
       this._cancelClientCertificateSwitchTimer = setTimeoutAt(
-        Math.min(Date.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS, deadline),
+        Math.min(
+          this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS,
+          deadline,
+        ),
         () => this.reconnectWithRenewedCertificate(generation, deadline),
+        { clock: this._clock },
       );
       return;
     }
@@ -2055,7 +2119,7 @@ export class ChargePoint {
   private _firmwareUpdateInFlight = false;
   /** Reference kept so disconnect/dispose can cancel a pending start
    *  before `retrieveDate`. */
-  private _firmwareUpdateTimers: NodeJS.Timeout[] = [];
+  private _firmwareUpdateTimers: TimerHandle[] = [];
 
   /**
    * §4.5 / §6.19: schedule a simulated firmware update progression. After
@@ -2085,7 +2149,7 @@ export class ChargePoint {
     }
     this._firmwareUpdateInFlight = true;
 
-    const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
+    const startDelay = Math.max(0, retrieveDate.getTime() - this._clock.now());
     const sequence: readonly FirmwareStatus[] = [
       "Downloading",
       "Downloaded",
@@ -2121,11 +2185,11 @@ export class ChargePoint {
         return;
       }
       this.sendFirmwareStatusNotification(step);
-      const t = setTimeout(() => fireStep(index + 1), intervalMs);
+      const t = this._clock.setTimeout(() => fireStep(index + 1), intervalMs);
       this._firmwareUpdateTimers.push(t);
     };
 
-    const startTimer = setTimeout(() => fireStep(0), startDelay);
+    const startTimer = this._clock.setTimeout(() => fireStep(0), startDelay);
     this._firmwareUpdateTimers.push(startTimer);
   }
 
@@ -2133,7 +2197,7 @@ export class ChargePoint {
    *  signed variant — kept separate so a SignedUpdateFirmware.req can't
    *  collide with (or be blocked by) a plain UpdateFirmware.req train. */
   private _signedFirmwareUpdateInFlight = false;
-  private _signedFirmwareUpdateTimers: NodeJS.Timeout[] = [];
+  private _signedFirmwareUpdateTimers: TimerHandle[] = [];
 
   /**
    * OCPP 1.6 Security Whitepaper SignedUpdateFirmware.req: schedules a
@@ -2159,7 +2223,7 @@ export class ChargePoint {
     }
     this._signedFirmwareUpdateInFlight = true;
 
-    const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
+    const startDelay = Math.max(0, retrieveDate.getTime() - this._clock.now());
     const sequence: readonly FirmwareStatus[] = [
       "Downloading",
       "Downloaded",
@@ -2175,11 +2239,11 @@ export class ChargePoint {
         return;
       }
       this.sendSignedFirmwareStatusNotification(sequence[index], requestId);
-      const t = setTimeout(() => fireStep(index + 1), intervalMs);
+      const t = this._clock.setTimeout(() => fireStep(index + 1), intervalMs);
       this._signedFirmwareUpdateTimers.push(t);
     };
 
-    const startTimer = setTimeout(() => fireStep(0), startDelay);
+    const startTimer = this._clock.setTimeout(() => fireStep(0), startDelay);
     this._signedFirmwareUpdateTimers.push(startTimer);
   }
 
@@ -2205,10 +2269,10 @@ export class ChargePoint {
   markBootRejected(retryAfterSeconds: number): void {
     this._outbox.setBootStatus({
       status: "Rejected",
-      retryAfter: new Date(Date.now() + retryAfterSeconds * 1000),
+      retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
     });
     // Re-send BootNotification.req once the interval elapses (§4.2).
-    setTimeout(() => {
+    this._clock.setTimeout(() => {
       this.boot();
     }, retryAfterSeconds * 1000);
   }
@@ -2407,11 +2471,13 @@ export class ChargePoint {
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
     // Cancel any pending firmware-update simulation so its status train
     // doesn't keep firing against a dead WebSocket.
-    this._firmwareUpdateTimers.forEach((t) => clearTimeout(t));
+    this._firmwareUpdateTimers.forEach((t) => this._clock.clearTimeout(t));
     this._firmwareUpdateTimers = [];
     this._firmwareUpdateInFlight = false;
     // ...and the signed variant's simulation too.
-    this._signedFirmwareUpdateTimers.forEach((t) => clearTimeout(t));
+    this._signedFirmwareUpdateTimers.forEach((t) =>
+      this._clock.clearTimeout(t),
+    );
     this._signedFirmwareUpdateTimers = [];
     this._signedFirmwareUpdateInFlight = false;
     this._scenarioHandledConnectors.clear();
@@ -2423,7 +2489,7 @@ export class ChargePoint {
     this._responseOverrides.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
-    this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));
+    this._connectionTimeoutTimers.forEach((t) => this._clock.clearTimeout(t));
     this._connectionTimeoutTimers.clear();
     // §4.1.1 serializer: drop the in-flight CALL + queued CALLs since the
     // WebSocket they target is gone. Transaction-related ones go to the
@@ -2542,7 +2608,7 @@ export class ChargePoint {
     this._events.emit("statusChange", { status: newStatus, previousStatus });
     this._stateManager.transitionChargePointStatus(newStatus, {
       source: "boundary-setter",
-      timestamp: new Date(),
+      timestamp: this._nowDate(),
     });
   }
 
@@ -2622,7 +2688,7 @@ export class ChargePoint {
       tagId,
       meterStart: connector.meterValue,
       meterStop: null,
-      startTime: new Date(),
+      startTime: this._nowDate(),
       stopTime: null,
       meterSent: false,
       reservationId,
@@ -2705,7 +2771,7 @@ export class ChargePoint {
     }
 
     connector.stopAutoMeterValue();
-    transaction.stopTime = new Date();
+    transaction.stopTime = this._nowDate();
     transaction.meterStop = connector.meterValue;
     if (reason) {
       transaction.stopReason = reason;
@@ -2845,7 +2911,7 @@ export class ChargePoint {
     const transaction = connector.transaction;
     if (transaction) {
       transaction.meterSent = false;
-      transaction.stopTime = new Date();
+      transaction.stopTime = this._nowDate();
       transaction.meterStop = connector.meterValue;
 
       // Emit Finishing state for scenarios that rely on the transitional status
@@ -3019,7 +3085,7 @@ export class ChargePoint {
       this._events.emit("statusChange", { status, previousStatus });
       this._stateManager.transitionChargePointStatus(status, {
         source: "connector-0-update",
-        timestamp: new Date(),
+        timestamp: this._nowDate(),
       });
       this._logger.info(
         `Charge point status updated: ${previousStatus} -> ${status} (connector 0)`,
@@ -3085,7 +3151,7 @@ export class ChargePoint {
     this.clearConnectionTimeout(connectorId);
     const timeoutSec = this._configuration?.connectionTimeOut();
     if (timeoutSec <= 0 || this.holdsConnectionTimeout(connectorId)) return;
-    const handle = setTimeout(() => {
+    const handle = this._clock.setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);
       const connector = this.getConnector(connectorId);
       if (!connector || connector.status !== OCPPStatus.Preparing) return;
@@ -3122,7 +3188,7 @@ export class ChargePoint {
   private clearConnectionTimeout(connectorId: number): void {
     const handle = this._connectionTimeoutTimers.get(connectorId);
     if (handle) {
-      clearTimeout(handle);
+      this._clock.clearTimeout(handle);
       this._connectionTimeoutTimers.delete(connectorId);
     }
   }

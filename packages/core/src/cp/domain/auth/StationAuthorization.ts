@@ -19,6 +19,8 @@ import {
   type LocalAuthorizationPolicy,
   type LocalOnlyDecision,
 } from "./LocalAuthorizationResolver";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 /** A CSMS verdict on an identifier, without the identifier itself. */
 export type CsmsAuthorizationResult = Omit<AuthorizationCacheRecord, "idToken">;
@@ -29,6 +31,8 @@ export interface StationAuthorizationDeps {
   /** Read on every call, so configuration changes apply at once. */
   policy: () => LocalAuthorizationPolicy;
   now?: () => number;
+  /** Where `now` comes from when it is not given; the platform clock. */
+  clock?: SimClock;
   /** Longest `idToken` / `parentId` a seed may carry, per the charge
    *  point's OCPP version (`idTokenMaxLength` of AuthorizationCacheSeed). */
   idTokenMaxLength: number;
@@ -44,7 +48,8 @@ export class StationAuthorization {
   private readonly now: () => number;
 
   constructor(private readonly deps: StationAuthorizationDeps) {
-    this.now = deps.now ?? Date.now;
+    const clock = deps.clock ?? realClock;
+    this.now = deps.now ?? (() => clock.now());
   }
 
   get cache(): AuthorizationCache {

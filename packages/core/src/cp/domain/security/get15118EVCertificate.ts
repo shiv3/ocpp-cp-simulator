@@ -3,6 +3,8 @@ import {
   OCPP_CALL_RESPONSE_TIMEOUT_MS,
   type OcppCallOutcome,
 } from "../types/OcppCall";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
 
 /**
  * OCPP 2.0.1 / 2.1 Get15118EVCertificate (M01 certificate installation, M02
@@ -43,6 +45,8 @@ export interface RelayOptions {
    *  Socket.IO client gives up. */
   readonly budgetMs?: number;
   readonly warn?: (message: string) => void;
+  /** The clock the time budget runs on; the platform clock by default. */
+  readonly clock?: SimClock;
 }
 
 /** The request payload, absent optional fields left out. */
@@ -95,7 +99,8 @@ export async function relayGet15118EVCertificate(
   options: RelayOptions = {},
 ): Promise<Get15118EVCertificateResult> {
   const budgetMs = options.budgetMs ?? OCPP_CALL_RESPONSE_TIMEOUT_MS;
-  const deadline = Date.now() + budgetMs;
+  const clock = options.clock ?? realClock;
+  const deadline = clock.now() + budgetMs;
   const payload = get15118EVCertificatePayload(request);
   const maxRequests = Math.max(
     1,
@@ -107,7 +112,11 @@ export async function relayGet15118EVCertificate(
   for (;;) {
     let outcome: OcppCallOutcome;
     try {
-      outcome = await withinBudget(send(payload), deadline - Date.now());
+      outcome = await withinBudget(
+        send(payload),
+        deadline - clock.now(),
+        clock,
+      );
     } catch (err) {
       if (err instanceof OcppCallNoAnswerError && responses.length > 0) {
         return { responses, noAnswer: err.reason };
@@ -137,19 +146,23 @@ export async function relayGet15118EVCertificate(
     }
     previousRemaining = remaining;
     // A request sent with no time left could only time out.
-    if (Date.now() >= deadline) return { responses, noAnswer: "timeout" };
+    if (clock.now() >= deadline) return { responses, noAnswer: "timeout" };
   }
   return { responses };
 }
 
 /** `operation`, or an {@link OcppCallNoAnswerError} timeout after `ms`. */
-function withinBudget<T>(operation: Promise<T>, ms: number): Promise<T> {
+function withinBudget<T>(
+  operation: Promise<T>,
+  ms: number,
+  clock: SimClock,
+): Promise<T> {
   // The CALL keeps its own timer; once the budget wins, its late outcome
   // is no longer anyone's to handle.
   operation.catch(() => undefined);
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: TimerHandle | undefined;
   const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(
+    timer = clock.setTimeout(
       () =>
         reject(
           new OcppCallNoAnswerError(
@@ -160,5 +173,7 @@ function withinBudget<T>(operation: Promise<T>, ms: number): Promise<T> {
       Math.max(0, ms),
     );
   });
-  return Promise.race([operation, expired]).finally(() => clearTimeout(timer));
+  return Promise.race([operation, expired]).finally(() => {
+    if (timer) clock.clearTimeout(timer);
+  });
 }

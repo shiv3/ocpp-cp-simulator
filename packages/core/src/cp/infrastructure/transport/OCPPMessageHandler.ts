@@ -328,7 +328,7 @@ export class OCPPMessageHandler {
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
   // arrives we restrict outgoing CALLs. The BootNotification.req itself
   // is exempt so the handshake can complete.
-  private _bootGate: BootGate = new BootGate();
+  private _bootGate: BootGate;
 
   // §4.7/§4.8/§4.10 + errata 3.18: transaction-related messages that fail
   // to deliver are queued and retried. Persists across reboots so power
@@ -377,10 +377,12 @@ export class OCPPMessageHandler {
     this._webSocket = webSocket;
     this._logger = logger;
     this._codec = codec;
+    this._bootGate = new BootGate(chargePoint.clock);
     this._pendingQueue = new PendingMessageQueue(
       chargePoint.id,
       chargePoint.database,
       QUEUED_ON_OCPP16,
+      chargePoint.clock,
     );
     // #528: `cp.update` can switch ocppVersion over the same --state-db,
     // leaving rows (e.g. TransactionEvent) a 1.6 CSMS does not know.

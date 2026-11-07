@@ -47,6 +47,10 @@ import { cancelIfCancellable } from "./cancellable";
 import { WaitControl, type WaitSignal } from "./WaitControl";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 
 type AutoMeterStartConfig = Parameters<
   NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
@@ -68,6 +72,12 @@ interface ParkedWait {
 const isMeterValueTimeout = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("Timeout waiting for meter value:");
+
+/** Time and randomness a scenario run reads; the platform's by default. */
+export interface ScenarioExecutorSimOptions {
+  readonly clock?: SimClock;
+  readonly rng?: Rng;
+}
 
 /**
  * Optional resume hint passed to {@link ScenarioExecutor.start}. When set
@@ -139,15 +149,22 @@ export class ScenarioExecutor {
   // Issue #247 Phase 3: track whether certificate quirks were armed during this
   // run, so they can be cleared when the run ends (both normal completion and stop()).
   private armedCertificateQuirks = false;
+  private readonly clock: SimClock;
+  private readonly rng: Rng;
 
   constructor(
     scenario: ScenarioDefinition,
     callbacks: ScenarioExecutorCallbacks,
     eventEmitter?: EventEmitter<ScenarioEvents>,
+    sim: ScenarioExecutorSimOptions = {},
   ) {
     this.scenario = scenario;
     this.callbacks = callbacks;
     this.eventEmitter = eventEmitter;
+    this.clock = sim.clock ?? realClock;
+    this.rng =
+      sim.rng ??
+      systemRngStreams.stream(String(scenario.targetId ?? ""), "scenario");
 
     // Create robot3 state machine
     const machine = createScenarioMachine({
@@ -343,7 +360,7 @@ export class ScenarioExecutor {
             : [resumeFromNodeId];
         this.executedNodes = seededNodes;
         this.currentNodeId = originNode.id;
-        this.currentNodeStartedAt = Date.now();
+        this.currentNodeStartedAt = this.clock.now();
         resumed = true;
         this.callbacks.log?.(
           `[${this.scenario.name}] Resuming scenario from node "${
@@ -521,7 +538,7 @@ export class ScenarioExecutor {
 
     // Update context with current node
     this.currentNodeId = node.id;
-    this.currentNodeStartedAt = Date.now();
+    this.currentNodeStartedAt = this.clock.now();
     this.executedNodes.push(node.id);
 
     this.notifyStateChange();
@@ -1151,7 +1168,7 @@ export class ScenarioExecutor {
     const updateInterval = 100; // Update progress every 100ms
     let elapsed = 0;
 
-    const progressInterval = setInterval(() => {
+    const progressInterval = this.clock.setInterval(() => {
       elapsed += updateInterval / 1000;
       const remaining = Math.max(0, totalSeconds - elapsed);
 
@@ -1170,14 +1187,14 @@ export class ScenarioExecutor {
       this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
 
       if (remaining <= 0) {
-        clearInterval(progressInterval);
+        this.clock.clearInterval(progressInterval);
       }
     }, updateInterval);
 
     try {
       await this.waitWithOptionalForceSkip(this.sleep(totalSeconds * 1000));
     } finally {
-      clearInterval(progressInterval);
+      this.clock.clearInterval(progressInterval);
 
       // Final progress update
       if (this.callbacks.onNodeProgress) {
@@ -1312,8 +1329,7 @@ export class ScenarioExecutor {
     if (!this.callbacks.onReserveNow) return;
 
     // Generate reservation ID if not provided
-    const reservationId =
-      data.reservationId || Math.floor(Math.random() * 1000000);
+    const reservationId = data.reservationId || this.rng.int(0, 1000000);
 
     await this.callbacks.onReserveNow(
       data.expiryMinutes,
@@ -1489,7 +1505,7 @@ export class ScenarioExecutor {
     this.reportIntervention({
       kind: "extend",
       nodeId: wait.nodeId,
-      at: Date.now(),
+      at: this.clock.now(),
       seconds,
     });
   }
@@ -1509,7 +1525,11 @@ export class ScenarioExecutor {
     const wait = this.requireParkedWait();
     this.unpark(wait.control);
     wait.control.request(kind);
-    this.reportIntervention({ kind, nodeId: wait.nodeId, at: Date.now() });
+    this.reportIntervention({
+      kind,
+      nodeId: wait.nodeId,
+      at: this.clock.now(),
+    });
   }
 
   private requireParkedWait(): ParkedWait {
@@ -1617,7 +1637,7 @@ export class ScenarioExecutor {
       return Promise.resolve();
     }
     return Promise.race([
-      new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      new Promise<void>((resolve) => this.clock.setTimeout(resolve, ms)),
       this.abortPromise,
     ]);
   }
@@ -1644,10 +1664,11 @@ export class ScenarioExecutor {
       : null;
 
     for (;;) {
-      const startedAt = Date.now();
+      const startedAt = this.clock.now();
       const control = new WaitControl(
         timeoutMs,
         (seconds) => new Error(timeoutMessage(seconds)),
+        this.clock,
       );
       this.parkedWaits.push({ nodeId, control, expectation, startedAt });
       this.notifyStateChange();
@@ -1686,7 +1707,7 @@ export class ScenarioExecutor {
   private reportWaitProgress(nodeId: string, control: WaitControl): () => void {
     if (control.deadlineAt === null) return () => {};
 
-    const progressInterval = setInterval(() => {
+    const progressInterval = this.clock.setInterval(() => {
       const remaining = (control.remainingMs() ?? 0) / 1000;
       const total = control.totalSeconds;
       this.callbacks.onNodeProgress?.(nodeId, remaining, total);
@@ -1698,11 +1719,11 @@ export class ScenarioExecutor {
       };
       this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
       this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-      if (remaining <= 0) clearInterval(progressInterval);
+      if (remaining <= 0) this.clock.clearInterval(progressInterval);
     }, 100);
 
     return () => {
-      clearInterval(progressInterval);
+      this.clock.clearInterval(progressInterval);
       const total = control.totalSeconds;
       this.callbacks.onNodeProgress?.(nodeId, 0, total);
       this.eventEmitter?.emit("nodeProgress", {

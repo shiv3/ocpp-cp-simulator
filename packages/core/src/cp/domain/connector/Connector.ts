@@ -1,5 +1,7 @@
 import { EventEmitter } from "../../shared/EventEmitter";
 import type { Logger } from "../../shared/Logger";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 import {
   type AutoMeterValueConfig,
   defaultAutoMeterValueConfig,
@@ -336,6 +338,7 @@ export class Connector {
     private readonly connectorId: number,
     private readonly logger: Logger,
     stationProfilesProvider?: () => ChargingProfileStore | null,
+    private readonly clock: SimClock = realClock,
   ) {
     this.stationProfilesProvider = stationProfilesProvider ?? (() => null);
     this.meterScheduler = new MeterValueScheduler(
@@ -359,7 +362,13 @@ export class Connector {
         getScheduleLimitWatts: () => this.effectiveMeterCapWatts(),
       },
       this.logger,
+      this.clock,
     );
+  }
+
+  /** The injected clock's current instant. */
+  private nowDate(): Date {
+    return new Date(this.clock.now());
   }
 
   /**
@@ -396,7 +405,7 @@ export class Connector {
    * without needing an extra timer.
    */
   currentScheduleLimitWatts(): number {
-    const { watts } = this.resolveScheduleConstraints(new Date());
+    const { watts } = this.resolveScheduleConstraints(this.nowDate());
     this.announceScheduleCrossing(watts);
     return watts;
   }
@@ -424,7 +433,7 @@ export class Connector {
    * should make instead of those two.
    */
   scheduleConstraints(): { watts: number; activePhases: number } {
-    const constraints = this.resolveScheduleConstraints(new Date());
+    const constraints = this.resolveScheduleConstraints(this.nowDate());
     this.announceScheduleCrossing(constraints.watts);
     return constraints;
   }
@@ -549,7 +558,7 @@ export class Connector {
    * sample set, not while driving the meter.
    */
   activePhaseCount(): number {
-    return this.resolveScheduleConstraints(new Date()).activePhases;
+    return this.resolveScheduleConstraints(this.nowDate()).activePhases;
   }
 
   /**
@@ -558,7 +567,7 @@ export class Connector {
    * that is not a sampling path, such as the 2.x `EVSE.Power` value (#538).
    */
   scheduleLimitWattsNow(): number {
-    return this.resolveScheduleConstraints(new Date()).watts;
+    return this.resolveScheduleConstraints(this.nowDate()).watts;
   }
 
   /**
@@ -930,7 +939,7 @@ export class Connector {
    * Returns `null` when no Tx-layer profile applies.
    */
   getActiveChargingProfile(
-    now: Date = new Date(),
+    now: Date = this.nowDate(),
   ): ActiveChargingProfile | null {
     const isValid = (profile: ActiveChargingProfile) => {
       if (profile.validFrom && new Date(profile.validFrom) > now) return false;

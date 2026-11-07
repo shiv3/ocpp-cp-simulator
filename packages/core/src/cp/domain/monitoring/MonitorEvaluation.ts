@@ -13,6 +13,8 @@ import {
   monitorBehaviour,
   type VariableMonitor,
 } from "./VariableMonitor";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 /** One monitor event, ready to be reported by NotifyEvent (N07). */
 export interface MonitoringEvent {
@@ -63,6 +65,8 @@ export interface MonitorEvaluationDeps {
    */
   lastQueuedEventId?(): number;
   now?: () => Date;
+  /** The clock the periodic timers run on; the platform clock by default. */
+  clock?: SimClock;
   /** Told whenever a threshold monitor's triggered flag flips. */
   onTriggeredChange?(id: number, triggered: boolean): void;
 }
@@ -93,6 +97,7 @@ export interface MonitorEvaluationDeps {
 export class MonitorEvaluation {
   private readonly states = new Map<number, MonitorState>();
   private readonly periodic: PeriodicMonitorScheduler;
+  private readonly clock: SimClock;
   private nextEventId: number;
   /** `on`: reporting; `held`: boot not Accepted while connected (B02.FR.02);
    *  `offline`: no connection or no boot yet; `disposed`: terminal. */
@@ -107,7 +112,11 @@ export class MonitorEvaluation {
     restoredTriggered: ReadonlyMap<number, boolean> = new Map(),
   ) {
     this.nextEventId = (deps.lastQueuedEventId?.() ?? 0) + 1;
-    this.periodic = new PeriodicMonitorScheduler((id) => this.periodicTick(id));
+    this.clock = deps.clock ?? realClock;
+    this.periodic = new PeriodicMonitorScheduler(
+      (id) => this.periodicTick(id),
+      this.clock,
+    );
     for (const monitor of deps.store.list()) {
       if (isPeriodicMonitorType(monitor.type)) {
         this.periodic.arm(monitor);
@@ -305,7 +314,7 @@ export class MonitorEvaluation {
     const transactionId = this.deps.transactionIdOf?.(monitor);
     return {
       eventId: this.nextEventId++,
-      timestamp: this.deps.now?.() ?? new Date(),
+      timestamp: this.deps.now?.() ?? new Date(this.clock.now()),
       monitor,
       trigger: notice.trigger,
       cleared: notice.cleared,

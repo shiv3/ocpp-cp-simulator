@@ -19,6 +19,10 @@ import type {
 import type { HistoryOptions, StateHistoryEntry } from "./types/StateSnapshot";
 import type { ChargePointStatus } from "../../domain/types/OcppTypes";
 import { LogType, OCPPStatus } from "../../domain/types/OcppTypes";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 
 interface ConnectorGetter {
   (id: number):
@@ -52,6 +56,8 @@ export class StateManager {
     private eventEmitter: EventEmitter<ChargePointEvents>,
     private chargePointGetter: ChargePointGetter,
     private connectorGetter: ConnectorGetter,
+    private clock: SimClock = realClock,
+    private ids: Rng = systemRngStreams.stream("", "state-history"),
   ) {
     this.history = new StateHistory(1000);
 
@@ -60,8 +66,8 @@ export class StateManager {
       "connectorStatusChange",
       ({ connectorId, status, previousStatus }) => {
         this.history.recordTransition({
-          id: crypto.randomUUID(),
-          timestamp: new Date(),
+          id: this.ids.uuid(),
+          timestamp: this.nowDate(),
           entity: "connector",
           entityId: connectorId,
           transitionType: "status",
@@ -69,7 +75,7 @@ export class StateManager {
           toState: status,
           context: {
             source: "ChargePoint.updateConnectorStatus",
-            timestamp: new Date(),
+            timestamp: this.nowDate(),
           },
           validationResult: {
             level: "OK",
@@ -78,6 +84,10 @@ export class StateManager {
         });
       },
     );
+  }
+
+  private nowDate(): Date {
+    return new Date(this.clock.now());
   }
 
   /**
@@ -168,8 +178,8 @@ export class StateManager {
 
       // Record history
       this.history.recordTransition({
-        id: crypto.randomUUID(),
-        timestamp: new Date(),
+        id: this.ids.uuid(),
+        timestamp: this.nowDate(),
         entity: "connector",
         entityId: connectorId,
         transitionType: "status",
@@ -177,7 +187,7 @@ export class StateManager {
         toState: newState,
         context: context || {
           source: "StateManager",
-          timestamp: new Date(),
+          timestamp: this.nowDate(),
         },
         validationResult: {
           level: "OK",
@@ -202,8 +212,8 @@ export class StateManager {
 
       // Record failure in history
       this.history.recordTransition({
-        id: crypto.randomUUID(),
-        timestamp: new Date(),
+        id: this.ids.uuid(),
+        timestamp: this.nowDate(),
         entity: "connector",
         entityId: connectorId,
         transitionType: "status",
@@ -211,7 +221,7 @@ export class StateManager {
         toState: previousState, // Same state because transition failed
         context: context || {
           source: "StateManager",
-          timestamp: new Date(),
+          timestamp: this.nowDate(),
         },
         validationResult: {
           level: "ERROR",
@@ -244,7 +254,7 @@ export class StateManager {
       { type: "PLUGIN" },
       {
         source: "prepareTransaction",
-        timestamp: new Date(),
+        timestamp: this.nowDate(),
         metadata: { tagId },
       },
     );
@@ -275,7 +285,7 @@ export class StateManager {
       { type: "START_TRANSACTION", transactionId },
       {
         source: "startTransaction",
-        timestamp: new Date(),
+        timestamp: this.nowDate(),
         metadata: { transactionId, tagId },
       },
     );
@@ -293,7 +303,7 @@ export class StateManager {
       { type: "STOP_TRANSACTION", reason },
       {
         source: "stopTransaction",
-        timestamp: new Date(),
+        timestamp: this.nowDate(),
         reason,
       },
     );
@@ -314,8 +324,8 @@ export class StateManager {
 
     // Record history
     this.history.recordTransition({
-      id: crypto.randomUUID(),
-      timestamp: new Date(),
+      id: this.ids.uuid(),
+      timestamp: this.nowDate(),
       entity: "chargePoint",
       transitionType: "status",
       fromState: previousStatus,
@@ -348,7 +358,7 @@ export class StateManager {
     return {
       status: chargePoint.status,
       error: chargePoint.error,
-      timestamp: new Date(),
+      timestamp: this.nowDate(),
     };
   }
 
@@ -377,11 +387,11 @@ export class StateManager {
         ? {
             id: connector.transaction.id,
             tagId: "",
-            startTime: new Date(),
+            startTime: this.nowDate(),
             startMeter: 0,
           }
         : null,
-      timestamp: new Date(),
+      timestamp: this.nowDate(),
     };
   }
 

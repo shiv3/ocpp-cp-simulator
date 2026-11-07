@@ -4,6 +4,8 @@ import {
   type AutoTrafficConfig,
   type AutoTrafficCounters,
 } from "../../domain/connector/AutoTraffic";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
 
 export interface AutoTrafficHooks {
   /** Authorize a tag; resolve `false` when the CSMS refused. */
@@ -29,7 +31,7 @@ export interface AutoTrafficHooks {
  */
 export class AutoTrafficRunner {
   private planner: AutoTrafficPlanner;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: TimerHandle | null = null;
   private stopped = false;
   /** Whether a session this runner started is still open. */
   private sessionOpen = false;
@@ -41,6 +43,7 @@ export class AutoTrafficRunner {
     private readonly cpId: string,
     private readonly connectorId: number,
     private readonly hooks: AutoTrafficHooks,
+    private readonly clock: SimClock = realClock,
   ) {
     this.planner = new AutoTrafficPlanner(config, cpId, connectorId);
   }
@@ -48,7 +51,7 @@ export class AutoTrafficRunner {
   start(): void {
     if (this.timer || !this.config.enabled) return;
     this.stopped = false;
-    this.startedAtMs = Date.now();
+    this.startedAtMs = this.clock.now();
     this.hooks.log(
       `[auto-traffic] ${this.cpId}/${this.connectorId} started (seed ${this.config.seed})`,
     );
@@ -65,7 +68,7 @@ export class AutoTrafficRunner {
   stop(): void {
     this.stopped = true;
     if (this.timer) {
-      clearTimeout(this.timer);
+      this.clock.clearTimeout(this.timer);
       this.timer = null;
     }
     if (this.sessionOpen) {
@@ -85,7 +88,7 @@ export class AutoTrafficRunner {
   private scheduleNext(): void {
     if (this.stopped) return;
     const step = this.planner.next();
-    this.timer = setTimeout(
+    this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
         void this.runStep(step.start, step.durationSec);
@@ -96,7 +99,9 @@ export class AutoTrafficRunner {
 
   private expired(): boolean {
     if (this.config.stopAfterSec === undefined) return false;
-    return Date.now() - this.startedAtMs >= this.config.stopAfterSec * 1000;
+    return (
+      this.clock.now() - this.startedAtMs >= this.config.stopAfterSec * 1000
+    );
   }
 
   private async runStep(start: boolean, durationSec: number): Promise<void> {
@@ -155,7 +160,7 @@ export class AutoTrafficRunner {
       return;
     }
 
-    this.timer = setTimeout(
+    this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
         void this.endSession();

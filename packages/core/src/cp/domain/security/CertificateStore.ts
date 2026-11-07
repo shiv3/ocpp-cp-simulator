@@ -19,6 +19,8 @@ import {
   type SignedCertificateUse,
 } from "./certificateUse";
 import { generateCsr, type CsrGenerationOptions } from "./csr";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
@@ -182,6 +184,7 @@ export class CertificateStore {
   constructor(
     private readonly chargePointId: string = "",
     private readonly database: Database | null = null,
+    private readonly clock: SimClock = realClock,
   ) {
     this.load();
   }
@@ -424,7 +427,7 @@ export class CertificateStore {
       ...this.#ocspResponses.filter(
         (entry) => !certificateHashDataEquals(entry.hash, hash),
       ),
-      { hash: { ...hash }, ocspResult, cachedAt: new Date().toISOString() },
+      { hash: { ...hash }, ocspResult, cachedAt: this.nowIso() },
     ];
   }
 
@@ -493,7 +496,7 @@ export class CertificateStore {
       use,
       pem: trimmed,
       hashData,
-      installedAt: new Date().toISOString(),
+      installedAt: this.nowIso(),
     };
     const entry: Entry = {
       kind: "root",
@@ -659,7 +662,11 @@ export class CertificateStore {
         return computeCertificateHashData(pems[i], issuerPem);
       }),
     );
-    return { use, pems, hashData, storedAt: new Date().toISOString() };
+    return { use, pems, hashData, storedAt: this.nowIso() };
+  }
+
+  private nowIso(): string {
+    return new Date(this.clock.now()).toISOString();
   }
 
   /**

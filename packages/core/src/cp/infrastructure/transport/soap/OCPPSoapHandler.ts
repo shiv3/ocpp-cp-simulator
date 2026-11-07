@@ -738,7 +738,7 @@ const OCPP16_WIRE_PROFILE: ClientWireProfile = {
 
 export class OCPPSoapHandler implements IChargePointMessageHandler {
   private readonly _dataTransferHandler = new DataTransferHandler();
-  private readonly _bootGate: BootGate = new BootGate();
+  private readonly _bootGate: BootGate;
   private _requestChain: Promise<void> = Promise.resolve();
   private readonly _dialect: SoapDialect;
   private readonly _wireProfile: ClientWireProfile;
@@ -748,6 +748,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     private readonly _logger: Logger,
     private readonly _options: OCPPSoapHandlerOptions,
   ) {
+    this._bootGate = new BootGate(this._chargePoint.clock);
     this._dialect = this._options.dialect ?? OCPP15_DIALECT;
     this._wireProfile = this.selectWireProfile(this._dialect.version);
   }

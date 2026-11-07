@@ -1,6 +1,8 @@
 import { setTimeoutAt } from "../../shared/timers";
 import { nextClockAlignedBoundary } from "../charge-point/ClockAlignedMeterScheduler";
 import type { VariableMonitor } from "./VariableMonitor";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 const DAY_SECONDS = 86_400;
 
@@ -24,12 +26,15 @@ export class PeriodicMonitorScheduler {
   /** The cancel function of each monitor's pending timer. */
   private readonly timers = new Map<number, () => void>();
 
-  constructor(private readonly onTick: (monitorId: number) => void) {}
+  constructor(
+    private readonly onTick: (monitorId: number) => void,
+    private readonly clock: SimClock = realClock,
+  ) {}
 
   /** (Re)start the timer of a periodic monitor, from now. */
   arm(monitor: Pick<VariableMonitor, "id" | "type" | "value">): void {
     this.disarm(monitor.id);
-    this.schedule(monitor, this.nextFire(monitor, Date.now()));
+    this.schedule(monitor, this.nextFire(monitor, this.clock.now()));
   }
 
   disarm(monitorId: number): void {
@@ -50,13 +55,17 @@ export class PeriodicMonitorScheduler {
   ): void {
     this.timers.set(
       monitor.id,
-      setTimeoutAt(fireAt, () => {
-        this.schedule(
-          monitor,
-          this.nextFire(monitor, Math.max(Date.now(), fireAt)),
-        );
-        this.onTick(monitor.id);
-      }),
+      setTimeoutAt(
+        fireAt,
+        () => {
+          this.schedule(
+            monitor,
+            this.nextFire(monitor, Math.max(this.clock.now(), fireAt)),
+          );
+          this.onTick(monitor.id);
+        },
+        { clock: this.clock },
+      ),
     );
   }
 

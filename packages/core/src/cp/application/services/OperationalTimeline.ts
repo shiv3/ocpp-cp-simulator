@@ -17,6 +17,8 @@ import {
   TIMELINE_FORMAT_VERSION,
   TIMELINE_KINDS,
 } from "@ocpp-cp-sim/contracts/timeline";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 // Defined in `packages/contracts/src` (#578); re-exported for the existing import sites.
 export { TIMELINE_DEFAULT_CAPACITY, TIMELINE_FORMAT_VERSION, TIMELINE_KINDS };
@@ -69,6 +71,8 @@ export interface OperationalTimelineOptions {
   capacity?: number;
   /** Epoch milliseconds; injectable for tests. */
   now?: () => number;
+  /** Where `now` comes from when it is not given; the platform clock. */
+  clock?: SimClock;
 }
 
 export class OperationalTimeline {
@@ -86,7 +90,8 @@ export class OperationalTimeline {
     options: OperationalTimelineOptions = {},
   ) {
     this.capacity = options.capacity ?? TIMELINE_DEFAULT_CAPACITY;
-    this.now = options.now ?? Date.now;
+    const clock = options.clock ?? realClock;
+    this.now = options.now ?? (() => clock.now());
   }
 
   /**

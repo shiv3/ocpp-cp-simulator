@@ -293,16 +293,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     SignedCertificateUse,
     SignCertificateRequestV201
   >();
-  private readonly _signBackoff = new SignCertificateBackoff({
-    settings: () => ({
-      waitMinimumSeconds:
-        this._chargePoint.configuration.certSigningWaitMinimum(),
-      repeatTimes: this._chargePoint.configuration.certSigningRepeatTimes(),
-    }),
-    isPending: (use) =>
-      this._chargePoint.certificateStore.pendingCsr(use) !== undefined,
-    resend: (use) => this.resendSignCertificate(use),
-  });
+  private readonly _signBackoff: SignCertificateBackoff;
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
     certificateInstalled: (use) => {
@@ -343,7 +334,19 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       chargePoint.id,
       chargePoint.database ?? null,
       QUEUED_ON_OCPP2,
+      chargePoint.clock,
     );
+    this._signBackoff = new SignCertificateBackoff({
+      settings: () => ({
+        waitMinimumSeconds:
+          this._chargePoint.configuration.certSigningWaitMinimum(),
+        repeatTimes: this._chargePoint.configuration.certSigningRepeatTimes(),
+      }),
+      isPending: (use) =>
+        this._chargePoint.certificateStore.pendingCsr(use) !== undefined,
+      resend: (use) => this.resendSignCertificate(use),
+      clock: chargePoint.clock,
+    });
     // `cp.update` can switch ocppVersion over the same --state-db, leaving
     // rows a 2.x CSMS does not know (one a 1.6 handler queued).
     const dropped = this._pendingQueue.droppedOnLoad;

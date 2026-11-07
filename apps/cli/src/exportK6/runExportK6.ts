@@ -15,6 +15,7 @@ import {
   renderReadme,
 } from "./emit/render";
 import type { ExportK6Args } from "./parseExportK6Args";
+import { runExportK6Behavior } from "./runExportK6Behavior";
 
 /** Scenario node types this exporter walks. Anything else is refused by name
  *  rather than exported and silently skipped. Exported because
@@ -46,6 +47,7 @@ export const SUPPORTED_NODE_TYPES = new Set([
 ]);
 
 export async function runExportK6(args: ExportK6Args): Promise<number> {
+  if ((args.behaviorFiles ?? []).length > 0) return runExportK6Behavior(args);
   let raw: string;
   try {
     raw = fs.readFileSync(args.scenarioFile, "utf8");

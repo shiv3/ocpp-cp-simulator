@@ -20,7 +20,7 @@ import {
   runScenario,
   scenarioSuccess,
   type ScenarioJson,
-} from "./ocpp-runtime/index";
+} from "./ocpp-runtime/index.ts";
 
 declare const __ENV: Record<string, string | undefined>;
 declare const __VU: number;

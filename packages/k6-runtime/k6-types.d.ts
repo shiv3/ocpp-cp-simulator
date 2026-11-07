@@ -61,5 +61,13 @@ declare module "k6/websockets" {
   }
 }
 
+declare module "k6/execution" {
+  const exec: {
+    scenario: { startTime: number; name: string };
+    vu: { idInTest: number };
+  };
+  export default exec;
+}
+
 /** k6 init-context file reader (available in the generated entry + index.ts). */
 declare function open(path: string): string;

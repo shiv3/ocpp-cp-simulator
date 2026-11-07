@@ -3,7 +3,7 @@
 // from the CSMS's point of view. The scenario can pre-arm one-shot status
 // overrides (responseOverride node) and the UnlockConnector outcome
 // (unlockOutcome node).
-import { str } from "./types";
+import { str } from "./types.ts";
 
 export interface ResponderState {
   localConfig: Map<string, string>;

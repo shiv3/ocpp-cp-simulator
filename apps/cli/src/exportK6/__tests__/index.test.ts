@@ -26,6 +26,9 @@ vi.mock("k6/timers", () => ({
   clearInterval: () => {},
 }));
 vi.mock("k6/data", () => ({ SharedArray: class {} }));
+vi.mock("k6/execution", () => ({
+  default: { scenario: { startTime: 0, name: "" }, vu: { idInTest: 1 } },
+}));
 
 describe("resolveIdentity", () => {
   it("replaces every ${__VU} occurrence in the template, not just the first", () => {

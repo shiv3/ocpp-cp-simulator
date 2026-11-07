@@ -1,5 +1,5 @@
 // packages/k6-runtime/src/wire/v16.ts
-import { num, type Wire, type WireCall } from "../types";
+import { num, type Wire, type WireCall } from "../types.ts";
 
 function call(action: string, payload: Record<string, unknown>): WireCall {
   return { action, payload };

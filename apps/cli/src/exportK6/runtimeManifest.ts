@@ -5,6 +5,10 @@
 export const RUNTIME_FILES: readonly string[] = [
   "assertions.ts",
   "autoResponder.ts",
+  "behaviorHost.ts",
+  "behaviorRandom.ts",
+  "behaviorRun.ts",
+  "behaviorTypes.ts",
   "curve.ts",
   "frames.ts",
   "index.ts",
@@ -19,6 +23,7 @@ export const RUNTIME_FILES: readonly string[] = [
 /** Runtime files allowed to import k6/* modules; all others must stay pure so
  * they remain unit-testable under vitest. */
 export const K6_ONLY_FILES: readonly string[] = [
+  "behaviorRun.ts",
   "index.ts",
   "metrics.ts",
   "ocppClient.ts",

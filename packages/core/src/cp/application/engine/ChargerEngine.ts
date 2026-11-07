@@ -832,7 +832,16 @@ export class ChargerEngine {
         });
       },
       random(stream: string): RandomStream {
-        return host.rng(`${behaviorId}/${stream}`);
+        const rng = host.rng(`${behaviorId}/${stream}`);
+        // The contract's int() is inclusive at both ends; the core stream's
+        // is [min, max).
+        return {
+          next: () => rng.next(),
+          int: (minInclusive, maxInclusive) =>
+            rng.int(minInclusive, maxInclusive + 1),
+          pick: (items) => rng.pick(items),
+          uuid: () => rng.uuid(),
+        };
       },
       get stopping(): boolean {
         return scope.stopping;

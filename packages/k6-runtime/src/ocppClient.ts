@@ -13,27 +13,29 @@ import {
   createMessageIdGenerator,
   decodeFrame,
   encodeCall,
+  encodeCallError,
   encodeCallResult,
-} from "./frames";
+} from "./frames.ts";
+import type { CallHandler } from "./behaviorHost.ts";
 import {
   createResponderState,
   respondToCall16,
   type ResponderState,
-} from "./autoResponder";
-import type { ScenarioHost } from "./interpreter";
+} from "./autoResponder.ts";
+import type { ScenarioHost } from "./interpreter.ts";
 import {
   CallErrorAnswer,
   type CpIdentity,
   type TranscriptEntry,
   type Wire,
   type WireCall,
-} from "./types";
+} from "./types.ts";
 import {
   ocppBootTime,
   ocppCallDuration,
   ocppCalls,
   ocppErrors,
-} from "./metrics";
+} from "./metrics.ts";
 
 interface PendingCall {
   action: string;
@@ -88,6 +90,7 @@ export class OcppChargePoint implements ScenarioHost {
   private localStatus = "Available";
   private heartbeatId: number | null = null;
   private closed = false;
+  private callHandler: CallHandler | null = null;
   private readonly startMs = Date.now();
 
   constructor(opts: OcppChargePointOptions) {
@@ -95,6 +98,22 @@ export class OcppChargePoint implements ScenarioHost {
     this.wire = opts.wire;
     this.connectorId = opts.connectorId;
     this.nextMessageId = createMessageIdGenerator(opts.identity.cpId);
+  }
+
+  get cpId(): string {
+    return this.opts.identity.cpId;
+  }
+
+  /** A behavior host claims the inbound CALLs of its rules; every other CALL
+   *  still goes to the auto-responder. */
+  setCallHandler(handler: CallHandler | null): void {
+    this.callHandler = handler;
+  }
+
+  /** A frame as given, for a behavior that opted into raw traffic. */
+  sendRaw(frame: string): void {
+    if (this.ws === null || this.closed) throw new Error("connection closed");
+    this.ws.send(frame);
   }
 
   connect(): Promise<void> {
@@ -279,17 +298,36 @@ export class OcppChargePoint implements ScenarioHost {
       payload: frame.payload,
       timeMs: Date.now() - this.startMs,
     });
-    const response = respondToCall16(
-      frame.action,
-      frame.payload,
-      this.responder,
-    );
-    try {
-      this.ws?.send(encodeCallResult(frame.messageId, response));
-    } catch {
-      ocppErrors.add(1, { action: frame.action, kind: "send_failed" });
-      // Fall through: the CALL was genuinely received, so waiters below
-      // still need to be notified even though the auto-response failed.
+    const claimed = this.callHandler?.(frame.action, frame.payload) ?? null;
+    if (claimed !== null) {
+      const { messageId } = frame;
+      void claimed.answer.then((answer) => {
+        try {
+          if (answer.kind === "result") {
+            this.ws?.send(encodeCallResult(messageId, answer.payload));
+          } else if (answer.kind === "error") {
+            this.ws?.send(
+              encodeCallError(messageId, answer.code, answer.description),
+            );
+          }
+        } catch {
+          ocppErrors.add(1, { action: frame.action, kind: "send_failed" });
+        }
+        claimed.sent();
+      });
+    } else {
+      const response = respondToCall16(
+        frame.action,
+        frame.payload,
+        this.responder,
+      );
+      try {
+        this.ws?.send(encodeCallResult(frame.messageId, response));
+      } catch {
+        ocppErrors.add(1, { action: frame.action, kind: "send_failed" });
+        // Fall through: the CALL was genuinely received, so waiters below
+        // still need to be notified even though the auto-response failed.
+      }
     }
     for (let i = 0; i < this.callWaiters.length; i++) {
       const w = this.callWaiters[i];

@@ -39,7 +39,7 @@ describe("renderEntryScript", () => {
 
   it("loads the scenario via open() and wires the runtime", () => {
     expect(entry).toContain('JSON.parse(open("./scenario.json"))');
-    expect(entry).toContain('from "./ocpp-runtime/index"');
+    expect(entry).toContain('from "./ocpp-runtime/index.ts"');
     expect(entry).toContain("buildOptions(__ENV)");
     expect(entry).toContain('createWire(__ENV.OCPP_VERSION ?? "1.6")');
   });

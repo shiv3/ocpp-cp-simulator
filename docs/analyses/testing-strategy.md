@@ -198,7 +198,10 @@ write), `InboundCallGate.test.ts` (order of policy, override and registry; 2.x s
 async behavior on a `VirtualClock` replays: 1,000 simulated chargers run twice with one seed (same
 effect hash), once with another (different hash), with a control on unseeded streams and a pinned
 hash for a small fleet. The result and its limits are in the
-[Charger engine design](charger-engine.md#determinism).
+[Charger engine design](charger-engine.md#determinism). The same fleet (`virtualFleet.ts`) runs in real Chromium
+through `scripts/verify/browser/run.ts` (Playwright is not a dependency; the script says how to supply it) and must hash
+identically to Bun; the k6 host is run for real with a k6 binary against `scripts/verify/fakeCsms16.ts`. Both are
+manual verifications, not part of `bun run test`: [Verification results](charger-engine.md#verification-results).
 
 ## Behavior tests
 

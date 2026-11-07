@@ -686,6 +686,8 @@ Export a scenario JSON as a runnable [k6](https://k6.io) load-test bundle:
 ocpp-cp-sim export-k6 --scenario charge.json -o loadtest/
 ```
 
+(`--behavior` instead of `--scenario` exports behavior code: [below](#behaviors-export-k6---behavior).)
+
 The bundle contains a `scenario.k6.ts` entry, a self-contained TypeScript
 OCPP runtime (`ocpp-runtime/`), the scenario, and a README with the full
 environment-variable reference (`PROFILE=spike|steady|soak`, `VUS`,
@@ -777,6 +779,40 @@ are refused with their own reason: `callResponse` and `useBehavior` (they need a
 engine the k6 runtime does not have), a `csmsCallTrigger` with `behavior: "replace"` (or an `onBusy`),
 and an `ocppCall` whose payload holds `{"$from": …}`. The k6 runtime always lets the station answer a
 CALL, so none of them is ever exported as the observing node it resembles.
+
+#### Behaviors: `export-k6 --behavior`
+
+```shell
+ocpp-cp-sim export-k6 --behavior examples/behaviors/flaky-firmware.ts -o loadtest/
+CSMS_URL=ws://localhost:9000 VUS=5 DURATION=30s RUN_FOR_MS=14000 k6 run loadtest/behavior.k6.ts
+```
+
+`--behavior <file>` (repeatable; exclusive with `--scenario`) exports [behavior code](#behavior-code---behavior-and-behavior-build)
+instead of a scenario. The file is type-checked and bundled as by `behavior build`, the bundle is copied to
+`behaviors/`, and `behavior.k6.ts` imports it statically (nothing is loaded by name at run time). OCPP 1.6J only.
+The k6 side is `BehaviorHost` (`packages/k6-runtime/src/behaviorHost.ts`): `ctx` over the same charge point the
+scenario interpreter drives. `ctx.sleep` and `ctx.until` are timers of the host, never k6 `sleep()`, so one VU can
+drive several charge points (`CHARGERS_PER_VU`) and stopping rejects every pending wait.
+
+What an iteration does: each VU connects its charge points, starts every `main` and `onCall` rule, and stops when
+every `main` returned, at `RUN_FOR_MS`, or 2 s before the end of a `steady` / `soak` run, whichever is first (a
+behavior with no `main` and no `RUN_FOR_MS` serves CALLs for 60 s). Stopping sets `ctx.stopping`, rejects the waits
+and closes the sockets before k6's `gracefulStop` starts counting; a `main` that waits on something the host does
+not own is abandoned after 1.5 s and the iteration is reported failed. `SEED` seeds `ctx.random` (same algorithm and
+key as the simulator).
+
+Refused at export, with the file and the reason named:
+
+| Refused                                                                                                     | Why                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `requires` of `physical`, `virtual-time` or `ocpp2.x`                                                       | The k6 host has no connector model, runs on real time, and speaks 1.6J only.                                           |
+| `mode: "extend"`, `ctx.defaultBehavior`                                                                     | The k6 auto-responder has no default behavior with follow-ups to extend.                                               |
+| `ctx.connector`, `ctx.plugIn`, `unplug`, `authorize`, `startCharging`, `stopCharging`, `setConnectorStatus` | No connector model. The check is syntactic (it also flags a property of that name); the members throw at run time too. |
+| A bundle that imports `k6` modules                                                                          | The export loads the bundle to read `requires` and the rules; it cannot do that.                                       |
+
+Responses are not checked against the OCPP schema (`skipValidation` has nothing to skip), and a CALL no rule claims
+is answered by the same auto-responder as in a scenario export. Environment variables are in the generated README.
+Measured results: [Charger engine design → Verification results](../analyses/charger-engine.md#verification-results).
 
 | `evSettings` field   | Honoured                                                       |
 | -------------------- | -------------------------------------------------------------- |

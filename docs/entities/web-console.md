@@ -18,7 +18,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Web console (browser UI)
@@ -59,6 +59,11 @@ daemon is present. After that detection, all simulator control uses the same
 Socket.IO connection documented in [Control plane](../concepts/control-plane.md):
 `rpc` acks for commands and `event` push envelopes for CP / registry updates.
 The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mode.md).
+
+Local mode can also run **behavior code**: `LocalChargePointService.loadBehaviorBundle(id, blob | text)` imports a bundle
+built with `ocpp-cp-sim behavior build` through `import(blobUrl)` and loads it onto one charge point of the page. It is
+programmatic only (no console UI), runs with the page's full authority, and is not persisted across a reload. Verified in
+Chromium: [Charger engine design → Verification results](../analyses/charger-engine.md#verification-results).
 
 ## Layout (route prefixes)
 

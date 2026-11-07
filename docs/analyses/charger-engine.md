@@ -9,9 +9,15 @@ sources:
   - packages/core/src/cp/infrastructure/transport/network-sim/ResponseEffectQueue.ts
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
   - packages/k6-runtime/src/interpreter.ts
+  - packages/k6-runtime/src/behaviorHost.ts
+  - apps/cli/src/exportK6/runExportK6Behavior.ts
+  - scripts/verify/browser/run.ts
+  - scripts/bench/engineScale.ts
   - "issues #566, #569, #575, #600, #618"
 related:
   - ../concepts/scenario-format.md
+  - ../entities/cli.md
+  - ../sources/bench-readme.md
 updated: 2026-11-07
 ---
 
@@ -401,16 +407,17 @@ So async functions are deterministic on Bun as long as every wait goes through t
 random draw through a stream; the macrotask hop between two timers is what settles the continuations.
 The design stands; no fallback is needed. The condition is the one stated above: a virtual-time run
 has no real I/O of its own process in flight (the in-process fake CSMS must itself be driven from
-virtual timers or settle synchronously). Not verified here: browsers (the same `setTimeout(0)` fallback
-is used where `setImmediate` is absent) and k6.
+virtual timers or settle synchronously). Browsers: verified in stage D2 (see [Verification results](#verification-results));
+k6 runs on real time and promises only explanation through seed and trace.
 
 ### Loading code
 
 - CLI and daemon: `--behavior <file>`, repeatable (stage D1: done, see its Status). The daemon needs `--allow-behavior-code` and refuses
   the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`.
 - `ocpp-cp-sim behavior build <file>` type-checks and writes one ESM bundle with `--external 'k6/*'`.
-- Web: load a built bundle from a local file through `import(blobUrl)`, in the local runtime only.
-- k6: `export-k6 --behavior <file>` generates a static import. The k6 host implements `ctx` over the
+- Web (stage D2: done): `LocalChargePointService.loadBehaviorBundle(id, blob | text)` loads a built bundle through
+  `import(blobUrl)`, in the local runtime only.
+- k6 (stage D2: done): `export-k6 --behavior <file>` generates a static import. The k6 host implements `ctx` over the
   existing `ScenarioHost`, OCPP 1.6J only. A behavior whose `requires` the host cannot meet is refused
   at export. Never degrade silently.
 - A test harness `runBehavior()` drives a behavior on a `VirtualClock` with a fake CSMS, and asserts the
@@ -544,3 +551,73 @@ Status (stage D1): loading behavior code. Decisions the design left open:
   still on the real socket. Limit: the HTTP upload sink used by diagnostics and logs (`Rig.uploadUrl`) is still
   a real server, so a test of those two uploads is not free of real I/O.
 - **Not in D1.** Web loading of a bundle, `export-k6 --behavior` and a k6 `ctx` host (stage E).
+
+Status (stage D2): k6, browser and scale. Decisions the design left open:
+
+- **k6 host.** `BehaviorHost` (`packages/k6-runtime/src/behaviorHost.ts`) implements `BehaviorContext` over
+  `OcppChargePoint`, which is the `ScenarioHost` the interpreter drives. The charge point got three small
+  additions: `setCallHandler` (a host claims the inbound CALLs of its rules; every other CALL still goes to the
+  auto-responder), `sendRaw` and `cpId`. `onCall` rules are `replace` only; a rule holds one open exchange and a
+  second CALL gets `onBusy` (default CALLERROR `GenericError`); `after` runs once the frame went out. Waits are
+  timers of the host (`k6/timers`, injected as a port so the host is testable), tracked so that stopping rejects
+  them with `BehaviorStopped`. The types are mirrored in `behaviorTypes.ts` (the k6 runtime may not import another
+  package); `behaviorTypes.test.ts` holds the mirror and the contract assignable to each other.
+- **What the k6 host does not provide, and refuses at export** (`runExportK6Behavior.ts`): `requires` of
+  `physical`, `virtual-time`, `ocpp2.x` (it provides `ocpp1.6` and `raw-frames`); `mode: "extend"` and
+  `ctx.defaultBehavior` (the k6 auto-responder has no follow-up effects to extend); `ctx.connector` and the
+  physical verbs. The ctx check is syntactic over the built bundle (a property of the same name is flagged
+  too); the members also throw at run time. The export imports the built bundle in Bun to read `requires` and
+  the rules, so a behavior that imports `k6` modules cannot be exported (it says so). Responses are not
+  schema-checked on k6.
+- **An iteration always ends.** Env: `RUN_FOR_MS` (a length), `CHARGERS_PER_VU` (ids get `-1`, `-2`, …), `SEED`.
+  Without `RUN_FOR_MS`, a behavior with a `main` ends with its mains, one without serves CALLs for 60 s. On a
+  `steady` / `soak` profile the iteration also stops 2 s before the end of `DURATION`, so k6's `gracefulStop`
+  is never needed, and an iteration that would start in the last 2 s waits the run out instead of looping.
+  A `main` that waits on something outside the host is abandoned after 1.5 s and the iteration is reported failed.
+- **`ctx.random(...).int` is inclusive at both ends**, as the contract says. The core adapter passed the
+  core stream's `[min, max)` through; `ChargerEngine` now adds one to the upper bound. The k6 stream uses the
+  same algorithm and key as the core one, so the same seed, charge point id and stream name draw the same numbers
+  (`behaviorHost.test.ts`).
+- **Web.** `LocalChargePointService.loadBehaviorBundle` / `unloadBehavior`. Programmatic only: no console UI was
+  added (the settings page has no natural place for a code loader, and the design keeps a UI for writing behaviors
+  out of scope); `scripts/verify/browser/page.ts` has the minimal file input the check uses. Behaviors are not
+  persisted by the page. `behaviorsOfModule` moved to `application/engine/behaviorModule.ts` so the CLI, the export
+  and the web service share it.
+- **`drainMicrotasks` hops with a `MessageChannel` where `setImmediate` is absent** (browsers). `setTimeout(0)` was
+  the fallback; see the measurement below.
+
+## Verification results
+
+All numbers were measured in the stage D2 container (4 cores, 11 GiB RAM, Linux x86_64, Bun 1.3.14), on
+2026-11-07. The tools are in the repository; none of the runs needed a change to the design.
+
+| Item                             | How                                                                                                                                                                                                                                                         | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| k6, 5 VUs                        | `export-k6 --behavior examples/behaviors/flaky-firmware.ts`, then `VUS=5 DURATION=25s RUN_FOR_MS=14000 SEED=d2 k6 run behavior.k6.ts` against `scripts/verify/fakeCsms16.ts --update-firmware` over a real WebSocket                                        | **Pass.** k6 v2.3.0 (go1.26.8). The CSMS recorded 120 frames: 5 charge points x 2 iterations, each iteration one BootNotification, one `UpdateFirmware` answered `{}`, and the four `FirmwareStatusNotification`s `Downloading`, `Downloaded`, `Installing`, `Installed` at the behavior's seeded delays (+0.5 s, +1.9 s, +0.5 s, +3.8 s for CP-1). `scenario_success` 100 % (10 of 10), `ocpp_calls` 50, 0 interrupted iterations                          |
+| k6, 1 VU, several chargers       | `examples/behaviors/heartbeat-loop.ts`, `VUS=1 CHARGERS_PER_VU=8 DURATION=14s`                                                                                                                                                                              | **Pass.** 8 charge points on one VU, 192 frames, 11 Heartbeats each at one-second spacing, `scenario_success` 100 %, 0 interrupted, the VU finished at 14.0 s                                                                                                                                                                                                                                                                                               |
+| k6, `gracefulStop`               | `scripts/verify/behaviors/hang.ts` (a `main` awaiting a promise that never settles), `VUS=2 DURATION=8s`                                                                                                                                                    | **Pass.** 4 iterations, 0 interrupted: two of 7.5 s (stopped at `DURATION` − 2 s = 6 s, the hung `main` abandoned after 1.5 s) and two of 0.5 s (the wait-out of the last seconds). The run ended at 8.0 s; a hung iteration would have kept it open for k6's default 30 s `gracefulStop` more. The hang was reported, not hidden: `scenario_success` 0 % and `main of "hang" did not stop in time`                                                         |
+| k6, refusals                     | `behaviorExport.bun.test.ts`                                                                                                                                                                                                                                | **Pass.** `requires` `physical` / `ocpp2.x`, `mode: "extend"`, `ctx.plugIn`, a destructured `connector`, a missing file and `--scenario` together with `--behavior` each exit 1 with the reason and write nothing. The runtime copies import no `sleep` from `k6`                                                                                                                                                                                           |
+| Browser, behavior                | Playwright (`playwright-core` 1.65.0) driving the preinstalled Chromium 158 (revision 1254, nothing to install): the page loads `flaky-firmware.bundle.js` from a file input with `import(blobUrl)` on `LocalChargePointService`, connects to the fake CSMS | **Pass.** The CSMS saw BootNotification, two StatusNotifications and the four `FirmwareStatusNotification`s of the same behavior. `typeof setImmediate` is `"undefined"` in the page                                                                                                                                                                                                                                                                        |
+| Browser, determinism             | The V1 fleet of `virtualFleet.ts` run in the page and on Bun, effects hashed with SHA-256                                                                                                                                                                   | **Pass: identical.** 25 chargers x 1 h: `c745d5ba…` (the pinned hash of the Bun test); 200 x 1 h: `dbe7112e…`; 1,000 x 6 h: `e2babcf3…`, 1,317,480 effects, 980,637 timers; Chromium 9.9 s, Bun 8.6 s                                                                                                                                                                                                                                                       |
+| Browser, `setImmediate` fallback | Same fleet, 25 chargers x 1 virtual hour                                                                                                                                                                                                                    | **The first fallback failed on speed, not on correctness.** With `setTimeout(0)` the hash matched but took **17.3 s** in Chromium (38 ms on Bun): a browser clamps nested timers to 4 ms per macrotask hop. `drainMicrotasks` now uses a `MessageChannel`: 200 chargers x 1 h in 284 ms (Bun 182 ms), same hashes. `clock.browserHop.bun.test.ts` covers the path                                                                                           |
+| Scale, bare behavior loops       | `bun scripts/bench/engineScale.ts --mode bare`, one process per row                                                                                                                                                                                         | 1,000: 1.1 KB heap and 13 KB RSS per charger, 0.18 s per virtual hour. **10,000: heap +11 MB (1.2 KB each), RSS 99 to 148 MB, 2.9 s per virtual hour**, 595,684 timers                                                                                                                                                                                                                                                                                      |
+| Scale, real `ChargePoint`        | `--mode cp`, in-memory socket, 1.6J, no database                                                                                                                                                                                                            | **10,000 real `ChargePoint` instances fit, using about 1.3 GB at peak of the 11 GiB.** 1,000: heap 54 KB per charger, RSS 150 KB, 2.0 s per virtual hour; 2,000: 52 KB, 133 KB, 4.4 s; 5,000: 50 KB, 127 KB, 12.7 s; **10,000: heap 495 MB (49 KB per charger), RSS peak 1,312 MB (it fell to 736 MB after a GC), 31.9 s per virtual hour** for 625,100 messages and 1,195,100 timers. Time per charger-hour grows from 2.0 ms at 1,000 to 3.2 ms at 10,000 |
+| Scale, real sockets              | `--mode cp-ws --n 1000`                                                                                                                                                                                                                                     | The same 1,000 charge points on real WebSockets to a CSMS in another process: heap 55 KB per charger, RSS 139 KB per charger (memory transport: 150 KB), 3.6 s per virtual hour (the hour is virtual; the sockets idle)                                                                                                                                                                                                                                     |
+
+What the scale numbers do not cover: a database per charge point (the daemon's `CPRegistry` adds SQLite rows and
+the `engine_state` JSON), a log sink (the logger had every type off), a UI, and the CSMS's own memory; the
+a real WebSocket per charger cost no more in this process (139 KB against 150 KB of RSS per charger at 1,000; the socket buffers live in the kernel). A daemon with 10,000
+charge points would add its persistence to the 49 KB per charger measured here; at that size it was not tried.
+Real-time behavior at 10,000 chargers (event loop lag of the fleet against a real CSMS) is also not measured:
+`fleet-bench.ts` is the tool for that.
+
+Found while measuring, fixed in the same stage:
+
+- The scenario export did not load on k6 2.3.0: its generated imports had no file extension
+  (`./ocpp-runtime/index`) and k6 resolves none. Every import of the runtime now names its `.ts` file; the one
+  assertion and the golden snapshot of the entry script changed by those characters. The scenario export itself
+  was loaded by k6 afterwards (its scenario run was not exercised against a CSMS that answers its triggers).
+- `ctx.random(...).int` was exclusive at the top in the core host and inclusive in the contract (fixed above).
+- The browser fallback of `drainMicrotasks` (fixed above).
+- Not found failing, but not exercised: the `spike` and ramping profiles with behaviors, mTLS, and k6 versions other
+  than 2.3.0 (the generated README says `k6 >= 1.6`; that floor was not re-tested).

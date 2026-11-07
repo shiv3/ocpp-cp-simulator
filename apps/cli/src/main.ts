@@ -1374,11 +1374,12 @@ Options:
                            connector's report and why.
   behavior build <file> [--out <file>]
                            Type-check a behavior and bundle it (ES2017, k6/* external).
-  export-k6 --scenario <file.json> [-o <dir>] [--ocpp-version 1.6] [--force]
-                           Export a scenario as a runnable k6 load-test
-                           bundle (entry script + self-contained OCPP
-                           runtime + README). Requires k6 >= v1.0 to run
-                           the generated test. See docs/entities/cli.md -> export-k6.
+  export-k6 (--scenario <file.json> | --behavior <file>...) [-o <dir>] [--ocpp-version 1.6] [--force]
+                           Export a scenario, or behavior code (OCPP 1.6J),
+                           as a runnable k6 load-test bundle (entry script +
+                           self-contained OCPP runtime + README). Requires
+                           k6 >= v1.6 to run the generated test. See
+                           docs/entities/cli.md -> export-k6.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path

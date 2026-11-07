@@ -49,7 +49,12 @@ export function unsupportedCtxUses(code: string): string[] {
       ts.isStringLiteralLike(node.argumentExpression)
     ) {
       check(node.argumentExpression.text);
-    } else if (ts.isBindingElement(node)) {
+    } else if (
+      ts.isBindingElement(node) &&
+      ts.isObjectBindingPattern(node.parent)
+    ) {
+      // Only an object pattern names a property: `const [connector] = pair`
+      // names a variable.
       const key = node.propertyName ?? node.name;
       if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) check(key.text);
     }
@@ -64,6 +69,8 @@ interface Built {
   readonly outName: string;
   readonly code: string;
   readonly problems: string[];
+  /** The behavior ids the file declares; empty when it could not be inspected. */
+  readonly ids?: readonly string[];
 }
 
 async function buildOne(file: string, index: number): Promise<Built> {
@@ -91,6 +98,7 @@ async function buildOne(file: string, index: number): Promise<Built> {
     );
   }
   // What `requires` and the rules say needs the loaded module.
+  let ids: string[] | undefined;
   const dir = mkdtempSync(path.join(tmpdir(), "ocpp-export-k6-"));
   try {
     const out = path.join(dir, "behavior.mjs");
@@ -107,10 +115,11 @@ async function buildOne(file: string, index: number): Promise<Built> {
       return { file, outName, code: bundled.code, problems };
     }
     for (const b of behaviors) problems.push(...unmetBy(b));
+    ids = behaviors.map((b) => b.id);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  return { file, outName, code: bundled.code, problems };
+  return { file, outName, code: bundled.code, problems, ids };
 }
 
 export async function runExportK6Behavior(args: ExportK6Args): Promise<number> {
@@ -119,6 +128,19 @@ export async function runExportK6Behavior(args: ExportK6Args): Promise<number> {
   for (let i = 0; i < files.length; i++)
     built.push(await buildOne(files[i], i));
   const problems = built.flatMap((b) => b.problems);
+  // Two bundles with one id would share one `ctx.state` and one rule set.
+  const seen = new Map<string, string>();
+  for (const b of built) {
+    for (const id of b.ids ?? []) {
+      const first = seen.get(id);
+      if (first !== undefined) {
+        problems.push(
+          `behavior id "${id}" is declared by ${first} and by ${b.file}`,
+        );
+      }
+      seen.set(id, first ?? b.file);
+    }
+  }
   if (problems.length > 0) {
     return fail(`behavior cannot be exported:\n  ${problems.join("\n  ")}`);
   }

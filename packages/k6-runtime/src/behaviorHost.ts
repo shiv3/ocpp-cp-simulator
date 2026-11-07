@@ -172,10 +172,13 @@ interface Rule {
   match?: Record<string, unknown>;
   busy: boolean;
   onBusy?: CallAnswer;
-  handle(
-    req: unknown,
-    ctx: BehaviorContext,
-  ): CallOutcome | Promise<CallOutcome>;
+  /** The `onCall` entry as written: `handle` is called on it, as the simulator does. */
+  spec: {
+    handle(
+      req: unknown,
+      ctx: BehaviorContext,
+    ): CallOutcome | Promise<CallOutcome>;
+  };
 }
 
 export class BehaviorHost {
@@ -188,6 +191,8 @@ export class BehaviorHost {
   private readonly states = new Map<string, Record<string, JsonValue>>();
   private readonly contexts = new Map<string, BehaviorContext>();
   private readonly waits = new Map<number, () => void>();
+  /** Rejects the `ctx.send` calls still waiting for an answer (see `stop`). */
+  private readonly pendingSends = new Set<() => void>();
   private isStopping = false;
   private readonly hookQueue: Array<{ name: string; event: unknown }> = [];
   private hookScheduled = false;
@@ -203,7 +208,12 @@ export class BehaviorHost {
     this.log = opts.log ?? ((): void => undefined);
     this.hooked = opts.behaviors.some((b) => b.on !== undefined);
     this.intercepting = opts.behaviors.some((b) => b.beforeSend !== undefined);
+    const ids = new Set<string>();
     for (const behavior of opts.behaviors) {
+      if (ids.has(behavior.id)) {
+        throw new Error(`behavior id "${behavior.id}" is given twice`);
+      }
+      ids.add(behavior.id);
       const problems = unmetBy(behavior);
       if (problems.length > 0) throw new Error(problems.join("\n"));
       for (const action of Object.keys(behavior.onCall ?? {})) {
@@ -214,7 +224,7 @@ export class BehaviorHost {
           match: rule.match,
           busy: false,
           onBusy: rule.onBusy,
-          handle: rule.handle,
+          spec: rule,
         });
       }
     }
@@ -224,20 +234,53 @@ export class BehaviorHost {
     return this.isStopping;
   }
 
-  /** Claim the CALLs of the rules and start every `main`. */
-  start(): void {
+  /**
+   * What went wrong during the run, for the iteration to report: a `main` that
+   * threw, and a connection the CSMS closed before the host was stopped.
+   */
+  readonly problems: string[] = [];
+  private closedWaiters: Array<() => void> = [];
+  private attached = false;
+
+  /**
+   * Resolves when the connection closes while the host is still running (it
+   * never resolves otherwise). The iteration ends then, with a problem.
+   */
+  whenClosed(): Promise<void> {
+    return new Promise<void>((resolve) => this.closedWaiters.push(resolve));
+  }
+
+  /**
+   * Claim the CALLs of the rules and watch the wire. Call it before the
+   * socket opens, so the BootNotification passes `beforeSend` and its answer
+   * reaches `callResult`; {@link start} does it when it was not done.
+   */
+  attach(): void {
+    if (this.attached) return;
+    this.attached = true;
     this.cp.setCallHandler((action, payload) => this.claim(action, payload));
-    if (this.hooked || this.intercepting) {
-      this.cp.setObserver?.({
-        beforeSend: (action, payload) => this.runBeforeSend(action, payload),
-        callResult: (event) => this.emitHook("callResult", event),
-        callReceived: (event) => this.emitHook("callReceived", event),
-        disconnected: (event) =>
-          this.emitHook("disconnected", { at: Date.now(), ...event }),
-      });
-      // The host starts once the socket is up and booted.
-      this.emitHook("connected", { at: Date.now() });
-    }
+    this.cp.setObserver?.({
+      beforeSend: (action, payload) =>
+        this.intercepting ? this.runBeforeSend(action, payload) : { payload },
+      callResult: (event) => this.emitHook("callResult", event),
+      callReceived: (event) => this.emitHook("callReceived", event),
+      disconnected: (event) => {
+        if (!this.isStopping) {
+          this.problems.push(
+            `${this.cp.cpId}: the connection was closed before the iteration ended` +
+              (event.code === undefined ? "" : ` (code ${event.code})`),
+          );
+          for (const resolve of this.closedWaiters.splice(0)) resolve();
+        }
+        this.emitHook("disconnected", { at: Date.now(), ...event });
+      },
+    });
+  }
+
+  /** The socket is up and booted: tell the hooks, and start every `main`. */
+  start(): void {
+    this.attach();
+    this.emitHook("connected", { at: Date.now() });
     for (const behavior of this.opts.behaviors) {
       const main = behavior.main;
       if (main === undefined) continue;
@@ -250,6 +293,9 @@ export class BehaviorHost {
             if (!(err instanceof BehaviorStopped)) {
               this.log(
                 `behavior ${behavior.id}: main failed: ${describe(err)}`,
+              );
+              this.problems.push(
+                `${this.cp.cpId}: main of "${behavior.id}" failed: ${describe(err)}`,
               );
             }
           },
@@ -280,6 +326,10 @@ export class BehaviorHost {
     this.hookQueue.length = 0;
     for (const cancel of [...this.waits.values()]) cancel();
     this.waits.clear();
+    // A `ctx.send` waiting on a slow CSMS must not keep its `main` alive past
+    // the grace time: the wait is cut like every other wait.
+    for (const cancel of [...this.pendingSends]) cancel();
+    this.pendingSends.clear();
     const pending = new Set(this.mains.map((m) => m.id));
     const settled = Promise.all(
       this.mains.map((m) =>
@@ -443,27 +493,30 @@ export class BehaviorHost {
     }
     rule.busy = true;
     let after: (() => Promise<void>) | undefined;
+    const failed = (err: unknown): CallAnswerToSend => {
+      this.log(
+        `behavior ${rule.behavior.id}: ${action} failed: ${describe(err)}`,
+      );
+      return {
+        kind: "error",
+        code: "InternalError",
+        description: `behavior ${rule.behavior.id} failed`,
+      };
+    };
     const answer = Promise.resolve()
-      .then(() => rule.handle(payload, this.contextOf(rule.behavior)))
-      .then(
-        (outcome): CallAnswerToSend => {
+      .then(() => rule.spec.handle(payload, this.contextOf(rule.behavior)))
+      .then((outcome): CallAnswerToSend => {
+        // A handler that returned nothing (or something that is no outcome) is
+        // the handler's failure, answered like a throw, not left unanswered.
+        try {
           after = outcome.after;
           return answerOf(outcome);
-        },
-        (err: unknown): CallAnswerToSend => {
-          this.log(
-            `behavior ${rule.behavior.id}: ${action} failed: ${describe(err)}`,
-          );
-          return {
-            kind: "error",
-            code: "InternalError",
-            description: `behavior ${rule.behavior.id} failed`,
-          };
-        },
-      )
-      .then((a) => {
+        } catch (err) {
+          return failed(err);
+        }
+      }, failed)
+      .finally(() => {
         rule.busy = false;
-        return a;
       });
     return {
       answer,
@@ -542,6 +595,7 @@ export class BehaviorHost {
       this.states.set(behavior.id, state);
     }
     const userState = state;
+    const streams = new Map<string, ReturnType<typeof seededStream>>();
     return {
       now: () => Date.now(),
       sleep(ms: number): Promise<void> {
@@ -584,8 +638,16 @@ export class BehaviorHost {
           );
         });
       },
-      random: (stream: string) =>
-        seededStream(host.seed, cp.cpId, `${behavior.id}/${stream}`),
+      random: (stream: string) => {
+        // One stream per name for the life of the context: a second call
+        // continues it, as on the simulator.
+        let one = streams.get(stream);
+        if (one === undefined) {
+          one = seededStream(host.seed, cp.cpId, `${behavior.id}/${stream}`);
+          streams.set(stream, one);
+        }
+        return one;
+      },
       get stopping(): boolean {
         return host.isStopping;
       },
@@ -611,10 +673,37 @@ export class BehaviorHost {
           );
           return undefined;
         }
-        return request;
+        return new Promise<Record<string, unknown>>((resolve, reject) => {
+          const cancel = (): void => reject(new BehaviorStopped());
+          host.pendingSends.add(cancel);
+          request.then(
+            (value) => {
+              host.pendingSends.delete(cancel);
+              resolve(value);
+            },
+            (err: unknown) => {
+              host.pendingSends.delete(cancel);
+              reject(err);
+            },
+          );
+        });
       },
       raw(frame: string): void {
-        cp.sendRaw(frame);
+        if (!(behavior.requires ?? []).includes("raw-frames")) {
+          throw new Error(
+            `Behavior ${behavior.id} uses ctx.raw but does not list "raw-frames" in requires`,
+          );
+        }
+        if (host.isStopping) throw new BehaviorStopped();
+        try {
+          cp.sendRaw(frame);
+        } catch (err) {
+          // As on the simulator, a frame that cannot go out is a warning, not
+          // an exception in the behavior.
+          host.log(
+            `behavior ${behavior.id}: raw frame failed: ${describe(err)}`,
+          );
+        }
       },
       plugIn: () => unsupported("plugIn"),
       unplug: () => unsupported("unplug"),

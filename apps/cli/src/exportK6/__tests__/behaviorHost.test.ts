@@ -250,6 +250,7 @@ describe("BehaviorHost ctx", () => {
         {
           api: 1,
           id: "c",
+          requires: ["raw-frames"],
           async main(ctx) {
             await ctx.send("DataTransfer", { vendorId: "v" });
             ctx.notify.firmwareStatus("Installed", { requestId: 9 });
@@ -413,11 +414,14 @@ describe("BehaviorHost event hooks", () => {
     expect(logs.join("\n")).toContain("callReceived hook failed: later");
   });
 
-  it("a hook that sends runs after the current hook; no hooks, no observer", async () => {
+  it("a hook that sends runs after the current hook; a behavior without hooks leaves the wire as it is", async () => {
     const f = fakeCp();
     const none = host([{ api: 1, id: "plain" }], f.cp);
     none.start();
-    expect(f.observer()).toBeNull();
+    // The observer only passes the wire through: nothing is changed or
+    // delivered for a behavior without hooks or beforeSend.
+    const payload = { a: 1 };
+    expect(f.observer()?.beforeSend("Heartbeat", payload)).toEqual({ payload });
   });
 
   it("refuses the connector and transaction hooks", () => {

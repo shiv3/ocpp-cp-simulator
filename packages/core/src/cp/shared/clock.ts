@@ -84,11 +84,39 @@ const nativeSetImmediate: ((fn: () => void) => unknown) | undefined = (
 ).setImmediate;
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 
+// Browsers have no setImmediate. `setTimeout(0)` is a macrotask hop too, but a
+// browser clamps nested timers to 4 ms, which makes a virtual run crawl (25
+// chargers for a virtual hour took 17 s there, 40 ms on Bun). A MessageChannel
+// message is a macrotask without the clamp.
+interface HopChannel {
+  readonly port1: { onmessage: ((event: unknown) => void) | null };
+  readonly port2: { postMessage(message: unknown): void };
+}
+const nativeMessageChannel = (
+  globalThis as { MessageChannel?: new () => HopChannel }
+).MessageChannel;
+let hopQueue: Array<() => void> | undefined;
+let hopChannel: HopChannel | undefined;
+
+function hopWithMessageChannel(resolve: () => void): void {
+  if (!nativeMessageChannel) {
+    nativeSetTimeout(resolve, 0);
+    return;
+  }
+  if (!hopChannel) {
+    hopQueue = [];
+    hopChannel = new nativeMessageChannel();
+    hopChannel.port1.onmessage = () => hopQueue?.shift()?.();
+  }
+  hopQueue?.push(resolve);
+  hopChannel.port2.postMessage(0);
+}
+
 /** Resolves after every microtask queued so far, and the ones they queue, ran. */
 export function drainMicrotasks(): Promise<void> {
   return new Promise<void>((resolve) => {
     if (nativeSetImmediate) nativeSetImmediate(resolve);
-    else nativeSetTimeout(resolve, 0);
+    else hopWithMessageChannel(resolve);
   });
 }
 

@@ -3,28 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { bundleBehavior } from "./bundleBehavior";
-
-/** Turn a module's default export into behaviors; throws on a bad shape. */
-export function behaviorsOfModule(file: string, mod: unknown): Behavior[] {
-  const exported = (mod as { default?: unknown }).default;
-  const list = Array.isArray(exported) ? exported : [exported];
-  return list.map((item, i) => {
-    const b = item as Partial<Behavior> | undefined;
-    if (
-      !b ||
-      typeof b !== "object" ||
-      b.api !== 1 ||
-      typeof b.id !== "string"
-    ) {
-      throw new Error(
-        `${file}: the default export must be a behavior ({ api: 1, id, ... })` +
-          ` or an array of them (item ${i})`,
-      );
-    }
-    return b as Behavior;
-  });
-}
 
 /**
  * Bundle `file` for this process and import it. The code runs with the full

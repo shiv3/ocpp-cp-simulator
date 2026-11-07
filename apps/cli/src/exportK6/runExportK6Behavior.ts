@@ -14,7 +14,7 @@ import {
   unmetBy,
 } from "@ocpp-cp-sim/k6-runtime/behaviorHost";
 import ts from "typescript";
-import { behaviorsOfModule } from "../behavior/loadBehaviorFile";
+import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { bundleBehavior, typecheckBehavior } from "../behavior/bundleBehavior";
 import {
   renderBehaviorEntry,

@@ -41,6 +41,7 @@ import type { AutoMeterValueSetting } from "@ocpp-cp-sim/core/cp/domain/charge-p
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
 import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
+import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type {
@@ -272,6 +273,50 @@ export class LocalChargePointService implements ChargePointService {
         this.emit(chargePoint.id, event),
       ),
     );
+  }
+
+  /**
+   * Load a built behavior bundle (`ocpp-cp-sim behavior build`) into one
+   * registered charge point of this page and return the ids it registered.
+   * The code runs with the full authority of the page: it comes from a file
+   * the user picked, never from the network. The bundle is a Blob (or its
+   * text); it is imported through a blob URL, which is revoked afterwards.
+   * Behaviors are not persisted: reload the page and load them again.
+   */
+  async loadBehaviorBundle(
+    id: string,
+    bundle: Blob | string,
+  ): Promise<string[]> {
+    const cp = this.getExistingChargePointOrThrow(id);
+    const blob =
+      typeof bundle === "string"
+        ? new Blob([bundle], { type: "text/javascript" })
+        : bundle.type === "text/javascript"
+          ? bundle
+          : new Blob([bundle], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const mod: unknown = await import(/* @vite-ignore */ url);
+      const behaviors = behaviorsOfModule("behavior bundle", mod);
+      const loaded: string[] = [];
+      try {
+        for (const behavior of behaviors) {
+          cp.loadBehavior(behavior);
+          loaded.push(behavior.id);
+        }
+      } catch (error) {
+        for (const behaviorId of loaded) cp.unloadBehavior(behaviorId);
+        throw error;
+      }
+      return loaded;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  /** Unload a behavior loaded with {@link loadBehaviorBundle}. */
+  unloadBehavior(id: string, behaviorId: string): boolean {
+    return this.getExistingChargePointOrThrow(id).unloadBehavior(behaviorId);
   }
 
   unregisterChargePoint(id: string): void {

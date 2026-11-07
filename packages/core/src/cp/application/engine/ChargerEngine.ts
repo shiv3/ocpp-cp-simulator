@@ -84,7 +84,7 @@ class Scope {
 
   constructor(
     readonly behaviorId: string,
-    readonly connectionBound: boolean,
+    public connectionBound: boolean,
   ) {}
 
   track(handle: TimerHandle, cancel: () => void): void {
@@ -107,6 +107,18 @@ class Scope {
     this.cancels.clear();
   }
 }
+
+/**
+ * Default behaviors whose follow-up stops when the connection closes: the
+ * firmware status trains, whose timers `ChargePoint` cleared on a close before
+ * the engine. The log and diagnostics uploads were not tied to the socket and
+ * go on across a reconnect. Rule 4 of docs/analyses/charger-engine.md: this is
+ * the behavior of ca01d302, kept as it was.
+ */
+const CONNECTION_BOUND_DEFAULTS: ReadonlySet<string> = new Set([
+  "default.firmware",
+  "default.signedFirmware",
+]);
 
 /** Per-CALL data a context needs. */
 interface CallEnv {
@@ -1180,7 +1192,11 @@ export class ChargerEngine {
   runDefault(action: string, payload: unknown): DefaultResult {
     const entry = this.defaults.get(action);
     if (!entry) throw new Error(`No default behavior answers ${action}`);
-    const scope = new Scope(entry.behavior.id, true);
+    // Not connection-bound while the answer is in the pipeline: a close before
+    // the follow-up starts cancels nothing (the follow-up then runs, as the
+    // old code ran it). See `CONNECTION_BOUND_DEFAULTS` for what binds it once
+    // it runs.
+    const scope = new Scope(entry.behavior.id, false);
     this.callScopes.add(scope);
     const env: CallEnv = { action, mode: "default", defaultEffects: [] };
     const ctx = this.makeContext(entry.behavior.id, scope, env);
@@ -1210,7 +1226,12 @@ export class ChargerEngine {
     }
     return {
       response: outcome.response,
-      effect: () => this.runAfter(entry.behavior.id, scope, ctx, after),
+      effect: () => {
+        scope.connectionBound = CONNECTION_BOUND_DEFAULTS.has(
+          entry.behavior.id,
+        );
+        this.runAfter(entry.behavior.id, scope, ctx, after);
+      },
     };
   }
 

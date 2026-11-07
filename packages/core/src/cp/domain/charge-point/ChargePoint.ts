@@ -2371,8 +2371,9 @@ export class ChargePoint {
     // connection is down (§3.5.3, LocalAuthorizeOffline), so a connection
     // loss must not empty it (#534). Only dispose() drops it.
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
-    // The engine stops the follow-up of every answer (the firmware status
-    // train among them) so it doesn't keep firing against a dead WebSocket.
+    // The engine ends the follow-up of answers a behavior of the user gave
+    // (they are bound to the connection). The follow-up of a default behavior,
+    // such as the firmware status train, goes on: it did before the engine.
     this._engine.connectionClosed();
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();

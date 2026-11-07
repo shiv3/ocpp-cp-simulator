@@ -95,7 +95,7 @@ describe("GetLogHandler", () => {
     }
   });
 
-  it("stops the sequence when the connection closes before the upload ends", () => {
+  it("goes on when the connection closes before the upload ends", async () => {
     const { ctx, sent } = buildContext();
     const res = new GetLogHandler().handle(
       {
@@ -108,7 +108,12 @@ describe("GetLogHandler", () => {
     if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
     res.afterResponseSettled();
     ctx.chargePoint.disconnect();
-    vi.advanceTimersByTime(10_000);
-    expect(sent).toEqual([{ status: "Uploading", requestId: 3 }]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // As before the engine: a closed connection does not cancel the upload
+    // sequence (the status goes out once the connection is back).
+    expect(sent).toEqual([
+      { status: "Uploading", requestId: 3 },
+      { status: "Uploaded", requestId: 3 },
+    ]);
   });
 });

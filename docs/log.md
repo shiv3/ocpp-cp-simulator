@@ -2279,3 +2279,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The 18-file cycle through `Configuration.ts` and the 2-file cycle through the handlers barrel are gone; no cycle of static value imports is left under `packages/` and `apps/`.
 - `bun run check:boundaries` now fails on such a cycle, and ESLint enforces `consistent-type-imports`. [Overview](overview.md) lists what counts as a cycle edge. [GitHub issues](sources/github-issues.md): #570.
+
+## [2026-11-07] ingest | Charger engine design (stage A: golden wire test)
+
+- New [Charger engine design](analyses/charger-engine.md): the target architecture and migration plan for moving charge point behavior out of the OCPP handlers. It is the contract for the `feat/charger-engine` stages.
+- [Testing strategy](analyses/testing-strategy.md): the golden wire test, the regression oracle for that work.

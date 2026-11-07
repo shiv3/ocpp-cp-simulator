@@ -1,0 +1,233 @@
+---
+title: Charger engine design
+type: analysis
+summary: Design of the charger engine — one owner of charge point state, behaviors written as TypeScript modules behind a narrow ctx port, one inbound gate, and an injectable clock — and the staged migration from handler-embedded behavior.
+sources:
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts
+  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts
+  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
+  - packages/core/src/cp/infrastructure/transport/network-sim/ResponseEffectQueue.ts
+  - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
+  - packages/k6-runtime/src/interpreter.ts
+  - "issues #566, #569, #575, #600, #618"
+related:
+  - ../concepts/scenario-format.md
+updated: 2026-11-07
+---
+
+# Charger engine design
+
+## Problem
+
+Charge point behavior lives in OCPP handlers and in `ChargePoint`. One behavior is spread over the 1.6
+handler, the 2.x handler, `ChargePoint`, `Connector`, the scenario runtime and the k6 responder, so
+versions drift: 1.6 `UpdateFirmware` sends notifications, 2.x only acknowledges. `ConnectorStateMachine`
+is initialized but production code sends it no transitions; `updateConnectorStatus` writes
+`connector.status` directly, from about ten files. Time and randomness are read directly, so a run
+cannot be replayed. Scenarios cannot replace behavior generically (#566).
+
+## Target
+
+```
+Driver (scenario, console, EV model) ─┐
+Behavior module (TypeScript) ─────────┤
+                                      ▼
+                     ctx (BehaviorContext port): time, wait, random, send, state, physical verbs
+                                      ▼
+Charger engine: single event queue, sole writer of charger state, default behaviors
+                                      ▼
+InboundCallGate / CallExchange  ◄──►  OCPP adapters (1.6 JSON, 2.x, SOAP): translation only
+```
+
+Rules:
+
+1. **Behavior is code.** Behaviors are plain TypeScript modules, not a JSON DSL. Default behaviors are
+   written against the same `ctx` API as user behaviors. Users override a part; they never reimplement
+   a charger.
+2. **Calculations stay as services.** `ChargingScheduleResolver`, `MeterValueBuilder`, charging curves,
+   `CertificateStore`, `ConfigurationStore`, authorization cache, OCPP codecs and network simulation are
+   not rewritten.
+3. **JSON scenarios stay.** They keep GUI editing, pause / step / resume, and fleet declaration. They
+   drive the engine and may select behaviors. Existing files keep working unchanged.
+4. **No behavior change unless configured.** With no behavior configured, the bytes on the wire and
+   their order are the same as before. In particular 2.x `UpdateFirmware` stays ack-only by default.
+5. **No code over the wire.** Socket.IO, MCP and OCPP accept JSON only (#569 forbids executable
+   content). Code loads only from local files at start, behind an explicit flag. Plain execution has
+   no isolation: `vm`, Worker and ShadowRealm are not called isolation anywhere.
+
+## Parts
+
+### Clock and random (`packages/core/src/cp/shared/clock.ts`, `rng.ts`)
+
+```ts
+export interface SimClock {
+  now(): number; // epoch ms
+  setTimeout(fn: () => void, ms: number): TimerHandle;
+  clearTimeout(handle: TimerHandle): void;
+  setInterval(fn: () => void, ms: number): TimerHandle;
+  clearInterval(handle: TimerHandle): void;
+}
+```
+
+`RealClock` wraps the platform. `VirtualClock` keeps one queue ordered by (time, charger id, sequence)
+and offers `advanceBy(ms)`, `advanceTo(t)` and `runUntilIdle()`. Between two timers these `await` a
+full microtask drain so that async behaviors settle before time moves on. `RngStreams(seed)` derives
+a stream from `hash(seed, chargerId, streamName)`, so adding a charger or a stream does not change the
+numbers of another.
+
+`ChargePoint` takes an optional clock and seed; the default is `RealClock`, which keeps behavior
+identical. All `domain/` and `application/` code uses the injected clock. Socket keep-alive and
+reconnect timers in `infrastructure/transport` may stay on real time only where a comment explains why.
+A CI check lists direct `Date.now`, `new Date()`, `setTimeout`, `setInterval` and `Math.random` in
+`domain/` and `application/` against a shrinking exemption list.
+
+### CallExchange and InboundCallGate
+
+`CallExchange` is one inbound CALL. State: `open | answered | suppressed | abandoned`. The first answer
+is sent; a later answer is not sent and throws. `respond()` and `respondError()` return a promise of
+`ExchangeSettlement` that always resolves: `{ delivered: true }` or `{ delivered: false, reason }`.
+`ResponseEffectQueue.register` gains an optional `onDropped` so that a dropped or stale effect reports
+back. Existing callers are unaffected.
+
+`InboundCallGate` replaces the policy and override blocks duplicated in the 1.6 and 2.x handlers. Order:
+
+1. `incomingCallReceived` (unchanged)
+2. `inboundPolicy`
+3. `responseOverride`
+4. `BehaviorRegistry.resolve()`, synchronous
+5. default path (2.x validates its payload here)
+
+Step 4 runs before validation, as policies do, so a behavior can own a malformed CALL. The gate is
+synchronous: 2.x must not defer a CALLRESULT by a microtask (#456). Action matching uses
+`csmsActionMatches`. SOAP: a `replace` rule on a SOAP station fails the run at arm time, it never
+silently falls back; a SOAP station does get default behaviors, which do not go through the gate in
+this version.
+
+### Behavior API (`packages/contracts`, types only)
+
+```ts
+export interface Behavior {
+  api: 1;
+  id: string;
+  requires?: readonly BehaviorCapability[]; // "ocpp1.6" | "ocpp2.x" | "physical" | "virtual-time" ...
+  onCall?: Record<string, CallBehavior>; // keyed by action, either version's spelling
+  main?(ctx: BehaviorContext): Promise<void>;
+  onResume?(ctx: BehaviorContext): Promise<void>;
+}
+
+export type CallBehavior = {
+  mode: "replace" | "extend";
+  match?: Record<string, unknown>; // deepPartialMatch
+  onBusy?: CallAnswer; // default: CALLERROR GenericError
+  handle(
+    req: unknown,
+    ctx: BehaviorContext,
+  ): CallOutcome | Promise<CallOutcome>;
+};
+
+export type CallOutcome =
+  | { response: unknown; skipValidation?: boolean; after?: () => Promise<void> }
+  | {
+      error: { code: string; description: string };
+      after?: () => Promise<void>;
+    }
+  | { noResponse: true; after?: () => Promise<void> };
+```
+
+`extend` runs the default behavior: `ctx.defaultBehavior(req)` returns the default response and
+registers its effect, and the handler may wrap it. `after` runs once the response settled, and is
+skipped with a warning if it was not delivered.
+
+`BehaviorContext`:
+
+- `now()`, `sleep(ms)`, `until(promise, { ms })`, `random(stream)`, `stopping`
+- `state`: user data that must be JSON-serializable; held by the engine
+- `send(action, payload, opts?)`: a station-initiated CALL through the normal path
+- `raw(frame)`: explicit opt-in for non-compliant traffic, via `RawFrameSender`
+- physical verbs, independent of OCPP version: `plugIn`, `unplug`, `authorize`, `startCharging`,
+  `stopCharging`, `setConnectorStatus`
+- `notify`: version-neutral notifications such as `firmwareStatus(status)`, `logStatus(status)`
+- `connector(id)`, `charger`: read-only snapshots
+- `log(message)`
+
+Behavior modules import types only. They must not use module-scope mutable state, `Date`,
+`Math.random` or timers; an ESLint config shipped for behaviors reports these. The API must work on
+k6: no `AbortController`, `URL`, `structuredClone`, `queueMicrotask`, `performance`, async generators or
+`for await`.
+
+### BehaviorRegistry (`application/behavior/`)
+
+One per charge point. Holds rules from two providers: code behaviors, and scenario rules.
+
+- Owner: `{ kind: "code", behaviorId }` or `{ kind: "scenario", scenarioId, connectorId, nodeId }`.
+- Selection: exact connector match, then oldest registration; a warning names the losers. A CALL
+  without a connector matches any rule.
+- A rule holds at most one open exchange. A second matching CALL gets `onBusy` at once and never
+  reaches the default path.
+- Scenario rules end with their run, released by owner. Code rules last as long as the behavior is
+  loaded.
+
+### Scenario schema 1.5 (additive)
+
+- `csmsCallTrigger.behavior`: `"observe"` (default, as today) or `"replace"`, plus `onBusy`.
+- `callResponse` node: `kind: "result" | "error" | "none"`, `payload`, `errorCode`, `errorDescription`,
+  `skipValidation`. It waits for settlement.
+- `{ "$from": "call.payload.requestId" }` as a whole value in `ocppCall` and `callResponse` payloads,
+  resolved against the exchange of that branch. A missing path fails the run.
+- `useBehavior` node: selects a behavior already loaded on the station by id. Data only.
+- The exchange is branch-scoped: pass a flow context through `executeSequentialFlow`, so parallel
+  branches from Start can own different calls. Ownership lasts from first reaching the node until the
+  run ends.
+
+Runtime contract:
+
+| Case                               | Behavior                                                                                      |
+| ---------------------------------- | --------------------------------------------------------------------------------------------- |
+| Disconnect before answering        | exchange `abandoned`, `incomingCallCompleted` is `NoResponse`, the run fails like other waits |
+| Run ends or stops unanswered       | CALLERROR `InternalError` with a warning; silence needs `kind: "none"`                        |
+| Answer after reconnect             | not sent, settles `stale`                                                                     |
+| Send failed or dropped             | `callResponse` receives `delivered: false` and fails the run                                  |
+| Time before answering              | never timed out by the simulator; delay nodes and `timeout` bound it                          |
+| `callResponse` without an exchange | fails the run                                                                                 |
+
+### Charger engine (`application/engine/`)
+
+`ChargerEngine` is one per charge point. It owns `ChargerState`, a JSON-serializable record of
+connector status, availability, transaction, firmware, log and reservation state. Every mutation goes
+through `engine.dispatch(event)`, processed in order on one queue. Handlers and `ChargePoint` translate
+to events and do not write state.
+
+`ChargePoint` remains as a facade with its public API. `Connector` fields become read views of the
+engine state. `ConnectorStateMachine` is deleted; `ALLOWED_CONNECTOR_STATUS_TRANSITIONS` stays, and is
+enforced only as a warning so that scenarios can keep forcing transitions. `StateManager` is reduced to
+recording `StateHistory` from engine output. `ChargePointEvents` keep their names and payloads, emitted
+from engine output. Persistence stores engine state.
+
+Default behaviors move one at a time into `application/engine/behaviors/`: firmware, signed firmware,
+diagnostics and logs, reset, availability, reservation, unlock, then transaction and connector status.
+Each move deletes the old code in the same commit. Calculations are called as services.
+
+Resume: state is restored, and `onResume` runs. Async positions are not restored.
+
+### Determinism
+
+Virtual-time mode runs on Bun and browsers against an in-process fake CSMS or a trace replay: one queue,
+a fixed tie-break, seeded streams. Same seed, same effects. Real-time mode (k6, a real CSMS) promises
+only explanation through seed and trace.
+
+### Loading code
+
+- CLI and daemon: `--behavior <file>`, repeatable. The daemon needs `--allow-behavior-code` and refuses
+  the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`.
+- `ocpp-cp-sim behavior build <file>` type-checks and writes one ESM bundle with `--external 'k6/*'`.
+- Web: load a built bundle from a local file through `import(blobUrl)`, in the local runtime only.
+- k6: `export-k6 --behavior <file>` generates a static import. The k6 host implements `ctx` over the
+  existing `ScenarioHost`, OCPP 1.6J only. A behavior whose `requires` the host cannot meet is refused
+  at export. Never degrade silently.
+- A test harness `runBehavior()` drives a behavior on a `VirtualClock` with a fake CSMS, and asserts the
+  same seed gives the same effect hash.
+
+## Out of scope
+
+QuickJS or any sandbox, remote delivery of code, an external-process plugin protocol, a console UI for
+writing behaviors, and retiring `export-k6`'s separate implementation.

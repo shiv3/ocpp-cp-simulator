@@ -129,6 +129,36 @@ synchronous: 2.x must not defer a CALLRESULT by a microtask (#456). Action match
 silently falls back; a SOAP station does get default behaviors, which do not go through the gate in
 this version.
 
+Status (stage A): `infrastructure/transport/inbound/CallExchange.ts` and `InboundCallGate.ts` exist,
+`application/behavior/BehaviorRegistry.ts` is a stub whose `resolve()` always answers `default`, and the
+1.6 and 2.x WebSocket handlers answer every inbound CALL through them. `ResponseEffectQueue.register`
+takes the optional `onDropped(reason)` with `stale | disposed | disconnect`. The 2.x path stays
+synchronous (#456): the gate and `respond()` write in the turn they are called, and only the returned
+promise is asynchronous. The SOAP handler is untouched. Decisions the design left open:
+
+- **Two ways to answer.** `respond()` / `respondError()` observe the answer: the transport gets a
+  settlement hook and the promise says whether the frame was written. `reply()` / `replyError()`
+  do not, and give the transport no hook unless the answer carries an effect. The handlers' default
+  path and the gate use `reply`: a frame dropped with no hook is logged by the network simulation as a
+  discard, and a hook would change that, which rule 4 forbids. `ExchangeSettlement.reason` is a
+  transport drop reason (`socket_closed | disposed | write_failed | queue_overflow`), `stale`
+  (connection changed, or abandoned) or `suppressed`.
+- **Stale and disconnect.** An answer on a connection that changed is not sent, runs no effect, and the
+  CALL is announced `NoResponse` (the 2.x handler already did this; the 1.6 handler used to announce
+  `CallResult` for a frame its socket then dropped, so that event now says `NoResponse`; nothing on
+  the wire differs). When the socket's close transaction finalizes, the gate abandons the exchanges
+  still open, which announces them at that moment instead of when the late answer arrives. A later
+  answer settles `stale` and does not throw; a second answer to an answered or suppressed CALL throws
+  `CallExchangeError`. A write that throws synchronously leaves the exchange open, so the catch
+  block can still answer with a CALLERROR as before.
+- **Ports.** The gate does the sequencing; what differs per version is how a policy or override is
+  looked up. A 1.6 CALL is looked up under its own name with `getInboundCallPolicy` and
+  `consumeResponseOverride` only; a 2.x CALL under its name and its 1.6 aliases, the one-shot
+  consumed under every spelling, and an override on an action whose answer is not `{ status }`
+  (`V201_ACTIONS_WITHOUT_STATUS_RESPONSE`) consumed with a warning while the real handler answers.
+- **Registry input.** `resolve()` gets the action, the payload and the connector id the CALL names
+  (`connectorId`, else `evse.connectorId`).
+
 ### Behavior API (`packages/contracts`, types only)
 
 ```ts

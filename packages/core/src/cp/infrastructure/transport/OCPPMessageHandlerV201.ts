@@ -8,10 +8,7 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "../../domain/types/FirmwareLogStatus";
-import {
-  csmsActionAliases,
-  V201_ACTIONS_WITHOUT_STATUS_RESPONSE,
-} from "../../domain/types/csmsActionNames";
+import { V201_ACTIONS_WITHOUT_STATUS_RESPONSE } from "../../domain/types/csmsActionNames";
 import type {
   BootNotificationRequestV201,
   HeartbeatRequestV201,
@@ -119,15 +116,13 @@ import {
   V21_CERTIFICATE_MAPPING,
   type CertificateWireMapping,
 } from "./v201/certificatesV201";
-import {
-  ResponseEffectQueue,
-  type GenerationToken,
-  type Settlement,
-} from "./network-sim";
+import { ResponseEffectQueue, type GenerationToken } from "./network-sim";
 import {
   PendingMessageQueue,
   type PendingMessage,
 } from "../../domain/transport/PendingMessageQueue";
+import { CallExchange } from "./inbound/CallExchange";
+import { InboundCallGate, portsAliased } from "./inbound/InboundCallGate";
 
 type V201ResponsePayload =
   | BootNotificationResponseV201
@@ -287,6 +282,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _expertCalls = new ExpertCalls(() => false);
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
+  private readonly _gate: InboundCallGate;
   /** #537: the last SignCertificateRequest sent per certificate use, what
    *  the A02.FR.17 back-off resends. */
   private readonly _signRequests = new Map<
@@ -365,13 +361,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       defer: (run) => queueMicrotask(run),
       log: (message) => this._logger.info(message, LogType.OCPP),
     });
+    this._gate = new InboundCallGate({
+      ports: portsAliased(chargePoint, V201_ACTIONS_WITHOUT_STATUS_RESPONSE),
+      registry: chargePoint.behaviors,
+      logPrefix: "[v2.0.1] ",
+      info: (message) => this._logger.info(message, LogType.OCPP),
+      warn: (message) => this._logger.warn(message, LogType.OCPP),
+    });
 
     // Register close-transaction callback for effect flushing
     // Note: OCPPWebSocket.onCloseTransaction stores a SINGLE callback;
     // since one protocol per connection, this is fine.
-    this._webSocket.onCloseTransaction((finalized) =>
-      this._responseEffectQueue.flushAfterCloseFinalization(finalized),
-    );
+    this._webSocket.onCloseTransaction((finalized) => {
+      this._gate.abandonAll();
+      this._responseEffectQueue.flushAfterCloseFinalization(finalized);
+    });
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
 
@@ -406,52 +410,42 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return crypto.randomUUID();
   }
 
-  /** Answer an inbound CSMS CALL with a CALLRESULT, announcing it first
-   *  (#396). */
-  private answerCall(
-    action: string,
+  /** The exchange of one inbound CALL, bound to this socket's generation. */
+  private openExchange(
     messageId: string,
-    response: unknown,
-    gen: GenerationToken,
-    onSettled?: (s: Settlement) => void,
-  ): void {
-    this._chargePoint.notifyIncomingCallCompleted({
-      action,
-      messageId,
-      outcome: "CallResult",
-    });
-    this._webSocket.sendResult(messageId, response, gen, onSettled);
-  }
-
-  /** Leave an inbound CSMS CALL unanswered, announcing it (#396). */
-  private ignoreCall(action: string, messageId: string): void {
-    this._chargePoint.notifyIncomingCallCompleted({
-      action,
-      messageId,
-      outcome: "NoResponse",
-    });
-  }
-
-  /** Answer an inbound CSMS CALL with a CALLERROR, announcing it first
-   *  (#396). */
-  private rejectCall(
     action: string,
-    messageId: string,
-    errorCode: OCPPErrorCode,
-    errorDescription: string,
-    gen: GenerationToken,
-  ): void {
-    this._chargePoint.notifyIncomingCallCompleted({
+    generation: GenerationToken,
+  ): CallExchange {
+    const exchange = new CallExchange({
       action,
       messageId,
-      outcome: "CallError",
-      errorCode,
+      generation,
+      isGenerationCurrent: (g) =>
+        g.gen === this._webSocket.currentGeneration().gen,
+      announce: (completion) =>
+        this._chargePoint.notifyIncomingCallCompleted(completion),
+      writeResult: (payload, gen, onSettled) =>
+        this._webSocket.sendResult(messageId, payload, gen, onSettled),
+      writeError: (errorCode, errorDescription, gen, onSettled) =>
+        this._webSocket.sendError(
+          messageId,
+          {
+            errorCode: errorCode as OCPPErrorCode,
+            errorDescription,
+            errorDetails: {},
+          },
+          gen,
+          onSettled,
+        ),
+      effects: this._responseEffectQueue,
+      warn: (message) =>
+        this._logger.warn(
+          message.startsWith("[v2.0.1]") ? message : `[v2.0.1] ${message}`,
+          LogType.OCPP,
+        ),
     });
-    this._webSocket.sendError(
-      messageId,
-      { errorCode, errorDescription, errorDetails: {} },
-      gen,
-    );
+    this._gate.track(exchange);
+    return exchange;
   }
 
   private send(
@@ -529,120 +523,35 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: unknown,
   ): void {
     if (messageType === OCPPMessageType.CALL) {
-      // #349: the three scenario mechanisms the 1.6 handler consults at this
-      // point — the csmsCallTrigger event, inbound policies and one-shot
-      // response overrides — were never consulted here, so no negative or
-      // wait-for-call scenario was expressible on 2.0.1. Scenarios spell
-      // actions in either version's vocabulary; a 2.0.1 CALL is looked up
-      // under its own name and its 1.6 alias (RequestStartTransaction ←
-      // RemoteStartTransaction, …).
+      // #349: the scenario mechanisms the 1.6 handler consults at this point —
+      // the csmsCallTrigger event, inbound policies and one-shot response
+      // overrides — apply on 2.0.1 too, through the one gate both handlers
+      // share. Scenarios spell actions in either version's vocabulary; a
+      // 2.0.1 CALL is looked up under its own name and its 1.6 alias
+      // (RequestStartTransaction ← RemoteStartTransaction, …).
       // #396: the control plane announces the CALL under its wire name;
-      // every answer below reports itself through answerCall / rejectCall.
-      this._chargePoint.notifyIncomingCall(action, payload, messageId);
-      const aliases = csmsActionAliases(action);
-      const policyName = aliases.find(
-        (name) => this._chargePoint.getInboundCallPolicy(name) !== undefined,
-      );
-      const inboundPolicy =
-        policyName === undefined
-          ? undefined
-          : this._chargePoint.getInboundCallPolicy(policyName);
-      if (inboundPolicy) {
-        const gen = this._webSocket.currentGeneration();
-        if (inboundPolicy.kind === "callerror") {
-          this._logger.warn(
-            `[v2.0.1] Inbound policy: replied CallError(${inboundPolicy.errorCode}) to ${action}`,
-            LogType.OCPP,
-          );
-          this.rejectCall(
-            action,
-            messageId,
-            inboundPolicy.errorCode as OCPPErrorCode,
-            inboundPolicy.errorDescription,
-            gen,
-          );
-          return;
-        }
-        this._logger.warn(
-          `[v2.0.1] Inbound policy: ignored ${action} (no response)`,
-          LogType.OCPP,
-        );
-        this.ignoreCall(action, messageId);
-        return;
-      }
-      const armedUnder = aliases.find((name) =>
-        this._chargePoint.hasResponseOverride(name),
-      );
-      if (armedUnder !== undefined) {
-        // One CALL consumes the one-shot under every spelling it was armed
-        // with, so a copy left under the other name cannot fire on a later,
-        // unrelated call.
-        const overrideStatus =
-          this._chargePoint.consumeResponseOverride(armedUnder);
-        for (const name of aliases)
-          this._chargePoint.clearResponseOverride(name);
-        if (V201_ACTIONS_WITHOUT_STATUS_RESPONSE.has(action)) {
-          // SetVariablesResponse / GetVariablesResponse are not `{ status }`;
-          // a canned status would be a schema-invalid answer. Documented
-          // caveat, enforced here: the real handler answers instead.
-          this._logger.warn(
-            `[v2.0.1] Response override armed as ${armedUnder} cannot be honoured for ${action} (its response is not { status }); answering normally`,
-            LogType.OCPP,
-          );
-        } else if (overrideStatus !== null) {
-          this._logger.info(
-            `[v2.0.1] Response override: ${action} → { status: "${overrideStatus}" }`,
-            LogType.OCPP,
-          );
-          // Same one call site as the 1.6 handler: the caller chose the
-          // status, and every other action the responseOverride node lists
-          // answers `{ status }` on 2.0.1 too.
-          this.answerCall(
-            action,
-            messageId,
-            { status: overrideStatus },
-            this._webSocket.currentGeneration(),
-          );
-          return;
-        }
-      }
+      // every answer below reports itself through the exchange.
+      const gen = this._webSocket.currentGeneration();
+      const exchange = this.openExchange(messageId, action, gen);
+      if (this._gate.admit(exchange, payload).kind === "settled") return;
 
       const entry = this._inbound.get(action);
       if (entry) {
         if (!entry.validate(payload)) {
-          const gen = this._webSocket.currentGeneration();
-          this.rejectCall(
-            action,
-            messageId,
-            "FormatViolation" as OCPPErrorCode,
-            `Invalid ${action} payload`,
-            gen,
-          );
+          exchange.replyError("FormatViolation", `Invalid ${action} payload`);
           return;
         }
 
-        // Capture generation before handler execution
-        const gen = this._webSocket.currentGeneration();
         const ctx: V201InboundContext = {
           chargePoint: this._chargePoint,
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
           certificateSigning: this._certificateSigning,
         };
-        // An async answer that settles after the socket generation changed
-        // cannot reach the CSMS (`sendResult` / `sendError` drop it): report
-        // the CALL as unanswered and run no afterResult.
-        const droppedAfterReconnect = (): boolean => {
-          if (this._webSocket.currentGeneration().gen === gen.gen) return false;
-          this._logger.warn(
-            `[v2.0.1] ${action} answered after the connection changed; not sent`,
-            LogType.OCPP,
-          );
-          this.ignoreCall(action, messageId);
-          return true;
-        };
         const fail = (error: unknown): void => {
-          if (droppedAfterReconnect()) return;
+          // The exchange refuses an answer on a connection that changed (and
+          // runs no afterResult); that case needs no CALLERROR.
+          if (exchange.state !== "open") return;
           // Same answer as the 1.6J handler: a failing handler is the
           // station's fault, so the CSMS gets InternalError instead of
           // waiting for its timeout (#399).
@@ -650,26 +559,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             `[v2.0.1] Error handling ${action}: ${error}`,
             LogType.OCPP,
           );
-          this.rejectCall(
-            action,
-            messageId,
-            "InternalError" as OCPPErrorCode,
+          exchange.replyError(
+            "InternalError",
             // OCPP-J 2.0.1 / 2.1 Part 4 §4.2.3: ErrorDescription is
             // string[255].
             (error instanceof Error ? error.message : String(error)).slice(
               0,
               255,
             ),
-            gen,
           );
         };
         const finish = ({ response, afterResult }: V201HandlerResult): void => {
-          if (droppedAfterReconnect()) return;
-          // Register effect with queue if present, get settlement callback
-          const onSettled = afterResult
-            ? this._responseEffectQueue.register(gen, afterResult)
-            : undefined;
-          this.answerCall(action, messageId, response, gen, onSettled);
+          exchange.reply(response, {
+            ...(afterResult ? { effect: afterResult } : {}),
+          });
         };
         let handled: ReturnType<typeof entry.handle>;
         try {
@@ -697,18 +600,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         return;
       }
 
-      const gen = this._webSocket.currentGeneration();
       this._logger.warn(
         `[v2.0.1] Unsupported CSMS action ${action}`,
         LogType.OCPP,
       );
-      this.rejectCall(
-        action,
-        messageId,
-        "NotImplemented" as OCPPErrorCode,
-        "This action is not supported",
-        gen,
-      );
+      exchange.replyError("NotImplemented", "This action is not supported");
     } else if (messageType === OCPPMessageType.CALLRESULT) {
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {

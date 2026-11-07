@@ -146,6 +146,7 @@ import {
   SupervisionUrlPool,
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
+import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
@@ -279,6 +280,7 @@ export class ChargePoint {
   private readonly _webSocket: OCPPWebSocket | null;
   private readonly _clock: SimClock;
   private readonly _rngSource: RngSource;
+  private readonly _behaviors = new BehaviorRegistry();
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
@@ -702,6 +704,11 @@ export class ChargePoint {
   /** The clock every timer and timestamp of this charge point reads. */
   get clock(): SimClock {
     return this._clock;
+  }
+
+  /** Rules that may take an inbound CSMS CALL over from the default path. */
+  get behaviors(): BehaviorRegistry {
+    return this._behaviors;
   }
 
   /** The random stream `name` of this charge point (see `RngStreams`). */

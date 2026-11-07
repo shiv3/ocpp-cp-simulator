@@ -182,6 +182,16 @@ in both directions in arrival order, normalizes it, and compares it with a commi
   `GOLDEN_RECORD=1`, an existing one never; a changed transcript is a failure to explain.
   `GOLDEN_PRINT=<name part>` prints transcripts while developing a case.
 
+## Inbound call handling
+
+The shared inbound path is covered at three levels: `CallExchange.test.ts` (single answer, a settlement
+on every drop path, stale generation, abandon on disconnect, no microtask between the answer and the
+write), `InboundCallGate.test.ts` (order of policy, override and registry; 2.x spellings) and
+`ResponseEffectQueue.onDropped.test.ts` under `packages/core/src/cp/infrastructure/transport/`, plus
+`OCPPMessageHandler.exchange.test.ts` for the 1.6 handler end to end. The 2.x synchronous CALLRESULT
+(#456) stays pinned by `OCPPMessageHandlerV201.asyncDispatch.test.ts`, and the bytes by the
+[golden wire test](#golden-wire-test).
+
 ## Virtual-time determinism (V1)
 
 `packages/core/src/cp/shared/__tests__/virtualTime.determinism.bun.test.ts` is the Bun check that

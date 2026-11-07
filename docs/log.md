@@ -2293,3 +2293,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | V1: async behavior on a VirtualClock is deterministic on Bun
 
 - New `virtualTime.determinism.bun.test.ts`: 1,000 chargers, same seed same hash, another seed another, six virtual hours in about 6 s. [Charger engine design](analyses/charger-engine.md#determinism) records the result and its limits; [Testing strategy](analyses/testing-strategy.md#virtual-time-determinism-v1) lists the test.
+
+## [2026-11-07] ingest | CallExchange, InboundCallGate and ResponseEffectQueue onDropped (charger engine stage A)
+
+- The 1.6 and 2.x handlers answer every inbound CALL through one `CallExchange` and one `InboundCallGate` (inbound policy, response override, then a stub `BehaviorRegistry.resolve()`); the duplicated blocks are gone, the 2.x CALLRESULT stays synchronous (#456) and the wire is unchanged. `ResponseEffectQueue.register` takes an optional `onDropped`. [Charger engine design](analyses/charger-engine.md#callexchange-and-inboundcallgate) records the decisions, [Testing strategy](analyses/testing-strategy.md#inbound-call-handling) the tests.

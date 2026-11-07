@@ -275,11 +275,16 @@ export class Connector {
     socAwaitsNextTransaction: boolean;
     lastAutoStartedScenarioKey: string | null;
   } {
+    // The engine-owned part is read from the connector's record, which is
+    // the charger engine's state, in one go.
+    const record = this.record;
     return {
-      status: this.status,
-      availability: this.availability,
-      scheduledAvailability: this.scheduledAvailability,
-      transaction: this.txTarget ? { ...this.txTarget } : null,
+      status: record.status,
+      availability: record.availability,
+      scheduledAvailability: record.scheduledAvailability,
+      transaction: record.transaction
+        ? transactionOfRecord(record.transaction)
+        : null,
       meterValueWh: this.meterValueWh,
       socPercent: this.socPercent,
       socAwaitsNextTransaction: this.socAwaitsNextTransaction,

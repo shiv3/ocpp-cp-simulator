@@ -3147,6 +3147,9 @@ export class CLIChargePointService {
       }
       restored += 1;
     });
+    // The connector records are back in the charger engine's state: let the
+    // loaded behaviors know (`onResume`). Async positions are not restored.
+    this._chargePoint.engine.resume();
     return restored;
   }
 

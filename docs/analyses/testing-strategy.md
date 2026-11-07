@@ -182,6 +182,14 @@ in both directions in arrival order, normalizes it, and compares it with a commi
   `GOLDEN_RECORD=1`, an existing one never; a changed transcript is a failure to explain.
   `GOLDEN_PRINT=<name part>` prints transcripts while developing a case.
 
+## Virtual-time determinism (V1)
+
+`packages/core/src/cp/shared/__tests__/virtualTime.determinism.bun.test.ts` is the Bun check that
+async behavior on a `VirtualClock` replays: 1,000 simulated chargers run twice with one seed (same
+effect hash), once with another (different hash), with a control on unseeded streams and a pinned
+hash for a small fleet. The result and its limits are in the
+[Charger engine design](charger-engine.md#determinism).
+
 ## Does anything actually launch the desktop daemon?
 
 Yes, since #319 — and the answer used to be no, which is why the

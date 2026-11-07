@@ -241,6 +241,24 @@ Virtual-time mode runs on Bun and browsers against an in-process fake CSMS or a 
 a fixed tie-break, seeded streams. Same seed, same effects. Real-time mode (k6, a real CSMS) promises
 only explanation through seed and trace.
 
+**V1 (verified on Bun 1.3.14).** `packages/core/src/cp/shared/__tests__/virtualTime.determinism.bun.test.ts`
+runs 1,000 simulated chargers with behavior-shaped `async` loops on a `VirtualClock`: random sleeps,
+two steps raced against a deadline (`until`), periodic timers, a 40-deep promise chain,
+`queueMicrotask`, `try`/`finally`. The ordered effects of the whole fleet are hashed.
+
+- The same seed gives an identical hash on two runs, and a different seed a different one. A control
+  run on unseeded streams gives two different hashes, so the hash is not blind. A pinned hash of a
+  25-charger run holds across processes.
+- Adding a charger to a run leaves the effects of every other charger unchanged (per-charger hashes).
+- Six virtual hours of 1,000 chargers (about 977,000 timers) run in about 6 s of real time.
+
+So async functions are deterministic on Bun as long as every wait goes through the clock and every
+random draw through a stream; the macrotask hop between two timers is what settles the continuations.
+The design stands; no fallback is needed. The condition is the one stated above: a virtual-time run
+has no real I/O of its own process in flight (the in-process fake CSMS must itself be driven from
+virtual timers or settle synchronously). Not verified here: browsers (the same `setTimeout(0)` fallback
+is used where `setImmediate` is absent) and k6.
+
 ### Loading code
 
 - CLI and daemon: `--behavior <file>`, repeatable. The daemon needs `--allow-behavior-code` and refuses

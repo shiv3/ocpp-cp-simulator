@@ -2289,3 +2289,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `packages/core/src/cp/shared/clock.ts` (`SimClock`, `RealClock`, `VirtualClock`) and `rng.ts` (`RngStreams`); `ChargePoint` and everything it builds under `domain/` and `application/` read time, timers, random numbers and ids through them, defaulting to the platform clock. [Charger engine design](analyses/charger-engine.md#clock-and-random-packagescoresrccpsharedclockts-rngts) records the decisions.
 - New `scripts/check-direct-time.ts`, run by `bun run check:boundaries`, with a shrinking exemption list. [Overview](overview.md#source-layout-and-package-boundaries).
+
+## [2026-11-07] ingest | V1: async behavior on a VirtualClock is deterministic on Bun
+
+- New `virtualTime.determinism.bun.test.ts`: 1,000 chargers, same seed same hash, another seed another, six virtual hours in about 6 s. [Charger engine design](analyses/charger-engine.md#determinism) records the result and its limits; [Testing strategy](analyses/testing-strategy.md#virtual-time-determinism-v1) lists the test.

@@ -2309,3 +2309,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `diagnostics.ts` and `logs.ts` do the same for `GetDiagnostics` and `GetLog` (1.6 trains, 2.x ack-only). A log sequence that was still waiting when the connection closed used to send its `Uploaded` on a dead socket after two seconds; it now stops with the connection, like the firmware trains.
 - `reset.ts` does the same for `Reset` on both versions; the 1.6 `ResetHandler` and the 2.x `handleResetV201` only translate.
 - `availability.ts` does the same for `ChangeAvailability` (1.6 applies the change before the answer, 2.x after it, as before).
+- `reservation.ts` does the same for `ReserveNow` and `CancelReservation`. Hand-written charge point stubs in tests get a real engine from `packages/core/src/test/withEngine.ts`.

@@ -4,6 +4,7 @@ import { availabilityBehavior } from "./availability";
 import { diagnosticsBehavior } from "./diagnostics";
 import { firmwareBehavior } from "./firmware";
 import { logsBehavior } from "./logs";
+import { reservationBehavior } from "./reservation";
 import { resetBehavior } from "./reset";
 import { signedFirmwareBehavior } from "./signedFirmware";
 
@@ -24,4 +25,5 @@ export function registerDefaultBehaviors(
   engine.registerDefault(logsBehavior(cp));
   engine.registerDefault(resetBehavior(cp));
   engine.registerDefault(availabilityBehavior(cp));
+  engine.registerDefault(reservationBehavior(cp));
 }

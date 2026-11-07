@@ -2,11 +2,9 @@
 // reservations have protocol-visible effects here; reset/unlock side effects
 // are deferred to a later fidelity phase.
 import type {
-  CancelReservationRequestV201,
   CancelReservationResponseV201,
   ChangeAvailabilityResponseV201,
   ClearCacheResponseV201,
-  ReserveNowRequestV201,
   ReserveNowResponseV201,
   ResetResponseV201,
   TriggerMessageRequestV201,
@@ -18,7 +16,6 @@ import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
-import { OCPPStatus, ReservationStatus } from "../../../domain/types/OcppTypes";
 import { LogType } from "../../../shared/Logger";
 
 /**
@@ -206,6 +203,11 @@ export const handleClearCacheV201 = (
   return { response: { status } satisfies ClearCacheResponseV201 };
 };
 
+/**
+ * H01 ReserveNow.req: translation only. The `default.reservation` behavior of
+ * the charger engine decides and reserves the connector once the answer
+ * settled (`application/engine/behaviors/reservation.ts`).
+ */
 export const handleReserveNowV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -215,58 +217,14 @@ export const handleReserveNowV201 = (
       response: { status: "Accepted" } satisfies ReserveNowResponseV201,
     };
   }
-
-  const req = payload as ReserveNowRequestV201;
-  const connectorId = req.evseId ?? 1;
-  const connector = ctx.chargePoint.getConnector(connectorId);
-
-  if (!connector) {
-    return {
-      response: { status: "Rejected" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  if (connector.status === OCPPStatus.Faulted) {
-    return {
-      response: { status: "Faulted" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  if (connector.status === OCPPStatus.Charging || connector.transaction) {
-    return {
-      response: { status: "Occupied" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  if (connector.availability !== "Operative") {
-    return {
-      response: { status: "Unavailable" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  const status = ctx.chargePoint.reservationManager.createReservation(
-    connectorId,
-    new Date(req.expiryDateTime),
-    req.idToken.idToken,
-    req.groupIdToken?.idToken,
-    req.id,
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "ReserveNow",
+    payload,
   );
-
-  return {
-    response: {
-      status: status as ReserveNowResponseV201["status"],
-    } satisfies ReserveNowResponseV201,
-    afterResult:
-      status === ReservationStatus.Accepted
-        ? () =>
-            ctx.chargePoint.updateConnectorStatus(
-              connectorId,
-              OCPPStatus.Reserved,
-            )
-        : undefined,
-  };
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };
 
+/** H02 CancelReservation.req: translation only, like {@link handleReserveNowV201}. */
 export const handleCancelReservationV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -276,28 +234,9 @@ export const handleCancelReservationV201 = (
       response: { status: "Accepted" } satisfies CancelReservationResponseV201,
     };
   }
-
-  const req = payload as CancelReservationRequestV201;
-  const mgr = ctx.chargePoint.reservationManager;
-  const reservation = mgr.getReservation(req.reservationId);
-  const cancelled = mgr.cancelReservation(req.reservationId);
-
-  if (cancelled && reservation) {
-    return {
-      response: { status: "Accepted" } satisfies CancelReservationResponseV201,
-      afterResult: () => {
-        const connector = ctx.chargePoint.getConnector(reservation.connectorId);
-        if (connector && connector.status === OCPPStatus.Reserved) {
-          ctx.chargePoint.updateConnectorStatus(
-            reservation.connectorId,
-            OCPPStatus.Available,
-          );
-        }
-      },
-    };
-  }
-
-  return {
-    response: { status: "Rejected" } satisfies CancelReservationResponseV201,
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "CancelReservation",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };

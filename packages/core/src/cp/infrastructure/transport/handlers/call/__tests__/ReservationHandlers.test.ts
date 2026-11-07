@@ -5,6 +5,7 @@ import {
 } from "../ReservationHandlers";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { withEngine } from "../../../../../../test/withEngine";
 import {
   ReservationStatus,
   CancelReservationStatus,
@@ -45,11 +46,11 @@ function buildContext(opts: {
     cancelReservation: vi.fn(),
     ...opts.reservationManager,
   };
-  const chargePoint = {
+  const chargePoint = withEngine({
     getConnector: vi.fn(() => opts.connector),
     reservationManager,
     updateConnectorStatus,
-  };
+  });
   const ctx = {
     chargePoint: chargePoint as unknown as ChargePoint,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

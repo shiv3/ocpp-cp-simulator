@@ -30,7 +30,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # OCPP versions and transports
@@ -428,6 +428,24 @@ error and the message is not sent again. On 1.6S that deviates from the OCPP-S
 1.6 errata sheet (3.2), which has a Charge Point retry transaction-related
 messages after a Fault
 ([#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585)).
+
+## OCPP 2.x Reset OnIdle
+
+For OCPP 2.0.1 and 2.1, `Reset` with `type: OnIdle` is answered `Accepted` and
+reboots after the CALLRESULT when its target is already idle. If a targeted
+connector has a running transaction, it is answered `Scheduled`; the station
+queues that reset and boots when the last transaction in that reset's scope
+ends. A station-wide reset waits for all connectors, while an EVSE-scoped reset
+waits only for that EVSE. Multiple scoped resets remain independent, and an
+Immediate reset supersedes only pending resets in the scope it resets.
+
+The decision uses whether a transaction is actually running, not whether a
+stopped transaction object is still attached to the connector. The queue is
+also rechecked after adding a scheduled reset and after connector removal, so a
+transaction ending while the response is in flight cannot strand the reset.
+An `Inoperative` availability change scheduled during a transaction remains
+`Unavailable` after the accepted reboot and continues to reject new local
+transaction starts.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

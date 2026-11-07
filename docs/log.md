@@ -2279,3 +2279,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The 18-file cycle through `Configuration.ts` and the 2-file cycle through the handlers barrel are gone; no cycle of static value imports is left under `packages/` and `apps/`.
 - `bun run check:boundaries` now fails on such a cycle, and ESLint enforces `consistent-type-imports`. [Overview](overview.md) lists what counts as a cycle edge. [GitHub issues](sources/github-issues.md): #570.
+
+## [2026-11-07] fix | OCPP 2.x Reset OnIdle follow-ups (#635)
+
+- Reset OnIdle now checks for running transactions rather than retained stopped transaction objects, rechecks immediately after scheduling, and is reevaluated when a connector is removed. Scoped Immediate resets cancel only the pending reset in their scope; other EVSE resets remain queued. An Inoperative connector stays Unavailable after the accepted reboot. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).

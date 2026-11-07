@@ -285,6 +285,8 @@ export class ChargePoint {
   private readonly _timelineProjector: OperationalTimelineProjector;
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
+  /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
+  private _pendingResetsOnIdle: { evseId?: number }[] = [];
   private readonly _localAuthListManager: LocalAuthListManager;
   private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
@@ -2285,7 +2287,11 @@ export class ChargePoint {
       // (See `restoreConnectorRuntimeFromDatabase` for the persisted
       // shape and `Connector.restoreRuntimeSnapshot` for how the
       // private fields are restored ahead of this StatusNotification.)
-      if (connector.autoResetToAvailable && connector.transaction === null) {
+      if (
+        connector.availability !== "Inoperative" &&
+        connector.autoResetToAvailable &&
+        !connector.hasRunningTransaction
+      ) {
         this.updateConnectorStatus(connector.id, OCPPStatus.Available);
         return;
       }
@@ -2764,6 +2770,55 @@ export class ChargePoint {
       this.persistAvailability();
     }
     connector.scheduledAvailability = null;
+
+    this.runPendingResetOnIdle();
+  }
+
+  /**
+   * #597: record a Reset OnIdle that was answered `Scheduled`. `evseId`
+   * undefined targets every connector. It runs when the last targeted
+   * transaction ends (see {@link runPendingResetOnIdle}).
+   */
+  scheduleResetOnIdle(evseId?: number): void {
+    this._pendingResetsOnIdle.push({ evseId });
+    // The transaction can end after the handler decided to answer Scheduled
+    // but before this callback runs. Recheck after enqueueing to avoid leaving
+    // an already-runnable reset stranded until a later transaction ends.
+    this.runPendingResetOnIdle();
+  }
+
+  /**
+   * #597: drop every pending Reset OnIdle. An Immediate reset reboots the
+   * station now, which already satisfies them; keeping them would boot
+   * again on a later transaction end.
+   */
+  cancelPendingResetsOnIdle(evseId?: number): void {
+    this._pendingResetsOnIdle =
+      evseId === undefined
+        ? []
+        : this._pendingResetsOnIdle.filter(
+            (pending) => pending.evseId !== evseId,
+          );
+  }
+
+  /**
+   * #597: boot again once a pending reset has no targeted connector left
+   * with a transaction. Called from {@link stopTransaction}. Each pending
+   * reset stays queued while its targets are still busy; the station
+   * boots once if any of them became runnable.
+   */
+  private runPendingResetOnIdle(): void {
+    if (this._pendingResetsOnIdle.length === 0) return;
+    const isBusy = (pending: { evseId?: number }): boolean =>
+      [...this._connectors.values()].some(
+        (connector) =>
+          (pending.evseId === undefined || connector.id === pending.evseId) &&
+          connector.hasRunningTransaction,
+      );
+    const remaining = this._pendingResetsOnIdle.filter(isBusy);
+    if (remaining.length === this._pendingResetsOnIdle.length) return;
+    this._pendingResetsOnIdle = remaining;
+    this.boot();
   }
 
   /**
@@ -2991,6 +3046,10 @@ export class ChargePoint {
     const removed = this._connectors.delete(connectorId);
     if (removed) {
       this._events.emit("connectorRemoved", { connectorId });
+      // Removing a busy connector may make a station-wide OnIdle reset
+      // runnable. runPendingResetOnIdle still waits if any remaining target
+      // has a running transaction.
+      this.runPendingResetOnIdle();
     }
     return removed;
   }

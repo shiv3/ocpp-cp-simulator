@@ -1,7 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { ScenarioMode } from "@ocpp-cp-sim/contracts/scenario";
-import { OCPPStatus } from "../../domain/types/OcppTypes";
-import { CurvePoint } from "../../domain/connector/MeterValueCurve";
+import type { OCPPStatus } from "../../domain/types/OcppTypes";
+import type { CurvePoint } from "../../domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../domain/connector/EVSettings";
 import type {
   TransactionStartTriggerReason,

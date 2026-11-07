@@ -1,4 +1,4 @@
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   SignedUpdateFirmwareRequestV16,
   SignedUpdateFirmwareResponseV16,

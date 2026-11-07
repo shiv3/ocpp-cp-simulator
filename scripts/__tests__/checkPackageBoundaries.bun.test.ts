@@ -8,7 +8,9 @@ import {
   REPO_ROOT,
   checkBoundaries,
   extractImports,
+  formatReport,
   hasFailures,
+  jsonSummary,
   loadConfig,
   loadSnapshot,
   readAliases,
@@ -50,6 +52,10 @@ describe("package boundaries of the real tree (#578)", () => {
       manifests: [],
     });
     expect(hasFailures(report)).toBe(false);
+  });
+
+  it("has no import cycle (#570)", () => {
+    expect(report.cycles).toEqual([]);
   });
 
   it("checked a plausible number of files and imports", () => {
@@ -201,6 +207,116 @@ describe("package boundaries on synthetic input", () => {
       ]),
     ).toThrow(/shadowed/);
     expect(() => validatePackageMap(PACKAGE_MAP)).not.toThrow();
+  });
+});
+
+describe("import cycles (#570)", () => {
+  const A = "packages/core/src/cp/a.ts";
+  const B = "packages/core/src/cp/b.ts";
+  const C = "packages/core/src/cp/c.ts";
+  const cyclesOf = (files: Record<string, string>) =>
+    checkBoundaries(snapshot(files)).cycles;
+
+  it("reports a cycle of value imports and fails the run", () => {
+    const r = checkBoundaries(
+      snapshot({
+        [A]: 'import { b } from "./b";\nexport const a = b;',
+        [B]: 'import { a } from "./a";\nexport const b = a;',
+      }),
+    );
+    expect(r.cycles).toEqual([[A, B]]);
+    expect(hasFailures(r)).toBe(true);
+    expect(formatReport(r)).toContain(
+      `  cycle of 2 file(s):\n    ${A}\n    ${B}`,
+    );
+    expect(jsonSummary(r)).toMatchObject({ cycles: [[A, B]] });
+  });
+
+  it("reports a cycle through a barrel's re-export", () => {
+    expect(
+      cyclesOf({
+        [A]: 'export * from "./b";',
+        [B]: 'import { c } from "./a";\nexport const b = c;',
+      }),
+    ).toEqual([[A, B]]);
+  });
+
+  it("reports a cycle closed by a side-effect import", () => {
+    expect(
+      cyclesOf({
+        [A]: 'import "./b";',
+        [B]: 'import { a } from "./a";\nexport const b = a;',
+      }),
+    ).toEqual([[A, B]]);
+  });
+
+  it("reports a file that imports itself", () => {
+    expect(cyclesOf({ [A]: 'export * from "./a";' })).toEqual([[A]]);
+  });
+
+  it("reports one group for every file of a longer cycle, and separate groups apart", () => {
+    const D = "packages/core/src/cp/d.ts";
+    const E = "packages/core/src/cp/e.ts";
+    expect(
+      cyclesOf({
+        [A]: 'import "./b";',
+        [B]: 'import "./c";',
+        [C]: 'import "./a";',
+        [D]: 'import "./e";',
+        [E]: 'import "./d";',
+      }),
+    ).toEqual([
+      [A, B, C],
+      [D, E],
+    ]);
+  });
+
+  it.each([
+    ["import type", 'import type { T } from "./a";'],
+    ["inline type imports only", 'import { type T } from "./a";'],
+    ["export type ... from", 'export type { T } from "./a";'],
+    ["an import() type", 'export type T = import("./a").T;'],
+    ["a dynamic import", 'export const load = () => import("./a");'],
+  ])("does not count an edge made of %s", (_name, closingEdge) => {
+    expect(
+      cyclesOf({
+        [A]: 'import { b } from "./b";\nexport type T = number;\nexport const a = b;',
+        [B]: closingEdge,
+      }),
+    ).toEqual([]);
+  });
+
+  it("counts a declaration that mixes a type and a value", () => {
+    expect(
+      cyclesOf({
+        [A]: 'import { b } from "./b";\nexport type T = number;\nexport const a = b;',
+        [B]: 'import { a, type T } from "./a";\nexport const b: T = a;',
+      }),
+    ).toEqual([[A, B]]);
+  });
+
+  it("does not report a diamond", () => {
+    const D = "packages/core/src/cp/d.ts";
+    expect(
+      cyclesOf({
+        [A]: 'import "./b";\nimport "./c";',
+        [B]: 'import "./d";',
+        [C]: 'import "./d";',
+        [D]: "export const d = 1;",
+      }),
+    ).toEqual([]);
+  });
+
+  it("finds a cycle across packages", () => {
+    const contracts = "packages/contracts/src/x.ts";
+    const r = checkBoundaries(
+      snapshot({
+        [A]: 'import { x } from "@ocpp-cp-sim/contracts/x";\nexport const a = x;',
+        [contracts]:
+          'import { a } from "@ocpp-cp-sim/core/cp/a";\nexport const x = a;',
+      }),
+    );
+    expect(r.cycles).toEqual([[contracts, A]]);
   });
 });
 

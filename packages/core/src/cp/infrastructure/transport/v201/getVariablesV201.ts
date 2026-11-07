@@ -2,7 +2,7 @@ import type {
   GetVariablesRequestV201,
   GetVariablesResponseV201,
 } from "@ocpp-cp-sim/ocpp/index";
-import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
+import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import {
   resolveDeviceModelVariable,

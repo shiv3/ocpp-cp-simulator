@@ -1,4 +1,4 @@
-import { ScenarioDefinition } from "../cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "../cp/application/scenario/ScenarioTypes";
 
 import essentialCpBehaviorJson from "./scenarios/essential-cp-behavior.json";
 import fullChargingCycleJson from "./scenarios/full-charging-cycle.json";

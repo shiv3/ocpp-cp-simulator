@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
-import {
+import type {
   ScenarioDefinition,
   ScenarioExecutorCallbacks,
-  ScenarioNodeType,
 } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 import { EventEmitter } from "../../../shared/EventEmitter";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../../domain/connector/Connector";

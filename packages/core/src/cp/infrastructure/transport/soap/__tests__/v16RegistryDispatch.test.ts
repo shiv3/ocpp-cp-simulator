@@ -9,7 +9,7 @@ import {
 } from "../v16RegistryDispatch";
 import { OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
 import type { SoapParsedValue } from "../soapEnvelope";
-import { Logger } from "../../../../shared/Logger";
+import type { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
 type TestSchema = Record<string, unknown>;

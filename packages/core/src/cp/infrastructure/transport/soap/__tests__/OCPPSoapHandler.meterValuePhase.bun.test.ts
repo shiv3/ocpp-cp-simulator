@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { OCPPSoapHandler } from "../OCPPSoapHandler";
 import { OCPP12_DIALECT, OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
-import { Logger } from "../../../../shared/Logger";
+import type { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
 /**

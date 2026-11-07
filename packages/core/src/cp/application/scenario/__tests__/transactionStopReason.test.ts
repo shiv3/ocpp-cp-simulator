@@ -4,7 +4,8 @@ import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
-import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
+import type { ScenarioDefinition } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 
 function timeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;

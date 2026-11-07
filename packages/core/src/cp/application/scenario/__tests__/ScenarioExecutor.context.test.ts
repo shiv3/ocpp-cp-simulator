@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
-import { ScenarioDefinition, ScenarioNodeType } from "../ScenarioTypes";
+import type { ScenarioDefinition } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 
 function buildCompletingScenario(): ScenarioDefinition {
   return {

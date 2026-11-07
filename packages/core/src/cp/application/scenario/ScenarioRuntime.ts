@@ -1,7 +1,7 @@
 import { cancellablePromise, type CancellableWait } from "./cancellable";
 import { csmsActionMatches } from "../../domain/types/csmsActionNames";
-import { ChargePoint } from "../../domain/charge-point/ChargePoint";
-import { Connector } from "../../domain/connector/Connector";
+import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { Connector } from "../../domain/connector/Connector";
 import { OCPPStatus, ReservationStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../shared/Logger";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";

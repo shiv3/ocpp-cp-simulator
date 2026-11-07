@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type {
   HandlerOutcome,

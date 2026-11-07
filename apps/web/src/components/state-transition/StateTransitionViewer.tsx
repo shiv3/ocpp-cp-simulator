@@ -1,12 +1,10 @@
 import React, { useMemo, useEffect, useRef, useState } from "react";
+import type { Node, Edge, NodeTypes } from "@xyflow/react";
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
-  Node,
-  Edge,
-  NodeTypes,
   ReactFlowProvider,
   useReactFlow,
 } from "@xyflow/react";

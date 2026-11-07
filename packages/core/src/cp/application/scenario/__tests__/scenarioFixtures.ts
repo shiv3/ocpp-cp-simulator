@@ -1,9 +1,9 @@
-import {
+import type {
   ScenarioDefinition,
   ScenarioNode,
   ScenarioNodeData,
-  ScenarioNodeType,
 } from "../ScenarioTypes";
+import { ScenarioNodeType } from "../ScenarioTypes";
 
 /** A graph node at the origin — position is irrelevant to the executor. */
 export function node(

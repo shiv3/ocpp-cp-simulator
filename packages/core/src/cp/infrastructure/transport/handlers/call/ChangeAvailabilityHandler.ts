@@ -1,13 +1,11 @@
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   ChangeAvailabilityRequestV16,
   ChangeAvailabilityResponseV16,
 } from "@ocpp-cp-sim/ocpp/index";
 import { LogType } from "../../../../shared/Logger";
-import {
-  OCPPAvailability,
-  OCPPStatus,
-} from "../../../../domain/types/OcppTypes";
+import type { OCPPAvailability } from "../../../../domain/types/OcppTypes";
+import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 
 /**
  * Handles ChangeAvailability.req per OCPP 1.6 §5.2:

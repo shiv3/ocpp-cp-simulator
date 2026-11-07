@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { OCPPWebSocket } from "../OCPPWebSocket";
-import { Logger } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
 
 // #406: WebSocketPingInterval drives client-side ping frames.
 

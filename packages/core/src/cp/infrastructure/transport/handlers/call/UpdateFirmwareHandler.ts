@@ -1,4 +1,4 @@
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import type {
   UpdateFirmwareRequestV16,

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
+import type { ScenarioDefinition } from "../ScenarioTypes";
 import {
-  ScenarioDefinition,
   type ScenarioExecutorCallbacks,
   ScenarioNodeType,
   type MeterValueNodeData,

@@ -20,11 +20,8 @@ import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
-import {
-  OCPPAvailability,
-  OCPPStatus,
-  ReservationStatus,
-} from "../../../domain/types/OcppTypes";
+import type { OCPPAvailability } from "../../../domain/types/OcppTypes";
+import { OCPPStatus, ReservationStatus } from "../../../domain/types/OcppTypes";
 import { LogType } from "../../../shared/Logger";
 
 export const handleResetV201 = (

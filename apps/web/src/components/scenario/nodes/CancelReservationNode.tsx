@@ -1,6 +1,7 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
-import { CancelReservationNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node } from "@xyflow/react";
+import type { CancelReservationNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
 const CancelReservationNode: React.FC<
   NodeProps<Node<CancelReservationNodeData>>

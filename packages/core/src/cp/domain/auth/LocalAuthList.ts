@@ -1,4 +1,5 @@
-import { Logger, LogType } from "../../shared/Logger";
+import type { Logger } from "../../shared/Logger";
+import { LogType } from "../../shared/Logger";
 import { idTokenKey } from "./idTokenKey";
 
 /**

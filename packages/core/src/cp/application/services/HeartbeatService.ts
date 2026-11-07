@@ -1,4 +1,4 @@
-import { Logger } from "../../shared/Logger";
+import type { Logger } from "../../shared/Logger";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 export interface HeartbeatServiceEvents {

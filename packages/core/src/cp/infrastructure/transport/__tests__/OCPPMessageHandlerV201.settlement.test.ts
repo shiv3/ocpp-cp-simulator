@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
-import { Logger, LogType } from "../../../shared/Logger";
+import type { Logger } from "../../../shared/Logger";
+import { LogType } from "../../../shared/Logger";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
 import type { Settlement, GenerationToken } from "../network-sim";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";

@@ -1,4 +1,4 @@
-import { Server as SocketIoServer } from "socket.io";
+import type { Server as SocketIoServer } from "socket.io";
 
 import type { CLIChargePointService } from "../service";
 import {

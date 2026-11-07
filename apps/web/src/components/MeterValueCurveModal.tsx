@@ -14,11 +14,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Save, X, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
+import type {
   AutoMeterValueConfig,
   CurvePoint,
-  calculateBezierPoint,
 } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { calculateBezierPoint } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 
 interface MeterValueCurveModalProps {
   isOpen: boolean;

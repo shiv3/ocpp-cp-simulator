@@ -1,4 +1,4 @@
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   GetConfigurationRequestV16,
   GetConfigurationResponseV16,
@@ -10,7 +10,7 @@ import type {
   IntegerConfigurationValue,
   ArrayConfigurationValue,
 } from "../../../../domain/charge-point/Configuration";
-import { OcppConfigurationKey } from "../../../../domain/types/OcppTypes";
+import type { OcppConfigurationKey } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 
 export class GetConfigurationHandler implements CallHandler<

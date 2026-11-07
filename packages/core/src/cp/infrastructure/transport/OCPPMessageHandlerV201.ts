@@ -47,10 +47,13 @@ import {
   OcppCallNoAnswerError,
   OcppCallRejectedError,
 } from "../../domain/errors/OcppCallErrors";
-import { Logger, LogType } from "../../shared/Logger";
-import {
+import type { Logger } from "../../shared/Logger";
+import { LogType } from "../../shared/Logger";
+import type {
   BootNotification,
   ChargePointErrorCode,
+} from "../../domain/types/OcppTypes";
+import {
   type OCPPErrorCode,
   OCPPMessageType,
   OCPPStatus,

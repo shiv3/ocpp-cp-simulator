@@ -1,4 +1,4 @@
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   RemoteStartTransactionRequestV16,
   RemoteStartTransactionResponseV16,

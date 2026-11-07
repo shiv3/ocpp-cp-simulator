@@ -44,10 +44,11 @@ import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluati
 import type {
   BootNotification,
   ChargePointErrorCode,
+  OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 // OCPPStatus is a string enum: it must be a VALUE import so switch cases can
 // use enum members — string-literal cases do not narrow an enum-typed value.
-import { OCPPAction, OCPPStatus } from "../../../domain/types/OcppTypes";
+import { OCPPAction } from "../../../domain/types/OcppTypes";
 import {
   BootGate,
   type BootGateStatus,

@@ -1,6 +1,7 @@
 import React, { memo } from "react";
-import { Handle, Position, NodeProps, type Node } from "@xyflow/react";
-import { StatusChangeNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node } from "@xyflow/react";
+import type { StatusChangeNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 
 const StatusChangeNode: React.FC<NodeProps<Node<StatusChangeNodeData>>> = ({

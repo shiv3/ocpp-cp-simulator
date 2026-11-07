@@ -1,11 +1,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal } from "lucide-react";
 
-import {
-  LogEntry,
-  LogLevel,
-  LogType,
-} from "@ocpp-cp-sim/core/cp/shared/Logger";
+import type { LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import {
   annotateOcppLogs,
   type LogDirection,

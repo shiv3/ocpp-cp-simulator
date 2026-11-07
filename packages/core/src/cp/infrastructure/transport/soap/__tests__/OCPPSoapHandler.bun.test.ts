@@ -3,10 +3,8 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import type { BootNotificationResult } from "../../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../../domain/connector/Transaction";
-import {
-  BootNotification,
-  OCPPStatus,
-} from "../../../../domain/types/OcppTypes";
+import type { BootNotification } from "../../../../domain/types/OcppTypes";
+import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import {
   buildSoapFaultEnvelope,
   OCPP15_SOAP_NAMESPACES,

@@ -2,7 +2,7 @@
 
 ## Checks
 
-Before pushing, run the checks CI runs: `bun run lint`, `bun run format:check`, `bun run typecheck` and `bun run test` ([Testing strategy](docs/analyses/testing-strategy.md)). Type errors fail the build.
+Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundaries`, `bun run format:check`, `bun run typecheck` and `bun run test` ([Testing strategy](docs/analyses/testing-strategy.md)). Type errors fail the build.
 
 ## Documentation
 

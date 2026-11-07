@@ -8,7 +8,7 @@ import type {
 import { isValidCertificateSignedRequestV16 } from "@ocpp-cp-sim/ocpp/index";
 import { CERTIFICATE_PEM_RE } from "../../../../domain/security/certificateHash";
 import { LogType } from "../../../../shared/Logger";
-import { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 

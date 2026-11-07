@@ -84,9 +84,9 @@ import {
 } from "../../domain/types/OcppCall";
 import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { Transaction } from "../../domain/connector/Transaction";
 import {
   isRunningTransactionStartedBy,
-  Transaction,
   type TransactionUpdateOptions,
 } from "../../domain/connector/Transaction";
 import {
@@ -102,21 +102,24 @@ import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue"
 import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
-import { Logger, LogType } from "../../shared/Logger";
-import {
+import type { Logger } from "../../shared/Logger";
+import { LogType } from "../../shared/Logger";
+import type {
   BootNotification,
   ChargePointErrorCode,
-  OCPPAction,
   OCPPErrorCode,
+} from "../../domain/types/OcppTypes";
+import {
+  OCPPAction,
   OCPPMessageType,
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
 import { BootGate } from "../../application/state/machines/BootGate";
 
 // Import handler registry and handlers
+import type { HandlerContext } from "./handlers";
 import {
   MessageHandlerRegistry,
-  HandlerContext,
   buildV16CallHandlerRegistry,
   StartTransactionResultHandler,
   StopTransactionResultHandler,

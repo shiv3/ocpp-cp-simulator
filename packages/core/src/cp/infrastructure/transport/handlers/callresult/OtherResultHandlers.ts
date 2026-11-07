@@ -1,4 +1,7 @@
-import { CallResultHandler, HandlerContext } from "../MessageHandlerRegistry";
+import type {
+  CallResultHandler,
+  HandlerContext,
+} from "../MessageHandlerRegistry";
 import type {
   DataTransferResponseV16,
   DiagnosticsStatusNotificationResponseV16,

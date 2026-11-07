@@ -1,11 +1,10 @@
-import {
+import type {
   ArrayConfigurationKey,
   ArrayConfigurationValue,
   BooleanConfigurationKey,
   BooleanConfigurationValue,
   Configuration,
   ConfigurationKey,
-  ConfigurationKeys,
   ConfigurationKeyType,
   ConfigurationValue,
   ConfigurationValueType,
@@ -13,8 +12,8 @@ import {
   IntegerConfigurationValue,
   StringConfigurationKey,
   StringConfigurationValue,
-  defaultConfiguration,
 } from "./Configuration";
+import { ConfigurationKeys, defaultConfiguration } from "./Configuration";
 import type { ChargePoint } from "./ChargePoint";
 import {
   isSignedMeterMode,

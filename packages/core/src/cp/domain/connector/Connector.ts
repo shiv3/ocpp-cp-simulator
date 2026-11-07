@@ -26,6 +26,13 @@ import type {
 } from "../../application/scenario/ScenarioTypes";
 import type { Transaction } from "./Transaction";
 import {
+  initialConnectorRecord,
+  reduceConnectorRecord,
+  type ConnectorRecord,
+  type ConnectorStateStore,
+  type ConnectorWrite,
+} from "./ConnectorRecord";
+import {
   type EVSettings,
   type EVSettingsPatch,
   assertRequiredFieldsKept,
@@ -145,20 +152,14 @@ export class Connector {
   private readonly scenarioEventsEmitter = new EventEmitter<ScenarioEvents>();
   private readonly meterScheduler: MeterValueScheduler;
 
-  private statusValue: OCPPStatus = OCPPStatus.Unavailable;
-  private availabilityValue: OCPPAvailability = "Operative";
-  // §5.2: when ChangeAvailability arrives during an active transaction the
-  // CP returns `Scheduled` and applies the new availability after the
-  // transaction stops. We remember the pending value here so the
-  // ChargePoint can finalize it on StopTransaction.
-  private scheduledAvailabilityValue: OCPPAvailability | null = null;
-  // OCPP 1.6 §7.6: ChargePointErrorCode carried in StatusNotification.req.
-  // Defaults to NoError. Set this before transitioning to Faulted (or before
-  // sending a warning-grade StatusNotification while
-  // Preparing/SuspendedEV/SuspendedEVSE/Finishing).
-  private currentErrorCodeValue: ChargePointErrorCode = "NoError";
-  private currentErrorInfo: string | null = null;
-  private currentVendorErrorCode: string | null = null;
+  // Status, availability (§5.2: a ChangeAvailability during a transaction is
+  // answered `Scheduled` and applied when it stops) and the error fields of
+  // the next StatusNotification (OCPP 1.6 §7.6; NoError by default, set before
+  // moving to Faulted) are a ConnectorRecord. Inside a charge point the record
+  // lives in the charger engine's state and every write is an engine event;
+  // on its own a connector keeps it in `localRecord`.
+  private localRecord: ConnectorRecord = initialConnectorRecord();
+  private store: ConnectorStateStore = this.createLocalStore();
   // §5.18 / §7.46: scenarios/tests can simulate broken cable retention by
   // flipping this to "UnlockFailed", or absent connector lock by setting
   // "NotSupported". UnlockConnector.req returns this value verbatim.
@@ -262,9 +263,9 @@ export class Connector {
     lastAutoStartedScenarioKey: string | null;
   } {
     return {
-      status: this.statusValue,
-      availability: this.availabilityValue,
-      scheduledAvailability: this.scheduledAvailabilityValue,
+      status: this.status,
+      availability: this.availability,
+      scheduledAvailability: this.scheduledAvailability,
       transaction: this.transactionValue ? { ...this.transactionValue } : null,
       meterValueWh: this.meterValueWh,
       socPercent: this.socPercent,
@@ -299,9 +300,12 @@ export class Connector {
     socAwaitsNextTransaction?: boolean;
     lastAutoStartedScenarioKey: string | null;
   }): void {
-    this.statusValue = snapshot.status;
-    this.availabilityValue = snapshot.availability;
-    this.scheduledAvailabilityValue = snapshot.scheduledAvailability;
+    this.store.write({
+      kind: "restore",
+      status: snapshot.status,
+      availability: snapshot.availability,
+      scheduledAvailability: snapshot.scheduledAvailability,
+    });
     // #315: the signing key is in memory only, so a begin reading signed
     // before the restart no longer matches MeterPublicKey<id>; drop it.
     this.transactionValue = snapshot.transaction
@@ -524,8 +528,8 @@ export class Connector {
     // could act on. Leaving the latch untouched here means the first resolve
     // that *can* act announces it (#301).
     if (
-      this.statusValue !== OCPPStatus.Charging &&
-      this.statusValue !== OCPPStatus.SuspendedEVSE
+      this.status !== OCPPStatus.Charging &&
+      this.status !== OCPPStatus.SuspendedEVSE
     ) {
       return;
     }
@@ -650,28 +654,21 @@ export class Connector {
   }
 
   get status(): OCPPStatus {
-    return this.statusValue;
+    return this.store.read().status;
   }
 
+  /** A bare write: only this connector's own `statusChange` listeners hear it. */
   set status(newStatus: OCPPStatus) {
-    const previousStatus = this.statusValue;
-    this.statusValue = newStatus;
-    if (newStatus !== OCPPStatus.SuspendedEV) {
-      this.energyOfferSuspendedValue = false;
-    }
-    this.eventsEmitter.emit("statusChange", {
-      status: newStatus,
-      previousStatus,
-    });
+    this.store.write({ kind: "status", status: newStatus, scope: "local" });
   }
 
   get availability(): OCPPAvailability {
-    return this.availabilityValue;
+    return this.store.read().availability;
   }
 
   set availability(newAvailability: OCPPAvailability) {
-    this.availabilityValue = newAvailability;
-    this.eventsEmitter.emit("availabilityChange", {
+    this.store.write({
+      kind: "availability",
       availability: newAvailability,
     });
   }
@@ -679,35 +676,90 @@ export class Connector {
   /** Pending availability that should be applied once the in-flight
    *  transaction ends (set by ChangeAvailability while charging). */
   get scheduledAvailability(): OCPPAvailability | null {
-    return this.scheduledAvailabilityValue;
+    return this.store.read().scheduledAvailability;
   }
 
   set scheduledAvailability(value: OCPPAvailability | null) {
-    this.scheduledAvailabilityValue = value;
+    this.store.write({ kind: "scheduledAvailability", value });
   }
 
   get currentErrorCode(): ChargePointErrorCode {
-    return this.currentErrorCodeValue;
+    return this.store.read().errorCode;
   }
 
   set currentErrorCode(code: ChargePointErrorCode) {
-    this.currentErrorCodeValue = code;
+    this.store.write({ kind: "errorCode", errorCode: code });
   }
 
   get errorInfo(): string | null {
-    return this.currentErrorInfo;
+    return this.store.read().errorInfo;
   }
 
   set errorInfo(info: string | null) {
-    this.currentErrorInfo = info;
+    this.store.write({ kind: "errorInfo", errorInfo: info });
   }
 
   get vendorErrorCode(): string | null {
-    return this.currentVendorErrorCode;
+    return this.store.read().vendorErrorCode;
   }
 
   set vendorErrorCode(code: string | null) {
-    this.currentVendorErrorCode = code;
+    this.store.write({ kind: "vendorErrorCode", vendorErrorCode: code });
+  }
+
+  /** The record as it is now. */
+  get record(): ConnectorRecord {
+    return this.store.read();
+  }
+
+  /**
+   * Move the record into `store` (the charger engine's state) or, with
+   * `null`, back into a private cell that starts from `last`.
+   */
+  bindStore(store: ConnectorStateStore | null, last?: ConnectorRecord): void {
+    if (store) {
+      this.store = store;
+      return;
+    }
+    this.localRecord = last ?? this.store.read();
+    this.store = this.createLocalStore();
+  }
+
+  private createLocalStore(): ConnectorStateStore {
+    return {
+      read: () => this.localRecord,
+      write: (write) => {
+        const previous = this.localRecord;
+        this.localRecord = reduceConnectorRecord(previous, write);
+        this.applyWrite(previous, write);
+      },
+    };
+  }
+
+  /**
+   * Called by the store after `write` changed the record from `previous`:
+   * the connector-local side of a write (its `statusChange` and
+   * `availabilityChange` listeners).
+   */
+  applyWrite(previous: ConnectorRecord, write: ConnectorWrite): void {
+    switch (write.kind) {
+      case "status":
+        if (write.status !== OCPPStatus.SuspendedEV) {
+          this.energyOfferSuspendedValue = false;
+        }
+        this.eventsEmitter.emit("statusChange", {
+          status: write.status,
+          previousStatus: previous.status,
+        });
+        break;
+      case "availability":
+        this.eventsEmitter.emit("availabilityChange", {
+          availability: write.availability,
+        });
+        break;
+      default:
+        break;
+    }
   }
 
   get unlockResponse(): "Unlocked" | "UnlockFailed" | "NotSupported" {

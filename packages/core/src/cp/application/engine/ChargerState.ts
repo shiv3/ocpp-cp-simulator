@@ -1,4 +1,9 @@
 import type { JsonValue } from "@ocpp-cp-sim/contracts/behavior";
+import {
+  reduceConnectorRecord,
+  type ConnectorRecord,
+  type ConnectorWrite,
+} from "../../domain/connector/ConnectorRecord";
 
 /**
  * The charger engine's state (docs/analyses/charger-engine.md, "Charger
@@ -7,9 +12,9 @@ import type { JsonValue } from "@ocpp-cp-sim/contracts/behavior";
  * of a behavior (`ctx.state`) lives under `behaviors` and is the one thing a
  * behavior mutates in place.
  *
- * Stage B holds what the default behaviors it moved report: firmware, log and
- * diagnostics status. Connector status, availability, transactions and
- * reservations join it when their behaviors move (stage C).
+ * It holds what the default behaviors that moved report (firmware, log and
+ * diagnostics status) and, per connector, status, availability and error
+ * info. Transactions and reservations join it when their behaviors move.
  */
 export interface ChargerState {
   readonly schema: 1;
@@ -17,6 +22,8 @@ export interface ChargerState {
   readonly signedFirmware: StatusRecord;
   readonly log: StatusRecord;
   readonly diagnostics: { readonly status: string };
+  /** Connector records by connector id (a JSON object key, so a string). */
+  readonly connectors: Readonly<Record<string, ConnectorRecord>>;
   /** `ctx.state` of every loaded behavior, by behavior id. */
   readonly behaviors: Record<string, Record<string, JsonValue>>;
 }
@@ -36,6 +43,17 @@ export type EngineEvent =
       readonly status: string;
       readonly requestId?: number;
     }
+  | {
+      readonly type: "connector.added";
+      readonly connectorId: number;
+      readonly record: ConnectorRecord;
+    }
+  | { readonly type: "connector.removed"; readonly connectorId: number }
+  | {
+      readonly type: "connector.write";
+      readonly connectorId: number;
+      readonly write: ConnectorWrite;
+    }
   | { readonly type: "behavior.loaded"; readonly behaviorId: string }
   | { readonly type: "behavior.unloaded"; readonly behaviorId: string }
   | { readonly type: "connection.closed" }
@@ -48,6 +66,7 @@ export function initialChargerState(): ChargerState {
     signedFirmware: { status: "Idle", requestId: null },
     log: { status: "Idle", requestId: null },
     diagnostics: { status: "Idle" },
+    connectors: {},
     behaviors: {},
   };
 }
@@ -74,6 +93,26 @@ export function reduceChargerState(
           return { ...state, diagnostics: { status: event.status } };
       }
       return state;
+    }
+    case "connector.added":
+      return {
+        ...state,
+        connectors: { ...state.connectors, [event.connectorId]: event.record },
+      };
+    case "connector.removed": {
+      const { [event.connectorId]: _gone, ...rest } = state.connectors;
+      return { ...state, connectors: rest };
+    }
+    case "connector.write": {
+      const record = state.connectors[event.connectorId];
+      if (!record) return state;
+      return {
+        ...state,
+        connectors: {
+          ...state.connectors,
+          [event.connectorId]: reduceConnectorRecord(record, event.write),
+        },
+      };
     }
     case "behavior.loaded":
       return state.behaviors[event.behaviorId]

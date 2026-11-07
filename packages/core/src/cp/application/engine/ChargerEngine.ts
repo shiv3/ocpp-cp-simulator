@@ -10,6 +10,7 @@ import type {
   RandomStream,
 } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
+import type { Connector } from "../../domain/connector/Connector";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
 import { LogType } from "../../shared/Logger";
@@ -125,6 +126,7 @@ function describe(error: unknown): string {
 export class ChargerEngine {
   private _state: ChargerState = initialChargerState();
   private readonly queue: EngineEvent[] = [];
+  private readonly connectors = new Map<number, Connector>();
   private draining = false;
   private disposed = false;
   private readonly loaded = new Map<string, Behavior>();
@@ -164,6 +166,14 @@ export class ChargerEngine {
   // ---- the event queue ----------------------------------------------------
 
   dispatch(event: EngineEvent): void {
+    // A connector write nests: the code that wrote `connector.status` (or
+    // called `updateConnectorStatus`) did so synchronously, from inside
+    // listeners of an earlier write, and the StatusNotification order on the
+    // wire follows that nesting. Everything else runs in FIFO order.
+    if (event.type.startsWith("connector.")) {
+      this.processConnector(event);
+      return;
+    }
     this.queue.push(event);
     if (this.draining) return;
     this.draining = true;
@@ -174,6 +184,63 @@ export class ChargerEngine {
     } finally {
       this.draining = false;
     }
+  }
+
+  private processConnector(event: EngineEvent): void {
+    const before = this._state;
+    this._state = reduceChargerState(before, event);
+    // Not guarded: an error a listener or the outbox throws reaches the caller
+    // of the write, as it did before the engine owned the record.
+    if (event.type === "connector.write")
+      this.performConnectorWrite(event, before);
+  }
+
+  private performConnectorWrite(
+    event: Extract<EngineEvent, { type: "connector.write" }>,
+    before: ChargerState,
+  ): void {
+    const connector = this.connectors.get(event.connectorId);
+    const previous = before.connectors[event.connectorId];
+    if (!connector || !previous) return;
+    connector.applyWrite(previous, event.write);
+    const { write } = event;
+    if (write.kind !== "status" || write.scope === "local") return;
+    this.host.events.emit("connectorStatusChange", {
+      connectorId: event.connectorId,
+      status: write.status,
+      previousStatus: previous.status,
+    });
+    if (write.scope === "full") {
+      this.host.afterConnectorStatus(event.connectorId, write.status);
+    }
+  }
+
+  /**
+   * Put `connector`'s record into the engine state. From now on the
+   * connector reads and writes it through the engine.
+   */
+  attachConnector(connector: Connector): void {
+    const id = connector.id;
+    this.connectors.set(id, connector);
+    this.dispatch({
+      type: "connector.added",
+      connectorId: id,
+      record: connector.record,
+    });
+    connector.bindStore({
+      read: () => this._state.connectors[id] ?? connector.record,
+      write: (write) =>
+        this.dispatch({ type: "connector.write", connectorId: id, write }),
+    });
+  }
+
+  /** The connector leaves: it keeps its last record in a cell of its own. */
+  detachConnector(connectorId: number): void {
+    const connector = this.connectors.get(connectorId);
+    if (!connector) return;
+    connector.bindStore(null, this._state.connectors[connectorId]);
+    this.connectors.delete(connectorId);
+    this.dispatch({ type: "connector.removed", connectorId });
   }
 
   private process(event: EngineEvent): void {

@@ -21,6 +21,7 @@ import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
 import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
 import { Connector } from "../connector/Connector";
+import type { ConnectorWrite } from "../connector/ConnectorRecord";
 import type {
   BootNotificationResult,
   ChargePointEvents,
@@ -460,9 +461,13 @@ export class ChargePoint {
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
+      this._engine.attachConnector(connector);
       const persisted = this.loadAvailability(connectorId);
       if (persisted) {
-        connector.availability = persisted;
+        this.writeConnector(connectorId, {
+          kind: "availability",
+          availability: persisted,
+        });
       }
       if (autoMeterValueSetting?.enabled) {
         connector.setIncrementFallback({
@@ -2493,11 +2498,10 @@ export class ChargePoint {
         // StopTransaction (CSMS-issued or scenario-driven) will move
         // it through Finishing → Available normally.
         if (connector.transaction !== null) return;
-        connector.status = OCPPStatus.Unavailable;
-        this._events.emit("connectorStatusChange", {
-          connectorId: connector.id,
+        this.writeConnector(connector.id, {
+          kind: "status",
           status: OCPPStatus.Unavailable,
-          previousStatus,
+          scope: "event",
         });
       });
     }
@@ -2717,7 +2721,10 @@ export class ChargePoint {
     // deferred availability flip and fire the follow-up StatusNotification.
     const scheduled = connector.scheduledAvailability;
     if (scheduled && scheduled !== connector.availability) {
-      connector.availability = scheduled;
+      this.writeConnector(connector.id, {
+        kind: "availability",
+        availability: scheduled,
+      });
       const next =
         scheduled === "Operative"
           ? OCPPStatus.Available
@@ -2725,7 +2732,10 @@ export class ChargePoint {
       this.updateConnectorStatus(connector.id, next);
       this.persistAvailability();
     }
-    connector.scheduledAvailability = null;
+    this.writeConnector(connector.id, {
+      kind: "scheduledAvailability",
+      value: null,
+    });
   }
 
   /**
@@ -2950,6 +2960,7 @@ export class ChargePoint {
 
     this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
     connector.dispose();
+    this._engine.detachConnector(connectorId);
     const removed = this._connectors.delete(connectorId);
     if (removed) {
       this._events.emit("connectorRemoved", { connectorId });
@@ -3000,13 +3011,27 @@ export class ChargePoint {
       return;
     }
 
-    const previousStatus = connector.status;
-    connector.status = status;
-    this._events.emit("connectorStatusChange", {
+    this._engine.dispatch({
+      type: "connector.write",
       connectorId,
-      status,
-      previousStatus,
+      write: { kind: "status", status, scope: "full" },
     });
+  }
+
+  /** A write to a connector's engine record (docs/analyses/charger-engine.md). */
+  private writeConnector(connectorId: number, write: ConnectorWrite): void {
+    this._engine.dispatch({ type: "connector.write", connectorId, write });
+  }
+
+  /**
+   * The rest of a `full` status write, run by the engine right after the
+   * record changed and the listeners were told: the connection-timeout timer
+   * and the StatusNotification.
+   * @internal
+   */
+  afterConnectorStatus(connectorId: number, status: OCPPStatus): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) return;
 
     // §4.9 B6 ConnectionTimeOut: when the connector enters Preparing,
     // start a timer; if it doesn't progress before the timeout, auto-

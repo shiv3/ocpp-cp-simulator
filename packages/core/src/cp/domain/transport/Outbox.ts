@@ -1,7 +1,7 @@
 // Domain-facing outbound seam. Delegates to the version-specific message
 // handler; ordering, boot-gate, and version-encoding will migrate here in
 // later 0b increments.
-import type { IChargePointMessageHandler } from "../../infrastructure/transport/IChargePointMessageHandler";
+import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
 import type { TransactionLifecycleEvent } from "./TransactionLifecycleEvent";
 
 export class Outbox implements IChargePointMessageHandler {

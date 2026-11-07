@@ -2279,3 +2279,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The 18-file cycle through `Configuration.ts` and the 2-file cycle through the handlers barrel are gone; no cycle of static value imports is left under `packages/` and `apps/`.
 - `bun run check:boundaries` now fails on such a cycle, and ESLint enforces `consistent-type-imports`. [Overview](overview.md) lists what counts as a cycle edge. [GitHub issues](sources/github-issues.md): #570.
+
+## [2026-11-07] ingest | SeededRng and the message-handler port leave infrastructure (#572, #574)
+
+- `SeededRng` (the seeded PRNG behind network simulation, the idTag pool, background traffic and supervision URL rotation) moves to `packages/core/src/cp/shared/SeededRng.ts`; the `network-sim` barrel no longer re-exports it. [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) points at the new path.
+- The outbound port `IChargePointMessageHandler` moves to `packages/core/src/cp/domain/transport/`, beside `Outbox`. `getDataTransferHandler()` now returns the domain interface `DataTransferVendorRegistry` (`registerVendor` / `unregisterVendor`) instead of the infrastructure `DataTransferHandler`, and `DataTransferResponder` moves to `domain/types/DataTransfer.ts`. No behaviour change. [GitHub issues](sources/github-issues.md): #572, #574.

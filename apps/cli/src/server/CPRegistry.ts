@@ -3,8 +3,10 @@ import * as fs from "fs";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import { behaviorFitProblem } from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
 import {
   BehaviorLibrary,
+  BehaviorNotLoadableError,
   type ReplaceOutcome,
 } from "../behavior/BehaviorLibrary";
 import type { ChargePointInitOptions } from "../types";
@@ -134,6 +136,13 @@ export class CPRegistry {
   readonly scenarioDefinitions: ScenarioRepository;
   /** The loaded behaviors; a charge point selects from it by id. */
   readonly library: BehaviorLibrary;
+  /**
+   * The `behaviors` column of a restored row whose in-memory selection is
+   * smaller than what is stored (an id this run did not load, a behavior the
+   * station cannot run). A rebuild that does not name a selection writes this
+   * back, so a run with fewer files does not shrink the stored selection.
+   */
+  private readonly storedSelection = new Map<string, string | null>();
 
   constructor(
     private readonly bus: EventBus,
@@ -245,6 +254,11 @@ export class CPRegistry {
       // #299: without these a charge point created with an idTag pool came
       // back drawing nothing, silently falling back to the hard-coded literal.
       const idTags = safeJsonParse<string[]>(row.id_tags);
+      const restored_behaviors = restoreBehaviors(
+        row,
+        this.library,
+        row.ocpp_version ?? "OCPP-1.6J",
+      );
       const init: ChargePointInitOptions = {
         cpId: row.cp_id,
         wsUrl: row.ws_url,
@@ -291,7 +305,7 @@ export class CPRegistry {
             row.boot_notif,
           ) ?? undefined,
         labels: restoreLabels(row),
-        ...restoreBehaviors(row, this.library),
+        ...restored_behaviors.init,
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
@@ -321,58 +335,72 @@ export class CPRegistry {
       }
       // Use the internal create path WITHOUT re-inserting into the DB —
       // these rows already exist.
-      const svc = this.instantiate(init, { reconcileSessions: false });
-      // Restore per-connector runtime state (OCPP status, in-flight
-      // transaction, meter, soc) BEFORE wiring the WebSocket so the
-      // first StatusNotification we send carries the resumed status
-      // rather than a fresh Available. The snapshot is applied via
-      // Connector.restoreRuntimeSnapshot, which writes private fields
-      // without emitting statusChange — so the listeners on the new
-      // service won't trigger a duplicate persist or notification.
-      const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
-      // #447: after the restore, so a restored transaction keeps its session.
-      svc.reconcileChargingSessions();
-      // After the reconcile, which only reads the connectors: `onResume` may
-      // start a transaction, and it must see the restored sessions settled.
-      svc.resumeEngine();
-      if (restoredConnectors > 0) {
-        console.log(
-          `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
-            `snapshot(s) for CP "${row.cp_id}"`,
+      try {
+        const svc = this.instantiate(init, { reconcileSessions: false });
+        if (restored_behaviors.column !== undefined) {
+          this.storedSelection.set(row.cp_id, restored_behaviors.column);
+        }
+        // Restore per-connector runtime state (OCPP status, in-flight
+        // transaction, meter, soc) BEFORE wiring the WebSocket so the
+        // first StatusNotification we send carries the resumed status
+        // rather than a fresh Available. The snapshot is applied via
+        // Connector.restoreRuntimeSnapshot, which writes private fields
+        // without emitting statusChange — so the listeners on the new
+        // service won't trigger a duplicate persist or notification.
+        const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
+        // #447: after the restore, so a restored transaction keeps its session.
+        svc.reconcileChargingSessions();
+        // After the reconcile, which only reads the connectors: `onResume` may
+        // start a transaction, and it must see the restored sessions settled.
+        svc.resumeEngine();
+        if (restoredConnectors > 0) {
+          console.log(
+            `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
+              `snapshot(s) for CP "${row.cp_id}"`,
+          );
+        }
+        // #300: the traffic config lives in `connector_settings`, not the
+        // connector row, so it needs its own restore. Without it an enabled
+        // configuration survived the restart as a row and came back idle.
+        if (this.connectorSettingsRepository) {
+          void svc
+            .restoreAutoTrafficFromDatabase(this.connectorSettingsRepository)
+            .then((started) => {
+              if (started > 0) {
+                console.log(
+                  `[CPRegistry] Resumed background traffic on ${started} ` +
+                    `connector(s) for CP "${row.cp_id}"`,
+                );
+              }
+            })
+            .catch(() => undefined);
+        }
+        // Rehydrate every scenario the operator had loaded against this CP
+        // before the restart. statusChange-trigger scenarios re-arm via the
+        // connector subscription set up in CLIChargePointService — nothing
+        // to do here beyond loading them.
+        const restoredScenarios = svc.restoreScenariosFromDatabase();
+        if (restoredScenarios > 0) {
+          console.log(
+            `[CPRegistry] Restored ${restoredScenarios} scenario(s) for CP "${row.cp_id}"`,
+          );
+        }
+        // Attach network simulation config BEFORE connecting so the CP
+        // starts with its faults applied.
+        if (this.networkSimManager) {
+          this.networkSimManager.onCpCreated(row.cp_id);
+        }
+        restored.push(row.cp_id);
+      } catch (error) {
+        // One row that cannot be rebuilt is not the daemon's end: the others
+        // come back, and this one stays in the table for a start that can.
+        this.storedSelection.delete(row.cp_id);
+        console.warn(
+          `[CPRegistry] Skipping restore of charge point "${row.cp_id}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
       }
-      // #300: the traffic config lives in `connector_settings`, not the
-      // connector row, so it needs its own restore. Without it an enabled
-      // configuration survived the restart as a row and came back idle.
-      if (this.connectorSettingsRepository) {
-        void svc
-          .restoreAutoTrafficFromDatabase(this.connectorSettingsRepository)
-          .then((started) => {
-            if (started > 0) {
-              console.log(
-                `[CPRegistry] Resumed background traffic on ${started} ` +
-                  `connector(s) for CP "${row.cp_id}"`,
-              );
-            }
-          })
-          .catch(() => undefined);
-      }
-      // Rehydrate every scenario the operator had loaded against this CP
-      // before the restart. statusChange-trigger scenarios re-arm via the
-      // connector subscription set up in CLIChargePointService — nothing
-      // to do here beyond loading them.
-      const restoredScenarios = svc.restoreScenariosFromDatabase();
-      if (restoredScenarios > 0) {
-        console.log(
-          `[CPRegistry] Restored ${restoredScenarios} scenario(s) for CP "${row.cp_id}"`,
-        );
-      }
-      // Attach network simulation config BEFORE connecting so the CP
-      // starts with its faults applied.
-      if (this.networkSimManager) {
-        this.networkSimManager.onCpCreated(row.cp_id);
-      }
-      restored.push(row.cp_id);
     }
     // Kick the WebSockets open so BootNotification + StatusNotification fly to
     // the CSMS automatically. Fire-and-forget — connect() returns immediately
@@ -547,13 +575,31 @@ export class CPRegistry {
     const svc = this.services.get(cpId);
     if (!svc) return null;
     const wanted = this.library.select(ids);
+    // Nothing is written until the station has shown it can run the selection:
+    // the version checks first, then the live change, then the row.
+    this.checkFit(svc.getInit().ocppVersion, wanted);
+    svc.setBehaviors(wanted, ids);
     this.database?.run(
       "UPDATE charge_points SET behaviors = ? WHERE cp_id = ?",
       [ids ? JSON.stringify(ids) : null, cpId],
     );
-    svc.setBehaviors(wanted, ids);
+    this.storedSelection.delete(cpId);
     this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
     return svc.behaviorIds();
+  }
+
+  /** Throws {@link BehaviorNotLoadableError} for a behavior this version cannot run. */
+  private checkFit(
+    ocppVersion: string | undefined,
+    behaviors: readonly Behavior[],
+  ): void {
+    for (const behavior of behaviors) {
+      const problem = behaviorFitProblem(behavior, {
+        ocppVersion: ocppVersion ?? "OCPP-1.6J",
+        virtualTime: false,
+      });
+      if (problem) throw new BehaviorNotLoadableError(problem);
+    }
   }
 
   /** The library listener: put a reloaded behavior on every charge point running it. */
@@ -622,7 +668,14 @@ export class CPRegistry {
     }
     const preparedInit = this.prepareInit(init);
     this.persistCreate(preparedInit);
-    const svc = this.instantiate(preparedInit);
+    let svc: CLIChargePointService;
+    try {
+      svc = this.instantiate(preparedInit);
+    } catch (error) {
+      // The row was written a line ago and this id did not exist: take it back.
+      this.persistRemove(preparedInit.cpId);
+      throw error;
+    }
     // Attach network simulation config before seeding so scenarios
     // run with faults applied.
     if (this.networkSimManager) {
@@ -668,12 +721,33 @@ export class CPRegistry {
     // covers it too; the snapshot is still safe to feed in because
     // loadScenario is an upsert keyed on scenario.id.
     const scenarioSnapshot = existing.snapshotScenarios();
+    // Without a state database nothing else carries `ctx.state` across the
+    // rebuild; with one, the new service reads it back from the row.
+    const engineState = this.database
+      ? undefined
+      : existing.engineStateSnapshot();
+    const previousInit = existing.getInit();
+    const previousColumn = this.storedSelection.get(init.cpId);
     existing.cleanup();
     this.unsubscribes.get(init.cpId)?.();
     this.unsubscribes.delete(init.cpId);
     this.services.delete(init.cpId);
-    this.persistCreate(preparedInit); // ON CONFLICT UPDATE — leaves scenarios intact
-    const svc = this.instantiate(preparedInit);
+    // A rebuild that does not name a selection keeps the stored one, even when
+    // this run holds fewer behaviors than it lists.
+    const keepStored =
+      init.behaviors === undefined && previousColumn !== undefined;
+    this.persistCreate(preparedInit, keepStored ? previousColumn : undefined); // ON CONFLICT UPDATE — leaves scenarios intact
+    let svc: CLIChargePointService;
+    try {
+      svc = this.instantiate(preparedInit, { engineState });
+    } catch (error) {
+      // The new configuration cannot run: put the old station back, row and
+      // service, rather than leave the id gone.
+      this.persistCreate(previousInit, previousColumn);
+      this.instantiate(previousInit, { engineState });
+      throw error;
+    }
+    if (!keepStored) this.storedSelection.delete(init.cpId);
     // Attach network simulation config so the re-created CP gets its faults.
     if (this.networkSimManager) {
       this.networkSimManager.onCpCreated(preparedInit.cpId);
@@ -716,7 +790,13 @@ export class CPRegistry {
    *  back, so a restored transaction keeps its session. */
   private instantiate(
     init: ChargePointInitOptions,
-    { reconcileSessions = true }: { reconcileSessions?: boolean } = {},
+    {
+      reconcileSessions = true,
+      engineState,
+    }: {
+      reconcileSessions?: boolean;
+      engineState?: ReturnType<CLIChargePointService["engineStateSnapshot"]>;
+    } = {},
   ): CLIChargePointService {
     const svc = new CLIChargePointService(
       this.withDerivedSoapCallback(init),
@@ -734,7 +814,18 @@ export class CPRegistry {
       unsub();
       unsubSettled();
     });
-    svc.loadBehaviors(this.library.select(init.behaviors));
+    if (engineState) svc.restoreEngineState(engineState);
+    try {
+      svc.loadBehaviors(this.library.select(init.behaviors));
+    } catch (error) {
+      // A station that cannot load its behaviors is not registered: no ghost
+      // under the id, nothing for a later `list` or restart to trip over.
+      this.unsubscribes.get(init.cpId)?.();
+      this.unsubscribes.delete(init.cpId);
+      this.services.delete(init.cpId);
+      svc.cleanup();
+      throw error;
+    }
     if (reconcileSessions) svc.reconcileChargingSessions();
     // The single choke point for "a service now exists under this init" —
     // create(), update() and restoreFromDatabase() all land here.
@@ -778,6 +869,7 @@ export class CPRegistry {
     // Ids only: an id that names no loaded behavior is refused here, before
     // anything is persisted, with the loaded ids in the message.
     if (init.behaviors !== undefined) this.library.check(init.behaviors);
+    this.checkFit(init.ocppVersion, this.library.select(init.behaviors));
     if (
       (init.securityProfile === 1 || init.securityProfile === 2) &&
       !init.authorizationKey
@@ -817,7 +909,14 @@ export class CPRegistry {
     });
   }
 
-  private persistCreate(init: ChargePointInitOptions): void {
+  /**
+   * `behaviorsColumn`, when given, is written as the `behaviors` value instead
+   * of the init's own (see {@link storedSelection}).
+   */
+  private persistCreate(
+    init: ChargePointInitOptions,
+    behaviorsColumn?: string | null,
+  ): void {
     if (!this.database) return;
     this.database.run(
       "INSERT INTO charge_points " +
@@ -877,7 +976,11 @@ export class CPRegistry {
         init.bootNotification ? JSON.stringify(init.bootNotification) : null,
         new Date().toISOString(),
         labelsColumn(init.labels),
-        init.behaviors ? JSON.stringify(init.behaviors) : null,
+        behaviorsColumn !== undefined
+          ? behaviorsColumn
+          : init.behaviors
+            ? JSON.stringify(init.behaviors)
+            : null,
         init.txUpdatedMeterValues ? 1 : null,
       ],
     );
@@ -1064,36 +1167,54 @@ function restoreLabels(row: ChargePointRow): Labels | undefined {
 }
 
 /**
- * Read the stored selection back. An id the library no longer has (the
- * daemon was started with fewer `--behavior` files) is dropped with a
- * warning rather than failing the restore: the charge point comes back
- * without that behavior.
+ * Read the stored selection back, for a station that speaks `ocppVersion`.
+ *
+ * What this run cannot honor is left out of memory only: an id the library
+ * does not have (the daemon was started with fewer `--behavior` files) and a
+ * behavior the station cannot run are dropped with a warning, and the charge
+ * point comes back without them. `column` is then the stored value as it is,
+ * so a rebuild that does not name a selection writes it back instead of the
+ * shorter list. A stored value that cannot be read selects nothing (and
+ * says so): a station never runs every behavior because its row is damaged.
  */
 function restoreBehaviors(
   row: ChargePointRow,
   library: BehaviorLibrary,
-): { behaviors?: string[] } {
-  const raw = safeJsonParse<unknown>(row.behaviors);
-  if (!Array.isArray(raw) || !raw.every((x) => typeof x === "string")) {
-    if (raw !== null) {
+  ocppVersion: string,
+): { init: { behaviors?: string[] }; column?: string | null } {
+  const fits = (id: string): string | null => {
+    const behavior = library.get(id);
+    if (!behavior) return "is not loaded in this run";
+    return behaviorFitProblem(behavior, { ocppVersion, virtualTime: false });
+  };
+  const parsed = safeJsonParse<unknown>(row.behaviors);
+  if (
+    row.behaviors &&
+    (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string"))
+  ) {
+    console.warn(
+      `[CPRegistry] ${row.cp_id}: the stored behaviors cannot be read; the charge point runs none until a selection is set`,
+    );
+    return { init: { behaviors: [] }, column: row.behaviors };
+  }
+  const stored = parsed as string[] | null;
+  const wanted = stored ?? library.ids();
+  const kept: string[] = [];
+  for (const id of wanted) {
+    const problem = fits(id);
+    if (problem === null) {
+      kept.push(id);
+    } else if (stored !== null || library.get(id) !== undefined) {
       console.warn(
-        `[CPRegistry] ignoring invalid stored behaviors for ${row.cp_id}`,
+        `[CPRegistry] ${row.cp_id}: behavior ${id} is left out: ${problem} (loaded: ${library.ids().join(", ") || "none"})`,
       );
     }
-    return {};
   }
-  const ids = raw as string[];
-  const known = ids.filter((id) => library.get(id) !== undefined);
-  if (known.length !== ids.length) {
-    console.warn(
-      `[CPRegistry] ${row.cp_id}: behaviors ${ids
-        .filter((id) => !known.includes(id))
-        .join(
-          ", ",
-        )} are not loaded in this run (loaded: ${library.ids().join(", ") || "none"})`,
-    );
+  if (stored === null && kept.length === wanted.length) return { init: {} };
+  if (stored !== null && kept.length === stored.length) {
+    return { init: { behaviors: kept } };
   }
-  return { behaviors: known };
+  return { init: { behaviors: kept }, column: row.behaviors };
 }
 
 function safeJsonParse<T>(raw: string | null): T | null {

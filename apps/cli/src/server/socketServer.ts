@@ -79,7 +79,10 @@ import {
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
 } from "../soapPath";
 import { appVersion } from "../appVersion";
-import { UnknownBehaviorError } from "../behavior/BehaviorLibrary";
+import {
+  BehaviorNotLoadableError,
+  UnknownBehaviorError,
+} from "../behavior/BehaviorLibrary";
 import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
 import {
@@ -2452,7 +2455,10 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   }
   // An id in `behaviors` that names no loaded behavior; the message lists
   // the loaded ids.
-  if (err instanceof UnknownBehaviorError) {
+  if (
+    err instanceof UnknownBehaviorError ||
+    err instanceof BehaviorNotLoadableError
+  ) {
     return new RpcFailure("invalid_params", err.message);
   }
   // #458: a set_ev_settings patch that would remove a required field.

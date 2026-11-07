@@ -93,7 +93,10 @@ import { legacyGeneratedBaseId } from "@ocpp-cp-sim/core/cp/domain/persistence/l
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
 import { SqliteEngineStateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/EngineStateRepository";
-import { parsePersistedEngineState } from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
+import {
+  parsePersistedEngineState,
+  type PersistedEngineState,
+} from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
 import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
@@ -2804,6 +2807,10 @@ export class CLIChargePointService {
     // sessions open for the next start to reconcile.
     this._sessionRecorder.dispose();
     if (permanent) {
+      // The station is gone for good: a `main` that writes `ctx.state` while it
+      // stops must not bring the `engine_state` row back for the next station
+      // under this id.
+      this._chargePoint.engine.onPersist(null);
       this._chargePoint.dispose();
     } else {
       // #538: the periodic monitors keep their timers offline. Stopped
@@ -3194,6 +3201,16 @@ export class CLIChargePointService {
    */
   loadBehaviors(behaviors: readonly Behavior[]): void {
     for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
+  }
+
+  /** The engine state that survives a rebuild (see `ChargerEngine.persistable`). */
+  engineStateSnapshot(): PersistedEngineState {
+    return this._chargePoint.engine.persistable();
+  }
+
+  /** Put a {@link engineStateSnapshot} back, before behaviors load. */
+  restoreEngineState(saved: PersistedEngineState): void {
+    this._chargePoint.engine.restoreState(saved);
   }
 
   /** Ids of the code behaviors loaded on this charge point, in load order. */

@@ -20,6 +20,14 @@ export class UnknownBehaviorError extends Error {
   }
 }
 
+/** A selected behavior that a station cannot run (`requires`, `beforeSend` on SOAP). */
+export class BehaviorNotLoadableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BehaviorNotLoadableError";
+  }
+}
+
 /** What applying a reloaded behavior to the charge points did. */
 export interface ReplaceOutcome {
   /** Charge points that now run the new version. */

@@ -156,6 +156,12 @@ export const EXEMPTIONS: readonly Exemption[] = [
     count: 1,
     reason: "saved_at of a stored connector snapshot",
   },
+  {
+    file: "packages/core/src/cp/domain/persistence/EngineStateRepository.ts",
+    kind: "new Date()",
+    count: 1,
+    reason: "updated_at stamp of the stored engine state row",
+  },
   // Pure helpers whose `now` parameter defaults to the platform clock. Every
   // production caller (Connector, ChargePoint) passes the injected clock's
   // instant; the default serves callers with no clock.

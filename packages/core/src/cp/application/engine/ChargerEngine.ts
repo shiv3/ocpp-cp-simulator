@@ -27,6 +27,7 @@ import {
   initialChargerState,
   reduceChargerState,
   type ChargerState,
+  type PersistedEngineState,
   type EngineEvent,
 } from "./ChargerState";
 import { registerDefaultBehaviors } from "./behaviors";
@@ -155,6 +156,87 @@ export class ChargerEngine {
     return JSON.parse(JSON.stringify(this._state)) as ChargerState;
   }
 
+  // ---- persistence --------------------------------------------------------
+
+  /**
+   * `ctx.state` read back from storage for behaviors that are not loaded (yet).
+   * A behavior loaded later adopts its entry; one that never comes back keeps
+   * its entry in {@link persistable}, so dropping `--behavior` for one run does
+   * not lose its data.
+   */
+  private orphans: Record<string, Record<string, JsonValue>> = {};
+  private persistListener: (() => void) | null = null;
+
+  /**
+   * The part of the state that survives a restart. A deep copy; throws if a
+   * behavior put something into `ctx.state` that is not JSON.
+   */
+  persistable(): PersistedEngineState {
+    const { schema, firmware, signedFirmware, log, diagnostics, behaviors } =
+      this._state;
+    // The built-in defaults keep no user data worth storing.
+    const user = Object.fromEntries(
+      Object.entries(behaviors).filter(([id]) => !id.startsWith("default.")),
+    );
+    const state = {
+      schema,
+      firmware,
+      signedFirmware,
+      log,
+      diagnostics,
+      behaviors: { ...this.orphans, ...user },
+    };
+    assertJsonSerializable(state);
+    return JSON.parse(JSON.stringify(state)) as PersistedEngineState;
+  }
+
+  /**
+   * Called when the persistable state may have changed: after a status
+   * notification, and every time a behavior yields to the engine (a wait, a
+   * send, the end of a handler), which is when its `ctx.state` writes settle.
+   * The listener compares and stores; it must not throw.
+   */
+  onPersist(listener: (() => void) | null): void {
+    this.persistListener = listener;
+  }
+
+  private touch(): void {
+    if (!this.persistListener) return;
+    try {
+      this.persistListener();
+    } catch (error) {
+      this.warn(`Persisting the engine state failed: ${describe(error)}`);
+    }
+  }
+
+  /**
+   * Put stored state back: the notification statuses (nothing is sent) and the
+   * `ctx.state` of every behavior, in place, so a behavior that already holds
+   * its `ctx.state` object sees it. Call it before `resume()`.
+   */
+  restoreState(saved: PersistedEngineState): void {
+    this.dispatch({
+      type: "state.restored",
+      firmware: saved.firmware,
+      signedFirmware: saved.signedFirmware,
+      log: saved.log,
+      diagnostics: saved.diagnostics,
+    });
+    this.orphans = {};
+    for (const [id, data] of Object.entries(saved.behaviors)) {
+      if (!this.adoptState(id, data)) this.orphans[id] = data;
+    }
+  }
+
+  /** Replace the `ctx.state` of a loaded behavior in place; false if none. */
+  private adoptState(id: string, data: Record<string, JsonValue>): boolean {
+    const target = this._state.behaviors[id];
+    if (!target) return false;
+    for (const key of Object.keys(target)) delete target[key];
+    Object.assign(target, data);
+    return true;
+  }
+
   /** Ids of the loaded code behaviors. */
   get behaviorIds(): readonly string[] {
     return [...this.loaded.keys()];
@@ -260,6 +342,7 @@ export class ChargerEngine {
     } catch (error) {
       this.warn(`Engine event ${event.type} failed: ${describe(error)}`);
     }
+    this.touch();
   }
 
   /** The side effects of an event, after the state took it. */
@@ -354,6 +437,11 @@ export class ChargerEngine {
     this.loaded.set(behavior.id, behavior);
     if (options.dormant) this.dormant.add(behavior.id);
     this.dispatch({ type: "behavior.loaded", behaviorId: behavior.id });
+    const orphan = this.orphans[behavior.id];
+    if (orphan) {
+      delete this.orphans[behavior.id];
+      this.adoptState(behavior.id, orphan);
+    }
     if (behavior.main && !options.dormant) {
       const scope = new Scope(behavior.id, false);
       this.mainScopes.set(behavior.id, scope);
@@ -460,7 +548,8 @@ export class ChargerEngine {
       .catch((error: unknown) => {
         if (error instanceof BehaviorStopped) return;
         this.warn(`Behavior ${behaviorId} failed: ${describe(error)}`);
-      });
+      })
+      .finally(() => this.touch());
   }
 
   // ---- answering a CALL ---------------------------------------------------
@@ -481,6 +570,7 @@ export class ChargerEngine {
     };
     const ctx = this.makeContext(behavior.id, scope, env);
     const fail = (error: unknown): void => {
+      this.touch();
       this.endScope(scope);
       if (error instanceof BehaviorStopped) return;
       this.warn(
@@ -491,6 +581,7 @@ export class ChargerEngine {
       }
     };
     const finish = (outcome: CallOutcome): void => {
+      this.touch();
       try {
         this.answer(behavior.id, scope, ctx, env, info, exchange, outcome);
       } catch (error) {
@@ -598,7 +689,10 @@ export class ChargerEngine {
           `Behavior ${behaviorId}: follow-up failed: ${describe(error)}`,
         );
       })
-      .finally(() => this.endScope(scope));
+      .finally(() => {
+        this.touch();
+        this.endScope(scope);
+      });
     void ctx;
   }
 
@@ -667,6 +761,7 @@ export class ChargerEngine {
     env?: CallEnv,
   ): BehaviorContext {
     const dispatch = (event: EngineEvent): void => this.dispatch(event);
+    const touch = (): void => this.touch();
     const warn = (message: string): void => this.warn(message);
     const readState = (): ChargerState => this._state;
     const runDefault = (action: string, req: unknown): DefaultResult =>
@@ -696,7 +791,8 @@ export class ChargerEngine {
     };
     const ctx: BehaviorContext = {
       now: () => clock.now(),
-      sleep(ms: number): Promise<void> {
+      sleep: (ms: number): Promise<void> => {
+        touch();
         if (scope.stopping) return stopped();
         return new Promise<void>((resolve, reject) => {
           const handle = clock.setTimeout(() => {
@@ -709,7 +805,8 @@ export class ChargerEngine {
           });
         });
       },
-      until<T>(promise: Promise<T>, opts: { ms: number }): Promise<T> {
+      until: <T>(promise: Promise<T>, opts: { ms: number }): Promise<T> => {
+        touch();
         if (scope.stopping) return stopped();
         return new Promise<T>((resolve, reject) => {
           const handle = clock.setTimeout(() => {
@@ -744,6 +841,7 @@ export class ChargerEngine {
         return (readState().behaviors[behaviorId] ??= {});
       },
       send: async (action, payload, opts) => {
+        touch();
         const request = host.sendOcppCall({
           action,
           payload: payload as Record<string, unknown>,

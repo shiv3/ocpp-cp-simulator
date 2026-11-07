@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -240,6 +240,15 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
   PRIMARY KEY (cp_id, connector_id)
 );
 
+-- The charger engine's own state across a restart: the firmware, log and
+-- diagnostics statuses and the \`ctx.state\` of behavior code, as one JSON
+-- document per charge point. Connectors keep their rows in \`connector_runtime\`.
+CREATE TABLE IF NOT EXISTS engine_state (
+  cp_id      TEXT PRIMARY KEY,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- Finished scenario runs (#388): the history \`scenario.runs.list\` pages
 -- through, and the full reports \`scenario_report\` returns. The columns
 -- are what the listing filters and sorts on; \`summary_json\` is the listing
@@ -368,6 +377,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "blueprints", perCp: false, resetOnStateReset: true },
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
+  { name: "engine_state", perCp: true, resetOnStateReset: true },
   { name: "scenario_runs", perCp: true, resetOnStateReset: true },
   { name: "charging_sessions", perCp: true, resetOnStateReset: true },
   { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
@@ -710,6 +720,11 @@ export function runMigrations(db: Database): void {
       );
     }
   }
+
+  // v22 → v23: the `engine_state` table (charger engine: notification statuses
+  // and behavior `ctx.state`), `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
+  // Additive: a database of an earlier version loads with no row, which reads
+  // as the initial state.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

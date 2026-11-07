@@ -92,6 +92,8 @@ import {
 import { legacyGeneratedBaseId } from "@ocpp-cp-sim/core/cp/domain/persistence/legacyStartupInstances";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
+import { SqliteEngineStateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/EngineStateRepository";
+import { parsePersistedEngineState } from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
 import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
@@ -766,6 +768,7 @@ export class CLIChargePointService {
       init.tls,
     );
     this._chargePoint.txUpdatedMeterValues = init.txUpdatedMeterValues === true;
+    if (database) this.persistEngineState(database, init.cpId);
     this._soapServer = isSoapVersion(ocppVersion)
       ? new OCPPSoapServer(
           {
@@ -3149,6 +3152,30 @@ export class CLIChargePointService {
       restored += 1;
     });
     return restored;
+  }
+
+  /**
+   * Keep the engine's own state (notification statuses, the `ctx.state` of
+   * behaviors) in the `engine_state` row. Read back here, in the constructor,
+   * so a behavior loaded afterwards adopts its stored `ctx.state` whatever the
+   * order of restore and load; the row of a charge point that never existed is
+   * absent and reads as the initial state. A stored value this build cannot
+   * read is ignored.
+   */
+  private persistEngineState(database: Database, cpId: string): void {
+    const repo = new SqliteEngineStateRepository(database);
+    const engine = this._chargePoint.engine;
+    const saved = parsePersistedEngineState(repo.load(cpId));
+    if (saved) engine.restoreState(saved);
+    // Normalized after the restore, so an untouched engine writes nothing.
+    let lastSaved = JSON.stringify(engine.persistable());
+    engine.onPersist(() => {
+      const next = engine.persistable();
+      const text = JSON.stringify(next);
+      if (text === lastSaved) return;
+      repo.save(cpId, next);
+      lastSaved = text;
+    });
   }
 
   /**

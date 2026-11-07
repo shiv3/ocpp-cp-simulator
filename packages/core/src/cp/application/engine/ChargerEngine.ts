@@ -780,7 +780,9 @@ export class ChargerEngine {
       },
       unplug: (connectorId) => {
         needs("physical", "ctx.unplug");
-        host.updateConnectorStatus(connectorId, OCPPStatus.Available);
+        // The EV side of the cable: a running transaction is stopped or
+        // suspended per StopTransactionOnEVSideDisconnect, as for any unplug.
+        host.evDisconnected(connectorId);
       },
       authorize: (idTag) => {
         needs("physical", "ctx.authorize");

@@ -3,19 +3,9 @@ import type {
   DataTransferRequestV16,
   DataTransferResponseV16,
 } from "@ocpp-cp-sim/ocpp/index";
+import type { DataTransferResponder } from "../../../../domain/types/DataTransfer";
+import type { DataTransferVendorRegistry } from "../../../../domain/transport/IChargePointMessageHandler";
 import { LogType } from "../../../../shared/Logger";
-
-/**
- * Per-vendor DataTransfer responder. Implementations decide whether a given
- * `messageId` is supported; returning `null` lets the handler fall through
- * to `UnknownMessageId`.
- */
-export interface DataTransferResponder {
-  handle(
-    messageId: string | undefined,
-    data: string | undefined,
-  ): { status: "Accepted" | "Rejected"; data?: string } | null;
-}
 
 /**
  * Handles CSMS-initiated DataTransfer.req per OCPP 1.6 §4.3 / §5.6.
@@ -30,10 +20,11 @@ export interface DataTransferResponder {
  * tests / scenarios can register custom responders without leaking state
  * between charge points.
  */
-export class DataTransferHandler implements CallHandler<
-  DataTransferRequestV16,
-  DataTransferResponseV16
-> {
+export class DataTransferHandler
+  implements
+    CallHandler<DataTransferRequestV16, DataTransferResponseV16>,
+    DataTransferVendorRegistry
+{
   private readonly vendors = new Map<string, DataTransferResponder>();
 
   /**

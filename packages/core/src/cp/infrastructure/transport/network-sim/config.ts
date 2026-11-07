@@ -1,4 +1,4 @@
-import { deriveSeed32 } from "./SeededRng";
+import { deriveSeed32 } from "../../../shared/SeededRng";
 import { MAX_TIMER_MS } from "../../../shared/timers";
 
 export { MAX_TIMER_MS };

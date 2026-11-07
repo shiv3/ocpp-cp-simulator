@@ -1,29 +1,33 @@
 import type {
   DataTransferData,
+  DataTransferResponder,
   DataTransferResult,
-} from "../../domain/types/DataTransfer";
-import type {
-  OcppCallOutcome,
-  OcppCallRequest,
-} from "../../domain/types/OcppCall";
+} from "../types/DataTransfer";
+import type { OcppCallOutcome, OcppCallRequest } from "../types/OcppCall";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "../../domain/types/FirmwareLogStatus";
+} from "../types/FirmwareLogStatus";
 import type {
   BootNotification,
   ChargePointErrorCode,
   OCPPStatus,
-} from "../../domain/types/OcppTypes";
+} from "../types/OcppTypes";
 import type {
   MeterSampleOverrides,
   ReadingContext,
-} from "../../domain/connector/MeterValueBuilder";
-import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
-import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
-import type { TransactionUpdateOptions } from "../../domain/connector/Transaction";
-import type { DataTransferHandler } from "./handlers";
+} from "../connector/MeterValueBuilder";
+import type { TransactionLifecycleEvent } from "./TransactionLifecycleEvent";
+import type { MonitoringEvent } from "../monitoring/MonitorEvaluation";
+import type { TransactionUpdateOptions } from "../connector/Transaction";
+
+/** Where scenarios register the responders that answer a CSMS-initiated
+ *  DataTransfer.req, one per `vendorId` (#574). */
+export interface DataTransferVendorRegistry {
+  registerVendor(vendorId: string, responder: DataTransferResponder): void;
+  unregisterVendor(vendorId: string): void;
+}
 
 export interface IChargePointMessageHandler {
   sendBootNotification(bootPayload: BootNotification): void;
@@ -113,7 +117,7 @@ export interface IChargePointMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void;
-  getDataTransferHandler(): DataTransferHandler;
+  getDataTransferHandler(): DataTransferVendorRegistry;
   /** #537: whether a transaction message awaits its write, its answer or
    *  a resend, which the CSMS may still settle before a close. Implemented
    *  on 2.x, the only version that reconnects for a renewed client

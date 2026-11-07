@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { deriveSeed32 } from "../SeededRng";
+import { deriveSeed32 } from "../../../../shared/SeededRng";
 import {
   MAX_TIMER_MS,
   NETWORK_SIM_LIMITS,

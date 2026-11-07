@@ -538,7 +538,7 @@ export class ChargePoint {
         cpoName,
         tls,
       );
-      this._rawFrames = new RawFrameSender(this._webSocket);
+      this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
       this._webSocket.observers.on("simulatedDisconnect", (fault) =>
         this._events.emit("networkFaultInjected", fault),
       );

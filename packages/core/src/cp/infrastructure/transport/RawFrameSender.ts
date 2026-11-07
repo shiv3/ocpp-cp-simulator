@@ -1,3 +1,5 @@
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 import {
   OCPP_CALL_RESPONSE_TIMEOUT_MS,
   RAW_FRAME_DEFAULT_WAIT_MS,
@@ -39,7 +41,10 @@ const UNREADABLE_FRAME_IDS = new Set(["", "-1"]);
 export class RawFrameSender {
   private readonly _waiters = new Set<Waiter>();
 
-  constructor(private readonly _webSocket: OCPPWebSocket) {
+  constructor(
+    private readonly _webSocket: OCPPWebSocket,
+    private readonly _clock: () => SimClock = () => realClock,
+  ) {
     _webSocket.setIncomingInterceptor((frame) => this.intercept(frame));
     _webSocket.observers.on("closed", ({ cause }) => {
       for (const waiter of [...this._waiters]) waiter.settle(null, cause);
@@ -73,7 +78,7 @@ export class RawFrameSender {
     return new Promise((resolve, reject) => {
       const finish = (): boolean => {
         if (!this._waiters.delete(waiter)) return false;
-        clearTimeout(timer);
+        this._clock().clearTimeout(timer);
         return true;
       };
       const waiter: Waiter = {
@@ -86,7 +91,10 @@ export class RawFrameSender {
           if (finish()) reject(error);
         },
       };
-      const timer = setTimeout(() => waiter.settle(null, null), waitMs);
+      const timer = this._clock().setTimeout(
+        () => waiter.settle(null, null),
+        waitMs,
+      );
       this._waiters.add(waiter);
       this._webSocket.sendRaw(
         frame,

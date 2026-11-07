@@ -82,10 +82,22 @@ a stream from `hash(seed, chargerId, streamName)`, so adding a charger or a stre
 numbers of another.
 
 `ChargePoint` takes an optional clock and seed; the default is `RealClock`, which keeps behavior
-identical. All `domain/` and `application/` code uses the injected clock. Socket keep-alive and
-reconnect timers in `infrastructure/transport` may stay on real time only where a comment explains why.
-A CI check lists direct `Date.now`, `new Date()`, `setTimeout`, `setInterval` and `Math.random` in
-`domain/` and `application/` against a shrinking exemption list.
+identical. All `domain/` and `application/` code uses the injected clock, and so do the two JSON message
+handlers (`OCPPMessageHandler`, `OCPPMessageHandlerV201`) with the waiters and senders they own
+(`CallWaiters`, `ExpertCalls`, `RawFrameSender`): their timestamps, the 30 s CALL timeout, the
+`TransactionEvent` resend and timeout timers, and their message and transaction ids (streams `message-id` and
+`transaction-id`) come from the station's clock and seed. A CI check lists direct `Date.now`, `new Date()`,
+`setTimeout`, `setInterval` and `Math.random` in `domain/`, `application/` and those five files against a
+shrinking exemption list.
+
+**What virtual time covers, exactly.** Everything above, and the engine and the behaviors. It does _not_ cover
+the rest of `infrastructure/transport`: the WebSocket (reconnect back-off, ping and pong timers, the network
+simulation's delays), the SOAP handler and the certificate-refresh machinery keep platform timers, as does the
+real socket to the fake CSMS. A virtual-time run therefore has to be driven so that nothing waits on those
+(the in-memory socket of `runBehavior()` has no such timers), and `effectHash` normalizes the timestamps and
+ids of the wire, so it proves the order of effects, not the values on the wire; the values are checked by
+the tests in `packages/core/src/test/regression/virtualWire.bun.test.ts`. A seeded run draws message ids and
+transaction ids from the seed, so two runs of one seed agree on them.
 
 Status (stage A): `clock.ts` and `rng.ts` exist, `ChargePoint` takes them as its last constructor
 argument (`{ clock, seed }`), and the check is `scripts/check-direct-time.ts`, run by

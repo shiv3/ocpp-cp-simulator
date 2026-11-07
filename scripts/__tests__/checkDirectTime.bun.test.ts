@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   EXEMPTIONS,
+  REPO_ROOT,
+  SCANNED_FILES,
   evaluate,
   scanSource,
   scanTree,
@@ -116,5 +120,16 @@ describe("the repository", () => {
     const report = evaluate(scanTree(), EXEMPTIONS);
     expect(report.violations).toEqual([]);
     expect(report.stale).toEqual([]);
+  });
+
+  it("scans the message handlers and finds nothing direct in them", () => {
+    expect(SCANNED_FILES.length).toBeGreaterThan(0);
+    for (const file of SCANNED_FILES) {
+      expect(existsSync(join(REPO_ROOT, file))).toBe(true);
+    }
+    const scanned = [...scanTree().keys()];
+    expect(scanned.filter((f) => SCANNED_FILES.some((s) => s === f))).toEqual(
+      [],
+    );
   });
 });

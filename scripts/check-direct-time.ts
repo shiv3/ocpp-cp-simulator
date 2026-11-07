@@ -34,6 +34,20 @@ export const SCANNED_DIRS = [
   "packages/core/src/cp/application",
 ] as const;
 
+/**
+ * Single files scanned as well: the two JSON message handlers and the helpers
+ * that arm their timers. The rest of `infrastructure/transport` (the
+ * WebSocket with its reconnect and ping timers, the SOAP handler) still runs
+ * on the platform clock; see "What virtual time covers" in the design.
+ */
+export const SCANNED_FILES = [
+  "packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts",
+  "packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts",
+  "packages/core/src/cp/infrastructure/transport/CallWaiters.ts",
+  "packages/core/src/cp/infrastructure/transport/ExpertCalls.ts",
+  "packages/core/src/cp/infrastructure/transport/RawFrameSender.ts",
+] as const;
+
 export type UseKind =
   | "Date.now"
   | "new Date()"
@@ -271,6 +285,10 @@ export function scanTree(root: string = REPO_ROOT): Map<string, Use[]> {
       if (uses.length > 0) result.set(rel, uses);
     }
   }
+  for (const rel of SCANNED_FILES) {
+    const uses = scanSource(rel, readFileSync(join(root, rel), "utf8"));
+    if (uses.length > 0) result.set(rel, uses);
+  }
   return result;
 }
 
@@ -302,7 +320,7 @@ function main(argv: string[]): number {
     let total = 0;
     for (const uses of found.values()) total += uses.length;
     console.log(
-      `direct time/randomness OK: ${SCANNED_DIRS.length} directories scanned, ${total} exempted use(s)`,
+      `direct time/randomness OK: ${SCANNED_DIRS.length} directories and ${SCANNED_FILES.length} files scanned, ${total} exempted use(s)`,
     );
     return 0;
   }

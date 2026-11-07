@@ -4,6 +4,8 @@ import {
   type OcppCallRequest,
 } from "../../domain/types/OcppCall";
 import { OcppCallNoAnswerError } from "../../domain/errors/OcppCallErrors";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 import { CallWaiters } from "./CallWaiters";
 import { encodeCallFrame } from "./callFrame";
 
@@ -41,10 +43,14 @@ export class ExpertCalls {
         `OCPP call ${id}: no answer within ${OCPP_CALL_RESPONSE_TIMEOUT_MS}ms`,
       );
     },
+    () => this._clock(),
   );
 
   /** `withdraw(id)` removes the CALL if it is still unsent and says so. */
-  constructor(private readonly _withdraw: (messageId: string) => boolean) {}
+  constructor(
+    private readonly _withdraw: (messageId: string) => boolean,
+    private readonly _clock: () => SimClock = () => realClock,
+  ) {}
 
   /** Track a CALL about to be sent under `messageId`; resolves with the
    *  CSMS's answer. */

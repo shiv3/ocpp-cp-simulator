@@ -102,7 +102,11 @@ import {
   toOcpp16SampledValue,
 } from "../../domain/connector/SignedMeterData";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { MAX_TIMER_MS } from "../../shared/timers";
+import { clockOf, unrefTimerHandle } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import type { Logger } from "../../shared/Logger";
@@ -331,11 +335,13 @@ export class OCPPMessageHandler {
       new Error(
         `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
       ),
+    () => this.clock,
   );
 
   /** Expert calls (#389) in flight; their answers are routed here first. */
-  private readonly _expertCalls = new ExpertCalls((id) =>
-    this.withdrawQueued(id),
+  private readonly _expertCalls = new ExpertCalls(
+    (id) => this.withdrawQueued(id),
+    () => this.clock,
   );
 
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
@@ -362,7 +368,7 @@ export class OCPPMessageHandler {
         phase: "written";
         action: OCPPAction;
         id: string;
-        timer: ReturnType<typeof setTimeout>;
+        timer: TimerHandle;
       }
     | null = null;
   // §4.1.1 lets the implementation pick the CALL timeout. 30s is a common
@@ -377,7 +383,7 @@ export class OCPPMessageHandler {
   /** #527: transaction-related messages waiting out their
    *  TransactionMessageRetryInterval after a CALLERROR, keyed by timer. */
   private readonly _transactionMessageRetries = new Map<
-    ReturnType<typeof setTimeout>,
+    TimerHandle,
     SerialEntry
   >();
 
@@ -767,7 +773,7 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: SecurityEventNotificationRequestV16 = {
       type,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this.clock.now()).toISOString(),
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
     this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
@@ -932,7 +938,7 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
-    const timestamp = overrides.timestamp ?? new Date();
+    const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
     const transaction = connector.transaction;
@@ -1195,7 +1201,7 @@ export class OCPPMessageHandler {
       this._chargePoint.notifyOutgoingCall(
         head.action === OCPPAction.Heartbeat,
       );
-      const timer = setTimeout(
+      const timer = this.clock.setTimeout(
         () => this.handleSerialTimeout(head.id),
         OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS,
       );
@@ -1256,7 +1262,7 @@ export class OCPPMessageHandler {
   private settleSerialInFlight(messageId: string): void {
     const cur = this._serialInFlight;
     if (!cur || cur.id !== messageId) return;
-    if (cur.phase === "written") clearTimeout(cur.timer);
+    if (cur.phase === "written") this.clock.clearTimeout(cur.timer);
     this._serialInFlight = null;
     this.pumpSerialQueue();
   }
@@ -1289,7 +1295,7 @@ export class OCPPMessageHandler {
   public onWebSocketClosed(): void {
     if (this._serialInFlight) {
       if (this._serialInFlight.phase === "written") {
-        clearTimeout(this._serialInFlight.timer);
+        this.clock.clearTimeout(this._serialInFlight.timer);
       }
       // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation).
       this._serialInFlight = null;
@@ -1305,7 +1311,7 @@ export class OCPPMessageHandler {
     // of the queued CALLs, which are younger. Replayed after the next boot,
     // it goes on with its count: §3.7.1 counts failures for this message.
     for (const [timer, resend] of this._transactionMessageRetries) {
-      clearTimeout(timer);
+      this.clock.clearTimeout(timer);
       this.salvageOrDiscard(resend, "socket_closed");
     }
     this._transactionMessageRetries.clear();
@@ -1730,7 +1736,7 @@ export class OCPPMessageHandler {
       attempt: attempt + 1,
       lastErrorCode: errorCode,
     };
-    const timer = setTimeout(() => {
+    const timer = this.clock.setTimeout(() => {
       this._transactionMessageRetries.delete(timer);
       // The boot gate closed meanwhile (a BootNotification answered
       // Pending): sendRequest would drop the resend. It waits in the
@@ -1761,7 +1767,7 @@ export class OCPPMessageHandler {
       });
       this.pumpSerialQueue();
     }, delayMs);
-    unrefTimer(timer);
+    unrefTimerHandle(timer);
     this._transactionMessageRetries.set(timer, resend);
     // After the timer is tracked: a listener closing the link must find it
     // in `_transactionMessageRetries`, or it would fire after the close.
@@ -1876,7 +1882,20 @@ export class OCPPMessageHandler {
   // All handler methods have been moved to individual handler classes
   // See packages/core/src/cp/handlers/ directory
 
+  /** The charge point's clock (the platform clock for a stand-in without one). */
+  private get clock(): SimClock {
+    return clockOf(this._chargePoint);
+  }
+
+  /** A random stream of the charge point (system randomness for a stand-in). */
+  private rng(name: string): Rng {
+    const cp = this._chargePoint as { id: string; rng?: (n: string) => Rng };
+    return typeof cp.rng === "function"
+      ? cp.rng(name)
+      : systemRngStreams.stream(cp.id, name);
+  }
+
   private generateMessageId(): string {
-    return crypto.randomUUID();
+    return this.rng("message-id").uuid();
   }
 }

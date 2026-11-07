@@ -76,7 +76,11 @@ import {
 } from "../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { toV2ConnectorStatus } from "../../domain/charge-point/runtimeValueKeys";
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { MAX_TIMER_MS } from "../../shared/timers";
+import { clockOf, unrefTimerHandle } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { OCPP_2_1 } from "../../domain/types/OcppVersion";
@@ -176,7 +180,7 @@ interface TransactionEventMessage {
   /** Message ids of the transmissions still awaiting an answer. */
   readonly inFlight: Set<string>;
   /** The resend waiting out `MessageAttemptInterval`, if any. */
-  resend?: ReturnType<typeof setTimeout>;
+  resend?: TimerHandle;
   done: boolean;
   /** A behavior's beforeSend dropped a transmission: the message was not
    *  refused by the socket, it was withdrawn on purpose. */
@@ -214,7 +218,7 @@ interface PendingRequest {
   transactionEvent?: TransactionEventDelivery;
   /** Its `MessageTimeout` timer (#529), armed when the CALL is written;
    *  cleared on answer and WebSocket close. */
-  timeout?: ReturnType<typeof setTimeout>;
+  timeout?: TimerHandle;
 }
 
 type TransactionEventFailure =
@@ -281,10 +285,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       new Error(
         `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
       ),
+    () => this.clock,
   );
   /** Expert calls (#389) in flight; their answers are routed here first. */
   // 2.x writes a CALL at once or drops it: nothing is ever left to withdraw.
-  private readonly _expertCalls = new ExpertCalls(() => false);
+  private readonly _expertCalls = new ExpertCalls(
+    () => false,
+    () => this.clock,
+  );
   // Response effect queue for deferred handler side effects
   private readonly _responseEffectQueue: ResponseEffectQueue;
   private readonly _gate: InboundCallGate;
@@ -311,8 +319,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  after the next accepted boot. */
   private _renewedClientCertificateDiscarded = false;
   /** #537 M06.FR.10: the weekly OCSP refresh, running while booted. */
-  private _certificateStatusRefresh: ReturnType<typeof setInterval> | null =
-    null;
+  private _certificateStatusRefresh: TimerHandle | null = null;
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -411,8 +418,25 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
+  /** The charge point's clock (the platform clock for a stand-in without one). */
+  private get clock(): SimClock {
+    return clockOf(this._chargePoint);
+  }
+
+  private clearTimer(handle: TimerHandle | undefined): void {
+    if (handle !== undefined) this.clock.clearTimeout(handle);
+  }
+
+  /** A random stream of the charge point (system randomness for a stand-in). */
+  private rng(name: string): Rng {
+    const cp = this._chargePoint as { id: string; rng?: (n: string) => Rng };
+    return typeof cp.rng === "function"
+      ? cp.rng(name)
+      : systemRngStreams.stream(cp.id, name);
+  }
+
   private generateMessageId(): string {
-    return crypto.randomUUID();
+    return this.rng("message-id").uuid();
   }
 
   /** The exchange of one inbound CALL, bound to this socket's generation. */
@@ -1042,9 +1066,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    */
   private armTransactionEventTimeout(
     delivery: TransactionEventDelivery,
-  ): ReturnType<typeof setTimeout> {
+  ): TimerHandle {
     const seconds = this._chargePoint.configuration.messageTimeout();
-    const timer = setTimeout(
+    const timer = this.clock.setTimeout(
       () => {
         this.onTransactionEventFailure(delivery, {
           reason: "timeout",
@@ -1053,7 +1077,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       },
       Math.min(Math.max(1, seconds) * 1000, MAX_TIMER_MS),
     );
-    unrefTimer(timer);
+    unrefTimerHandle(timer);
     return timer;
   }
 
@@ -1061,10 +1085,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private endTransmission(
     messageId: string,
     { message }: TransactionEventDelivery,
-    timeout: ReturnType<typeof setTimeout> | undefined,
+    timeout: TimerHandle | undefined,
   ): void {
     message.inFlight.delete(messageId);
-    clearTimeout(timeout);
+    this.clearTimer(timeout);
   }
 
   /** Settle or discard `message`: cancel its waiting resend and forget all
@@ -1073,11 +1097,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     message.done = true;
     this._activeTransactionEvents.delete(message);
     if (message.resend !== undefined) {
-      clearTimeout(message.resend);
+      this.clock.clearTimeout(message.resend);
       message.resend = undefined;
     }
     for (const id of message.inFlight) {
-      clearTimeout(this._pendingRequests.get(id)?.timeout);
+      this.clearTimer(this._pendingRequests.get(id)?.timeout);
       this._pendingRequests.delete(id);
     }
     message.inFlight.clear();
@@ -1151,11 +1175,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       `[v2.0.1] ${describeTransactionEvent(payload)} ${what}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
       LogType.TRANSACTION,
     );
-    const timer = setTimeout(() => {
+    const timer = this.clock.setTimeout(() => {
       message.resend = undefined;
       this.transmitTransactionEvent(message);
     }, delayMs);
-    unrefTimer(timer);
+    unrefTimerHandle(timer);
     message.resend = timer;
   }
 
@@ -1210,7 +1234,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const messageId = this.generateMessageId();
     const ev = v201StatusEvse(connectorId);
     const payload: StatusNotificationRequestV201 = {
-      timestamp: (opts?.timestamp ?? new Date()).toISOString(),
+      timestamp: (opts?.timestamp ?? new Date(this.clock.now())).toISOString(),
       connectorStatus: toV2ConnectorStatus(status),
       evseId: ev.evseId,
       connectorId: ev.connectorId,
@@ -1244,7 +1268,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   ): void {
     if (!transaction.cpTransactionId) {
       this.patchTx(connectorId, transaction, {
-        cpTransactionId: crypto.randomUUID(),
+        cpTransactionId: this.rng("transaction-id").uuid(),
       });
     }
     const transactionId = transaction.cpTransactionId as string;
@@ -1321,7 +1345,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
     if (!transaction.cpTransactionId) {
       this.patchTx(connectorId, transaction, {
-        cpTransactionId: crypto.randomUUID(),
+        cpTransactionId: this.rng("transaction-id").uuid(),
       });
     }
     const seqNo = transaction.cpNextSeqNo ?? 0;
@@ -1332,7 +1356,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     connector.markTransactionChanged();
     const payload: TransactionEventRequestV201 = {
       eventType: "Updated",
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this.clock.now()).toISOString(),
       triggerReason: "ChargingStateChanged",
       seqNo,
       transactionInfo: {
@@ -1351,8 +1375,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     transaction: Transaction,
     connectorId: number,
   ): void {
-    const transactionId = transaction.cpTransactionId ?? crypto.randomUUID();
-    const timestamp = (transaction.stopTime ?? new Date()).toISOString();
+    const transactionId =
+      transaction.cpTransactionId ?? this.rng("transaction-id").uuid();
+    const timestamp = (
+      transaction.stopTime ?? new Date(this.clock.now())
+    ).toISOString();
     const seqNo = transaction.cpNextSeqNo ?? 0;
     this.patchTx(connectorId, transaction, { cpNextSeqNo: seqNo + 1 });
     const payload: TransactionEventRequestV201 = {
@@ -1433,10 +1460,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
     if (!transaction.cpTransactionId) {
       this.patchTx(connectorId, transaction, {
-        cpTransactionId: crypto.randomUUID(),
+        cpTransactionId: this.rng("transaction-id").uuid(),
       });
     }
-    const timestamp = (options.timestamp ?? new Date()).toISOString();
+    const timestamp = (
+      options.timestamp ?? new Date(this.clock.now())
+    ).toISOString();
 
     let meterValue: TransactionEventRequestV201["meterValue"];
     if (options.meterValues) {
@@ -1598,7 +1627,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = buildSampledValues(connector, measurands, context);
-    const timestamp = overrides.timestamp ?? new Date();
+    const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     let sampledValue = this.toV201SampledValues(sampledValues) as [
       V201MeterValuesSampledValue,
       ...V201MeterValuesSampledValue[],
@@ -1717,7 +1746,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   ): Promise<void> {
     const payload: SecurityEventNotificationRequestV201 = {
       type,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this.clock.now()).toISOString(),
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
     const id = this.generateMessageId();
@@ -1867,7 +1896,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   private stopCertificateStatusRefresh(): void {
     if (this._certificateStatusRefresh !== null) {
-      clearInterval(this._certificateStatusRefresh);
+      this.clock.clearInterval(this._certificateStatusRefresh);
       this._certificateStatusRefresh = null;
     }
   }
@@ -2054,11 +2083,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (status.status === "Accepted") {
       this.stopCertificateStatusRefresh();
       this.requestCertificateStatus();
-      const refresh = setInterval(
+      const refresh = this.clock.setInterval(
         () => this.requestCertificateStatus(),
         CERTIFICATE_STATUS_REFRESH_MS,
       );
-      unrefTimer(refresh);
+      unrefTimerHandle(refresh);
       this._certificateStatusRefresh = refresh;
       this._signBackoff.resumeAll();
       // #537 2.1 A02.FR.29: the connection that discarded a renewed
@@ -2115,7 +2144,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
     this._outageHandled = true;
     for (const pending of this._pendingRequests.values()) {
-      clearTimeout(pending.timeout);
+      this.clearTimer(pending.timeout);
     }
     // Clear written-but-unanswered correlation entries on disconnect.
     // A disconnect must not leave stale correlation state.

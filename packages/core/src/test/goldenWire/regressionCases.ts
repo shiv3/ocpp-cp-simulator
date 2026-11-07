@@ -865,12 +865,16 @@ c201("transaction-update-driven", async (r) => {
 // --- restart: the snapshot goes through the row format and a new station
 const roundTrip = (snap: any) => {
   const row = JSON.parse(JSON.stringify(snap));
-  if (row.transaction) {
-    row.transaction.startTime = new Date(row.transaction.startTime);
-    if (row.transaction.stopTime)
-      row.transaction.stopTime = new Date(row.transaction.stopTime);
-  }
-  return row;
+  const tx = row.transaction;
+  if (!tx) return row;
+  return {
+    ...row,
+    transaction: {
+      ...tx,
+      startTime: new Date(tx.startTime),
+      ...(tx.stopTime ? { stopTime: new Date(tx.stopTime) } : {}),
+    },
+  };
 };
 async function restart(r: Rig, options: Partial<RigOptions> = {}) {
   const snaps = [...r.cp.connectors.values()].map(

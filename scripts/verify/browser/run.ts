@@ -127,6 +127,19 @@ await page.waitForFunction(() =>
 out.pageState = await page.evaluate(() =>
   (window as unknown as { __d2: { state(): unknown } }).__d2.state(),
 );
+// Loading a bundle whose behavior id is already loaded replaces it (a
+// reload): no "already loaded" error, still one behavior.
+await page.evaluate(() => {
+  const input = document.getElementById("bundle") as HTMLInputElement;
+  document.getElementById("status")!.textContent = "reloading";
+  input.dispatchEvent(new Event("change"));
+});
+await page.waitForFunction(() =>
+  /^(loaded|error)/.test(document.getElementById("status")?.textContent ?? ""),
+);
+out.pageStateAfterReload = await page.evaluate(() =>
+  (window as unknown as { __d2: { state(): unknown } }).__d2.state(),
+);
 await page.evaluate(() =>
   (window as unknown as { __d2: { connect(): Promise<void> } }).__d2.connect(),
 );

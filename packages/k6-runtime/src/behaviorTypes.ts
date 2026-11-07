@@ -233,8 +233,12 @@ export interface BehaviorContext {
   random(stream: string): RandomStream;
   /** True once the behavior was unloaded or the station is disposed. */
   readonly stopping: boolean;
-  /** User data; must be JSON-serializable, held by the engine. */
-  state: Record<string, JsonValue>;
+  /**
+   * User data; must be JSON-serializable, held by the engine. The object is
+   * the engine's: change its keys (`ctx.state.count = 1`), never assign
+   * `ctx.state` itself (core refuses it).
+   */
+  readonly state: Record<string, JsonValue>;
   /** A station-initiated CALL through the normal path; resolves to its result. */
   send(action: string, payload: unknown, opts?: SendOptions): Promise<unknown>;
   /** Explicit opt-in for non-compliant traffic, via the raw frame sender. */

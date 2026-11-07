@@ -256,7 +256,8 @@ describe("BehaviorHost ctx", () => {
             ctx.notify.logStatus("Uploaded", { requestId: 3 });
             ctx.raw("[2]");
             ctx.state.n = 1;
-            ctx.state = { m: 2 };
+            // The k6 host still accepts an assignment the contract now forbids.
+            (ctx as { state: unknown }).state = { m: 2 };
             ctx.log("hi");
             expect(ctx.charger).toMatchObject({
               id: "CP-1",

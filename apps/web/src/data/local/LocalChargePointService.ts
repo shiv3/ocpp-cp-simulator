@@ -41,6 +41,7 @@ import type { AutoMeterValueSetting } from "@ocpp-cp-sim/core/cp/domain/charge-p
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
 import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
@@ -306,21 +307,38 @@ export class LocalChargePointService implements ChargePointService {
       const mod: unknown = await import(/* @vite-ignore */ url);
       const behaviors = behaviorsOfModule("behavior bundle", mod);
       const running = new Set(cp.engine.behaviorIds);
-      // Check every behavior before changing anything.
+      const seen = new Set<string>();
       for (const behavior of behaviors) {
-        if (running.has(behavior.id)) cp.engine.assertLoadable(behavior);
+        if (seen.has(behavior.id)) {
+          throw new Error(`behavior id "${behavior.id}" is given twice`);
+        }
+        seen.add(behavior.id);
       }
+      // Check every behavior, replaced and new alike, before changing anything.
+      for (const behavior of behaviors) cp.engine.assertLoadable(behavior);
       const added: string[] = [];
+      const replaced: Behavior[] = [];
       try {
         for (const behavior of behaviors) {
-          if (running.has(behavior.id)) cp.engine.replaceBehavior(behavior);
-          else {
+          if (running.has(behavior.id)) {
+            const previous = cp.engine.behaviorOf(behavior.id);
+            cp.engine.replaceBehavior(behavior);
+            if (previous) replaced.push(previous);
+          } else {
             cp.loadBehavior(behavior);
             added.push(behavior.id);
           }
         }
       } catch (error) {
+        // All or nothing: what was added goes, what was replaced comes back.
         for (const behaviorId of added) cp.unloadBehavior(behaviorId);
+        for (const previous of replaced.reverse()) {
+          try {
+            cp.engine.replaceBehavior(previous);
+          } catch {
+            // The original error is the one to report.
+          }
+        }
         throw error;
       }
       return behaviors.map((behavior) => behavior.id);

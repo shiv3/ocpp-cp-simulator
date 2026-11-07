@@ -173,6 +173,8 @@ export interface Behavior {
   id: string;
   requires?: readonly BehaviorCapability[]; // "ocpp1.6" | "ocpp2.x" | "physical" | "virtual-time" ...
   onCall?: Record<string, CallBehavior>; // keyed by action, either version's spelling
+  on?: BehaviorEvents; // connectorStatus, transactionStarted/Stopped, connected, disconnected, callResult, callReceived
+  beforeSend?: Record<string, BeforeSend>; // station-initiated CALLs, keyed by action
   main?(ctx: BehaviorContext): Promise<void>;
   onResume?(ctx: BehaviorContext): Promise<void>;
 }
@@ -208,6 +210,7 @@ skipped with a warning if it was not delivered.
 - `raw(frame)`: explicit opt-in for non-compliant traffic, via `RawFrameSender`
 - physical verbs, independent of OCPP version: `plugIn`, `unplug`, `authorize`, `startCharging`,
   `stopCharging`, `setConnectorStatus`
+- `accepted(action)` / `rejected(action)`: the valid canned response of this station's version
 - `notify`: version-neutral notifications such as `firmwareStatus(status)`, `logStatus(status)`
 - `connector(id)`, `charger`: read-only snapshots
 - `log(message)`
@@ -413,7 +416,9 @@ k6 runs on real time and promises only explanation through seed and trace.
 ### Loading code
 
 - CLI and daemon: `--behavior <file>`, repeatable (stage D1: done, see its Status). The daemon needs `--allow-behavior-code` and refuses
-  the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`.
+  the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`, into a library
+  by behavior id. Which charge point runs which behavior is data, chosen by id (stage E: done); `--watch-behaviors` and
+  `behavior.reload` re-read the same files (stage E: done).
 - `ocpp-cp-sim behavior build <file>` type-checks and writes one ESM bundle with `--external 'k6/*'`.
 - Web (stage D2: done): `LocalChargePointService.loadBehaviorBundle(id, blob | text)` loads a built bundle through
   `import(blobUrl)`, in the local runtime only.
@@ -586,6 +591,112 @@ Status (stage D2): k6, browser and scale. Decisions the design left open:
 - **`drainMicrotasks` hops with a `MessageChannel` where `setImmediate` is absent** (browsers). `setTimeout(0)` was
   the fallback; see the measurement below.
 
+### Status (stage E): hooks, send interception, assignment, reload
+
+Everything below is additive. With no behavior that uses these features, the wire traffic is unchanged: the golden
+wire test (158 cases) passes with its fixtures untouched, and the hot paths cost one boolean check
+(`hooked` / `intercepting` on the engine). Decisions the design left open:
+
+**Event hooks (`Behavior.on`).**
+
+| Hook                         | Payload                                                        | Raised when                                                                                                                                                                  |
+| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connectorStatus`            | `{ connectorId, from, to }`                                    | A connector's status record changes (every writer, local ones included; a write that keeps the value raises nothing, a restore raises nothing)                               |
+| `transactionStarted`         | `{ connectorId, transactionId, idTag }`                        | The connector gets a transaction record; on 1.6 `transactionId` is `0` until the CSMS answers, on 2.x the station's UUID                                                     |
+| `transactionStopped`         | `{ connectorId, transactionId, idTag, reason? }`               | The record gets its stop time (or is removed while running), once per transaction                                                                                            |
+| `connected` / `disconnected` | `{ at }` / `{ at, code?, reason? }`                            | The socket really opened / closed. The synthesized `connected` of a repeated `connect()` is not one. SOAP: when the callback is up                                           |
+| `callResult`                 | `{ action, messageId, outcome: "result" \| "error", payload }` | The CSMS answered a station-initiated CALL, any of them (automatic messages, `ctx.send`, the `ocppCall` node). An error carries `{ errorCode, errorDescription }` as payload |
+| `callReceived`               | `{ action, messageId, payload }`                               | The CSMS sent a CALL, before the gate looks at it. Observation only: it cannot change the answer                                                                             |
+
+- **Delivery.** Events go on one FIFO queue and are delivered in a microtask after the turn that caused them,
+  so a hook never runs inside the event (or inside the handler that raised it) and the state it sees is the state
+  after the change (`ctx.connector()` shows the new status; the payload carries `from` / `to` for hooks that run
+  later than the change). Hooks of several behaviors run in load order. A hook may be async; the engine does not
+  await it. A hook that throws or rejects is logged as a warning and the charger carries on. An event raised while a
+  hook runs (the hook wrote a status, sent a CALL) joins the queue and its hooks run after the running hook returns,
+  so a hook's own writes never nest, and the wire order is: the traffic of the event, then the traffic of the hook.
+  The order depends only on program order, so the same seed gives the same effects on a `VirtualClock`
+  (`hooks.bun.test.ts`, 16 cases, one of them hashes two runs).
+- Payloads of `callResult` / `callReceived` are copies; a hook cannot change what the engine holds.
+- Dormant behaviors (loaded for a scenario's `useBehavior`) do not get hooks or `beforeSend`.
+
+**Send interception (`Behavior.beforeSend`).**
+
+- One choke point per transport: `sendRequest` on 1.6 and `send` on 2.x. Every station-initiated CALL passes it:
+  automatic messages, `ctx.send`, `ocppCall` nodes and control-plane expert calls. The expert path asks before the
+  call is tracked, so the `sentFrame` it reports is the frame that went out. `ctx.raw` writes a frame as given and is
+  outside. A CALL the boot gate suppresses never reaches it. A SOAP station refuses a behavior with `beforeSend`
+  at load (`Behavior x uses beforeSend, which needs an OCPP-J station`).
+- The key is the wire action. On a 2.x station `StartTransaction` and `StopTransaction` also name `TransactionEvent`
+  with `eventType` `Started` / `Ended`; the payload handed over is always the one of the station's own version. Other
+  1.6 and 2.x names that differ (`MeterValues` in a 2.x transaction rides `TransactionEvent`) are not translated.
+- Signature `(payload, ctx) => payload | { drop: true } | undefined`, synchronous. `payload` is a copy;
+  returning nothing leaves the CALL as it was (mutating the copy changes nothing). A returned promise, a throw or a
+  non-object is a warning and the CALL goes on unchanged. Behaviors chain in load order, each seeing the result of
+  the one before. A rewritten payload goes through the existing outgoing schema warning (a warning, the CALL is
+  still sent). A resend (1.6 transaction retries) is intercepted again as the new CALL it is.
+- A `ctx.send` made from inside a `beforeSend` waits one microtask, so it is queued after the CALL being intercepted.
+- **Dropped CALL.** Nothing is queued and nothing is written. Whoever waits is told through the path a CALL that
+  never reached the wire already had: `OcppCallNoAnswerError("dropped")` for `ctx.send` / `ocppCall` / expert calls,
+  the DataTransfer waiter's rejection, a lost first transmission for a 2.x `TransactionEvent`. The serial queue of 1.6
+  is not held (no slot is taken), and a dropped Heartbeat still re-arms the idle timer, otherwise the periodic
+  Heartbeat would stop for good. A dropped `StartTransaction` leaves the transaction without a CSMS id, as an
+  unanswered one would; later CALLs go out (`beforeSend.bun.test.ts`: Heartbeat, MeterValues, StartTransaction).
+
+**Per-charger assignment.**
+
+- `--behavior` fills a `BehaviorLibrary` (`apps/cli/src/behavior/BehaviorLibrary.ts`): behavior id to behavior, in load
+  order. A charge point's `behaviors: string[]` selects from it by id: absent runs every loaded behavior (today's
+  behavior), `[]` none. Unknown ids are `invalid_params` naming the loaded ids, before anything is created or
+  persisted. It is accepted by `cp.create`, `cp.create_many`, `cp.update` (omitted keeps the current list), blueprints
+  (`blueprintSchema`, through `params`), the CLI (`--use-behavior <id>` for the charge points the command line starts)
+  and `cp.behaviors.set` (in place, `null` = all). `behavior.list` shows the library.
+- It persists with the charge point (`charge_points.behaviors`, schema v24; `NULL` = all). On restore an id that is
+  no longer loaded is dropped with a warning.
+- **No code over the wire.** `behaviors` is `string[]` and is only ever looked up in the library; a string that looks
+  like source or a path is an unknown id. The tests feed source text, a path and a `data:` URL to `cp.create` and
+  `cp.behaviors.set` and check that nothing ran, that `behavior.reload` and `behavior.list` refuse any parameter
+  (strict schemas), and that no method named like a loader exists (`behaviorAssignment.bun.test.ts`).
+- Changing the selection at run time unloads the behaviors no longer selected (their `ctx.state` is dropped with
+  them) and loads the new ones after those already running, so the load order of a charge point can differ from the
+  library order after a change.
+
+**Reload.**
+
+- `BehaviorLibrary.reload()` re-reads the paths given at start (`behavior.reload` takes no parameters;
+  `--watch-behaviors` watches the directories of the files, 150 ms debounce, and calls the same function). A file
+  whose bundle hash equals the loaded one is skipped; a file that fails to build or load, or whose set of behavior ids
+  changed, keeps its old version and the error is logged and returned. Reloads run one at a time. Each read imports
+  a bundle from a fresh `mkdtemp` directory, removed afterwards, so the module cache never serves an old version.
+- `ChargerEngine.replaceBehavior(next)` validates `next` first (`requires`, `beforeSend` on SOAP, rule registration;
+  any failure leaves the old version untouched), then swaps the rules. An exchange in flight finishes on the old code
+  (its closure holds it); a CALL after the swap gets the new one. Hooks and `beforeSend` resolve the behavior at
+  delivery, so they switch at once. `ctx.state` survives (it is keyed by id). A running `main` and the hooks'
+  context are asked to stop (`ctx.stopping` turns true, waits still work) and are cut off after
+  `ChargerEngine.RELOAD_GRACE_MS` (5 s, the station's clock); the new `main` starts when the old one returned or the
+  grace time is over. Unloading, disposing or reloading again during the grace time cuts the old work off at once.
+  The scenario rules of a dormant behavior keep the old version until their run ends.
+- Web: `loadBehaviorBundle` again with a bundle whose behavior id is already loaded on that charge point replaces it
+  under the same rules (checked in Chromium).
+
+**`ctx.accepted(action)` / `ctx.rejected(action)`** try `{ status: "Accepted" }` (`"Rejected"`) and, for `accepted`,
+`{}` against the bundled response schema of the action for the station's version and return the first that is valid.
+`UpdateFirmware` is `{}` on 1.6 and `{ status: "Accepted" }` on 2.x. An action with no bundled schema, or whose response
+needs more than a status or has no such status, throws `ctx.rejected("UpdateFirmware"): the UpdateFirmware response on
+OCPP-1.6J has no Rejected answer; build the response by hand`. Either version's spelling of the action is understood.
+The template `flaky-firmware.ts` uses it.
+
+**k6.** Provided: `connected`, `disconnected`, `callResult`, `callReceived`, `beforeSend` (the k6 client asks the host
+inside `call()`, the one place every CALL is queued, so the automatic Heartbeat is covered) and `accepted` / `rejected`
+(the export writes the 1.6 answers into the entry script). Refused at export, never ignored: `connectorStatus`,
+`transactionStarted`, `transactionStopped` (no connector or transaction model). Assignment and reload do not apply
+to k6 (one export is one set of behaviors).
+
+Tests that target code this stage changes: none was deleted or weakened. `methods.test.ts` counts the explicit methods
+(46 to 49), the MCP tool lists of `mcp.test.ts` and `mcpToolSchemaParity.test.ts` gained three tools, and handler unit
+tests with hand-written station doubles needed nothing: the transports read the engine through `behaviorTapOf`, which
+passes everything through for a double without an engine.
+
 ## Verification results
 
 All numbers were measured in the stage D2 container (4 cores, 11 GiB RAM, Linux x86_64, Bun 1.3.14), on
@@ -621,3 +732,19 @@ Found while measuring, fixed in the same stage:
 - The browser fallback of `drainMicrotasks` (fixed above).
 - Not found failing, but not exercised: the `spike` and ramping profiles with behaviors, mTLS, and k6 versions other
   than 2.3.0 (the generated README says `k6 >= 1.6`; that floor was not re-tested).
+
+### Stage E
+
+Measured on 2026-11-07 in the stage E container (Bun 1.3.14, k6 v2.3.0, Chromium 158 through `playwright-core` 1.65.0).
+
+| Item                        | How                                                                                                                                                                                                                                                                                                    | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The real daemon, end to end | `bun scripts/verify/e2e/behaviorsDaemon.ts`: `main.ts --http-port … --allow-behavior-code --watch-behaviors` with three behavior files, a local CSMS over a real WebSocket, two charge points created over `cp.create` with different `behaviors`; the CSMS records every frame                        | **Pass, 15 checks.** CP-A (`disconnect-on-charging` + `answer-reset`) answered `Reset` `Accepted`, CP-B (`reset-rejects`) `Rejected`. CP-A's MeterValues carried `1000` for the energy register where CP-B's carried `0` (the example's `beforeSend`); the CSMS received CP-A's malformed frame `[9,"misbehave","NoSuchAction",{}]` 2.8 s after Charging. An unknown id was refused naming the three loaded ids                                                           |
+| Reload without a restart    | The script edits `answer-reset.ts` (`accepted` to `rejected`) while the daemon runs                                                                                                                                                                                                                    | **Pass.** The next `Reset` to CP-A was answered `Rejected`; same daemon pid, each charge point still on its first connection (1 open each). A syntax error in the file kept the old version (still `Rejected`) and the daemon logged `keeping the old version`. `behavior.reload` then applied the fixed file to 1 charge point (`applied: 1`); a `file` parameter was refused. `cp.behaviors.set` moved CP-B to `answer-reset` in place (`Accepted`, still 1 connection) |
+| k6                          | `export-k6 --behavior scripts/verify/behaviors/k6-hooks.ts`, `VUS=1 DURATION=12s RUN_FOR_MS=6000` against `fakeCsms16.ts --update-firmware`                                                                                                                                                            | **Pass.** `UpdateFirmware` answered `{}` (`ctx.accepted` on 1.6). The CSMS saw `Downloading`, `Installing`, `Installed`, each with `requestId: 42` (`beforeSend` rewrite) and no `Downloaded` (dropped, nothing sent, the behavior went on). The hooks `connected`, `callReceived` and `callResult` fired; 3 iterations, 0 interrupted                                                                                                                                    |
+| Browser                     | `scripts/verify/browser/run.ts`: the page loads `flaky-firmware.bundle.js` twice into the same charge point                                                                                                                                                                                            | **Pass.** The second load replaced the behavior (no "already loaded" error, one behavior serving); the CSMS saw the four `FirmwareStatusNotification`s; the determinism hashes of D2 were unchanged                                                                                                                                                                                                                                                                       |
+| Tests                       | `bun run typecheck`, `lint`, `check:boundaries`, `format:check` green. `bunx vitest run`: 6 files / 80 tests fail, all `CloseEvent is not defined`, the baseline (5403 passed against 5260). `bun run test:bun`: 2096 pass, 1 skip, 0 fail (baseline 1719). Golden wire: 158 cases, fixtures untouched | New: `hooks` 16, `beforeSend` 15, `reload` 8, `responseHelpers` 6, `behaviorLibrary` 6, `behaviorAssignment` 10, the example 3, k6 host 8 + export 2, contracts 5, CLI flags 5                                                                                                                                                                                                                                                                                            |
+
+Not covered: `--watch-behaviors` on a network file system (`fs.watch` recursive on Linux), a reload while thousands of
+exchanges are in flight, hooks on SOAP stations beyond `connected` / `disconnected`, and the `callResult` hook for a
+timed-out CALL (there is no answer to report; the waiter's own timeout is the signal).

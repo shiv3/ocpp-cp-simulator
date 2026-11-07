@@ -22,7 +22,7 @@ related:
   - operational-timeline.md
   - charging-sessions.md
   - local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Socket.IO control plane
@@ -207,6 +207,7 @@ one rather than restating a subset.
 | `tls`                                             | object                           | The same material inline: `ca`, `cert`, `key`, `rejectUnauthorized`, `serverName`.                                                                                                                                                          |
 | `autoConnect`                                     | boolean                          | Connect immediately after the call.                                                                                                                                                                                                         |
 | `labels`                                          | object of string values          | Generic grouping metadata (`{ "site": "lyon-01", "env": "lab" }`) — see [Charge-point labels](#charge-point-labels).                                                                                                                        |
+| `behaviors`                                       | array of strings                 | Ids of the loaded [behaviors](#behaviors) this charge point runs. Absent: every loaded behavior; `[]`: none. Ids only, never code. `cp.update` keeps an omitted list.                                                                       |
 
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.
@@ -362,6 +363,39 @@ The list and the policy are **persisted** (`charge_points.supervision_urls` /
 failover configuration: a restart that brought the charge point back on
 `ws_url` alone would silently disable the one thing the list exists to provide.
 See [State persistence](state-persistence.md).
+
+##### Behaviors
+
+[Behavior code](../analyses/charger-engine.md#behavior-api-packagescontracts-types-only) enters a
+process in one way: `--behavior <file>` on the command line, which loads the files into a
+library ([CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build)). The control plane
+only **selects from that library by id**; no method takes source text, a path or a URL, and no
+method loads, uploads or evaluates anything (`behaviorCodeIsNotRemote.bun.test.ts`,
+`behaviorAssignment.bun.test.ts`).
+
+| Method / parameter                                                                      | Meaning                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `behaviors` on `cp.create`, `cp.create_many`, `cp.update` and in a blueprint's `params` | `string[]` of behavior ids. Absent: **every loaded behavior** (what a daemon did before the parameter existed). `[]`: none. `cp.update` keeps the selection when the list is omitted; a blueprint's list is replaced by a request's.                                                                                                  |
+| `cp.behaviors.set { cpId, behaviors }`                                                  | Change the selection **in place**: no rebuild, the connection and any transaction stay. Unselected behaviors are unloaded (their `ctx.state` goes with them), newly selected ones are loaded after those already running. `behaviors: null` goes back to "every loaded behavior". Answers `{ cpId, behaviors }`, the ids now running. |
+| `behavior.list {}`                                                                      | `{ behaviors: [{ id, file }], watching }`: the library and whether `--watch-behaviors` is on.                                                                                                                                                                                                                                         |
+| `behavior.reload {}`                                                                    | Re-read **the files given at start** and apply the changed ones (below). Takes no parameters at all: a `file`, a `source` or any other field is refused (`strict`), so neither a path nor code can come from the caller. Answers `{ files: [{ file, ids, ok, unchanged, error?, applied, failures }] }`.                              |
+
+An id that names no loaded behavior is `invalid_params` with the loaded ids in the message
+(`Unknown behavior id "x"; loaded behaviors: a, b`), before anything is created or changed.
+`behaviors` is stored with the charge point (`charge_points.behaviors`, schema v24, JSON array;
+`NULL` = all) and restored with it; an id the restarted daemon no longer has is dropped with a warning.
+MCP: `cp_behaviors_set`, `behavior_list` and `behavior_reload`; `cp_create` takes `behaviors` from the schema.
+
+**Reload.** `behavior.reload` and `--watch-behaviors` (which watches the directories of the files and
+calls the same code after a 150 ms debounce) rebuild each file and compare its bundle with the one in
+use. An unchanged bundle is left alone (`unchanged: true`). A file that does not build or load, or
+whose set of behavior ids changed, keeps its old version: the error is logged and returned (`ok:
+false`); a reload is all or nothing per file. Otherwise every charge point running a behavior of the file
+switches to the new version: exchanges in flight finish on the old code, a CALL that arrives later gets the
+new one, `ctx.state` stays, hooks and `beforeSend` use the new version at once. A running `main` sees
+`ctx.stopping` and has 5 s (on the station's clock) to return before its waits are cut off; the new `main`
+starts when the old one returned or the grace time is over. A charge point whose station cannot take the
+new version (`requires`, `beforeSend` on SOAP) keeps the old one and is named in `failures`.
 
 ##### Charge-point labels
 
@@ -654,6 +688,9 @@ Guarantees a conformance driver can rely on:
 | `blueprint.list` / `.save` / `.delete`                         | See [Blueprints](#blueprints) below                                                                 | Named, reusable CP hardware descriptions; instantiate with `cp.create_many { blueprintId }`.                                                                                                                                                                                          |
 | `cp.update`                                                    | Same as `cp.create`                                                                                 | Replace an existing CP config and **rebuild** the CP (its socket closes); `autoConnect: true` reconnects it after update. Omitted `labels` are kept.                                                                                                                                  |
 | `cp.labels.set`                                                | `{ "cpId": string, "labels": object }`                                                              | Replace a CP's labels in place, without the rebuild `cp.update` does ([Charge-point labels](#charge-point-labels)).                                                                                                                                                                   |
+| `cp.behaviors.set`                                             | `{ "cpId": string, "behaviors": string[] \| null }`                                                 | `{ cpId, behaviors }`: change which loaded behaviors a CP runs, in place; ids only ([Behaviors](#behaviors)).                                                                                                                                                                         |
+| `behavior.list`                                                | `{}`                                                                                                | `{ behaviors: [{ id, file }], watching }` ([Behaviors](#behaviors)).                                                                                                                                                                                                                  |
+| `behavior.reload`                                              | `{}` (no other field is accepted)                                                                   | `{ files: [...] }`: re-read the files given at start and apply the changed ones ([Behaviors](#behaviors)).                                                                                                                                                                            |
 | `cp.bulk`                                                      | `{ "labels": object, "action": "connect" \| "disconnect" \| "reset" }`                              | `{ matched, succeeded, failed }`: run the action on every CP carrying every pair; a non-empty selector is required ([Charge-point labels](#charge-point-labels)).                                                                                                                     |
 | `cp.delete`                                                    | `{ "cpId": string }`                                                                                | Remove a CP from the registry and delete its rows from every `cp_id`-keyed table, stored logs included ([State persistence](state-persistence.md)).                                                                                                                                   |
 | `logs.get`                                                     | `{ "cpId": string, "limit"?: number, "offset"?: number, "order"?: "asc" \| "desc" }`                | Return persisted logs, or the in-memory log buffer when no state DB is configured. `limit` takes the **most recent** N; see [Log format → Log windowing](log-format.md#log-windowing).                                                                                                |

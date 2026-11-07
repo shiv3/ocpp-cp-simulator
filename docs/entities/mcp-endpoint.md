@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 32 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 35 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - apps/cli/src/server/mcp/tools.ts
   - apps/cli/src/server/__tests__/mcp.test.ts
@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -42,7 +42,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 32 curated tools wrapping the daemon's
+The endpoint exposes 35 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                          | RPC Method                    | Params                                                                                                                                                                                                                                                                        |
@@ -54,6 +54,9 @@ The endpoint exposes 32 curated tools wrapping the daemon's
 | `blueprint_save`              | `blueprint.save`              | `blueprint` — schema derived from `blueprintSchema` ([Blueprints](../concepts/control-plane.md#blueprints))                                                                                                                                                                   |
 | `cp_delete`                   | `cp.delete`                   | `cpId`                                                                                                                                                                                                                                                                        |
 | `cp_labels_set`               | `cp.labels.set`               | `cpId`, `labels` — replaces the CP's labels in place, no reconnect; schema derived from the method's (#446)                                                                                                                                                                   |
+| `cp_behaviors_set`            | `cp.behaviors.set`            | `cpId`, `behaviors` (ids, `[]` or `null`) — choose which loaded behaviors the CP runs, in place; ids only, never code; an unknown id names the loaded ids                                                                                                                     |
+| `behavior_list`               | `behavior.list`               | — (the library `--behavior` loaded, and whether `--watch-behaviors` is on)                                                                                                                                                                                                    |
+| `behavior_reload`             | `behavior.reload`             | — (no parameters: re-reads the files given at start; no path or code can be supplied)                                                                                                                                                                                         |
 | `cp_bulk`                     | `cp.bulk`                     | `labels`, `action` (`connect` / `disconnect` / `reset`) — every CP carrying every pair; `{}` refused; partial success is the result; schema derived from the method's (#470)                                                                                                  |
 | `cp_connect`                  | `connect`                     | `cpId`                                                                                                                                                                                                                                                                        |
 | `cp_disconnect`               | `disconnect`                  | `cpId`                                                                                                                                                                                                                                                                        |

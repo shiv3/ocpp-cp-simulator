@@ -227,6 +227,15 @@ including the k6 refusals), `behaviorCodeIsNotRemote.bun.test.ts` (code-like `lo
 `scripts/__tests__/behaviorEslint.bun.test.ts` (the ESLint config), `service.engineStatePersistence.bun.test.ts`
 and the template's own `examples/behaviors/flaky-firmware.bun.test.ts` (same seed, same frames).
 
+The tests of stage E (hooks, send interception, assignment, reload) are, in `packages/core/src/test/behavior/`,
+`hooks.bun.test.ts` (delivery order, re-entrancy, throwing and async hooks, same seed same hash),
+`beforeSend.bun.test.ts` (rewrite and drop on Heartbeat, MeterValues, StartTransaction, `ctx.send`, the `ocppCall`
+path, 2.x aliases, SOAP refusal), `reload.bun.test.ts` (`replaceBehavior`: in-flight exchange, `ctx.state`, grace
+time) and `responseHelpers.bun.test.ts` (`ctx.accepted` / `ctx.rejected`); in `apps/cli`, `behaviorLibrary.bun.test.ts`
+(select, reload, fresh temporary imports) and `server/__tests__/behaviorAssignment.bun.test.ts` (the control-plane
+methods, persistence, and that no code or path is accepted); `behaviorHost.test.ts` and `behaviorExport.bun.test.ts`
+for the k6 host and its refusals. `scripts/verify/e2e/behaviorsDaemon.ts` drives the real daemon end to end.
+
 The tests of the scenario 1.5 features are `scenario15.bun.test.ts` (one test per row of the runtime
 contract in the [Charger engine design](charger-engine.md#scenario-schema-15-additive)) and
 `ScenarioExecutor`-level `callResponse.test.ts`. The acceptance tests for #566 are

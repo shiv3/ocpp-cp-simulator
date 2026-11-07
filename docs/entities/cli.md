@@ -677,6 +677,41 @@ ocpp-cp-sim behavior build examples/behaviors/flaky-firmware.ts --out dist/flaky
   `flaky-firmware.bun.test.ts` beside it shows the same-seed test on `runBehavior()`.
 - A behavior's `ctx.state` and the notification statuses survive a restart with `--state-db`:
   [State persistence](../concepts/state-persistence.md).
+- **Event hooks and `beforeSend`.** `on: { connectorStatus, transactionStarted, transactionStopped, connected,
+disconnected, callResult, callReceived }` observes the station (after the turn that caused the event, never
+  nested in it, not awaited, a throw is logged and changes nothing) and `beforeSend: { MeterValues(payload, ctx)
+{ … } }` rewrites or drops (`{ drop: true }`) a station-initiated CALL before it is queued, synchronously;
+  `ctx.accepted("UpdateFirmware")` / `ctx.rejected(…)` return the valid canned response of this station's OCPP
+  version. Details and decisions: [Charger engine design](../analyses/charger-engine.md#status-stage-e-hooks-send-interception-assignment-reload);
+  `examples/behaviors/disconnect-on-charging.ts` is a template using hooks and `beforeSend`.
+
+#### Choosing behaviors per charge point and reloading them
+
+`--behavior` files go into a **library**, by behavior id. Without further flags every charge point runs every
+loaded behavior (as before). To give charge points different behaviors:
+
+```shell
+# one charge point, only one of the two loaded behaviors
+ocpp-cp-sim --cp-id CP001 --ws-url ws://localhost:9000 \
+  --behavior a.ts --behavior b.ts --use-behavior b
+
+# a daemon: charge points pick theirs by id over the control plane (ids only, never code)
+ocpp-cp-sim --http-port 8080 --allow-behavior-code --watch-behaviors --behavior a.ts --behavior b.ts
+#   cp.create { cpId, wsUrl, behaviors: ["a"] }   cp.behaviors.set { cpId, behaviors: ["b"] }
+```
+
+- `--use-behavior <id>` (repeatable) selects the behaviors of the charge points the command line itself
+  starts (`--cp-id`, `--cp-count`); it needs `--behavior` and `--cp-id`. An unknown id stops the start with
+  exit code 1 and `Unknown behavior id "x"; loaded behaviors: a, b`. Charge points created later choose with
+  the `behaviors` parameter of `cp.create` / `cp.create_many` / `cp.update` / a blueprint, or `cp.behaviors.set`
+  ([Control plane → Behaviors](../concepts/control-plane.md#behaviors)).
+- `--watch-behaviors` re-bundles a behavior file when a file in its directory changes (150 ms debounce) and
+  applies the new version without a restart; the daemon method `behavior.reload` does the same on demand and
+  accepts no path or code. Reload is atomic per file (a file that fails to build or load keeps the old version
+  and logs the error), exchanges in flight finish on the old code, `ctx.state` stays, and a running `main` is
+  asked to stop (`ctx.stopping`) and gets 5 s before the new `main` starts. A reload cannot add or remove
+  behavior ids (restart for that). Each reload imports a fresh bundle from a new temporary directory, which is
+  removed afterwards, so the runtime's module cache never serves an old version.
 
 ### export-k6
 
@@ -808,7 +843,14 @@ Refused at export, with the file and the reason named:
 | `requires` of `physical`, `virtual-time` or `ocpp2.x`                                                       | The k6 host has no connector model, runs on real time, and speaks 1.6J only.                                           |
 | `mode: "extend"`, `ctx.defaultBehavior`                                                                     | The k6 auto-responder has no default behavior with follow-ups to extend.                                               |
 | `ctx.connector`, `ctx.plugIn`, `unplug`, `authorize`, `startCharging`, `stopCharging`, `setConnectorStatus` | No connector model. The check is syntactic (it also flags a property of that name); the members throw at run time too. |
+| `on.connectorStatus`, `on.transactionStarted`, `on.transactionStopped`                                      | They need a connector and transaction model the k6 host does not have; never silently ignored.                         |
 | A bundle that imports `k6` modules                                                                          | The export loads the bundle to read `requires` and the rules; it cannot do that.                                       |
+
+The k6 host does provide `on.connected`, `on.disconnected`, `on.callResult`, `on.callReceived` (same delivery
+rule as in the simulator: after the turn, FIFO, not awaited), `beforeSend` (the k6 client asks the host before it
+queues any CALL, the automatic Heartbeat included; a dropped CALL rejects its caller with `OcppCallNoAnswerError`
+and is never queued) and `ctx.accepted` / `ctx.rejected` (the export writes the 1.6 answers into `behavior.k6.ts`).
+Per-charger assignment and reload do not apply to k6 (one export, one set of behaviors).
 
 Responses are not checked against the OCPP schema (`skipValidation` has nothing to skip), and a CALL no rule claims
 is answered by the same auto-responder as in a scenario export. Environment variables are in the generated README.
@@ -939,8 +981,10 @@ the OCPP answer are unchanged.
 | `--daemon`                          | No       | -                                       | Server daemon. With no `--http-port`, listens on `http://127.0.0.1:9700`.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `--http-port <port>`                | No       | `9700` with bare `--daemon`             | Enable the TCP health / Socket.IO server on this port                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `--http-host <addr>`                | No       | `127.0.0.1`                             | Bind address for HTTP. Non-loopback binds require web-console Basic Auth or `--unsafe-remote`.                                                                                                                                                                                                                                                                                                                                                                                                |
-| `--behavior <file>`                 | No       | -                                       | Load behavior code onto every charge point; repeatable. Runs with the process's full authority. A daemon also needs `--allow-behavior-code`. See [Behavior code](#behavior-code---behavior-and-behavior-build).                                                                                                                                                                                                                                                                               |
+| `--behavior <file>`                 | No       | -                                       | Load behavior code into the library (every charge point runs all of it unless `--use-behavior` / `behaviors` picks); repeatable. Runs with the process's full authority. A daemon also needs `--allow-behavior-code`. See [Behavior code](#behavior-code---behavior-and-behavior-build).                                                                                                                                                                                                      |
 | `--allow-behavior-code`             | No       | -                                       | A daemon's explicit opt-in to `--behavior`. Refused together with `--unsafe-remote`.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `--use-behavior <id>`               | No       | all loaded                              | Run only the loaded behavior with this id on the charge points started from `--cp-id`; repeatable. Needs `--behavior` and `--cp-id`. See [Choosing behaviors per charge point](#choosing-behaviors-per-charge-point-and-reloading-them).                                                                                                                                                                                                                                                      |
+| `--watch-behaviors`                 | No       | -                                       | Reload a `--behavior` file when it (or a file in its directory) changes; in a daemon `behavior.reload` does the same on demand.                                                                                                                                                                                                                                                                                                                                                               |
 | `--unsafe-remote`                   | No       | -                                       | Allow a non-loopback daemon bind without `--web-console-basic-auth-user/pass`. Use only on trusted networks.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `--unix-socket <path\|none>`        | No       | deprecated no-op                        | Accepted for launcher compatibility, prints one warning, and is ignored.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `--web-console [<port>]`            | No       | -                                       | Serve the bundled browser UI alongside Socket.IO. Without a port, shares `--http-port`; with a port, serves on that listener. Needs a directory with `index.html`: `<repo>/dist` after `bun run build`, the `dist/` a release package ships, a `dist/` beside the binary, or `--web-console-dist`. On failure it names every path it searched.                                                                                                                                                |

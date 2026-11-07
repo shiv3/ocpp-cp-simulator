@@ -82,6 +82,12 @@ behaviors (the reconcile only reads the connectors, so the order is safe, and `o
 Behavior `ctx.state` and the firmware / log / diagnostics statuses persist in `engine_state`; in-flight waits do not.
 A `cp.update` rebuild keeps that row, so a behavior's data continues across it.
 
+The `charge_points.behaviors` column (schema v24) holds the ids of the loaded behaviors a charge point runs, as a JSON
+array; `NULL` (every row of an older database) means all of them, which is what ran before. It is written by
+`cp.create` / `cp.update` and by `cp.behaviors.set`, and read back on restore: an id the restarted daemon did not
+load (fewer `--behavior` files) is dropped with a warning. Only ids are stored, never code
+([Control plane → Behaviors](control-plane.md#behaviors)).
+
 ## Reset
 
 The browser ships a **Reset all simulator data** button (Settings page) that

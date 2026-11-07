@@ -107,7 +107,7 @@ on a use the list does not allow and on an entry that allows more than the file
 has. It also runs [`scripts/check-single-writer.ts`](../scripts/check-single-writer.ts):
 only `packages/core/src/cp/application/engine/` may assign a connector's `status`,
 `availability`, `scheduledAvailability`, `currentErrorCode`, `errorInfo` or
-`vendorErrorCode` ([Charger engine design](analyses/charger-engine.md#charger-engine-applicationengine)).
+`vendorErrorCode`, `transaction`, `transactionId` or a transaction's fields ([Charger engine design](analyses/charger-engine.md#charger-engine-applicationengine)).
 
 | Package (`@ocpp-cp-sim/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                      |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |

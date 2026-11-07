@@ -2327,3 +2327,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | Connector status in engine state (charger engine stage C1)
 
 - `ChargerState.connectors` holds status, availability and error info; `Connector` reads and writes it through the engine, `updateConnectorStatus` only dispatches; `check-single-writer.ts` enforces one writer; `ConnectorStateMachine` is deleted and `StateManager` only records history. [Charger engine design](analyses/charger-engine.md), [Overview](overview.md#source-layout-and-package-boundaries).
+
+## [2026-11-07] ingest | Transactions, persistence and resume (charger engine stage C2)
+
+- `ConnectorRecord.transaction` holds the transaction as JSON; `Connector.transaction` is a live view; `default.transaction` owns start, stop and the four remote actions on both versions; `check-single-writer.ts` guards the transaction fields; `connector_runtime` restore fills engine state and `engine.resume()` runs `onResume`. Scenario registry and `ReservationManager` stay. [Charger engine design](analyses/charger-engine.md), [Overview](overview.md#source-layout-and-package-boundaries).

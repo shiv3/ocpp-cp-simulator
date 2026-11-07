@@ -336,8 +336,8 @@ design left open:
 - **State so far.** `ChargerState` holds `schema`, the last firmware, signed firmware, log and
   diagnostics status the station reported (`{ status, requestId }`), and `behaviors`, the `ctx.state`
   of every loaded behavior. Stage C added `connectors` (see "Status (stage C)"). Transactions and
-  reservations move into it with their default behaviors later; until then they stay in `Connector` and the
-  managers.
+  reservations move into it with their default behaviors later; transactions are in it since stage C2
+  (reservations stay in `ReservationManager`).
   `engine.snapshot()` returns a deep copy after checking it is JSON-serializable.
 - **The queue.** `engine.dispatch(event)` is synchronous: an event dispatched while the queue is idle is
   reduced and acted on before the call returns, so a notification still goes out in the turn that asked
@@ -366,8 +366,8 @@ design left open:
   the answer settled) and `default.unlock` (`UnlockConnector`: 1.6 stops a transaction in flight first, 2.x
   refuses to).
 
-  Transactions and connector status are not moved yet (stage C); the behaviors above call the existing
-  `ChargePoint` paths for them.
+  Connector status (stage C1) and transactions (stage C2) are engine-owned now; the behaviors above call
+  `ChargePoint`'s facades for them, which dispatch into the engine.
 
 - **Start of a follow-up.** `after` starts in the turn the response settled, up to its first wait, as the
   effects it replaced did (`Uploading` still goes out in the turn of the settlement). Its later steps run
@@ -453,5 +453,44 @@ Decisions the design left open:
 - **`StateManager`** keeps `StateHistory` and records `connectorStatusChange` and the charge point's own
   status changes. It no longer has a state machine, `initializeConnector`, `transitionConnectorStatus` or the
   state snapshots.
-- **Not in C1.** Transactions, persistence of engine state and resume. The connector-runtime snapshot still
-  goes through `restoreRuntimeSnapshot`, which now writes a `restore` event (silent).
+- **Not in C1.** Transactions, persistence of engine state and resume: see stage C2.
+
+Status (stage C2): transactions, persistence and resume. Decisions the design left open:
+
+- **State.** The transaction is a field of the connector's record: `ConnectorRecord.transaction` is a
+  `TransactionRecord` (`domain/connector/TransactionRecord.ts`), plain JSON: the same shape as `Transaction`
+  with `startTime` / `stopTime` as ISO strings and unset fields absent (never `undefined`). Two writes:
+  `transaction.set` (begin, replace, remove) and `transaction.patch` (field changes; an `undefined` value
+  deletes the key). `restore` may carry a transaction. They nest like every `connector.*` event.
+- **`Connector.transaction` is a live view.** One `Transaction` object (with `Date`s) per transaction, wrapped
+  in a `Proxy`: reads are plain property reads, an assignment to a field dispatches a `transaction.patch`, and
+  `applyWrite` keeps the object in step with the record, so holders of the object see every change and its
+  identity lasts as long as the transaction does. Assigning `connector.transaction = x` stores a copy of `x`
+  (the view is a different object than `x`). Code uses `connector.patchTransaction({...})`,
+  `assignTransactionId(id)` and `detachTransaction()`; `infrastructure/transport/handlers/patchTransaction.ts`
+  does the same for a `Transaction` that may be detached.
+- **`default.transaction`** (`application/engine/behaviors/transaction.ts`) holds `startTransaction`,
+  `stopTransaction` and `cleanTransaction` (moved out of `ChargePoint`, which keeps one-line facades with
+  its public API), and answers `RemoteStartTransaction`, `RemoteStopTransaction` (1.6) and
+  `RequestStartTransaction`, `RequestStopTransaction` (2.x) with the `AuthorizeRemoteTxRequests` and scenario
+  delegation behavior of before. The handlers translate. `ChargePoint` hands the module a `TransactionPorts`
+  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private. Meter value
+  calculation (`Connector`, `MeterValueBuilder`) and charging profile resolution (`clearChargingProfiles`)
+  stay services.
+- **The scenario registry stays.** `_scenarioHandledConnectors`, `_scenarioStopHandledConnectors`,
+  `noteDefaultHandledRemoteStart` / `Stop` and `takeDefaultHandled…` are kept. `ScenarioRuntime` arms and reads
+  them for parking and for the "raced the default" warning; routing the same through registry rules would move
+  who answers and when the warning fires, so it is not a wire-neutral swap. The behavior reads them.
+- **Single writer.** `check-single-writer.ts` also guards `connector.transaction`, `connector.transactionId`
+  and every `Transaction` field when the receiver's text mentions `transaction` or `tx`.
+- **Physical verbs.** `ctx.startCharging` / `stopCharging` use the `ChargePoint` facades, so they run the
+  transaction default; `ctx.unplug` calls `evDisconnected` (a running transaction is stopped or suspended per
+  `StopTransactionOnEVSideDisconnect`) instead of forcing `Available`. Test: `physical.bun.test.ts`.
+- **Persistence.** The `connector_runtime` row format is unchanged (`transaction_json` is the record shape,
+  so earlier rows load). `snapshotRuntime` reads the connector's record; the restore write carries the
+  transaction into the engine state; `restoreConnectorRuntimeFromDatabase` ends with `engine.resume()`, so
+  `onResume` runs once, after the state is back. Only connector rows persist; the `ctx.state` of behaviors and
+  the notification statuses do not (a new table is needed; stage D).
+- **Reservations stay** in `ReservationManager`: it owns a map of `Date`-carrying records, an expiry
+  interval and a callback, and is used on its own by scenarios and tests; moving it needs a store port and a
+  codec like the transaction's, which is not a small change.

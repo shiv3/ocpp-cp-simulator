@@ -77,7 +77,11 @@ export interface BehaviorRule {
   readonly owner: RuleOwner;
   /** The action in either OCPP version's spelling. */
   readonly action: string;
-  /** The rule serves CALLs for this connector only; absent: any CALL. */
+  /**
+   * The connector the rule belongs to. A ranking hint, not a filter: among
+   * the rules that match a CALL, those for exactly the connector it names win
+   * (use `match` to filter on a payload field).
+   */
   readonly connectorId?: number;
   /** A deep partial match against the request payload. */
   readonly match?: Record<string, unknown>;
@@ -181,25 +185,14 @@ export class BehaviorRegistry {
    *
    * Selection: among the rules that name the action (translated on 2.x) and
    * whose `match` fits the payload, the ones for exactly the CALL's connector
-   * win over the ones for any connector, then the oldest registration; a
-   * warning names the losers.
+   * win over the others, then the oldest registration; a warning names the
+   * losers. A CALL that names no connector matches every rule alike.
    */
   resolve(call: BehaviorCall, exchange?: HeldExchange): BehaviorResolution {
     if (this.entries.length === 0) return DEFAULT_RESOLUTION;
     const version = this.options.ocppVersion?.() ?? "OCPP-1.6J";
     const candidates = this.entries.filter(({ rule }) => {
       if (!csmsActionMatches(rule.action, call.action, version)) return false;
-      if (
-        rule.connectorId !== undefined &&
-        call.connectorId !== undefined &&
-        rule.connectorId !== call.connectorId
-      ) {
-        return false;
-      }
-      // A rule for one connector does not serve a CALL that names none.
-      if (rule.connectorId !== undefined && call.connectorId === undefined) {
-        return false;
-      }
       return (
         rule.match === undefined || deepPartialMatch(rule.match, call.payload)
       );

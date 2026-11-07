@@ -26,7 +26,7 @@ related:
   - ../concepts/charging-sessions.md
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -723,9 +723,16 @@ detail — the table above is where those differences live.
 | `certQuirks`         | No       |
 | `connectionTrigger`  | No       |
 | `ocppCall`           | Yes      |
+| `callResponse`       | No       |
+| `useBehavior`        | No       |
 
 A scenario containing a node type marked "No" is refused by `export-k6` with
-the offending type named, rather than exported and silently skipped.
+the offending type named, rather than exported and silently skipped. The schema 1.5 additions
+([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15))
+are refused with their own reason: `callResponse` and `useBehavior` (they need a station behavior
+engine the k6 runtime does not have), a `csmsCallTrigger` with `behavior: "replace"` (or an `onBusy`),
+and an `ocppCall` whose payload holds `{"$from": …}`. The k6 runtime always lets the station answer a
+CALL, so none of them is ever exported as the observing node it resembles.
 
 | `evSettings` field   | Honoured                                                       |
 | -------------------- | -------------------------------------------------------------- |

@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Index
@@ -34,7 +34,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Socket.IO control plane](concepts/control-plane.md)                     | The `rpc` / `event` contract: CP command methods, daemon methods, rooms and snapshots, error codes, end-to-end example                            |
 | [Expert OCPP calls](concepts/expert-ocpp-calls.md)                       | Any station-initiated OCPP-J CALL with an edited payload: per-version actions, schema bypass, `applyResponse`, errors                             |
-| [Scenario file format (v1.4)](concepts/scenario-format.md)               | Node-graph JSON: 24 node types, triggers, assertions and the two-axis verdict, `--watch` re-reads, template instances, versioning, changelog      |
+| [Scenario file format (v1.5)](concepts/scenario-format.md)               | Node-graph JSON: 26 node types, triggers, assertions and the two-axis verdict, `--watch` re-reads, template instances, versioning, changelog      |
 | [OCPP trace format (v1.1)](concepts/trace-format.md)                     | Implementation-independent JSONL record per OCPP exchange; JSON Schema; producing records from logs                                               |
 | [State persistence](concepts/state-persistence.md)                       | SQLite schema shared by daemon (`--state-db`) and browser (sql.js); table catalog; `state.reset`                                                  |
 | [Log format](concepts/log-format.md)                                     | One log-line shape across stderr, `logs` table, browser download and `logs.get`; newest-first `limit` windowing; retention                        |
@@ -54,7 +54,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 
 | Page                                                                              | Summary                                                                                               |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| [packages/core/schema/scenario.schema.json](sources/scenario-json-schema.md)      | Published scenario JSON Schema v1.4 — strict on known fields, permissive on unknown, advisory at load |
+| [packages/core/schema/scenario.schema.json](sources/scenario-json-schema.md)      | Published scenario JSON Schema v1.5 — strict on known fields, permissive on unknown, advisory at load |
 | [packages/ocpp/vendor/ocpp-schemas](sources/vendored-ocpp-schemas.md)             | OCA OCPP 1.6 / 2.0.1 / 2.1 message schemas, vendored verbatim at a pinned commit; never modify        |
 | [docs/examples/scenarios](sources/example-scenarios.md)                           | `demo-charging.json` (lifecycle demo) and `all-cases.json` (node-type catalogue, cross-version e2e)   |
 | [Reverse-proxy + SSO example](sources/reverse-proxy-sso-example.md)               | nginx + Authelia compose showing `--trust-forwarded-headers` behind a proxy                           |

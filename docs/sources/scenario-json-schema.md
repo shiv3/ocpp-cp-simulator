@@ -1,14 +1,14 @@
 ---
 title: "Source: packages/core/schema/scenario.schema.json"
 type: source
-summary: The published JSON Schema (Draft 2020-12) for scenario files v1.4 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
+summary: The published JSON Schema (Draft 2020-12) for scenario files v1.5 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
   - packages/core/schema/scenario.schema.json
 related:
   - ../concepts/scenario-format.md
   - ../entities/scenario-templates.md
   - example-scenarios.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Source: `packages/core/schema/scenario.schema.json`
@@ -23,11 +23,12 @@ fields the schema deliberately does not reject.
 
 **Key facts.**
 
-- Version `1.4` (issue #214 introduced 1.0; issue #240 added the
+- Version `1.5` (issue #214 introduced 1.0; issue #240 added the
   `connectionTrigger` node and the `csmsCallTrigger` `payload` condition in
   1.1; issue #301 the charging-curve and electrical `evSettings` fields in
   1.2; issue #389 the `ocppCall` node in 1.3; the web console's Library the
-  optional `libraryId` in 1.4 — the version history is the
+  optional `libraryId` in 1.4; issue #566 the `callResponse` and `useBehavior` nodes and
+  `csmsCallTrigger` `behavior` / `onBusy` in 1.5 — the version history is the
   [changelog](../concepts/scenario-format.md#changelog)).
 - `evSettings.attribution` (optional array, #458) carries the credit owed for
   data copied from an imported vehicle profile — source, attribution text,

@@ -2315,3 +2315,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] ingest | extend mode (charger engine stage B)
 
 - `ctx.defaultBehavior(req)` in an `extend` handler returns the default response and registers the default's follow-up; a user behavior can opt a 2.x `UpdateFirmware` in to a status train this way. [Charger engine design](analyses/charger-engine.md#behavior-api-packagescontracts-types-only).
+
+## [2026-11-07] ingest | Scenario schema 1.5 (charger engine stage B)
+
+- `csmsCallTrigger.behavior` / `onBusy`, the `callResponse` and `useBehavior` nodes and `{ "$from": … }` are in `scenario.schema.json`, `ScenarioTypes`, the executor (branch-scoped CALL), the runtime and the web editor; `SCENARIO_SCHEMA_VERSION` is `1.5`. `export-k6` refuses them. [Scenario format](concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15), [export-k6](entities/cli.md).

@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
-import { VirtualClock } from "../../cp/shared/clock";
+import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
 import type {
   CsmsResponder,
   FakeCsms,
@@ -74,7 +74,14 @@ export async function runBehavior(
   await rig.connectAndBoot();
   const origin = csms.mark();
   for (const behavior of options.behaviors ?? []) cp.loadBehavior(behavior);
-  const settle = (): Promise<void> => csms.settle(quietMs);
+  // A real hop first: with no traffic in flight the fake CSMS reports quiet at
+  // once, and the work that follows a virtual timer (scenario nodes, behavior
+  // continuations) still needs its turn.
+  const settle = async (): Promise<void> => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await csms.settle(quietMs);
+    await drainMicrotasks();
+  };
   await settle();
 
   const frames = (): readonly WireFrame[] => csms.frames.slice(origin);

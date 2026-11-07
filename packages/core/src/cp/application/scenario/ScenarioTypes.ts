@@ -90,6 +90,11 @@ export enum ScenarioNodeType {
   // station's OCPP-J version with an authored payload. Waits for the answer
   // and logs it; see ChargePoint.sendOcppCall.
   OCPP_CALL = "ocppCall",
+  // Schema 1.5 (#566): answer the CSMS CALL a `csmsCallTrigger` with
+  // `behavior: "replace"` took over. Kind result / error / none.
+  CALL_RESPONSE = "callResponse",
+  // Schema 1.5 (#566): select a behavior loaded on the station by id.
+  USE_BEHAVIOR = "useBehavior",
 }
 
 /**
@@ -236,6 +241,46 @@ export type CsmsCallTriggerNodeData = BaseNodeData & {
    *  subset (see packages/core/src/scenario/deepPartialMatch.ts). Non-matching frames
    *  are not consumed — the node keeps waiting. Absent = any payload. */
   payload?: Record<string, unknown>;
+  /** Schema 1.5 (#566). `observe` (default, as before): the station's own
+   *  behavior answers the CALL and the node only waits for its arrival.
+   *  `replace`: the scenario owns the CALL; nothing answers it until a
+   *  `callResponse` node does, and the default behavior does not run. */
+  behavior?: "observe" | "replace";
+  /** Schema 1.5: what a second matching CALL gets while the first is still
+   *  unanswered (only with `behavior: "replace"`). Default: CALLERROR
+   *  `GenericError`. */
+  onBusy?: CallResponseSpec;
+};
+
+/**
+ * How a scenario answers a CALL it owns (schema 1.5, #566): a CALLRESULT with
+ * `payload`, a CALLERROR with `errorCode` / `errorDescription`, or silence.
+ * A `payload` may hold `{ "$from": "call.payload.requestId" }` as a whole
+ * value, resolved against the exchange of the branch.
+ */
+export type CallResponseSpec = {
+  kind: "result" | "error" | "none";
+  payload?: Record<string, unknown>;
+  errorCode?: string;
+  errorDescription?: string;
+};
+
+/**
+ * Call Response Node Data (schema 1.5, #566): answers the CALL taken by the
+ * nearest `csmsCallTrigger` (`behavior: "replace"`) of this branch, and waits
+ * until the answer settled on the wire. Fails the run if the branch holds no
+ * CALL or the answer was not delivered.
+ */
+export type CallResponseNodeData = BaseNodeData &
+  CallResponseSpec & {
+    /** Send `payload` without checking it against the response schema. */
+    skipValidation?: boolean;
+  };
+
+/** Use Behavior Node Data (schema 1.5, #566): data only, the id of a behavior
+ *  loaded on the station. Fails the run if none has that id. */
+export type UseBehaviorNodeData = BaseNodeData & {
+  behaviorId: string;
 };
 
 /**
@@ -451,6 +496,8 @@ export type ScenarioNodeData =
   | ConfigSetNodeData
   | DataTransferNodeData
   | OcppCallNodeData
+  | CallResponseNodeData
+  | UseBehaviorNodeData
   | StartNodeData
   | ConnectionTriggerNodeData
   | BaseNodeData;
@@ -480,7 +527,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.4";
+export const SCENARIO_SCHEMA_VERSION = "1.5";
 
 /**
  * Scenario definition
@@ -736,6 +783,34 @@ export interface ConnectorScenariosCollection {
 /**
  * Scenario executor callbacks
  */
+/** A `csmsCallTrigger` with `behavior: "replace"` asks the station to hand
+ *  it the CALL (schema 1.5, #566). */
+export interface ScenarioReplaceRequest {
+  scenarioId: string;
+  nodeId: string;
+  onBusy?: CallResponseSpec;
+}
+
+/** How an answer the scenario gave ended; always resolves. */
+export type ScenarioAnswerSettlement =
+  { delivered: true } | { delivered: false; reason: string };
+
+/**
+ * The CALL a scenario run owns (schema 1.5, #566): what arrived, and the one
+ * way to answer it. Branch-scoped: the executor keeps it in the flow of the
+ * branch that reached the `csmsCallTrigger`.
+ */
+export interface ScenarioCallExchange {
+  readonly action: string;
+  readonly messageId: string;
+  readonly payload: unknown;
+  /** Answer the CALL and wait until the answer settled. Throws when the
+   *  response breaks the action's schema (unless `skipValidation`). */
+  answer(
+    spec: CallResponseSpec & { skipValidation?: boolean },
+  ): Promise<ScenarioAnswerSettlement>;
+}
+
 export interface ScenarioExecutorCallbacks {
   onStatusChange?: (status: OCPPStatus) => Promise<void>;
   /**
@@ -810,7 +885,20 @@ export interface ScenarioExecutorCallbacks {
   onWaitForCsmsCall?: (
     action: string,
     payload?: Record<string, unknown>,
-  ) => Promise<{ action: string; payload: unknown }>;
+    /** Schema 1.5: present for `behavior: "replace"`; the wait then also
+     *  resolves with the exchange the scenario now owns. */
+    replace?: ScenarioReplaceRequest,
+  ) => Promise<{
+    action: string;
+    payload: unknown;
+    exchange?: ScenarioCallExchange;
+  }>;
+  /** Schema 1.5: the run ended (finished, failed or stopped). Release what it
+   *  armed and answer the CALLs it still owns with CALLERROR `InternalError`. */
+  onRunEnded?: () => void;
+  /** Schema 1.5: select the behavior loaded on the station with this id;
+   *  throws if there is none. */
+  onUseBehavior?: (behaviorId: string, nodeId: string) => void;
   /** Issue #240: park until the WebSocket reaches `event`. Level-triggered;
    *  never rejects on disconnect. */
   onWaitForConnection?: (event: "connected" | "disconnected") => Promise<void>;

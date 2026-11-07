@@ -161,6 +161,92 @@ describe("runExportK6", () => {
     );
   });
 
+  describe("schema 1.5 behavior features are refused, never ignored (#566)", () => {
+    const withNode = (type: string, data: Record<string, unknown>) => ({
+      ...VALID,
+      nodes: [
+        ...VALID.nodes,
+        {
+          id: "x",
+          type,
+          position: { x: 0, y: 0 },
+          data: { label: "X", ...data },
+        },
+      ],
+    });
+
+    async function refuse(scenario: unknown): Promise<string> {
+      const code = await runExportK6({
+        scenarioFile: writeScenario(scenario),
+        outDir: join(dir, "out"),
+        ocppVersion: "1.6",
+        force: false,
+      });
+      expect(code).toBe(1);
+      expect(readdirSync(dir)).not.toContain("out");
+      return stderr.join("");
+    }
+
+    it("callResponse", async () => {
+      const message = await refuse(
+        withNode("callResponse", { kind: "result", payload: {} }),
+      );
+      expect(message).toContain(
+        'unsupported node type "callResponse" (node x)',
+      );
+      expect(message).toContain("station behavior engine");
+    });
+
+    it("useBehavior", async () => {
+      const message = await refuse(
+        withNode("useBehavior", { behaviorId: "my-behavior" }),
+      );
+      expect(message).toContain('unsupported node type "useBehavior" (node x)');
+    });
+
+    it("csmsCallTrigger with behavior replace", async () => {
+      const message = await refuse(
+        withNode("csmsCallTrigger", { action: "Reset", behavior: "replace" }),
+      );
+      expect(message).toContain(
+        'behavior "replace" is not supported by export-k6',
+      );
+      expect(message).toContain("node x");
+    });
+
+    it("an onBusy without replace", async () => {
+      const message = await refuse(
+        withNode("csmsCallTrigger", {
+          action: "Reset",
+          onBusy: { kind: "none" },
+        }),
+      );
+      expect(message).toContain("onBusy");
+    });
+
+    it("an ocppCall payload that reads $from", async () => {
+      const message = await refuse(
+        withNode("ocppCall", {
+          action: "FirmwareStatusNotification",
+          payload: { status: { $from: "call.payload.status" } },
+        }),
+      );
+      expect(message).toContain('"$from"');
+    });
+
+    it("still exports csmsCallTrigger with behavior observe", async () => {
+      const code = await runExportK6({
+        scenarioFile: writeScenario(
+          withNode("csmsCallTrigger", { action: "Reset", behavior: "observe" }),
+        ),
+        outDir: join(dir, "out"),
+        ocppVersion: "1.6",
+        force: false,
+      });
+      expect(code).toBe(0);
+    });
+  });
+
   it("fails on a missing start node", async () => {
     const bad = {
       ...VALID,

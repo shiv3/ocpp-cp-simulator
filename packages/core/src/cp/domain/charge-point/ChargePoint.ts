@@ -147,7 +147,10 @@ import {
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
 import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
-import { ChargerEngine } from "../../application/engine/ChargerEngine";
+import {
+  ChargerEngine,
+  type LoadBehaviorOptions,
+} from "../../application/engine/ChargerEngine";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
@@ -729,8 +732,8 @@ export class ChargePoint {
    * from the default behavior, and `main` starts. Throws on a duplicate id or
    * a `requires` this station cannot meet.
    */
-  loadBehavior(behavior: Behavior): void {
-    this._engine.loadBehavior(behavior);
+  loadBehavior(behavior: Behavior, options?: LoadBehaviorOptions): void {
+    this._engine.loadBehavior(behavior, options);
   }
 
   /** Unload a behavior loaded with {@link loadBehavior}; false if none has that id. */

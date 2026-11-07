@@ -278,6 +278,38 @@ Runtime contract:
 | Time before answering              | never timed out by the simulator; delay nodes and `timeout` bound it                          |
 | `callResponse` without an exchange | fails the run                                                                                 |
 
+Status (stage B): all of the above is implemented, and the schema is 1.5
+([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)).
+Decisions the design left open:
+
+- **Where the rule lives.** A `csmsCallTrigger` with `behavior: "replace"` registers a scenario rule with the
+  station's `BehaviorRegistry` when the node arms (`ScenarioRuntime.waitForCsmsCallReplacing`). The rule's
+  `connectorId` is the run's connector and only **ranks** (exact connector first, then oldest registration);
+  filtering is `match`, i.e. the node's `payload` condition. A CALL that names no connector matches every
+  rule. The rule ends when the exchange it took is answered (or abandoned), when the wait is withdrawn
+  before a CALL arrived (timeout, continue), or when the run ends. Withdrawing a wait that already took a CALL
+  does not drop the rule, so a second CALL still gets `onBusy`.
+- **Flow context.** `ScenarioExecutor` passes a `Flow { exchange, answered }` through
+  `executeSequentialFlow` / `executeSingleNode` / `executeNode`; every branch from Start gets a fresh one.
+  `$from` is resolved by `resolveFromExchange` (`resolveFrom.ts`) against the branch's exchange: roots are
+  `call.action`, `call.messageId` and `call.payload.<path>`.
+- **Run end.** The executor's `finally` calls `callbacks.onRunEnded()`; the runtime releases the owners the run
+  armed and answers the still-open exchanges CALLERROR `InternalError` with a warning.
+- **`callResponse`** checks a `result` payload against the action's response schema (same check as a code
+  behavior, `responseValidation.ts`) unless `skipValidation`; a violation throws, the run fails and the CALL is
+  answered `InternalError` at the run's end. `kind: "none"` is reported as delivered. A second `callResponse`
+  for the same CALL fails the run.
+- **`useBehavior`** needed a meaning for "selects": `cp.loadBehavior(behavior, { dormant: true })` loads a
+  behavior without serving it (no rules, no `main`); a run that reaches `useBehavior` registers its rules
+  under the run as owner, so they end with the run. A behavior that is not dormant already serves; the node
+  then only checks it exists. An unknown id fails the run.
+- **SOAP.** The wait fails when the node arms (`behavior "replace" needs an OCPP-J station`).
+- **`export-k6`** refuses `behavior: "replace"`, `onBusy`, `callResponse`, `useBehavior` and an `ocppCall`
+  payload holding `$from`, each with its own message. The schema's `schemaVersion` stamp became `1.5`.
+- The tests are `packages/core/src/test/behavior/scenario15.bun.test.ts` (one test per row of the table above,
+  on a virtual clock against the fake CSMS) and `ScenarioExecutor`-level `callResponse.test.ts`, which holds the
+  rows that need a stub: a send that failed or was dropped, and SOAP.
+
 ### Charger engine (`application/engine/`)
 
 `ChargerEngine` is one per charge point. It owns `ChargerState`, a JSON-serializable record of

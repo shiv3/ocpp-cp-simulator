@@ -18,6 +18,7 @@ import type {
   BehaviorCall,
   BehaviorRule,
   HeldExchange,
+  RuleOwner,
 } from "../behavior/BehaviorRegistry";
 import {
   assertJsonSerializable,
@@ -43,6 +44,14 @@ export class BehaviorTimeout extends Error {
     super(`Timed out after ${ms}ms`);
     this.name = "BehaviorTimeout";
   }
+}
+
+export interface LoadBehaviorOptions {
+  /**
+   * Load without serving: no rule is registered and `main` does not start
+   * until a scenario selects the behavior with `useBehavior`.
+   */
+  readonly dormant?: boolean;
 }
 
 /** What a default behavior produced for one CALL, in the shape handlers use. */
@@ -119,6 +128,8 @@ export class ChargerEngine {
   private draining = false;
   private disposed = false;
   private readonly loaded = new Map<string, Behavior>();
+  /** Ids of behaviors loaded `dormant`. */
+  private readonly dormant = new Set<string>();
   private readonly mainScopes = new Map<string, Scope>();
   private readonly callScopes = new Set<Scope>();
   private readonly defaults = new Map<
@@ -242,7 +253,7 @@ export class ChargerEngine {
    * `onCall` entry, and start `main`. Throws on a duplicate id or a capability
    * this station cannot meet; nothing is registered then.
    */
-  loadBehavior(behavior: Behavior): void {
+  loadBehavior(behavior: Behavior, options: LoadBehaviorOptions = {}): void {
     if (behavior.api !== 1) {
       throw new Error(
         `Behavior ${behavior.id}: unsupported api ${String(behavior.api)}`,
@@ -260,7 +271,36 @@ export class ChargerEngine {
         );
       }
     }
-    const owner = { kind: "code", behaviorId: behavior.id } as const;
+    if (!options.dormant) {
+      this.registerRules(behavior, { kind: "code", behaviorId: behavior.id });
+    }
+    this.loaded.set(behavior.id, behavior);
+    if (options.dormant) this.dormant.add(behavior.id);
+    this.dispatch({ type: "behavior.loaded", behaviorId: behavior.id });
+    if (behavior.main && !options.dormant) {
+      const scope = new Scope(behavior.id, false);
+      this.mainScopes.set(behavior.id, scope);
+      this.runDetached(behavior.id, scope, (ctx) => behavior.main!(ctx));
+    }
+  }
+
+  /**
+   * Put the rules of a behavior loaded `dormant` to work under `owner` (a
+   * scenario run, schema 1.5 `useBehavior`). The rules end with the owner:
+   * release them with `BehaviorRegistry.release`. A behavior that is not
+   * dormant already serves its rules; selecting it again does nothing. Throws
+   * if no behavior has that id.
+   */
+  activateBehavior(id: string, owner: RuleOwner): void {
+    const behavior = this.loaded.get(id);
+    if (!behavior) {
+      throw new Error(`No behavior with id "${id}" is loaded on this station`);
+    }
+    if (!this.dormant.has(id)) return;
+    this.registerRules(behavior, owner);
+  }
+
+  private registerRules(behavior: Behavior, owner: RuleOwner): void {
     const unregister: Array<() => void> = [];
     try {
       for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
@@ -280,13 +320,6 @@ export class ChargerEngine {
       for (const off of unregister) off();
       throw error;
     }
-    this.loaded.set(behavior.id, behavior);
-    this.dispatch({ type: "behavior.loaded", behaviorId: behavior.id });
-    if (behavior.main) {
-      const scope = new Scope(behavior.id, false);
-      this.mainScopes.set(behavior.id, scope);
-      this.runDetached(behavior.id, scope, (ctx) => behavior.main!(ctx));
-    }
   }
 
   /** Unload a behavior: stop its waits, release its rules, settle its open CALLs. */
@@ -294,6 +327,7 @@ export class ChargerEngine {
     const behavior = this.loaded.get(id);
     if (!behavior) return false;
     this.loaded.delete(id);
+    this.dormant.delete(id);
     this.mainScopes.get(id)?.cancel();
     this.mainScopes.delete(id);
     for (const scope of [...this.callScopes]) {

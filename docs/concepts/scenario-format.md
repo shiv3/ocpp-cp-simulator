@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.4)
+title: Scenario file format (v1.5)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 24 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 26 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -16,7 +16,9 @@ sources:
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
-  - "issues #214, #240, #247, #239, #301, #332"
+  - "issues #214, #240, #247, #239, #301, #332, #566"
+  - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
+  - packages/core/src/cp/application/scenario/resolveFrom.ts
   - apps/web/src/console/lib/scenarioLibrary.ts
 related:
   - ../sources/scenario-json-schema.md
@@ -26,10 +28,11 @@ related:
   - control-plane.md
   - ../entities/cli.md
   - vehicle-profiles.md
-updated: 2026-11-05
+  - ../analyses/charger-engine.md
+updated: 2026-11-07
 ---
 
-# Scenario File Format (v1.4)
+# Scenario File Format (v1.5)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -47,9 +50,9 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.4`** (`schemaVersion`). Files stamped `1.0` to `1.3` remain valid — 1.x
+- **Version `1.5`** (`schemaVersion`). Files stamped `1.0` to `1.4` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
-- Covers the full 23-node discriminated union the scenario engine supports
+- Covers the full 26-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
 - **Validation against this schema is advisory in this version**: the
   simulator warns (`console.warn` in the browser, stderr / server log on the
@@ -77,7 +80,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                      |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.4"` (current); `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                                                 |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.5"` (current); `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                                        |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                              |
 | `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand. |
@@ -113,32 +116,34 @@ shape depends on `type`).
 
 ## Node types
 
-| `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                               |
-| -------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `statusChange`       | `status`                                                         |                                                                                                                                                                                       |
-| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                             |
-| `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`            |
-| `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                       |
-| `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                       |
-| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             | See [note](#connectorplug-notes) below.                                                                                                                                               |
-| `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                             |
-| `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                             |
-| `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                             |
-| `reserveNow`         | `expiryMinutes`, `idTag`                                         | `parentIdTag`, `reservationId`                                                                                                                                                        |
-| `cancelReservation`  | `reservationId`                                                  |                                                                                                                                                                                       |
-| `reservationTrigger` | —                                                                | `timeout`                                                                                                                                                                             |
-| `start`              | —                                                                | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                               |
-| `end`                | —                                                                |                                                                                                                                                                                       |
-| `statusNotification` | `status`                                                         | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                     |
-| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                                       |
-| `configSet`          | `key`, `value`                                                   |                                                                                                                                                                                       |
-| `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                                   |
-| `csmsCallTrigger`    | `action`                                                         | `timeout`, `payload`. See [note](#csmscalltrigger-payload-condition) below.                                                                                                           |
-| `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                            |
-| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                       |
-| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below. |
-| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                |
-| `ocppCall`           | `action`, `payload`                                              | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                 |
+| `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                                      |
+| -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `statusChange`       | `status`                                                         |                                                                                                                                                                                              |
+| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                                    |
+| `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`                   |
+| `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                              |
+| `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                              |
+| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             | See [note](#connectorplug-notes) below.                                                                                                                                                      |
+| `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                                    |
+| `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                                    |
+| `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                                    |
+| `reserveNow`         | `expiryMinutes`, `idTag`                                         | `parentIdTag`, `reservationId`                                                                                                                                                               |
+| `cancelReservation`  | `reservationId`                                                  |                                                                                                                                                                                              |
+| `reservationTrigger` | —                                                                | `timeout`                                                                                                                                                                                    |
+| `start`              | —                                                                | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                                      |
+| `end`                | —                                                                |                                                                                                                                                                                              |
+| `statusNotification` | `status`                                                         | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                            |
+| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                                              |
+| `configSet`          | `key`, `value`                                                   |                                                                                                                                                                                              |
+| `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                                          |
+| `csmsCallTrigger`    | `action`                                                         | `timeout`, `payload`, `behavior`, `onBusy`. See [payload condition](#csmscalltrigger-payload-condition) and [replace](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15). |
+| `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                                   |
+| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                              |
+| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.        |
+| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                       |
+| `ocppCall`           | `action`, `payload`                                              | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                        |
+| `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"`)                     | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                              |
+| `useBehavior`        | `behaviorId`                                                     | See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                                                                                            |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -243,6 +248,67 @@ pre-#240 behavior) matches any payload.
     "label": "Wait for hard Reset",
     "action": "Reset",
     "payload": { "type": "Hard" }
+  }
+}
+```
+
+### `csmsCallTrigger` replace, `callResponse`, `$from` and `useBehavior` (schema 1.5)
+
+**Issue #566.** By default a `csmsCallTrigger` only _observes_: the station answers the CALL with its own
+behavior and the node waits for its arrival. Schema 1.5 lets a scenario _own_ the CALL, for any action and on
+OCPP 1.6 and 2.x alike (the [charger engine design](../analyses/charger-engine.md#scenario-schema-15-additive)
+has the reasoning):
+
+- `csmsCallTrigger.behavior`: `"observe"` (default, as before) or `"replace"`. With `replace`, a CALL that
+  matches `action` (and `payload`, if given) is handed to the node: nothing answers it, and the station's
+  default behavior for that action does not run, until a `callResponse` node answers.
+- `csmsCallTrigger.onBusy`: what a second matching CALL gets while the first is still unanswered, in the shape
+  of a `callResponse` (`kind`, `payload`, `errorCode`, `errorDescription`). Default: CALLERROR
+  `GenericError`. A rule holds one open CALL; the second never reaches the default behavior.
+- `callResponse`: `kind` `"result"` sends a CALLRESULT with `payload` (checked against the action's response
+  schema unless `skipValidation` is true; a violation fails the run), `"error"` a CALLERROR with `errorCode`
+  (default `GenericError`) and `errorDescription`, `"none"` stays silent on purpose. The node waits until the
+  answer settled on the wire.
+- `{ "$from": "call.payload.requestId" }` as a **whole value** anywhere in an `ocppCall` or `callResponse`
+  `payload` reads from the CALL the branch took over: `call.action`, `call.messageId` or
+  `call.payload.<key>[.<key>…]` (array items by index). A path that names nothing fails the run, as does a
+  `$from` in a branch that holds no CALL. An object with other keys next to `$from` is an ordinary object.
+- `useBehavior`: `behaviorId` selects a behavior loaded on the station (`cp.loadBehavior(behavior, { dormant:
+true })`, or any loaded behavior). A dormant behavior serves its `onCall` rules only while a run that
+  reached the node is alive. Data only: a scenario never carries code. The run fails if no behavior has that
+  id.
+
+The CALL is **branch-scoped**: parallel branches from Start each own the CALL their own `csmsCallTrigger`
+took, and a `callResponse` answers the nearest one of its branch. The rule ends when its CALL is answered, so
+the next CALL of the action is the station's again; a loop that reaches the node again arms it again.
+
+| Case                               | Behavior                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Disconnect before answering        | The CALL is abandoned and announced as `NoResponse`; the `callResponse` that follows fails the run  |
+| Run ends or stops unanswered       | CALLERROR `InternalError` with a warning; silence needs `kind: "none"`                              |
+| Answer after reconnect             | Not sent, settles `stale`; the run fails                                                            |
+| Send failed or dropped             | `callResponse` receives `delivered: false` and fails the run                                        |
+| Time before answering              | Never timed out by the simulator; `delay` nodes and the trigger's `timeout` bound it                |
+| `callResponse` without an exchange | Fails the run (also when the CALL of its branch is already answered)                                |
+| SOAP station                       | `behavior: "replace"` fails the run when the node arms; it never falls back to the default behavior |
+
+`export-k6` refuses `behavior: "replace"`, `onBusy`, `callResponse`, `useBehavior` and a `$from` payload with a
+clear error: the k6 runtime always lets the station answer.
+
+```json
+{
+  "id": "own-update-firmware",
+  "type": "csmsCallTrigger",
+  "position": { "x": 0, "y": 0 },
+  "data": {
+    "label": "Own UpdateFirmware",
+    "action": "UpdateFirmware",
+    "behavior": "replace",
+    "onBusy": {
+      "kind": "error",
+      "errorCode": "InternalError",
+      "errorDescription": "busy"
+    }
   }
 }
 ```
@@ -1008,6 +1074,10 @@ does not hold.
 
 ## Changelog
 
+- **v1.5**: Issue #566. `csmsCallTrigger` gains `behavior` (`"observe"` | `"replace"`) and `onBusy`; adds the
+  `callResponse` and `useBehavior` node types and the `{ "$from": … }` payload reference. Purely additive —
+  `1.4` and older files remain valid. See
+  [the note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).
 - **v1.4**: Adds the optional `libraryId` (string): on a connector's copy of
   a web console [Library](../entities/web-console.md#scenario-library)
   scenario, the `id` of the Library scenario it was made from; absent on

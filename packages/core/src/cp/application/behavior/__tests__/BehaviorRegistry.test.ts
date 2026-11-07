@@ -138,12 +138,19 @@ describe("BehaviorRegistry", () => {
     expect(second).toHaveLength(0);
   });
 
-  it("a CALL without a connector matches any-connector rules only", () => {
+  it("a rule's connector ranks it and does not filter", () => {
     const registry = new BehaviorRegistry();
-    registry.register(rule(code("c1"), { connectorId: 1 }));
-    expect(registry.resolve(call(), new FakeExchange()).kind).toBe("default");
-    registry.register(rule(code("any")));
+    const forOne: Array<[BehaviorCall, HeldExchange]> = [];
+    registry.register(rule(code("c1"), { connectorId: 1 }, forOne));
+    // A CALL that names no connector, or another one, still reaches the rule.
     expect(registry.resolve(call(), new FakeExchange()).kind).toBe("taken");
+    expect(
+      registry.resolve(
+        call({ connectorId: 2 }),
+        new FakeExchange("UpdateFirmware", "m2"),
+      ).kind,
+    ).toBe("busy");
+    expect(forOne).toHaveLength(1);
   });
 
   it("answers onBusy at once while a rule holds an open exchange", () => {

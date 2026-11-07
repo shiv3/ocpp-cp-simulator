@@ -3,6 +3,7 @@ import {
   type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import { behaviorTapOf } from "./behaviorTap";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -81,7 +82,10 @@ import {
   type OcppCallOutcome,
   type OcppCallRequest,
 } from "../../domain/types/OcppCall";
-import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../domain/errors/OcppCallErrors";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../domain/connector/Transaction";
 import {
@@ -686,8 +690,9 @@ export class OCPPMessageHandler {
    *  but its answer goes to the caller, and to the result handlers only
    *  when `applyResponse` is set. */
   public async sendOcppCall(
-    request: OcppCallRequest,
+    originalRequest: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
+    let request = originalRequest;
     // ChargePoint.sendOcppCall checked the action against the 1.6 catalog,
     // every entry of which is an OCPPAction.
     const action = request.action as OCPPAction;
@@ -701,6 +706,22 @@ export class OCPPMessageHandler {
     if (warning && !request.skipValidation) {
       throw new OcppCallRejectedError("invalid_payload", warning);
     }
+    // The behaviors' beforeSend runs before the call is tracked, so the
+    // frame shown to the caller is the one that goes out.
+    const decision = behaviorTapOf(this._chargePoint).beforeSend(
+      action,
+      request.payload,
+    );
+    if ("drop" in decision) {
+      throw new OcppCallNoAnswerError(
+        "dropped",
+        `OCPP call ${action} dropped (dropped_by_behavior)`,
+      );
+    }
+    request = {
+      ...request,
+      payload: decision.payload as Record<string, unknown>,
+    };
     const id = this.generateMessageId();
     const answer = this._expertCalls.start(id, request);
     // Deliberately unchecked when skipValidation is set: sendRequest logs the
@@ -711,6 +732,8 @@ export class OCPPMessageHandler {
       request.payload as unknown as OcppMessageRequestPayload,
       this.connectorOf(request.payload),
       (reason) => this._expertCalls.onDropped(id, reason),
+      undefined,
+      true,
     );
     return answer;
   }
@@ -983,6 +1006,8 @@ export class OCPPMessageHandler {
     connectorId?: number,
     onDropped?: (reason: string) => void,
     attempt?: number,
+    /** The behaviors' beforeSend already ran (the expert path). */
+    intercepted = false,
   ): void {
     if (!this.isCallAllowed(action)) {
       this._logger.warn(
@@ -990,6 +1015,28 @@ export class OCPPMessageHandler {
         LogType.OCPP,
       );
       return;
+    }
+    if (!intercepted) {
+      const decision = behaviorTapOf(this._chargePoint).beforeSend(
+        action,
+        payload,
+      );
+      if ("drop" in decision) {
+        // Nothing is queued and nothing is written: the caller (if any) is
+        // told, the serial queue is not held up.
+        this._logger.warn(
+          `Dropping ${action}: a behavior's beforeSend dropped it`,
+          LogType.OCPP,
+        );
+        onDropped?.("dropped_by_behavior");
+        // A dropped Heartbeat is a Heartbeat the CSMS never answered: the
+        // idle timer still goes on, or the periodic Heartbeat would stop for good.
+        if (action === OCPPAction.Heartbeat) {
+          this._chargePoint.notifyOutgoingCall(false);
+        }
+        return;
+      }
+      payload = decision.payload as OcppMessageRequestPayload;
     }
     const warning = this._codec.outgoingWarning(action, payload);
     if (warning) {
@@ -1307,12 +1354,14 @@ export class OCPPMessageHandler {
         );
         break;
       case OCPPMessageType.CALLRESULT:
+        this.observeAnswer(messageId, "result", payload);
         this.handleCallResult(
           messageId,
           payload as OcppMessagePayloadCallResult,
         );
         break;
       case OCPPMessageType.CALLERROR:
+        this.observeAnswer(messageId, "error", payload);
         this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:
@@ -1323,11 +1372,34 @@ export class OCPPMessageHandler {
     }
   }
 
+  /** Tell the behaviors' `callResult` hooks the CSMS answered one of our CALLs. */
+  private observeAnswer(
+    messageId: string,
+    outcome: "result" | "error",
+    payload: unknown,
+  ): void {
+    const request = this._requests.get(messageId);
+    if (!request) return;
+    behaviorTapOf(this._chargePoint).observe({
+      type: "callResult",
+      action: request.action,
+      messageId,
+      outcome,
+      payload,
+    });
+  }
+
   private async handleCall(
     messageId: string,
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
   ): Promise<void> {
+    behaviorTapOf(this._chargePoint).observe({
+      type: "callReceived",
+      action,
+      messageId,
+      payload,
+    });
     // Capture the generation at dispatch time (before the await) so a response
     // produced by an async handler settles against its originating generation.
     const gen = this._webSocket.currentGeneration();

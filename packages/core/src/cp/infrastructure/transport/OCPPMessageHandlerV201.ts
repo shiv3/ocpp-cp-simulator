@@ -3,6 +3,7 @@ import {
   type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import { behaviorTapOf } from "./behaviorTap";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -457,6 +458,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     onDropped?: (reason: string) => void,
     transactionEvent?: TransactionEventDelivery,
     onWritten?: () => void,
+    /** The behaviors' beforeSend already ran (the expert path). */
+    intercepted = false,
   ): void {
     if (!this._webSocket.isConnected()) {
       this._logger.warn(
@@ -465,6 +468,24 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       onDropped?.("not_connected");
       return;
+    }
+    if (!intercepted) {
+      const decision = behaviorTapOf(this._chargePoint).beforeSend(
+        action,
+        payload,
+      );
+      if ("drop" in decision) {
+        this._logger.warn(
+          `[v2.0.1] Dropping ${action}: a behavior's beforeSend dropped it`,
+          LogType.OCPP,
+        );
+        onDropped?.("dropped_by_behavior");
+        // A dropped Heartbeat is a Heartbeat the CSMS never answered: the
+        // idle timer still goes on, or the periodic Heartbeat would stop for good.
+        if (action === "Heartbeat") this._chargePoint.notifyOutgoingCall(false);
+        return;
+      }
+      payload = decision.payload as V201RequestPayload;
     }
     const warning = this._codec?.outgoingWarning(action, payload);
     if (warning) {
@@ -532,6 +553,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       // (RequestStartTransaction ← RemoteStartTransaction, …).
       // #396: the control plane announces the CALL under its wire name;
       // every answer below reports itself through the exchange.
+      behaviorTapOf(this._chargePoint).observe({
+        type: "callReceived",
+        action,
+        messageId,
+        payload,
+      });
       const gen = this._webSocket.currentGeneration();
       const exchange = this.openExchange(messageId, action, gen);
       if (this._gate.admit(exchange, payload).kind === "settled") return;
@@ -607,8 +634,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       exchange.replyError("NotImplemented", "This action is not supported");
     } else if (messageType === OCPPMessageType.CALLRESULT) {
+      this.observeAnswer(messageId, "result", payload);
       this.handleCallResult(messageId, payload as V201ResponsePayload);
     } else if (messageType === OCPPMessageType.CALLERROR) {
+      this.observeAnswer(messageId, "error", payload);
       const pending = this._pendingRequests.get(messageId);
       this._pendingRequests.delete(messageId);
       this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
@@ -653,6 +682,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         );
       }
     }
+  }
+
+  /** Tell the behaviors' `callResult` hooks the CSMS answered one of our CALLs. */
+  private observeAnswer(
+    messageId: string,
+    outcome: "result" | "error",
+    payload: unknown,
+  ): void {
+    const pending = this._pendingRequests.get(messageId);
+    if (!pending) return;
+    behaviorTapOf(this._chargePoint).observe({
+      type: "callResult",
+      action: pending.action,
+      messageId,
+      outcome,
+      payload,
+    });
   }
 
   private handleCallResult(
@@ -1614,13 +1660,30 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  caller, and through the normal response handling only when
    *  `applyResponse` is set. */
   public async sendOcppCall(
-    request: OcppCallRequest,
+    originalRequest: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
+    let request = originalRequest;
     const warning =
       this._codec?.outgoingWarning(request.action, request.payload) ?? null;
     if (warning && !request.skipValidation) {
       throw new OcppCallRejectedError("invalid_payload", warning);
     }
+    // The behaviors' beforeSend runs before the call is tracked, so the
+    // frame shown to the caller is the one that goes out.
+    const decision = behaviorTapOf(this._chargePoint).beforeSend(
+      request.action,
+      request.payload,
+    );
+    if ("drop" in decision) {
+      throw new OcppCallNoAnswerError(
+        "dropped",
+        `OCPP call ${request.action} dropped (dropped_by_behavior)`,
+      );
+    }
+    request = {
+      ...request,
+      payload: decision.payload as Record<string, unknown>,
+    };
     const id = this.generateMessageId();
     const answer = this._expertCalls.start(id, request);
     // `send` logs the codec warning, if any, as for every CALL; with
@@ -1630,6 +1693,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       id,
       request.payload as unknown as V201RequestPayload,
       (reason) => this._expertCalls.onDropped(id, reason),
+      undefined,
+      undefined,
+      true,
     );
     return answer;
   }

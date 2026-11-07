@@ -66,12 +66,120 @@ export interface CallBehavior {
   ): CallOutcome | Promise<CallOutcome>;
 }
 
+/** A connector's status changed (`from` differs from `to`). */
+export interface ConnectorStatusEvent {
+  readonly connectorId: number;
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * A transaction began or ended on a connector. `transactionId` is the id the
+ * connector holds at that moment: `0` on 1.6 while the CSMS has not yet
+ * answered StartTransaction.
+ */
+export interface TransactionEvent {
+  readonly connectorId: number;
+  readonly transactionId: number | string | null;
+  readonly idTag: string | null;
+  /** Stop only: the stop reason, when one was recorded. */
+  readonly reason?: string;
+}
+
+/** The connection to the CSMS came up (`at`: epoch ms on the station's clock). */
+export interface ConnectedEvent {
+  readonly at: number;
+}
+
+/** The connection ended. */
+export interface DisconnectedEvent {
+  readonly at: number;
+  readonly code?: number;
+  readonly reason?: string;
+}
+
+/**
+ * The CSMS answered a station-initiated CALL, an automatic one (Heartbeat,
+ * StatusNotification, …) as much as one a behavior or a scenario sent.
+ * `payload` is the result, or `{ errorCode, errorDescription }` for an error.
+ */
+export interface CallResultEvent {
+  readonly action: string;
+  readonly messageId: string;
+  readonly outcome: "result" | "error";
+  readonly payload: unknown;
+}
+
+/** The CSMS sent a CALL. Observation only: it cannot change the answer. */
+export interface CallReceivedEvent {
+  readonly action: string;
+  readonly messageId: string;
+  readonly payload: unknown;
+}
+
+/**
+ * Event hooks. The engine calls them after the state change is applied and
+ * after the turn that caused it, never inside it; it does not await them. A
+ * hook that throws is logged and changes nothing. Several behaviors each get
+ * the event, in load order.
+ */
+export interface BehaviorEvents {
+  connectorStatus?(
+    event: ConnectorStatusEvent,
+    ctx: BehaviorContext,
+  ): void | Promise<void>;
+  transactionStarted?(
+    event: TransactionEvent,
+    ctx: BehaviorContext,
+  ): void | Promise<void>;
+  transactionStopped?(
+    event: TransactionEvent,
+    ctx: BehaviorContext,
+  ): void | Promise<void>;
+  connected?(event: ConnectedEvent, ctx: BehaviorContext): void | Promise<void>;
+  disconnected?(
+    event: DisconnectedEvent,
+    ctx: BehaviorContext,
+  ): void | Promise<void>;
+  callResult?(
+    event: CallResultEvent,
+    ctx: BehaviorContext,
+  ): void | Promise<void>;
+  callReceived?(
+    event: CallReceivedEvent,
+    ctx: BehaviorContext,
+  ): void | Promise<void>;
+}
+
+/** Returned from a {@link BeforeSend} to put nothing on the wire. */
+export interface DropCall {
+  readonly drop: true;
+}
+
+/**
+ * Called, synchronously, for a station-initiated CALL of the action it is
+ * registered under, before the CALL is queued. `payload` is a copy. Return
+ * the payload to send (changed or not), `{ drop: true }`, or nothing to
+ * leave the CALL as it is. A returned promise is refused with a warning and
+ * the CALL goes out unchanged, because the order of the chain must not move.
+ */
+export type BeforeSend = (
+  payload: Record<string, unknown>,
+  ctx: BehaviorContext,
+) => Record<string, unknown> | DropCall | undefined | void;
+
 export interface Behavior {
   api: 1;
   id: string;
   requires?: readonly BehaviorCapability[];
   /** Keyed by action, in either OCPP version's spelling. */
   onCall?: Record<string, CallBehavior>;
+  on?: BehaviorEvents;
+  /**
+   * Interception of station-initiated CALLs on the OCPP-J paths, keyed by
+   * action in either version's spelling. Refused at load on a SOAP station.
+   */
+  beforeSend?: Record<string, BeforeSend>;
   main?(ctx: BehaviorContext): Promise<void>;
   /** After the station state was restored; async positions are not. */
   onResume?(ctx: BehaviorContext): Promise<void>;

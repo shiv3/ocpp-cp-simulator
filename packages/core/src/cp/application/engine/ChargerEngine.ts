@@ -1,6 +1,7 @@
 import type {
   Behavior,
   BehaviorCapability,
+  BehaviorEvents,
   BehaviorContext,
   CallBehavior,
   CallOutcome,
@@ -8,12 +9,17 @@ import type {
   ConnectorSnapshot,
   JsonValue,
   RandomStream,
+  TransactionEvent,
 } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
+import type {
+  ConnectorRecord,
+  ConnectorWrite,
+} from "../../domain/connector/ConnectorRecord";
 import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
-import { isOcpp2Version } from "../../domain/types/OcppVersion";
+import { isOcpp2Version, isSoapVersion } from "../../domain/types/OcppVersion";
 import { LogType } from "../../shared/Logger";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import type {
@@ -109,6 +115,15 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
+function jsonCopy(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -139,6 +154,25 @@ export class ChargerEngine {
   private readonly defaults = new Map<
     string,
     { behavior: Behavior; call: CallBehavior }
+  >();
+
+  /** True while a loaded, non-dormant behavior has a `beforeSend` table. */
+  private intercepting = false;
+  /** >0 while a `beforeSend` function runs. */
+  private interceptDepth = 0;
+  /** Event hooks waiting for delivery, oldest first. */
+  private readonly hookQueue: Array<{
+    name: keyof BehaviorEvents;
+    event: unknown;
+  }> = [];
+  private hookScheduled = false;
+  private hookDraining = false;
+  /** True while a loaded, non-dormant behavior has an `on` table. */
+  private hooked = false;
+  /** The context (and wait scope) each behavior's hooks run with. */
+  private readonly hookContexts = new Map<
+    string,
+    { scope: Scope; ctx: BehaviorContext }
   >();
 
   constructor(private readonly host: ChargePoint) {
@@ -287,6 +321,7 @@ export class ChargerEngine {
     if (!connector || !previous) return;
     connector.applyWrite(previous, event.write);
     const { write } = event;
+    this.emitWriteHooks(event.connectorId, previous, write);
     if (write.kind !== "status" || write.scope === "local") return;
     if (
       write.scope === "full" &&
@@ -305,6 +340,61 @@ export class ChargerEngine {
     if (write.scope === "full") {
       this.host.afterConnectorStatus(event.connectorId, write.status);
     }
+  }
+
+  /** Event hooks for a connector write that has been applied. */
+  private emitWriteHooks(
+    connectorId: number,
+    previous: ConnectorRecord,
+    write: ConnectorWrite,
+  ): void {
+    if (!this.hooked || write.kind === "restore") return;
+    const now = this._state.connectors[connectorId];
+    if (!now) return;
+    if (write.kind === "status" && previous.status !== now.status) {
+      this.emitHook("connectorStatus", {
+        connectorId,
+        from: previous.status,
+        to: now.status,
+      });
+      return;
+    }
+    if (
+      write.kind !== "transaction.set" &&
+      write.kind !== "transaction.patch"
+    ) {
+      return;
+    }
+    const before = previous.transaction;
+    const after = now.transaction;
+    if (!before && after) {
+      this.emitHook(
+        "transactionStarted",
+        this.transactionEvent(connectorId, after),
+      );
+    } else if (
+      before &&
+      before.stopTime === null &&
+      (!after || after.stopTime)
+    ) {
+      this.emitHook(
+        "transactionStopped",
+        this.transactionEvent(connectorId, after ?? before),
+      );
+    }
+  }
+
+  private transactionEvent(
+    connectorId: number,
+    tx: NonNullable<ConnectorRecord["transaction"]>,
+  ): TransactionEvent {
+    const reason = tx.stopReason ?? tx.stoppedReason;
+    return {
+      connectorId,
+      transactionId: tx.cpTransactionId ?? tx.id,
+      idTag: tx.tagId ?? null,
+      ...(reason ? { reason: String(reason) } : {}),
+    };
   }
 
   /**
@@ -380,6 +470,9 @@ export class ChargerEngine {
         break;
       case "disposed":
         this.disposed = true;
+        this.hooked = false;
+        this.hookQueue.length = 0;
+        for (const id of [...this.hookContexts.keys()]) this.endHookContext(id);
         for (const scope of [...this.callScopes]) this.endScope(scope);
         for (const scope of this.mainScopes.values()) scope.cancel();
         this.mainScopes.clear();
@@ -406,6 +499,247 @@ export class ChargerEngine {
     this.loaded.clear();
   }
 
+  // ---- event hooks --------------------------------------------------------
+
+  /**
+   * What the transport and the charge point report: the connection came up or
+   * went down, the CSMS sent a CALL, the CSMS answered one of ours. Delivered
+   * to the `on` table of every loaded behavior, in load order, after the turn
+   * that caused it (see {@link deliverHooks}).
+   */
+  observe(
+    event:
+      | { type: "connected" }
+      | { type: "disconnected"; code?: number; reason?: string }
+      | {
+          type: "callResult";
+          action: string;
+          messageId: string;
+          outcome: "result" | "error";
+          payload: unknown;
+        }
+      | {
+          type: "callReceived";
+          action: string;
+          messageId: string;
+          payload: unknown;
+        },
+  ): void {
+    if (!this.hooked || this.disposed) return;
+    switch (event.type) {
+      case "connected":
+        this.emitHook("connected", { at: this.host.clock.now() });
+        break;
+      case "disconnected":
+        this.emitHook("disconnected", {
+          at: this.host.clock.now(),
+          ...(event.code === undefined ? {} : { code: event.code }),
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+        });
+        break;
+      case "callResult":
+        this.emitHook("callResult", {
+          action: event.action,
+          messageId: event.messageId,
+          outcome: event.outcome,
+          payload: jsonCopy(event.payload),
+        });
+        break;
+      case "callReceived":
+        this.emitHook("callReceived", {
+          action: event.action,
+          messageId: event.messageId,
+          payload: jsonCopy(event.payload),
+        });
+        break;
+    }
+  }
+
+  private refreshHooked(): void {
+    const active = [...this.loaded.values()].filter(
+      (b) => !this.dormant.has(b.id),
+    );
+    this.hooked = active.some((b) => b.on !== undefined);
+    this.intercepting = active.some((b) => b.beforeSend !== undefined);
+  }
+
+  // ---- send interception --------------------------------------------------
+
+  /**
+   * Run the `beforeSend` of every loaded behavior, in load order, over a
+   * station-initiated CALL that is about to be queued. The transports call it
+   * from their one send path; `ctx.raw` does not come here. Returns the
+   * payload to send or `{ drop: true }`, in which case nothing may go on the
+   * wire and the caller of the CALL must be told it was dropped.
+   *
+   * Synchronous by design: the behaviors are chained one after the other, so
+   * their order cannot move. A function that throws, returns a promise or
+   * returns something that is not an object is logged and skipped; the CALL
+   * goes on with the payload as the previous step left it.
+   */
+  beforeSend(
+    action: string,
+    payload: unknown,
+  ): { readonly drop: true } | { readonly payload: unknown } {
+    if (!this.intercepting || this.disposed) return { payload };
+    const names = this.outboundNames(action, payload);
+    let current = payload;
+    for (const behavior of [...this.loaded.values()]) {
+      const table = behavior.beforeSend;
+      if (!table || this.dormant.has(behavior.id)) continue;
+      for (const name of names) {
+        const fn = table[name];
+        if (typeof fn !== "function") continue;
+        const { ctx } = this.hookContext(behavior);
+        let returned: unknown;
+        this.interceptDepth++;
+        try {
+          returned = fn(jsonCopy(current) as Record<string, unknown>, ctx);
+        } catch (error) {
+          this.warn(
+            `Behavior ${behavior.id}: beforeSend.${name} failed: ${describe(error)}; the ${action} goes out as it was`,
+          );
+          continue;
+        } finally {
+          this.interceptDepth--;
+        }
+        if (returned === undefined) continue;
+        if (isThenable(returned)) {
+          this.warn(
+            `Behavior ${behavior.id}: beforeSend.${name} returned a promise; it must be synchronous, so the ${action} goes out as it was`,
+          );
+          continue;
+        }
+        if (typeof returned !== "object" || returned === null) {
+          this.warn(
+            `Behavior ${behavior.id}: beforeSend.${name} returned neither a payload object nor { drop: true }; ignored`,
+          );
+          continue;
+        }
+        if ((returned as { drop?: unknown }).drop === true) {
+          this.host.logger.info(
+            `[behavior ${behavior.id}] beforeSend.${name} dropped a ${action}`,
+            LogType.OCPP,
+          );
+          return { drop: true };
+        }
+        if (Array.isArray(returned)) {
+          this.warn(
+            `Behavior ${behavior.id}: beforeSend.${name} returned an array; ignored`,
+          );
+          continue;
+        }
+        current = returned;
+      }
+    }
+    return { payload: current };
+  }
+
+  /** True while a `beforeSend` function runs (a `ctx.send` from it waits its turn). */
+  get intercepts(): boolean {
+    return this.interceptDepth > 0;
+  }
+
+  /**
+   * The keys of a `beforeSend` table that name this CALL: its wire action,
+   * and on 2.x the 1.6 spelling of a transaction message (`TransactionEvent`
+   * `Started` is `StartTransaction`, `Ended` is `StopTransaction`). The
+   * payload handed over is always the one of the station's own version.
+   */
+  private outboundNames(action: string, payload: unknown): string[] {
+    const names = [action];
+    if (
+      action === "TransactionEvent" &&
+      isOcpp2Version(this.host.ocppVersion)
+    ) {
+      const type = (payload as { eventType?: unknown } | null)?.eventType;
+      if (type === "Started") names.push("StartTransaction");
+      else if (type === "Ended") names.push("StopTransaction");
+    }
+    return names;
+  }
+
+  /**
+   * Queue a hook event. Hooks never run inside the turn that caused the event:
+   * the queue is drained in a microtask, FIFO, so a hook that writes state or
+   * sends runs after the current event (and its wire traffic) is finished.
+   * An event raised while a hook runs joins the queue and is delivered after
+   * the running hook returns. The order depends on nothing but program order,
+   * so a run on a `VirtualClock` repeats exactly.
+   */
+  private emitHook(name: keyof BehaviorEvents, event: unknown): void {
+    if (!this.hooked || this.disposed) return;
+    this.hookQueue.push({ name, event });
+    if (this.hookScheduled || this.hookDraining) return;
+    this.hookScheduled = true;
+    void Promise.resolve().then(() => this.deliverHooks());
+  }
+
+  private deliverHooks(): void {
+    this.hookScheduled = false;
+    if (this.hookDraining) return;
+    this.hookDraining = true;
+    try {
+      for (
+        let next = this.hookQueue.shift();
+        next;
+        next = this.hookQueue.shift()
+      ) {
+        if (this.disposed) {
+          this.hookQueue.length = 0;
+          return;
+        }
+        this.deliverHook(next.name, next.event);
+      }
+    } finally {
+      this.hookDraining = false;
+    }
+  }
+
+  private deliverHook(name: keyof BehaviorEvents, event: unknown): void {
+    for (const behavior of [...this.loaded.values()]) {
+      if (this.dormant.has(behavior.id)) continue;
+      const hook = behavior.on?.[name] as
+        ((event: unknown, ctx: BehaviorContext) => unknown) | undefined;
+      if (typeof hook !== "function") continue;
+      const { ctx } = this.hookContext(behavior);
+      try {
+        const returned = hook.call(behavior.on, event, ctx);
+        if (isThenable(returned)) {
+          returned.then(undefined, (error: unknown) => {
+            if (error instanceof BehaviorStopped) return;
+            this.warn(
+              `Behavior ${behavior.id}: ${name} hook failed: ${describe(error)}`,
+            );
+          });
+        }
+      } catch (error) {
+        this.warn(
+          `Behavior ${behavior.id}: ${name} hook failed: ${describe(error)}`,
+        );
+      }
+      this.touch();
+    }
+  }
+
+  private hookContext(behavior: Behavior): {
+    scope: Scope;
+    ctx: BehaviorContext;
+  } {
+    let entry = this.hookContexts.get(behavior.id);
+    if (!entry) {
+      const scope = new Scope(behavior.id, false);
+      entry = { scope, ctx: this.makeContext(behavior.id, scope) };
+      this.hookContexts.set(behavior.id, entry);
+    }
+    return entry;
+  }
+
+  private endHookContext(id: string): void {
+    this.hookContexts.get(id)?.scope.cancel();
+    this.hookContexts.delete(id);
+  }
+
   // ---- code behaviors -----------------------------------------------------
 
   /**
@@ -423,6 +757,11 @@ export class ChargerEngine {
     if (this.loaded.has(behavior.id)) {
       throw new Error(`Behavior ${behavior.id} is already loaded`);
     }
+    if (behavior.beforeSend && isSoapVersion(this.host.ocppVersion)) {
+      throw new Error(
+        `Behavior ${behavior.id} uses beforeSend, which needs an OCPP-J station; ${this.host.ocppVersion} is SOAP`,
+      );
+    }
     for (const capability of behavior.requires ?? []) {
       const problem = this.unmet(capability);
       if (problem) {
@@ -436,6 +775,7 @@ export class ChargerEngine {
     }
     this.loaded.set(behavior.id, behavior);
     if (options.dormant) this.dormant.add(behavior.id);
+    this.refreshHooked();
     this.dispatch({ type: "behavior.loaded", behaviorId: behavior.id });
     const orphan = this.orphans[behavior.id];
     if (orphan) {
@@ -493,6 +833,8 @@ export class ChargerEngine {
     if (!behavior) return false;
     this.loaded.delete(id);
     this.dormant.delete(id);
+    this.refreshHooked();
+    this.endHookContext(id);
     this.mainScopes.get(id)?.cancel();
     this.mainScopes.delete(id);
     for (const scope of [...this.callScopes]) {
@@ -851,6 +1193,9 @@ export class ChargerEngine {
       },
       send: async (action, payload, opts) => {
         touch();
+        // From inside a beforeSend the CALL waits for its turn, so it goes
+        // out after the CALL being intercepted.
+        if (this.interceptDepth > 0) await Promise.resolve();
         const request = host.sendOcppCall({
           action,
           payload: payload as Record<string, unknown>,

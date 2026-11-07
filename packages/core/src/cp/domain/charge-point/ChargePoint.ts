@@ -1792,6 +1792,7 @@ export class ChargePoint {
       );
       this.boot();
       this._events.emit("connected", undefined);
+      this._engine.observe({ type: "connected" });
       return;
     }
 
@@ -1821,6 +1822,7 @@ export class ChargePoint {
       () => {
         this.boot();
         this._events.emit("connected", undefined);
+        this._engine.observe({ type: "connected" });
         // The queued-message flush itself is triggered by
         // markBootAccepted(); we just need the WebSocket to come up and
         // BootNotification to round-trip first.
@@ -1839,6 +1841,11 @@ export class ChargePoint {
             : null;
         if (failure) this._logger.error(failure, LogType.WEBSOCKET);
         this._events.emit("disconnected", { code: ev.code, reason: ev.reason });
+        this._engine.observe({
+          type: "disconnected",
+          code: ev.code,
+          reason: ev.reason,
+        });
         if (failure) this.error = failure;
       },
     );

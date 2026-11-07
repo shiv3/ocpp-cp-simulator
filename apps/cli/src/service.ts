@@ -3278,12 +3278,13 @@ export class CLIChargePointService {
   }
 
   /**
-   * Run `onResume` of the loaded behaviors. Call it once, after
+   * Have the loaded behaviors' `onResume` run once the CSMS accepts the next
+   * BootNotification. Call it once, after
    * {@link restoreConnectorRuntimeFromDatabase} and
    * {@link reconcileChargingSessions}.
    */
   resumeEngine(): void {
-    this._chargePoint.engine.resume();
+    this._chargePoint.engine.resumeAfterBoot();
   }
 
   /**

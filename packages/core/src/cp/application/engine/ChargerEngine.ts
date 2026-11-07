@@ -1096,7 +1096,26 @@ export class ChargerEngine {
     return true;
   }
 
-  /** Run `onResume` of every loaded behavior; call it after state was restored. */
+  private resumeWaiting = false;
+
+  /**
+   * Run `onResume` once the CSMS has accepted the next BootNotification: the
+   * boot gate refuses everything else until then, so a `ctx.send` from
+   * `onResume` run any earlier would only be refused. Nothing is sent or
+   * changed by waiting.
+   */
+  resumeAfterBoot(): void {
+    this.resumeWaiting = true;
+  }
+
+  /** The station's boot was accepted: run the `onResume` that was waiting for it. */
+  bootAccepted(): void {
+    if (!this.resumeWaiting) return;
+    this.resumeWaiting = false;
+    this.resume();
+  }
+
+  /** Run `onResume` of every loaded behavior now; call it after state was restored. */
   resume(): void {
     for (const behavior of this.loaded.values()) {
       if (!behavior.onResume || this.dormant.has(behavior.id)) continue;

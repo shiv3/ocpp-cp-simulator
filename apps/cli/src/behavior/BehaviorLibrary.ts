@@ -72,6 +72,13 @@ export class BehaviorLibrary {
   private queue: Promise<unknown> = Promise.resolve();
   private watchers: FSWatcher[] = [];
 
+  /**
+   * Whether the daemon's `behavior.reload` method may re-read the files. Set
+   * from `--watch-behaviors` or `--allow-behavior-reload`; a library used by
+   * tests and embedders allows it.
+   */
+  rpcReloadAllowed = true;
+
   /** How long a reloaded module's top level may take before the reload fails. */
   importTimeoutMs = 2_000;
 

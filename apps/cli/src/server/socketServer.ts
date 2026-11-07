@@ -1144,6 +1144,12 @@ function capFailures(failures: readonly string[]): string[] {
 async function reloadBehaviors(
   deps: RuntimeSocketIoDeps,
 ): Promise<Result<"behavior.reload">> {
+  if (!deps.registry.library.rpcReloadAllowed) {
+    throw new RpcFailure(
+      "unavailable",
+      "behavior.reload is off: start the daemon with --watch-behaviors or --allow-behavior-reload to let it re-read the --behavior files",
+    );
+  }
   const files = await deps.registry.library.reload();
   return {
     files: files.map((f) => ({

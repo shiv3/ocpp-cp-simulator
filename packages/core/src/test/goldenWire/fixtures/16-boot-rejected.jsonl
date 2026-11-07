@@ -1,0 +1,2 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"chargeBoxSerialNumber":"123456","chargePointModel":"Model","chargePointSerialNumber":"123456","chargePointVendor":"Vendor","firmwareVersion":"1.0","iccid":"","imsi":"","meterSerialNumber":"123456","meterType":""}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Rejected","currentTime":"<ts>","interval":3600}}

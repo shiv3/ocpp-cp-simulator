@@ -9,13 +9,15 @@ sources:
   - e2e/README.md
   - scripts/steve-verify/README.md
   - examples/testcontainers-java/README.md
+  - packages/core/src/test/goldenWire/
 related:
   - ../entities/desktop-app.md
   - ../sources/e2e-readme.md
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-11-05
+  - charger-engine.md
+updated: 2026-11-07
 ---
 
 # Testing strategy
@@ -147,6 +149,38 @@ already covers all 7) and so would not have caught either defect.
 The `analyze` test matrix (`apps/cli/src/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes
 ([OCPP DebugKit](../entities/ocpp-debugkit.md)).
+
+## Golden wire test
+
+`packages/core/src/test/goldenWire/` is the regression oracle of the
+[charger engine](charger-engine.md) work (rule 4: with nothing configured, the bytes on the wire and
+their order do not change). `goldenWire.bun.test.ts` drives real `ChargePoint` instances against an
+in-process fake CSMS (`FakeCsms.ts`, `Bun.serve`) on OCPP 1.6 and 2.0.1, records every OCPP-J frame
+in both directions in arrival order, normalizes it, and compares it with a committed fixture under
+`goldenWire/fixtures/` (one `.jsonl` file per case, one frame per line).
+
+- **Normalization** (`normalize.ts`) only replaces what changes between runs: message ids become `id-N` by
+  first appearance, UUIDs `<uuid-N>`, ISO timestamps `<ts>`, `127.0.0.1:<port>` the fake CSMS port, and a
+  generated CSR `<csr>`. Key order, numbers and the order of frames are part of the contract.
+- **Cases**: `cases.ts` holds 99 scripted cases over both versions (boot including Pending and
+  Rejected, status walk, authorize, local and remote start / stop, meter values, EV disconnect, reset,
+  `UpdateFirmware` including `SimulatedFirmwareUpdateFailure`, `SignedUpdateFirmware`,
+  `GetDiagnostics` / `GetLog`, `ChangeAvailability` including `Scheduled`, reservations, unlock,
+  `TriggerMessage`, `inboundPolicy`, `responseOverride`, configuration / variables, data transfer, local
+  list, smart charging, disconnect and reconnect, transactions stopped offline). `scenarioCases.ts` runs
+  all 58 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
+  [scenario README](../../packages/core/src/utils/scenarios/README.md) describes.
+- **Not unattended**: five templates cannot run to their `End` node without a person or a
+  stop, because an Auto MeterValue node blocks for minutes or a loop never ends
+  (`status-triggered-actions`, `full-charging-cycle`, `essential-cp-behavior`, `smart-charging`,
+  `multi-status-monitor`). They are recorded for a fixed window and then stopped; `NOT_UNATTENDED` in
+  `scenarioCases.ts` gives the reason for each.
+- **Determinism**: the driver never decides the order of frames. It waits for a named frame and then for
+  traffic to go quiet (`FakeCsms.settle`). The fake CSMS sends a scenario's call 700 ms after the wait
+  starts so it stays clear of the 5 s meter ticks.
+- **Fixtures are never regenerated to get green.** A missing fixture is written only with
+  `GOLDEN_RECORD=1`, an existing one never; a changed transcript is a failure to explain.
+  `GOLDEN_PRINT=<name part>` prints transcripts while developing a case.
 
 ## Does anything actually launch the desktop daemon?
 

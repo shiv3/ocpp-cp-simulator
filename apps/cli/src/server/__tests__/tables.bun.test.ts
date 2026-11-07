@@ -89,6 +89,10 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
       [cp],
     );
     db.run(
+      "INSERT INTO engine_state (cp_id, state_json, updated_at) VALUES (?, '{}', ?)",
+      [cp, t],
+    );
+    db.run(
       "INSERT INTO certificates (cp_id, seq, kind, certificate_use, body, installed_at) VALUES (?, 1, 'root', 'CsmsRootCertificate', '{}', ?)",
       [cp, t],
     );

@@ -39,7 +39,7 @@ export function readErrorReportingConfig(
  * hooks that feed it. The SDK is a lazy chunk, so the default (no DSN) build
  * never downloads it; an SDK that fails to load or start leaves reporting off
  * rather than the console blank, so this never rejects. Errors only: no
- * tracing, no session replay.
+ * tracing, no session replay, no session reports.
  */
 export async function initErrorReporting(
   config: ErrorReportingConfig | null = readErrorReportingConfig(),
@@ -54,6 +54,9 @@ export async function initErrorReporting(
       dataCollection: restrictedDataCollection(),
       beforeSend: (event) => scrubErrorReport(event),
       beforeBreadcrumb: (breadcrumb) => scrubErrorReport(breadcrumb),
+      // Errors only: BrowserSession would report a session on every page load.
+      integrations: (defaults) =>
+        defaults.filter(({ name }) => name !== "BrowserSession"),
     });
   } catch (err) {
     console.warn("Error reporting disabled: the Sentry SDK did not start", err);

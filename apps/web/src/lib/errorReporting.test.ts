@@ -27,6 +27,25 @@ function fakeSentry() {
   return { sentry, captured };
 }
 
+type Integration = { name: string };
+
+/**
+ * The integration names the SDK ends up with for these `init` options, as
+ * `getIntegrationsToSetup` in `@sentry/core` resolves them: an array is
+ * added to the defaults, a function replaces them.
+ */
+function resolveIntegrations(
+  options: { integrations?: unknown },
+  defaults: Integration[],
+): string[] {
+  const { integrations } = options;
+  const resolved =
+    typeof integrations === "function"
+      ? (integrations as (d: Integration[]) => Integration[])(defaults)
+      : [...defaults, ...((integrations as Integration[] | undefined) ?? [])];
+  return resolved.map((integration) => integration.name);
+}
+
 describe("readErrorReportingConfig", () => {
   it("is off when the build carries no VITE_SENTRY_DSN", () => {
     expect(readErrorReportingConfig({})).toBeNull();
@@ -51,6 +70,21 @@ describe("initErrorReporting", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it("sends no session reports and adds no integration (errors only)", async () => {
+    const { sentry } = fakeSentry();
+    await initErrorReporting(
+      { dsn: DSN, release: "1.0.0" },
+      async () => sentry as never,
+    );
+
+    // `@sentry/react` defaults include BrowserSession, which reports a
+    // session on every page load even when nothing fails.
+    const defaults = [{ name: "BrowserSession" }, { name: "GlobalHandlers" }];
+    expect(
+      resolveIntegrations(sentry.init.mock.calls[0]![0], defaults),
+    ).toEqual(["GlobalHandlers"]);
+  });
+
   it("initialises the SDK with data collection off, no tracing and a scrubber", async () => {
     const { sentry } = fakeSentry();
     await initErrorReporting(
@@ -67,7 +101,6 @@ describe("initErrorReporting", () => {
       dataCollection: restrictedDataCollection(),
     });
     expect(options).not.toHaveProperty("tracesSampleRate");
-    expect(options).not.toHaveProperty("integrations");
 
     const event = options.beforeSend({
       message: "ws://cp:secret@csms.example/ocpp",

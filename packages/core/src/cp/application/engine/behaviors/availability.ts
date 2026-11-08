@@ -104,12 +104,21 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
   if (connectorId === undefined) {
     const active = [...cp.connectors.values()].filter((c) => c.transaction);
     if (active.length > 0) {
+      // G04.FR.06 answers Scheduled while a transaction runs, but G04.FR.07 /
+      // G04.FR.08 and TC_G_14_CS apply the change to the EVSEs without a
+      // transaction at once; only the busy ones wait for their transaction.
       return {
         response: { status: "Scheduled" },
         after: async () => {
-          for (const connector of active) {
-            connector.scheduledAvailability = target;
+          for (const connector of cp.connectors.values()) {
+            if (connector.transaction) {
+              connector.scheduledAvailability = target;
+              continue;
+            }
+            connector.availability = target;
+            cp.updateConnectorStatus(connector.id, nextStatus);
           }
+          cp.persistAvailability();
         },
       };
     }

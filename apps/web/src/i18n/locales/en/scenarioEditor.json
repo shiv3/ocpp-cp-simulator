@@ -48,7 +48,7 @@
   "scenarioEditor.ev.curveSoc": "Charging curve point {{index}} SoC percent",
   "scenarioEditor.ev.fallbackBuiltin": "No Default EV Settings are saved in Settings.",
   "scenarioEditor.ev.fallbackNote": "The auto-meter \"Stop mode\" inside MeterValue nodes can derive its stop condition from these settings.",
-  "scenarioEditor.ev.fallbackPost": "({{model}}) configured in Settings; a connector whose EV settings differ keeps its own values.",
+  "scenarioEditor.ev.fallbackPost": "({{model}}) configured in Settings; when the connector's EV settings differ, empty fields keep the connector's values.",
   "scenarioEditor.ev.fallbackPre": "Placeholders show the",
   "scenarioEditor.ev.fallbackPrefix": "Empty fields keep the connector's current EV settings.",
   "scenarioEditor.ev.fallbackStrong": "Default EV Settings",

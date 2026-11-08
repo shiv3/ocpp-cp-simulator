@@ -48,7 +48,7 @@
   "scenarioEditor.ev.curveSoc": "充電カーブのポイント {{index}} の SoC (%)",
   "scenarioEditor.ev.fallbackBuiltin": "設定にデフォルト EV 設定は保存されていません。",
   "scenarioEditor.ev.fallbackNote": "MeterValue ノードの自動メーターの「停止モード」は、これらの設定から停止条件を導出できます。",
-  "scenarioEditor.ev.fallbackPost": "({{model}}) です。EV 設定が異なるコネクタは自身の値を保持します。",
+  "scenarioEditor.ev.fallbackPost": "({{model}}) です。コネクタの EV 設定が異なる場合、空欄の項目はコネクタの値を保持します。",
   "scenarioEditor.ev.fallbackPre": "プレースホルダーは設定の",
   "scenarioEditor.ev.fallbackPrefix": "空欄の項目はコネクタの現在の EV 設定を保持します。",
   "scenarioEditor.ev.fallbackStrong": "デフォルト EV 設定",

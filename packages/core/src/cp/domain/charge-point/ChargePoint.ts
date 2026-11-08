@@ -3844,11 +3844,10 @@ export class ChargePoint {
         this.stopPeriodicSampling(connector.id);
         return;
       }
-      // Part 2 §4.8 (errata 3.18): the `0` of a transaction whose
-      // StartTransaction.req was answered with a CALLERROR (#527) is a
-      // placeholder the CSMS never issued; a sample would name a transaction
-      // it does not know.
-      if (connector.transaction?.startCallError) return;
+      // A transaction whose StartTransaction.req was answered with a
+      // CALLERROR (#527) is sampled too (errata 3.15, §4.7: every interval,
+      // SHALL): the MeterValues.req carries the id its StartTransaction got,
+      // or -1 until it has one (errata 3.18, §4.8; #565).
       // Offline too: §3.7 "When offline, the Charge Point MUST queue any
       // transaction-related messages", periodic MeterValues included. The
       // outbox queues it (a MeterValues of a transaction) and replays it in

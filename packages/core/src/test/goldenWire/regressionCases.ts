@@ -408,6 +408,29 @@ c16(
   },
   { memory: true, simulation: { clock: periodicRestartClock, seed: "g722" } },
 );
+// errata 3.15 (§4.7) still asks for a sample every interval when the
+// StartTransaction.req was answered with a CALLERROR; errata 3.18 (§4.8)
+// names the id they carry: -1 until a conf gives one.
+const periodicStartErrorClock = new VirtualClock();
+c16(
+  "meter-periodic-start-callerror",
+  async (r) => {
+    r.csms.responders.StartTransaction = () =>
+      ({ error: { code: "InternalError", description: "x" } }) as any;
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicStartErrorClock, 200);
+    r.cp.stopTransaction(1);
+    await settle(r);
+    await periodic(r, periodicStartErrorClock, 60);
+  },
+  {
+    memory: true,
+    simulation: { clock: periodicStartErrorClock, seed: "g722" },
+  },
+);
 // The interval is read when the transaction starts: a ChangeConfiguration
 // from the CSMS mid-transaction applies to the next one.
 const periodicChangeClock = new VirtualClock();

@@ -139,6 +139,23 @@ describe("redaction (Sec-2)", () => {
     expectNoSecrets(w);
   });
 
+  it("redactCp carries transport and strips the proxy credentials (#683, #684)", () => {
+    const w = redactCp({
+      ...fullConfig,
+      transport: {
+        reconnect: { mode: "fixed", baseDelayMs: 5000 },
+        ws: { proxy: "http://puser:proxy-secret@proxy.test:3128" },
+      },
+    });
+    expect(w.transport).toEqual({
+      reconnect: { mode: "fixed", baseDelayMs: 5000 },
+      ws: { proxy: "http://proxy.test:3128/" },
+    });
+    expect(JSON.stringify(w)).not.toContain("proxy-secret");
+    expect(wireCpConfigSchema.safeParse(w).success).toBe(true);
+    expect(redactCp(fullConfig)).not.toHaveProperty("transport");
+  });
+
   it("redactCp ignores inline TLS material if a caller accidentally supplies it", () => {
     const w = redactCp({
       ...fullConfig,

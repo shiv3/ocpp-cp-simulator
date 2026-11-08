@@ -568,7 +568,11 @@ export class ChargePoint {
 
   /** May TriggerMessage request `target` under the capability profile (#618)? */
   isTriggerTargetSupported(target: string): boolean {
-    return isTriggerTargetSupported(this._capabilityProfile, target);
+    return isTriggerTargetSupported(
+      this._capabilityProfile,
+      target,
+      translatesCsmsActionNames(this._ocppVersion),
+    );
   }
 
   /** See {@link InboundValidationMode}. Read on every inbound CALL. */
@@ -2570,7 +2574,13 @@ export class ChargePoint {
   private applyBootAccepted(interval: number): void {
     // Send connector 0 (charge point level) status first
     this.updateConnectorStatus(0, OCPPStatus.Available);
+    // #455: a transaction the power-loss recovery is about to end was already
+    // decided at the loss. Reporting its pre-loss status (Charging) after the
+    // reboot would suggest energy flowed after the restart, so the recovery's
+    // own Finishing / Available is the first thing the CSMS hears (#811).
+    const ending = this.connectorsEndedByPowerRecovery();
     this.connectors.forEach((connector) => {
+      if (ending.has(connector.id)) return;
       // Reset to Available only when this is a fresh post-boot state —
       // i.e. autoReset is enabled AND no transaction is in flight. A
       // connector that was restored from `connector_runtime` with an
@@ -2861,6 +2871,19 @@ export class ChargePoint {
     if (this._ocppVersion !== OCPP_2_1) return "resume";
     const timeout = options.txResumptionTimeoutSeconds ?? 0;
     return timeout > 0 && outageMs <= timeout * 1000 ? "resume" : "end";
+  }
+
+  /** Connectors whose running transaction the pending recovery will end. */
+  private connectorsEndedByPowerRecovery(): ReadonlySet<number> {
+    const pending = this._powerRecovery;
+    const out = new Set<number>();
+    if (!pending || pending.options.transactions !== "end") return out;
+    for (const { connectorId } of pending.loss.transactions) {
+      if (this.getConnector(connectorId)?.hasRunningTransaction) {
+        out.add(connectorId);
+      }
+    }
+    return out;
   }
 
   /** Run the pending power-loss recovery; the boot is Accepted. */

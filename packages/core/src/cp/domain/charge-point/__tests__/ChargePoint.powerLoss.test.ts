@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChargePoint, PowerStateError } from "../ChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
+import { OCPPStatus } from "../../types/OcppTypes";
 
 /**
  * #455: a power loss is neither a network loss nor an OCPP Reset. The
@@ -32,6 +33,12 @@ function build(version: string): ChargePoint {
 
 async function charging(cp: ChargePoint): Promise<void> {
   await cp.startTransaction("TAG-1", 1);
+}
+
+/** The CSMS-less rig leaves the connector in Preparing; make it Charging. */
+async function chargingStatus(cp: ChargePoint): Promise<void> {
+  await charging(cp);
+  cp.updateConnectorStatus(1, OCPPStatus.Charging);
 }
 
 function accepted(cp: ChargePoint): void {
@@ -149,6 +156,59 @@ describe("ChargePoint power loss (#455)", () => {
       stoppedReason: "PowerLoss",
       stoppedAt: new Date("2026-01-01T10:00:00Z"),
     });
+  });
+
+  it("an ending recovery does not report the pre-loss Charging after the reboot (#811 review)", async () => {
+    const cp = build("OCPP-1.6J");
+    await chargingStatus(cp);
+    cp.powerLoss();
+    cp.restorePower({ transactions: "end" });
+    const reported: Array<[number, string]> = [];
+    const update = cp.updateConnectorStatus.bind(cp);
+    vi.spyOn(cp, "updateConnectorStatus").mockImplementation((id, status) => {
+      reported.push([id, status]);
+      update(id, status);
+    });
+    accepted(cp);
+    await tick();
+    expect(reported.filter(([id]) => id === 1).map(([, s]) => s)).not.toContain(
+      "Charging",
+    );
+    expect(cp.getConnector(1)?.hasRunningTransaction).toBe(false);
+  });
+
+  it("keeps resumed transactions reported as before (#811 review)", async () => {
+    const cp = build("OCPP-1.6J");
+    await chargingStatus(cp);
+    cp.powerLoss();
+    cp.restorePower();
+    const reported: string[] = [];
+    const update = cp.updateConnectorStatus.bind(cp);
+    vi.spyOn(cp, "updateConnectorStatus").mockImplementation((id, status) => {
+      if (id === 1) reported.push(status);
+      update(id, status);
+    });
+    accepted(cp);
+    await tick();
+    expect(reported).toContain("Charging");
+  });
+
+  it("the register stands still while off and never goes backwards after a resume (#798)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T10:00:00Z"));
+    const cp = build("OCPP-1.6J");
+    await chargingStatus(cp);
+    cp.setMeterValue(1, 5000);
+    cp.powerLoss();
+    const connector = cp.getConnector(1)!;
+    const before = connector.meterValue;
+    vi.setSystemTime(new Date("2026-01-01T11:00:00Z"));
+    expect(connector.meterValue).toBe(before);
+    cp.restorePower();
+    accepted(cp);
+    await tick();
+    vi.setSystemTime(new Date("2026-01-01T11:05:00Z"));
+    expect(connector.meterValue).toBeGreaterThanOrEqual(before);
   });
 
   it("2.0.1 ends by default (no TxResumed in that version)", async () => {

@@ -141,6 +141,7 @@ import {
   MONITORING_REQUEST_MAX_BYTES,
   MONITORING_REQUEST_MAX_ITEMS,
 } from "../monitoring/monitoringCtrlrKeys";
+import { DEVICE_MODEL } from "../device-model/DeviceModelRegistry";
 import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
@@ -798,6 +799,7 @@ export class ChargePoint {
       repository.saveActiveBase(this._monitoring.activeMonitoringBase);
     }
     this.publishMonitoringCtrlr();
+    this.publishDeviceModelConstants();
     this.publishRuntimeValues();
     // Registered before the evaluation's own listener, so a new row exists
     // when its triggered flag is first written.
@@ -844,6 +846,17 @@ export class ChargePoint {
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
     this._deviceModelTargets.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /**
+   * The registry's constants (#604), such as `TxCtrlr.TxStartPoint`, as
+   * read-only runtime keys, so reads, reports and monitors see them.
+   */
+  private publishDeviceModelConstants(): void {
+    for (const def of DEVICE_MODEL.variables) {
+      if (def.constant !== true || typeof def.default !== "string") continue;
+      this._configuration.defineRuntimeKey(def.valueKey, def.default);
+    }
   }
 
   /**

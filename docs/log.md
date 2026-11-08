@@ -2388,3 +2388,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | AutoTraffic: idTag pool, start preconditions, per-outcome counters (#603)
+
+- [Control plane → Background traffic](concepts/control-plane.md#background-traffic): `stopAt`, `idTagStrategy`, `cpIndex`; tags from the pool with the traffic's own seeded cursor (why not `nextIdTag`); start preconditions (Accepted, Available, no transaction); the full counter list.
+- [Daemon → Metrics](entities/daemon.md#metrics): the five `ocppcp_auto_traffic_*` series. [Fleet load roadmap](analyses/fleet-load-and-observability-roadmap.md): the config sketch and the metric names as shipped. [GitHub issues](sources/github-issues.md): #603.

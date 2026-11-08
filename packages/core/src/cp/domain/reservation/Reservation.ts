@@ -215,6 +215,22 @@ export class ReservationManager {
   }
 
   /**
+   * The live reservation of a connector (or the connector-0 one), read
+   * without the lazy expiry cleanup of {@link getReservationForConnector}: no
+   * `onExpire` side effect, a lapsed reservation is skipped.
+   */
+  peekReservationForConnector(connectorId: number): Reservation | undefined {
+    const now = this.clock.now();
+    const live = [...this.reservations.values()].filter(
+      (r) => r.expiryDate.getTime() > now,
+    );
+    return (
+      live.find((r) => r.connectorId === connectorId) ??
+      (connectorId !== 0 ? live.find((r) => r.connectorId === 0) : undefined)
+    );
+  }
+
+  /**
    * Get reservation by ID
    * @param reservationId Reservation ID
    * @returns Reservation if found, undefined otherwise
@@ -296,6 +312,21 @@ export class ReservationManager {
       this.clock.clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
     }
+  }
+
+  /**
+   * Put reservations back after a connection loss that was not a reboot
+   * (#702): those whose expiry has not passed, with the cleanup timer
+   * running again. Returns the ones restored.
+   */
+  restore(reservations: readonly Reservation[]): Reservation[] {
+    const now = this.clock.now();
+    const kept = reservations.filter((r) => r.expiryDate.getTime() > now);
+    for (const reservation of kept) {
+      this.reservations.set(reservation.reservationId, { ...reservation });
+    }
+    if (!this.cleanupTimer) this.startCleanupTimer();
+    return kept;
   }
 
   /**

@@ -124,10 +124,20 @@ describe("OCPP 2.0.1 transaction control", () => {
         { status: "Rejected" },
       ]);
 
-      csms.send([2, "rs-201-4", "GetTransactionStatus", {}]);
+      // #554 (E14): the CSMS has not answered the two TransactionEvents yet.
+      csms.send([2, "rs-201-4", "GetTransactionStatus", { transactionId }]);
+      expect(await csms.waitForFrame(callResultFrame("rs-201-4"))).toEqual([
+        3,
+        "rs-201-4",
+        { ongoingIndicator: false, messagesInQueue: true },
+      ]);
 
-      const statusResult = await csms.waitForFrame(callResultFrame("rs-201-4"));
-      expect(statusResult).toEqual([3, "rs-201-4", { messagesInQueue: false }]);
+      csms.send([3, startedFrame[1], {}]);
+      csms.send([3, endedFrame[1], {}]);
+      csms.send([2, "rs-201-5", "GetTransactionStatus", {}]);
+
+      const statusResult = await csms.waitForFrame(callResultFrame("rs-201-5"));
+      expect(statusResult).toEqual([3, "rs-201-5", { messagesInQueue: false }]);
     } finally {
       cp.disconnect();
       await csms.stop();

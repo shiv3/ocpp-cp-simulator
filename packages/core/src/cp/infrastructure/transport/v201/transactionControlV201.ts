@@ -59,7 +59,8 @@ export function handleGetTransactionStatusV201(
   return {
     response: {
       ...(ongoing === undefined ? {} : { ongoingIndicator: ongoing }),
-      messagesInQueue: false,
+      messagesInQueue:
+        ctx.hasTransactionEventsToDeliver?.(req.transactionId) ?? false,
     } satisfies GetTransactionStatusResponseV201,
   };
 }

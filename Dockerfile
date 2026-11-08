@@ -23,7 +23,13 @@
 #       --scenario-template-file /scenarios/demo-charging.json \
 #       --scenario-connector all
 
-ARG BUN_VERSION=1
+# Bun for the build and runtime stages. Must match the bun line of
+# .tool-versions, the single source of the Bun version (mise, every
+# workflow): the image runs the Bun the tests ran on, not whatever 1.x
+# is latest. The workflows pass the value read from .tool-versions;
+# scripts/__tests__/bunVersionPin.bun.test.ts fails when this default
+# drifts. Override with --build-arg BUN_VERSION=<x.y.z>.
+ARG BUN_VERSION=1.4.3
 # Health-check URL path. Same value is baked into the UI bundle at build
 # time (as VITE_HEALTH_PATH) and re-applied at runtime as the daemon's
 # --health-path flag, so the browser's remote-mode auto-detect probe and

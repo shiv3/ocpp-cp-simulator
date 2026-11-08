@@ -23,6 +23,9 @@ services:
         # `<sha7>-dev` instead of `local-dev`, e.g.
         # `APP_COMMIT=$(git rev-parse HEAD) docker compose build`.
         APP_COMMIT: "${APP_COMMIT:-}"
+        # No BUN_VERSION here on purpose: compose cannot read .tool-versions,
+        # and an empty value would override the Dockerfile default, which
+        # is pinned to it (and guarded by a test).
     image: ocpp-cp-sim
     container_name: ocpp-cp-sim
     restart: unless-stopped

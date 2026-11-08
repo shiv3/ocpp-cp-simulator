@@ -68,14 +68,26 @@ export function buildBaseReportData(
       );
       if (targets?.supports(valueKey) === true) {
         const target = targets.get(valueKey);
+        const [actual] = datum.variableAttribute;
+        const minSet = targets.getLimit(valueKey, "MinSet");
+        const maxSet = targets.getLimit(valueKey, "MaxSet");
+        // MinSet / MaxSet bound the Target and are reported once set (B05
+        // remark).
+        const attribute = (type: "MinSet" | "MaxSet", value: number) => ({
+          type,
+          value: String(value),
+          mutability: "ReadWrite" as const,
+        });
         datum.variableAttribute = [
-          datum.variableAttribute[0],
+          actual,
           {
             type: "Target",
             ...(target !== undefined && { value: String(target) }),
             mutability: "ReadWrite",
           },
-        ];
+          ...(minSet !== undefined ? [attribute("MinSet", minSet)] : []),
+          ...(maxSet !== undefined ? [attribute("MaxSet", maxSet)] : []),
+        ] as ReportDataType["variableAttribute"];
       }
       reportData.push(datum);
     }

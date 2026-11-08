@@ -854,8 +854,12 @@ export class ChargePoint {
    */
   private publishDeviceModelConstants(): void {
     for (const def of DEVICE_MODEL.variables) {
-      if (def.constant !== true || typeof def.default !== "string") continue;
-      this._configuration.defineRuntimeKey(def.valueKey, def.default);
+      if (def.constant !== true) continue;
+      if (typeof def.default === "string") {
+        this._configuration.defineRuntimeKey(def.valueKey, def.default);
+      } else if (typeof def.default === "number") {
+        this._configuration.defineRuntimeIntegerKey(def.valueKey, def.default);
+      }
     }
   }
 

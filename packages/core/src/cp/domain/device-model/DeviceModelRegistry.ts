@@ -1,6 +1,11 @@
 // The OCPP 2.x Device Model registry (#604): which components and variables
 // the station has, and each variable's metadata. Pure data plus lookups; the
 // values live in the ConfigurationStore under `valueKey`.
+import {
+  DEVICE_DATA_CTRLR_KEYS,
+  VARIABLES_REQUEST_MAX_BYTES,
+  VARIABLES_REQUEST_MAX_ITEMS,
+} from "./deviceDataCtrlrKeys";
 import { MAX_TIMER_MS } from "../../shared/timers";
 import {
   MONITORING_CTRLR_KEYS,
@@ -465,6 +470,37 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     default: "Authorized,EVConnected",
     constant: true,
   }),
+  // #606: the request limits GetVariables / SetVariables enforce
+  // (B05.FR.11, B06.FR.05); constants of the simulated station.
+  ...(
+    [
+      ["GetVariables", "itemsPerGetVariables", "bytesPerGetVariables"],
+      ["SetVariables", "itemsPerSetVariables", "bytesPerSetVariables"],
+    ] as const
+  ).flatMap(([message, items, bytes]) => [
+    runtime(
+      "DeviceDataCtrlr",
+      "ItemsPerMessage",
+      DEVICE_DATA_CTRLR_KEYS[items],
+      {
+        instance: message,
+        dataType: "integer",
+        default: VARIABLES_REQUEST_MAX_ITEMS,
+        constant: true,
+      },
+    ),
+    runtime(
+      "DeviceDataCtrlr",
+      "BytesPerMessage",
+      DEVICE_DATA_CTRLR_KEYS[bytes],
+      {
+        instance: message,
+        dataType: "integer",
+        default: VARIABLES_REQUEST_MAX_BYTES,
+        constant: true,
+      },
+    ),
+  ]),
   // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-§2.13.9).
   runtime(
     "MonitoringCtrlr",

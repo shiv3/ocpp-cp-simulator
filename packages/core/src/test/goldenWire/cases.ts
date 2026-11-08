@@ -114,6 +114,36 @@ export const goldenCases: GoldenCase[] = [
       },
     },
   ),
+  // OCPP 1.6 section 4.2: while Rejected the station answers nothing the CSMS
+  // sends and a Reset has no effect; it answers again once the retry
+  // BootNotification has been Accepted.
+  c16(
+    "boot-rejected-silent-then-retry",
+    async (rig) => {
+      await settle(rig);
+      rig.csms.callNoWait("GetConfiguration", { key: ["HeartbeatInterval"] });
+      rig.csms.callNoWait("Reset", { type: "Soft" });
+      await new Promise((r) => setTimeout(r, 300));
+      await rig.csms.waitForCall("BootNotification", {
+        nth: 2,
+        timeoutMs: 30_000,
+      });
+      await settle(rig);
+      await rig.csms.call("GetConfiguration", { key: ["HeartbeatInterval"] });
+      await settle(rig);
+    },
+    {
+      responders: {
+        BootNotification: (_p, { nth }) => ({
+          result: {
+            status: nth === 1 ? "Rejected" : "Accepted",
+            currentTime: "2030-01-01T00:00:00.000Z",
+            interval: nth === 1 ? 1 : 3600,
+          },
+        }),
+      },
+    },
+  ),
   ...both(
     "boot-rejected",
     async (rig) => {

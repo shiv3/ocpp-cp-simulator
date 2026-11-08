@@ -48,6 +48,18 @@ export class BootGate {
   }
 
   /**
+   * §4.2: "While Rejected, the Charge Point SHALL NOT respond to any Central
+   * System initiated message." True from the Rejected answer until the retry
+   * interval has passed, i.e. until the retry BootNotification is due. Pending
+   * and Accepted answer as usual.
+   */
+  isInboundSilenced(now?: Date): boolean {
+    if (this._status.status !== "Rejected") return false;
+    const currentTime = now ?? new Date(this.clock.now());
+    return currentTime < this._status.retryAfter;
+  }
+
+  /**
    * Check whether an outgoing CALL with the given action is allowed.
    *
    * @param action The OCPP action to check

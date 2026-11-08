@@ -425,6 +425,7 @@ export class OCPPMessageHandler {
     this._gate = new InboundCallGate({
       ports: ports16(chargePoint),
       registry: chargePoint.behaviors,
+      silenced: () => this._bootGate.isInboundSilenced(),
       info: (message) => this._logger.info(message, LogType.OCPP),
       warn: (message) => this._logger.warn(message, LogType.OCPP),
     });

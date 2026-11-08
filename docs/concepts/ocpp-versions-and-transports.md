@@ -429,6 +429,22 @@ error and the message is not sent again. On 1.6S that deviates from the OCPP-S
 messages after a Fault
 ([#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585)).
 
+## OCPP-J 1.6 boot gate (§4.2)
+
+Outgoing CALLs follow the status of the last `BootNotification.conf`
+(`BootGate`): `Accepted` lets everything out; before the first answer and while
+`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
+until the retry interval has passed.
+
+Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
+SHALL NOT respond to any Central System initiated message", so from a
+`Rejected` answer until the retry interval has passed the station sends no
+CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
+reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
+shown on the timeline as unanswered. When the retry BootNotification is due the
+station answers again. Pending and Accepted answer as usual. There is no
+opt-out.
+
 ## OCPP 2.x Reset OnIdle
 
 For OCPP 2.0.1 and 2.1, `Reset` with `type: OnIdle` is answered `Accepted` and

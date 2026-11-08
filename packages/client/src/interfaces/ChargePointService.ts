@@ -1,3 +1,5 @@
+import type { TransportConfigWire } from "@ocpp-cp-sim/contracts/transportConfig";
+import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { VehicleCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
 import type {
   AuthorizationCacheSeedEntry,
@@ -152,6 +154,9 @@ export interface ChargePointSnapshot {
       disabledActions?: readonly string[];
       triggerMessageTargets?: readonly string[];
     };
+    /** #609 / #611: reconnect policy and WebSocket client options; the
+     *  proxy URL's credentials are removed. */
+    transport?: TransportConfigWire;
     /** What the charger hardware delivers per connector (#327). */
     chargerCapabilities?: ReadonlyChargerCapabilities;
     tlsCaPath?: string;
@@ -618,7 +623,7 @@ export interface ChargePointService {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void>;
+  ): Promise<StartTransactionOutcome | void>;
   stopTransaction(
     id: string,
     connectorId: number,

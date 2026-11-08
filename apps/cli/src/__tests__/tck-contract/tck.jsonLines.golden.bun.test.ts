@@ -66,7 +66,7 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
     expect(await cp.request("heartbeat")).toEqual({ id: "t4", ok: true });
     expect(
       await cp.request("start_transaction", { connector: 1, tagId: "TAG1" }),
-    ).toEqual({ id: "t5", ok: true });
+    ).toEqual({ id: "t5", ok: true, data: { started: true } });
     // The TCK's J_xx readings name Sample.Clock (core-201.ts); the default is
     // Sample.Periodic.
     expect(
@@ -204,7 +204,9 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
         triggerReason: "CablePluggedIn",
         chargingState: "EVConnected",
       }),
-    ).toEqual({ id: "t2", ok: true });
+    ).toEqual({ id: "t2", ok: true, data: { started: true } });
+    // No wait between the two (#813): the reply above means the transaction
+    // exists.
     expect(
       await cp.request("transaction_event", {
         connector: 1,

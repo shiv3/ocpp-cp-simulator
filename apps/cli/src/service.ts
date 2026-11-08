@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
 import type {
@@ -1015,6 +1016,7 @@ export class CLIChargePointService {
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
         inboundValidation: this._init.inboundValidation,
         capabilityProfile: this._init.capabilityProfile,
+        transport: this._init.transport,
         chargerCapabilities: this._init.chargerCapabilities,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
@@ -1176,8 +1178,8 @@ export class CLIChargePointService {
     connectorId: number,
     tagId: string,
     options: StartTransactionCommandOptions = {},
-  ): void {
-    this._chargePoint.startTransaction(
+  ): Promise<StartTransactionOutcome> {
+    return this._chargePoint.startTransaction(
       tagId,
       connectorId,
       undefined,

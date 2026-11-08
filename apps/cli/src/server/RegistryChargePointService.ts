@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import * as fs from "fs";
 import type {
@@ -102,6 +103,7 @@ import { redactSensitiveText } from "@ocpp-cp-sim/core/cp/shared/redaction";
 import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
+import { redactTransport } from "@ocpp-cp-sim/contracts/events";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import type {
@@ -366,8 +368,12 @@ export class RegistryChargePointService implements ChargePointService {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void> {
-    this.requireService(id).startTransaction(connectorId, tagId, options);
+  ): Promise<StartTransactionOutcome> {
+    return this.requireService(id).startTransaction(
+      connectorId,
+      tagId,
+      options,
+    );
   }
 
   async stopTransaction(
@@ -1199,6 +1205,9 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           inboundValidation: status.config.inboundValidation,
           capabilityProfile: status.config.capabilityProfile,
+          ...(status.config.transport === undefined
+            ? {}
+            : { transport: redactTransport(status.config.transport) }),
           chargerCapabilities: status.config.chargerCapabilities,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,

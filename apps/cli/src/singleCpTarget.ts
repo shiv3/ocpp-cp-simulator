@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import * as fs from "fs";
 import type {
   DataTransferData,
@@ -86,7 +87,7 @@ export interface SingleCpCommandOps {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void>;
+  ): Promise<StartTransactionOutcome | void>;
   setAutoTrafficConfig(
     connectorId: number,
     config: AutoTrafficConfig,
@@ -277,7 +278,7 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     },
     getStatus: async () => service.getStatus(),
     startTransaction: async (connectorId, tagId, options) => {
-      service.startTransaction(connectorId, tagId, options);
+      return service.startTransaction(connectorId, tagId, options);
     },
     setAutoTrafficConfig: async (connectorId, config) => {
       service.setAutoTrafficConfig(connectorId, config);

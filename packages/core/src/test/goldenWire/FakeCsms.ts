@@ -160,6 +160,7 @@ export class FakeCsms {
   attachMemoryClient(socket: MemoryServerSocket): void {
     this.socket = socket;
     this.opens++;
+    this.lastFrameAt = Date.now();
     for (const wake of [...this.connectionWaiters]) wake();
   }
 

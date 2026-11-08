@@ -29,6 +29,7 @@ import {
   type SetDefaultTariffResponseV21,
   type SetDERControlResponseV21,
   type UpdateDynamicScheduleResponseV21,
+  type UsePriorityChargingRequestV21,
   type UsePriorityChargingResponseV21,
 } from "@ocpp-cp-sim/ocpp/v21/index";
 import {
@@ -183,11 +184,29 @@ export function buildV21InboundRegistry(): V201InboundRegistry {
 
   registry.set("UsePriorityCharging", {
     validate: isValidUsePriorityChargingRequestV21,
-    handle: () => ({
-      response: {
-        status: "NoProfile",
-      } satisfies UsePriorityChargingResponseV21,
-    }),
+    handle: (payload, ctx) => {
+      const { transactionId, activate } =
+        payload as UsePriorityChargingRequestV21;
+      const ongoing = Array.from(ctx.chargePoint.connectors.values()).some(
+        (connector) => connector.transaction?.cpTransactionId === transactionId,
+      );
+      if (!ongoing) {
+        // K21.FR.02
+        return {
+          response: {
+            status: "Rejected",
+            statusInfo: { reasonCode: "TxNotFound" },
+          } satisfies UsePriorityChargingResponseV21,
+        };
+      }
+      // K21.FR.06: nothing to deactivate. K21.FR.01: the station never
+      // installs a PriorityCharging profile, so activation finds none.
+      return {
+        response: (activate
+          ? { status: "NoProfile", statusInfo: { reasonCode: "NotFound" } }
+          : { status: "Accepted" }) satisfies UsePriorityChargingResponseV21,
+      };
+    },
   });
 
   return registry;

@@ -19,6 +19,8 @@ const c16 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `16-${name}`, version: "1.6", run, options });
 const c201 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `201-${name}`, version: "2.0.1", run, options });
+const c21 = (name: string, run: Case["run"], options?: Case["options"]) =>
+  cases.push({ name: `21-${name}`, version: "2.1", run, options });
 const both = (name: string, run: Case["run"], options?: Case["options"]) => {
   c16(name, run, options);
   c201(name, run, options);
@@ -1339,6 +1341,20 @@ c201("reset-unknown-evse", async (r) => {
 c201("reset-immediate-resume-charging", async (r) => {
   await charging(r);
   await r.csms.call("Reset", { type: "ImmediateAndResume", evseId: 1 });
+  await settle(r);
+});
+
+// 2.1 K21.FR.01 / FR.02 / FR.06: UsePriorityCharging looks the transaction up;
+// the station never has a PriorityCharging profile.
+c21("use-priority-charging", async (r) => {
+  await charging(r);
+  const transactionId = r.transactionId(1);
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: true });
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: false });
+  await r.csms.call("UsePriorityCharging", {
+    transactionId: "no-such-transaction",
+    activate: true,
+  });
   await settle(r);
 });
 

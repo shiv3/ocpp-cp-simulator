@@ -138,8 +138,44 @@ describe("buildV21InboundRegistry", () => {
     expect(responseFor("UpdateDynamicSchedule")).toEqual({
       status: "Rejected",
     });
-    expect(responseFor("UsePriorityCharging")).toEqual({
-      status: "NoProfile",
+  });
+
+  describe("UsePriorityCharging (K21)", () => {
+    const answer = (transactionId: string, activate: boolean): unknown => {
+      const handler = buildV21InboundRegistry().get("UsePriorityCharging");
+      const ctx = {
+        chargePoint: {
+          connectors: new Map([
+            [1, { transaction: { cpTransactionId: "tx-1" } }],
+          ]),
+        },
+      };
+      return (
+        handler?.handle({ transactionId, activate }, ctx as never) as
+          V201HandlerResult | undefined
+      )?.response;
+    };
+
+    it("is Rejected / TxNotFound for a transaction that is not ongoing (K21.FR.02)", () => {
+      expect(answer("tx-9", true)).toEqual({
+        status: "Rejected",
+        statusInfo: { reasonCode: "TxNotFound" },
+      });
+      expect(answer("tx-9", false)).toEqual({
+        status: "Rejected",
+        statusInfo: { reasonCode: "TxNotFound" },
+      });
+    });
+
+    it("is NoProfile for an ongoing transaction and activate = true (K21.FR.01)", () => {
+      expect(answer("tx-1", true)).toEqual({
+        status: "NoProfile",
+        statusInfo: { reasonCode: "NotFound" },
+      });
+    });
+
+    it("is Accepted for an ongoing transaction and activate = false (K21.FR.06)", () => {
+      expect(answer("tx-1", false)).toEqual({ status: "Accepted" });
     });
   });
 });

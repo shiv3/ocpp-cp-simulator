@@ -66,8 +66,8 @@ async function acceptBootAndDrainV201(csms: MockCsms): Promise<void> {
     interval: 300,
   });
 
-  // Wait for and reply to StatusNotifications (evseId=0, connectorId=0 and evseId=1, connectorId=1)
-  await replyStatusNotificationV201(csms, 0, 0);
+  // Wait for and reply to the StatusNotification of evseId=1, connectorId=1
+  // (2.x sends none for the station scope, #703).
   await replyStatusNotificationV201(csms, 1, 1);
 }
 

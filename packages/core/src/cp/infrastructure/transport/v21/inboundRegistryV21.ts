@@ -17,7 +17,6 @@ import {
   isValidUsePriorityChargingRequestV21,
   type AdjustPeriodicEventStreamResponseV21,
   type AFRRSignalResponseV21,
-  type ChangeTransactionTariffResponseV21,
   type ClearDERControlResponseV21,
   type ClearTariffsResponseV21,
   type GetDERControlResponseV21,
@@ -26,13 +25,14 @@ import {
   type NotifyAllowedEnergyTransferResponseV21,
   type NotifyWebPaymentStartedResponseV21,
   type RequestBatterySwapResponseV21,
-  type SetDefaultTariffResponseV21,
   type SetDERControlResponseV21,
   type UpdateDynamicScheduleResponseV21,
+  type UsePriorityChargingRequestV21,
   type UsePriorityChargingResponseV21,
 } from "@ocpp-cp-sim/ocpp/v21/index";
 import {
   buildV201InboundRegistry,
+  type V201HandlerResult,
   type V201InboundHandler,
   type V201InboundRegistry,
 } from "../v201/inboundRegistryV201";
@@ -49,6 +49,16 @@ const V21_SHARED_HANDLERS: Readonly<
   // 2.1 N02.FR.22: NotifyMonitoringReport carries eventNotificationType.
   GetMonitoringReport: createGetMonitoringReportHandlerV201("v21"),
 };
+
+function noLocalCostCalculation(): V201HandlerResult {
+  return {
+    response: {},
+    callError: {
+      code: "NotSupported",
+      description: "Local cost calculation is not supported",
+    },
+  };
+}
 
 export function buildV21InboundRegistry(): V201InboundRegistry {
   const registry = new Map<string, V201InboundHandler>();
@@ -87,11 +97,8 @@ export function buildV21InboundRegistry(): V201InboundRegistry {
 
   registry.set("ChangeTransactionTariff", {
     validate: isValidChangeTransactionTariffRequestV21,
-    handle: () => ({
-      response: {
-        status: "Rejected",
-      } satisfies ChangeTransactionTariffResponseV21,
-    }),
+    // I11.FR.01: no local cost calculation, so a CALLERROR, not a status.
+    handle: () => noLocalCostCalculation(),
   });
 
   registry.set("ClearDERControl", {
@@ -167,9 +174,8 @@ export function buildV21InboundRegistry(): V201InboundRegistry {
 
   registry.set("SetDefaultTariff", {
     validate: isValidSetDefaultTariffRequestV21,
-    handle: () => ({
-      response: { status: "Rejected" } satisfies SetDefaultTariffResponseV21,
-    }),
+    // I07.FR.01: TariffCostCtrlr is absent, so a CALLERROR, not a status.
+    handle: () => noLocalCostCalculation(),
   });
 
   registry.set("UpdateDynamicSchedule", {
@@ -183,11 +189,29 @@ export function buildV21InboundRegistry(): V201InboundRegistry {
 
   registry.set("UsePriorityCharging", {
     validate: isValidUsePriorityChargingRequestV21,
-    handle: () => ({
-      response: {
-        status: "NoProfile",
-      } satisfies UsePriorityChargingResponseV21,
-    }),
+    handle: (payload, ctx) => {
+      const { transactionId, activate } =
+        payload as UsePriorityChargingRequestV21;
+      const ongoing = Array.from(ctx.chargePoint.connectors.values()).some(
+        (connector) => connector.transaction?.cpTransactionId === transactionId,
+      );
+      if (!ongoing) {
+        // K21.FR.02
+        return {
+          response: {
+            status: "Rejected",
+            statusInfo: { reasonCode: "TxNotFound" },
+          } satisfies UsePriorityChargingResponseV21,
+        };
+      }
+      // K21.FR.06: nothing to deactivate. K21.FR.01: the station never
+      // installs a PriorityCharging profile, so activation finds none.
+      return {
+        response: (activate
+          ? { status: "NoProfile", statusInfo: { reasonCode: "NotFound" } }
+          : { status: "Accepted" }) satisfies UsePriorityChargingResponseV21,
+      };
+    },
   });
 
   return registry;

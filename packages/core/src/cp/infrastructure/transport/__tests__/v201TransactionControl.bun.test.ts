@@ -45,7 +45,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
 
 describe("OCPP 2.0.1 transaction control", () => {
   it("accepts remote start/stop, stops as Remote, and reports no ongoing transaction after stop", async () => {
-    const csms = startMockCsms({ answerCalls: true });
+    const csms = startMockCsms();
     const cp = new ChargePoint(
       "CP201-TX-CONTROL",
       DefaultBootNotification,
@@ -92,6 +92,8 @@ describe("OCPP 2.0.1 transaction control", () => {
       expect(started.triggerReason).toBe("RemoteStart");
       expect(started.transactionInfo.remoteStartId).toBe(7);
 
+      // One CALL at a time (#708): Ended goes out once Started is answered.
+      csms.send([3, startedFrame[1], {}]);
       csms.send([2, "rs-201-2", "RequestStopTransaction", { transactionId }]);
 
       const stopResult = await csms.waitForFrame(callResultFrame("rs-201-2"));
@@ -124,14 +126,19 @@ describe("OCPP 2.0.1 transaction control", () => {
         { status: "Rejected" },
       ]);
 
-      csms.send([2, "rs-201-4", "GetTransactionStatus", {}]);
-
-      const statusResult = await csms.waitForFrame(callResultFrame("rs-201-4"));
-      expect(statusResult).toEqual([
+      // #554 (E14): the CSMS has not answered the Ended event yet.
+      csms.send([2, "rs-201-4", "GetTransactionStatus", { transactionId }]);
+      expect(await csms.waitForFrame(callResultFrame("rs-201-4"))).toEqual([
         3,
         "rs-201-4",
-        { ongoingIndicator: false, messagesInQueue: false },
+        { ongoingIndicator: false, messagesInQueue: true },
       ]);
+
+      csms.send([3, endedFrame[1], {}]);
+      csms.send([2, "rs-201-5", "GetTransactionStatus", {}]);
+
+      const statusResult = await csms.waitForFrame(callResultFrame("rs-201-5"));
+      expect(statusResult).toEqual([3, "rs-201-5", { messagesInQueue: false }]);
     } finally {
       cp.disconnect();
       await csms.stop();

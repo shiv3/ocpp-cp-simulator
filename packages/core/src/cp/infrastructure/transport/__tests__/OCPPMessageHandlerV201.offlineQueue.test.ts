@@ -168,6 +168,7 @@ function setup(ocppVersion: string) {
       transactionMessageAttempts: vi.fn(() => 3),
       transactionMessageRetryInterval: vi.fn(() => 60),
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
     },

@@ -123,6 +123,7 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
       // #529: the timeout trigger is covered in
       // OCPPMessageHandlerV201.transactionTimeout.test.ts.
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       meterValuesSampledData: vi.fn(() => []),
     },
   };

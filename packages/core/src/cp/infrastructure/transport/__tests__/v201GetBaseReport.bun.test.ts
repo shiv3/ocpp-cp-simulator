@@ -56,12 +56,6 @@ describe("OCPP 2.0.1 GetBaseReport", () => {
         (frame) =>
           frame[0] === 2 &&
           frame[2] === "StatusNotification" &&
-          (frame[3] as { evseId?: number }).evseId === 0,
-      );
-      await csms.waitForFrame(
-        (frame) =>
-          frame[0] === 2 &&
-          frame[2] === "StatusNotification" &&
           (frame[3] as { evseId?: number }).evseId === 1,
       );
 

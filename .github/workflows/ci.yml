@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The install-URL step diffs the pull request against its base.
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -101,8 +104,36 @@ jobs:
       # advertise and fails if one does not return 200. Needs network access to
       # github.com, and has a short retry so a blip is not a red build; a 404
       # fails immediately.
+      #
+      # #808: the fetch depends on a GitHub release being reachable, so a
+      # release outage turned every unrelated pull request red. A pull request
+      # fetches only when its diff adds or removes an advertised install
+      # command (the same `install -g https://` pattern the script greps for,
+      # so what is checked and what triggers the check cannot drift apart) or
+      # touches the release plumbing; otherwise only the offline invariants
+      # run. A push to main fetches always, and install-urls.yml fetches daily
+      # so a broken cli-latest is still noticed.
       - name: Documented install URLs resolve
-        run: ./scripts/verify-install-urls.sh
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            ./scripts/verify-install-urls.sh
+            exit
+          fi
+          base="origin/${BASE_REF}"
+          if git diff --unified=0 "$base"...HEAD -- '*.md' \
+               | grep -qE '^[+-].*(pnpm|bun|npm) install -g https://' \
+             || ! git diff --quiet "$base"...HEAD -- \
+                  .github/workflows/cli-release.yml \
+                  scripts/roll-cli-latest.sh \
+                  scripts/verify-install-urls.sh; then
+            ./scripts/verify-install-urls.sh
+          else
+            echo "No install command or release plumbing changed: offline invariants only (#808)"
+            ./scripts/verify-install-urls.sh --offline
+          fi
 
   # Vitest, run once: the coverage run is the test run, and it fails the job
   # on a failing test (it used to run a second time, non-blocking, only for

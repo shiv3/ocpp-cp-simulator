@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { SetChargingProfileHandler } from "../SmartChargingHandlers";
+import {
+  ClearChargingProfileHandler,
+  GetCompositeScheduleHandler,
+  SetChargingProfileHandler,
+} from "../SmartChargingHandlers";
 import { HandlerCallError } from "../../HandlerCallError";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
@@ -109,7 +113,41 @@ describe("SetChargingProfile replacement (#594)", () => {
   });
 });
 
+describe("SetChargingProfile replacement is visible on the timeline (#594)", () => {
+  it("names the displaced profile instead of calling the new one an update", () => {
+    const { chargePoint, set, profile } = setup();
+    set(1, profile(1, "TxDefaultProfile", 3));
+    set(1, profile(2, "TxDefaultProfile", 3));
+    set(1, profile(2, "TxDefaultProfile", 3));
+    const applied = chargePoint.timeline.query({
+      kinds: ["charging_profile_applied"],
+    }).entries;
+    expect(applied).toHaveLength(3);
+    // First install: nothing replaced.
+    expect(applied[0].data.replaced).toBe(false);
+    expect(applied[0].data.replacedIds).toBeUndefined();
+    // Slot replacement: a new profile, so not "updated", and 1 is named.
+    expect(applied[1].data.replaced).toBe(false);
+    expect(applied[1].data.replacedIds).toEqual([1]);
+    expect(applied[1].summary).toContain("applied");
+    expect(applied[1].summary).toContain("replacing profile 1");
+    // Same id again: a true update.
+    expect(applied[2].data.replaced).toBe(true);
+    expect(applied[2].data.replacedIds).toBeUndefined();
+    expect(applied[2].summary).toContain("updated");
+  });
+});
+
 describe("SetChargingProfile TxProfile preconditions (#594)", () => {
+  it("rejects a TxProfile when the attached transaction is already closed", () => {
+    const { chargePoint, set, profile, startTransaction, ids } = setup();
+    startTransaction(1, 42);
+    chargePoint.getConnector(1)!.transaction!.stopTime = new Date();
+    expect(chargePoint.getConnector(1)!.hasRunningTransaction).toBe(false);
+    expect(set(1, profile(1, "TxProfile", 0)).status).toBe("Rejected");
+    expect(ids(1)).toEqual([]);
+  });
+
   it("rejects a TxProfile for a connector without an active transaction", () => {
     const { set, profile, ids } = setup();
     expect(set(1, profile(1, "TxProfile", 0)).status).toBe("Rejected");
@@ -164,5 +202,34 @@ describe("SetChargingProfile without SmartCharging (#594)", () => {
     expect(thrown).toBeInstanceOf(HandlerCallError);
     expect((thrown as HandlerCallError).errorCode).toBe("NotSupported");
     expect(ids(1)).toEqual([]);
+  });
+
+  it("answers NotSupported to ClearChargingProfile and GetCompositeSchedule too", () => {
+    const { chargePoint, set, profile, ctx, ids } = setup();
+    set(1, profile(1, "TxDefaultProfile", 0));
+    chargePoint.configuration.setRuntimeValue("SupportedFeatureProfiles", [
+      "Core",
+    ]);
+    const code = (run: () => unknown) => {
+      try {
+        run();
+      } catch (error) {
+        return (error as HandlerCallError).errorCode;
+      }
+      return undefined;
+    };
+    expect(
+      code(() => new ClearChargingProfileHandler().handle({} as never, ctx)),
+    ).toBe("NotSupported");
+    expect(
+      code(() =>
+        new GetCompositeScheduleHandler().handle(
+          { connectorId: 1, duration: 600 } as never,
+          ctx,
+        ),
+      ),
+    ).toBe("NotSupported");
+    // Nothing was cleared.
+    expect(ids(1)).toEqual([1]);
   });
 });

@@ -2389,3 +2389,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `SetChargingProfile` on 1.6 replaces by `chargingProfileId` or by `stackLevel` + purpose (2.x unchanged), rejects a TxProfile without an active transaction or with another `transactionId`, and answers CALLERROR `NotSupported` when `SupportedFeatureProfiles` lacks `SmartCharging`. Handlers can now answer a CALLERROR by throwing `HandlerCallError`. No golden fixture changed.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | SetChargingProfile review fixes: displaced profiles, NotSupported scope, running transaction (#594 review)
+
+- `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).

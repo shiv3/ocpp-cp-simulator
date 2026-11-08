@@ -1410,18 +1410,31 @@ export class ChargePoint {
     source: ChargingProfileSource,
     options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile, options);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile, options);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;

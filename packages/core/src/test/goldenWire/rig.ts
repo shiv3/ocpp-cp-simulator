@@ -17,6 +17,7 @@ import {
 export const OCPP_VERSION_STRING: Record<WireVersion, string> = {
   "1.6": "OCPP-1.6J",
   "2.0.1": "OCPP-2.0.1",
+  "2.1": "OCPP-2.1",
 };
 
 export interface RigOptions {

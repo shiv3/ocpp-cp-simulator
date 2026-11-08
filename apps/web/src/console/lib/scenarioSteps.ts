@@ -10,7 +10,11 @@ import {
   type ConnectorPlugNodeData,
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
+  type ChoiceNodeData,
   type DelayNodeData,
+  type NotifyNodeData,
+  type SetStateNodeData,
+  type SwitchNodeData,
   type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
@@ -648,6 +652,46 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           behaviorId: "",
         } satisfies UseBehaviorNodeData,
       };
+    case ScenarioNodeType.NOTIFY:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Notify",
+          kind: "firmwareStatus",
+          status: "Idle",
+        } satisfies NotifyNodeData,
+      };
+    case ScenarioNodeType.SWITCH:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Switch",
+          value: { $from: "state.mode" },
+          cases: ["a", "b"],
+        } satisfies SwitchNodeData,
+      };
+    case ScenarioNodeType.CHOICE:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Choice", options: [{}, {}] } satisfies ChoiceNodeData,
+      };
+    case ScenarioNodeType.SET_STATE:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Set state",
+          key: "mode",
+          value: "a",
+        } satisfies SetStateNodeData,
+      };
     case ScenarioNodeType.CSMS_CALL_TRIGGER:
       return {
         id,
@@ -790,7 +834,13 @@ export function stepSummary(node: ScenarioNode): string {
     }
     case ScenarioNodeType.DELAY: {
       const d = node.data as DelayNodeData;
-      return `${d.delaySeconds} s`;
+      return [
+        `${d.delaySeconds} s`,
+        d.until ? `until ${d.until}` : "",
+        d.jitterSeconds ? `jitter ≤ ${d.jitterSeconds} s` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
     }
     case ScenarioNodeType.REMOTE_START_TRIGGER: {
       const d = node.data as RemoteStartTriggerNodeData;
@@ -874,12 +924,30 @@ export function stepSummary(node: ScenarioNode): string {
           ? `CALLERROR ${d.errorCode ?? "GenericError"}`
           : d.kind === "none"
             ? "no answer"
-            : "CALLRESULT";
+            : d.kind === "accepted" || d.kind === "rejected"
+              ? d.kind
+              : "CALLRESULT";
       return d.skipValidation ? `${what} (unvalidated)` : what;
     }
     case ScenarioNodeType.USE_BEHAVIOR: {
       const d = node.data as UseBehaviorNodeData;
       return d.behaviorId;
+    }
+    case ScenarioNodeType.NOTIFY: {
+      const d = node.data as NotifyNodeData;
+      return `${d.kind} ${d.status}`;
+    }
+    case ScenarioNodeType.SWITCH: {
+      const d = node.data as SwitchNodeData;
+      return `${JSON.stringify(d.value)} · ${d.cases?.length ?? 0} cases`;
+    }
+    case ScenarioNodeType.CHOICE: {
+      const d = node.data as ChoiceNodeData;
+      return `${d.options?.length ?? 0} options`;
+    }
+    case ScenarioNodeType.SET_STATE: {
+      const d = node.data as SetStateNodeData;
+      return `${d.key} = ${JSON.stringify(d.value)}`;
     }
     default:
       return label;
@@ -941,6 +1009,10 @@ export const STEP_CATEGORIES: ReadonlyArray<{
       ScenarioNodeType.OCPP_CALL,
       ScenarioNodeType.CALL_RESPONSE,
       ScenarioNodeType.USE_BEHAVIOR,
+      ScenarioNodeType.NOTIFY,
+      ScenarioNodeType.SWITCH,
+      ScenarioNodeType.CHOICE,
+      ScenarioNodeType.SET_STATE,
       ScenarioNodeType.RESERVE_NOW,
       ScenarioNodeType.CANCEL_RESERVATION,
     ],

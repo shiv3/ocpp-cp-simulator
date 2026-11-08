@@ -11,10 +11,18 @@ const KIND_OPTIONS = [
   { value: "result", labelKey: "scenarioEditor.callResponse.kindResult" },
   { value: "error", labelKey: "scenarioEditor.callResponse.kindError" },
   { value: "none", labelKey: "scenarioEditor.callResponse.kindNone" },
+  { value: "accepted", labelKey: "scenarioEditor.callResponse.kindAccepted" },
+  { value: "rejected", labelKey: "scenarioEditor.callResponse.kindRejected" },
 ] as const;
 
 function isJsonObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** `accepted` / `rejected` answer with the version's plain status: no payload,
+ *  no error, nothing to validate. */
+function callResponseKind(kind: unknown) {
+  return KIND_OPTIONS.find((o) => o.value === kind)?.value ?? "result";
 }
 
 /** The fields that describe how a CALL is answered: kind, payload for a
@@ -28,8 +36,7 @@ export function CallResponseSpecFields({
   onChange: (value: NodeFormData) => void;
 }) {
   const { t } = useTranslation();
-  const kind =
-    value.kind === "error" || value.kind === "none" ? value.kind : "result";
+  const kind = callResponseKind(value.kind);
   return (
     <div className="space-y-3">
       <SelectField
@@ -89,6 +96,7 @@ export default function CallResponseForm({
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
+  const kind = callResponseKind(value.kind);
   return (
     <div className="space-y-3">
       <TextField
@@ -97,12 +105,14 @@ export default function CallResponseForm({
         onChange={(label) => onChange({ ...value, label })}
       />
       <CallResponseSpecFields value={value} onChange={onChange} />
-      <CheckboxField
-        id="call-response-skip-validation"
-        label={t("scenarioEditor.ocppCall.skipValidation")}
-        checked={value.skipValidation === true}
-        onChange={(skipValidation) => onChange({ ...value, skipValidation })}
-      />
+      {kind !== "accepted" && kind !== "rejected" && (
+        <CheckboxField
+          id="call-response-skip-validation"
+          label={t("scenarioEditor.ocppCall.skipValidation")}
+          checked={value.skipValidation === true}
+          onChange={(skipValidation) => onChange({ ...value, skipValidation })}
+        />
+      )}
     </div>
   );
 }

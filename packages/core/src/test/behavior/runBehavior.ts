@@ -86,9 +86,6 @@ export async function runBehavior(
     noConnect: true,
   });
   const { cp, csms } = rig;
-  await rig.connectAndBoot();
-  const origin = csms.mark();
-  for (const behavior of options.behaviors ?? []) cp.loadBehavior(behavior);
   // A real hop first: with no traffic in flight the fake CSMS reports quiet at
   // once, and the work that follows a virtual timer (scenario nodes, behavior
   // continuations) still needs its turn.
@@ -108,7 +105,15 @@ export async function runBehavior(
     await settleOnce();
     cp.engine.assertStorableState();
   };
+  // A failed run returns no `dispose()`, so a boot, a refused behavior or a
+  // first settle that throws tears the rig down here: otherwise the station
+  // stays connected and the memory transport's WebSocket patch outlives the
+  // test file (#803).
+  let origin: number;
   try {
+    await rig.connectAndBoot();
+    origin = csms.mark();
+    for (const behavior of options.behaviors ?? []) cp.loadBehavior(behavior);
     await settle();
   } catch (error) {
     await rig.dispose();

@@ -3,14 +3,16 @@ import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { bootedChargePoint } from "./stationHarness";
+import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 /**
  * #447: the CSMS's verdict on the idToken of a 2.x transaction comes back in
  * TransactionEvent.conf `idTokenInfo`. A status other than Accepted is the
  * 2.x twin of 1.6's non-Accepted StartTransaction.conf (#181): with
  * `TxCtrlr/StopTxOnInvalidId` (default true) the station ends the transaction
- * as Deauthorized / DeAuthorized; with it false the transaction keeps
- * running. Either way `startTransactionNotAccepted` reports it.
+ * as Deauthorized / DeAuthorized; with it false the transaction stays open but
+ * the energy delivery stops: one TransactionEvent(Updated, ChargingStateChanged,
+ * SuspendedEVSE) (E05.FR.02, C15.FR.06). Either way `startTransactionNotAccepted` reports it.
  */
 
 const eventOf =
@@ -70,7 +72,7 @@ describe("OCPP 2.0.1 TransactionEvent.conf idTokenInfo (#447)", () => {
     }
   });
 
-  it("keeps the transaction running when StopTxOnInvalidId is false", async () => {
+  it("suspends the energy delivery and keeps the transaction when StopTxOnInvalidId is false", async () => {
     const csms = startMockCsms();
     const { cp, started, rejections } = await startedTransaction(
       csms,
@@ -89,7 +91,14 @@ describe("OCPP 2.0.1 TransactionEvent.conf idTokenInfo (#447)", () => {
       expect(rejections).toEqual([
         { connectorId: 1, status: "Blocked", stopped: false },
       ]);
+      const updated = await csms.waitForFrame(eventOf("Updated"));
+      const payload = updated[3] as TransactionEventRequestV201;
+      expect(payload.triggerReason).toBe("ChargingStateChanged");
+      expect(payload.transactionInfo.chargingState).toBe("SuspendedEVSE");
+      expect(csms.received.filter(eventOf("Updated"))).toHaveLength(1);
       expect(csms.received.some(eventOf("Ended"))).toBe(false);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.SuspendedEVSE);
+      expect(cp.getConnector(1)?.energyHeld).toBe(true);
       expect(cp.getConnector(1)?.transaction?.stopTime).toBeNull();
     } finally {
       cp.disconnect();

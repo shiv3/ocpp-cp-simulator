@@ -188,6 +188,7 @@ function applyProfileStatus(
   } else if (
     !paused &&
     connector.status === OCPPStatus.SuspendedEVSE &&
+    !connector.energyHeld &&
     connector.transaction != null
   ) {
     chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);

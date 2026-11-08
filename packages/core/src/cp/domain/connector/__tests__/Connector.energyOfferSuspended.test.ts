@@ -88,3 +88,41 @@ describe("Connector energy offer suspended by an EV-side disconnect (#488)", () 
     expect(connector.energyOfferSuspended).toBe(false);
   });
 });
+
+describe("Connector energy held after a non-Accepted id (E05.FR.02/03)", () => {
+  it("freezes the register at once without an allowance and survives a status change", () => {
+    vi.useFakeTimers();
+    const { connector } = chargingConnector();
+    vi.advanceTimersByTime(1_000);
+    expect(connector.meterValue).toBe(100);
+
+    expect(connector.holdEnergyForInvalidId(0)).toBe(true);
+    connector.status = OCPPStatus.SuspendedEVSE;
+    vi.advanceTimersByTime(3_000);
+
+    expect(connector.meterValue).toBe(100);
+    expect(connector.energyHeld).toBe(true);
+  });
+
+  it("delivers MaxEnergyOnInvalidId first, then holds and says so", () => {
+    vi.useFakeTimers();
+    const { connector } = chargingConnector();
+    const exhausted = vi.fn();
+    connector.events.on("invalidIdEnergyExhausted", exhausted);
+    vi.advanceTimersByTime(1_000);
+
+    expect(connector.holdEnergyForInvalidId(250)).toBe(false);
+    vi.advanceTimersByTime(10_000);
+
+    expect(connector.meterValue).toBe(400);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(connector.energyHeld).toBe(true);
+  });
+
+  it("is cleared by the next transaction", () => {
+    const { connector } = chargingConnector();
+    connector.holdEnergyForInvalidId(0);
+    connector.beginTransaction(transaction(9));
+    expect(connector.energyHeld).toBe(false);
+  });
+});

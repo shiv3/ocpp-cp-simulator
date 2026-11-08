@@ -26,7 +26,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Charging sessions
@@ -90,9 +90,10 @@ for 2.x):
 | `interrupted` | It ended with `EmergencyStop`, `HardReset`, `SoftReset`, `ImmediateReset`, `Reboot`, `PowerLoss`, `UnlockCommand`, `GroundFault`, `OvercurrentFault`, `PowerQuality`, `Timeout`, or `DeAuthorized` without a CSMS rejection; or its end was lost across a restart. |
 | `completed`   | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, …                                                                                                                                             |
 
-A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
-`TxCtrlr/StopTxOnInvalidId` false) still ends `completed`; its
-`authorizationStatus` keeps the CSMS's answer.
+A rejected id the station kept the transaction open for
+(`StopTransactionOnInvalidId` / `TxCtrlr/StopTxOnInvalidId` false) still ends
+`completed`; its `authorizationStatus` keeps the CSMS's answer. The station
+delivers no more energy on it (see below).
 
 ### Rejections and failed starts (#447)
 
@@ -112,7 +113,13 @@ Two domain gaps were closed so these outcomes can be told apart:
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
   station ends it with `triggerReason: Deauthorized` and
-  `stoppedReason: DeAuthorized`; with it false the transaction keeps running.
+  `stoppedReason: DeAuthorized`; with it false the transaction stays open but
+  the energy delivery stops (#696, E05.FR.02, C15.FR.06): the connector goes
+  to `SuspendedEVSE`, the energy register stops rising, and the station sends
+  one `TransactionEvent(Updated)` with `triggerReason: ChargingStateChanged`
+  and `chargingState: SuspendedEVSE`. `TxCtrlr/MaxEnergyOnInvalidId` (the 1.6
+  key `MaxEnergyOnInvalidId`, default `0`) delivers that many more Wh first
+  (E05.FR.03), then the same suspension. The hold ends with the transaction.
   Either way `startTransactionNotAccepted` reports it.
 
 In both versions the CSMS's answer is written to the transaction

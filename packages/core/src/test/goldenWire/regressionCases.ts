@@ -2465,6 +2465,20 @@ c16(
   },
   { beforeConnect: profile1 },
 );
+// Power returning is a start of the device (A04.FR.01): the Accepted boot
+// after a power loss reports StartupOfTheDevice again (#734).
+c16(
+  "power-restore-startup-event",
+  async (r) => {
+    r.cp.powerLoss();
+    await wait(300);
+    r.cp.restorePower();
+    await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+    await wait(300);
+    await settle(r);
+  },
+  { beforeConnect: profile1 },
+);
 // A critical event raised while disconnected is delivered after the next
 // Accepted boot with the timestamp it was raised with.
 c16(

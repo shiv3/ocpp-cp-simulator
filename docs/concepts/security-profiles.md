@@ -21,7 +21,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # OCPP 1.6 security profiles
@@ -387,8 +387,9 @@ on 1.6, unlike 2.x). The station treats them as follows (#734):
   non-critical type, a vendor's own included, is dropped while offline.
 - `ResetOrReboot` is raised by every `Reset` (Soft and Hard) and sent after the
   boot that follows it, with the reset reason as `techInfo`.
-- `StartupOfTheDevice` is sent once per process start and once per `Reset`, on
-  the first `Accepted` boot after it. A reconnect after a dropped socket and a
+- `StartupOfTheDevice` is sent once per process start, once per `Reset` and
+  once per power restore (`restorePower`, #455), on the first `Accepted` boot
+  after it. A reconnect after a dropped socket and a
   boot answered to a `TriggerMessage` are not startups and send none.
 - Both automatic events keep the `SecurityProfile >= 1` gate: a profile-0
   station sends neither. This is a decision, not a requirement of the

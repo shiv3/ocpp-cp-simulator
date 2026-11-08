@@ -2804,7 +2804,8 @@ export class ChargePoint {
       // (ResetOrReboot among them) go out first, with their own timestamps.
       this._outbox.flushQueuedSecurityEvents();
       // StartupOfTheDevice reports a start of the device: once per process
-      // start and once per reset, not per reconnect or triggered boot. It is
+      // start, per reset and per power restore, not per reconnect or
+      // triggered boot. It is
       // consumed by the first Accepted boot either way, so a later change of
       // the security profile does not report a startup that already passed.
       if (this._startupEventPending) {
@@ -3356,6 +3357,9 @@ export class ChargePoint {
     const restoredAt = this._nowDate();
     const outageMs = Math.max(0, restoredAt.getTime() - loss.at.getTime());
     this._powerLoss = null;
+    // Power returning is a start of the device: the Accepted boot that follows
+    // reports StartupOfTheDevice again (#734, A04.FR.01).
+    this._startupEventPending = true;
     const recovery = this.planPowerRecovery(loss, outageMs, options);
     this._powerRecovery =
       loss.transactions.length > 0

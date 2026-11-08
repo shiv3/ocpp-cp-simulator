@@ -6,8 +6,12 @@ sources:
   - packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts
   - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
   - packages/core/src/cp/domain/charge-point/ConfigurationStore.ts
+  - packages/core/src/cp/infrastructure/transport/v201/baseReportV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/reportParts.ts
+  - packages/core/src/cp/domain/device-model/reportLimits.ts
   - "issue #604"
   - "issue #569"
+  - "issue #605"
 related:
   - ../concepts/variable-monitoring.md
   - ../concepts/local-authorization.md
@@ -70,11 +74,10 @@ would accept a value that changes nothing.
 
 ## Components
 
-`OCPPCommCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`,
+`OCPPCommCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`, `DeviceDataCtrlr`,
 `LocalAuthListCtrlr`, `AuthCtrlr`, `AuthCacheCtrlr`, `MonitoringCtrlr`,
 `ChargingStation`, `SecurityCtrlr`, and the EVSE-scoped `EVSE` and `Connector`
-(which need `component.evse`). `ClockCtrlr`, `DeviceDataCtrlr`,
-`TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
+(which need `component.evse`). `ClockCtrlr`, `TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
 one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 
 ## Variables
@@ -87,6 +90,8 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`          | `TransactionMessageAttempts` (1.6)        | ReadWrite  | integer    | –                                                      | 3                                                 | Persistent  |
 | `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`   | `TransactionMessageRetryInterval` (1.6)   | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `OCPPCommCtrlr.MessageTimeout[Default]`                    | `MessageTimeout`                          | ReadOnly   | integer    | min 1                                                  | 30                                                | Persistent  |
+| `DeviceDataCtrlr.ItemsPerMessage[GetReport]`               | `ItemsPerMessageGetReport`                | ReadOnly   | integer    | min 1                                                  | 100                                               | Volatile    |
+| `DeviceDataCtrlr.BytesPerMessage[GetReport]`               | `BytesPerMessageGetReport`                | ReadOnly   | integer    | min 1                                                  | 65536                                             | Volatile    |
 | `TxCtrlr.EVConnectionTimeOut`                              | `ConnectionTimeOut` (1.6)                 | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `SampledDataCtrlr.TxUpdatedInterval`                       | `MeterValueSampleInterval` (1.6)          | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `SampledDataCtrlr.TxUpdatedMeasurands`                     | `MeterValuesSampledData` (1.6)            | ReadWrite  | MemberList | –                                                      | Energy.Active.Import.Register,Power.Active.Import | Persistent  |
@@ -120,6 +125,36 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `EVSE.Power`                                               | `EVSEPower`                               | ReadOnly   | decimal    | unit W                                                 | runtime                                           | Volatile    |
 | `EVSE.AvailabilityState`                                   | `EVSEAvailabilityState`                   | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
 | `Connector.AvailabilityState`                              | `ConnectorAvailabilityState`              | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
+
+## Reports: GetBaseReport and NotifyReport
+
+`GetBaseReport` answers `Accepted` and then sends the report as `NotifyReport`
+parts ([`baseReportV201.ts`](../../packages/core/src/cp/infrastructure/transport/v201/baseReportV201.ts),
+#605). All three `reportBase` values are supported (B07.FR.12 asks for at
+least `ConfigurationInventory` and `FullInventory`), so `NotSupported`
+(B07.FR.02) cannot occur for a request the schema accepts; a station with
+nothing to report answers `EmptyResultSet`.
+
+| `reportBase`             | Contents                                                                                                                                                                                                                                      | Clause    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `FullInventory`          | Every registry entry the store has a value for (each EVSE-scoped entry once per EVSE).                                                                                                                                                        | B07.FR.08 |
+| `ConfigurationInventory` | The entries the operator can set: a `ReadWrite` or `WriteOnly` attribute (this includes the 2.1 `Target` of `EVSE.Power`).                                                                                                                    | B07.FR.07 |
+| `SummaryInventory`       | `AvailabilityState` of the Charging Station and of each EVSE; of a Connector only when it differs from its EVSE (it never does today, a connector has its EVSE's state). No Active / Problem / Tripped / Overload / Fallback variable exists. | B07.FR.09 |
+
+The value of a `WriteOnly` variable is never reported (B07.FR.03). Only the
+`Actual` attribute (and `Target` where one exists) is reported; the other
+attribute types of B07.FR.11 are not modeled.
+
+**Parts.** A report is cut into `NotifyReport` parts of at most
+`DeviceDataCtrlr.ItemsPerMessage[GetReport]` entries and
+`BytesPerMessage[GetReport]` bytes (the whole OCPP-J frame, measured as a
+non-last part). An entry larger than the byte limit is sent alone. Every part
+has the request's `requestId` (B07.FR.04, B08.FR.04), the first has `seqNo` 0
+and `seqNo` grows by one (B07.FR.10, B08.FR.14), and every part but the last
+has `tbc` true (B08.FR.05). `GetReport` uses the same parts. The two variables
+are `ReadOnly` (the appendix words them as limits on the CSMS's request; the
+simulator reuses them as its part size, so there is one number to read). The
+parts are sent back to back, the way `NotifyMonitoringReport` is.
 
 ## Adding a variable
 

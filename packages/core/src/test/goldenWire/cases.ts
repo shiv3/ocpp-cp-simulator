@@ -773,6 +773,32 @@ export const goldenCases: GoldenCase[] = [
     });
     await settle(rig);
   }),
+  // #605: one case per report base (B07.FR.07-FR.09), then a full report
+  // split by ItemsPerMessage into parts linked by seqNo / tbc (B07.FR.10).
+  ...(
+    ["ConfigurationInventory", "FullInventory", "SummaryInventory"] as const
+  ).map((reportBase) =>
+    c201(`base-report-${reportBase}`, async (rig) => {
+      await rig.csms.call("GetBaseReport", { requestId: 1, reportBase });
+      await rig.csms.waitForCall("NotifyReport", { timeoutMs: 30_000 });
+      await settle(rig);
+    }),
+  ),
+  c201("base-report-chunked", async (rig) => {
+    rig.cp.configuration.defineRuntimeIntegerKey(
+      "ItemsPerMessageGetReport",
+      15,
+      {
+        min: 1,
+      },
+    );
+    await rig.csms.call("GetBaseReport", {
+      requestId: 2,
+      reportBase: "FullInventory",
+    });
+    await rig.csms.waitForCall("NotifyReport", { nth: 3, timeoutMs: 30_000 });
+    await settle(rig);
+  }),
   ...both("data-transfer", async (rig) => {
     await rig.csms.call("DataTransfer", { vendorId: "com.example" });
     rig.cp.sendDataTransfer("com.example.cp", "ping", "payload");

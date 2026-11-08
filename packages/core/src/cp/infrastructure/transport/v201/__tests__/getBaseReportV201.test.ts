@@ -52,7 +52,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("%s GetBaseReport", (ocppVersion) => {
     });
     const ids = (parts: NotifyReportRequestV201[]) =>
       parts.flatMap((p) =>
-        p.reportData.map(
+        (p.reportData ?? []).map(
           (rd) =>
             `${rd.component.name}${rd.component.evse ? `/${rd.component.evse.id}` : ""}.${rd.variable.name}${rd.variable.instance ? `[${rd.variable.instance}]` : ""}`,
         ),
@@ -84,7 +84,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("%s GetBaseReport", (ocppVersion) => {
   it("ConfigurationInventory reports only what the operator can set", () => {
     const { parts, ids } = run("ConfigurationInventory");
     const writable = parts
-      .flatMap((p) => p.reportData)
+      .flatMap((p) => p.reportData ?? [])
       .every((rd) =>
         rd.variableAttribute.some((a) => a.mutability !== "ReadOnly"),
       );
@@ -116,7 +116,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("%s GetBaseReport", (ocppVersion) => {
       parts.map((_, i) => i < parts.length - 1),
     );
     expect(new Set(parts.map((p) => p.requestId))).toEqual(new Set([7]));
-    expect(parts.every((p) => p.reportData.length <= 5)).toBe(true);
+    expect(parts.every((p) => (p.reportData?.length ?? 0) <= 5)).toBe(true);
     expect(parts.every((p) => isValidNotifyReportRequestV201(p))).toBe(true);
   });
 

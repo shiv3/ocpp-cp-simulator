@@ -491,7 +491,6 @@ export class GetCompositeScheduleHandler implements CallHandler<
       scheduleStart: anchor.toISOString(),
       chargingSchedule: {
         duration,
-        startSchedule: anchor.toISOString(),
         chargingRateUnit: responseUnit,
         chargingSchedulePeriod,
       },

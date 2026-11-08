@@ -9,6 +9,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/handlers/call/SmartChargingHandlers.ts
   - "issue #723"
   - "issue #729"
+  - "issue #737"
 related:
   - charging-sessions.md
   - charger-engine.md
@@ -76,3 +77,12 @@ Matching follows 1.6 §5.5 and §6.13 with errata 3.25 and 3.26:
 The answer is `Accepted` when at least one profile was removed and `Unknown`
 (§7.21: "No Charging Profile(s) were found matching the request") when none
 was. The 2.x `ClearChargingProfile` is a separate handler and is unchanged.
+
+## GetCompositeSchedule answer (1.6)
+
+The 1.6 `GetCompositeSchedule.conf` carries `scheduleStart` (the instant the
+composite starts, now) and a `chargingSchedule` with `duration`,
+`chargingRateUnit` and the periods. It does **not** carry
+`chargingSchedule.startSchedule`: the 1.6 errata 3.57 says the field "must be
+omitted" when a ChargingSchedule is part of a `GetCompositeSchedule.conf`
+(§6.22, §7.13). The 2.x answer is a different message and is not affected.

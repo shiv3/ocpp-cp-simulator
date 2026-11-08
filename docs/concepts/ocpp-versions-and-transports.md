@@ -806,7 +806,7 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 
 ## Inbound CALL validation on OCPP-J 1.6
 
-An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` has three values. Set it with `--inbound-validation <off|warn|enforce>` ([CLI](../entities/cli.md), [daemon](../entities/daemon.md)), the `inboundValidation` field of `cp.create` / `cp.update` ([control plane](control-plane.md#cpcreate)), or, from library code, the `ChargePoint` transport option and `ChargePoint.setInboundValidation()`. The CLI persists it with `--state-db` ([State persistence](state-persistence.md)); a row from before the column restores as `warn`.
+An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` has three values. Set it with `--inbound-validation <off|warn|enforce>` ([CLI](../entities/cli.md), [daemon](../entities/daemon.md)), the `inboundValidation` field of `cp.create` / `cp.update` ([control plane](control-plane.md#cpcreate-parameters)), or, from library code, the `ChargePoint` transport option and `ChargePoint.setInboundValidation()`. The CLI persists it with `--state-db` ([State persistence](state-persistence.md)); a row from before the column restores as `warn`.
 
 | Value     | A schema-invalid CALL                                                                         |
 | --------- | --------------------------------------------------------------------------------------------- |

@@ -109,15 +109,15 @@ in [CLI → CLI Options](cli.md#cli-options).
 
 ## HTTP Surfaces
 
-| Method | Path                                  | Auth                                          | Returns / purpose                                                                                                     |
-| ------ | ------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/healthz`                         | Exempt                                        | `{ "ok": true, "version": "…" }`; used for browser Local/Remote detection, readiness checks, and Docker healthchecks. |
-| GET    | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling / upgrade transport. Not a REST control endpoint.                                                   |
-| POST   | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling transport. Not a REST control endpoint.                                                             |
-| POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP SOAP (1.2 / 1.5 / 1.6S) CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.                        |
-| POST   | `/mcp`                                | HTTP Basic Auth if enabled                    | MCP Streamable HTTP endpoint (tools-only, stateless JSON-RPC). See [MCP endpoint](mcp-endpoint.md).                   |
-| GET    | `/metrics`                            | HTTP Basic Auth if enabled (see below)        | Prometheus text exposition, when `--metrics` is passed. 404 otherwise. See [Metrics](#metrics).                       |
-| GET    | static asset URL                      | HTTP Basic Auth if enabled                    | Web console assets when `--web-console` is enabled. Unknown page paths fall back to `index.html`.                     |
+| Method | Path                                  | Auth                                          | Returns / purpose                                                                                                        |
+| ------ | ------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/v1/healthz`                         | Exempt                                        | `{ "ok": true, "version": "…" }`; used for browser Local/Remote detection, readiness checks, and Docker healthchecks.    |
+| GET    | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling / upgrade transport. Not a REST control endpoint.                                                      |
+| POST   | `/socket.io/`                         | Socket.IO handshake auth if enabled           | Engine.IO polling transport. Not a REST control endpoint.                                                                |
+| POST   | `<soapPath>/:cpId/ChargePointService` | HTTP Basic Auth if enabled or trusted network | OCPP SOAP (1.2 / 1.5 / 1.6S) CSMS-to-CP callback endpoint. Default `soapPath` is `/ocpp/soap`.                           |
+| POST   | `/mcp`                                | HTTP Basic Auth if enabled                    | MCP Streamable HTTP endpoint (tools and OCPP schema resources, stateless JSON-RPC). See [MCP endpoint](mcp-endpoint.md). |
+| GET    | `/metrics`                            | HTTP Basic Auth if enabled (see below)        | Prometheus text exposition, when `--metrics` is passed. 404 otherwise. See [Metrics](#metrics).                          |
+| GET    | static asset URL                      | HTTP Basic Auth if enabled                    | Web console assets when `--web-console` is enabled. Unknown page paths fall back to `index.html`.                        |
 
 Every other `/v1/*` path returns `404`.
 

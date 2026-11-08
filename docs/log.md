@@ -2388,3 +2388,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | MCP: OCPP JSON Schema resources and `tail_logs` (#613)
+
+- `/mcp` now serves `resources/list` / `resources/read`: one resource per vendored OCA schema (`ocpp-schema://<v16|v201|v21>/<Action>/<request|response>`) plus `ocpp-schema://NOTICE`; every schema read carries the license notice as a second content item. New tool `tail_logs` (the last N log entries, oldest first, with `level` / `type` / `contains` filters); 36 curated tools. Updated [MCP endpoint](entities/mcp-endpoint.md), [Index](index.md), [Driving from an AI agent](analyses/driving-from-an-ai-agent.md).

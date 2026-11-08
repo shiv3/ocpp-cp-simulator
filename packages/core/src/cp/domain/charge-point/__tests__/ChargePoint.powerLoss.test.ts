@@ -5,7 +5,7 @@ import { DefaultBootNotification } from "../../types/OcppTypes";
 /**
  * #455: a power loss is neither a network loss nor an OCPP Reset. The
  * transactions survive it; what the station sends after the reboot depends
- * on the version (1.6 §4.2 / §7.40 PowerLoss; 2.x B01.FR.03, E17).
+ * on the version (1.6 §4.2 / §7.36 PowerLoss; 2.x B01.FR.03, E17).
  */
 
 const built: ChargePoint[] = [];

@@ -26,6 +26,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
+  - power-loss.md
 updated: 2026-11-08
 ---
 
@@ -88,7 +89,9 @@ for 2.x):
 | `active`      | The transaction is still running.                                                                                                                                                                                                                                  |
 | `failed`      | The CSMS refused the start: it did not accept the id on the start and the station stopped on it (`DeAuthorized`, see below). An id a 2.x `Updated` answer withdraws mid-session ends it `interrupted`. A CALLERROR is not a refusal (see below).                   |
 | `interrupted` | It ended with `EmergencyStop`, `HardReset`, `SoftReset`, `ImmediateReset`, `Reboot`, `PowerLoss`, `UnlockCommand`, `GroundFault`, `OvercurrentFault`, `PowerQuality`, `Timeout`, or `DeAuthorized` without a CSMS rejection; or its end was lost across a restart. |
-| `completed`   | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, …                                                                                                                                             |
+
+A [power loss](power-loss.md) (#455) that the station ends after the reboot closes the session `interrupted` with `PowerLoss`; one it resumes keeps the session `active`.
+| `completed` | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, … |
 
 A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
 `TxCtrlr/StopTxOnInvalidId` false) still ends `completed`; its

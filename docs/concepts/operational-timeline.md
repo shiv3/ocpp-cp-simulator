@@ -21,6 +21,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - ocpp-versions-and-transports.md
+  - power-loss.md
 updated: 2026-11-08
 ---
 
@@ -86,12 +87,13 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.3`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.4`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
 `transaction_message_discarded` (#490). `1.3` added their `action` and `reason`
-fields, and made `errorCode` conditional (#527, #529).
+fields, and made `errorCode` conditional (#527, #529). `1.4` added `power_lost` and
+`power_restored` (#455).
 
 ## Kinds
 
@@ -106,6 +108,8 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `status_change`                 | CP        | `from`, `to`                                                         | The charge point status changes; repeats of the same status are skipped.                                                                                                                                    |
 | `connector_status`              | connector | `from`, `to`                                                         | A connector status changes; repeats are skipped.                                                                                                                                                            |
 | `network_fault_injected`        | CP        | `ruleId`, `ruleType`, `reconnectDelayMs`                             | A `manual-disconnect` or `periodic-disconnect` rule fires, before the socket closes. Opens an incident.                                                                                                     |
+| `power_lost`                    | CP        | `transactions`                                                       | (#455) `power.loss` cuts the power; the `disconnected` entry follows. `transactions` is how many were running.                                                                                              |
+| `power_restored`                | CP        | `outageMs`, `recovery` (`resume`, `end`, `none`), `transactions`     | (#455) Power returns; the station boots next. See [Power loss](power-loss.md).                                                                                                                              |
 | `recovery_completed`            | CP        | `durationMs`, `ruleId`, `restored`, `unrestored` (when not restored) | The open incident's recovery condition holds, or its settle window runs out. Closes it.                                                                                                                     |
 | `transaction_started`           | connector | `tagId`, `transactionId` (2.x only)                                  | A transaction starts. OCPP 2.x carries the CP-minted id; 1.6 has no id yet.                                                                                                                                 |
 | `transaction_id_assigned`       | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                                                                                                             |

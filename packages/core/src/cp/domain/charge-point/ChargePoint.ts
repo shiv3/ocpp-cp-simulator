@@ -234,7 +234,7 @@ export interface PowerLossRecord {
  * (#455).
  * - `resume` keeps them running (1.6 leaves this to the implementation; 2.1
  *   E17.FR.10-14 requires it within `TxResumptionTimeout`).
- * - `end` reports them ended with reason `PowerLoss` (1.6 §7.40 StopTransaction
+ * - `end` reports them ended with reason `PowerLoss` (1.6 §7.36 StopTransaction
  *   reasons; 2.x E17.FR.20-21).
  */
 export type PowerRecovery = "resume" | "end";

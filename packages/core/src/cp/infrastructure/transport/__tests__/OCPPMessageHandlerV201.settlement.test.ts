@@ -138,6 +138,7 @@ const createMockChargePoint = (): ChargePoint => {
       getString: vi.fn(),
       // #529: a written TransactionEvent arms its MessageTimeout.
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
     },
     // #528: no state database, so the E11 queue stays in memory.
     database: null,

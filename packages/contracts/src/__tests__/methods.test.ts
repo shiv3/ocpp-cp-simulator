@@ -84,7 +84,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(49);
+    expect(EXPLICIT_METHODS).toHaveLength(50);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -180,6 +180,26 @@ describe("connector-0 per-command rule (PB3)", () => {
     expect(
       METHODS.run_scenario.params.safeParse({ connector: 0, scenarioId: "s" })
         .success,
+    ).toBe(false);
+  });
+
+  it("start_transaction and authorize accept an IdToken type (#599)", () => {
+    expect(
+      METHODS.start_transaction.params.safeParse({
+        connector: 1,
+        tagId: "T",
+        idTokenType: "KeyCode",
+      }).success,
+    ).toBe(true);
+    expect(
+      METHODS.authorize.params.safeParse({ tagId: "T", idTokenType: "Central" })
+        .success,
+    ).toBe(true);
+    expect(
+      METHODS.start_transaction.params.safeParse({
+        connector: 1,
+        idTokenType: "RFID",
+      }).success,
     ).toBe(false);
   });
 
@@ -332,6 +352,76 @@ describe("cp.bulk (#470)", () => {
         failed: [{ cpId: "B", reason: "Connection timeout" }],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("cp.scenario.run (#486)", () => {
+  const params = METHODS["cp.scenario.run"].params;
+  const labels = { site: "s1" };
+
+  it("accepts a selector, a connector, a template and the run options", () => {
+    expect(
+      params.safeParse({
+        labels,
+        connector: 1,
+        templateId: "basic-charge",
+        evSettings: { maxPower: 7000 },
+        strict: true,
+        once: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("refuses an empty or missing selector", () => {
+    const rest = { connector: 1, templateId: "t" };
+    expect(params.safeParse({ labels: {}, ...rest }).success).toBe(false);
+    expect(params.safeParse(rest).success).toBe(false);
+  });
+
+  it("refuses a missing template or connector, a bad connector and unknown fields", () => {
+    expect(params.safeParse({ labels, connector: 1 }).success).toBe(false);
+    expect(params.safeParse({ labels, templateId: "t" }).success).toBe(false);
+    expect(
+      params.safeParse({ labels, connector: 0, templateId: "t" }).success,
+    ).toBe(false);
+    expect(
+      params.safeParse({ labels, connector: 1, templateId: "t", cpId: "A" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("reports the scenario id of every started run", () => {
+    expect(
+      METHODS["cp.scenario.run"].result.safeParse({
+        matched: ["A", "B"],
+        started: [{ cpId: "A", scenarioId: "s-1" }],
+        failed: [{ cpId: "B", reason: "unknown template" }],
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("sessions.list fleet-wide (#489)", () => {
+  const params = METHODS["sessions.list"].params;
+
+  it("accepts no cpId, a selector and a start-time range", () => {
+    expect(params.safeParse({}).success).toBe(true);
+    expect(
+      params.safeParse({
+        labels: { site: "s1" },
+        outcomes: ["failed"],
+        startedFrom: "2026-11-08T00:00:00Z",
+        startedTo: "2026-11-08T09:00:00+09:00",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("refuses an empty cpId and an instant without a zone", () => {
+    expect(params.safeParse({ cpId: "" }).success).toBe(false);
+    expect(params.safeParse({ startedFrom: "2026-11-08" }).success).toBe(false);
+    expect(params.safeParse({ startedTo: "2026-11-08T00:00:00" }).success).toBe(
+      false,
+    );
   });
 });
 

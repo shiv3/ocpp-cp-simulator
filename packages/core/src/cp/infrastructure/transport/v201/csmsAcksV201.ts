@@ -200,10 +200,12 @@ export const handleGetLocalListVersionAckV201 = ((
   }
 
   const cp = ctx.chargePoint;
+  // D02.FR.03: without LocalAuthListEnabled the answer is 0, "no Local
+  // Authorization List". (-1 is the 1.6 convention, 1.6 §5.10.)
   if (!cp.configuration.localAuthListEnabled()) {
     return {
       response: {
-        versionNumber: -1,
+        versionNumber: 0,
       } satisfies GetLocalListVersionResponseV201,
     };
   }

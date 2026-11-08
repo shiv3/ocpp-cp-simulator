@@ -19,6 +19,8 @@ const c16 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `16-${name}`, version: "1.6", run, options });
 const c201 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `201-${name}`, version: "2.0.1", run, options });
+const c21 = (name: string, run: Case["run"], options?: Case["options"]) =>
+  cases.push({ name: `21-${name}`, version: "2.1", run, options });
 const both = (name: string, run: Case["run"], options?: Case["options"]) => {
   c16(name, run, options);
   c201(name, run, options);
@@ -84,7 +86,7 @@ c16("firmware-reconnect-then-again", async (r) => {
   });
   await wait(300);
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
   await r.csms.call("UpdateFirmware", {
     location: "http://x",
@@ -96,7 +98,7 @@ c16("firmware-reconnect-then-again", async (r) => {
 c16("diagnostics-disconnect", async (r) => {
   await r.csms.call("GetDiagnostics", { location: r.uploadUrl() });
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
 });
 // --- remote start
@@ -564,7 +566,7 @@ both("offline-start-stop", async (r) => {
 both("offline-mid-tx-reconnect", async (r) => {
   await charging(r);
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
   await r.remoteStop();
   await settle(r);
@@ -576,7 +578,7 @@ both("disconnect-with-remote-stop-noack", async (r) => {
     ? r.csms.callNoWait("RemoteStopTransaction", { transactionId: id })
     : r.csms.callNoWait("RequestStopTransaction", { transactionId: id }));
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
 });
 
@@ -595,7 +597,7 @@ const latency = (r: Rig, ms = 500) =>
   );
 const dropAndBack = async (r: Rig, nth = 2) => {
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth, timeoutMs: 30000 });
+  await r.reconnected(nth);
   await settle(r);
 };
 c16("ns-firmware-drop", async (r) => {
@@ -719,6 +721,36 @@ both("ns-reserve-drop", async (r) => {
   await wait(1000);
   await settle(r);
 });
+// OCPP-J 2.0.1 §5.4, B04.FR.01/02 (#702): a reconnect sends no BootNotification
+// while the boot data is unchanged; the connectors are reported only when the
+// outage exceeded OfflineThreshold (here 0 s: any outage does).
+c201(
+  "reconnect-exceeds-offline-threshold",
+  async (r) => {
+    cfg(r, "OfflineThreshold", "0");
+    r.csms.dropConnection();
+    await r.reconnected();
+    await settle(r);
+  },
+  two,
+);
+// The simulator option BootOnReconnect keeps a BootNotification on every connect.
+c201("reconnect-boot-on-reconnect", async (r) => {
+  cfg(r, "BootOnReconnect", "true");
+  r.csms.dropConnection();
+  await r.reconnected();
+  await settle(r);
+});
+// Changed boot data is a reason to boot again (§5.4).
+c201("reconnect-boot-data-changed", async (r) => {
+  (r.cp as any)._bootNotification = {
+    ...(r.cp as any)._bootNotification,
+    firmwareVersion: "2.0",
+  };
+  r.csms.dropConnection();
+  await r.reconnected();
+  await settle(r);
+});
 both("ns-remote-start-order", async (r) => {
   latency(r, 200);
   await r.remoteStart("A");
@@ -833,6 +865,21 @@ c201("malformed-calls", async (r) => {
     ["CancelReservation", {}],
     ["GetLog", {}],
     ["UpdateFirmware", {}],
+  ] as const) {
+    await r.csms.call(a, p, 3000).catch(() => undefined);
+    await wait(30);
+  }
+  await settle(r);
+});
+// OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715): one CALLERROR per kind of
+// violation that malformed-calls (missing properties) does not show.
+c201("violation-codes", async (r) => {
+  for (const [a, p] of [
+    ["ChangeAvailability", { operationalStatus: 5 }],
+    ["ChangeAvailability", { operationalStatus: "Nope" }],
+    ["UnlockConnector", { evseId: 1, connectorId: 1, extra: true }],
+    ["ClearCache", "nope"],
+    ["SetVariables", { setVariableData: [] }],
   ] as const) {
     await r.csms.call(a, p, 3000).catch(() => undefined);
     await wait(30);
@@ -1125,6 +1172,34 @@ both(
     },
   },
 );
+// F01.FR.01/02: a Blocked answer keeps the 2.x start from happening (the
+// RequestStartTransaction answer is Accepted first); Central and
+// NoAuthorization tokens are never sent to Authorize.
+c201(
+  "remote-start-authorize-blocked",
+  async (r) => {
+    authorizeRemote(r, true);
+    r.plugIn();
+    await settle(r);
+    await r.remoteStart("TAG-BLOCKED");
+    await settle(r);
+  },
+  {
+    responders: { Authorize: () => ({ idTokenInfo: { status: "Blocked" } }) },
+  },
+);
+c201("remote-start-authorize-central-token", async (r) => {
+  authorizeRemote(r, true);
+  r.plugIn();
+  await settle(r);
+  await r.csms.call("RequestStartTransaction", {
+    idToken: { idToken: "CENTRAL-1", type: "Central" },
+    remoteStartId: 1,
+    evseId: 1,
+  });
+  await settle(r);
+  await r.remoteStop();
+});
 both("remote-start-no-authorize", async (r) => {
   authorizeRemote(r, false);
   r.plugIn();
@@ -1315,6 +1390,73 @@ both("remote-start-inoperative", async (r) => {
   await r.remoteStart("X", 1);
   await settle(r);
 });
+// #599: the TransactionEvent carries the idToken (type included) of the
+// RequestStartTransaction, F01.FR.04.
+c201("remote-start-central-type", async (r) => {
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+  });
+  await settle(r);
+});
+// #598: RequestStartTransaction validation and the reason codes of a rejection.
+c201("remote-start-invalid-profile", async (r) => {
+  const schedule = [
+    {
+      id: 1,
+      chargingRateUnit: "W",
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+    },
+  ];
+  const profile = {
+    id: 1,
+    stackLevel: 0,
+    chargingProfileKind: "Absolute",
+    chargingSchedule: schedule,
+  };
+  const idToken = { idToken: "TAG-A", type: "Central" };
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken,
+    chargingProfile: { ...profile, chargingProfilePurpose: "TxDefaultProfile" },
+  });
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 2,
+    idToken,
+    chargingProfile: {
+      ...profile,
+      chargingProfilePurpose: "TxProfile",
+      transactionId: "tx-1",
+    },
+  });
+  await settle(r);
+});
+c201("remote-start-master-pass", async (r) => {
+  r.cp.configuration.setRuntimeValue("MasterPassGroupId", "MASTER");
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+    groupIdToken: { idToken: "MASTER", type: "Central" },
+  });
+  await settle(r);
+});
+c201("remote-start-unknown-evse", async (r) => {
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+    evseId: 9,
+  });
+  await settle(r);
+});
+c201("remote-start-any-evse", async (r) => {
+  // The case is about EVSE selection, so the type is fixed and the recorded
+  // wire does not depend on how the started event reports a request type.
+  const idToken = { idToken: "TAG-A", type: "ISO14443" };
+  await r.csms.call("RequestStartTransaction", { remoteStartId: 1, idToken });
+  await settle(r);
+  await r.csms.call("RequestStartTransaction", { remoteStartId: 2, idToken });
+  await settle(r);
+});
 // #602: CustomerInformation answers and reports through
 // NotifyCustomerInformation.
 c201("customer-information", async (r) => {
@@ -1352,6 +1494,50 @@ c201("reset-unknown-evse", async (r) => {
 c201("reset-immediate-resume-charging", async (r) => {
   await charging(r);
   await r.csms.call("Reset", { type: "ImmediateAndResume", evseId: 1 });
+  await settle(r);
+});
+
+// 2.1 I07.FR.01 / I11.FR.01: without local cost calculation SetDefaultTariff
+// and ChangeTransactionTariff are an RPC CALLERROR NotSupported, not a status;
+// GetTariffs / ClearTariffs (I09.FR.03, I10.FR.06) stay NoTariff results.
+c21("tariff-without-local-cost-calculation", async (r) => {
+  await charging(r);
+  const tariff = { tariffId: "T-1", currency: "EUR" };
+  await r.csms.call("SetDefaultTariff", { evseId: 1, tariff });
+  await r.csms.call("ChangeTransactionTariff", {
+    tariff,
+    transactionId: r.transactionId(1),
+  });
+  await r.csms.call("GetTariffs", { evseId: 1 });
+  await r.csms.call("ClearTariffs", {});
+  await settle(r);
+});
+// 2.1 B13.FR.01 / B13.FR.02: no transaction resumption, so ImmediateAndResume
+// is Rejected while a transaction runs and the transaction keeps running; with
+// none it is an Immediate reset.
+c21("reset-immediate-resume-charging", async (r) => {
+  await charging(r);
+  await r.csms.call("Reset", { type: "ImmediateAndResume", evseId: 1 });
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
+c21("reset-immediate-resume-idle", async (r) => {
+  await r.csms.call("Reset", { type: "ImmediateAndResume" });
+  await wait(600);
+  await settle(r);
+});
+// 2.1 K21.FR.01 / FR.02 / FR.06: UsePriorityCharging looks the transaction up;
+// the station never has a PriorityCharging profile.
+c21("use-priority-charging", async (r) => {
+  await charging(r);
+  const transactionId = r.transactionId(1);
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: true });
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: false });
+  await r.csms.call("UsePriorityCharging", {
+    transactionId: "no-such-transaction",
+    activate: true,
+  });
   await settle(r);
 });
 
@@ -1394,7 +1580,7 @@ both(
 );
 both("reconnect-pace", async (r) => {
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 6000 });
+  await r.reconnected(2, 6000);
   await settle(r);
 });
 both("connection-handshake", async (r) => {

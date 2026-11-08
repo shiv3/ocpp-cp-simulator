@@ -4,6 +4,7 @@ import type { OCPPStatus } from "../../domain/types/OcppTypes";
 import type { CurvePoint } from "../../domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../domain/connector/EVSettings";
 import type {
+  IdTokenTypeName,
   TransactionStartTriggerReason,
   TransactionStopTriggerReason,
 } from "../../domain/connector/Transaction";
@@ -124,16 +125,22 @@ export type TransactionNodeData = BaseNodeData & {
    *  "EVDisconnected" for TC_005, "PowerLoss"). A reason captured by a
    *  preceding RemoteStopTrigger node still wins. Issue #110. */
   stopReason?: string;
+  /** OCPP 2.x `IdToken.type` of the start's Authorize and TransactionEvents
+   *  (#599); `ISO14443` when absent. Ignored on 1.6. Only for start. */
+  idTokenType?: IdTokenTypeName;
 };
 
 export interface RemoteStartDetails {
   tagId: string;
   remoteStartId?: number;
+  /** The CSMS's `idToken.type` of a 2.x RequestStartTransaction (#599). */
+  idTokenType?: IdTokenTypeName;
 }
 
 export interface StartTransactionOptions {
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
+  idTokenType?: IdTokenTypeName;
 }
 
 export interface StopTransactionOptions {

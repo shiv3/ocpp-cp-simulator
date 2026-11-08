@@ -2384,3 +2384,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Charger engine web strings under the console i18n (#634)
 
 - The `callResponse` and `useBehavior` nodes (node, form, palette item, registry title) and the `csmsCallTrigger` behavior controls (`observe` / `replace`, the `onBusy` group) use `scenarioEditor.*` / `scenarioNodes.*` keys in `en`, `ja` and `zh-CN`; `i18n.test.ts` stays green. Left in English on purpose, as on main: `stepSummary` text, default node labels saved into scenarios, and the protocol terms `CALLRESULT` / `CALLERROR`. See [Web console internationalization](concepts/web-console-i18n.md).
+
+## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
+
+- `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).

@@ -103,6 +103,7 @@ import {
   authorizationResultFromIdTokenInfo,
   cacheableIdToken,
 } from "./v201/authorizationCacheV201";
+import { measurandEnumFor } from "./v201/measurandEnum";
 import {
   buildV201InboundRegistry,
   type V201Action,
@@ -1487,7 +1488,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const context = options.context ?? "Sample.Periodic";
       const sampledValue = this.withSignedEnergy(
         this.toV201SampledValues(
-          buildSampledValues(connector, measurands, context),
+          this.buildSamples(connector, measurands, context),
         ),
         connectorId,
         transaction.tagId,
@@ -1598,6 +1599,30 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     ];
   }
 
+  /**
+   * The builder's samples for `measurands`, minus those outside the station's
+   * `MeasurandEnumType` (#714): `Temperature` and `RPM` are 1.6 measurands, and
+   * a list loaded from a persisted configuration or set by a scenario may still
+   * name them. A schema-invalid sample is never put on the wire.
+   */
+  private buildSamples(
+    connector: Parameters<typeof buildSampledValues>[0],
+    measurands: string[],
+    context: ReadingContext,
+  ): SampledValue[] {
+    const allowed = measurandEnumFor(this._chargePoint.ocppVersion);
+    const kept = measurands.filter((m) => allowed.has(m));
+    if (kept.length < measurands.length) {
+      this._logger.warn(
+        `[v2.0.1] Not sending measurands outside MeasurandEnumType: ${measurands
+          .filter((m) => !allowed.has(m))
+          .join(", ")}`,
+        LogType.METER_VALUE,
+      );
+    }
+    return buildSampledValues(connector, kept, context);
+  }
+
   /** 1.6-shaped builder output → 2.0.1 SampledValueType. `context` is
    *  carried through since #335; it used to be computed and dropped. */
   private toV201SampledValues(
@@ -1638,7 +1663,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValues = buildSampledValues(connector, measurands, context);
+    const sampledValues = this.buildSamples(connector, measurands, context);
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     let sampledValue = this.toV201SampledValues(sampledValues) as [
       V201MeterValuesSampledValue,

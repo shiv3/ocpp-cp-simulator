@@ -447,6 +447,10 @@ An `Inoperative` availability change scheduled during a transaction remains
 `Unavailable` after the accepted reboot and continues to reject new local
 transaction starts.
 
+## Measurand lists on 2.x
+
+`SampledDataCtrlr.TxUpdatedMeasurands` and `AlignedDataCtrlr.Measurands` are MemberLists over `MeasurandEnumType`. On OCPP 2.0.1 / 2.1 `SetVariables` checks every member against the enum of the station's version (the vendored Part 3 schema): a member outside it (`Temperature` and `RPM` are 1.6 measurands, `Foo` is nothing) answers `attributeStatus: Rejected` with `attributeStatusInfo.reasonCode: InvalidValue` (B05.FR.07) and keeps the previous list. An empty list is valid. The same list still reaches the station by other routes (persisted state, scenarios, `a sample override), so the 2.x handler also drops measurands outside the enum before it builds a sample and logs a warning: a schema-invalid `MeterValues`or`TransactionEvent` `meterValue`is never sent (#714). OCPP 1.6 is unchanged:`ChangeConfiguration`still accepts`Temperature`and`RPM`. Code: `transport/v201/measurandEnum.ts`, `setVariablesV201.ts`.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

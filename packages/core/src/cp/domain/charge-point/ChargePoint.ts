@@ -62,7 +62,7 @@ import type {
   OcppTlsOptions,
 } from "../../infrastructure/transport/wsUrlWithBasic";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
-import { measurandEnumFor } from "../../infrastructure/transport/v201/measurandEnum";
+import { measurandEnumFor } from "../connector/measurandEnum";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import {

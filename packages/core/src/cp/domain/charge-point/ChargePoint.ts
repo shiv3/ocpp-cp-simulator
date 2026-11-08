@@ -175,7 +175,7 @@ import {
   MONITORING_REQUEST_MAX_BYTES,
   MONITORING_REQUEST_MAX_ITEMS,
 } from "../monitoring/monitoringCtrlrKeys";
-import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
+import { renderConfigValue } from "./renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,

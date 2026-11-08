@@ -8,7 +8,7 @@ import {
   resolveDeviceModelVariable,
   type DeviceModelEvse,
 } from "./deviceModelMap";
-import { renderConfigValue } from "./renderConfigValue";
+import { renderConfigValue } from "../../../domain/charge-point/renderConfigValue";
 
 type GetVariableResult = GetVariablesResponseV201["getVariableResult"][number];
 

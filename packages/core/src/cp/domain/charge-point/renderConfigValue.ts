@@ -5,7 +5,7 @@ import {
   type ConfigurationValue,
   type IntegerConfigurationValue,
   type StringConfigurationValue,
-} from "../../../domain/charge-point/ConfigurationStore";
+} from "./ConfigurationStore";
 
 export function renderConfigValue(value: ConfigurationValue): string {
   if (isWriteOnlyConfigurationKey(value.key)) return "";

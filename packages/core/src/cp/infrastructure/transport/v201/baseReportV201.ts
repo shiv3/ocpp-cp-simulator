@@ -16,7 +16,7 @@ import {
   V201_EVSE_VARIABLES,
   V201_VARIABLE_TO_V16_KEY,
 } from "./deviceModelMap";
-import { renderConfigValue } from "./renderConfigValue";
+import { renderConfigValue } from "../../../domain/charge-point/renderConfigValue";
 
 function toCharacteristicDataType(
   type: ConfigurationKeyType,

@@ -2,6 +2,7 @@ import { cancellablePromise, type CancellableWait } from "./cancellable";
 import { csmsActionMatches } from "../../domain/types/csmsActionNames";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
+import type { IdTokenTypeName } from "../../domain/connector/Transaction";
 import { OCPPStatus, ReservationStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../shared/Logger";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
@@ -121,7 +122,11 @@ const waitForRemoteStart = (
   connector: Connector,
   log: NonNullable<ScenarioExecutorCallbacks["log"]>,
   runStartedAt: number,
-): CancellableWait<{ tagId: string; remoteStartId?: number }> => {
+): CancellableWait<{
+  tagId: string;
+  remoteStartId?: number;
+  idTokenType?: IdTokenTypeName;
+}> => {
   // §4.9 S3: fail-fast if the charge point cannot receive RemoteStartTransaction
   if (!chargePoint.canReceiveCsmsCall("RemoteStartTransaction")) {
     const version = chargePoint.ocppVersion;
@@ -167,44 +172,50 @@ const waitForRemoteStart = (
 
   let cleanupFn: (() => void) | null = null;
 
-  const promise = new Promise<{ tagId: string; remoteStartId?: number }>(
-    (resolve, reject) => {
-      let settled = false;
+  const promise = new Promise<{
+    tagId: string;
+    remoteStartId?: number;
+    idTokenType?: IdTokenTypeName;
+  }>((resolve, reject) => {
+    let settled = false;
 
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        chargePoint.events.off("remoteStartReceived", handler);
-        chargePoint.events.off("disconnected", disconnectHandler);
-        chargePoint.unregisterScenarioHandler(connector.id);
-      };
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      chargePoint.events.off("remoteStartReceived", handler);
+      chargePoint.events.off("disconnected", disconnectHandler);
+      chargePoint.unregisterScenarioHandler(connector.id);
+    };
 
-      cleanupFn = cleanup;
+    cleanupFn = cleanup;
 
-      const handler = (data: {
-        connectorId: number;
-        tagId: string;
-        remoteStartId?: number;
-      }) => {
-        if (data.connectorId !== connector.id) return;
-        cleanup();
-        resolve({
-          tagId: data.tagId,
-          ...(data.remoteStartId !== undefined
-            ? { remoteStartId: data.remoteStartId }
-            : {}),
-        });
-      };
+    const handler = (data: {
+      connectorId: number;
+      tagId: string;
+      remoteStartId?: number;
+      idTokenType?: IdTokenTypeName;
+    }) => {
+      if (data.connectorId !== connector.id) return;
+      cleanup();
+      resolve({
+        tagId: data.tagId,
+        ...(data.remoteStartId !== undefined
+          ? { remoteStartId: data.remoteStartId }
+          : {}),
+        ...(data.idTokenType !== undefined
+          ? { idTokenType: data.idTokenType }
+          : {}),
+      });
+    };
 
-      const disconnectHandler = () => {
-        cleanup();
-        reject(new Error("Disconnected while waiting for remote start"));
-      };
+    const disconnectHandler = () => {
+      cleanup();
+      reject(new Error("Disconnected while waiting for remote start"));
+    };
 
-      chargePoint.events.on("remoteStartReceived", handler);
-      chargePoint.events.on("disconnected", disconnectHandler);
-    },
-  );
+    chargePoint.events.on("remoteStartReceived", handler);
+    chargePoint.events.on("disconnected", disconnectHandler);
+  });
 
   return {
     promise,

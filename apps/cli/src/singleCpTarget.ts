@@ -57,6 +57,7 @@ import type {
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -110,7 +111,7 @@ export interface SingleCpCommandOps {
   sendHeartbeat(): Promise<void>;
   startHeartbeat(intervalSeconds: number): Promise<void>;
   stopHeartbeat(): Promise<void>;
-  authorize(tagId: string): Promise<void>;
+  authorize(tagId: string, idTokenType?: IdTokenTypeName): Promise<void>;
   sendDataTransfer(
     vendorId: string,
     messageId?: string,
@@ -308,8 +309,8 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     stopHeartbeat: async () => {
       service.stopHeartbeat();
     },
-    authorize: async (tagId) => {
-      service.authorize(tagId);
+    authorize: async (tagId, idTokenType) => {
+      service.authorize(tagId, idTokenType);
     },
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(vendorId, messageId, data),
@@ -467,7 +468,8 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     startHeartbeat: (intervalSeconds) =>
       service.startHeartbeat(cpId, intervalSeconds),
     stopHeartbeat: () => service.stopHeartbeat(cpId),
-    authorize: (tagId) => service.authorize(cpId, tagId),
+    authorize: (tagId, idTokenType) =>
+      service.authorize(cpId, tagId, idTokenType),
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(cpId, vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),

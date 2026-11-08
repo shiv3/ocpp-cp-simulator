@@ -13,7 +13,7 @@ import {
 type MemorySocketLike = MemoryServerSocket;
 let memoryCount = 0;
 
-export type WireVersion = "1.6" | "2.0.1";
+export type WireVersion = "1.6" | "2.0.1" | "2.1";
 
 /** One recorded frame, in the order the fake CSMS saw or sent it. */
 export interface WireFrame {
@@ -102,7 +102,12 @@ export class FakeCsms {
     this.version = options.version;
     this.currentTime = options.currentTime ?? FIXED_TIME;
     this.responders = { ...(options.responders ?? {}) };
-    const protocol = this.version === "1.6" ? "ocpp1.6" : "ocpp2.0.1";
+    const protocol =
+      this.version === "1.6"
+        ? "ocpp1.6"
+        : this.version === "2.1"
+          ? "ocpp2.1"
+          : "ocpp2.0.1";
     this.memory = options.memory === true;
     if (this.memory) {
       this.server = null;

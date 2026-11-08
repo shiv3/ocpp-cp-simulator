@@ -124,6 +124,10 @@ import {
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
+  checkSecurityProfileChange,
+  isCertificateCurrentlyValid,
+} from "../security/securityProfileChange";
+import {
   MONITORING_BASES,
   MonitoringStore,
 } from "../monitoring/MonitoringStore";
@@ -677,6 +681,9 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
+      this.wireSecurityConfiguration();
+    }
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
     // We don't actually transition status here (no WebSocket yet); the
     // saved flag is reapplied when ChangeAvailability runs or when the
@@ -1066,6 +1073,76 @@ export class ChargePoint {
   }
 
   /** Hook up subsystems that react to live Configuration changes. */
+  /**
+   * #724 (1.6 security whitepaper A01.FR.03, A05): the transport sends the
+   * stored `AuthorizationKey` and `SecurityProfile` from the next attempt
+   * on, and a `SecurityProfile` change is checked against the A05
+   * prerequisites. Installed after the constructor applied its own initial
+   * values, which are not ChangeConfiguration requests.
+   */
+  private wireSecurityConfiguration(): void {
+    this._configuration.setSecurityProfileGuard((current, next) => {
+      const now = this.nowDate();
+      const verdict = checkSecurityProfileChange({
+        current,
+        next,
+        authorizationKey:
+          this._configuration.getString("AuthorizationKey") ?? "",
+        hasCentralSystemRoot:
+          this._certificateStore
+            .listRootCertificates(["CsmsRootCertificate"])
+            .some((root) => isCertificateCurrentlyValid(root.pem, now)) ||
+          (this._webSocket?.hasConfiguredTrustAnchors() ?? false),
+        hasChargePointCertificate:
+          this._certificateStore
+            .listSignedChains("ChargingStationCertificate")
+            .some((chain) => isCertificateCurrentlyValid(chain.pems[0], now)) ||
+          (this._webSocket?.hasClientCertificate() ?? false),
+      });
+      if (!verdict.allowed) {
+        this._logger.warn(
+          `ChangeConfiguration SecurityProfile=${next} refused (${verdict.requirement}): ${verdict.reason}`,
+          LogType.CONFIGURATION,
+        );
+      }
+      return verdict.allowed;
+    });
+    this._configuration.onChange((key, value) => {
+      if (key === "AuthorizationKey" && typeof value === "string") {
+        this._webSocket?.setSecurityCredentials({ authorizationKey: value });
+      } else if (key === "SecurityProfile" && typeof value === "number") {
+        this._webSocket?.setSecurityCredentials({
+          securityProfile: value as OcppSecurityProfile,
+        });
+      }
+    });
+  }
+
+  /**
+   * #724 A05.FR.06-08: after the CALLRESULT of an accepted `SecurityProfile`
+   * upgrade the station disconnects and reconnects with the new profile.
+   * When that connection does not open, the previous profile is put back
+   * and used for the next attempt (A05.FR.08).
+   */
+  switchSecurityProfile(previousProfile: number): void {
+    this._webSocket?.armSecurityProfileFallback(() => {
+      this._logger.warn(
+        `Could not connect with security profile ${this._configuration.getInteger("SecurityProfile")}; falling back to profile ${previousProfile} (A05.FR.08)`,
+        LogType.CONFIGURATION,
+      );
+      this._configuration.applyChange(
+        "SecurityProfile",
+        String(previousProfile),
+        { bypassGuard: true },
+      );
+    });
+    this._logger.info(
+      "SecurityProfile changed: reconnecting with the new profile (A05.FR.06/07)",
+      LogType.CONFIGURATION,
+    );
+    this.reset();
+  }
+
   private wireConfigurationListeners(): void {
     this._configuration.onChange((key, value) => {
       switch (key) {

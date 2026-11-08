@@ -88,7 +88,7 @@ describe("ConfigurationStore security whitepaper keys", () => {
   it("validates reads and ChangeConfiguration mutations", () => {
     const store = storeWithDefaults();
 
-    expect(store.applyChange("SecurityProfile", "2")).toBe("RebootRequired");
+    expect(store.applyChange("SecurityProfile", "2")).toBe("Accepted");
     expect(store.getInteger("SecurityProfile")).toBe(2);
 
     expect(store.applyChange("SecurityProfile", "4")).toBe("Rejected");
@@ -110,11 +110,38 @@ describe("ConfigurationStore security whitepaper keys", () => {
     expect(store.applyChange("UnknownSecurityKey", "x")).toBe("NotSupported");
   });
 
+  it("answers Rejected and keeps SecurityProfile when the A05 guard refuses (#724)", () => {
+    const store = storeWithDefaults();
+    const seen: Array<[number, number]> = [];
+    let allow = false;
+    store.setSecurityProfileGuard((current, next) => {
+      seen.push([current, next]);
+      return allow;
+    });
+
+    expect(store.applyChange("SecurityProfile", "2")).toBe("Rejected");
+    expect(store.getInteger("SecurityProfile")).toBe(0);
+    allow = true;
+    expect(store.applyChange("SecurityProfile", "2")).toBe("Accepted");
+    expect(store.getInteger("SecurityProfile")).toBe(2);
+    // Other keys and a bypassing change never reach the guard.
+    expect(store.applyChange("CpoName", "x")).toBe("Accepted");
+    allow = false;
+    expect(
+      store.applyChange("SecurityProfile", "1", { bypassGuard: true }),
+    ).toBe("Accepted");
+    expect(store.getInteger("SecurityProfile")).toBe(1);
+    expect(seen).toEqual([
+      [0, 2],
+      [0, 2],
+    ]);
+  });
+
   it("round-trips mutable security keys through persistence", () => {
     const db = new MemoryConfigurationDatabase();
     const first = storeWithDefaults(db);
 
-    expect(first.applyChange("SecurityProfile", "3")).toBe("RebootRequired");
+    expect(first.applyChange("SecurityProfile", "3")).toBe("Accepted");
     expect(first.applyChange("AuthorizationKey", "persisted-secret")).toBe(
       "Accepted",
     );

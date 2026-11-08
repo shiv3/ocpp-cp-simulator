@@ -35,7 +35,6 @@ export type ConfigurationChangeStatus =
  */
 const REBOOT_REQUIRED_KEYS = new Set<string>([
   "ChargingScheduleMaxPeriods", // pre-allocated array sizes etc.
-  "SecurityProfile", // transport profile changes require reconnect/reboot.
   // (Extend as additional reboot-sensitive keys are wired in.)
 ]);
 
@@ -70,6 +69,8 @@ export class ConfigurationStore {
   private readonly listeners = new Set<ConfigurationChangeListener>();
   /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
   private readonly runtimeKeys = new Set<string>();
+  private securityProfileGuard:
+    ((current: number, next: number) => boolean) | null = null;
 
   constructor(
     private readonly chargePointId: string,
@@ -401,12 +402,28 @@ export class ConfigurationStore {
   }
 
   /**
+   * Installs the A05 check of an OCPP 1.6 `SecurityProfile` change (#724):
+   * `applyChange` answers `Rejected` and keeps the value when the guard
+   * refuses it. The charge point installs it once its own initial values are
+   * applied; `applyChange(..., { bypassGuard: true })` skips it.
+   */
+  setSecurityProfileGuard(
+    guard: ((current: number, next: number) => boolean) | null,
+  ): void {
+    this.securityProfileGuard = guard;
+  }
+
+  /**
    * Apply a ChangeConfiguration.req: parses the string value into the key's
    * declared type, persists, fires listeners, and returns the spec-defined
    * status. Unknown keys → `NotSupported`. Readonly keys → `Rejected`.
    * Parse failures → `Rejected`.
    */
-  applyChange(name: string, rawValue: string): ConfigurationChangeStatus {
+  applyChange(
+    name: string,
+    rawValue: string,
+    options: { bypassGuard?: boolean } = {},
+  ): ConfigurationChangeStatus {
     const entry = this.values.get(name);
     if (!entry) return "NotSupported";
     if (entry.key.readonly) return "Rejected";
@@ -414,6 +431,18 @@ export class ConfigurationStore {
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
     if (!isConfigurationValueValid(entry.key, parsed)) return "Rejected";
+    if (
+      name === "SecurityProfile" &&
+      this.securityProfileGuard &&
+      options.bypassGuard !== true &&
+      typeof parsed === "number" &&
+      !this.securityProfileGuard(
+        typeof entry.value === "number" ? entry.value : 0,
+        parsed,
+      )
+    ) {
+      return "Rejected";
+    }
 
     const next = { key: entry.key, value: parsed } as ConfigurationValue;
     this.values.set(name, next);

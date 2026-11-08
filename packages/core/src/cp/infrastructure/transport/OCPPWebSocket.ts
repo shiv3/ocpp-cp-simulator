@@ -218,6 +218,7 @@ export class OCPPWebSocket {
   private _ocppVersion: string;
   private _securityProfile?: OcppSecurityProfile;
   private _authorizationKey?: string;
+  private _securityProfileFallback: (() => void) | null = null;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
   /**
@@ -322,6 +323,42 @@ export class OCPPWebSocket {
     if (!/^wss:/i.test(this._url)) return undefined;
     if (this._tls?.rejectUnauthorized === false) return undefined;
     return this._tls?.ca;
+  }
+
+  /**
+   * #724 A01.FR.03 / A05.FR.07: the credentials the next connection attempt
+   * sends. Read on every attempt, so a ChangeConfiguration of
+   * `AuthorizationKey` or `SecurityProfile` is used by the next reconnect.
+   */
+  public setSecurityCredentials(credentials: {
+    securityProfile?: OcppSecurityProfile;
+    authorizationKey?: string;
+  }): void {
+    if ("securityProfile" in credentials) {
+      this._securityProfile = credentials.securityProfile;
+    }
+    if ("authorizationKey" in credentials) {
+      this._authorizationKey = credentials.authorizationKey;
+    }
+  }
+
+  /**
+   * #724 A05.FR.08: until a connection opens, a socket close that is not a
+   * manual disconnect calls `fallback` once, before the next attempt, so the
+   * caller can put the previous security profile back.
+   */
+  public armSecurityProfileFallback(fallback: () => void): void {
+    this._securityProfileFallback = fallback;
+  }
+
+  /** `--tls-ca` certificates are configured. */
+  public hasConfiguredTrustAnchors(): boolean {
+    return !!this._tls?.ca;
+  }
+
+  /** A client certificate is configured (`--tls-cert`) or was renewed. */
+  public hasClientCertificate(): boolean {
+    return !!this._tls?.cert || this._renewedClientCertificate !== null;
   }
 
   /** Whether the CSMS link authenticates with a client certificate
@@ -484,6 +521,7 @@ export class OCPPWebSocket {
     let opened = false;
     const onopenHandler = () => {
       opened = true;
+      this._securityProfileFallback = null;
       this.onClientCertificateOpened(attempt.renewed);
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
@@ -515,6 +553,11 @@ export class OCPPWebSocket {
       );
       // Generation guard: only process close if this socket belongs to the current generation
       if (socketGeneration === this._generationCounter) {
+        if (!opened && !this._isManualDisconnect) {
+          const fallback = this._securityProfileFallback;
+          this._securityProfileFallback = null;
+          fallback?.();
+        }
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
         if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {

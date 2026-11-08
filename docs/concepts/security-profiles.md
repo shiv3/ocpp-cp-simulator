@@ -208,6 +208,39 @@ signature algorithms, hidden `CpoName`) can be armed from a scenario with the
 `certQuirks` node and its `octt` preset — see
 [Scenario format → certificate quirks](scenario-format.md#inboundpolicy-and-certificate-quirks-notes).
 
+### Changing `AuthorizationKey` and `SecurityProfile` (1.6)
+
+`ChangeConfiguration` of these two keys reaches the transport (#724):
+
+- **`AuthorizationKey`** (A01.FR.03): after `Accepted` the stored value is what
+  every later connection attempt sends as the Basic Auth password: the next
+  reconnect, a `Reset`, a TriggerMessage-driven reconnect. The station does not
+  reconnect by itself; the CSMS, which no longer accepts the old password,
+  closes the link. A daemon restart re-applies the key the charge point was
+  created with (the registry row), not the changed one.
+- **`SecurityProfile`** (A05.FR.01-05): the value is checked first and
+  answered `Rejected`, leaving the profile unchanged, when
+  - it is lower than the current one, or equal to it above profile 1
+    (A05.FR.01; `AllowSecurityProfileDowngrade` is not implemented, so a 3 → 2
+    downgrade is refused too);
+  - it is 1 or 2 and the stored `AuthorizationKey` is not 16 to 20 bytes written
+    as 32 to 40 hex digits (A05.FR.02, whitepaper §7.2);
+  - it is 2 or 3 and the station has no currently valid CentralSystemRoot
+    (an installed `CSMSRootCertificate`/`CentralSystemRootCertificate`, or
+    `--tls-ca`) (A05.FR.03);
+  - it is 3 and the station has no currently valid ChargePointCertificate (a
+    stored Charging Station chain, or `--tls-cert`) (A05.FR.04).
+
+  A valid upgrade answers `Accepted` (not `RebootRequired`). Once that answer is
+  written the station disconnects and reconnects with the new profile
+  (A05.FR.06/07, the same teardown as `Reset`). If that connection does not
+  open, the previous profile is put back and the next attempt uses it
+  (A05.FR.08). An unchanged value of 0 or 1 is `Accepted` without a
+  reconnect. The initial profile from `--security-profile` is not a
+  `ChangeConfiguration` and is not checked. Installed `CSMSRootCertificate`s
+  count as a prerequisite but do not join the connection's TLS trust: use
+  `--tls-ca` for that.
+
 ## Certificate store
 
 Each charge point keeps one certificate store

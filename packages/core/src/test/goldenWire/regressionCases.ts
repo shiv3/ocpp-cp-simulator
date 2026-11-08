@@ -267,6 +267,19 @@ both("avail-flip-while-charging", async (r) => {
   await changeAvail(r, "Inoperative", 1);
   await settle(r);
 });
+// G03.FR.03 / G04.FR.04 for the station: the same state is Accepted during a
+// transaction, and Operative drops the pending Inoperative.
+c201("avail-station-same-state-while-charging", async (r) => {
+  await charging(r);
+  await changeAvail(r, "Operative");
+  await settle(r);
+  await changeAvail(r, "Inoperative");
+  await settle(r);
+  await changeAvail(r, "Operative");
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
 both("avail-no-autoreset", async (r) => {
   r.cp.getConnector(1)!.autoResetToAvailable = false;
   await charging(r);

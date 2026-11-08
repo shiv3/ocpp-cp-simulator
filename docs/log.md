@@ -2419,3 +2419,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - G04.FR.06/07/08, TC_G_14_CS: with a transaction on some EVSEs a station-wide `ChangeAvailability` answers `Scheduled`, but the EVSEs without a transaction change at once (StatusNotification, persisted) and only the busy ones keep `scheduledAvailability`. 1.6 (§5.2) unchanged. Goldens `201-avail-one-busy` (the RequestStartTransaction on the idle EVSE is now `Rejected`) and `201-avail-station-during-tx` re-recorded.
 - Page: [Default behaviors](entities/default-behaviors.md).
+
+## [2026-11-08] ingest | 2.x ChangeAvailability to the current state is Accepted during a transaction (#694)
+
+- G03.FR.03 / G04.FR.04: the target is compared with the current availability before the transaction check. The same state answers `Accepted` (no StatusNotification) and drops a pending opposite schedule; `Scheduled` is kept for a real change (G03.FR.05, G04.FR.06). For one EVSE and for the station. 1.6 unchanged. Golden `201-avail-flip-while-charging` re-recorded (id-9); `201-avail-station-same-state-while-charging` added.
+- Page: [Default behaviors](entities/default-behaviors.md).

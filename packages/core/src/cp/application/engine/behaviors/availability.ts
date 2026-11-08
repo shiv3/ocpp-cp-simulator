@@ -102,35 +102,37 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
   const nextStatus = statusOf(target);
 
   if (connectorId === undefined) {
-    const active = [...cp.connectors.values()].filter((c) => c.transaction);
-    if (active.length > 0) {
-      // G04.FR.06 answers Scheduled while a transaction runs, but G04.FR.07 /
-      // G04.FR.08 and TC_G_14_CS apply the change to the EVSEs without a
-      // transaction at once; only the busy ones wait for their transaction.
+    // G03.FR.03 / G04.FR.04: a request for the state the EVSE is already in is
+    // Accepted; Scheduled applies only to a change that is really pending
+    // (G03.FR.05, G04.FR.06). A busy EVSE already in the target state just
+    // drops an opposite schedule.
+    const waiting = [...cp.connectors.values()].filter(
+      (c) => c.transaction && c.availability !== target,
+    );
+    const apply = (): void => {
+      for (const connector of cp.connectors.values()) {
+        if (connector.transaction) {
+          // G04.FR.07 / G04.FR.08 and TC_G_14_CS: only the busy EVSEs wait.
+          connector.scheduledAvailability =
+            connector.availability === target ? null : target;
+          continue;
+        }
+        connector.availability = target;
+        cp.updateConnectorStatus(connector.id, nextStatus);
+      }
+      cp.persistAvailability();
+    };
+    if (waiting.length > 0) {
       return {
         response: { status: "Scheduled" },
-        after: async () => {
-          for (const connector of cp.connectors.values()) {
-            if (connector.transaction) {
-              connector.scheduledAvailability = target;
-              continue;
-            }
-            connector.availability = target;
-            cp.updateConnectorStatus(connector.id, nextStatus);
-          }
-          cp.persistAvailability();
-        },
+        after: async () => apply(),
       };
     }
     return {
       response: { status: "Accepted" },
       after: async () => {
         cp.updateConnectorStatus(0, nextStatus);
-        for (const connector of cp.connectors.values()) {
-          connector.availability = target;
-          cp.updateConnectorStatus(connector.id, nextStatus);
-        }
-        cp.persistAvailability();
+        apply();
       },
     };
   }
@@ -138,6 +140,16 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
   const connector = cp.getConnector(connectorId);
   if (!connector) return { response: { status: "Rejected" } };
   if (connector.transaction) {
+    // Already in the requested state: Accepted, and a pending opposite
+    // schedule is dropped (G03.FR.03, G04.FR.04).
+    if (connector.availability === target) {
+      return {
+        response: { status: "Accepted" },
+        after: async () => {
+          connector.scheduledAvailability = null;
+        },
+      };
+    }
     return {
       response: { status: "Scheduled" },
       after: async () => {

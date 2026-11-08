@@ -4,6 +4,8 @@ import {
   blueprintSchema,
   createManyToolSchema,
   cpBulkParamsSchema,
+  behaviorReloadParamsSchema,
+  cpBehaviorsSetParamsSchema,
   cpLabelsSetParamsSchema,
   cpListParamsSchema,
   createParamsSchema,
@@ -136,6 +138,60 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         const result = await runRpc(deps, {
           method: "cp.labels.set",
           params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // Which loaded behaviors a charge point runs. Ids only: the tool cannot
+  // carry code, and the daemon only has the behaviors its operator loaded
+  // with --behavior.
+  mcp.tool("cp_behaviors_set", {
+    description:
+      "Choose which of the daemon's loaded behaviors (see behavior_list) a charge point runs, by id; [] runs none, null runs every loaded behavior. Applied in place: the charge point stays connected. Only ids are accepted, never code; an unknown id is an error that names the loaded ids.",
+    inputSchema: cpBehaviorsSetParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.behaviors.set",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("behavior_list", {
+    description:
+      "List the behaviors the daemon loaded at start (--behavior) with the file each came from, whether --watch-behaviors is on, and the built-in default behaviors with the CSMS actions each answers (the actions that mode extend works for).",
+    inputSchema: z.object({}).strict(),
+    handler: async () => {
+      try {
+        const result = await runRpc(deps, {
+          method: "behavior.list",
+          params: {},
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("behavior_reload", {
+    description:
+      "Re-read the behavior files the daemon was started with and apply the changed ones: new calls use the new code, exchanges in flight finish on the old one, ctx.state stays; a file that does not build keeps the old version. Takes no parameters: no path and no code can be supplied.",
+    inputSchema: behaviorReloadParamsSchema,
+    handler: async () => {
+      try {
+        const result = await runRpc(deps, {
+          method: "behavior.reload",
+          params: {},
         });
         return successResult(result);
       } catch (err) {

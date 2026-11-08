@@ -1,6 +1,8 @@
 import { ReservationStatus } from "../types/OcppTypes";
 import type { Logger } from "../../shared/Logger";
 import { LogType } from "../../shared/Logger";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
 
 /**
  * Reservation data structure
@@ -22,7 +24,7 @@ export interface Reservation {
 export class ReservationManager {
   private reservations: Map<number, Reservation> = new Map();
   private logger: Logger;
-  private cleanupTimer?: NodeJS.Timeout;
+  private cleanupTimer?: TimerHandle;
   /** Invoked with the connector id each time a reservation is dropped by
    *  cleanupExpiredReservations() because its expiry passed — from the periodic
    *  timer, or lazily via getReservationForConnector()/getAllReservations(). Lets
@@ -32,7 +34,14 @@ export class ReservationManager {
    *  do NOT fire this — their status transition is handled by the caller. */
   private readonly onExpire?: (connectorId: number) => void;
 
-  constructor(logger: Logger, onExpire?: (connectorId: number) => void) {
+  private readonly clock: SimClock;
+
+  constructor(
+    logger: Logger,
+    onExpire?: (connectorId: number) => void,
+    clock: SimClock = realClock,
+  ) {
+    this.clock = clock;
     this.logger = logger;
     this.onExpire = onExpire;
     this.startCleanupTimer();
@@ -74,7 +83,7 @@ export class ReservationManager {
     }
 
     // Check if expiry date is in the past
-    if (expiryDate <= new Date()) {
+    if (expiryDate.getTime() <= this.clock.now()) {
       this.logger.warn(
         `Reservation expiry date is in the past: ${expiryDate}`,
         LogType.GENERAL,
@@ -88,7 +97,7 @@ export class ReservationManager {
       expiryDate,
       idTag,
       parentIdTag,
-      createdAt: new Date(),
+      createdAt: new Date(this.clock.now()),
     };
 
     this.reservations.set(reservationId, reservation);
@@ -161,7 +170,7 @@ export class ReservationManager {
     }
 
     // Check if expired
-    if (reservation.expiryDate <= new Date()) {
+    if (reservation.expiryDate.getTime() <= this.clock.now()) {
       this.logger.warn(
         `Reservation ${reservationId} has expired`,
         LogType.GENERAL,
@@ -236,7 +245,7 @@ export class ReservationManager {
    * Clean up expired reservations
    */
   cleanupExpiredReservations(): void {
-    const now = new Date();
+    const now = new Date(this.clock.now());
     const expiredReservationIds: number[] = [];
 
     for (const [id, reservation] of this.reservations.entries()) {
@@ -274,7 +283,7 @@ export class ReservationManager {
    * Start automatic cleanup timer (runs every minute)
    */
   private startCleanupTimer(): void {
-    this.cleanupTimer = setInterval(() => {
+    this.cleanupTimer = this.clock.setInterval(() => {
       this.cleanupExpiredReservations();
     }, 60000); // Run every minute
   }
@@ -284,7 +293,7 @@ export class ReservationManager {
    */
   stopCleanupTimer(): void {
     if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
+      this.clock.clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
     }
   }

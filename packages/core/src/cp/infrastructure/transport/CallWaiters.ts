@@ -1,3 +1,6 @@
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+
 /**
  * Callers waiting for the CSMS's answer to one CP→CSMS CALL, keyed by CALL
  * id (#348 DataTransfer, #389 expert calls). Each waiter settles exactly
@@ -10,18 +13,20 @@ export class CallWaiters<T> {
     {
       resolve: (value: T) => void;
       reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
+      timer: TimerHandle;
     }
   >();
 
   constructor(
     private readonly _timeoutMs: number,
     private readonly _timeoutError: (id: string) => Error,
+    /** The clock the timeout runs on, read when a waiter is registered. */
+    private readonly _clock: () => SimClock = () => realClock,
   ) {}
 
   register(id: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = this._clock().setTimeout(() => {
         this._waiters.delete(id);
         reject(this._timeoutError(id));
       }, this._timeoutMs);
@@ -45,7 +50,7 @@ export class CallWaiters<T> {
     const waiter = this._waiters.get(id);
     if (!waiter) return undefined;
     this._waiters.delete(id);
-    clearTimeout(waiter.timer);
+    this._clock().clearTimeout(waiter.timer);
     return waiter;
   }
 }

@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { normalizeKeyName, redactSensitiveValue } from "./redaction";
-import { OBJ_MAX_BYTES, STR_64K, boundedObject } from "./limits";
+import { OBJ_MAX_BYTES, STR_256, STR_64K, boundedObject } from "./limits";
 import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "./securityProfile";
 
@@ -59,6 +59,8 @@ interface FullCpConfig {
   tlsKeyPath?: string;
   bootNotification: FullBootNotification | null;
   labels?: Labels;
+  /** Ids of the loaded behaviors this charge point runs; absent: all of them. */
+  behaviors?: readonly string[];
 }
 
 /**
@@ -91,6 +93,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
+    behaviors: config.behaviors ? [...config.behaviors] : undefined,
   };
 }
 
@@ -133,6 +136,7 @@ export const wireCpConfigSchema = z
     tlsKeyPath: STR_64K.optional(),
     bootNotification: bootNotificationWireSchema,
     labels: labelsSchema.optional(),
+    behaviors: z.array(STR_256).optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;

@@ -6,6 +6,10 @@ import type {
 } from "../../domain/connector/Connector";
 import { setTimeoutAt } from "../../shared/timers";
 import type { OperationalTimeline } from "./OperationalTimeline";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 
 /**
  * How long connector statuses get to come back once the CSMS has accepted a
@@ -49,7 +53,7 @@ interface Incident {
 export class OperationalTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
   private incident: Incident | null = null;
-  private settleTimer: ReturnType<typeof setTimeout> | null = null;
+  private settleTimer: TimerHandle | null = null;
   /** connectorId (0 = station) → profileId → cancel the pending expiry. */
   private readonly expiryTimers = new Map<number, Map<number, () => void>>();
 
@@ -57,6 +61,8 @@ export class OperationalTimelineProjector {
     private readonly timeline: OperationalTimeline,
     events: EventEmitter<ChargePointEvents>,
     private readonly connectors: ReadonlyMap<number, Connector>,
+    private readonly clock: SimClock = realClock,
+    private readonly ids: Rng = systemRngStreams.stream("", "timeline"),
   ) {
     const on = <K extends keyof ChargePointEvents>(
       event: K,
@@ -95,7 +101,7 @@ export class OperationalTimelineProjector {
       });
       this.checkRecovery();
       if (this.incident?.link === "booted" && this.settleTimer === null) {
-        this.settleTimer = setTimeout(() => {
+        this.settleTimer = this.clock.setTimeout(() => {
           this.settleTimer = null;
           this.closeIncident(this.unrestoredConnectors().length === 0);
         }, RECOVERY_SETTLE_MS);
@@ -121,7 +127,7 @@ export class OperationalTimelineProjector {
     });
     on("networkFaultInjected", ({ ruleId, ruleType, reconnectDelayMs }) => {
       // Minted first, so a throw cannot leave a half-opened incident behind.
-      const incidentId = crypto.randomUUID();
+      const incidentId = this.ids.uuid();
       this.clearSettleTimer();
       // One clock read for the incident's start and its entry, so the
       // recovery's durationMs is exactly the gap between the two entries.
@@ -286,6 +292,7 @@ export class OperationalTimelineProjector {
       return;
     }
     const cancel = setTimeoutAt(expiresAt, expire, {
+      clock: this.clock,
       now: () => this.timeline.now(),
       // Weeks away, possibly: never the reason the process will not exit.
       unref: true,
@@ -349,7 +356,7 @@ export class OperationalTimelineProjector {
 
   private clearSettleTimer(): void {
     if (this.settleTimer === null) return;
-    clearTimeout(this.settleTimer);
+    this.clock.clearTimeout(this.settleTimer);
     this.settleTimer = null;
   }
 }

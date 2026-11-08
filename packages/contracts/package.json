@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./eslint-behavior": "./eslint/behavior.js",
     "./*": "./src/*.ts"
   }
 }

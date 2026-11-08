@@ -176,6 +176,9 @@ function cpForWire(cpId: string, service: CLIChargePointService): FullCp {
       ocppVersion: init.ocppVersion,
       bootNotification: init.bootNotification ?? null,
       labels: init.labels,
+      ...(init.behaviors === undefined
+        ? {}
+        : { behaviors: [...init.behaviors] }),
     },
   };
 }

@@ -15,6 +15,7 @@ import {
   renderReadme,
 } from "./emit/render";
 import type { ExportK6Args } from "./parseExportK6Args";
+import { runExportK6Behavior } from "./runExportK6Behavior";
 
 /** Scenario node types this exporter walks. Anything else is refused by name
  *  rather than exported and silently skipped. Exported because
@@ -46,6 +47,7 @@ export const SUPPORTED_NODE_TYPES = new Set([
 ]);
 
 export async function runExportK6(args: ExportK6Args): Promise<number> {
+  if ((args.behaviorFiles ?? []).length > 0) return runExportK6Behavior(args);
   let raw: string;
   try {
     raw = fs.readFileSync(args.scenarioFile, "utf8");
@@ -169,7 +171,32 @@ function validateExportability(scenario: ScenarioJson): string[] {
   }
   for (const node of nodes) {
     if (!SUPPORTED_NODE_TYPES.has(node.type)) {
-      problems.push(`unsupported node type "${node.type}" (node ${node.id})`);
+      problems.push(
+        `unsupported node type "${node.type}" (node ${node.id})${
+          REFUSED_BEHAVIOR_NODES[node.type] ?? ""
+        }`,
+      );
+      continue;
+    }
+    // Schema 1.5 (#566): a CALL the scenario takes over, and a payload that
+    // reads from it, need a station behavior engine the k6 runtime does not
+    // have. Refused, never exported as the observing node they resemble.
+    const data = isPlainObject(node.data) ? node.data : {};
+    if (node.type === "csmsCallTrigger") {
+      if (data.behavior === "replace") {
+        problems.push(
+          `csmsCallTrigger behavior "replace" is not supported by export-k6 (node ${node.id}): the k6 runtime always lets the station answer the CALL; use "observe" or run the scenario on the simulator`,
+        );
+      } else if (data.onBusy !== undefined) {
+        problems.push(
+          `csmsCallTrigger onBusy is only meaningful with behavior "replace", which export-k6 does not support (node ${node.id})`,
+        );
+      }
+    }
+    if (node.type === "ocppCall" && containsFrom(data.payload)) {
+      problems.push(
+        `ocppCall payload uses "$from", which needs a CALL taken over by a csmsCallTrigger with behavior "replace"; export-k6 does not support it (node ${node.id})`,
+      );
     }
   }
   const rawAssertions: unknown[] = Array.isArray(scenario.assertions)
@@ -187,6 +214,23 @@ function validateExportability(scenario: ScenarioJson): string[] {
     }
   });
   return problems;
+}
+
+/** Why a 1.5 node type is not exported, appended to the generic message. */
+const REFUSED_BEHAVIOR_NODES: Readonly<Record<string, string>> = {
+  callResponse:
+    ": answering a CALL the scenario took over needs a station behavior engine, which the k6 runtime does not have",
+  useBehavior:
+    ": selecting a loaded behavior needs a station behavior engine, which the k6 runtime does not have",
+};
+
+/** Does `value` hold a `{ "$from": … }` reference anywhere? */
+function containsFrom(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsFrom);
+  if (isPlainObject(value)) {
+    return "$from" in value || Object.values(value).some(containsFrom);
+  }
+  return false;
 }
 
 function fail(msg: string): number {

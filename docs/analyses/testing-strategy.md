@@ -9,13 +9,16 @@ sources:
   - e2e/README.md
   - scripts/steve-verify/README.md
   - examples/testcontainers-java/README.md
+  - packages/core/src/test/goldenWire/
 related:
   - ../entities/desktop-app.md
   - ../sources/e2e-readme.md
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-updated: 2026-11-05
+  - ../concepts/charger-engine.md
+  - charger-engine-migration.md
+updated: 2026-11-08
 ---
 
 # Testing strategy
@@ -147,6 +150,132 @@ already covers all 7) and so would not have caught either defect.
 The `analyze` test matrix (`apps/cli/src/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes
 ([OCPP DebugKit](../entities/ocpp-debugkit.md)).
+
+## Golden wire test
+
+`packages/core/src/test/goldenWire/` is the regression oracle of the
+[charger engine](../concepts/charger-engine.md) work (rule 4: with nothing configured, the bytes on the wire and
+their order do not change). `goldenWire.bun.test.ts` drives real `ChargePoint` instances against an
+in-process fake CSMS (`FakeCsms.ts`, `Bun.serve`) on OCPP 1.6 and 2.0.1, records every OCPP-J frame
+in both directions in arrival order, normalizes it, and compares it with a committed fixture under
+`goldenWire/fixtures/` (one `.jsonl` file per case, one frame per line).
+
+- **What normalization hides** (`normalize.ts`), exhaustively; everything else is compared byte for byte
+  (key order, numbers, strings, the order of frames):
+  - message ids become `id-N` by first appearance, so _which_ frame answers which survives but the value
+    and its form (UUID or not) do not;
+  - UUID-shaped strings become `<uuid-N>` by first appearance;
+  - every ISO-8601 timestamp becomes `<ts>`: its value, its millisecond part and its zone are hidden;
+  - `127.0.0.1:<port>` replaces the port of the fake CSMS (and the per-server token in its path), and a
+    generated CSR becomes `<csr>`;
+  - the text of an uncaught JavaScript error in a CALLERROR (`TypeError: ...`) becomes
+    `<javascript error>`: it names local variables of the implementation, only the code is contract;
+  - **timing**: no frame carries a time, so delays between frames are not compared. Where the pace is the
+    behavior (boot retry, heartbeat period, reconnect, a future firmware date), the case itself bounds it
+    (a wait with a timeout, or a probe frame sent between two steps of a train).
+  - **Strict cases** (`strict: true`, five of them) hide less: a CP timestamp becomes its distance in
+    whole seconds from the first CP timestamp plus its digit-masked shape
+    (`<ts+2s 9999-99-99T99:99:99.999Z>`), so a wrong stop time or a lost millisecond part shows, and a
+    message id that is not UUID-shaped is marked `(raw)`. The fixtures of the first set are not strict.
+- **Frames the fake CSMS cannot parse** (not JSON, not an array, an unknown message type) are recorded as
+  `raw` frames, not dropped, so a station that emits one fails the case.
+- **Cases**: three sets, 335 in all (103 scripted + 54 templates + 178 regression = 335 fixtures; the suite
+  reports 338 tests, the 335 cases plus 3 harness checks). `cases.ts` holds 103 scripted cases over both versions (boot
+  including Pending and Rejected, status walk, authorize, local and remote start / stop, meter values, EV
+  disconnect, reset, `UpdateFirmware` including `SimulatedFirmwareUpdateFailure`, `SignedUpdateFirmware`,
+  `GetDiagnostics` / `GetLog`, `ChangeAvailability` including `Scheduled`, reservations, unlock,
+  `TriggerMessage`, `inboundPolicy`, `responseOverride`, configuration / variables, data transfer, local
+  list, smart charging, disconnect and reconnect, transactions stopped offline). `scenarioCases.ts` runs
+  the 54 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
+  [scenario README](../../packages/core/src/utils/scenarios/README.md) describes.
+  `regressionCases.ts` holds 178 more: 175 **recorded on ca01d302 (the commit before the charger engine),
+  never on the branch**, and 3 `Reset` `OnIdle` cases recorded on `c099aac9` (#635) (a fixture that a later commit of main changes is re-recorded on a worktree at
+  that commit, still never on the branch; five were after #635),
+  after a review found 29 of 63 mutants of the engine survived the first set
+  (no retry after CALLERROR, an offline queue flushed in the wrong order, follow-ups of a close, policy
+  versus override, a TxProfile surviving its transaction, a whole-station `ChangeAvailability` during a
+  transaction, `AuthorizeRemoteTxRequests`, a reservation not consumed, `ConnectionTimeOut`, the stop
+  time, `GetLog` and firmware across a disconnect, ...). Those cases are the regression oracle: a case
+  that fails on the branch is a regression to fix, not a fixture to record again.
+- **Harness checks** (they fail when the oracle itself shrinks): a fixture file without a case fails
+  (`every fixture belongs to a case`); the set of built-in template ids is pinned in `scenarioCases.ts`
+  (`PINNED_TEMPLATE_IDS`), so removing a template cannot silently shrink the scenario set; the fake CSMS
+  only accepts upgrades on its own URL token, so a station left over from an earlier case cannot add
+  frames to another case; the path of the upgrade request is checked by the `connection-handshake` case.
+- **Not unattended**: five templates cannot run to their `End` node without a person or a
+  stop, because an Auto MeterValue node blocks for minutes or a loop never ends
+  (`status-triggered-actions`, `full-charging-cycle`, `essential-cp-behavior`, `smart-charging`,
+  `multi-status-monitor`). They are recorded for a fixed window and then stopped; `NOT_UNATTENDED` in
+  `scenarioCases.ts` gives the reason for each.
+- **Determinism**: the driver never decides the order of frames. It waits for a named frame and then for
+  traffic to go quiet (`FakeCsms.settle`). The fake CSMS sends a scenario's call 700 ms after the wait
+  starts so it stays clear of the 5 s meter ticks.
+- **Fixtures are never regenerated to get green.** A missing fixture is written only with
+  `GOLDEN_RECORD=1`, an existing one never; a changed transcript is a failure to explain.
+  `GOLDEN_PRINT=<name part>` prints transcripts while developing a case.
+
+## Inbound call handling
+
+The shared inbound path is covered at three levels: `CallExchange.test.ts` (single answer, a settlement
+on every drop path, stale generation, abandon on disconnect, no microtask between the answer and the
+write), `InboundCallGate.test.ts` (order of policy, override and registry; 2.x spellings) and
+`ResponseEffectQueue.onDropped.test.ts` under `packages/core/src/cp/infrastructure/transport/`, plus
+`OCPPMessageHandler.exchange.test.ts` for the 1.6 handler end to end. The 2.x synchronous CALLRESULT
+(#456) stays pinned by `OCPPMessageHandlerV201.asyncDispatch.test.ts`, and the bytes by the
+[golden wire test](#golden-wire-test).
+
+## Virtual-time determinism (V1)
+
+`packages/core/src/cp/shared/__tests__/virtualTime.determinism.bun.test.ts` is the Bun check that
+async behavior on a `VirtualClock` replays: 1,000 simulated chargers run twice with one seed (same
+effect hash), once with another (different hash), with a control on unseeded streams and a pinned
+hash for a small fleet. The result and its limits are in the
+[Charger engine](../concepts/charger-engine.md#determinism). The same fleet (`virtualFleet.ts`) runs in real Chromium
+through `scripts/verify/browser/run.ts` (Playwright is not a dependency; the script says how to supply it) and must hash
+identically to Bun; the k6 host is run for real with a k6 binary against `scripts/verify/fakeCsms16.ts`. Both are
+manual verifications, not part of `bun run test`: [Verification results](charger-engine-migration.md#verification-results).
+
+## Behavior tests
+
+`runBehavior()` (`packages/core/src/test/behavior/runBehavior.ts`, Bun only) builds a real `ChargePoint`
+on a `VirtualClock` with a seed, wired to the fake CSMS of the golden wire test, loads behaviors with
+`cp.loadBehavior()` and offers `advance(ms)`, `call()`, `callsOf()` and `effectHash()`. `advance` moves
+virtual time, then waits for the traffic that follows to go quiet. By default the station and the fake CSMS
+talk over an in-memory socket (`goldenWire/memoryTransport.ts`, installed in place of `globalThis.WebSocket`
+for the fake CSMS's address only): no port, no real time, only event-loop turns, so one `advance(6 * 3_600_000)`
+over a behavior that waits for every answer works (`memoryTransport.bun.test.ts`). `transport: "socket"`
+keeps a real loopback WebSocket, with its short real-time wait, for tests of the transport itself; both give
+the same frames. A delay is therefore asserted by stepping time (`advance(499)`: nothing
+yet; `advance(1)`: the frame), not by reading a timestamp off a frame. A behavior or scenario that waits for
+an answer of the fake CSMS between two timed waits arms its next timer only once that real answer arrived,
+so on the socket transport a long sequence is advanced with `advanceInSteps` (500 ms by default) instead of
+one jump; the memory transport has no such limit.
+`runScenario.ts` next to it runs a scenario definition on the same station and clock. The engine's own tests are
+`engine.bun.test.ts` there, and `BehaviorRegistry.test.ts` and `ChargerState.test.ts` under
+`packages/core/src/cp/application/`.
+
+The tests of loading code are `apps/cli/src/__tests__/behavior.bun.test.ts` (flags, loader, `behavior build`
+including the k6 refusals), `behaviorCodeIsNotRemote.bun.test.ts` (code-like `load_scenario` data stays data),
+`scripts/__tests__/behaviorEslint.bun.test.ts` (the ESLint config), `service.engineStatePersistence.bun.test.ts`
+and the template's own `examples/behaviors/flaky-firmware.bun.test.ts` (same seed, same frames).
+
+The tests of stage E (hooks, send interception, assignment, reload) are, in `packages/core/src/test/behavior/`,
+`hooks.bun.test.ts` (delivery order, re-entrancy, throwing and async hooks, same seed same hash),
+`beforeSend.bun.test.ts` (rewrite and drop on Heartbeat, MeterValues, StartTransaction, `ctx.send`, the `ocppCall`
+path, 2.x aliases, SOAP refusal), `reload.bun.test.ts` (`replaceBehavior`: in-flight exchange, `ctx.state`, grace
+time) and `responseHelpers.bun.test.ts` (`ctx.accepted` / `ctx.rejected`); in `apps/cli`, `behaviorLibrary.bun.test.ts`
+(select, reload, fresh temporary imports) and `server/__tests__/behaviorAssignment.bun.test.ts` (the control-plane
+methods, persistence, and that no code or path is accepted); `behaviorHost.test.ts` and `behaviorExport.bun.test.ts`
+for the k6 host and its refusals. `scripts/verify/e2e/behaviorsDaemon.ts` drives the real daemon end to end.
+
+The tests of the scenario 1.5 features are `scenario15.bun.test.ts` (one test per row of the runtime
+contract in the [Charger engine](../concepts/charger-engine.md#scenario-schema-15)) and
+`ScenarioExecutor`-level `callResponse.test.ts`. The acceptance tests for #566 are
+`acceptance566.bun.test.ts`: for OCPP 1.6 and 2.0.1 and for a JSON scenario and a code behavior alike, an
+incoming `UpdateFirmware` is matched, replaced completely, answered and followed by notifications whose
+payloads, order and delays the owner chose (the default sequence never runs); concurrent calls, cancellation
+(of an open CALL and of a running sequence) and disconnect cleanup are covered, and `UnlockConnector` shows
+the mechanism is not specific to firmware.
 
 ## Does anything actually launch the desktop daemon?
 

@@ -2,8 +2,8 @@
 // Executes a ScenarioDefinition's node/edge graph against a ScenarioHost.
 // Semantics mirror packages/core/src/cp/application/scenario/ScenarioExecutor.ts, reduced
 // to what a load-test CP needs (no pause/step/resume, no persistence).
-import { deepPartialMatch } from "./assertions";
-import { evaluateCurveKwh, sortCurvePoints, type CurvePoint } from "./curve";
+import { deepPartialMatch } from "./assertions.ts";
+import { evaluateCurveKwh, sortCurvePoints, type CurvePoint } from "./curve.ts";
 import {
   bool,
   CallErrorAnswer,
@@ -13,7 +13,7 @@ import {
   type ScenarioNodeJson,
   type Wire,
   type WireCall,
-} from "./types";
+} from "./types.ts";
 
 export interface ScenarioHost {
   readonly connectorId: number;

@@ -35,6 +35,9 @@ import { setGlobalLogFormat } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
 import { runAnalyze } from "./analyze/runAnalyze";
+import { behaviorFlagProblem } from "./behavior/flags";
+import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
+import { BehaviorLibrary } from "./behavior/BehaviorLibrary";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
 import {
@@ -222,6 +225,11 @@ export function parseArgs(argv: string[]): CLIOptions {
   let httpUrl: string | null = null;
   let allEvents = false;
   let unsafeRemote = false;
+  const behaviorFiles: string[] = [];
+  const useBehaviors: string[] = [];
+  let watchBehaviors = false;
+  let allowBehaviorReload = false;
+  let allowBehaviorCode = false;
   let serveStatic: string | null = null;
   // --web-console: enabled flag + optional explicit port. When the port is
   // omitted (`--web-console` alone), the UI shares the --http-port listener.
@@ -443,6 +451,33 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--unsafe-remote":
         unsafeRemote = true;
+        break;
+      case "--behavior":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --behavior requires a file path\n");
+          process.exit(1);
+        }
+        behaviorFiles.push(next);
+        i++;
+        break;
+      case "--allow-behavior-code":
+        allowBehaviorCode = true;
+        break;
+      case "--use-behavior":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --use-behavior requires a behavior id\n",
+          );
+          process.exit(1);
+        }
+        useBehaviors.push(next);
+        i++;
+        break;
+      case "--watch-behaviors":
+        watchBehaviors = true;
+        break;
+      case "--allow-behavior-reload":
+        allowBehaviorReload = true;
         break;
       case "--cors-origin":
         if (!next || next.startsWith("--")) {
@@ -1015,6 +1050,43 @@ export function parseArgs(argv: string[]): CLIOptions {
         }
       : null;
 
+  const behaviorProblem = behaviorFlagProblem({
+    serverMode: isServerMode,
+    behaviorFiles,
+    allowBehaviorCode,
+    unsafeRemote,
+    useBehaviors,
+    watchBehaviors,
+    allowBehaviorReload,
+  });
+  if (behaviorProblem) {
+    process.stderr.write(`${behaviorProblem}\n`);
+    process.exit(1);
+  }
+  if (
+    isClientMode &&
+    (behaviorFiles.length > 0 ||
+      allowBehaviorCode ||
+      useBehaviors.length > 0 ||
+      watchBehaviors ||
+      allowBehaviorReload)
+  ) {
+    process.stderr.write(
+      "Error: --behavior, --allow-behavior-code, --use-behavior and " +
+        "--watch-behaviors and --allow-behavior-reload apply to a running charge point, not to " +
+        "--send / --stop / --events\n",
+    );
+    process.exit(1);
+  }
+  if (useBehaviors.length > 0 && !cpId) {
+    // Same reasoning as --label: without a cpId nothing is bootstrapped, so
+    // the selection would have no charge point to land on.
+    process.stderr.write(
+      "Error: --use-behavior requires --cp-id (it selects the behaviors of the bootstrapped charge points)\n",
+    );
+    process.exit(1);
+  }
+
   if (
     !isClientMode &&
     isServerMode &&
@@ -1120,6 +1192,11 @@ export function parseArgs(argv: string[]): CLIOptions {
     httpBasicAuth,
     allEvents,
     unsafeRemote,
+    behaviorFiles,
+    allowBehaviorCode,
+    useBehaviors,
+    watchBehaviors,
+    allowBehaviorReload,
     corsOrigins,
     trustForwardedHeaders,
     serveStatic,
@@ -1277,11 +1354,37 @@ Options:
   --unsafe-remote          Allow a non-loopback daemon bind without
                            --web-console-basic-auth-user/pass. Use only on
                            trusted networks.
+  --behavior <file>        Load behavior code (a TypeScript or JavaScript
+                           module whose default export is a behavior) onto
+                           every charge point (repeatable). It runs with this
+                           process's full authority; see docs/entities/cli.md.
+  --allow-behavior-code    A daemon's explicit opt-in to --behavior. Refused
+                           together with --unsafe-remote.
+  --use-behavior <id>      Run only the loaded behavior with this id on the
+                           charge points started from --cp-id (repeatable;
+                           default: every --behavior). Charge points created
+                           later pick theirs with the "behaviors" parameter
+                           or cp.behaviors.set; ids only, never code.
+  --watch-behaviors        Reload a --behavior file when it (or a file in its
+                           directory) changes: new calls use the new code,
+                           exchanges in flight finish on the old one, ctx.state
+                           stays. A file that does not build keeps the old
+                           version. Daemon: also enables the behavior.reload
+                           method.
+  --allow-behavior-reload  Daemon only: answer the behavior.reload method
+                           (re-reads the --behavior files, runs their code)
+                           without watching them. Without this flag or
+                           --watch-behaviors the method is refused and new
+                           code enters only at start.
   --cors-origin <origin>   Restrict CORS to this origin (repeatable). Pass "*"
                            for open CORS. Default: open on a loopback bind;
                            same-origin-only when bound to a non-loopback host
                            (0.0.0.0 / LAN) so cross-site browser calls are
-                           rejected.
+                           rejected, and also same-origin-only with
+                           --allow-behavior-code, on any bind (a page in
+                           your browser must not drive a daemon that runs
+                           code; a web console on another origin then needs
+                           --cors-origin <its origin>).
   --trust-forwarded-headers
                            With the same-origin default, also accept the
                            public origin a reverse proxy reports via
@@ -1329,11 +1432,14 @@ Options:
                            docs/entities/analyze.md -> "Splitting by
                            connector" for what gets replicated into every
                            connector's report and why.
-  export-k6 --scenario <file.json> [-o <dir>] [--ocpp-version 1.6] [--force]
-                           Export a scenario as a runnable k6 load-test
-                           bundle (entry script + self-contained OCPP
-                           runtime + README). Requires k6 >= v1.0 to run
-                           the generated test. See docs/entities/cli.md -> export-k6.
+  behavior build <file> [--out <file>]
+                           Type-check a behavior and bundle it (ES2017, k6/* external).
+  export-k6 (--scenario <file.json> | --behavior <file>...) [-o <dir>] [--ocpp-version 1.6] [--force]
+                           Export a scenario, or behavior code (OCPP 1.6J),
+                           as a runnable k6 load-test bundle (entry script +
+                           self-contained OCPP runtime + README). Requires
+                           k6 >= v1.6 to run the generated test. See
+                           docs/entities/cli.md -> export-k6.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running
                            behind a proxy that reserves the default path
@@ -1444,12 +1550,14 @@ HTTP endpoints (see docs/entities/daemon.md):
  *     stderr. The daemon is exposed on the LAN; defaulting to open
  *     CORS would let any page in the operator's browser call it.
  */
-function resolveCorsPolicy(
-  options: CLIOptions,
-):
+function resolveCorsPolicy(options: CLIOptions):
   | { kind: "any" }
   | { kind: "allowlist"; origins: string[] }
-  | { kind: "same-origin"; trustForwardedHeaders: boolean } {
+  | {
+      kind: "same-origin";
+      trustForwardedHeaders: boolean;
+      allowedHosts?: string[];
+    } {
   if (options.corsOrigins.length > 0) {
     if (options.corsOrigins.length === 1 && options.corsOrigins[0] === "*") {
       return { kind: "any" };
@@ -1457,6 +1565,23 @@ function resolveCorsPolicy(
     return { kind: "allowlist", origins: [...options.corsOrigins] };
   }
   const host = options.httpHost;
+  if (options.allowBehaviorCode) {
+    process.stderr.write(
+      "[server] --allow-behavior-code: applying same-origin-only CORS, so a " +
+        "page from another origin cannot call /socket.io or /mcp, and a Host " +
+        "that is not an IP address, localhost or the bind address is refused " +
+        "(DNS rebinding). A web " +
+        "console served from another origin needs `--cors-origin <origin>`; " +
+        '`--cors-origin "*"` opens it again.\n',
+    );
+    return {
+      kind: "same-origin",
+      trustForwardedHeaders: options.trustForwardedHeaders,
+      // Against DNS rebinding: the Host must be an IP literal, localhost or
+      // the name the daemon was told to bind to.
+      allowedHosts: [host],
+    };
+  }
   if (isLoopbackHost(host)) return { kind: "any" };
   if (!options.trustForwardedHeaders) {
     process.stderr.write(
@@ -1502,6 +1627,9 @@ export function buildBootstrap(
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...((options.useBehaviors?.length ?? 0) > 0
+      ? { behaviors: [...options.useBehaviors!] }
+      : {}),
     tls: options.tls,
     tlsCaPath: options.tlsCaPath,
     tlsCertPath: options.tlsCertPath,
@@ -1510,9 +1638,27 @@ export function buildBootstrap(
   };
 }
 
+async function loadBehavesOrExit(
+  files: readonly string[],
+  useBehaviors: readonly string[] = [],
+): Promise<BehaviorLibrary> {
+  if (files.length === 0) return BehaviorLibrary.of([]);
+  try {
+    const library = await BehaviorLibrary.fromFiles(files);
+    library.check(useBehaviors);
+    return library;
+  } catch (err) {
+    process.stderr.write(
+      `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(1);
+  }
+}
+
 function createStandaloneChargePointRuntime(
   options: CLIOptions,
   database: Database | null,
+  behaviors: BehaviorLibrary = BehaviorLibrary.of([]),
 ): SingleCpRuntimeTarget {
   const bootstrap = buildBootstrap(options);
   if (!bootstrap) {
@@ -1522,6 +1668,7 @@ function createStandaloneChargePointRuntime(
   const bus = new EventBus();
   const registry = new CPRegistry(bus, database, {
     allowInsecureTlsKeyPerms: options.insecureTlsKeyPerms,
+    behaviors,
   });
   const configRepository = createSocketConfigRepository(database);
   // #495: the registry's, which its charge points write to as well.
@@ -1535,9 +1682,15 @@ function createStandaloneChargePointRuntime(
     scenarioRepository,
     connectorSettingsRepository,
   });
-  const eventSource = registry.registerExisting(
-    CLIChargePointService.fromOptions(options, database),
+  const standalone = CLIChargePointService.fromOptions(options, database);
+  standalone.loadBehaviors(
+    behaviors.select(
+      (options.useBehaviors?.length ?? 0) > 0
+        ? options.useBehaviors
+        : undefined,
+    ),
   );
+  const eventSource = registry.registerExisting(standalone);
 
   return {
     chargePointService,
@@ -1575,6 +1728,24 @@ async function main(): Promise<void> {
     }
     const code = await runExportK6(parsed.args);
     process.exit(code);
+  }
+
+  // `behavior build` is a subcommand like `export-k6`.
+  if (process.argv[2] === "behavior") {
+    const parsed = parseBehaviorArgs(process.argv.slice(3));
+    if (!parsed.ok) {
+      process.stderr.write(`${parsed.message}\n`);
+      process.exit(1);
+    }
+    const result = await buildBehaviorFile(parsed.file, parsed.out);
+    if (!result.ok) {
+      process.stderr.write(
+        `Error: cannot build ${parsed.file}:\n  ${result.problems.join("\n  ")}\n`,
+      );
+      process.exit(1);
+    }
+    process.stdout.write(`${result.outFile}\n`);
+    process.exit(0);
   }
 
   const options = parseArgs(process.argv);
@@ -1644,7 +1815,15 @@ async function main(): Promise<void> {
     options.webConsolePort != null;
 
   if (isServerMode) {
+    const behaviors = await loadBehavesOrExit(
+      options.behaviorFiles,
+      options.useBehaviors,
+    );
     await startServer({
+      behaviors,
+      watchBehaviors: options.watchBehaviors,
+      allowBehaviorReload: options.allowBehaviorReload,
+      allowBehaviorCode: options.allowBehaviorCode,
       httpPort: options.httpPort,
       httpHost: options.httpHost,
       pidPath: options.daemon ? DEFAULT_PID_PATH : null,
@@ -1686,7 +1865,16 @@ async function main(): Promise<void> {
   if (options.stateDb) {
     replDatabase = BunSqliteDatabase.open(options.stateDb);
   }
-  const service = createStandaloneChargePointRuntime(options, replDatabase);
+  const behaviors = await loadBehavesOrExit(
+    options.behaviorFiles,
+    options.useBehaviors,
+  );
+  if (options.watchBehaviors) behaviors.watch();
+  const service = createStandaloneChargePointRuntime(
+    options,
+    replDatabase,
+    behaviors,
+  );
 
   let shuttingDown = false;
   const shutdown = () => {

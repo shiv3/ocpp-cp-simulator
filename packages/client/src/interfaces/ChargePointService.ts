@@ -153,6 +153,8 @@ export interface ChargePointSnapshot {
     } | null;
     /** Operator labels (#446); absent when the charge point has none. */
     labels?: Labels;
+    /** Ids of the loaded behaviors it runs; absent: every loaded behavior. */
+    behaviors?: readonly string[];
   };
 }
 
@@ -208,6 +210,8 @@ export interface CreateChargePointParams {
   autoConnect?: boolean;
   /** Operator labels (#446). On update, omitted keeps the current ones. */
   labels?: Labels;
+  /** Ids of the loaded behaviors to run; absent: all (on update: keep the current). */
+  behaviors?: readonly string[];
 }
 
 export type ChargePointEvent =

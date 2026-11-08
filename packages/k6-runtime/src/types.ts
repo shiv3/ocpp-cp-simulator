@@ -138,3 +138,31 @@ export function str(v: unknown): string | undefined {
 export function bool(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
+
+/**
+ * What a behavior host observes on the charge point's wire: the one choke
+ * point every station-initiated CALL passes (`beforeSend`) and the frames
+ * that come back.
+ */
+export interface CallObserver {
+  /** Before the CALL is queued; may rewrite its payload or drop it. */
+  beforeSend(
+    action: string,
+    payload: Record<string, unknown>,
+  ): { drop: true } | { payload: Record<string, unknown> };
+  /** The CSMS answered one of our CALLs. */
+  callResult(event: {
+    action: string;
+    messageId: string;
+    outcome: "result" | "error";
+    payload: unknown;
+  }): void;
+  /** The CSMS sent a CALL. */
+  callReceived(event: {
+    action: string;
+    messageId: string;
+    payload: unknown;
+  }): void;
+  /** The socket closed. */
+  disconnected(event: { code?: number; reason?: string }): void;
+}

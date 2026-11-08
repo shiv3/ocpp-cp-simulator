@@ -10,6 +10,7 @@ import {
 import { OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
 import type { SoapParsedValue } from "../soapEnvelope";
 import type { Logger } from "../../../../shared/Logger";
+import { withEngine } from "../../../../../test/withEngine";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 
 type TestSchema = Record<string, unknown>;
@@ -506,6 +507,8 @@ describe("inbound request validation (#285)", () => {
     getConnector: () => undefined,
     status: "Available",
   } as unknown as ChargePoint;
+  // The default behaviors live in the charger engine.
+  withEngine(chargePoint);
 
   // The table from the issue, one mandatory element removed per request.
   const cases: Array<[string, Record<string, SoapParsedValue>, string]> = [

@@ -13,6 +13,10 @@ import {
   type ChargingSession,
 } from "../../domain/session/ChargingSession";
 import { OCPP_2_0_1, OCPP_2_1 } from "../../domain/types/OcppVersion";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 
 /** What the recorder reads off the charge point it is attached to. */
 export type RecordedChargePoint = Pick<
@@ -23,6 +27,10 @@ export type RecordedChargePoint = Pick<
 export interface ChargingSessionRecorderOptions {
   now?: () => Date;
   newSessionId?: () => string;
+  /** Where `now` comes from when it is not given; the platform clock. */
+  clock?: SimClock;
+  /** Where session ids come from when `newSessionId` is not given. */
+  ids?: Rng;
 }
 
 /**
@@ -55,8 +63,10 @@ export class ChargingSessionRecorder {
     private readonly repository: ChargingSessionRepository,
     options: ChargingSessionRecorderOptions = {},
   ) {
-    this.now = options.now ?? (() => new Date());
-    this.newSessionId = options.newSessionId ?? (() => crypto.randomUUID());
+    const clock = options.clock ?? realClock;
+    const ids = options.ids ?? systemRngStreams.stream("", "sessions");
+    this.now = options.now ?? (() => new Date(clock.now()));
+    this.newSessionId = options.newSessionId ?? (() => ids.uuid());
     this.isV2 = cp.ocppVersion === OCPP_2_0_1 || cp.ocppVersion === OCPP_2_1;
 
     const events = cp.events;

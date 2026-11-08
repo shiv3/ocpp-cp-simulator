@@ -27,6 +27,9 @@ import type {
   ConfigSetNodeData,
   DataTransferNodeData,
   OcppCallNodeData,
+  CallResponseNodeData,
+  UseBehaviorNodeData,
+  ScenarioCallExchange,
   ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
@@ -34,6 +37,7 @@ import type {
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 import { ScenarioNodeType } from "./ScenarioTypes";
+import { resolveFromExchange } from "./resolveFrom";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {
@@ -47,6 +51,10 @@ import { cancelIfCancellable } from "./cancellable";
 import { WaitControl, type WaitSignal } from "./WaitControl";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 
 type AutoMeterStartConfig = Parameters<
   NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
@@ -65,9 +73,28 @@ interface ParkedWait {
   startedAt: number;
 }
 
+/**
+ * What one branch of the run owns (schema 1.5, #566): the CALL its
+ * `csmsCallTrigger` took over. Branches from Start get one each, so parallel
+ * branches can own different CALLs; the run ends with it unanswered only after
+ * the runtime answered `InternalError` (see `onRunEnded`).
+ */
+interface Flow {
+  exchange: ScenarioCallExchange | null;
+  answered: boolean;
+}
+
+const newFlow = (): Flow => ({ exchange: null, answered: false });
+
 const isMeterValueTimeout = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("Timeout waiting for meter value:");
+
+/** Time and randomness a scenario run reads; the platform's by default. */
+export interface ScenarioExecutorSimOptions {
+  readonly clock?: SimClock;
+  readonly rng?: Rng;
+}
 
 /**
  * Optional resume hint passed to {@link ScenarioExecutor.start}. When set
@@ -139,15 +166,22 @@ export class ScenarioExecutor {
   // Issue #247 Phase 3: track whether certificate quirks were armed during this
   // run, so they can be cleared when the run ends (both normal completion and stop()).
   private armedCertificateQuirks = false;
+  private readonly clock: SimClock;
+  private readonly rng: Rng;
 
   constructor(
     scenario: ScenarioDefinition,
     callbacks: ScenarioExecutorCallbacks,
     eventEmitter?: EventEmitter<ScenarioEvents>,
+    sim: ScenarioExecutorSimOptions = {},
   ) {
     this.scenario = scenario;
     this.callbacks = callbacks;
     this.eventEmitter = eventEmitter;
+    this.clock = sim.clock ?? realClock;
+    this.rng =
+      sim.rng ??
+      systemRngStreams.stream(String(scenario.targetId ?? ""), "scenario");
 
     // Create robot3 state machine
     const machine = createScenarioMachine({
@@ -310,6 +344,10 @@ export class ScenarioExecutor {
         this.armedCertificateQuirks = false;
       }
 
+      // Schema 1.5 (#566): release the CALL rules this run armed and answer
+      // the CALLs it still owns.
+      this.callbacks.onRunEnded?.();
+
       this.notifyStateChange();
     }
   }
@@ -343,7 +381,7 @@ export class ScenarioExecutor {
             : [resumeFromNodeId];
         this.executedNodes = seededNodes;
         this.currentNodeId = originNode.id;
-        this.currentNodeStartedAt = Date.now();
+        this.currentNodeStartedAt = this.clock.now();
         resumed = true;
         this.callbacks.log?.(
           `[${this.scenario.name}] Resuming scenario from node "${
@@ -370,7 +408,7 @@ export class ScenarioExecutor {
       if (!originNode) {
         throw new Error("No start node found in scenario");
       }
-      await this.executeSingleNode(originNode);
+      await this.executeSingleNode(originNode, newFlow());
     }
 
     // Walk outgoing edges from the origin node (whether Start or resume).
@@ -396,7 +434,7 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Executing single branch`,
         "debug",
       );
-      await this.executeSequentialFlow(nextNodes[0]!);
+      await this.executeSequentialFlow(nextNodes[0]!, newFlow());
     } else {
       // Multiple branches - execute in parallel
       this.callbacks.log?.(
@@ -423,7 +461,7 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Starting branch ${index + 1} from node: ${node.data?.label || node.id}`,
         "debug",
       );
-      return this.executeSequentialFlow(node);
+      return this.executeSequentialFlow(node, newFlow());
     });
 
     // Wait for all branches to complete
@@ -437,7 +475,10 @@ export class ScenarioExecutor {
   /**
    * Execute a sequential flow starting from a given node
    */
-  private async executeSequentialFlow(startNode: ScenarioNode): Promise<void> {
+  private async executeSequentialFlow(
+    startNode: ScenarioNode,
+    flow: Flow,
+  ): Promise<void> {
     let currentNode = startNode;
 
     while (
@@ -446,7 +487,7 @@ export class ScenarioExecutor {
       getScenarioStateName(this.service) !== "idle"
     ) {
       // Execute the current node
-      await this.executeSingleNode(currentNode);
+      await this.executeSingleNode(currentNode, flow);
 
       // If the node finished while paused, do not make the next node visible
       // until the run has been resumed. Stop/abort can also land while parked.
@@ -495,7 +536,10 @@ export class ScenarioExecutor {
   /**
    * Execute a single node
    */
-  private async executeSingleNode(node: ScenarioNode): Promise<void> {
+  private async executeSingleNode(
+    node: ScenarioNode,
+    flow: Flow,
+  ): Promise<void> {
     // A stop() may have landed while the previous node was awaiting; never
     // start another node once aborted.
     if (this.aborted) {
@@ -521,7 +565,7 @@ export class ScenarioExecutor {
 
     // Update context with current node
     this.currentNodeId = node.id;
-    this.currentNodeStartedAt = Date.now();
+    this.currentNodeStartedAt = this.clock.now();
     this.executedNodes.push(node.id);
 
     this.notifyStateChange();
@@ -546,7 +590,7 @@ export class ScenarioExecutor {
       node.type !== ScenarioNodeType.START &&
       node.type !== ScenarioNodeType.END
     ) {
-      await this.executeNode(node);
+      await this.executeNode(node, flow);
     }
 
     // Dispatch NODE_COMPLETE event
@@ -569,7 +613,7 @@ export class ScenarioExecutor {
   /**
    * Execute a single node
    */
-  private async executeNode(node: ScenarioNode): Promise<void> {
+  private async executeNode(node: ScenarioNode, flow: Flow): Promise<void> {
     // Log node execution
     const nodeLabel = node.data?.label || node.id;
     this.callbacks.log?.(
@@ -644,6 +688,7 @@ export class ScenarioExecutor {
         await this.executeCsmsCallTrigger(
           node.id,
           node.data as CsmsCallTriggerNodeData,
+          flow,
         );
         break;
 
@@ -680,7 +725,15 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.OCPP_CALL:
-        await this.executeOcppCall(node.data as OcppCallNodeData);
+        await this.executeOcppCall(node.data as OcppCallNodeData, flow);
+        break;
+
+      case ScenarioNodeType.CALL_RESPONSE:
+        await this.executeCallResponse(node.data as CallResponseNodeData, flow);
+        break;
+
+      case ScenarioNodeType.USE_BEHAVIOR:
+        this.executeUseBehavior(node.id, node.data as UseBehaviorNodeData);
         break;
 
       case ScenarioNodeType.CONNECTION_TRIGGER:
@@ -890,7 +943,10 @@ export class ScenarioExecutor {
   /** Send an expert OCPP call (#389) and log the answer. A CALLERROR is an
    *  answer — often the one the scenario is after — so the flow goes on; a
    *  refusal or no answer throws and fails the run. */
-  private async executeOcppCall(data: OcppCallNodeData): Promise<void> {
+  private async executeOcppCall(
+    data: OcppCallNodeData,
+    flow: Flow,
+  ): Promise<void> {
     if (!this.callbacks.onSendOcppCall) {
       this.callbacks.log?.(
         "OCPP call: no onSendOcppCall callback wired",
@@ -898,7 +954,12 @@ export class ScenarioExecutor {
       );
       return;
     }
-    const { action, payload, skipValidation, applyResponse } = data;
+    const { action, skipValidation, applyResponse } = data;
+    const payload = resolveFromExchange(
+      data.payload,
+      flow.exchange,
+      `ocppCall(${action})`,
+    ) as Record<string, unknown>;
     const call = this.callbacks.onSendOcppCall({
       action,
       payload,
@@ -1151,7 +1212,7 @@ export class ScenarioExecutor {
     const updateInterval = 100; // Update progress every 100ms
     let elapsed = 0;
 
-    const progressInterval = setInterval(() => {
+    const progressInterval = this.clock.setInterval(() => {
       elapsed += updateInterval / 1000;
       const remaining = Math.max(0, totalSeconds - elapsed);
 
@@ -1170,14 +1231,14 @@ export class ScenarioExecutor {
       this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
 
       if (remaining <= 0) {
-        clearInterval(progressInterval);
+        this.clock.clearInterval(progressInterval);
       }
     }, updateInterval);
 
     try {
       await this.waitWithOptionalForceSkip(this.sleep(totalSeconds * 1000));
     } finally {
-      clearInterval(progressInterval);
+      this.clock.clearInterval(progressInterval);
 
       // Final progress update
       if (this.callbacks.onNodeProgress) {
@@ -1312,8 +1373,7 @@ export class ScenarioExecutor {
     if (!this.callbacks.onReserveNow) return;
 
     // Generate reservation ID if not provided
-    const reservationId =
-      data.reservationId || Math.floor(Math.random() * 1000000);
+    const reservationId = data.reservationId || this.rng.int(0, 1000000);
 
     await this.callbacks.onReserveNow(
       data.expiryMinutes,
@@ -1489,7 +1549,7 @@ export class ScenarioExecutor {
     this.reportIntervention({
       kind: "extend",
       nodeId: wait.nodeId,
-      at: Date.now(),
+      at: this.clock.now(),
       seconds,
     });
   }
@@ -1509,7 +1569,11 @@ export class ScenarioExecutor {
     const wait = this.requireParkedWait();
     this.unpark(wait.control);
     wait.control.request(kind);
-    this.reportIntervention({ kind, nodeId: wait.nodeId, at: Date.now() });
+    this.reportIntervention({
+      kind,
+      nodeId: wait.nodeId,
+      at: this.clock.now(),
+    });
   }
 
   private requireParkedWait(): ParkedWait {
@@ -1617,7 +1681,7 @@ export class ScenarioExecutor {
       return Promise.resolve();
     }
     return Promise.race([
-      new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      new Promise<void>((resolve) => this.clock.setTimeout(resolve, ms)),
       this.abortPromise,
     ]);
   }
@@ -1644,10 +1708,11 @@ export class ScenarioExecutor {
       : null;
 
     for (;;) {
-      const startedAt = Date.now();
+      const startedAt = this.clock.now();
       const control = new WaitControl(
         timeoutMs,
         (seconds) => new Error(timeoutMessage(seconds)),
+        this.clock,
       );
       this.parkedWaits.push({ nodeId, control, expectation, startedAt });
       this.notifyStateChange();
@@ -1686,7 +1751,7 @@ export class ScenarioExecutor {
   private reportWaitProgress(nodeId: string, control: WaitControl): () => void {
     if (control.deadlineAt === null) return () => {};
 
-    const progressInterval = setInterval(() => {
+    const progressInterval = this.clock.setInterval(() => {
       const remaining = (control.remainingMs() ?? 0) / 1000;
       const total = control.totalSeconds;
       this.callbacks.onNodeProgress?.(nodeId, remaining, total);
@@ -1698,11 +1763,11 @@ export class ScenarioExecutor {
       };
       this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
       this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-      if (remaining <= 0) clearInterval(progressInterval);
+      if (remaining <= 0) this.clock.clearInterval(progressInterval);
     }, 100);
 
     return () => {
-      clearInterval(progressInterval);
+      this.clock.clearInterval(progressInterval);
       const total = control.totalSeconds;
       this.callbacks.onNodeProgress?.(nodeId, 0, total);
       this.eventEmitter?.emit("nodeProgress", {
@@ -1722,6 +1787,7 @@ export class ScenarioExecutor {
   private async executeCsmsCallTrigger(
     nodeId: string,
     data: CsmsCallTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForCsmsCall = this.callbacks.onWaitForCsmsCall;
     if (!waitForCsmsCall) return;
@@ -1735,6 +1801,7 @@ export class ScenarioExecutor {
         `csmsCallTrigger(${data.action}): payload condition must be a JSON object`,
       );
     }
+    const replace = data.behavior === "replace";
     const result = await this.runTriggerWait(
       nodeId,
       data.timeout,
@@ -1742,14 +1809,97 @@ export class ScenarioExecutor {
         `Timeout waiting for CSMS call ${data.action}${
           data.payload ? " matching payload" : ""
         } (${seconds}s)`,
-      () => waitForCsmsCall(data.action, data.payload),
+      () =>
+        waitForCsmsCall(
+          data.action,
+          data.payload,
+          replace
+            ? {
+                scenarioId: this.scenario.id,
+                nodeId,
+                ...(data.onBusy ? { onBusy: data.onBusy } : {}),
+              }
+            : undefined,
+        ),
     );
     if (result) {
       this.callbacks.log?.(
         `CSMS call received: ${result.value.action}`,
         "info",
       );
+      if (replace) {
+        if (!result.value.exchange) {
+          throw new Error(
+            `csmsCallTrigger(${data.action}): behavior "replace" is not available on this station`,
+          );
+        }
+        // The branch owns the CALL from here on.
+        flow.exchange = result.value.exchange;
+        flow.answered = false;
+      }
     }
+  }
+
+  /**
+   * Schema 1.5 (#566): answer the CALL this branch took over and wait until
+   * the answer settled on the wire. An answer that was not delivered (the
+   * connection closed or changed, the frame was dropped) fails the run.
+   */
+  private async executeCallResponse(
+    data: CallResponseNodeData,
+    flow: Flow,
+  ): Promise<void> {
+    const exchange = flow.exchange;
+    if (!exchange) {
+      throw new Error(
+        'callResponse: this branch holds no CALL; place it after a csmsCallTrigger with behavior "replace"',
+      );
+    }
+    if (flow.answered) {
+      throw new Error(
+        `callResponse: the ${exchange.action} CALL of this branch is already answered`,
+      );
+    }
+    const payload =
+      data.kind === "result"
+        ? (resolveFromExchange(
+            data.payload ?? {},
+            exchange,
+            `callResponse(${exchange.action})`,
+          ) as Record<string, unknown>)
+        : undefined;
+    const settled = await Promise.race([
+      exchange.answer({
+        kind: data.kind,
+        ...(payload === undefined ? {} : { payload }),
+        ...(data.errorCode === undefined ? {} : { errorCode: data.errorCode }),
+        ...(data.errorDescription === undefined
+          ? {}
+          : { errorDescription: data.errorDescription }),
+        ...(data.skipValidation ? { skipValidation: true } : {}),
+      }),
+      this.abortPromise.then(() => null),
+    ]);
+    if (settled === null) return;
+    flow.answered = true;
+    if (!settled.delivered) {
+      throw new Error(
+        `callResponse: the answer to ${exchange.action} was not delivered (${settled.reason})`,
+      );
+    }
+    this.callbacks.log?.(
+      `Answered ${exchange.action} with ${data.kind}`,
+      "info",
+    );
+  }
+
+  /** Schema 1.5 (#566): select a behavior loaded on the station. */
+  private executeUseBehavior(nodeId: string, data: UseBehaviorNodeData): void {
+    if (!this.callbacks.onUseBehavior) {
+      throw new Error("useBehavior: this station cannot select behaviors");
+    }
+    this.callbacks.onUseBehavior(data.behaviorId, nodeId);
+    this.callbacks.log?.(`Using behavior ${data.behaviorId}`, "info");
   }
 
   /** Issue #240: park until the WebSocket reaches data.event. */

@@ -18,6 +18,7 @@
  *   it), not on the connector's electrical model (#323).
  */
 
+import { stationNow } from "../../stationNow";
 import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   ClearChargingProfileRequestV16,
@@ -390,7 +391,7 @@ export class GetCompositeScheduleHandler implements CallHandler<
     const chargePointMaxProfile =
       context.chargePoint.getActiveChargePointMaxProfile();
 
-    const anchor = new Date();
+    const anchor = stationNow(context.chargePoint);
     const slices = buildCompositeWattsSchedule(
       { txProfile, chargePointMaxProfile },
       anchor,

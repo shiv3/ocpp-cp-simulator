@@ -1,3 +1,4 @@
+import { withEngine } from "../../../../test/withEngine";
 import { describe, expect, it, mock } from "bun:test";
 import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
@@ -82,6 +83,9 @@ function station(
     status: OCPPStatus.Charging,
     transaction: restored,
     transactionId: undefined as number | undefined,
+    assignTransactionId(id: number) {
+      this.transactionId = id;
+    },
     markStartCallError: mock(() => {}),
   };
   const rejected: Array<ChargePointEvents["transactionMessageRejected"]> = [];
@@ -351,12 +355,12 @@ describe("OCPP 1.6 startCallError across a restart (#527)", () => {
       const restored = new Connector(1, logger);
       restored.restoreRuntimeSnapshot(repo.load("CP-527", 1)!);
 
-      const chargePoint = {
+      const chargePoint = withEngine({
         connectors: new Map([[1, restored]]),
         // Stops short of the stop itself: this test is about the match.
         isScenarioStopHandled: () => true,
         notifyRemoteStopReceived() {},
-      };
+      });
       return new RemoteStopTransactionHandler().handle({ transactionId: 0 }, {
         chargePoint,
       } as unknown as HandlerContext);

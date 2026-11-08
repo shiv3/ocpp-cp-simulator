@@ -1,5 +1,7 @@
 import type { OCPPAction } from "../types/OcppTypes";
 import type { Database } from "../persistence/Database";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 /**
  * One queued CALL waiting to be (re)delivered. Stored verbatim — the
@@ -81,6 +83,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     private readonly chargePointId: string,
     private readonly database: Database | null,
     queuedActions: ReadonlySet<A>,
+    private readonly clock: SimClock = realClock,
   ) {
     this.queuedActions = queuedActions;
     this.load();
@@ -102,7 +105,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   ): void {
     const row: PendingRow<A> = {
       ...message,
-      queuedAt: Date.now(),
+      queuedAt: this.clock.now(),
       attempts: message.attempts ?? 0,
       messageId: this.nextMessageId(),
       seq: this.nextSeq++,
@@ -220,7 +223,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
           action,
           payload: safeParse(r.payload),
           connectorId: r.connector_id ?? undefined,
-          queuedAt: Date.parse(r.created_at) || Date.now(),
+          queuedAt: Date.parse(r.created_at) || this.clock.now(),
           attempts: r.attempts,
           seq: r.seq ?? 0,
         });
@@ -295,7 +298,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     // queues for different cps don't collide (cp_id is part of the PK
     // anyway, but the id is also user-visible in logs).
     const suffix = (this.nextIdSuffix += 1);
-    return `${Date.now().toString(36)}-${suffix.toString(36)}`;
+    return `${this.clock.now().toString(36)}-${suffix.toString(36)}`;
   }
 }
 

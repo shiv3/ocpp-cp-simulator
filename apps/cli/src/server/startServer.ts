@@ -10,6 +10,7 @@ import {
 } from "@ocpp-cp-sim/contracts/labels";
 import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+import { BehaviorLibrary } from "../behavior/BehaviorLibrary";
 import { CPRegistry } from "./CPRegistry";
 import { NetworkSimManager } from "./NetworkSimManager";
 import { EventBus } from "./eventBus";
@@ -46,6 +47,7 @@ import {
 import { renderMetrics } from "./metrics/render";
 import { VehicleProfileRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/VehicleProfileRepository";
 import { OpenEvDirectoryClient } from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
 import { BlueprintRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
@@ -128,6 +130,22 @@ export interface ServerOptions {
    * network — the default is that the gate covers it, unlike the health path.
    */
   readonly metricsNoAuth?: boolean;
+  /**
+   * Behavior code (`--behavior`) loaded onto every charge point of the
+   * daemon, restored and created over RPC included. It runs with the
+   * process's authority, so the daemon refuses it unless
+   * {@link allowBehaviorCode} is set (`--allow-behavior-code`).
+   */
+  readonly behaviors?: BehaviorLibrary | readonly Behavior[];
+  /** `--watch-behaviors`: reload a behavior file when it changes. */
+  readonly watchBehaviors?: boolean;
+  /**
+   * `--allow-behavior-reload`: answer `behavior.reload` without watching. The
+   * method also works with {@link watchBehaviors}. Otherwise it is refused: new
+   * code enters a running daemon only when the operator asked for it.
+   */
+  readonly allowBehaviorReload?: boolean;
+  readonly allowBehaviorCode?: boolean;
   readonly autoConnect: boolean;
   readonly startupScenario: {
     readonly scenario: string | null;
@@ -198,6 +216,15 @@ export async function startServer(
     inputOpts.startupScenario,
   );
   if (startupConflict) throw new Error(startupConflict);
+  const behaviorCount =
+    inputOpts.behaviors instanceof BehaviorLibrary
+      ? inputOpts.behaviors.size
+      : (inputOpts.behaviors?.length ?? 0);
+  if (behaviorCount > 0 && !inputOpts.allowBehaviorCode) {
+    throw new Error(
+      "Behavior code is loaded only with allowBehaviorCode (--allow-behavior-code)",
+    );
+  }
 
   // #183, in the issue's order: the SOAP callback listener, then the tunnel
   // that forwards to it, then everything that needs the tunnel's origin. The
@@ -295,9 +322,19 @@ export async function startServer(
       // restored or created over RPC — derives one from this base (#183).
       soapPublicBaseUrl: opts.soapPublicBaseUrl ?? null,
       soapPath: opts.soapPath,
+      behaviors: opts.behaviors ?? [],
     },
     connectorSettingsRepository,
   );
+  // --watch-behaviors: the registry's library re-reads the files given at
+  // start when one changes; the registry applies the new version to every
+  // charge point running it.
+  registry.library.rpcReloadAllowed =
+    opts.allowBehaviorReload === true || opts.watchBehaviors === true;
+  const stopBehaviorWatch =
+    opts.watchBehaviors && registry.library.size > 0
+      ? registry.library.watch()
+      : () => undefined;
   // Create network simulation manager and wire it to the registry BEFORE
   // restoring CPs so they get their config attached before connect().
   const networkSimManager = new NetworkSimManager(database, {
@@ -492,6 +529,7 @@ export async function startServer(
     pidPath: opts.pidPath,
     registry,
     onShutdownStart: () => {
+      stopBehaviorWatch();
       fileReload?.close();
       void socketIo.close();
       // Sync kill, so the agent is gone before process.exit() below.
@@ -688,6 +726,25 @@ export async function startServer(
         `Bootstrap matches restored CP "${init.cpId}"; reusing` +
           labelsNotAppliedNote(init.labels, existing.getInit().labels),
       );
+      // `--use-behavior` names the selection of this run: it replaces the
+      // stored one, the way `cp.behaviors.set` would.
+      const wanted = init.behaviors;
+      if (
+        wanted &&
+        JSON.stringify([...wanted].sort()) !==
+          JSON.stringify([...existing.behaviorIds()].sort())
+      ) {
+        try {
+          registry.setBehaviors(init.cpId, wanted);
+          serverLog(
+            `CP "${init.cpId}": --use-behavior ${wanted.join(", ")} replaces its stored behavior selection`,
+          );
+        } catch (error) {
+          serverLog(
+            `CP "${init.cpId}" keeps its behaviors; --use-behavior ${wanted.join(", ")} was not applied: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
     } else {
       serverLog(`Bootstrapped CP "${init.cpId}"`);
     }
@@ -700,6 +757,7 @@ export async function startServer(
     httpPort: boundHttpPort,
     soapCallbackPort: soapCallbackServer?.port ?? null,
     stop() {
+      stopBehaviorWatch();
       fileReload?.close();
       void socketIo.close();
       soapTunnel?.close();

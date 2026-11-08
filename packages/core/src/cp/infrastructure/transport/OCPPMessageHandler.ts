@@ -3,6 +3,7 @@ import {
   type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import { behaviorTapOf } from "./behaviorTap";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -66,7 +67,6 @@ import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,
   OcppMessageRequestPayload,
-  OcppMessageResponsePayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
 import type { Settlement } from "./network-sim";
@@ -82,7 +82,10 @@ import {
   type OcppCallOutcome,
   type OcppCallRequest,
 } from "../../domain/types/OcppCall";
-import { OcppCallRejectedError } from "../../domain/errors/OcppCallErrors";
+import {
+  OcppCallNoAnswerError,
+  OcppCallRejectedError,
+} from "../../domain/errors/OcppCallErrors";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../domain/connector/Transaction";
 import {
@@ -99,7 +102,11 @@ import {
   toOcpp16SampledValue,
 } from "../../domain/connector/SignedMeterData";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
-import { MAX_TIMER_MS, unrefTimer } from "../../shared/timers";
+import { MAX_TIMER_MS } from "../../shared/timers";
+import { clockOf, unrefTimerHandle } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { systemRngStreams } from "../../shared/rng";
+import type { Rng } from "../../shared/rng";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import type { Logger } from "../../shared/Logger";
@@ -118,6 +125,7 @@ import { BootGate } from "../../application/state/machines/BootGate";
 
 // Import handler registry and handlers
 import type { HandlerContext } from "./handlers";
+import { patchTransaction } from "./handlers/patchTransaction";
 import {
   MessageHandlerRegistry,
   buildV16CallHandlerRegistry,
@@ -127,6 +135,9 @@ import {
   AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
+import { CallExchange } from "./inbound/CallExchange";
+import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
+import type { GenerationToken } from "./network-sim/NetworkSimController";
 
 /** Actions the 1.6 handler queues offline and replays (§4.7 / §4.8 /
  *  §4.10). Any other row in `pending_messages` was queued by the 2.x
@@ -288,7 +299,13 @@ class RequestHistory {
 interface SerialEntry {
   action: OCPPAction;
   id: string;
+  /** The payload as the station built it. It is what the request history
+   *  keeps (so an answer is matched against the CALL as it was meant), what
+   *  the offline queue stores and what a resend starts from. */
   payload: OcppMessageRequestPayload;
+  /** What the behaviors' beforeSend made of it, when they changed it: the
+   *  payload written to the socket. */
+  wire?: OcppMessageRequestPayload;
   connectorId?: number;
   /** A caller waits for this CALL's answer: when it is dropped the caller
    *  is told, instead of the CALL being salvaged or silently discarded. */
@@ -318,17 +335,19 @@ export class OCPPMessageHandler {
       new Error(
         `DataTransfer ${id}: no answer within ${DATA_TRANSFER_RESPONSE_TIMEOUT_MS}ms`,
       ),
+    () => this.clock,
   );
 
   /** Expert calls (#389) in flight; their answers are routed here first. */
-  private readonly _expertCalls = new ExpertCalls((id) =>
-    this.withdrawQueued(id),
+  private readonly _expertCalls = new ExpertCalls(
+    (id) => this.withdrawQueued(id),
+    () => this.clock,
   );
 
   // §4.2 boot gate. Until a BootNotification.conf with status=Accepted
   // arrives we restrict outgoing CALLs. The BootNotification.req itself
   // is exempt so the handshake can complete.
-  private _bootGate: BootGate = new BootGate();
+  private _bootGate: BootGate;
 
   // §4.7/§4.8/§4.10 + errata 3.18: transaction-related messages that fail
   // to deliver are queued and retried. Persists across reboots so power
@@ -349,7 +368,7 @@ export class OCPPMessageHandler {
         phase: "written";
         action: OCPPAction;
         id: string;
-        timer: ReturnType<typeof setTimeout>;
+        timer: TimerHandle;
       }
     | null = null;
   // §4.1.1 lets the implementation pick the CALL timeout. 30s is a common
@@ -359,11 +378,12 @@ export class OCPPMessageHandler {
 
   // Response effect queue for deferred handler side effects
   private _responseEffectQueue: ResponseEffectQueue;
+  private _gate: InboundCallGate;
 
   /** #527: transaction-related messages waiting out their
    *  TransactionMessageRetryInterval after a CALLERROR, keyed by timer. */
   private readonly _transactionMessageRetries = new Map<
-    ReturnType<typeof setTimeout>,
+    TimerHandle,
     SerialEntry
   >();
 
@@ -377,10 +397,12 @@ export class OCPPMessageHandler {
     this._webSocket = webSocket;
     this._logger = logger;
     this._codec = codec;
+    this._bootGate = new BootGate(chargePoint.clock);
     this._pendingQueue = new PendingMessageQueue(
       chargePoint.id,
       chargePoint.database,
       QUEUED_ON_OCPP16,
+      chargePoint.clock,
     );
     // #528: `cp.update` can switch ocppVersion over the same --state-db,
     // leaving rows (e.g. TransactionEvent) a 1.6 CSMS does not know.
@@ -399,12 +421,19 @@ export class OCPPMessageHandler {
       defer: (run) => queueMicrotask(run),
       log: (message) => this._logger.info(message, LogType.OCPP),
     });
+    this._gate = new InboundCallGate({
+      ports: ports16(chargePoint),
+      registry: chargePoint.behaviors,
+      info: (message) => this._logger.info(message, LogType.OCPP),
+      warn: (message) => this._logger.warn(message, LogType.OCPP),
+    });
 
     // Register close-transaction callback for effect flushing (if available)
     if (this._webSocket.onCloseTransaction) {
-      this._webSocket.onCloseTransaction((finalized) =>
-        this._responseEffectQueue.flushAfterCloseFinalization(finalized),
-      );
+      this._webSocket.onCloseTransaction((finalized) => {
+        this._gate.abandonAll();
+        this._responseEffectQueue.flushAfterCloseFinalization(finalized);
+      });
     }
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
@@ -501,7 +530,11 @@ export class OCPPMessageHandler {
         at: transaction.startTime,
       },
     );
-    if (signedBegin) transaction.signedBeginOcmf = signedBegin.ocmf;
+    if (signedBegin) {
+      patchTransaction(this._chargePoint, connectorId, transaction, {
+        signedBeginOcmf: signedBegin.ocmf,
+      });
+    }
     this.sendRequest(
       OCPPAction.StartTransaction,
       messageId,
@@ -669,8 +702,9 @@ export class OCPPMessageHandler {
    *  but its answer goes to the caller, and to the result handlers only
    *  when `applyResponse` is set. */
   public async sendOcppCall(
-    request: OcppCallRequest,
+    originalRequest: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
+    let request = originalRequest;
     // ChargePoint.sendOcppCall checked the action against the 1.6 catalog,
     // every entry of which is an OCPPAction.
     const action = request.action as OCPPAction;
@@ -684,6 +718,22 @@ export class OCPPMessageHandler {
     if (warning && !request.skipValidation) {
       throw new OcppCallRejectedError("invalid_payload", warning);
     }
+    // The behaviors' beforeSend runs before the call is tracked, so the
+    // frame shown to the caller is the one that goes out.
+    const decision = behaviorTapOf(this._chargePoint).beforeSend(
+      action,
+      request.payload,
+    );
+    if ("drop" in decision) {
+      throw new OcppCallNoAnswerError(
+        "dropped",
+        `OCPP call ${action} dropped (dropped_by_behavior)`,
+      );
+    }
+    request = {
+      ...request,
+      payload: decision.payload as Record<string, unknown>,
+    };
     const id = this.generateMessageId();
     const answer = this._expertCalls.start(id, request);
     // Deliberately unchecked when skipValidation is set: sendRequest logs the
@@ -694,6 +744,8 @@ export class OCPPMessageHandler {
       request.payload as unknown as OcppMessageRequestPayload,
       this.connectorOf(request.payload),
       (reason) => this._expertCalls.onDropped(id, reason),
+      undefined,
+      true,
     );
     return answer;
   }
@@ -721,7 +773,7 @@ export class OCPPMessageHandler {
     const messageId = this.generateMessageId();
     const payload: SecurityEventNotificationRequestV16 = {
       type,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this.clock.now()).toISOString(),
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
     this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
@@ -886,7 +938,7 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
-    const timestamp = overrides.timestamp ?? new Date();
+    const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
     const transaction = connector.transaction;
@@ -966,6 +1018,8 @@ export class OCPPMessageHandler {
     connectorId?: number,
     onDropped?: (reason: string) => void,
     attempt?: number,
+    /** The behaviors' beforeSend already ran (the expert path). */
+    intercepted = false,
   ): void {
     if (!this.isCallAllowed(action)) {
       this._logger.warn(
@@ -974,7 +1028,16 @@ export class OCPPMessageHandler {
       );
       return;
     }
-    const warning = this._codec.outgoingWarning(action, payload);
+    // A CALL handed over while the socket is down is not transmitted, so
+    // beforeSend does not see it: it is queued as built and intercepted when
+    // it is replayed (once per transmission, like the 2.x handler).
+    let wire: OcppMessageRequestPayload | undefined;
+    if (!intercepted && this._webSocket.isConnected()) {
+      const decision = this.interceptOutgoing(action, payload, onDropped);
+      if (decision === "dropped") return;
+      wire = decision;
+    }
+    const warning = this._codec.outgoingWarning(action, wire ?? payload);
     if (warning) {
       this._logger.warn(warning, LogType.OCPP);
     }
@@ -985,11 +1048,43 @@ export class OCPPMessageHandler {
       action,
       id,
       payload,
+      ...(wire !== undefined && { wire }),
       connectorId,
       onDropped,
       attempt,
     });
     this.pumpSerialQueue();
+  }
+
+  /**
+   * The behaviors' beforeSend for one transmission. Returns the payload to
+   * write when a behavior changed it (`undefined`: unchanged), or "dropped"
+   * after telling the caller: nothing is queued and nothing is written, the
+   * serial queue is not held up.
+   */
+  private interceptOutgoing(
+    action: OCPPAction,
+    payload: OcppMessageRequestPayload,
+    onDropped?: (reason: string) => void,
+  ): OcppMessageRequestPayload | undefined | "dropped" {
+    const decision = behaviorTapOf(this._chargePoint).beforeSend(
+      action,
+      payload,
+    );
+    if ("drop" in decision) {
+      this._logger.warn(
+        `Dropping ${action}: a behavior's beforeSend dropped it`,
+        LogType.OCPP,
+      );
+      onDropped?.("dropped_by_behavior");
+      // A dropped Heartbeat is a Heartbeat the CSMS never answered: the
+      // idle timer still goes on, or the periodic Heartbeat would stop for good.
+      if (action === OCPPAction.Heartbeat) {
+        this._chargePoint.notifyOutgoingCall(false);
+      }
+      return "dropped";
+    }
+    return decision.payload as OcppMessageRequestPayload;
   }
 
   /**
@@ -1071,7 +1166,7 @@ export class OCPPMessageHandler {
       const accepted = this._webSocket.sendAction(
         head.id,
         head.action,
-        head.payload,
+        head.wire ?? head.payload,
         gen,
         (settlement) => this.onSerialSettled(head, settlement),
       );
@@ -1106,7 +1201,7 @@ export class OCPPMessageHandler {
       this._chargePoint.notifyOutgoingCall(
         head.action === OCPPAction.Heartbeat,
       );
-      const timer = setTimeout(
+      const timer = this.clock.setTimeout(
         () => this.handleSerialTimeout(head.id),
         OCPPMessageHandler.SERIAL_CALL_TIMEOUT_MS,
       );
@@ -1167,7 +1262,7 @@ export class OCPPMessageHandler {
   private settleSerialInFlight(messageId: string): void {
     const cur = this._serialInFlight;
     if (!cur || cur.id !== messageId) return;
-    if (cur.phase === "written") clearTimeout(cur.timer);
+    if (cur.phase === "written") this.clock.clearTimeout(cur.timer);
     this._serialInFlight = null;
     this.pumpSerialQueue();
   }
@@ -1200,7 +1295,7 @@ export class OCPPMessageHandler {
   public onWebSocketClosed(): void {
     if (this._serialInFlight) {
       if (this._serialInFlight.phase === "written") {
-        clearTimeout(this._serialInFlight.timer);
+        this.clock.clearTimeout(this._serialInFlight.timer);
       }
       // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation).
       this._serialInFlight = null;
@@ -1216,7 +1311,7 @@ export class OCPPMessageHandler {
     // of the queued CALLs, which are younger. Replayed after the next boot,
     // it goes on with its count: §3.7.1 counts failures for this message.
     for (const [timer, resend] of this._transactionMessageRetries) {
-      clearTimeout(timer);
+      this.clock.clearTimeout(timer);
       this.salvageOrDiscard(resend, "socket_closed");
     }
     this._transactionMessageRetries.clear();
@@ -1290,12 +1385,14 @@ export class OCPPMessageHandler {
         );
         break;
       case OCPPMessageType.CALLRESULT:
+        this.observeAnswer(messageId, "result", payload);
         this.handleCallResult(
           messageId,
           payload as OcppMessagePayloadCallResult,
         );
         break;
       case OCPPMessageType.CALLERROR:
+        this.observeAnswer(messageId, "error", payload);
         this.handleCallError(messageId, payload as OcppMessageErrorPayload);
         break;
       default:
@@ -1306,84 +1403,55 @@ export class OCPPMessageHandler {
     }
   }
 
+  /** Tell the behaviors' `callResult` hooks the CSMS answered one of our CALLs. */
+  private observeAnswer(
+    messageId: string,
+    outcome: "result" | "error",
+    payload: unknown,
+  ): void {
+    const request = this._requests.get(messageId);
+    if (!request) return;
+    behaviorTapOf(this._chargePoint).observe({
+      type: "callResult",
+      action: request.action,
+      messageId,
+      outcome,
+      payload,
+    });
+  }
+
   private async handleCall(
     messageId: string,
     action: OCPPAction,
     payload: OcppMessagePayloadCall,
   ): Promise<void> {
+    behaviorTapOf(this._chargePoint).observe({
+      type: "callReceived",
+      action,
+      messageId,
+      payload,
+    });
     // Capture the generation at dispatch time (before the await) so a response
     // produced by an async handler settles against its originating generation.
     const gen = this._webSocket.currentGeneration();
+    const exchange = this.openExchange(messageId, action, gen);
 
-    // Issue #110: surface every incoming CSMS call to the scenario layer
-    // (csmsCallTrigger nodes), regardless of handler outcome. #396: the
-    // control plane announces it too, and every answer below reports
-    // itself through sendCallResult / sendCallError.
-    this._chargePoint.notifyIncomingCall(action, payload, messageId);
-
-    // Issue #247: inbound call policy — if set, enforce it before handler lookup.
-    // Unlike responseOverride (one-shot), policies are sticky and survive reconnects.
-    const inboundPolicy = this._chargePoint.getInboundCallPolicy(action);
-    if (inboundPolicy) {
-      if (inboundPolicy.kind === "callerror") {
-        this._logger.warn(
-          `Inbound policy: replied CallError(${inboundPolicy.errorCode}) to ${action}`,
-          LogType.OCPP,
-        );
-        this.sendCallError(
-          action,
-          messageId,
-          inboundPolicy.errorCode as OCPPErrorCode,
-          inboundPolicy.errorDescription,
-          gen,
-        );
-        return;
-      } else if (inboundPolicy.kind === "ignore") {
-        this._logger.warn(
-          `Inbound policy: ignored ${action} (no response)`,
-          LogType.OCPP,
-        );
-        this.ignoreCall(action, messageId);
-        return;
-      }
-    }
-
-    // Issue #110: a scenario responseOverride node may have armed a
-    // one-shot canned response for this action (e.g. RemoteStartTransaction
-    // → Rejected for TC_026). It replaces the handler entirely, so the legacy
-    // remoteStartReceived/remoteStopReceived delegation never fires — scenarios
-    // combining an override with a wait must use the generic csmsCallTrigger.
-    const overrideStatus = this._chargePoint.consumeResponseOverride(action);
-    if (overrideStatus !== null) {
-      this._logger.info(
-        `Response override: ${action} → { status: "${overrideStatus}" }`,
-        LogType.OCPP,
-      );
-      // Response overrides intentionally carry a caller-chosen status
-      // string (e.g. "Rejected" for TC_026); the closed response union
-      // can't express that, so assert the shape at this one call site.
-      this.sendCallResult(
-        action,
-        messageId,
-        {
-          status: overrideStatus,
-        } as OcppMessageResponsePayload,
-        gen,
-      );
-      return;
-    }
+    // The gate announces the CALL (issue #110, #396: csmsCallTrigger nodes and
+    // the control plane), then applies the inbound policy (#247, sticky) and a
+    // one-shot response override (#110; it replaces the handler entirely, so
+    // the legacy remoteStartReceived/remoteStopReceived delegation never fires
+    // — scenarios combining an override with a wait must use the generic
+    // csmsCallTrigger). Every answer reports itself through the exchange.
+    if (this._gate.admit(exchange, payload).kind === "settled") return;
 
     // Use registry to get handler
     const handler = this._registry.getCallHandler(action);
 
     if (!handler) {
       this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
-      this.sendCallError(
-        action,
-        messageId,
+      exchange.replyError(
         OCPPErrorCodeV16.NotImplemented,
         "This action is not supported",
-        gen,
       );
       return;
     }
@@ -1400,26 +1468,45 @@ export class OCPPMessageHandler {
       const { payload: normalizedPayload, effect } = normalizeHandlerResult(
         rawResult as HandlerResult,
       );
-      const onSettled = effect
-        ? this._responseEffectQueue.register(gen, effect)
-        : undefined;
-      this.sendCallResult(
-        action,
-        messageId,
-        normalizedPayload as OcppMessageResponsePayload,
-        gen,
-        onSettled,
-      );
+      exchange.reply(normalizedPayload, {
+        ...(effect ? { effect } : {}),
+      });
     } catch (error) {
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
-      this.sendCallError(
-        action,
-        messageId,
-        OCPPErrorCodeV16.InternalError,
-        String(error),
-        gen,
-      );
+      if (exchange.state === "open") {
+        exchange.replyError(OCPPErrorCodeV16.InternalError, String(error));
+      }
     }
+  }
+
+  /** The exchange of one inbound CALL, bound to this socket's generation. */
+  private openExchange(
+    messageId: string,
+    action: string,
+    generation: GenerationToken,
+  ): CallExchange {
+    const exchange = new CallExchange({
+      action,
+      messageId,
+      generation,
+      isGenerationCurrent: (g) =>
+        g.gen === this._webSocket.currentGeneration().gen,
+      announce: (completion) =>
+        this._chargePoint.notifyIncomingCallCompleted(completion),
+      writeResult: (payload, gen, onSettled) =>
+        this._webSocket.sendResult(messageId, payload, gen, onSettled),
+      writeError: (errorCode, errorDescription, gen, onSettled) =>
+        this._webSocket.sendError(
+          messageId,
+          { errorCode: errorCode as OCPPErrorCode, errorDescription },
+          gen,
+          onSettled,
+        ),
+      effects: this._responseEffectQueue,
+      warn: (message) => this._logger.warn(message, LogType.OCPP),
+    });
+    this._gate.track(exchange);
+    return exchange;
   }
 
   private handleCallResult(
@@ -1649,7 +1736,7 @@ export class OCPPMessageHandler {
       attempt: attempt + 1,
       lastErrorCode: errorCode,
     };
-    const timer = setTimeout(() => {
+    const timer = this.clock.setTimeout(() => {
       this._transactionMessageRetries.delete(timer);
       // The boot gate closed meanwhile (a BootNotification answered
       // Pending): sendRequest would drop the resend. It waits in the
@@ -1658,10 +1745,29 @@ export class OCPPMessageHandler {
         this.salvageOrDiscard(resend, "boot gate");
         return;
       }
-      this._serialQueue.push({ ...resend, id: this.generateMessageId() });
+      // A resend is a new transmission: the behaviors see it again, starting
+      // from the payload as built (the same rule as a replay from the offline
+      // queue, and as on 2.x).
+      let wire: OcppMessageRequestPayload | undefined;
+      if (this._webSocket.isConnected()) {
+        const decision = this.interceptOutgoing(resend.action, resend.payload);
+        if (decision === "dropped") {
+          this._logger.warn(
+            `${resend.action} resend dropped by a behavior's beforeSend; the message is not sent again`,
+            LogType.TRANSACTION,
+          );
+          return;
+        }
+        wire = decision;
+      }
+      this._serialQueue.push({
+        ...resend,
+        ...(wire !== undefined && { wire }),
+        id: this.generateMessageId(),
+      });
       this.pumpSerialQueue();
     }, delayMs);
-    unrefTimer(timer);
+    unrefTimerHandle(timer);
     this._transactionMessageRetries.set(timer, resend);
     // After the timer is tracked: a listener closing the link must find it
     // in `_transactionMessageRetries`, or it would fire after the close.
@@ -1776,64 +1882,20 @@ export class OCPPMessageHandler {
   // All handler methods have been moved to individual handler classes
   // See packages/core/src/cp/handlers/ directory
 
-  private sendCallResult(
-    action: string,
-    messageId: string,
-    payload: OcppMessageResponsePayload,
-    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
-    onSettled?: (s: Settlement) => void,
-  ): void {
-    this._chargePoint.notifyIncomingCallCompleted({
-      action,
-      messageId,
-      outcome: "CallResult",
-    });
-    // Callers without a dispatch-captured generation (response overrides,
-    // unsupported-action errors) respond in the current generation.
-    this._webSocket.sendResult(
-      messageId,
-      payload,
-      gen ?? this._webSocket.currentGeneration(),
-      onSettled,
-    );
+  /** The charge point's clock (the platform clock for a stand-in without one). */
+  private get clock(): SimClock {
+    return clockOf(this._chargePoint);
   }
 
-  /** Leave an inbound CSMS CALL unanswered, announcing it (#396). */
-  private ignoreCall(action: string, messageId: string): void {
-    this._chargePoint.notifyIncomingCallCompleted({
-      action,
-      messageId,
-      outcome: "NoResponse",
-    });
-  }
-
-  private sendCallError(
-    action: string,
-    messageId: string,
-    errorCode: OCPPErrorCode,
-    errorDescription: string,
-    gen?: ReturnType<typeof this._webSocket.currentGeneration>,
-    onSettled?: (s: Settlement) => void,
-  ): void {
-    this._chargePoint.notifyIncomingCallCompleted({
-      action,
-      messageId,
-      outcome: "CallError",
-      errorCode,
-    });
-    const errorDetails = {
-      errorCode: errorCode,
-      errorDescription: errorDescription,
-    };
-    this._webSocket.sendError(
-      messageId,
-      errorDetails,
-      gen ?? this._webSocket.currentGeneration(),
-      onSettled,
-    );
+  /** A random stream of the charge point (system randomness for a stand-in). */
+  private rng(name: string): Rng {
+    const cp = this._chargePoint as { id: string; rng?: (n: string) => Rng };
+    return typeof cp.rng === "function"
+      ? cp.rng(name)
+      : systemRngStreams.stream(cp.id, name);
   }
 
   private generateMessageId(): string {
-    return crypto.randomUUID();
+    return this.rng("message-id").uuid();
   }
 }

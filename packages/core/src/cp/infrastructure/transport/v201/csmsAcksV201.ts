@@ -6,16 +6,12 @@ import type {
   DataTransferResponseV201,
   GetDisplayMessagesResponseV201,
   GetLocalListVersionResponseV201,
-  GetLogResponseV201,
   PublishFirmwareResponseV201,
   SendLocalListRequestV201,
   SendLocalListResponseV201,
   SetDisplayMessageResponseV201,
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
-  UpdateFirmwareResponseV201,
-  UpdateFirmwareRequestV201,
-  GetLogRequestV201,
 } from "@ocpp-cp-sim/ocpp/index";
 import type {
   V201HandlerResult,
@@ -114,30 +110,20 @@ export const handleSendLocalListAckV201 = ((
 }) satisfies V201AckHandler;
 
 /**
- * N01 GetLog.req (#345). Accepted with a filename, and the `requestId` is
- * remembered for the LogStatusNotification reports that follow — driven over
- * the control plane (`log_status_notification`); nothing is uploaded. Before,
- * this answered `Rejected`, so no log lifecycle could start.
+ * N01 GetLog.req (#345): translation only. The `default.logs` behavior of the
+ * charger engine accepts it with a filename and remembers the `requestId` for
+ * the LogStatusNotification reports the control plane drives; nothing is
+ * uploaded.
  */
 export const handleGetLogAckV201 = ((
   payload: unknown,
-  ctx?: V201InboundContext,
+  ctx: V201InboundContext,
 ): V201HandlerResult => {
-  const request = payload as GetLogRequestV201;
-  if (ctx && typeof request?.requestId === "number") {
-    ctx.chargePoint.noteLogRequest(request.requestId);
-  }
-  const logType = request?.logType ?? "DiagnosticsLog";
-  return {
-    response: {
-      status: "Accepted",
-      // GetLogResponse.filename is bounded at 255 in the 2.0.1 schema.
-      filename:
-        `${ctx?.chargePoint.id ?? "cp"}-${logType}-${request?.requestId ?? 0}.log`.slice(
-          -255,
-        ),
-    } satisfies GetLogResponseV201,
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "GetLog",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 }) satisfies V201AckHandler;
 
 export const handleSetDisplayMessageAckV201 = (() => ({
@@ -191,25 +177,21 @@ export const handleUnpublishFirmwareAckV201 = (() => ({
 })) satisfies V201AckHandler;
 
 /**
- * L01 UpdateFirmware.req (#345). Accepted, and the `requestId` is remembered
- * so the FirmwareStatusNotification reports that follow can name this
- * lifecycle without the caller repeating it. Nothing is downloaded: unlike the
- * 1.6 handler, the 2.0.1 station does not walk the status machine on its own —
- * the reports are driven over the control plane (`firmware_status_notification`),
- * which is what a conformance suite needs to say the right things in the
- * right order. Before, this answered `Rejected`, so no lifecycle could start.
+ * L01 UpdateFirmware.req (#345): translation only. The `default.firmware`
+ * behavior of the charger engine accepts the request and remembers its
+ * `requestId`; nothing is downloaded, and the reports that follow are driven
+ * over the control plane (`firmware_status_notification`). A user behavior
+ * can opt in to a status train.
  */
 export const handleUpdateFirmwareAckV201 = ((
   payload: unknown,
-  ctx?: V201InboundContext,
+  ctx: V201InboundContext,
 ): V201HandlerResult => {
-  const request = payload as UpdateFirmwareRequestV201;
-  if (ctx && typeof request?.requestId === "number") {
-    ctx.chargePoint.noteFirmwareRequest(request.requestId);
-  }
-  return {
-    response: { status: "Accepted" } satisfies UpdateFirmwareResponseV201,
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "UpdateFirmware",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 }) satisfies V201AckHandler;
 
 export const handleGetLocalListVersionAckV201 = ((

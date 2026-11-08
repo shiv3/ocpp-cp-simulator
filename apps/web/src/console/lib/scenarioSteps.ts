@@ -14,7 +14,9 @@ import {
   type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
+  type CallResponseNodeData,
   type OcppCallNodeData,
+  type UseBehaviorNodeData,
   type RemoteStartTriggerNodeData,
   type RemoteStopTriggerNodeData,
   type ReservationTriggerNodeData,
@@ -625,6 +627,27 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           payload: {},
         } satisfies OcppCallNodeData,
       };
+    case ScenarioNodeType.CALL_RESPONSE:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Call response",
+          kind: "result",
+          payload: {},
+        } satisfies CallResponseNodeData,
+      };
+    case ScenarioNodeType.USE_BEHAVIOR:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Use behavior",
+          behaviorId: "",
+        } satisfies UseBehaviorNodeData,
+      };
     case ScenarioNodeType.CSMS_CALL_TRIGGER:
       return {
         id,
@@ -783,7 +806,7 @@ export function stepSummary(node: ScenarioNode): string {
     }
     case ScenarioNodeType.CSMS_CALL_TRIGGER: {
       const d = node.data as CsmsCallTriggerNodeData;
-      return `wait ${d.action}${d.payload ? " · payload" : ""}${d.timeout ? ` · ${d.timeout}s` : ""}`;
+      return `wait ${d.action}${d.behavior === "replace" ? " · replace" : ""}${d.payload ? " · payload" : ""}${d.timeout ? ` · ${d.timeout}s` : ""}`;
     }
     case ScenarioNodeType.RESERVATION_TRIGGER: {
       const d = node.data as ReservationTriggerNodeData;
@@ -844,6 +867,20 @@ export function stepSummary(node: ScenarioNode): string {
       const d = node.data as OcppCallNodeData;
       return d.skipValidation ? `${d.action} (unvalidated)` : d.action;
     }
+    case ScenarioNodeType.CALL_RESPONSE: {
+      const d = node.data as CallResponseNodeData;
+      const what =
+        d.kind === "error"
+          ? `CALLERROR ${d.errorCode ?? "GenericError"}`
+          : d.kind === "none"
+            ? "no answer"
+            : "CALLRESULT";
+      return d.skipValidation ? `${what} (unvalidated)` : what;
+    }
+    case ScenarioNodeType.USE_BEHAVIOR: {
+      const d = node.data as UseBehaviorNodeData;
+      return d.behaviorId;
+    }
     default:
       return label;
   }
@@ -902,6 +939,8 @@ export const STEP_CATEGORIES: ReadonlyArray<{
       ScenarioNodeType.DATA_TRANSFER,
       ScenarioNodeType.NOTIFICATION,
       ScenarioNodeType.OCPP_CALL,
+      ScenarioNodeType.CALL_RESPONSE,
+      ScenarioNodeType.USE_BEHAVIOR,
       ScenarioNodeType.RESERVE_NOW,
       ScenarioNodeType.CANCEL_RESERVATION,
     ],

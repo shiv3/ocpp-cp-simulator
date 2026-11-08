@@ -12,7 +12,7 @@ related:
   - ../entities/cli.md
   - control-plane.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Access control
@@ -130,12 +130,13 @@ consequences worth stating, because `--watch` (#314) made them concrete:
 
 The CORS policy depends on the bind address and any `--cors-origin` flags:
 
-| Bind                          | `--cors-origin` flag       | Effective policy                                                                                                                                                         |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Loopback (`127.0.0.1`, etc.)  | _(none)_                   | **`any`** — `*` echoed back. Safe because nothing off-host can reach loopback anyway.                                                                                    |
-| Non-loopback (`0.0.0.0`, LAN) | _(none)_                   | **`same-origin`** — only requests whose `Origin` matches the request `Host` are allowed (plus non-browser callers with no `Origin` header). A warning is logged at boot. |
-| Any                           | `--cors-origin <url>` (×N) | **`allowlist`** — only the listed origins are echoed back.                                                                                                               |
-| Any                           | `--cors-origin "*"`        | **`any`** — explicit opt-in to open CORS.                                                                                                                                |
+| Bind                          | `--cors-origin` flag                  | Effective policy                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Loopback (`127.0.0.1`, etc.)  | _(none)_                              | **`any`** — `*` echoed back. Safe because nothing off-host can reach loopback anyway.                                                                                                                                                                                                                                                                                                                                                     |
+| Any                           | _(none)_ with `--allow-behavior-code` | **`same-origin`**, also on loopback: a page in the operator's browser must not drive a daemon that runs behavior code. The request's `Host` must also be an IP literal, `localhost` or the bind address, so a page on a DNS name rebound to the daemon (whose `Origin` equals its `Host`) is refused too. One line is logged at boot. A console on another origin needs `--cors-origin <its origin>`; `--cors-origin "*"` opens it again. |
+| Non-loopback (`0.0.0.0`, LAN) | _(none)_                              | **`same-origin`** — only requests whose `Origin` matches the request `Host` are allowed (plus non-browser callers with no `Origin` header). A warning is logged at boot.                                                                                                                                                                                                                                                                  |
+| Any                           | `--cors-origin <url>` (×N)            | **`allowlist`** — only the listed origins are echoed back.                                                                                                                                                                                                                                                                                                                                                                                |
+| Any                           | `--cors-origin "*"`                   | **`any`** — explicit opt-in to open CORS.                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 For browser UIs hosted on a different origin, allowlist them:
 

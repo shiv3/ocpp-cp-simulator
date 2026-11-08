@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.4)",
-  "$comment": "Scenario file format v1.4 (issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.5)",
+  "$comment": "Scenario file format v1.5 (csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -220,6 +220,17 @@
         "animated": { "type": "boolean" }
       }
     },
+    "callResponseSpec": {
+      "$comment": "v1.5 (#566). How a scenario answers a CALL it owns: a CALLRESULT with `payload`, a CALLERROR with `errorCode` / `errorDescription`, or silence (`none`).",
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["result", "error", "none"] },
+        "payload": { "type": "object" },
+        "errorCode": { "type": "string" },
+        "errorDescription": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
     "baseNodeData": {
       "type": "object",
       "additionalProperties": true,
@@ -261,7 +272,9 @@
             "inboundPolicy",
             "certQuirks",
             "connectionTrigger",
-            "ocppCall"
+            "ocppCall",
+            "callResponse",
+            "useBehavior"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -400,7 +413,15 @@
                 "properties": {
                   "action": { "type": "string" },
                   "timeout": { "type": "number" },
-                  "payload": { "type": "object" }
+                  "payload": { "type": "object" },
+                  "behavior": {
+                    "$comment": "v1.5 (#566). `observe` (default): the station answers, the node only waits for the arrival. `replace`: the scenario owns the CALL until a callResponse node answers it. Not available on SOAP stations (the run fails when the node arms).",
+                    "enum": ["observe", "replace"]
+                  },
+                  "onBusy": {
+                    "$comment": "v1.5 (#566). What a second matching CALL gets while the first is unanswered; only meaningful with behavior \"replace\". Default: CALLERROR GenericError.",
+                    "$ref": "#/$defs/callResponseSpec"
+                  }
                 }
               }
             }
@@ -559,6 +580,35 @@
                   "payload": { "type": "object" },
                   "skipValidation": { "type": "boolean" },
                   "applyResponse": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "callResponse" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.5 (#566). Answers the CALL the nearest csmsCallTrigger with behavior \"replace\" of this branch took over, and waits until the answer settled. A `payload` may hold {\"$from\": \"call.payload.<key>\"} as a whole value, resolved against that CALL. Fails the run if the branch holds no CALL or the answer was not delivered.",
+                "required": ["kind"],
+                "allOf": [{ "$ref": "#/$defs/callResponseSpec" }],
+                "properties": {
+                  "skipValidation": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "useBehavior" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.5 (#566). Selects a behavior loaded on the station by id. Data only: the code is loaded with the station, never by a scenario. Fails the run if no loaded behavior has that id.",
+                "required": ["behaviorId"],
+                "properties": {
+                  "behaviorId": { "type": "string", "minLength": 1 }
                 }
               }
             }

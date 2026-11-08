@@ -1238,3 +1238,26 @@ a spare machine and a CSMS.
   typecheck it directly with `npx tsc --noEmit -p scripts/bench/tsconfig.json`.
   It is a `composite` project referenced from the root `tsconfig.json`, so
   `tsc -b` covers it too rather than leaving it orphaned.
+
+## engineScale.ts — how many simulated chargers fit in one process
+
+Not the daemon benchmark above: this one needs no daemon and no CSMS. It runs N
+simulated chargers in **one Bun process on a `VirtualClock`** and reports heap
+and RSS per charger and the real time one virtual hour takes
+([charger engine migration → Verification results](../../docs/analyses/charger-engine-migration.md#verification-results)).
+
+```sh
+bun scripts/bench/engineScale.ts --suite                 # the table, one process per row
+bun scripts/bench/engineScale.ts --mode bare --n 10000   # a bare async behavior loop per charger
+bun scripts/bench/engineScale.ts --mode cp --n 10000     # a real ChargePoint per charger, in-memory socket
+bun scripts/bench/engineScale.ts --mode cp-ws --n 1000   # real WebSockets to a CSMS in another process
+```
+
+- `bare`: an async loop per charger (sleep 30–90 s, a Heartbeat answered after a
+  promise job, every tenth raced against a deadline). No `ChargePoint`.
+- `cp`: a real `ChargePoint` per charger (engine, handlers, connectors, logger with
+  every type off, no database) with the same behavior loaded, talking to an
+  in-process 1.6J CSMS over an in-memory WebSocket.
+- Heap is the JSC heap after a full GC (`heapStats`, because `process.memoryUsage().heapUsed`
+  does not follow it in Bun); RSS is the process's. Each row is its own process.
+- Not included: a database per charger, a log sink, the UI, the CSMS's own memory.

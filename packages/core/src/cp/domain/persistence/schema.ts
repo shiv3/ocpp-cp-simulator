@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 24;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -179,6 +179,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- Operator labels as a JSON object of string values (#446), e.g.
   -- {"site":"oberkirch-01","env":"lab"}. NULL when the charge point has none.
   labels         TEXT,
+  -- Ids of the loaded behaviors (--behavior) this charge point runs, a JSON
+  -- array of strings. NULL: every loaded behavior (the default).
+  behaviors      TEXT,
   -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
   -- TransactionEvent(Updated); NULL (a row older than the column) is off.
   tx_updated_meter_values INTEGER
@@ -238,6 +241,15 @@ CREATE TABLE IF NOT EXISTS connector_runtime (
   scenario_position_json           TEXT,
   updated_at                       TEXT NOT NULL,
   PRIMARY KEY (cp_id, connector_id)
+);
+
+-- The charger engine's own state across a restart: the firmware, log and
+-- diagnostics statuses and the \`ctx.state\` of behavior code, as one JSON
+-- document per charge point. Connectors keep their rows in \`connector_runtime\`.
+CREATE TABLE IF NOT EXISTS engine_state (
+  cp_id      TEXT PRIMARY KEY,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 -- Finished scenario runs (#388): the history \`scenario.runs.list\` pages
@@ -368,6 +380,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "blueprints", perCp: false, resetOnStateReset: true },
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
+  { name: "engine_state", perCp: true, resetOnStateReset: true },
   { name: "scenario_runs", perCp: true, resetOnStateReset: true },
   { name: "charging_sessions", perCp: true, resetOnStateReset: true },
   { name: "vehicle_profiles", perCp: false, resetOnStateReset: true },
@@ -708,6 +721,21 @@ export function runMigrations(db: Database): void {
       db.exec(
         "ALTER TABLE charge_points ADD COLUMN tx_updated_meter_values INTEGER",
       );
+    }
+  }
+
+  // v22 → v23: the `engine_state` table (charger engine: notification statuses
+  // and behavior `ctx.state`), `IF NOT EXISTS` in SCHEMA_SQL like the v14 step.
+  // Additive: a database of an earlier version loads with no row, which reads
+  // as the initial state.
+
+  // v23 → v24: `charge_points.behaviors`, the ids of the loaded behaviors a
+  // charge point runs. NULL (every row of an older database) means all of
+  // them, which is what ran before. Guarded like the v16 column.
+  if (stored < 24) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("behaviors")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN behaviors TEXT");
     }
   }
 

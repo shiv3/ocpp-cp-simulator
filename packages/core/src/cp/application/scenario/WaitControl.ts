@@ -1,4 +1,6 @@
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
 
 /** What an operator asked a parked wait to do instead of waiting on (#240). */
 export type WaitSignal = "retry" | "continue";
@@ -19,9 +21,9 @@ export class WaitControl {
   readonly expired: Promise<never>;
   readonly signal: Promise<WaitSignal>;
 
-  private readonly startedAt = Date.now();
+  private readonly startedAt: number;
   private totalMs: number;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: TimerHandle | null = null;
   private rejectExpired: (error: Error) => void = () => {};
   private resolveSignal: (signal: WaitSignal) => void = () => {};
   private readonly timeoutError: (totalSeconds: number) => Error;
@@ -29,7 +31,9 @@ export class WaitControl {
   constructor(
     timeoutMs: number,
     timeoutError: (totalSeconds: number) => Error,
+    private readonly clock: SimClock = realClock,
   ) {
+    this.startedAt = this.clock.now();
     this.timeoutError = timeoutError;
     this.totalMs = Math.max(0, timeoutMs);
     this.expired = new Promise<never>((_, reject) => {
@@ -50,7 +54,7 @@ export class WaitControl {
   }
 
   /** Ms left before the deadline (never negative); null without one. */
-  remainingMs(now = Date.now()): number | null {
+  remainingMs(now = this.clock.now()): number | null {
     const deadline = this.deadlineAt;
     return deadline === null ? null : Math.max(0, deadline - now);
   }
@@ -82,7 +86,7 @@ export class WaitControl {
   }
 
   dispose(): void {
-    if (this.timer) clearTimeout(this.timer);
+    if (this.timer) this.clock.clearTimeout(this.timer);
     this.timer = null;
   }
 
@@ -90,7 +94,7 @@ export class WaitControl {
     this.dispose();
     const remaining = this.remainingMs();
     if (remaining === null) return;
-    this.timer = setTimeout(
+    this.timer = this.clock.setTimeout(
       () => this.rejectExpired(this.timeoutError(this.totalSeconds)),
       remaining,
     );

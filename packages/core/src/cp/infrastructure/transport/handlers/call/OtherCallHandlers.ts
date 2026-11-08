@@ -12,6 +12,7 @@ import type {
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";
+import { defaultBehavior16 } from "./defaultBehavior";
 
 export class ChangeConfigurationHandler implements CallHandler<
   ChangeConfigurationRequestV16,
@@ -166,10 +167,10 @@ export class ClearCacheHandler implements CallHandler<
 }
 
 /**
- * §5.18: if a transaction is running on the target connector, finish it
- * first (reason=UnlockCommand per §7.36), then return the connector's
- * configured unlock response. The default is `Unlocked`; scenarios can
- * flip this to `UnlockFailed` or `NotSupported` to verify CSMS error paths.
+ * §5.18 UnlockConnector.req: translation only. The charger engine's
+ * `default.unlock` behavior stops a transaction in flight (reason
+ * `UnlockCommand`, §7.36) and returns the connector's configured unlock
+ * response (`application/engine/behaviors/unlock.ts`).
  */
 export class UnlockConnectorHandler implements CallHandler<
   UnlockConnectorRequestV16,
@@ -179,30 +180,10 @@ export class UnlockConnectorHandler implements CallHandler<
     payload: UnlockConnectorRequestV16,
     context: HandlerContext,
   ): UnlockConnectorResponseV16 {
-    const { connectorId } = payload;
-    const connector = context.chargePoint.getConnector(connectorId);
-    if (!connector) {
-      context.logger.warn(
-        `UnlockConnector: unknown connectorId=${connectorId}`,
-        LogType.OCPP,
-      );
-      // §7.46: NotSupported also covers the "unknown ConnectorId" case
-      // (errata 3.87).
-      return { status: "NotSupported" };
-    }
-
-    if (connector.transaction) {
-      context.logger.info(
-        `UnlockConnector: stopping in-flight transaction on connector ${connectorId}`,
-        LogType.OCPP,
-      );
-      context.chargePoint.stopTransaction(connector, "UnlockCommand");
-    }
-
-    context.logger.info(
-      `UnlockConnector connector=${connectorId} → ${connector.unlockResponse}`,
-      LogType.OCPP,
-    );
-    return { status: connector.unlockResponse };
+    return defaultBehavior16(
+      context.chargePoint,
+      "UnlockConnector",
+      payload,
+    ) as UnlockConnectorResponseV16;
   }
 }

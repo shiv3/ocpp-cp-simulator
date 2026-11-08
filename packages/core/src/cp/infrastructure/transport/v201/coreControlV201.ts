@@ -2,28 +2,26 @@
 // reservations have protocol-visible effects here; reset/unlock side effects
 // are deferred to a later fidelity phase.
 import type {
-  CancelReservationRequestV201,
   CancelReservationResponseV201,
-  ChangeAvailabilityRequestV201,
   ChangeAvailabilityResponseV201,
   ClearCacheResponseV201,
-  ReserveNowRequestV201,
   ReserveNowResponseV201,
-  ResetRequestV201,
   ResetResponseV201,
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
-  UnlockConnectorRequestV201,
   UnlockConnectorResponseV201,
 } from "@ocpp-cp-sim/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
-import type { OCPPAvailability } from "../../../domain/types/OcppTypes";
-import { OCPPStatus, ReservationStatus } from "../../../domain/types/OcppTypes";
 import { LogType } from "../../../shared/Logger";
 
+/**
+ * B11 / B12 Reset.req: translation only. The `default.reset` behavior of the
+ * charger engine answers and resets once the answer settled
+ * (`application/engine/behaviors/reset.ts`).
+ */
 export const handleResetV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -33,54 +31,18 @@ export const handleResetV201 = (
       response: { status: "Accepted" } satisfies ResetResponseV201,
     };
   }
-
-  const req = payload as ResetRequestV201;
-  const type: string = req.type;
-  const { evseId } = req;
-  const all = [...ctx.chargePoint.connectors.values()];
-  const targets =
-    evseId === undefined
-      ? all
-      : all.filter((connector) => connector.id === evseId);
-
-  if (evseId !== undefined && targets.length === 0) {
-    return {
-      response: { status: "Rejected" } satisfies ResetResponseV201,
-    };
-  }
-
-  if (
-    type === "OnIdle" &&
-    targets.some((connector) => connector.hasRunningTransaction)
-  ) {
-    return {
-      response: { status: "Scheduled" } satisfies ResetResponseV201,
-      afterResult: () => ctx.chargePoint.scheduleResetOnIdle(evseId),
-    };
-  }
-
-  return {
-    response: { status: "Accepted" } satisfies ResetResponseV201,
-    afterResult: () => {
-      if (type !== "ImmediateAndResume") {
-        ctx.chargePoint.cancelPendingResetsOnIdle(evseId);
-        for (const connector of targets) {
-          if (connector.hasRunningTransaction) {
-            ctx.chargePoint.stopTransaction(connector.id, "HardReset", {
-              triggerReason: "ResetCommand",
-            });
-          }
-        }
-      }
-      ctx.chargePoint.boot();
-    },
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "Reset",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };
 
-function availabilityStatus(target: OCPPAvailability): OCPPStatus {
-  return target === "Operative" ? OCPPStatus.Available : OCPPStatus.Unavailable;
-}
-
+/**
+ * G03 ChangeAvailability.req: translation only. The `default.availability`
+ * behavior of the charger engine decides and applies the change once the
+ * answer settled (`application/engine/behaviors/availability.ts`).
+ */
 export const handleChangeAvailabilityV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -90,76 +52,17 @@ export const handleChangeAvailabilityV201 = (
       response: { status: "Accepted" } satisfies ChangeAvailabilityResponseV201,
     };
   }
-
-  const req = payload as ChangeAvailabilityRequestV201;
-  const target: OCPPAvailability = req.operationalStatus;
-  const connectorId = req.evse?.id;
-  const nextStatus = availabilityStatus(target);
-
-  if (connectorId === undefined) {
-    const activeConnectors = Array.from(
-      ctx.chargePoint.connectors.values(),
-    ).filter((connector) => connector.transaction);
-    if (activeConnectors.length > 0) {
-      return {
-        response: {
-          status: "Scheduled",
-        } satisfies ChangeAvailabilityResponseV201,
-        afterResult: () => {
-          for (const connector of activeConnectors) {
-            connector.scheduledAvailability = target;
-          }
-        },
-      };
-    }
-
-    return {
-      response: {
-        status: "Accepted",
-      } satisfies ChangeAvailabilityResponseV201,
-      afterResult: () => {
-        ctx.chargePoint.updateConnectorStatus(0, nextStatus);
-        for (const connector of ctx.chargePoint.connectors.values()) {
-          connector.availability = target;
-          ctx.chargePoint.updateConnectorStatus(connector.id, nextStatus);
-        }
-        ctx.chargePoint.persistAvailability();
-      },
-    };
-  }
-
-  const connector = ctx.chargePoint.getConnector(connectorId);
-  if (!connector) {
-    return {
-      response: {
-        status: "Rejected",
-      } satisfies ChangeAvailabilityResponseV201,
-    };
-  }
-
-  if (connector.transaction) {
-    return {
-      response: {
-        status: "Scheduled",
-      } satisfies ChangeAvailabilityResponseV201,
-      afterResult: () => {
-        connector.scheduledAvailability = target;
-      },
-    };
-  }
-
-  return {
-    response: {
-      status: "Accepted",
-    } satisfies ChangeAvailabilityResponseV201,
-    afterResult: () => {
-      connector.availability = target;
-      ctx.chargePoint.updateConnectorStatus(connectorId, nextStatus);
-      ctx.chargePoint.persistAvailability();
-    },
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "ChangeAvailability",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };
 
+/**
+ * F05 UnlockConnector.req: translation only. The `default.unlock` behavior of
+ * the charger engine decides (`application/engine/behaviors/unlock.ts`).
+ */
 export function handleUnlockConnectorV201(): V201HandlerResult;
 export function handleUnlockConnectorV201(
   payload: unknown,
@@ -174,32 +77,11 @@ export function handleUnlockConnectorV201(
       response: { status: "Unlocked" } satisfies UnlockConnectorResponseV201,
     };
   }
-
-  const req = payload as UnlockConnectorRequestV201;
-  const connector = ctx.chargePoint.getConnector(req.evseId);
-  if (!connector) {
-    return {
-      response: {
-        status: "UnknownConnector",
-      } satisfies UnlockConnectorResponseV201,
-    };
-  }
-
-  if (connector.transaction) {
-    // OCPP 2.0.1: do not unlock or stop an ongoing authorized transaction.
-    return {
-      response: {
-        status: "OngoingAuthorizedTransaction",
-      } satisfies UnlockConnectorResponseV201,
-    };
-  }
-
-  return {
-    response: {
-      status:
-        connector.unlockResponse === "Unlocked" ? "Unlocked" : "UnlockFailed",
-    } satisfies UnlockConnectorResponseV201,
-  };
+  const { response } = ctx.chargePoint.engine.runDefault(
+    "UnlockConnector",
+    payload,
+  );
+  return { response };
 }
 
 export const handleTriggerMessageV201 = (
@@ -303,6 +185,11 @@ export const handleClearCacheV201 = (
   return { response: { status } satisfies ClearCacheResponseV201 };
 };
 
+/**
+ * H01 ReserveNow.req: translation only. The `default.reservation` behavior of
+ * the charger engine decides and reserves the connector once the answer
+ * settled (`application/engine/behaviors/reservation.ts`).
+ */
 export const handleReserveNowV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -312,58 +199,14 @@ export const handleReserveNowV201 = (
       response: { status: "Accepted" } satisfies ReserveNowResponseV201,
     };
   }
-
-  const req = payload as ReserveNowRequestV201;
-  const connectorId = req.evseId ?? 1;
-  const connector = ctx.chargePoint.getConnector(connectorId);
-
-  if (!connector) {
-    return {
-      response: { status: "Rejected" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  if (connector.status === OCPPStatus.Faulted) {
-    return {
-      response: { status: "Faulted" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  if (connector.status === OCPPStatus.Charging || connector.transaction) {
-    return {
-      response: { status: "Occupied" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  if (connector.availability !== "Operative") {
-    return {
-      response: { status: "Unavailable" } satisfies ReserveNowResponseV201,
-    };
-  }
-
-  const status = ctx.chargePoint.reservationManager.createReservation(
-    connectorId,
-    new Date(req.expiryDateTime),
-    req.idToken.idToken,
-    req.groupIdToken?.idToken,
-    req.id,
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "ReserveNow",
+    payload,
   );
-
-  return {
-    response: {
-      status: status as ReserveNowResponseV201["status"],
-    } satisfies ReserveNowResponseV201,
-    afterResult:
-      status === ReservationStatus.Accepted
-        ? () =>
-            ctx.chargePoint.updateConnectorStatus(
-              connectorId,
-              OCPPStatus.Reserved,
-            )
-        : undefined,
-  };
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };
 
+/** H02 CancelReservation.req: translation only, like {@link handleReserveNowV201}. */
 export const handleCancelReservationV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -373,28 +216,9 @@ export const handleCancelReservationV201 = (
       response: { status: "Accepted" } satisfies CancelReservationResponseV201,
     };
   }
-
-  const req = payload as CancelReservationRequestV201;
-  const mgr = ctx.chargePoint.reservationManager;
-  const reservation = mgr.getReservation(req.reservationId);
-  const cancelled = mgr.cancelReservation(req.reservationId);
-
-  if (cancelled && reservation) {
-    return {
-      response: { status: "Accepted" } satisfies CancelReservationResponseV201,
-      afterResult: () => {
-        const connector = ctx.chargePoint.getConnector(reservation.connectorId);
-        if (connector && connector.status === OCPPStatus.Reserved) {
-          ctx.chargePoint.updateConnectorStatus(
-            reservation.connectorId,
-            OCPPStatus.Available,
-          );
-        }
-      },
-    };
-  }
-
-  return {
-    response: { status: "Rejected" } satisfies CancelReservationResponseV201,
-  };
+  const { response, effect } = ctx.chargePoint.engine.runDefault(
+    "CancelReservation",
+    payload,
+  );
+  return { response, ...(effect ? { afterResult: effect } : {}) };
 };

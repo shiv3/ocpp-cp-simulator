@@ -1,0 +1,2 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Rejected","currentTime":"<ts>","interval":3600}}

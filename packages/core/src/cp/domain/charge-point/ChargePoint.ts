@@ -5,6 +5,10 @@ import type {
 } from "../types/FirmwareLogStatus";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { setTimeoutAt } from "../../shared/timers";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { RngStreams, systemRngStreams } from "../../shared/rng";
+import type { Rng, RngSource } from "../../shared/rng";
 import type {
   DataTransferData,
   DataTransferResult,
@@ -17,6 +21,7 @@ import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
 import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
 import { Connector } from "../connector/Connector";
+import type { ConnectorWrite } from "../connector/ConnectorRecord";
 import type {
   BootNotificationResult,
   ChargePointEvents,
@@ -44,6 +49,12 @@ import type {
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
+import {
+  cleanTransaction as cleanTransactionDefault,
+  startTransaction as startTransactionDefault,
+  stopTransaction as stopTransactionDefault,
+  type TransactionPorts,
+} from "../../application/engine/behaviors/transaction";
 import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
 import {
   type OcppCallOutcome,
@@ -81,7 +92,6 @@ import {
 } from "../types/OcppTypes";
 import type {
   StopTransactionReason,
-  Transaction,
   TransactionChargingState,
   TransactionStartTriggerReason,
   TransactionStopTriggerReason,
@@ -142,6 +152,12 @@ import {
   SupervisionUrlPool,
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
+import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
+import {
+  ChargerEngine,
+  type LoadBehaviorOptions,
+} from "../../application/engine/ChargerEngine";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
@@ -170,7 +186,7 @@ export interface AutoMeterValueSetting {
   value: number;
 }
 
-interface StartTransactionOptions {
+export interface StartTransactionOptions {
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
@@ -190,7 +206,7 @@ export interface StartTransactionOutcome {
   denialStatus?: string;
 }
 
-interface StopTransactionOptions {
+export interface StopTransactionOptions {
   triggerReason?: TransactionStopTriggerReason;
   /** OCPP 2.x Ended-event stoppedReason named explicitly (#335); when
    *  absent the encoder derives it from the 1.6 `reason`. */
@@ -232,6 +248,19 @@ export interface CertificateQuirks {
   hiddenConfigurationKeys?: string[];
 }
 
+/**
+ * What makes a run replayable (docs/concepts/charger-engine.md): the clock
+ * every timer and timestamp of the charge point reads, and the seed its
+ * random streams derive from. With neither, the platform clock and
+ * `Math.random` are used and nothing differs from a charge point built
+ * without this argument.
+ */
+export interface ChargePointSimulationOptions {
+  readonly clock?: SimClock;
+  /** A seed (a string or a number) or ready-made streams. */
+  readonly seed?: string | number | RngSource;
+}
+
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
@@ -260,6 +289,19 @@ export class ChargePoint {
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket | null;
+  private readonly _clock: SimClock;
+
+  /** The station's current time, from its clock (virtual under a VirtualClock). */
+  nowDate(): Date {
+    return new Date(this._clock.now());
+  }
+  private readonly _rngSource: RngSource;
+  private readonly _behaviors = new BehaviorRegistry({
+    ocppVersion: () => this._ocppVersion,
+    warn: (message) => this._logger.warn(message, LogType.OCPP),
+  });
+  /** Owner of the engine-held state and the behaviors (stage B). */
+  private readonly _engine = new ChargerEngine(this);
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
@@ -349,7 +391,7 @@ export class ChargePoint {
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
-  private readonly _connectionTimeoutTimers: Map<number, NodeJS.Timeout> =
+  private readonly _connectionTimeoutTimers: Map<number, TimerHandle> =
     new Map();
   // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
   // send-only (browser local mode). For non-SOAP versions, always false.
@@ -384,13 +426,25 @@ export class ChargePoint {
     authorizationKey?: string,
     cpoName?: string,
     tls?: OcppTlsOptions,
+    simulation: ChargePointSimulationOptions = {},
   ) {
+    this._clock = simulation.clock ?? realClock;
+    this._rngSource =
+      simulation.seed === undefined
+        ? systemRngStreams
+        : typeof simulation.seed === "object"
+          ? simulation.seed
+          : new RngStreams(simulation.seed);
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
-    this._certificateStore = new CertificateStore(this._id, this._database);
+    this._certificateStore = new CertificateStore(
+      this._id,
+      this._database,
+      this._clock,
+    );
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
     this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
@@ -414,13 +468,18 @@ export class ChargePoint {
         connectorId,
         this._logger,
         () => this._stationProfiles,
+        this._clock,
       );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
+      this._engine.attachConnector(connector);
       const persisted = this.loadAvailability(connectorId);
       if (persisted) {
-        connector.availability = persisted;
+        this.writeConnector(connectorId, {
+          kind: "availability",
+          availability: persisted,
+        });
       }
       if (autoMeterValueSetting?.enabled) {
         connector.setIncrementFallback({
@@ -486,7 +545,7 @@ export class ChargePoint {
         cpoName,
         tls,
       );
-      this._rawFrames = new RawFrameSender(this._webSocket);
+      this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
       this._webSocket.observers.on("simulatedDisconnect", (fault) =>
         this._events.emit("networkFaultInjected", fault),
       );
@@ -509,10 +568,11 @@ export class ChargePoint {
     }
     this._outbox = new Outbox(this._messageHandler);
 
-    this._heartbeat = new HeartbeatService(this._logger);
+    this._heartbeat = new HeartbeatService(this._logger, this._clock);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
-    this._clockAligned = new ClockAlignedMeterScheduler((boundary) =>
-      this.emitClockAlignedSamples(boundary),
+    this._clockAligned = new ClockAlignedMeterScheduler(
+      (boundary) => this.emitClockAlignedSamples(boundary),
+      this._clock,
     );
 
     // #299: a charge point that draws from a pool when a call names no tag.
@@ -529,13 +589,16 @@ export class ChargePoint {
     this._reservationManager = new ReservationManager(
       this._logger,
       (connectorId) => this.onReservationExpired(connectorId),
+      this._clock,
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
     // #452: the policy is read on every decision, so ChangeConfiguration
     // applies at once. `_configuration` is assigned further down; nothing
     // reads the policy before the constructor returns.
     this._authorization = new StationAuthorization({
-      cache: new AuthorizationCache(this._id, this._database),
+      cache: new AuthorizationCache(this._id, this._database, {
+        clock: this._clock,
+      }),
       localList: this._localAuthListManager,
       policy: () => ({
         cacheEnabled: this._configuration.authorizationCacheEnabled(),
@@ -549,39 +612,26 @@ export class ChargePoint {
         localListChecksExpiry: true,
       }),
       idTokenMaxLength: idTokenMaxLength(this._ocppVersion),
+      clock: this._clock,
     });
 
     this._stateManager = new StateManager(
       this._logger,
       this._events,
       () => ({ status: this._status, error: this._error }),
-      (connectorId) => {
-        const connector = this._connectors.get(connectorId);
-        if (!connector) return undefined;
-        return {
-          status: connector.status,
-          availability: connector.availability,
-          transaction: connector.transaction,
-          meterValue: connector.meterValue,
-        };
-      },
+      this._clock,
+      this.rng("state-history"),
     );
 
     // #448: subscribed before any connection or status event can fire.
-    this._timeline = new OperationalTimeline(this._id);
+    this._timeline = new OperationalTimeline(this._id, { clock: this._clock });
     this._timelineProjector = new OperationalTimelineProjector(
       this._timeline,
       this._events,
       this._connectors,
+      this._clock,
+      this.rng("timeline"),
     );
-
-    this._connectors.forEach((connector, connectorId) => {
-      this._stateManager.initializeConnector(
-        connectorId,
-        connector.status,
-        connector.availability,
-      );
-    });
 
     // ConfigurationStore is constructed last because it depends on `this`
     // (via the `defaultConfiguration(cp)` factory which reads
@@ -658,6 +708,46 @@ export class ChargePoint {
         "ON CONFLICT (cp_id, connector_id) DO UPDATE SET availability = excluded.availability",
       [this._id, connectorId, availability],
     );
+  }
+
+  /** The clock every timer and timestamp of this charge point reads. */
+  get clock(): SimClock {
+    return this._clock;
+  }
+
+  /** Rules that may take an inbound CSMS CALL over from the default path. */
+  get behaviors(): BehaviorRegistry {
+    return this._behaviors;
+  }
+
+  /** The charger engine: event queue, engine state and behavior runner. */
+  get engine(): ChargerEngine {
+    return this._engine;
+  }
+
+  /**
+   * Load a behavior object (docs/concepts/charger-engine.md, "Behavior API")
+   * into this station: its `onCall` rules take the matching inbound CALLs over
+   * from the default behavior, and `main` starts. Throws on a duplicate id or
+   * a `requires` this station cannot meet.
+   */
+  loadBehavior(behavior: Behavior, options?: LoadBehaviorOptions): void {
+    this._engine.loadBehavior(behavior, options);
+  }
+
+  /** Unload a behavior loaded with {@link loadBehavior}; false if none has that id. */
+  unloadBehavior(id: string): boolean {
+    return this._engine.unloadBehavior(id);
+  }
+
+  /** The random stream `name` of this charge point (see `RngStreams`). */
+  rng(name: string): Rng {
+    return this._rngSource.stream(this._id, name);
+  }
+
+  /** The current instant of {@link clock} as a `Date`. */
+  private _nowDate(): Date {
+    return new Date(this._clock.now());
   }
 
   /** Exposed so OCPPMessageHandler (PendingMessageQueue) can share the
@@ -745,6 +835,7 @@ export class ChargePoint {
           repository.setTriggered(id, triggered),
         // The reports a previous run queued keep their eventIds (#538).
         lastQueuedEventId: () => this._outbox.highestQueuedNotifyEventId(),
+        clock: this._clock,
       },
       new Map(persisted.map((p) => [p.monitor.id, p.triggered])),
     );
@@ -1374,7 +1465,7 @@ export class ChargePoint {
   /** Convenience: the currently active ChargePointMaxProfile (highest
    *  stackLevel) at the station level. Returns `null` if none. */
   getActiveChargePointMaxProfile(
-    now: Date = new Date(),
+    now: Date = this._nowDate(),
   ): ActiveChargingProfile | null {
     return this._stationProfiles.getActive(
       ChargingProfilePurposeType.ChargePointMaxProfile,
@@ -1415,7 +1506,7 @@ export class ChargePoint {
    *  by the default (non-scenario) path — i.e. isScenarioHandled(connectorId)
    *  was false at delivery time. See _lastDefaultHandledRemoteStart. */
   noteDefaultHandledRemoteStart(connectorId: number): void {
-    this._lastDefaultHandledRemoteStart.set(connectorId, Date.now());
+    this._lastDefaultHandledRemoteStart.set(connectorId, this._clock.now());
   }
 
   /** Consume (and remove) the timestamp recorded by
@@ -1458,7 +1549,7 @@ export class ChargePoint {
 
   /** Mirror of noteDefaultHandledRemoteStart for the stop side. */
   noteDefaultHandledRemoteStop(connectorId: number): void {
-    this._lastDefaultHandledRemoteStop.set(connectorId, Date.now());
+    this._lastDefaultHandledRemoteStop.set(connectorId, this._clock.now());
   }
 
   /** Mirror of takeDefaultHandledRemoteStart for the stop side. */
@@ -1556,12 +1647,12 @@ export class ChargePoint {
 
     return new Promise<string>((resolve) => {
       let settled = false;
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let timeoutId: TimerHandle | null = null;
 
       const cleanup = () => {
         if (settled) return;
         settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
+        if (timeoutId) this._clock.clearTimeout(timeoutId);
         this._events.off("authorizeResult", handler);
         this._events.off("disconnected", disconnectHandler);
       };
@@ -1592,7 +1683,7 @@ export class ChargePoint {
       this._events.on("authorizeResult", handler);
       this._events.on("disconnected", disconnectHandler);
 
-      timeoutId = setTimeout(() => {
+      timeoutId = this._clock.setTimeout(() => {
         cleanup();
         if (!this.isOnline()) {
           decideOffline(`Timeout (${timeoutMs}ms) and offline`);
@@ -1708,6 +1799,7 @@ export class ChargePoint {
       );
       this.boot();
       this._events.emit("connected", undefined);
+      this._engine.observe({ type: "connected" });
       return;
     }
 
@@ -1737,6 +1829,7 @@ export class ChargePoint {
       () => {
         this.boot();
         this._events.emit("connected", undefined);
+        this._engine.observe({ type: "connected" });
         // The queued-message flush itself is triggered by
         // markBootAccepted(); we just need the WebSocket to come up and
         // BootNotification to round-trip first.
@@ -1755,6 +1848,11 @@ export class ChargePoint {
             : null;
         if (failure) this._logger.error(failure, LogType.WEBSOCKET);
         this._events.emit("disconnected", { code: ev.code, reason: ev.reason });
+        this._engine.observe({
+          type: "disconnected",
+          code: ev.code,
+          reason: ev.reason,
+        });
         if (failure) this.error = failure;
       },
     );
@@ -1872,7 +1970,10 @@ export class ChargePoint {
       request,
       (payload) =>
         this.sendOcppCall({ action: "Get15118EVCertificate", payload }),
-      { warn: (message) => this._logger.warn(message, LogType.OCPP) },
+      {
+        warn: (message) => this._logger.warn(message, LogType.OCPP),
+        clock: this._clock,
+      },
     );
   }
 
@@ -1905,7 +2006,7 @@ export class ChargePoint {
       webSocket.clearRenewedClientCertificate();
       return;
     }
-    const wait = identity.notBefore.getTime() - Date.now();
+    const wait = identity.notBefore.getTime() - this._clock.now();
     if (wait > 0) {
       this._logger.info(
         `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
@@ -1918,7 +2019,7 @@ export class ChargePoint {
           if (request !== this._clientCertificateSwitchSeq) return;
           void this.useRenewedClientCertificate();
         },
-        { unref: true },
+        { clock: this._clock, unref: true },
       );
       return;
     }
@@ -1934,7 +2035,7 @@ export class ChargePoint {
     }
     this.reconnectWithRenewedCertificate(
       webSocket.currentGeneration(),
-      Date.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
     );
   }
 
@@ -1951,11 +2052,15 @@ export class ChargePoint {
     if (webSocket.currentGeneration() !== generation) return;
     if (
       this._outbox.hasTransactionMessagesInFlight() &&
-      Date.now() < deadline
+      this._clock.now() < deadline
     ) {
       this._cancelClientCertificateSwitchTimer = setTimeoutAt(
-        Math.min(Date.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS, deadline),
+        Math.min(
+          this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS,
+          deadline,
+        ),
         () => this.reconnectWithRenewedCertificate(generation, deadline),
+        { clock: this._clock },
       );
       return;
     }
@@ -2051,140 +2156,6 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
-  /** Set while a simulated firmware update is in flight, so a second
-   *  UpdateFirmware.req (the spec allows the CSMS to re-issue) doesn't
-   *  fork a parallel status train. */
-  private _firmwareUpdateInFlight = false;
-  /** Reference kept so disconnect/dispose can cancel a pending start
-   *  before `retrieveDate`. */
-  private _firmwareUpdateTimers: NodeJS.Timeout[] = [];
-
-  /**
-   * §4.5 / §6.19: schedule a simulated firmware update progression. After
-   * `retrieveDate` is reached, fires FirmwareStatusNotification.req in
-   * sequence — Downloading → Downloaded → Installing → Installed — with
-   * `intervalMs` between each transition.
-   *
-   * Real charge points download a binary, install it, and reboot. The
-   * simulator just walks the status machine so the CSMS observes the
-   * full happy-path by default. Failure paths are also reachable via
-   * TriggerMessage(FirmwareStatusNotification) for tests that want to
-   * drive them manually, or pre-armed for certification scenarios (cert
-   * 1.6 Firmware TC_044_2 / TC_044_3) via the `SimulatedFirmwareUpdateFailure`
-   * custom config key (set through a scenario `configSet` node before
-   * UpdateFirmware fires): `"DownloadFailed"` diverts at the Downloaded
-   * step, `"InstallationFailed"` diverts at the Installed step. The armed
-   * value is one-shot: it is consumed and cleared on the next UpdateFirmware,
-   * so a second UpdateFirmware without re-arming will run the happy path.
-   */
-  simulateFirmwareUpdate(retrieveDate: Date, intervalMs = 2000): void {
-    if (this._firmwareUpdateInFlight) {
-      this._logger.warn(
-        "UpdateFirmware: a previous simulated update is still in flight; ignoring",
-        LogType.OCPP,
-      );
-      return;
-    }
-    this._firmwareUpdateInFlight = true;
-
-    const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
-    const sequence: readonly FirmwareStatus[] = [
-      "Downloading",
-      "Downloaded",
-      "Installing",
-      "Installed",
-    ];
-    const failureMode = this._configuration.getString(
-      "SimulatedFirmwareUpdateFailure",
-    );
-    // One-shot: clear the armed failure immediately so the next UpdateFirmware
-    // runs the happy path unless re-armed.
-    if (failureMode) {
-      this._configuration.applyChange("SimulatedFirmwareUpdateFailure", "");
-    }
-
-    const fireStep = (index: number) => {
-      if (index >= sequence.length) {
-        this._firmwareUpdateInFlight = false;
-        this._firmwareUpdateTimers = [];
-        return;
-      }
-      const step = sequence[index];
-      if (step === "Downloaded" && failureMode === "DownloadFailed") {
-        this.sendFirmwareStatusNotification("DownloadFailed");
-        this._firmwareUpdateInFlight = false;
-        this._firmwareUpdateTimers = [];
-        return;
-      }
-      if (step === "Installed" && failureMode === "InstallationFailed") {
-        this.sendFirmwareStatusNotification("InstallationFailed");
-        this._firmwareUpdateInFlight = false;
-        this._firmwareUpdateTimers = [];
-        return;
-      }
-      this.sendFirmwareStatusNotification(step);
-      const t = setTimeout(() => fireStep(index + 1), intervalMs);
-      this._firmwareUpdateTimers.push(t);
-    };
-
-    const startTimer = setTimeout(() => fireStep(0), startDelay);
-    this._firmwareUpdateTimers.push(startTimer);
-  }
-
-  /** Mirrors `_firmwareUpdateInFlight` / `_firmwareUpdateTimers` for the
-   *  signed variant — kept separate so a SignedUpdateFirmware.req can't
-   *  collide with (or be blocked by) a plain UpdateFirmware.req train. */
-  private _signedFirmwareUpdateInFlight = false;
-  private _signedFirmwareUpdateTimers: NodeJS.Timeout[] = [];
-
-  /**
-   * OCPP 1.6 Security Whitepaper SignedUpdateFirmware.req: schedules a
-   * simulated signed firmware update progression. After `retrieveDate` is
-   * reached, fires SignedFirmwareStatusNotification.req in sequence —
-   * Downloading → Downloaded → SignatureVerified → Installing → Installed
-   * — with `intervalMs` between each transition, carrying `requestId` on
-   * every notification. Same "no real binary, just walk the status
-   * machine" approach as `simulateFirmwareUpdate` — no signature is
-   * actually verified.
-   */
-  simulateSignedFirmwareUpdate(
-    retrieveDate: Date,
-    requestId: number,
-    intervalMs = 2000,
-  ): void {
-    if (this._signedFirmwareUpdateInFlight) {
-      this._logger.warn(
-        "SignedUpdateFirmware: a previous simulated update is still in flight; ignoring",
-        LogType.OCPP,
-      );
-      return;
-    }
-    this._signedFirmwareUpdateInFlight = true;
-
-    const startDelay = Math.max(0, retrieveDate.getTime() - Date.now());
-    const sequence: readonly FirmwareStatus[] = [
-      "Downloading",
-      "Downloaded",
-      "SignatureVerified",
-      "Installing",
-      "Installed",
-    ];
-
-    const fireStep = (index: number) => {
-      if (index >= sequence.length) {
-        this._signedFirmwareUpdateInFlight = false;
-        this._signedFirmwareUpdateTimers = [];
-        return;
-      }
-      this.sendSignedFirmwareStatusNotification(sequence[index], requestId);
-      const t = setTimeout(() => fireStep(index + 1), intervalMs);
-      this._signedFirmwareUpdateTimers.push(t);
-    };
-
-    const startTimer = setTimeout(() => fireStep(0), startDelay);
-    this._signedFirmwareUpdateTimers.push(startTimer);
-  }
-
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
@@ -2198,6 +2169,8 @@ export class ChargePoint {
     // messages now that the boot gate is open. Run via queueMicrotask so
     // any post-boot StatusNotification fan-out goes first.
     queueMicrotask(() => this._outbox.flushPendingQueue());
+    // After the post-boot status fan-out, and with the gate already open.
+    queueMicrotask(() => this.engine.bootAccepted());
   }
 
   markBootPending(): void {
@@ -2207,10 +2180,10 @@ export class ChargePoint {
   markBootRejected(retryAfterSeconds: number): void {
     this._outbox.setBootStatus({
       status: "Rejected",
-      retryAfter: new Date(Date.now() + retryAfterSeconds * 1000),
+      retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
     });
     // Re-send BootNotification.req once the interval elapses (§4.2).
-    setTimeout(() => {
+    this._clock.setTimeout(() => {
       this.boot();
     }, retryAfterSeconds * 1000);
   }
@@ -2411,15 +2384,10 @@ export class ChargePoint {
     // connection is down (§3.5.3, LocalAuthorizeOffline), so a connection
     // loss must not empty it (#534). Only dispose() drops it.
     this.clearChargingProfiles(0, {}, "ConnectionClosed");
-    // Cancel any pending firmware-update simulation so its status train
-    // doesn't keep firing against a dead WebSocket.
-    this._firmwareUpdateTimers.forEach((t) => clearTimeout(t));
-    this._firmwareUpdateTimers = [];
-    this._firmwareUpdateInFlight = false;
-    // ...and the signed variant's simulation too.
-    this._signedFirmwareUpdateTimers.forEach((t) => clearTimeout(t));
-    this._signedFirmwareUpdateTimers = [];
-    this._signedFirmwareUpdateInFlight = false;
+    // The engine ends the follow-up of answers a behavior of the user gave
+    // (they are bound to the connection). The follow-up of a default behavior,
+    // such as the firmware status train, goes on: it did before the engine.
+    this._engine.connectionClosed();
     this._scenarioHandledConnectors.clear();
     this._scenarioStopHandledConnectors.clear();
     this._lastDefaultHandledRemoteStart.clear();
@@ -2429,7 +2397,7 @@ export class ChargePoint {
     this._responseOverrides.clear();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
-    this._connectionTimeoutTimers.forEach((t) => clearTimeout(t));
+    this._connectionTimeoutTimers.forEach((t) => this._clock.clearTimeout(t));
     this._connectionTimeoutTimers.clear();
     // §4.1.1 serializer: drop the in-flight CALL + queued CALLs since the
     // WebSocket they target is gone. Transaction-related ones go to the
@@ -2472,6 +2440,7 @@ export class ChargePoint {
     this.releaseRenewedClientCertificate();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
+    this._engine.dispose();
     // Offline monitoring keeps the periodic timers running: stop them.
     this.stopMonitoring();
     this._localAuthListManager.dispose();
@@ -2537,150 +2506,38 @@ export class ChargePoint {
         // StopTransaction (CSMS-issued or scenario-driven) will move
         // it through Finishing → Available normally.
         if (connector.transaction !== null) return;
-        connector.status = OCPPStatus.Unavailable;
-        this._events.emit("connectorStatusChange", {
-          connectorId: connector.id,
+        this.writeConnector(connector.id, {
+          kind: "status",
           status: OCPPStatus.Unavailable,
-          previousStatus,
+          scope: "event",
         });
       });
     }
     this._events.emit("statusChange", { status: newStatus, previousStatus });
     this._stateManager.transitionChargePointStatus(newStatus, {
       source: "boundary-setter",
-      timestamp: new Date(),
+      timestamp: this._nowDate(),
     });
   }
 
-  async startTransaction(
+  /** Start a transaction on a connector; the default lives in the engine
+   *  (`application/engine/behaviors/transaction.ts`). */
+  startTransaction(
     tagId: string,
     connectorId: number,
     batteryCapacityKwh?: number,
     initialSoc?: number,
     options: StartTransactionOptions = {},
   ): Promise<StartTransactionOutcome> {
-    const connector = this.getConnector(connectorId);
-    if (!connector) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.TRANSACTION,
-      );
-      return { started: false };
-    }
-
-    if (connector.transaction && connector.transaction.stopTime === null) {
-      // Only a NOT-yet-stopped transaction blocks a new start. A closed one
-      // still attached (cleanTransaction sets stopTime without detaching; a
-      // snapshot persisted before #491 restores one) must NOT block a retry.
-      this._logger.warn(
-        `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
-        LogType.TRANSACTION,
-      );
-      return { started: false };
-    }
-
-    if (connector.availability !== "Operative") {
-      this._logger.warn(
-        `Connector ${connectorId} is ${connector.availability}; refusing to start transaction`,
-        LogType.TRANSACTION,
-      );
-      return { started: false };
-    }
-
-    // Issue #181: gate LOCAL (non-remote-start) starts on Authorize.conf.
-    // "RemoteStart" means either RemoteStartTransactionHandler's direct
-    // path (which already applies AuthorizeRemoteTxRequests semantics) or
-    // a scenario that captured a RemoteStartTrigger node — both already
-    // went through CSMS-driven authorization, so they're excluded here.
-    const isLocalStart = options.triggerReason !== "RemoteStart";
-    if (isLocalStart && this._configuration.authorizeBeforeLocalStart()) {
-      const status = await this.authorizeAndWait(tagId);
-      // Any non-"Accepted" idTagInfo/idTokenInfo status denies the local
-      // start. Deliberately NOT an allowlist of specific denial strings —
-      // OCPP 2.0.1/2.1's AuthorizationStatusEnumType has more denial values
-      // than 1.6's AuthorizationStatus (ConcurrentTx, NoCredit,
-      // NotAllowedTypeEVSE, NotAtThisLocation, NotAtThisTime, Unknown), and
-      // a hardcoded 1.6-shaped list would silently let those through.
-      if (status !== "Accepted") {
-        this._logger.warn(
-          `Authorize.conf ${status} for ${tagId}; refusing local transaction start on connector ${connectorId}`,
-          LogType.TRANSACTION,
-        );
-        this._events.emit("authorizeDenied", {
-          connectorId,
-          tagId,
-          status,
-        });
-        return { started: false, denialStatus: status };
-      }
-    }
-
-    // §5.13: if the connector was Reserved (or the reservation is for
-    // connectorId=0 with this idTag), consume that reservation and carry
-    // its id into StartTransaction.req so CSMS can close it out.
-    const reservation =
-      this._reservationManager.getReservationForConnector(connectorId);
-    const reservationId = reservation?.reservationId;
-
-    const transaction: Transaction = {
-      id: 0,
-      connectorId,
+    return startTransactionDefault(
+      this,
+      this.transactionPorts,
       tagId,
-      meterStart: connector.meterValue,
-      meterStop: null,
-      startTime: new Date(),
-      stopTime: null,
-      meterSent: false,
-      reservationId,
-      remoteStartId: options.remoteStartId,
-      startTriggerReason: options.triggerReason,
-      startChargingState: options.chargingState,
+      connectorId,
       batteryCapacityKwh,
       initialSoc,
-    };
-
-    // Set initial SoC on connector if provided
-    if (initialSoc !== undefined) {
-      connector.soc = initialSoc;
-    }
-
-    if (reservation) {
-      // The reservation is fulfilled the moment we send StartTransaction —
-      // §5.13 says the reservation terminates when a transaction is started
-      // for the reserved idTag.
-      this._reservationManager.cancelReservation(reservation.reservationId);
-    }
-
-    connector.beginTransaction(transaction);
-    // Drive Preparing before enqueueing StartTransaction.req: the outbound
-    // CALL queue is strictly serial/FIFO, so whichever we queue first is
-    // what the wire sees first. Sending Preparing's StatusNotification.req
-    // ahead of StartTransaction.req makes the OCPP-conformant wire order
-    // (Preparing precedes StartTransaction) intrinsic to the domain rather
-    // than an accident of scenario node ordering (#176). A connector already
-    // in Preparing (plugged in first) has sent it: a second
-    // StatusNotification(Preparing) is a Preparing → Preparing transition
-    // OCPP 1.6 does not have (#496). Its ConnectionTimeOut restarts; on 1.x
-    // the transaction set above now runs, so the restart only clears it
-    // (#527). On 2.x EVConnectionTimeOut targets this very transaction.
-    if (connector.status === OCPPStatus.Preparing) {
-      this.startConnectionTimeout(connectorId);
-    } else {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
-    }
-    this._outbox.sendTransactionEvent({
-      phase: "started",
-      transaction,
-      connectorId,
-    });
-
-    this._events.emit("transactionStarted", {
-      connectorId,
-      transactionId: 0,
-      tagId,
-    });
-
-    return { started: true };
+      options,
+    );
   }
 
   stopTransaction(
@@ -2688,90 +2545,13 @@ export class ChargePoint {
     reason?: StopTransactionReason,
     options: StopTransactionOptions = {},
   ): void {
-    const connector =
-      typeof connectorOrId === "number"
-        ? this.getConnector(connectorOrId)
-        : connectorOrId;
-    if (!connector) {
-      const connId =
-        typeof connectorOrId === "number" ? connectorOrId : connectorOrId.id;
-      this._logger.error(`Connector ${connId} not found`, LogType.TRANSACTION);
-      return;
-    }
-
-    const transaction = connector.transaction;
-    // A closed transaction (`stopTime` set) is no transaction: stopping it
-    // again would send a second StopTransaction.req for it (#491).
-    if (!transaction || !connector.hasRunningTransaction) {
-      this._logger.warn(
-        `No active transaction for connector ${connector.id} when stopping`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-
-    connector.stopAutoMeterValue();
-    transaction.stopTime = new Date();
-    transaction.meterStop = connector.meterValue;
-    if (reason) {
-      transaction.stopReason = reason;
-    }
-    if (options.triggerReason) {
-      transaction.stopTriggerReason = options.triggerReason;
-    }
-    if (options.stoppedReason) {
-      transaction.stoppedReason = options.stoppedReason;
-    }
-
-    this._outbox.sendTransactionEvent({
-      phase: "ended",
-      transaction,
-      connectorId: connector.id,
-    });
-
-    this._events.emit("transactionStopped", {
-      connectorId: connector.id,
-      transactionId: transaction.id,
-      reason: transaction.stoppedReason ?? transaction.stopReason,
-    });
-
-    // Clear TxProfile charging profiles when transaction ends (OCPP 1.6 spec compliant)
-    // NOTE: Only TxProfile is cleared. TxDefaultProfile persists for future transactions.
-    // ChargePointMaxProfile also persists as it applies to the entire station.
-    const [cleared] = this.clearChargingProfiles(
-      connector.id,
-      { purpose: ChargingProfilePurposeType.TxProfile },
-      "TransactionEnded",
+    stopTransactionDefault(
+      this,
+      this.transactionPorts,
+      connectorOrId,
+      reason,
+      options,
     );
-    if (cleared) {
-      this._logger.info(
-        `Cleared ${cleared.profiles.length} TxProfile(s) after transaction end on connector ${connector.id}`,
-        LogType.TRANSACTION,
-      );
-    }
-
-    this.cleanTransaction(connector);
-    connector.stopTransaction();
-    if (connector.autoResetToAvailable) {
-      this.updateConnectorStatus(connector.id, OCPPStatus.Available);
-    }
-
-    // §5.2: if ChangeAvailability arrived while this transaction was
-    // running we returned `Scheduled`; now that it stopped, finalize the
-    // deferred availability flip and fire the follow-up StatusNotification.
-    const scheduled = connector.scheduledAvailability;
-    if (scheduled && scheduled !== connector.availability) {
-      connector.availability = scheduled;
-      const next =
-        scheduled === "Operative"
-          ? OCPPStatus.Available
-          : OCPPStatus.Unavailable;
-      this.updateConnectorStatus(connector.id, next);
-      this.persistAvailability();
-    }
-    connector.scheduledAvailability = null;
-
-    this.runPendingResetOnIdle();
   }
 
   /**
@@ -2803,11 +2583,12 @@ export class ChargePoint {
 
   /**
    * #597: boot again once a pending reset has no targeted connector left
-   * with a transaction. Called from {@link stopTransaction}. Each pending
+   * with a transaction. Called when a transaction ends (the engine's default stop) and when a
+   * connector is removed. Each pending
    * reset stays queued while its targets are still busy; the station
    * boots once if any of them became runnable.
    */
-  private runPendingResetOnIdle(): void {
+  runPendingResetOnIdle(): void {
     if (this._pendingResetsOnIdle.length === 0) return;
     const isBusy = (pending: { evseId?: number }): boolean =>
       [...this._connectors.values()].some(
@@ -2891,24 +2672,14 @@ export class ChargePoint {
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
-    const connector =
-      typeof connectorOrId === "number"
-        ? this.getConnector(connectorOrId)
-        : connectorOrId;
-    if (!connector) return;
-
-    const transaction = connector.transaction;
-    if (transaction) {
-      transaction.meterSent = false;
-      transaction.stopTime = new Date();
-      transaction.meterStop = connector.meterValue;
-
-      // Emit Finishing state for scenarios that rely on the transitional status
-      this.updateConnectorStatus(connector.id, OCPPStatus.Finishing);
-    }
-
-    connector.stopAutoMeterValue();
+    cleanTransactionDefault(this, connectorOrId);
   }
+
+  private readonly transactionPorts: TransactionPorts = {
+    sendTransactionEvent: (event) => this._outbox.sendTransactionEvent(event),
+    startConnectionTimeout: (connectorId) =>
+      this.startConnectionTimeout(connectorId),
+  };
 
   startHeartbeat(period: number): void {
     this._heartbeat.startHeartbeat(period);
@@ -3043,6 +2814,7 @@ export class ChargePoint {
 
     this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
     connector.dispose();
+    this._engine.detachConnector(connectorId);
     const removed = this._connectors.delete(connectorId);
     if (removed) {
       this._events.emit("connectorRemoved", { connectorId });
@@ -3078,7 +2850,7 @@ export class ChargePoint {
       this._events.emit("statusChange", { status, previousStatus });
       this._stateManager.transitionChargePointStatus(status, {
         source: "connector-0-update",
-        timestamp: new Date(),
+        timestamp: this._nowDate(),
       });
       this._logger.info(
         `Charge point status updated: ${previousStatus} -> ${status} (connector 0)`,
@@ -3097,13 +2869,27 @@ export class ChargePoint {
       return;
     }
 
-    const previousStatus = connector.status;
-    connector.status = status;
-    this._events.emit("connectorStatusChange", {
+    this._engine.dispatch({
+      type: "connector.write",
       connectorId,
-      status,
-      previousStatus,
+      write: { kind: "status", status, scope: "full" },
     });
+  }
+
+  /** A write to a connector's engine record (docs/concepts/charger-engine.md). */
+  private writeConnector(connectorId: number, write: ConnectorWrite): void {
+    this._engine.dispatch({ type: "connector.write", connectorId, write });
+  }
+
+  /**
+   * The rest of a `full` status write, run by the engine right after the
+   * record changed and the listeners were told: the connection-timeout timer
+   * and the StatusNotification.
+   * @internal
+   */
+  afterConnectorStatus(connectorId: number, status: OCPPStatus): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector) return;
 
     // §4.9 B6 ConnectionTimeOut: when the connector enters Preparing,
     // start a timer; if it doesn't progress before the timeout, auto-
@@ -3144,7 +2930,7 @@ export class ChargePoint {
     this.clearConnectionTimeout(connectorId);
     const timeoutSec = this._configuration?.connectionTimeOut();
     if (timeoutSec <= 0 || this.holdsConnectionTimeout(connectorId)) return;
-    const handle = setTimeout(() => {
+    const handle = this._clock.setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);
       const connector = this.getConnector(connectorId);
       if (!connector || connector.status !== OCPPStatus.Preparing) return;
@@ -3181,7 +2967,7 @@ export class ChargePoint {
   private clearConnectionTimeout(connectorId: number): void {
     const handle = this._connectionTimeoutTimers.get(connectorId);
     if (handle) {
-      clearTimeout(handle);
+      this._clock.clearTimeout(handle);
       this._connectionTimeoutTimers.delete(connectorId);
     }
   }

@@ -41,6 +41,22 @@ export function normalizeHandlerResult(r: HandlerResult): {
   };
 }
 
+/**
+ * Why a registered effect did not run (reported to `onDropped`):
+ * - `stale`: the connection generation was superseded before it could run
+ * - `disposed`: the generation was disposed before the response settled
+ * - `disconnect`: the station closed the connection itself (manual / internal)
+ */
+export type EffectDropReason = "stale" | "disposed" | "disconnect";
+
+/** Told once, when an effect registered with an `onDropped` will not run. */
+export type EffectDroppedHandler = (reason: EffectDropReason) => void;
+
+interface HeldEffect {
+  readonly effect: () => void;
+  readonly onDropped?: EffectDroppedHandler;
+}
+
 export interface ResponseEffectQueueDeps {
   /**
    * Check if a generation token is the current live generation.
@@ -73,7 +89,7 @@ export interface ResponseEffectQueueDeps {
  */
 export class ResponseEffectQueue {
   private readonly deps: ResponseEffectQueueDeps;
-  private heldEffects = new Map<number, Array<() => void>>();
+  private heldEffects = new Map<number, HeldEffect[]>();
   private finalizedGenerations = new Set<number>();
   private highestFinalizedGen = -1;
 
@@ -84,13 +100,21 @@ export class ResponseEffectQueue {
   /**
    * Register an effect for a generation. Returns a settlement hook that should be
    * passed as the onSettled callback to the response-send pipeline.
+   *
+   * `onDropped`, when given, is called exactly once if the effect will not
+   * run, with the reason (see {@link EffectDropReason}); it is never called
+   * for an effect that runs, whether or not that effect throws.
    */
   public register(
     gen: GenerationToken,
-    effect: () => void,
+    effect: (outcome: Settlement["outcome"]) => void,
+    onDropped?: EffectDroppedHandler,
   ): (s: Settlement) => void {
     return (settlement: Settlement) => {
       const outcome = settlement.outcome;
+      // The effect is told how its response ended, so work that must follow a
+      // delivered answer only can tell (`written`) from one that ran anyway.
+      const run = (): void => effect(outcome);
 
       if (
         outcome === "written" ||
@@ -103,26 +127,28 @@ export class ResponseEffectQueue {
             this.deps.log(
               `Response effect queue: skipped stale effect for generation ${gen.gen}`,
             );
+            this.reportDropped(onDropped, "stale");
             return;
           }
-          this.runEffect(effect);
+          this.runEffect(run);
         });
       } else if (outcome === "socket_closed") {
         // Check if this generation has already been finalized
         if (this.isGenerationFinalized(gen.gen)) {
           // Late registration: resolve immediately using latched closeCause
-          this.resolveLateSocketClosedEffect(gen, effect);
+          this.resolveLateSocketClosedEffect(gen, run, onDropped);
         } else {
           // Hold the effect until flushAfterCloseFinalization is called
           if (!this.heldEffects.has(gen.gen)) {
             this.heldEffects.set(gen.gen, []);
           }
-          this.heldEffects.get(gen.gen)!.push(effect);
+          this.heldEffects.get(gen.gen)!.push({ effect: run, onDropped });
         }
       } else if (outcome === "disposed") {
         this.deps.log(
           `Response effect queue: dropped effect for disposed generation ${gen.gen}`,
         );
+        this.reportDropped(onDropped, "disposed");
       }
     };
   }
@@ -142,12 +168,13 @@ export class ResponseEffectQueue {
       const closeCause = finalized.closeCause ?? "network";
       if (closeCause === "network" || closeCause === "simulated") {
         // Schedule effects via defer with stale check
-        for (const effect of effects) {
+        for (const { effect, onDropped } of effects) {
           this.deps.defer(() => {
             if (!this.deps.isGenerationCurrent(finalized)) {
               this.deps.log(
                 `Response effect queue: skipped stale effect during finalization flush for generation ${gen}`,
               );
+              this.reportDropped(onDropped, "stale");
               return;
             }
             this.runEffect(effect);
@@ -155,10 +182,11 @@ export class ResponseEffectQueue {
         }
       } else if (closeCause === "manual" || closeCause === "internal") {
         // Drop effects for manual/internal disconnects
-        for (const _ of effects) {
+        for (const { onDropped } of effects) {
           this.deps.log(
             `Response effect queue: dropped effect for ${closeCause} disconnect (generation ${gen})`,
           );
+          this.reportDropped(onDropped, "disconnect");
         }
       }
     }
@@ -206,6 +234,7 @@ export class ResponseEffectQueue {
   private resolveLateSocketClosedEffect(
     gen: GenerationToken,
     effect: () => void,
+    onDropped?: EffectDroppedHandler,
   ): void {
     const closeCause = gen.closeCause ?? "network";
 
@@ -216,6 +245,7 @@ export class ResponseEffectQueue {
           this.deps.log(
             `Response effect queue: skipped stale late-registered effect for generation ${gen.gen}`,
           );
+          this.reportDropped(onDropped, "stale");
           return;
         }
         this.runEffect(effect);
@@ -225,6 +255,20 @@ export class ResponseEffectQueue {
       this.deps.log(
         `Response effect queue: dropped late-registered effect for ${closeCause} disconnect (generation ${gen.gen})`,
       );
+      this.reportDropped(onDropped, "disconnect");
+    }
+  }
+
+  /** Tell the registrant its effect will not run; a throwing handler is logged. */
+  private reportDropped(
+    onDropped: EffectDroppedHandler | undefined,
+    reason: EffectDropReason,
+  ): void {
+    if (!onDropped) return;
+    try {
+      onDropped(reason);
+    } catch (error) {
+      this.deps.log(`Response effect queue: onDropped threw: ${error}`);
     }
   }
 

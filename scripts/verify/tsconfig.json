@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.verify.tsbuildinfo",
+    "outDir": "../../node_modules/.tmp/out/verify",
+    "types": ["bun-types"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": "../.."
+  },
+  // Stage D2 verification tools (k6, browser). Not part of any package.
+  "include": ["**/*.ts"],
+  "references": [
+    { "path": "../../apps/cli" },
+    { "path": "../../apps/web" },
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/k6-runtime" },
+    { "path": "../../packages/ocpp" },
+    { "path": "../../packages/trace" }
+  ]
+}

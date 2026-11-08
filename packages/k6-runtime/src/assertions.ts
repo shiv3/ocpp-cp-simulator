@@ -21,7 +21,7 @@
 //
 // This file is emitted verbatim into export bundles: it must NOT import
 // from packages/core/src/cp/** (not even types), use Node/Bun APIs, or use k6/* imports.
-import type { AssertionSpecJson, TranscriptEntry } from "./types";
+import type { AssertionSpecJson, TranscriptEntry } from "./types.ts";
 
 export interface AssertionOutcome {
   id: string;

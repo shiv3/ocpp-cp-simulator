@@ -6,10 +6,18 @@ import { OCPPStatus, ReservationStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../shared/Logger";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 import type {
+  CallResponseSpec,
+  ScenarioCallExchange,
   ScenarioExecutionContext,
   ScenarioExecutorCallbacks,
+  ScenarioReplaceRequest,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
+import type { HeldExchange, RuleOwner } from "../behavior/BehaviorRegistry";
+import { responseProblems } from "../engine/responseValidation";
+import { clockOf } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+import { rngOf } from "../../shared/rng";
 
 export interface ScenarioRuntimeHooks {
   onStateChange?: (context: ScenarioExecutionContext) => void;
@@ -148,7 +156,7 @@ const waitForRemoteStart = (
   );
   if (missedAt !== null) {
     log(
-      `RemoteStartTransaction arrived ${Math.max(0, Date.now() - missedAt)}ms ` +
+      `RemoteStartTransaction arrived ${Math.max(0, clockOf(chargePoint).now() - missedAt)}ms ` +
         "before this node armed and was handled OUTSIDE this scenario (a " +
         "transaction was started directly). This node is now waiting for a " +
         "RemoteStartTransaction that will likely never come — probably a " +
@@ -248,7 +256,7 @@ const waitForRemoteStop = (
   );
   if (missedAt !== null) {
     log(
-      `RemoteStopTransaction arrived ${Math.max(0, Date.now() - missedAt)}ms ` +
+      `RemoteStopTransaction arrived ${Math.max(0, clockOf(chargePoint).now() - missedAt)}ms ` +
         "before this node armed and was handled OUTSIDE this scenario (the " +
         "transaction was stopped directly). This node is now waiting for a " +
         "RemoteStopTransaction that will likely never come — probably a " +
@@ -368,6 +376,176 @@ const waitForCsmsCall = (
   };
 };
 
+/** The registry's `onBusy` answer for a scenario's `onBusy` spec. */
+const busyAnswerOf = (
+  spec: CallResponseSpec | undefined,
+): import("@ocpp-cp-sim/contracts/behavior").CallAnswer | undefined => {
+  if (!spec) return undefined;
+  if (spec.kind === "none") return { noResponse: true };
+  if (spec.kind === "error") {
+    return {
+      error: {
+        code: spec.errorCode ?? "GenericError",
+        description: spec.errorDescription ?? "",
+      },
+    };
+  }
+  return { response: spec.payload ?? {} };
+};
+
+/** The CALL a scenario run owns, as the executor sees it (schema 1.5). */
+const scenarioExchangeOf = (
+  chargePoint: ChargePoint,
+  exchange: HeldExchange,
+  payload: unknown,
+): ScenarioCallExchange => ({
+  action: exchange.action,
+  messageId: exchange.messageId,
+  payload,
+  answer: async (spec) => {
+    if (spec.kind === "none") {
+      if (exchange.state === "abandoned") {
+        return { delivered: false, reason: "stale" };
+      }
+      void exchange.suppress();
+      return { delivered: true };
+    }
+    if (spec.kind === "error") {
+      return exchange.respondError(
+        spec.errorCode ?? "GenericError",
+        spec.errorDescription ?? "",
+      );
+    }
+    const response = spec.payload ?? {};
+    if (!spec.skipValidation) {
+      const problems = responseProblems(
+        exchange.action,
+        chargePoint.ocppVersion,
+        response,
+      );
+      if (problems.length > 0) {
+        throw new Error(
+          `callResponse: the ${exchange.action} response breaks its schema: ${problems.join("; ")} (set skipValidation to send it anyway)`,
+        );
+      }
+    }
+    return exchange.respond(response);
+  },
+});
+
+/**
+ * Schema 1.5 (#566): a `csmsCallTrigger` with `behavior: "replace"` arms a
+ * rule with the station's behavior registry and waits for the CALL it takes
+ * over. The rule stays until the CALL it served is answered (or the wait is
+ * withdrawn, or the run ends); a second matching CALL meanwhile gets
+ * `onBusy`. SOAP stations have no registry in front of their handlers, so the
+ * wait fails here instead of falling back to the default behavior.
+ */
+const waitForCsmsCallReplacing = (
+  chargePoint: ChargePoint,
+  connector: Connector,
+  action: string,
+  payload: Record<string, unknown> | undefined,
+  replace: ScenarioReplaceRequest,
+  armedOwners: Map<string, RuleOwner>,
+): CancellableWait<{
+  action: string;
+  payload: unknown;
+  exchange: ScenarioCallExchange;
+}> => {
+  const fail = (message: string) => ({
+    promise: Promise.reject(new Error(message)),
+    cancel: () => {},
+  });
+  if (chargePoint.isSoapChargePoint()) {
+    return fail(
+      `csmsCallTrigger(${action}): behavior "replace" needs an OCPP-J station; ${chargePoint.ocppVersion} is SOAP`,
+    );
+  }
+  if (!chargePoint.canReceiveCsmsCall(action)) {
+    return fail(
+      `csmsCallTrigger(${action}) requires a transport that can receive CSMS-initiated calls; this charge point cannot — the scenario would wait forever`,
+    );
+  }
+
+  const owner: RuleOwner = {
+    kind: "scenario",
+    scenarioId: replace.scenarioId,
+    connectorId: connector.id,
+    nodeId: replace.nodeId,
+  };
+  const ownerKey = `${owner.scenarioId}:${owner.connectorId}:${owner.nodeId}`;
+  // A loop reaches the node again: what the last pass armed ends first.
+  if (armedOwners.has(ownerKey)) {
+    for (const stale of chargePoint.behaviors.release(
+      (o) =>
+        o.kind === "scenario" &&
+        `${o.scenarioId}:${o.connectorId}:${o.nodeId}` === ownerKey,
+    )) {
+      chargePoint.logger.warn(
+        `${stale.action}: the scenario armed this node again before answering the previous call; answering InternalError`,
+        LogType.OCPP,
+      );
+      stale.replyError(
+        "InternalError",
+        "The scenario moved on without answering this call",
+      );
+    }
+  }
+  armedOwners.set(ownerKey, owner);
+
+  let unregister: (() => void) | null = null;
+  let disconnectOff: (() => void) | null = null;
+  let taken = false;
+  const stop = () => {
+    unregister?.();
+    unregister = null;
+    disconnectOff?.();
+    disconnectOff = null;
+  };
+  const busy = busyAnswerOf(replace.onBusy);
+
+  const promise = new Promise<{
+    action: string;
+    payload: unknown;
+    exchange: ScenarioCallExchange;
+  }>((resolve, reject) => {
+    unregister = chargePoint.behaviors.register({
+      owner,
+      action,
+      connectorId: connector.id,
+      ...(payload ? { match: payload } : {}),
+      mode: "replace",
+      ...(busy ? { onBusy: busy } : {}),
+      take: (call, exchange) => {
+        // Served: the rule ends with this CALL's exchange, so the next CALL of
+        // the action is the default behavior's again.
+        taken = true;
+        exchange.onClosed(stop);
+        disconnectOff?.();
+        disconnectOff = null;
+        resolve({
+          action: call.action,
+          payload: call.payload,
+          exchange: scenarioExchangeOf(chargePoint, exchange, call.payload),
+        });
+      },
+    });
+    disconnectOff = chargePoint.events.on("disconnected", () => {
+      stop();
+      reject(new Error(`Disconnected while waiting for CSMS call ${action}`));
+    });
+  });
+  // Withdrawing a wait that was answered must not drop the rule: the CALL it
+  // took is still the run's to answer, and a second one still gets `onBusy`.
+  return {
+    promise,
+    cancel: () => {
+      if (!taken) stop();
+    },
+  };
+};
+
 /** Issue #240: park until the WebSocket reaches `event`. Level-triggered —
  *  if the charge point is already in the target state, resolve immediately
  *  (same convention as waitForStatus / waitForReservation). Deliberately
@@ -442,7 +620,7 @@ const waitForReservation = (
   const promise = new Promise<number>((resolve) => {
     const cleanup = () => {
       connector.events.off("statusChange", statusChangeHandler);
-      clearInterval(pollingId);
+      clockOf(chargePoint).clearInterval(pollingId);
     };
     cleanupFn = cleanup;
 
@@ -460,7 +638,7 @@ const waitForReservation = (
 
     connector.events.on("statusChange", statusChangeHandler);
 
-    const pollingId = setInterval(tryResolve, 250);
+    const pollingId = clockOf(chargePoint).setInterval(tryResolve, 250);
   });
 
   return { promise, cancel: () => cleanupFn?.() };
@@ -469,20 +647,21 @@ const waitForReservation = (
 const waitForMeterValue = (
   connector: Connector,
   targetValue: number,
-  timeout?: number,
+  timeout: number | undefined,
+  clock: SimClock,
 ): Promise<void> => {
   if (connector.meterValue >= targetValue || connector.transaction === null) {
     return Promise.resolve();
   }
 
   return new Promise<void>((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
+    let timeoutId: TimerHandle | null = null;
     let settled = false;
 
     const cleanup = () => {
       if (settled) return false;
       settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
+      if (timeoutId) clock.clearTimeout(timeoutId);
       connector.events.off("meterValueChange", meterHandler);
       connector.events.off("transactionChange", transactionHandler);
       return true;
@@ -504,7 +683,7 @@ const waitForMeterValue = (
     connector.events.on("transactionChange", transactionHandler);
 
     if (timeout && timeout > 0) {
-      timeoutId = setTimeout(() => {
+      timeoutId = clock.setTimeout(() => {
         if (!cleanup()) return;
         reject(
           new Error(
@@ -525,7 +704,9 @@ export const createScenarioExecutorCallbacks = (
   // check in waitForRemoteStart/waitForRemoteStop: only a bypass that
   // happened during THIS run is worth warning about, not a stale one from
   // an earlier, unrelated run on the same connector.
-  const runStartedAt = Date.now();
+  const runStartedAt = clockOf(chargePoint).now();
+  // Schema 1.5 (#566): the rules this run armed, released when it ends.
+  const armedOwners = new Map<string, RuleOwner>();
 
   const callbacks: ScenarioExecutorCallbacks & {
     onGetTransactionMeterStart: () => number | null;
@@ -633,7 +814,12 @@ export const createScenarioExecutorCallbacks = (
       }
     },
     onDelay: async (seconds) => {
-      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+      await new Promise((resolve) =>
+        clockOf(chargePoint).setTimeout(
+          () => resolve(undefined),
+          seconds * 1000,
+        ),
+      );
     },
     onWaitForRemoteStart: () => {
       return cancellablePromise(
@@ -645,8 +831,47 @@ export const createScenarioExecutorCallbacks = (
         waitForRemoteStop(chargePoint, connector, log, runStartedAt),
       );
     },
-    onWaitForCsmsCall: (action, payload) => {
+    onWaitForCsmsCall: (action, payload, replace) => {
+      if (replace) {
+        return cancellablePromise(
+          waitForCsmsCallReplacing(
+            chargePoint,
+            connector,
+            action,
+            payload,
+            replace,
+            armedOwners,
+          ),
+        );
+      }
       return cancellablePromise(waitForCsmsCall(chargePoint, action, payload));
+    },
+    onUseBehavior: (behaviorId, nodeId) => {
+      const owner: RuleOwner = {
+        kind: "scenario",
+        scenarioId: `use:${behaviorId}`,
+        connectorId: connector.id,
+        nodeId,
+      };
+      chargePoint.engine.activateBehavior(behaviorId, owner);
+      armedOwners.set(`${behaviorId}:${connector.id}:${nodeId}`, owner);
+    },
+    onRunEnded: () => {
+      if (armedOwners.size === 0) return;
+      const mine = new Set(armedOwners.values());
+      armedOwners.clear();
+      const open = chargePoint.behaviors.release((owner) => mine.has(owner));
+      chargePoint.engine.deactivateBehaviors((owner) => mine.has(owner));
+      for (const exchange of open) {
+        chargePoint.logger.warn(
+          `${exchange.action}: the scenario ended before it answered this call; answering InternalError (use callResponse kind "none" to stay silent)`,
+          LogType.OCPP,
+        );
+        exchange.replyError(
+          "InternalError",
+          "The scenario ended before it answered this call",
+        );
+      }
     },
     onWaitForConnection: (event) => {
       return cancellablePromise(waitForConnection(chargePoint, event));
@@ -654,10 +879,14 @@ export const createScenarioExecutorCallbacks = (
     onWaitForStatus: (targetStatus) =>
       cancellablePromise(waitForStatus(connector, targetStatus)),
     onWaitForMeterValue: async (targetValue, timeout) =>
-      waitForMeterValue(connector, targetValue, timeout),
+      waitForMeterValue(connector, targetValue, timeout, clockOf(chargePoint)),
     onReserveNow: async (expiryMinutes, idTag, parentIdTag, reservationId) => {
-      const expiryDate = new Date(Date.now() + expiryMinutes * 60 * 1000);
-      const resolvedId = reservationId || Math.floor(Math.random() * 1000000);
+      const expiryDate = new Date(
+        clockOf(chargePoint).now() + expiryMinutes * 60 * 1000,
+      );
+      const resolvedId =
+        reservationId ||
+        rngOf(chargePoint, "scenario-reservation").int(0, 1000000);
       const status = chargePoint.reservationManager.createReservation(
         connector.id,
         expiryDate,

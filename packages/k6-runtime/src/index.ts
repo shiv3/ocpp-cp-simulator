@@ -1,16 +1,18 @@
 // packages/k6-runtime/src/index.ts
 // Public surface of the emitted runtime — everything the generated entry
 // script imports.
-export { OcppChargePoint } from "./ocppClient";
-export { runScenario } from "./interpreter";
-export { buildOptions } from "./profiles";
-export { evaluateAssertions } from "./assertions";
-export { scenarioSuccess } from "./metrics";
-export type { CpIdentity, ScenarioJson, Wire } from "./types";
+export { OcppChargePoint } from "./ocppClient.ts";
+export { runScenario } from "./interpreter.ts";
+export { runBehaviorIteration } from "./behaviorRun.ts";
+export type { Behavior } from "./behaviorTypes.ts";
+export { buildOptions } from "./profiles.ts";
+export { evaluateAssertions } from "./assertions.ts";
+export { scenarioSuccess } from "./metrics.ts";
+export type { CpIdentity, ScenarioJson, Wire } from "./types.ts";
 
-import { wire16 } from "./wire/v16";
+import { wire16 } from "./wire/v16.ts";
 import { SharedArray } from "k6/data";
-import type { CpIdentity, Wire } from "./types";
+import type { CpIdentity, Wire } from "./types.ts";
 
 export function createWire(version: string): Wire {
   if (version === "1.6") return wire16;

@@ -9,7 +9,10 @@ import {
   CSMS_CALL_TRIGGER_ACTIONS,
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
+  type CallResponseNodeData,
+  type CallResponseSpec,
   type OcppCallNodeData,
+  type UseBehaviorNodeData,
   type DelayNodeData,
   INBOUND_POLICY_ACTIONS,
   INBOUND_POLICY_ERROR_CODES,
@@ -48,6 +51,8 @@ import InboundPolicyForm from "./InboundPolicyForm";
 import MeterValueForm from "./MeterValueForm";
 import NotificationForm from "./NotificationForm";
 import OcppCallForm from "./OcppCallForm";
+import CallResponseForm from "./CallResponseForm";
+import UseBehaviorForm from "./UseBehaviorForm";
 import RemoteStartTriggerForm from "./RemoteStartTriggerForm";
 import RemoteStopTriggerForm from "./RemoteStopTriggerForm";
 import ResponseOverrideForm from "./ResponseOverrideForm";
@@ -662,6 +667,71 @@ function ocppCallFormToNodeData(formData: NodeFormData): OcppCallNodeData {
   }) as OcppCallNodeData;
 }
 
+const CALL_RESPONSE_KINDS = new Set<string>(["result", "error", "none"]);
+
+/** The fields of a CallResponseSpec as the form edits them and as saved. A
+ *  payload that is not an object is kept as typed (see ocppCallPayload). */
+function callResponseSpecFields(source: Record<string, unknown>) {
+  return {
+    kind: CALL_RESPONSE_KINDS.has(source.kind as string)
+      ? (source.kind as CallResponseSpec["kind"])
+      : "result",
+    payload:
+      source.payload === undefined
+        ? undefined
+        : (ocppCallPayload(source.payload) as Record<string, unknown>),
+    errorCode: optionalString(source.errorCode),
+    errorDescription: optionalString(source.errorDescription),
+  };
+}
+
+function asCallResponseSpec(value: unknown): CallResponseSpec | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return compactDefined(
+    callResponseSpecFields(value as Record<string, unknown>),
+  );
+}
+
+function callResponseNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  return compactDefined({
+    ...baseToForm(nodeData),
+    ...callResponseSpecFields(nodeData as Record<string, unknown>),
+    skipValidation: optionalBoolean(
+      (nodeData as Partial<CallResponseNodeData>).skipValidation,
+    ),
+  });
+}
+
+function callResponseFormToNodeData(
+  formData: NodeFormData,
+): CallResponseNodeData {
+  return compactDefined({
+    ...baseFromForm(formData),
+    ...callResponseSpecFields(formData),
+    skipValidation: optionalBoolean(formData.skipValidation),
+  }) as CallResponseNodeData;
+}
+
+function useBehaviorNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  return {
+    ...baseToForm(nodeData),
+    behaviorId: stringValue(
+      (nodeData as Partial<UseBehaviorNodeData>).behaviorId,
+    ),
+  };
+}
+
+function useBehaviorFormToNodeData(
+  formData: NodeFormData,
+): UseBehaviorNodeData {
+  return {
+    ...baseFromForm(formData),
+    behaviorId: stringValue(formData.behaviorId),
+  };
+}
+
 function csmsCallTriggerNodeDataToForm(
   nodeData: ScenarioNodeData,
 ): NodeFormData {
@@ -674,6 +744,16 @@ function csmsCallTriggerNodeDataToForm(
       (nodeData as Partial<CsmsCallTriggerNodeData>).timeout,
     ),
     payload: (nodeData as Partial<CsmsCallTriggerNodeData>).payload,
+    behavior:
+      (nodeData as Partial<CsmsCallTriggerNodeData>).behavior === "replace"
+        ? "replace"
+        : undefined,
+    onBusy:
+      (nodeData as Partial<CsmsCallTriggerNodeData>).behavior === "replace"
+        ? asCallResponseSpec(
+            (nodeData as Partial<CsmsCallTriggerNodeData>).onBusy,
+          )
+        : undefined,
   });
 }
 
@@ -685,6 +765,12 @@ function csmsCallTriggerFormToNodeData(
     action: asCsmsCallTriggerAction(formData.action),
     timeout: optionalNumber(formData.timeout),
     payload: asPayloadCondition(formData.payload),
+    // `observe` is the default and stays absent from saved scenarios.
+    behavior: formData.behavior === "replace" ? "replace" : undefined,
+    onBusy:
+      formData.behavior === "replace"
+        ? asCallResponseSpec(formData.onBusy)
+        : undefined,
   }) as CsmsCallTriggerNodeData;
 }
 
@@ -981,6 +1067,18 @@ export const NODE_FORM_REGISTRY = {
     Component: OcppCallForm,
     nodeDataToForm: ocppCallNodeDataToForm,
     formToNodeData: ocppCallFormToNodeData,
+  },
+  [ScenarioNodeType.CALL_RESPONSE]: {
+    title: "scenarioEditor.node.callResponse",
+    Component: CallResponseForm,
+    nodeDataToForm: callResponseNodeDataToForm,
+    formToNodeData: callResponseFormToNodeData,
+  },
+  [ScenarioNodeType.USE_BEHAVIOR]: {
+    title: "scenarioEditor.node.useBehavior",
+    Component: UseBehaviorForm,
+    nodeDataToForm: useBehaviorNodeDataToForm,
+    formToNodeData: useBehaviorFormToNodeData,
   },
   [ScenarioNodeType.CONNECTION_TRIGGER]: {
     title: "scenarioEditor.node.connectionTrigger",

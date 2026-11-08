@@ -3,6 +3,8 @@ import {
   type AutoMeterValueConfig,
   getMeterValueAtTime,
 } from "./MeterValueCurve";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
 
 export type MeterValueStrategy =
   | {
@@ -36,7 +38,7 @@ interface MeterValueSchedulerCallbacks {
 }
 
 export class MeterValueScheduler {
-  private timer: NodeJS.Timeout | null = null;
+  private timer: TimerHandle | null = null;
   private startTimestamp: number | null = null;
 
   /**
@@ -98,6 +100,7 @@ export class MeterValueScheduler {
     private readonly connectorId: number,
     private readonly callbacks: MeterValueSchedulerCallbacks,
     private readonly logger?: Logger,
+    private readonly clock: SimClock = realClock,
   ) {}
 
   start(strategy: MeterValueStrategy): void {
@@ -120,7 +123,7 @@ export class MeterValueScheduler {
         return;
       }
 
-      this.startTimestamp = Date.now();
+      this.startTimestamp = this.clock.now();
       const intervalMs = config.autoCalculateInterval
         ? this.calculateAutoInterval(config)
         : Math.max(1000, config.intervalSeconds * 1000);
@@ -129,7 +132,7 @@ export class MeterValueScheduler {
         `[MeterValueScheduler] Starting curve strategy for connector ${this.connectorId} interval=${intervalMs}ms`,
       );
 
-      this.timer = setInterval(() => {
+      this.timer = this.clock.setInterval(() => {
         this.tickCurve(config);
       }, intervalMs);
       return;
@@ -140,8 +143,8 @@ export class MeterValueScheduler {
       `[MeterValueScheduler] Starting increment strategy for connector ${this.connectorId} interval=${intervalMs}ms increment=${strategy.incrementValue} maxTime=${strategy.maxTimeSeconds || "unlimited"} maxValue=${strategy.maxValue || "unlimited"}`,
     );
 
-    this.startTimestamp = Date.now();
-    this.timer = setInterval(() => {
+    this.startTimestamp = this.clock.now();
+    this.timer = this.clock.setInterval(() => {
       this.tickIncrement(strategy);
     }, intervalMs);
   }
@@ -155,7 +158,7 @@ export class MeterValueScheduler {
       strategy.maxTimeSeconds > 0 &&
       this.startTimestamp
     ) {
-      const elapsedSeconds = (Date.now() - this.startTimestamp) / 1000;
+      const elapsedSeconds = (this.clock.now() - this.startTimestamp) / 1000;
       if (elapsedSeconds >= strategy.maxTimeSeconds) {
         this.logger?.info?.(
           `[MeterValueScheduler] Max time reached (${strategy.maxTimeSeconds}s) for connector ${this.connectorId}, stopping`,
@@ -239,7 +242,7 @@ export class MeterValueScheduler {
 
   stop(): void {
     if (this.timer) {
-      clearInterval(this.timer);
+      this.clock.clearInterval(this.timer);
       this.timer = null;
     }
     this.startTimestamp = null;
@@ -258,7 +261,7 @@ export class MeterValueScheduler {
   private tickCurve(config: AutoMeterValueConfig): void {
     if (!this.startTimestamp) return;
 
-    const elapsedMs = Date.now() - this.startTimestamp;
+    const elapsedMs = this.clock.now() - this.startTimestamp;
     const elapsedSeconds = elapsedMs / 1000;
     // The trajectory this session delivers, shifted so the curve's own first
     // point sits on the register the session started from. Without the shift

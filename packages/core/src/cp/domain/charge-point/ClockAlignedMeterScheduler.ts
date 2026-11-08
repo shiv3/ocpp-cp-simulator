@@ -1,3 +1,6 @@
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -36,12 +39,15 @@ export function nextClockAlignedBoundary(
  * on a boundary that was already reported does not report it again.
  */
 export class ClockAlignedMeterScheduler {
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: TimerHandle | null = null;
   private intervalSeconds = 0;
   private enabled = false;
   private lastEmittedBoundary = Number.NEGATIVE_INFINITY;
 
-  constructor(private readonly onBoundary: (boundaryMs: number) => void) {}
+  constructor(
+    private readonly onBoundary: (boundaryMs: number) => void,
+    private readonly clock: SimClock = realClock,
+  ) {}
 
   /** Change the interval; `0` disables. Takes effect at once if enabled. */
   setIntervalSeconds(intervalSeconds: number): void {
@@ -62,16 +68,16 @@ export class ClockAlignedMeterScheduler {
   private rearm(): void {
     this.clearTimer();
     if (this.intervalSeconds > 0) {
-      this.arm(Math.max(Date.now(), this.lastEmittedBoundary));
+      this.arm(Math.max(this.clock.now(), this.lastEmittedBoundary));
     }
   }
 
   /** Arm on the first boundary strictly after `afterMs`. */
   private arm(afterMs: number): void {
     const boundary = nextClockAlignedBoundary(afterMs, this.intervalSeconds);
-    this.timer = setTimeout(
+    this.timer = this.clock.setTimeout(
       () => this.fire(boundary),
-      Math.max(0, boundary - Date.now()),
+      Math.max(0, boundary - this.clock.now()),
     );
   }
 
@@ -83,12 +89,12 @@ export class ClockAlignedMeterScheduler {
     // early fire must not re-arm on the boundary it just reported, and a
     // late one must not replay the boundaries it slept through.
     if (this.timer !== null || !this.enabled) return;
-    this.arm(Math.max(Date.now(), boundary));
+    this.arm(Math.max(this.clock.now(), boundary));
   }
 
   private clearTimer(): void {
     if (this.timer !== null) {
-      clearTimeout(this.timer);
+      this.clock.clearTimeout(this.timer);
       this.timer = null;
     }
   }

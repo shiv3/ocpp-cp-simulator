@@ -7,11 +7,13 @@ sources:
   - scripts/bench/fleet-bench.ts
   - scripts/bench/lib.ts
   - scripts/bench/fleetBench.slowpath.test-bun.ts
+  - scripts/bench/engineScale.ts
 related:
+  - ../analyses/charger-engine-migration.md#verification-results
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Source: `scripts/bench/README.md`
@@ -733,3 +735,11 @@ sandboxes. See
 for what to record once someone runs it, and
 [Roadmap → 5a](../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling)
 for how that number gates 5b (a worker model).
+
+## engineScale.ts
+
+A second tool in the same directory, with no daemon and no CSMS: it runs N simulated chargers in one Bun process on a
+`VirtualClock` and reports heap and RSS per charger and the real time of one virtual hour, either for a bare async behavior
+loop per charger or for a real `ChargePoint` per charger (in-memory socket, or real sockets with `--mode cp-ws`).
+`--suite` prints the table. The measured results (10,000 real `ChargePoint` instances: 495 MB heap, 1.3 GB RSS peak, 31.9 s
+per virtual hour) are in [Charger engine migration → Verification results](../analyses/charger-engine-migration.md#verification-results).

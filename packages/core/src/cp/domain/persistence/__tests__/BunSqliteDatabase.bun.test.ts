@@ -663,6 +663,41 @@ describe("txUpdatedMeterValues schema, v22 (#347)", () => {
   });
 });
 
+describe("engine state schema, v23", () => {
+  it("creates engine_state on a database stamped 22 and keeps its other rows", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("DROP TABLE engine_state");
+      db.run(
+        "INSERT INTO connector_runtime (cp_id, connector_id, status, availability, updated_at) " +
+          "VALUES ('CP1', 1, 'Available', 'Operative', '2026-11-01T00:00:00Z')",
+      );
+      db.run("UPDATE schema_meta SET value = '22' WHERE key = 'version'");
+      expect(tables(db)).not.toContain("engine_state");
+
+      runMigrations(db);
+
+      expect(tables(db)).toContain("engine_state");
+      expect(
+        db.get<{ n: number }>("SELECT COUNT(*) AS n FROM connector_runtime")?.n,
+      ).toBe(1);
+      expect(
+        db.get<{ n: number }>("SELECT COUNT(*) AS n FROM engine_state")?.n,
+      ).toBe(0);
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(23);
+
+      db.run("UPDATE schema_meta SET value = '22' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("charging sessions schema, v17 (#447)", () => {
   it("creates charging_sessions on a database stamped 16", () => {
     const db = BunSqliteDatabase.open(":memory:");

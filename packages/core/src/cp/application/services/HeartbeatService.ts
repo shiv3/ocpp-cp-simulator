@@ -1,5 +1,7 @@
 import type { Logger } from "../../shared/Logger";
 import { EventEmitter } from "../../shared/EventEmitter";
+import { realClock } from "../../shared/clock";
+import type { SimClock, TimerHandle } from "../../shared/clock";
 
 export interface HeartbeatServiceEvents {
   /** Fired whenever the public state of the heartbeat changes (interval
@@ -29,7 +31,7 @@ export interface HeartbeatServiceEvents {
 export class HeartbeatService {
   private readonly _events = new EventEmitter<HeartbeatServiceEvents>();
   private _logger: Logger;
-  private _timer: ReturnType<typeof setTimeout> | null = null;
+  private _timer: TimerHandle | null = null;
   private _sendHeartbeatCallback: (() => void) | null = null;
   /** Interval requested by the CSMS (BootNotification.conf.interval or
    *  ChangeConfiguration HeartbeatInterval). 0 disables. */
@@ -37,7 +39,10 @@ export class HeartbeatService {
   /** Wall-clock time of the most recent Heartbeat.req we sent (for UI). */
   private _lastSentAt: Date | null = null;
 
-  constructor(logger: Logger) {
+  constructor(
+    logger: Logger,
+    private readonly _clock: SimClock = realClock,
+  ) {
     this._logger = logger;
   }
 
@@ -113,7 +118,7 @@ export class HeartbeatService {
   /** Stamp lastSentAt — called from the transport when the outgoing CALL is
    *  specifically a Heartbeat.req, so the UI can show "last sent Xs ago". */
   markHeartbeatSent(): void {
-    this._lastSentAt = new Date();
+    this._lastSentAt = new Date(this._clock.now());
     this.emitState();
   }
 
@@ -141,7 +146,7 @@ export class HeartbeatService {
 
   private armTimer(): void {
     this.clearTimer();
-    this._timer = setTimeout(() => {
+    this._timer = this._clock.setTimeout(() => {
       this._timer = null;
       // Send fires sendRequest → notifyOutgoingCall → armTimer for the next
       // window, so we don't have to re-arm here. markHeartbeatSent runs from
@@ -152,7 +157,7 @@ export class HeartbeatService {
 
   private clearTimer(): void {
     if (this._timer) {
-      clearTimeout(this._timer);
+      this._clock.clearTimeout(this._timer);
       this._timer = null;
     }
   }

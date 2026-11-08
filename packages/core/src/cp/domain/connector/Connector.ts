@@ -1,5 +1,7 @@
 import { EventEmitter } from "../../shared/EventEmitter";
 import type { Logger } from "../../shared/Logger";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 import {
   type AutoMeterValueConfig,
   defaultAutoMeterValueConfig,
@@ -23,6 +25,20 @@ import type {
   ScenarioEvents,
 } from "../../application/scenario/ScenarioTypes";
 import type { Transaction } from "./Transaction";
+import {
+  applyPatchToTransaction,
+  patchOfFields,
+  recordOfTransaction,
+  transactionOfRecord,
+  type TransactionRecord,
+} from "./TransactionRecord";
+import {
+  initialConnectorRecord,
+  reduceConnectorRecord,
+  type ConnectorRecord,
+  type ConnectorStateStore,
+  type ConnectorWrite,
+} from "./ConnectorRecord";
 import {
   type EVSettings,
   type EVSettingsPatch,
@@ -102,7 +118,7 @@ export interface ConnectorEvents {
   statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
   /**
    * Fires when `beginTransaction` or `stopTransaction` flips the
-   * `transactionValue` field, distinct from `transactionIdChange`
+   * `transaction` field, distinct from `transactionIdChange`
    * (which only fires when the CSMS confirms a real id on an
    * already-active transaction). Persistence listeners use this to
    * catch the "transaction object just started" / "just cleared" edges
@@ -143,20 +159,14 @@ export class Connector {
   private readonly scenarioEventsEmitter = new EventEmitter<ScenarioEvents>();
   private readonly meterScheduler: MeterValueScheduler;
 
-  private statusValue: OCPPStatus = OCPPStatus.Unavailable;
-  private availabilityValue: OCPPAvailability = "Operative";
-  // §5.2: when ChangeAvailability arrives during an active transaction the
-  // CP returns `Scheduled` and applies the new availability after the
-  // transaction stops. We remember the pending value here so the
-  // ChargePoint can finalize it on StopTransaction.
-  private scheduledAvailabilityValue: OCPPAvailability | null = null;
-  // OCPP 1.6 §7.6: ChargePointErrorCode carried in StatusNotification.req.
-  // Defaults to NoError. Set this before transitioning to Faulted (or before
-  // sending a warning-grade StatusNotification while
-  // Preparing/SuspendedEV/SuspendedEVSE/Finishing).
-  private currentErrorCodeValue: ChargePointErrorCode = "NoError";
-  private currentErrorInfo: string | null = null;
-  private currentVendorErrorCode: string | null = null;
+  // Status, availability (§5.2: a ChangeAvailability during a transaction is
+  // answered `Scheduled` and applied when it stops) and the error fields of
+  // the next StatusNotification (OCPP 1.6 §7.6; NoError by default, set before
+  // moving to Faulted) are a ConnectorRecord. Inside a charge point the record
+  // lives in the charger engine's state and every write is an engine event;
+  // on its own a connector keeps it in `localRecord`.
+  private localRecord: ConnectorRecord = initialConnectorRecord();
+  private store: ConnectorStateStore = this.createLocalStore();
   // §5.18 / §7.46: scenarios/tests can simulate broken cable retention by
   // flipping this to "UnlockFailed", or absent connector lock by setting
   // "NotSupported". UnlockConnector.req returns this value verbatim.
@@ -215,7 +225,13 @@ export class Connector {
    */
   private socAwaitsNextTransaction = true;
   private socPercent: number | null = null;
-  private transactionValue: Transaction | null = null;
+  // The transaction is part of the connector's record (engine state). Code
+  // gets a live `Transaction` object, a view: reads are plain property reads,
+  // an assignment to one of its fields dispatches a `transaction.patch` write.
+  // `applyWrite` keeps it in step with the record, so its identity lasts as
+  // long as the transaction does.
+  private txView: Transaction | null = null;
+  private txTarget: Transaction | null = null;
 
   /**
    * The EV side of the cable was unplugged during a transaction the station
@@ -259,11 +275,16 @@ export class Connector {
     socAwaitsNextTransaction: boolean;
     lastAutoStartedScenarioKey: string | null;
   } {
+    // The engine-owned part is read from the connector's record, which is
+    // the charger engine's state, in one go.
+    const record = this.record;
     return {
-      status: this.statusValue,
-      availability: this.availabilityValue,
-      scheduledAvailability: this.scheduledAvailabilityValue,
-      transaction: this.transactionValue ? { ...this.transactionValue } : null,
+      status: record.status,
+      availability: record.availability,
+      scheduledAvailability: record.scheduledAvailability,
+      transaction: record.transaction
+        ? transactionOfRecord(record.transaction)
+        : null,
       meterValueWh: this.meterValueWh,
       socPercent: this.socPercent,
       socAwaitsNextTransaction: this.socAwaitsNextTransaction,
@@ -297,14 +318,20 @@ export class Connector {
     socAwaitsNextTransaction?: boolean;
     lastAutoStartedScenarioKey: string | null;
   }): void {
-    this.statusValue = snapshot.status;
-    this.availabilityValue = snapshot.availability;
-    this.scheduledAvailabilityValue = snapshot.scheduledAvailability;
+    this.store.write({
+      kind: "restore",
+      status: snapshot.status,
+      availability: snapshot.availability,
+      scheduledAvailability: snapshot.scheduledAvailability,
+      transaction: snapshot.transaction
+        ? recordOfTransaction({
+            ...snapshot.transaction,
+            signedBeginOcmf: undefined,
+          })
+        : null,
+    });
     // #315: the signing key is in memory only, so a begin reading signed
     // before the restart no longer matches MeterPublicKey<id>; drop it.
-    this.transactionValue = snapshot.transaction
-      ? { ...snapshot.transaction, signedBeginOcmf: undefined }
-      : null;
     this.meterValueWh = snapshot.meterValueWh;
     this.socPercent = snapshot.socPercent;
     // Carried across the restart with the SoC it describes. Without it a
@@ -336,6 +363,7 @@ export class Connector {
     private readonly connectorId: number,
     private readonly logger: Logger,
     stationProfilesProvider?: () => ChargingProfileStore | null,
+    private readonly clock: SimClock = realClock,
   ) {
     this.stationProfilesProvider = stationProfilesProvider ?? (() => null);
     this.meterScheduler = new MeterValueScheduler(
@@ -359,7 +387,13 @@ export class Connector {
         getScheduleLimitWatts: () => this.effectiveMeterCapWatts(),
       },
       this.logger,
+      this.clock,
     );
+  }
+
+  /** The injected clock's current instant. */
+  private nowDate(): Date {
+    return new Date(this.clock.now());
   }
 
   /**
@@ -396,7 +430,7 @@ export class Connector {
    * without needing an extra timer.
    */
   currentScheduleLimitWatts(): number {
-    const { watts } = this.resolveScheduleConstraints(new Date());
+    const { watts } = this.resolveScheduleConstraints(this.nowDate());
     this.announceScheduleCrossing(watts);
     return watts;
   }
@@ -424,7 +458,7 @@ export class Connector {
    * should make instead of those two.
    */
   scheduleConstraints(): { watts: number; activePhases: number } {
-    const constraints = this.resolveScheduleConstraints(new Date());
+    const constraints = this.resolveScheduleConstraints(this.nowDate());
     this.announceScheduleCrossing(constraints.watts);
     return constraints;
   }
@@ -452,7 +486,7 @@ export class Connector {
         ChargingProfilePurposeType.ChargePointMaxProfile,
         now,
       ) ?? null;
-    const start = this.transactionValue?.startTime ?? null;
+    const start = this.transaction?.startTime ?? null;
     const resolved = resolveEffectiveLimitWatts(
       txProfile,
       stationMax,
@@ -515,8 +549,8 @@ export class Connector {
     // could act on. Leaving the latch untouched here means the first resolve
     // that *can* act announces it (#301).
     if (
-      this.statusValue !== OCPPStatus.Charging &&
-      this.statusValue !== OCPPStatus.SuspendedEVSE
+      this.status !== OCPPStatus.Charging &&
+      this.status !== OCPPStatus.SuspendedEVSE
     ) {
       return;
     }
@@ -549,7 +583,7 @@ export class Connector {
    * sample set, not while driving the meter.
    */
   activePhaseCount(): number {
-    return this.resolveScheduleConstraints(new Date()).activePhases;
+    return this.resolveScheduleConstraints(this.nowDate()).activePhases;
   }
 
   /**
@@ -558,7 +592,7 @@ export class Connector {
    * that is not a sampling path, such as the 2.x `EVSE.Power` value (#538).
    */
   scheduleLimitWattsNow(): number {
-    return this.resolveScheduleConstraints(new Date()).watts;
+    return this.resolveScheduleConstraints(this.nowDate()).watts;
   }
 
   /**
@@ -605,7 +639,7 @@ export class Connector {
       curve,
       socPercent: resolveSocForCurve(
         this.soc,
-        this.transactionValue?.initialSoc,
+        this.transaction?.initialSoc,
         this._evSettings.initialSoc,
       ),
       scheduleLimitWatts: scheduleW,
@@ -613,7 +647,7 @@ export class Connector {
   }
 
   private socFromMeterValue(meterValueWh: number): number | null {
-    const transactionCapacity = this.transactionValue?.batteryCapacityKwh;
+    const transactionCapacity = this.transaction?.batteryCapacityKwh;
     const capacity =
       transactionCapacity && transactionCapacity > 0
         ? transactionCapacity
@@ -621,8 +655,8 @@ export class Connector {
     if (capacity <= 0) return null;
 
     const initial =
-      this.transactionValue?.initialSoc ?? this._evSettings.initialSoc ?? 0;
-    const meterStart = this.transactionValue?.meterStart ?? 0;
+      this.transaction?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const meterStart = this.transaction?.meterStart ?? 0;
     const deliveredKWh = Math.max(0, meterValueWh - meterStart) / 1000;
     const derived = initial + (deliveredKWh / capacity) * 100;
     return Math.min(100, Math.max(0, derived));
@@ -641,28 +675,24 @@ export class Connector {
   }
 
   get status(): OCPPStatus {
-    return this.statusValue;
+    return this.store.read().status;
   }
 
+  /**
+   * TRANSITIONAL (removed with #575): kept so callers and tests need not change.
+   * A bare write: only this connector's own `statusChange` listeners hear it.
+   */
   set status(newStatus: OCPPStatus) {
-    const previousStatus = this.statusValue;
-    this.statusValue = newStatus;
-    if (newStatus !== OCPPStatus.SuspendedEV) {
-      this.energyOfferSuspendedValue = false;
-    }
-    this.eventsEmitter.emit("statusChange", {
-      status: newStatus,
-      previousStatus,
-    });
+    this.store.write({ kind: "status", status: newStatus, scope: "local" });
   }
 
   get availability(): OCPPAvailability {
-    return this.availabilityValue;
+    return this.store.read().availability;
   }
 
   set availability(newAvailability: OCPPAvailability) {
-    this.availabilityValue = newAvailability;
-    this.eventsEmitter.emit("availabilityChange", {
+    this.store.write({
+      kind: "availability",
       availability: newAvailability,
     });
   }
@@ -670,35 +700,137 @@ export class Connector {
   /** Pending availability that should be applied once the in-flight
    *  transaction ends (set by ChangeAvailability while charging). */
   get scheduledAvailability(): OCPPAvailability | null {
-    return this.scheduledAvailabilityValue;
+    return this.store.read().scheduledAvailability;
   }
 
   set scheduledAvailability(value: OCPPAvailability | null) {
-    this.scheduledAvailabilityValue = value;
+    this.store.write({ kind: "scheduledAvailability", value });
   }
 
   get currentErrorCode(): ChargePointErrorCode {
-    return this.currentErrorCodeValue;
+    return this.store.read().errorCode;
   }
 
   set currentErrorCode(code: ChargePointErrorCode) {
-    this.currentErrorCodeValue = code;
+    this.store.write({ kind: "errorCode", errorCode: code });
   }
 
   get errorInfo(): string | null {
-    return this.currentErrorInfo;
+    return this.store.read().errorInfo;
   }
 
   set errorInfo(info: string | null) {
-    this.currentErrorInfo = info;
+    this.store.write({ kind: "errorInfo", errorInfo: info });
   }
 
   get vendorErrorCode(): string | null {
-    return this.currentVendorErrorCode;
+    return this.store.read().vendorErrorCode;
   }
 
   set vendorErrorCode(code: string | null) {
-    this.currentVendorErrorCode = code;
+    this.store.write({ kind: "vendorErrorCode", vendorErrorCode: code });
+  }
+
+  /** The record as it is now. */
+  get record(): ConnectorRecord {
+    return this.store.read();
+  }
+
+  /**
+   * Move the record into `store` (the charger engine's state) or, with
+   * `null`, back into a private cell that starts from `last`.
+   */
+  bindStore(store: ConnectorStateStore | null, last?: ConnectorRecord): void {
+    if (store) {
+      this.store = store;
+      return;
+    }
+    this.localRecord = last ?? this.store.read();
+    this.store = this.createLocalStore();
+  }
+
+  private createLocalStore(): ConnectorStateStore {
+    return {
+      read: () => this.localRecord,
+      write: (write) => {
+        const previous = this.localRecord;
+        this.localRecord = reduceConnectorRecord(previous, write);
+        this.applyWrite(previous, write);
+      },
+    };
+  }
+
+  /**
+   * Called by the store after `write` changed the record from `previous`:
+   * the connector-local side of a write (its `statusChange` and
+   * `availabilityChange` listeners).
+   */
+  applyWrite(previous: ConnectorRecord, write: ConnectorWrite): void {
+    switch (write.kind) {
+      case "status":
+        if (write.status !== OCPPStatus.SuspendedEV) {
+          this.energyOfferSuspendedValue = false;
+        }
+        this.eventsEmitter.emit("statusChange", {
+          status: write.status,
+          previousStatus: previous.status,
+        });
+        break;
+      case "availability":
+        this.eventsEmitter.emit("availabilityChange", {
+          availability: write.availability,
+        });
+        break;
+      case "transaction.set":
+        this.rebuildTransactionView(write.transaction);
+        break;
+      case "transaction.patch":
+        if (this.txTarget) applyPatchToTransaction(this.txTarget, write.patch);
+        break;
+      case "restore":
+        if (write.transaction !== undefined) {
+          this.rebuildTransactionView(write.transaction);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  private rebuildTransactionView(record: TransactionRecord | null): void {
+    if (!record) {
+      this.txTarget = null;
+      this.txView = null;
+      return;
+    }
+    const target = transactionOfRecord(record);
+    this.txTarget = target;
+    this.txView = new Proxy(target, {
+      // A view kept past the end of its transaction is detached: it writes
+      // into its own record, never into the transaction that replaced it.
+      set: (viewTarget, key, value) => {
+        if (typeof key !== "string") return false;
+        if (this.txTarget !== viewTarget) {
+          return Reflect.set(viewTarget, key, value);
+        }
+        this.store.write({
+          kind: "transaction.patch",
+          patch: patchOfFields({ [key]: value }),
+        });
+        return true;
+      },
+      deleteProperty: (viewTarget, key) => {
+        if (typeof key !== "string") return false;
+        if (this.txTarget !== viewTarget) {
+          return Reflect.deleteProperty(viewTarget, key);
+        }
+        this.store.write({
+          kind: "transaction.patch",
+          patch: patchOfFields({ [key]: undefined }),
+        });
+        return true;
+      },
+    });
   }
 
   get unlockResponse(): "Unlocked" | "UnlockFailed" | "NotSupported" {
@@ -778,9 +910,7 @@ export class Connector {
    * an SoC before pressing Start (#301).
    */
   get hasRunningTransaction(): boolean {
-    return (
-      this.transactionValue !== null && this.transactionValue.stopTime === null
-    );
+    return this.transaction !== null && this.transaction.stopTime === null;
   }
 
   /** See {@link energyOfferSuspendedValue} (#488). */
@@ -794,17 +924,42 @@ export class Connector {
     this.energyOfferSuspendedValue = true;
   }
 
+  /**
+   * TRANSITIONAL (removed with #575): a live `Proxy` view of the engine's record;
+   * assigning stores a copy, so the view is not the object you assigned.
+   */
   get transaction(): Transaction | null {
-    return this.transactionValue;
+    return this.txView;
   }
 
   set transaction(transaction: Transaction | null) {
-    this.transactionValue = transaction;
+    if (transaction !== null && transaction === this.txView) return;
+    this.store.write({
+      kind: "transaction.set",
+      transaction: transaction ? recordOfTransaction(transaction) : null,
+    });
+  }
+
+  /** Detach the transaction without announcing it (no `transactionChange`). */
+  detachTransaction(): void {
+    this.store.write({ kind: "transaction.set", transaction: null });
+  }
+
+  /**
+   * Change fields of the transaction on this connector, through the engine
+   * (an `undefined` value removes the field). No-op without a transaction.
+   */
+  patchTransaction(fields: Partial<Record<keyof Transaction, unknown>>): void {
+    if (!this.txTarget) return;
+    this.store.write({
+      kind: "transaction.patch",
+      patch: patchOfFields(fields),
+    });
   }
 
   markTransactionChanged(): void {
     this.eventsEmitter.emit("transactionChange", {
-      transaction: this.transactionValue,
+      transaction: this.transaction,
     });
   }
 
@@ -812,15 +967,25 @@ export class Connector {
    *  StartTransaction.req; its `0` id is now a placeholder the CSMS failed
    *  to process. Emits `transactionChange` so the flag is persisted. */
   markStartCallError(): void {
-    if (!this.transactionValue || this.transactionValue.startCallError) return;
-    this.transactionValue.startCallError = true;
+    if (!this.txTarget || this.txTarget.startCallError) return;
+    this.store.write({
+      kind: "transaction.patch",
+      patch: { startCallError: true },
+    });
     this.markTransactionChanged();
   }
 
   set transactionId(transactionId: number) {
-    if (!this.transactionValue) return;
-    this.transactionValue.id = transactionId;
-    delete this.transactionValue.startCallError;
+    this.assignTransactionId(transactionId);
+  }
+
+  /** The CSMS assigned `transactionId` (StartTransaction.conf). */
+  assignTransactionId(transactionId: number): void {
+    if (!this.txTarget) return;
+    this.store.write({
+      kind: "transaction.patch",
+      patch: { id: transactionId, startCallError: undefined },
+    });
     this.eventsEmitter.emit("transactionIdChange", { transactionId });
   }
 
@@ -930,7 +1095,7 @@ export class Connector {
    * Returns `null` when no Tx-layer profile applies.
    */
   getActiveChargingProfile(
-    now: Date = new Date(),
+    now: Date = this.nowDate(),
   ): ActiveChargingProfile | null {
     const isValid = (profile: ActiveChargingProfile) => {
       if (profile.validFrom && new Date(profile.validFrom) > now) return false;
@@ -1083,14 +1248,14 @@ export class Connector {
     this.autoConfig = normalized;
     this.eventsEmitter.emit("autoMeterValueChange", { config: normalized });
 
-    if (this.transactionValue) {
+    if (this.transaction) {
       this.startConfiguredMeterValue();
     }
   }
 
   setIncrementFallback(config: IncrementStrategyConfig | null): void {
     this.incrementFallback = config;
-    if (this.transactionValue && !this.autoConfig.enabled) {
+    if (this.transaction && !this.autoConfig.enabled) {
       this.startConfiguredMeterValue();
     }
   }
@@ -1100,7 +1265,10 @@ export class Connector {
   }
 
   beginTransaction(transaction: Transaction): void {
-    this.transactionValue = transaction;
+    this.store.write({
+      kind: "transaction.set",
+      transaction: recordOfTransaction(transaction),
+    });
     // A new session has announced nothing yet. `lastSchedulePaused` records
     // what *this* session last told the ChargePoint, and the listener it
     // feeds no-ops without a transaction — so "already announced" is only a
@@ -1117,7 +1285,7 @@ export class Connector {
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
     this.energyOfferSuspendedValue = false;
-    this.openSessionSoc(transaction);
+    this.openSessionSoc(this.txView ?? transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });
   }
@@ -1168,7 +1336,7 @@ export class Connector {
       // and where they could, the connector's own value is the later statement
       // and the one the operator can see.
       if (this.socPercent !== null) {
-        transaction.initialSoc = this.socPercent;
+        this.patchTransaction({ initialSoc: this.socPercent });
       }
       return;
     }
@@ -1213,7 +1381,7 @@ export class Connector {
 
   stopTransaction(): void {
     this.meterScheduler.stop();
-    this.transactionValue = null;
+    this.store.write({ kind: "transaction.set", transaction: null });
     this.eventsEmitter.emit("transactionChange", { transaction: null });
   }
 
@@ -1222,7 +1390,7 @@ export class Connector {
   }
 
   startConfiguredMeterValue(): void {
-    if (!this.transactionValue) return;
+    if (!this.transaction) return;
 
     if (this.autoConfig.enabled) {
       this.meterScheduler.start({ kind: "curve", config: this.autoConfig });
@@ -1280,7 +1448,7 @@ export class Connector {
     this.eventsEmitter.removeAllListeners();
     this.scenarioEventsEmitter.removeAllListeners();
     this.onMeterSend = null;
-    // Intentionally do NOT clear `transactionValue` / `socPercent` in either
+    // Intentionally do NOT clear the transaction / `socPercent` in either
     // runtime cleanup or full dispose. Disconnect/reconnect paths rely on those
     // values so post-boot StatusNotifications can describe the live connector
     // state instead of orphaning an in-flight transaction at the CSMS side.
@@ -1330,7 +1498,7 @@ export class Connector {
    */
   private checkAutoStop(): void {
     if (!this.autoConfig.stopAtTargetSoc) return;
-    if (!this.transactionValue) return;
+    if (!this.transaction) return;
     if (!this.meterScheduler.isActive()) return;
     const current = this.effectiveSocPercent();
     if (current === null) return;
@@ -1369,15 +1537,15 @@ export class Connector {
    * unknown.
    */
   private meterWhForSoc(soc: number): number | null {
-    const transactionCapacity = this.transactionValue?.batteryCapacityKwh;
+    const transactionCapacity = this.transaction?.batteryCapacityKwh;
     const capacity =
       transactionCapacity && transactionCapacity > 0
         ? transactionCapacity
         : this._evSettings.batteryCapacityKwh;
     if (capacity <= 0) return null;
     const initial =
-      this.transactionValue?.initialSoc ?? this._evSettings.initialSoc ?? 0;
-    const meterStart = this.transactionValue?.meterStart ?? 0;
+      this.transaction?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const meterStart = this.transaction?.meterStart ?? 0;
     const deliveredKWh = ((soc - initial) / 100) * capacity;
     if (deliveredKWh <= 0) return meterStart;
     return Math.round(meterStart + deliveredKWh * 1000);

@@ -7,6 +7,8 @@ import { GetLogHandler } from "../handlers/call/GetLogHandler";
 import { UpdateFirmwareHandler } from "../handlers/call/UpdateFirmwareHandler";
 import { SignedUpdateFirmwareHandler } from "../handlers/call/SignedUpdateFirmwareHandler";
 import { Logger } from "../../../shared/Logger";
+import { realClock } from "../../../shared/clock";
+import { ChargerEngine } from "../../../application/engine/ChargerEngine";
 import type { HandlerContext } from "../handlers/MessageHandlerRegistry";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isHandlerOutcome } from "../network-sim/ResponseEffectQueue";
@@ -35,15 +37,38 @@ function buildContext() {
     sendSignedFirmwareStatusNotification: record(
       "sendSignedFirmwareStatusNotification",
     ),
-    simulateFirmwareUpdate: record("simulateFirmwareUpdate"),
-    simulateSignedFirmwareUpdate: record("simulateSignedFirmwareUpdate"),
+    clock: realClock,
+    logger: new Logger(),
+    ocppVersion: "OCPP-1.6J",
+    configuration: {
+      getString: () => undefined,
+      applyChange: () => "Accepted",
+    },
+    // The charger engine runs the default behaviors. The firmware ones are
+    // stubbed (recording the call and handing back an effect); the others
+    // run for real against this mock station.
+    engine: undefined as unknown as ChargerEngine,
     connectors: new Map([
       [1, { id: 1 }],
       [2, { id: 2 }],
     ]),
   };
 
-  const logger = new Logger();
+  const realEngine = new ChargerEngine(chargePoint as unknown as ChargePoint);
+  chargePoint.engine = {
+    runDefault: (action: string, payload: unknown) => {
+      if (action !== "UpdateFirmware" && action !== "SignedUpdateFirmware") {
+        return realEngine.runDefault(action, payload);
+      }
+      record("runDefault")(action, payload);
+      return {
+        response: action === "UpdateFirmware" ? {} : { status: "Accepted" },
+        effect: record(`effect:${action}`),
+      };
+    },
+  } as unknown as ChargerEngine;
+
+  const logger = chargePoint.logger;
 
   const ctx: HandlerContext = {
     chargePoint: chargePoint as unknown as ChargePoint,
@@ -419,7 +444,7 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect sends Uploading, then Uploaded once the upload window elapses", () => {
+    it("effect sends Uploading, then Uploaded once the upload window elapses", async () => {
       vi.useFakeTimers();
       try {
         const { ctx, chargePointCalls } = buildContext();
@@ -443,7 +468,7 @@ describe("responseEffects.handlers", () => {
             ["Uploading", 123],
           ]);
 
-          vi.advanceTimersByTime(2000);
+          await vi.advanceTimersByTimeAsync(2000);
 
           expect(chargePointCalls.sendLogStatusNotification).toEqual([
             ["Uploading", 123],
@@ -474,7 +499,7 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect calls simulateFirmwareUpdate on settlement", () => {
+    it("effect starts the default behavior's follow-up on settlement", () => {
       const { ctx, chargePointCalls } = buildContext();
       const handler = new UpdateFirmwareHandler();
       const now = new Date();
@@ -488,9 +513,10 @@ describe("responseEffects.handlers", () => {
 
       expect(isHandlerOutcome(result)).toBe(true);
       if (isHandlerOutcome(result)) {
-        expect(chargePointCalls.simulateFirmwareUpdate).toBeUndefined();
+        expect(chargePointCalls["effect:UpdateFirmware"]).toBeUndefined();
+        expect(chargePointCalls.runDefault[0][0]).toBe("UpdateFirmware");
         result.afterResponseSettled();
-        expect(chargePointCalls.simulateFirmwareUpdate).toHaveLength(1);
+        expect(chargePointCalls["effect:UpdateFirmware"]).toHaveLength(1);
       }
     });
   });
@@ -518,7 +544,7 @@ describe("responseEffects.handlers", () => {
       }
     });
 
-    it("effect calls simulateSignedFirmwareUpdate with requestId on settlement", () => {
+    it("effect starts the signed follow-up on settlement", () => {
       const { ctx, chargePointCalls } = buildContext();
       const handler = new SignedUpdateFirmwareHandler();
       const now = new Date();
@@ -537,12 +563,15 @@ describe("responseEffects.handlers", () => {
 
       expect(isHandlerOutcome(result)).toBe(true);
       if (isHandlerOutcome(result)) {
-        expect(chargePointCalls.simulateSignedFirmwareUpdate).toBeUndefined();
+        expect(chargePointCalls["effect:SignedUpdateFirmware"]).toBeUndefined();
+        // The request, requestId (789) included, goes to the default behavior.
+        expect(chargePointCalls.runDefault[0][0]).toBe("SignedUpdateFirmware");
+        expect(
+          (chargePointCalls.runDefault[0][1] as { requestId: number })
+            .requestId,
+        ).toBe(789);
         result.afterResponseSettled();
-        const calls = chargePointCalls.simulateSignedFirmwareUpdate;
-        expect(calls).toHaveLength(1);
-        // Verify that requestId (789) is passed as the second argument
-        expect(calls?.[0][1]).toBe(789);
+        expect(chargePointCalls["effect:SignedUpdateFirmware"]).toHaveLength(1);
       }
     });
   });

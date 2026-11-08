@@ -86,6 +86,9 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     status: OCPPStatus.Preparing,
     transaction: transaction() as Transaction | null,
     transactionId: undefined as number | undefined,
+    assignTransactionId(id: number) {
+      this.transactionId = id;
+    },
     markStartCallError() {
       if (this.transaction) this.transaction.startCallError = true;
     },

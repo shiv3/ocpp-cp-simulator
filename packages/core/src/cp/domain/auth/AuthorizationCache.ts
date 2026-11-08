@@ -2,6 +2,8 @@ import type { Database } from "../persistence/Database";
 import { AUTHORIZATION_CACHE_SEED_MAX } from "@ocpp-cp-sim/contracts/authorization";
 import { idTokenKey } from "./idTokenKey";
 import { effectiveStatus } from "./LocalAuthorizationResolver";
+import { realClock } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 
 /**
  * What the CSMS said about an identifier, normalized across versions:
@@ -29,6 +31,8 @@ export interface AuthorizationCacheOptions {
   /** Capacity; reaching it evicts per {@link AuthorizationCache.upsert}. */
   maxEntries?: number;
   now?: () => number;
+  /** Where `now` comes from when it is not given; the platform clock. */
+  clock?: SimClock;
 }
 
 /** Neither 1.6 nor 2.x has a key for the cache capacity in entries. */
@@ -77,7 +81,8 @@ export class AuthorizationCache {
       1,
       options.maxEntries ?? DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES,
     );
-    this.now = options.now ?? Date.now;
+    const clock = options.clock ?? realClock;
+    this.now = options.now ?? (() => clock.now());
     this.load();
   }
 

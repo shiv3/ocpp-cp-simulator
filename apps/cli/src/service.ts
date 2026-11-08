@@ -1,3 +1,4 @@
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -91,6 +92,11 @@ import {
 import { legacyGeneratedBaseId } from "@ocpp-cp-sim/core/cp/domain/persistence/legacyStartupInstances";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
+import { SqliteEngineStateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/EngineStateRepository";
+import {
+  parsePersistedEngineState,
+  type PersistedEngineState,
+} from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
 import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
@@ -765,6 +771,7 @@ export class CLIChargePointService {
       init.tls,
     );
     this._chargePoint.txUpdatedMeterValues = init.txUpdatedMeterValues === true;
+    if (database) this.persistEngineState(database, init.cpId);
     this._soapServer = isSoapVersion(ocppVersion)
       ? new OCPPSoapServer(
           {
@@ -1002,6 +1009,9 @@ export class CLIChargePointService {
         tlsKeyPath: this._init.tlsKeyPath,
         bootNotification: this._init.bootNotification ?? null,
         labels: this._init.labels,
+        ...(this._init.behaviors === undefined
+          ? {}
+          : { behaviors: [...this._init.behaviors] }),
       },
     };
   }
@@ -2618,7 +2628,7 @@ export class CLIChargePointService {
     const connector = this._chargePoint.connectors.get(connectorId);
     if (!connector) return;
 
-    connector.transaction = null;
+    connector.detachTransaction();
     // The setter does not emit `transactionChange`, so nothing else would
     // announce this one (#314) — but only announce it here when there was no
     // run to stop. `stopScenario` drops the executor synchronously and leaves
@@ -2797,6 +2807,10 @@ export class CLIChargePointService {
     // sessions open for the next start to reconcile.
     this._sessionRecorder.dispose();
     if (permanent) {
+      // The station is gone for good: a `main` that writes `ctx.state` while it
+      // stops must not bring the `engine_state` row back for the next station
+      // under this id.
+      this._chargePoint.engine.onPersist(null);
       this._chargePoint.dispose();
     } else {
       // #538: the periodic monitors keep their timers offline. Stopped
@@ -2808,6 +2822,12 @@ export class CLIChargePointService {
       // is stopping: its wait, store listener and in-memory keys go too.
       this._chargePoint.releaseRenewedClientCertificate();
       this._chargePoint.disconnect();
+      // The engine of a discarded instance stops with it: its `main` loops,
+      // hooks and open exchanges would run on beside the replacement, and its
+      // persist listener would keep overwriting the `engine_state` row the
+      // replacement owns now. The row itself stays (an update keeps it).
+      this._chargePoint.engine.onPersist(null);
+      this._chargePoint.engine.dispose();
     }
     this.detachConnectorEventForwarders();
     for (const unsub of this._unsubscribes) {
@@ -3148,6 +3168,134 @@ export class CLIChargePointService {
       restored += 1;
     });
     return restored;
+  }
+
+  /**
+   * Keep the engine's own state (notification statuses, the `ctx.state` of
+   * behaviors) in the `engine_state` row. Read back here, in the constructor,
+   * so a behavior loaded afterwards adopts its stored `ctx.state` whatever the
+   * order of restore and load; the row of a charge point that never existed is
+   * absent and reads as the initial state. A stored value this build cannot
+   * read is ignored.
+   */
+  private persistEngineState(database: Database, cpId: string): void {
+    const repo = new SqliteEngineStateRepository(database);
+    const engine = this._chargePoint.engine;
+    const saved = parsePersistedEngineState(repo.load(cpId));
+    if (saved) engine.restoreState(saved);
+    // Normalized after the restore, so an untouched engine writes nothing.
+    let lastSaved = JSON.stringify(engine.persistable());
+    engine.onPersist(() => {
+      const next = engine.persistable();
+      const text = JSON.stringify(next);
+      if (text === lastSaved) return;
+      repo.save(cpId, next);
+      lastSaved = text;
+    });
+  }
+
+  /**
+   * Load behavior code (`--behavior`) onto this charge point. A behavior that
+   * cannot load (duplicate id, unmet `requires`) throws; the ones before it
+   * stay loaded.
+   */
+  loadBehaviors(behaviors: readonly Behavior[]): void {
+    for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
+  }
+
+  /** The engine state that survives a rebuild (see `ChargerEngine.persistable`). */
+  engineStateSnapshot(): PersistedEngineState {
+    return this._chargePoint.engine.persistable();
+  }
+
+  /** Put a {@link engineStateSnapshot} back, before behaviors load. */
+  restoreEngineState(saved: PersistedEngineState): void {
+    this._chargePoint.engine.restoreState(saved);
+  }
+
+  /** Ids of the code behaviors loaded on this charge point, in load order. */
+  behaviorIds(): string[] {
+    return [...this._chargePoint.engine.behaviorIds];
+  }
+
+  /**
+   * Throws if this station could not load one of `wanted` (the checks a load
+   * runs), changing nothing. For a caller that is about to rebuild the station
+   * and must find out before it closes the old one.
+   */
+  assertBehaviorsLoadable(wanted: readonly Behavior[]): void {
+    for (const behavior of wanted) {
+      this._chargePoint.engine.assertLoadable(behavior);
+    }
+  }
+
+  /**
+   * Make `wanted` the set of code behaviors running here (a run-time
+   * selection): the ones loaded and not wanted are unloaded, the wanted ones
+   * not loaded yet are loaded after those already running. `selection` is
+   * what is recorded as the charge point's `behaviors` (`undefined`: all).
+   */
+  setBehaviors(
+    wanted: readonly Behavior[],
+    selection: readonly string[] | undefined,
+  ): void {
+    const engine = this._chargePoint.engine;
+    const keep = new Set(wanted.map((b) => b.id));
+    const have = new Set(engine.behaviorIds);
+    // Check first, so a behavior this station cannot run changes nothing.
+    for (const behavior of wanted) {
+      if (!have.has(behavior.id)) engine.assertLoadable(behavior);
+    }
+    for (const id of [...have]) {
+      if (!keep.has(id)) this._chargePoint.unloadBehavior(id);
+    }
+    for (const behavior of wanted) {
+      if (!have.has(behavior.id)) this._chargePoint.loadBehavior(behavior);
+    }
+    this._init = {
+      ...this._init,
+      ...(selection === undefined
+        ? { behaviors: undefined }
+        : { behaviors: [...selection] }),
+    };
+  }
+
+  /**
+   * Put new versions of loaded behaviors in their place (a reload), all or
+   * none: each is checked before any is replaced, and if one still fails the
+   * ones already replaced go back to the version they had.
+   */
+  replaceBehaviors(next: readonly Behavior[]): void {
+    const engine = this._chargePoint.engine;
+    for (const behavior of next) engine.assertLoadable(behavior);
+    const done: Behavior[] = [];
+    try {
+      for (const behavior of next) {
+        const previous = engine.behaviorOf(behavior.id);
+        engine.replaceBehavior(behavior);
+        if (previous) done.push(previous);
+      }
+    } catch (error) {
+      for (const previous of done.reverse()) {
+        try {
+          engine.replaceBehavior(previous);
+        } catch {
+          // The old version ran here a moment ago; if it cannot be put back
+          // the original error is still the one to report.
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Have the loaded behaviors' `onResume` run once the CSMS accepts the next
+   * BootNotification. Call it once, after
+   * {@link restoreConnectorRuntimeFromDatabase} and
+   * {@link reconcileChargingSessions}.
+   */
+  resumeEngine(): void {
+    this._chargePoint.engine.resumeAfterBoot();
   }
 
   /**

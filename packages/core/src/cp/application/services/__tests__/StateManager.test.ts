@@ -15,12 +15,10 @@ function newStateManager(): {
   const logs: LogEntry[] = [];
   logger.loggingCallback = (entry) => logs.push(entry);
   const events = new EventEmitter<ChargePointEvents>();
-  const manager = new StateManager(
-    logger,
-    events,
-    () => ({ status: OCPPStatus.Available, error: "" }),
-    () => undefined,
-  );
+  const manager = new StateManager(logger, events, () => ({
+    status: OCPPStatus.Available,
+    error: "",
+  }));
   return { manager, events, logs };
 }
 
@@ -44,27 +42,25 @@ describe("StateManager", () => {
     ]);
   });
 
-  // #374: robot3 hands the change callback the service, not a state, so
-  // reading `.name` off it mapped every transition to Faulted.
-  it("reports the connector status the machine actually moved to", () => {
+  // The retired connector state machine is gone: the manager records the
+  // status changes the charger engine publishes, and nothing else.
+  it("records the connector status changes the engine publishes", () => {
     const { manager, events } = newStateManager();
-    const changes: ChargePointEvents["connectorStatusChange"][] = [];
-    events.on("connectorStatusChange", (change) => changes.push(change));
-    manager.initializeConnector(1);
 
-    const result = manager.prepareTransaction(1, "TAG-1");
-
-    expect(result).toMatchObject({
-      success: true,
-      previousState: OCPPStatus.Available,
-      newState: OCPPStatus.Preparing,
+    events.emit("connectorStatusChange", {
+      connectorId: 1,
+      status: OCPPStatus.Preparing,
+      previousStatus: OCPPStatus.Available,
     });
-    expect(changes).toEqual([
-      {
-        connectorId: 1,
-        status: OCPPStatus.Preparing,
-        previousStatus: OCPPStatus.Available,
-      },
+
+    expect(manager.getStateHistory()).toEqual([
+      expect.objectContaining({
+        entity: "connector",
+        entityId: 1,
+        fromState: OCPPStatus.Available,
+        toState: OCPPStatus.Preparing,
+        success: true,
+      }),
     ]);
   });
 });

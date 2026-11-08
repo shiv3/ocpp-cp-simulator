@@ -41,6 +41,8 @@ import type { AutoMeterValueSetting } from "@ocpp-cp-sim/core/cp/domain/charge-p
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
 import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
+import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type {
@@ -272,6 +274,82 @@ export class LocalChargePointService implements ChargePointService {
         this.emit(chargePoint.id, event),
       ),
     );
+  }
+
+  /**
+   * Load a built behavior bundle (`ocpp-cp-sim behavior build`) into one
+   * registered charge point of this page and return the ids it registered.
+   * The code runs with the full authority of the page: it comes from a file
+   * the user picked, never from the network. The bundle is a Blob (or its
+   * text); it is imported through a blob URL, which is revoked afterwards.
+   * Behaviors are not persisted: reload the page and load them again.
+   *
+   * Calling it again with a bundle whose behavior id is already loaded on
+   * that charge point replaces that behavior (a reload), under the engine's
+   * rules: new CALLs use the new code, exchanges in flight finish on the old
+   * one, `ctx.state` stays, a running `main` is asked to stop and gets a grace
+   * time before the new `main` starts. A version the station cannot take
+   * leaves everything as it was.
+   */
+  async loadBehaviorBundle(
+    id: string,
+    bundle: Blob | string,
+  ): Promise<string[]> {
+    const cp = this.getExistingChargePointOrThrow(id);
+    const blob =
+      typeof bundle === "string"
+        ? new Blob([bundle], { type: "text/javascript" })
+        : bundle.type === "text/javascript"
+          ? bundle
+          : new Blob([bundle], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const mod: unknown = await import(/* @vite-ignore */ url);
+      const behaviors = behaviorsOfModule("behavior bundle", mod);
+      const running = new Set(cp.engine.behaviorIds);
+      const seen = new Set<string>();
+      for (const behavior of behaviors) {
+        if (seen.has(behavior.id)) {
+          throw new Error(`behavior id "${behavior.id}" is given twice`);
+        }
+        seen.add(behavior.id);
+      }
+      // Check every behavior, replaced and new alike, before changing anything.
+      for (const behavior of behaviors) cp.engine.assertLoadable(behavior);
+      const added: string[] = [];
+      const replaced: Behavior[] = [];
+      try {
+        for (const behavior of behaviors) {
+          if (running.has(behavior.id)) {
+            const previous = cp.engine.behaviorOf(behavior.id);
+            cp.engine.replaceBehavior(behavior);
+            if (previous) replaced.push(previous);
+          } else {
+            cp.loadBehavior(behavior);
+            added.push(behavior.id);
+          }
+        }
+      } catch (error) {
+        // All or nothing: what was added goes, what was replaced comes back.
+        for (const behaviorId of added) cp.unloadBehavior(behaviorId);
+        for (const previous of replaced.reverse()) {
+          try {
+            cp.engine.replaceBehavior(previous);
+          } catch {
+            // The original error is the one to report.
+          }
+        }
+        throw error;
+      }
+      return behaviors.map((behavior) => behavior.id);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  /** Unload a behavior loaded with {@link loadBehaviorBundle}. */
+  unloadBehavior(id: string, behaviorId: string): boolean {
+    return this.getExistingChargePointOrThrow(id).unloadBehavior(behaviorId);
   }
 
   unregisterChargePoint(id: string): void {

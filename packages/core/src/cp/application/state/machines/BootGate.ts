@@ -1,4 +1,6 @@
 import { OCPPAction } from "../../../domain/types/OcppTypes";
+import { realClock } from "../../../shared/clock";
+import type { SimClock } from "../../../shared/clock";
 
 /**
  * §4.2 Boot gate status union type.
@@ -28,6 +30,8 @@ export type BootGateStatus =
 export class BootGate {
   private _status: BootGateStatus = { status: "Idle" };
 
+  constructor(private readonly clock: SimClock = realClock) {}
+
   /**
    * Get the current boot gate status.
    */
@@ -47,14 +51,14 @@ export class BootGate {
    * Check whether an outgoing CALL with the given action is allowed.
    *
    * @param action The OCPP action to check
-   * @param now Optional current time (defaults to new Date() for testing)
+   * @param now Optional current time (defaults to the gate's clock)
    * @returns true if the action is allowed, false otherwise
    */
   isCallAllowed(action: OCPPAction, now?: Date): boolean {
     // BootNotification is always exempt — it's required to unblock the gate.
     if (action === OCPPAction.BootNotification) return true;
 
-    const currentTime = now ?? new Date();
+    const currentTime = now ?? new Date(this.clock.now());
 
     switch (this._status.status) {
       case "Accepted":

@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Log
@@ -2280,6 +2280,82 @@ other. Reworded on all three pages to say what is and is not watched (the
 - The 18-file cycle through `Configuration.ts` and the 2-file cycle through the handlers barrel are gone; no cycle of static value imports is left under `packages/` and `apps/`.
 - `bun run check:boundaries` now fails on such a cycle, and ESLint enforces `consistent-type-imports`. [Overview](overview.md) lists what counts as a cycle edge. [GitHub issues](sources/github-issues.md): #570.
 
+## [2026-11-07] ingest | Charger engine design (stage A: golden wire test)
+
+- New [Charger engine design](analyses/charger-engine-migration.md): the target architecture and migration plan for moving charge point behavior out of the OCPP handlers. It is the contract for the `feat/charger-engine` stages.
+- [Testing strategy](analyses/testing-strategy.md): the golden wire test, the regression oracle for that work.
+
+## [2026-11-07] ingest | Injectable clock and seeded random streams (charger engine stage A)
+
+- `packages/core/src/cp/shared/clock.ts` (`SimClock`, `RealClock`, `VirtualClock`) and `rng.ts` (`RngStreams`); `ChargePoint` and everything it builds under `domain/` and `application/` read time, timers, random numbers and ids through them, defaulting to the platform clock. [Charger engine design](concepts/charger-engine.md#clock-and-random) records the decisions.
+- New `scripts/check-direct-time.ts`, run by `bun run check:boundaries`, with a shrinking exemption list. [Overview](overview.md#source-layout-and-package-boundaries).
+
+## [2026-11-07] ingest | V1: async behavior on a VirtualClock is deterministic on Bun
+
+- New `virtualTime.determinism.bun.test.ts`: 1,000 chargers, same seed same hash, another seed another, six virtual hours in about 6 s. [Charger engine design](concepts/charger-engine.md#determinism) records the result and its limits; [Testing strategy](analyses/testing-strategy.md#virtual-time-determinism-v1) lists the test.
+
+## [2026-11-07] ingest | CallExchange, InboundCallGate and ResponseEffectQueue onDropped (charger engine stage A)
+
+- The 1.6 and 2.x handlers answer every inbound CALL through one `CallExchange` and one `InboundCallGate` (inbound policy, response override, then a stub `BehaviorRegistry.resolve()`); the duplicated blocks are gone, the 2.x CALLRESULT stays synchronous (#456) and the wire is unchanged. `ResponseEffectQueue.register` takes an optional `onDropped`. [Charger engine design](concepts/charger-engine.md#callexchange-and-inboundcallgate) records the decisions, [Testing strategy](analyses/testing-strategy.md#inbound-call-handling) the tests.
+
+## [2026-11-07] ingest | Behavior types, BehaviorRegistry and ChargerEngine (charger engine stage B)
+
+- `@ocpp-cp-sim/contracts/behavior` holds the behavior API types; `BehaviorRegistry` now selects between code behaviors and scenario rules (exact connector, oldest registration, `onBusy`, release by owner); `ChargerEngine` and `ChargerState` own the event queue, the `ctx` implementation and the behaviors loaded with `cp.loadBehavior()`. `runBehavior()` drives them on a `VirtualClock`. [Charger engine design](concepts/charger-engine.md#behavior-api) records the decisions, [Testing strategy](analyses/testing-strategy.md#behavior-tests) the harness.
+
+## [2026-11-07] ingest | Default behaviors move into the engine (charger engine stage B)
+
+- `application/engine/behaviors/firmware.ts` is the default behavior of `UpdateFirmware` on 1.6 (status train, `SimulatedFirmwareUpdateFailure`) and 2.x (ack-only); the 1.6 handler and the 2.x acknowledgement only translate, `ChargePoint.simulateFirmwareUpdate` is gone. The train now stops when the connection closes through the engine, as the old timers did. [Charger engine design](concepts/charger-engine.md#the-engine).
+- `application/engine/behaviors/signedFirmware.ts` does the same for `SignedUpdateFirmware`; `ChargePoint.simulateSignedFirmwareUpdate` is gone.
+- `diagnostics.ts` and `logs.ts` do the same for `GetDiagnostics` and `GetLog` (1.6 trains, 2.x ack-only). A log sequence that was still waiting when the connection closed used to send its `Uploaded` on a dead socket after two seconds; it now stops with the connection, like the firmware trains.
+- `reset.ts` does the same for `Reset` on both versions; the 1.6 `ResetHandler` and the 2.x `handleResetV201` only translate.
+- `availability.ts` does the same for `ChangeAvailability` (1.6 applies the change before the answer, 2.x after it, as before).
+- `reservation.ts` does the same for `ReserveNow` and `CancelReservation`. Hand-written charge point stubs in tests get a real engine from `packages/core/src/test/withEngine.ts`.
+- `unlock.ts` does the same for `UnlockConnector`. Every handler of the seven moved defaults now translates and calls `engine.runDefault`.
+
+## [2026-11-07] ingest | extend mode (charger engine stage B)
+
+- `ctx.defaultBehavior(req)` in an `extend` handler returns the default response and registers the default's follow-up; a user behavior can opt a 2.x `UpdateFirmware` in to a status train this way. [Charger engine design](concepts/charger-engine.md#behavior-api).
+
+## [2026-11-07] ingest | Scenario schema 1.5 (charger engine stage B)
+
+- `csmsCallTrigger.behavior` / `onBusy`, the `callResponse` and `useBehavior` nodes and `{ "$from": … }` are in `scenario.schema.json`, `ScenarioTypes`, the executor (branch-scoped CALL), the runtime and the web editor; `SCENARIO_SCHEMA_VERSION` is `1.5`. `export-k6` refuses them. [Scenario format](concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15), [export-k6](entities/cli.md).
+
+## [2026-11-07] ingest | Acceptance tests for #566 (charger engine stage B)
+
+- `acceptance566.bun.test.ts`: a JSON scenario and a code behavior each own an incoming `UpdateFirmware` on 1.6 and 2.0.1, replace it completely and control notification payloads, order and delays; concurrent calls, cancellation and disconnect cleanup; `UnlockConnector` as a second action. [Testing strategy](analyses/testing-strategy.md#behavior-tests).
+
+## [2026-11-07] ingest | Connector status in engine state (charger engine stage C1)
+
+- `ChargerState.connectors` holds status, availability and error info; `Connector` reads and writes it through the engine, `updateConnectorStatus` only dispatches; `check-single-writer.ts` enforces one writer; `ConnectorStateMachine` is deleted and `StateManager` only records history. [Charger engine design](analyses/charger-engine-migration.md), [Overview](overview.md#source-layout-and-package-boundaries).
+
+## [2026-11-07] ingest | Transactions, persistence and resume (charger engine stage C2)
+
+- `ConnectorRecord.transaction` holds the transaction as JSON; `Connector.transaction` is a live view; `default.transaction` owns start, stop and the four remote actions on both versions; `check-single-writer.ts` guards the transaction fields; `connector_runtime` restore fills engine state and `engine.resume()` runs `onResume`. Scenario registry and `ReservationManager` stay. [Charger engine design](analyses/charger-engine-migration.md), [Overview](overview.md#source-layout-and-package-boundaries).
+
+## [2026-11-07] ingest | Loading behavior code (charger engine stage D1)
+
+- `--behavior` / `--allow-behavior-code` on the CLI and daemon, `behavior build`, the `@ocpp-cp-sim/contracts/eslint-behavior` config and `examples/behaviors/flaky-firmware.ts`; `engine_state` (schema 23) persists behavior `ctx.state` and the notification statuses and `engine.resume()` runs after the session reconcile; `runBehavior` talks to the fake CSMS over an in-memory socket by default. [Charger engine design](analyses/charger-engine-migration.md), [CLI](entities/cli.md#behavior-code---behavior-and-behavior-build), [Daemon](entities/daemon.md), [State persistence](concepts/state-persistence.md), [Testing strategy](analyses/testing-strategy.md#behavior-tests).
+
+## [2026-11-07] ingest | k6, browser and scale verification (charger engine stage D2)
+
+- `export-k6 --behavior` and the k6 `BehaviorHost` (OCPP 1.6J; refuses `requires` it cannot meet, `extend` rules and unsupported `ctx` members); `LocalChargePointService.loadBehaviorBundle`; `drainMicrotasks` hops with a `MessageChannel` in browsers; `scripts/verify/` (fake CSMS, Chromium driver) and `scripts/bench/engineScale.ts`. Measured: real k6 2.3.0 with 5 VUs and with 1 VU x 8 chargers, `gracefulStop`, identical VirtualClock hashes in Chromium and Bun (1,000 chargers x 6 h), 10,000 real `ChargePoint` instances in 1.3 GB RSS. The scenario export's extensionless imports did not load on k6 2.3.0 and were fixed. [Charger engine design](analyses/charger-engine-migration.md#verification-results), [CLI](entities/cli.md#behaviors-export-k6---behavior), [Web console](entities/web-console.md), [Bench README](sources/bench-readme.md).
+
+## [2026-11-07] ingest | Event hooks, send interception, per-charger assignment and reload (charger engine stage E)
+
+- [Charger engine design](analyses/charger-engine-migration.md#stage-e-hooks-send-interception-assignment-reload): `Behavior.on` (connectorStatus, transactionStarted / Stopped, connected, disconnected, callResult, callReceived), `Behavior.beforeSend` (rewrite or drop a station-initiated CALL; dropped means unanswered and never holds the serial queue), `ctx.accepted` / `ctx.rejected`, the `BehaviorLibrary`, `replaceBehavior` and the verification results of stage E.
+- [Control plane → Behaviors](concepts/control-plane.md#behaviors): `behaviors` on `cp.create` / `cp.create_many` / `cp.update` / blueprints, `cp.behaviors.set`, `behavior.list`, `behavior.reload` (no parameters, no path, no code); ids only.
+- [CLI](entities/cli.md#choosing-behaviors-per-charge-point-and-reloading-them): `--use-behavior`, `--watch-behaviors`, the k6 additions and refusals; [Daemon](entities/daemon.md), [MCP endpoint](entities/mcp-endpoint.md) (35 curated tools: `cp_behaviors_set`, `behavior_list`, `behavior_reload`; also in [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md)), [State persistence](concepts/state-persistence.md) (`charge_points.behaviors`, schema v24), [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | Review fixes 1: the regression oracle and core regressions (charger engine)
+
+- [Testing strategy → Golden wire test](analyses/testing-strategy.md#golden-wire-test): what normalization hides (exhaustively), the 175 regression cases recorded on ca01d302, strict cases, raw frames, the harness checks (orphan fixture, pinned template set, per-server URL token); the case counts were wrong (157 cases plus the uniqueness test, not 158 cases).
+- [Charger engine design](analyses/charger-engine-migration.md#review-fixes-1-core-regressions): default follow-ups across a close (rule 4 against ca01d302), cut-off contexts, `after` and undelivered answers, reload rank, ids, `extend` without a default, spelling on 1.6, the connector of a 2.x CALL, hook payloads, persistence timing, `ctx.state` read-only, one `beforeSend` rule for both versions, what virtual time covers.
+
+## [2026-11-08] ingest | Review fixes 2: CLI, daemon, persistence, security, k6 (charger engine)
+
+- [Charger engine design](analyses/charger-engine-migration.md#review-fixes-2-cli-daemon-persistence-security-k6): checked-before-written selections and restore that never stops the daemon, opt-in `behavior.reload`, same-origin CORS with `--allow-behavior-code`, all-or-nothing reload, `onResume` after boot, k6 host parity, source-check limits; new "Review" section and re-run verification table.
+- [Control plane](concepts/control-plane.md#behaviors), [State persistence](concepts/state-persistence.md), [Access control](concepts/access-control.md#cors), [CLI](entities/cli.md), [Daemon](entities/daemon.md): `--allow-behavior-reload`, restore and selection rules, resume timing, CORS row.
+
 ## [2026-11-07] ingest | SeededRng and the message-handler port leave infrastructure (#572, #574)
 
 - `SeededRng` (the seeded PRNG behind network simulation, the idTag pool, background traffic and supervision URL rotation) moves to `packages/core/src/cp/shared/SeededRng.ts`; the `network-sim` barrel no longer re-exports it. [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) points at the new path.
@@ -2289,6 +2365,22 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - Reset OnIdle now checks for running transactions rather than retained stopped transaction objects, rechecks immediately after scheduling, and is reevaluated when a connector is removed. Scoped Immediate resets cancel only the pending reset in their scope; other EVSE resets remain queued. An Inoperative connector stays Unavailable after the accepted reboot. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
 
+## [2026-11-08] ingest | Merge of main: Reset OnIdle in the engine (charger engine)
+
+- [Charger engine design](analyses/charger-engine-migration.md#reset-onidle-after-the-merge-of-main): #635 ported into `default.reset` and the default stop; #572 / #574 imports follow the moves. [Testing strategy](analyses/testing-strategy.md#golden-wire-test): five fixtures re-recorded on origin/main, three `Reset` `OnIdle` cases added.
+
+## [2026-11-08] restructure | Charger engine page split; precedence, defaults and scenario-or-behavior pages
+
+- `analyses/charger-engine.md` split: [Charger engine](concepts/charger-engine.md) is the contract as shipped (rules, API with its preview status and experimental members, delivery-timing table, lifecycle, hooks, `beforeSend` key table, assignment, the trust line, transitional list); [Charger engine migration history](analyses/charger-engine-migration.md) keeps the stages, decisions, verification and reviews (stage statuses no longer sit under "Out of scope"). Inbound links in the overview, control plane, state persistence, scenario format, testing strategy, CLI, daemon, web console and bench pages, and the `docs/…` paths in code comments, follow.
+- New: [Who answers an inbound CALL](concepts/call-precedence.md) (a running scenario wins over code; the order tested pair by pair; how `_scenarioHandledConnectors` parking relates), [Default behaviors](entities/default-behaviors.md) (per action and version, and the actions with no default), [Scenario or behavior?](analyses/scenario-or-behavior.md) (choice table, recipes including disable, node to `ctx` mapping).
+- Decisions recorded: dormant behaviors are all or none; `virtual-time` removed from `requires`; physical verbs and `ctx.raw` checked at load; same-origin CORS also guards `Host`; `behavior.list` reports the defaults.
+- [Migration history](analyses/charger-engine-migration.md#why-the-1000-x-6-h-hash-changed): the 1,000 x 6 h hash did not change in review fixes 1; the first value cannot be reproduced.
+- [Scenario format](concepts/scenario-format.md): the editor authors schema 1.5. [Daemon](entities/daemon.md), [Access control](concepts/access-control.md#cors), [MCP endpoint](entities/mcp-endpoint.md): the trusted computing base (imports, watched directories), Basic Auth with code, the MCP levers. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#soap-and-behaviors): SOAP exclusions. [GitHub issues](sources/github-issues.md): #566, #569, #575, #600, #618, #635.
+
 ## [2026-11-08] ingest | Web console internationalization on react-i18next (#634)
 
 - The console is translated into English (default), Simplified Chinese and Japanese with react-i18next under `apps/web/src/i18n/`. Resources are JSON, one file per namespace per locale (`locales/<locale>/<namespace>.json`); English is bundled and is the fallback, `ja` / `zh-CN` are separate chunks loaded when first selected. Keys are typed from the English JSON (`CustomTypeOptions`), counted nouns use `_one` / `_other` plural keys, and the saved choice stays in `localStorage` (`ocpp-cp.console.locale`) and `<html lang>`. The language selector sits beside the theme toggle; Local and Remote mode share it. OCPP action names, protocol fields, enum values and identifiers stay untranslated. New page: [Web console internationalization](concepts/web-console-i18n.md); `i18n.test.ts` fails when `ja` / `zh-CN` lack a key of `en` (plural-aware), have unknown keys, empty strings or different `{{placeholders}}`. Not covered yet: text from other workspace packages (analyze disclaimer, timeline summaries, `@ocpp-debugkit/toolkit` output, two core errors).
+
+## [2026-11-08] ingest | Charger engine web strings under the console i18n (#634)
+
+- The `callResponse` and `useBehavior` nodes (node, form, palette item, registry title) and the `csmsCallTrigger` behavior controls (`observe` / `replace`, the `onBusy` group) use `scenarioEditor.*` / `scenarioNodes.*` keys in `en`, `ja` and `zh-CN`; `i18n.test.ts` stays green. Left in English on purpose, as on main: `stepSummary` text, default node labels saved into scenarios, and the protocol terms `CALLRESULT` / `CALLERROR`. See [Web console internationalization](concepts/web-console-i18n.md).

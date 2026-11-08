@@ -1,6 +1,8 @@
 import type { Connector } from "../../domain/connector/Connector";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { ScenarioExecutor } from "./ScenarioExecutor";
+import { clockOf } from "../../shared/clock";
+import { rngOf } from "../../shared/rng";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type {
   ScenarioDefinition,
@@ -322,6 +324,10 @@ export class ScenarioManager {
         () => executor,
       ),
       this.eventEmitter,
+      {
+        clock: clockOf(this.chargePoint),
+        rng: rngOf(this.chargePoint, `scenario:${scenario.targetId ?? ""}`),
+      },
     );
     this.executors.set(scenarioId, executor);
 

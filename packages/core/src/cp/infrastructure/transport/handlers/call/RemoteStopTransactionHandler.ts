@@ -3,8 +3,12 @@ import type {
   RemoteStopTransactionRequestV16,
   RemoteStopTransactionResponseV16,
 } from "@ocpp-cp-sim/ocpp/index";
-import { OCPPStatus } from "../../../../domain/types/OcppTypes";
+import { defaultBehavior16 } from "./defaultBehavior";
 
+/**
+ * §5.12: translation only; see `default.transaction` in
+ * `application/engine/behaviors/transaction.ts`.
+ */
 export class RemoteStopTransactionHandler implements CallHandler<
   RemoteStopTransactionRequestV16,
   RemoteStopTransactionResponseV16
@@ -13,39 +17,10 @@ export class RemoteStopTransactionHandler implements CallHandler<
     payload: RemoteStopTransactionRequestV16,
     context: HandlerContext,
   ): RemoteStopTransactionResponseV16 {
-    const { transactionId } = payload;
-    // #491, #527: a transaction whose StartTransaction.req was answered with
-    // a CALLERROR (being resent, or discarded) runs on the `0` placeholder.
-    // The CSMS never issued that id, so a request naming it is not about
-    // this transaction. A `0` the CSMS assigned is (#328).
-    const connector = Array.from(context.chargePoint.connectors.values()).find(
-      (c) =>
-        c.transaction &&
-        c.transaction.id === transactionId &&
-        !c.transaction.startCallError,
-    );
-
-    if (!connector) {
-      return { status: "Rejected" };
-    }
-    if (context.chargePoint.isScenarioStopHandled(connector.id)) {
-      // Scenario is parked on a RemoteStopTrigger node — hand the
-      // request over rather than stopping the transaction here, so the
-      // scenario's own Transaction Stop step runs the §7.36 path.
-      context.chargePoint.notifyRemoteStopReceived(connector.id, transactionId);
-      return { status: "Accepted" };
-    }
-    // Not scenario-handled: note it so a scenario that arms
-    // registerScenarioStopHandler on this connector shortly after can tell
-    // it raced this exact call and warn instead of silently parking forever
-    // (see ScenarioRuntime.waitForRemoteStop).
-    context.chargePoint.noteDefaultHandledRemoteStop(connector.id);
-    context.chargePoint.updateConnectorStatus(
-      connector.id,
-      OCPPStatus.SuspendedEVSE,
-    );
-    // §7.36: stopped via RemoteStopTransaction.req → reason="Remote".
-    context.chargePoint.stopTransaction(connector, "Remote");
-    return { status: "Accepted" };
+    return defaultBehavior16(
+      context.chargePoint,
+      "RemoteStopTransaction",
+      payload,
+    ) as RemoteStopTransactionResponseV16;
   }
 }

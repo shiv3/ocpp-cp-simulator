@@ -871,6 +871,14 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 
 **With SmartCharging not advertised (#594).** `NotImplemented` (no handler) comes before validation, and the `NotSupported` that `SetChargingProfile` answers when `SmartCharging` is missing from `SupportedFeatureProfiles` comes from inside the handler. So on such a station, under `enforce`, an invalid `SetChargingProfile` payload gets the constraint-violation CALLERROR and a valid one gets `NotSupported`.
 
+## OCPP 1.6 SetChargingProfile
+
+`SetChargingProfile.req` on **OCPP 1.6J** (and 1.6-S, through the shared handler; #594):
+
+- **Replacement.** A profile replaces the installed one with the same `chargingProfileId`, or with the same `stackLevel` and `chargingProfilePurpose`, in the same scope (the connector's profiles, or the station store for `connectorId` 0). The `charging_profile_applied` timeline event reports `replaced: true` only when the **same id** was updated; a profile displaced by the same-slot rule is named in `replacedIds` (and in the summary: "… applied …, replacing profile 1"), see [Operational timeline](operational-timeline.md#smart-charging-profiles). OCPP 2.x keeps replacing by id only.
+- **TxProfile preconditions.** A `TxProfile` for a connector without a **running** transaction (one whose `stopTime` is still unset; a closed transaction that is still attached does not count) answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
+- **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule` are all answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` / `Unknown` status. On **1.6-S** there is no CALLERROR: the SOAP server turns the same refusal into a generic SOAP Fault, `Dispatch error for SetChargingProfile: SmartCharging is not supported` (likewise for the other two operations). The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
+
 ## Inbound CS→CP request validation
 
 An inbound SOAP request on an **OCPP 1.6-S** charge point is validated

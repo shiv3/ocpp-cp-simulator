@@ -24,7 +24,21 @@ class FakeSocket {
   connected = false;
   /** CALLs `sendAction` refuses next (network-sim refusal, not_accepted). */
   refuseNext = 0;
-  setMessageHandler(): void {}
+  /** The handler's inbound callback; a written CALL is answered through it,
+   *  since a 2.x station sends the next CALL only after the answer (#708). */
+  private onMessage:
+    | ((type: number, id: string, action: string, payload: unknown) => void)
+    | undefined;
+  setMessageHandler(
+    handler: (
+      type: number,
+      id: string,
+      action: string,
+      payload: unknown,
+    ) => void,
+  ): void {
+    this.onMessage = handler;
+  }
   onCloseTransaction(): void {}
   isConnected(): boolean {
     return this.connected;
@@ -33,7 +47,7 @@ class FakeSocket {
     return { gen: 1, closeCause: null };
   }
   sendAction(
-    _messageId: string,
+    messageId: string,
     action: string,
     payload: unknown,
     _gen: unknown,
@@ -45,6 +59,8 @@ class FakeSocket {
     }
     this.calls.push({ action, payload });
     onSettled?.({ outcome: "written" });
+    // The CSMS answers: CALLRESULT type id is 3.
+    queueMicrotask(() => this.onMessage?.(3, messageId, action, {}));
     return true;
   }
 }
@@ -102,6 +118,9 @@ function station(
   return { socket, tx, handler, logger };
 }
 
+/** Let the fake CSMS answer the CALLs the station wrote, one at a time. */
+const settleAnswers = () => new Promise((resolve) => setTimeout(resolve, 20));
+
 function rows(db: BunSqliteDatabase) {
   return db.all<{ action: string; payload: string; connector_id: number }>(
     "SELECT action, payload, connector_id FROM pending_messages WHERE cp_id = ? ORDER BY seq",
@@ -142,6 +161,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         after = station(db, version);
         after.socket.connected = true;
         after.handler.flushPendingQueue();
+        await settleAnswers();
         const replayed = after.socket.calls.map(
           (c) => c.payload as TransactionEventRequestV201,
         );
@@ -183,6 +203,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         expect(rows(db)).toHaveLength(2);
 
         after.handler.flushPendingQueue();
+        await settleAnswers();
         const replayed = after.socket.calls.map(
           (c) => c.payload as TransactionEventRequestV201,
         );

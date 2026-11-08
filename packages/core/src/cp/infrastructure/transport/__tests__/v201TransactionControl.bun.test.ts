@@ -45,7 +45,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
 
 describe("OCPP 2.0.1 transaction control", () => {
   it("accepts remote start/stop, stops as Remote, and reports no ongoing transaction after stop", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = new ChargePoint(
       "CP201-TX-CONTROL",
       DefaultBootNotification,

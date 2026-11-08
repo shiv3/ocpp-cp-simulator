@@ -2414,3 +2414,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | One CALL in flight on OCPP 2.0.1 / 2.1 (#708)
+
+- The 2.x handler sends CALLs one at a time (Part 4 §4.1.1): the next waits for the CALLRESULT / CALLERROR, `MessageTimeout`, a failed write or a close; inbound CALLs are answered at once. A TransactionEvent waits for an older one that is waiting out its resend interval (E13.FR.03/04), so `Ended` no longer overtakes a resent `Started`. The "known limitation" note is removed.
+- Golden fixtures re-recorded: eight 2.x fixtures where the answer to an inbound CALL now precedes CALLs that wait for the slot.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#one-call-in-flight-on-2x-ocpp-j-411), [Expert OCPP calls](concepts/expert-ocpp-calls.md).

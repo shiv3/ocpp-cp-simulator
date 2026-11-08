@@ -35,8 +35,19 @@ class FakeOCPPWebSocket {
       payload: unknown,
     ) => void,
   ): void {
-    // Store handler for potential use in future tests
-    void handler;
+    this.messageHandler = handler;
+  }
+
+  private messageHandler:
+    | ((type: number, id: string, action: string, payload: unknown) => void)
+    | null = null;
+  /** The id of the latest outbound CALL. */
+  lastCallId = "";
+
+  /** The CSMS answers the latest outbound CALL: it frees the one-CALL-in-flight
+   *  slot (OCPP-J §4.1.1, #708) for the next. */
+  answerLastCall(): void {
+    this.messageHandler?.(OCPPMessageType.CALLRESULT, this.lastCallId, "", {});
   }
 
   onCloseTransaction(cb: (finalized: GenerationToken) => void): void {
@@ -59,6 +70,7 @@ class FakeOCPPWebSocket {
     onSettled?: (s: Settlement) => void,
   ): boolean {
     this.pendingSettlements.push({ messageId, callback: onSettled });
+    this.lastCallId = messageId;
     this.sentCalls.push({ action, payload });
     return true;
   }
@@ -311,7 +323,9 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       }
       expect(mockChargePoint.notifyOutgoingCall).toHaveBeenCalledWith(true);
 
-      // On drop: should NOT call notifyOutgoingCall
+      // On drop: should NOT call notifyOutgoingCall. The next CALL goes
+      // after the answer to the first (§4.1.1).
+      fakeSocket.answerLastCall();
       vi.mocked(mockChargePoint.notifyOutgoingCall).mockClear();
       handler.sendHeartbeat();
       const [, , , , onSettled2] = spy.mock.calls[1];
@@ -386,25 +400,19 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
     it("handler.onWebSocketClosed() clears _pendingRequests", () => {
       const spy = vi.spyOn(fakeSocket, "sendAction");
 
-      // Send multiple heartbeats
+      // The second heartbeat waits for the first (§4.1.1, #708).
       handler.sendHeartbeat();
       handler.sendHeartbeat();
+      expect(spy.mock.calls).toHaveLength(1);
 
-      const calls = spy.mock.calls;
-      const [, , , , cb1] = calls[0];
-      const [, , , , cb2] = calls[1];
-
-      // Settle both as written
+      const [, , , , cb1] = spy.mock.calls[0];
       if (cb1) {
         cb1({ outcome: "written" });
-      }
-      if (cb2) {
-        cb2({ outcome: "written" });
       }
 
       expect(
         (handler as unknown as HandlerTestAccess)._pendingRequests.size,
-      ).toBe(2);
+      ).toBe(1);
 
       // Call onWebSocketClosed
       handler.onWebSocketClosed();
@@ -470,6 +478,13 @@ describe("OCPPMessageHandlerV201 Settlement", () => {
       fakeSocket.settleCall("msg-1", "written");
       fakeSocket.settleCall("msg-2", "written");
       await flushEffects();
+
+      // One CALL in flight (§4.1.1, #708): the second NotifyReport goes once
+      // the first is answered.
+      expect(fakeSocket.sentCalls).toEqual([
+        { action: "NotifyReport", payload: { requestId: 123 } },
+      ]);
+      fakeSocket.answerLastCall();
 
       // Each handler carries its own requestId, so this also proves the two
       // effects didn't get crossed or collapsed into one.

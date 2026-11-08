@@ -131,7 +131,7 @@ function attachConnectorRuntimePersistence(
 
 describe("OCPP 2.0.1 transaction events", () => {
   it("sends TransactionEvent and MeterValues with stable transaction id and numeric values", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = new ChargePoint(
       "CP201-TX",
       DefaultBootNotification,
@@ -247,7 +247,7 @@ describe("OCPP 2.0.1 transaction events", () => {
   });
 
   it("sends TransactionEvent Updated when active chargingState changes", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = new ChargePoint(
       "CP201-TX-CHARGING-STATE",
       DefaultBootNotification,
@@ -423,7 +423,7 @@ describe("OCPP 2.0.1 transaction events", () => {
   });
 
   it("resets TransactionEvent seqNo for each new transaction", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = new ChargePoint(
       "CP201-TX-SEQ",
       DefaultBootNotification,
@@ -500,7 +500,7 @@ describe("OCPP 2.0.1 transaction events", () => {
   });
 
   it("keeps persisted transaction id when stopping after handler restart", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = new ChargePoint(
       "CP201-TX-RESTORE",
       DefaultBootNotification,
@@ -586,7 +586,7 @@ describe("OCPP 2.0.1 transaction events", () => {
   });
 
   it("does not re-emit chargingState Updated or reuse seqNo after restart while suspended", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const db = BunSqliteDatabase.open(":memory:");
     const repo = new SqliteConnectorRuntimeRepository(db);
     const cpId = "CP201-TX-CHARGING-STATE-RESTART";

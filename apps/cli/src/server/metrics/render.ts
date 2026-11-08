@@ -60,10 +60,53 @@ export function renderMetrics(
   const cpStates = new Map<string, number>();
   const connectorStates = new Map<string, number>();
   let transactions = 0;
+  // #603: AutoTraffic outcomes, summed over every running connector.
+  const traffic = {
+    cycles: { attempted: 0, skipped: 0 },
+    steps: new Map<string, number>(),
+    consecutiveSkips: 0,
+    firstRunAt: null as number | null,
+    lastRunAt: null as number | null,
+  };
 
   for (const cpId of registry.list()) {
-    const status = registry.get(cpId)?.getStatus();
-    if (!status) continue;
+    const service = registry.get(cpId);
+    const status = service?.getStatus();
+    if (!service || !status) continue;
+    for (const connector of status.connectors) {
+      const c = service.getAutoTrafficCounters(connector.id);
+      traffic.cycles.attempted += c.attempted;
+      traffic.cycles.skipped += c.skipped;
+      for (const [step, outcome, n] of [
+        ["authorize", "accepted", c.authorizeAccepted],
+        ["authorize", "rejected", c.authorizeRejected],
+        ["start", "accepted", c.startAccepted],
+        ["start", "rejected", c.startRejected],
+        ["stop", "accepted", c.stopAccepted],
+        ["stop", "rejected", c.stopRejected],
+      ] as const) {
+        traffic.steps.set(
+          `${step} ${outcome}`,
+          (traffic.steps.get(`${step} ${outcome}`) ?? 0) + n,
+        );
+      }
+      traffic.consecutiveSkips = Math.max(
+        traffic.consecutiveSkips,
+        c.consecutiveSkips,
+      );
+      if (c.firstRunAt !== null) {
+        traffic.firstRunAt = Math.min(
+          traffic.firstRunAt ?? c.firstRunAt,
+          c.firstRunAt,
+        );
+      }
+      if (c.lastRunAt !== null) {
+        traffic.lastRunAt = Math.max(
+          traffic.lastRunAt ?? c.lastRunAt,
+          c.lastRunAt,
+        );
+      }
+    }
     bump(cpStates, String(status.status));
     for (const connector of status.connectors) {
       bump(connectorStates, String(connector.status));
@@ -164,6 +207,68 @@ export function renderMetrics(
     "counter",
   );
   out.sample("ocppcp_ws_reconnects_total", {}, recorder.reconnects);
+
+  // Sums over the running AutoTraffic connectors: a connector whose traffic
+  // is turned off or reconfigured drops out, so a counter can fall (a reset
+  // to Prometheus).
+  out.metric(
+    "ocppcp_auto_traffic_cycles_total",
+    "AutoTraffic cycles by result: attempted, or skipped (rolled out, or a start precondition failed).",
+    "counter",
+  );
+  out.sample(
+    "ocppcp_auto_traffic_cycles_total",
+    { result: "attempted" },
+    traffic.cycles.attempted,
+  );
+  out.sample(
+    "ocppcp_auto_traffic_cycles_total",
+    { result: "skipped" },
+    traffic.cycles.skipped,
+  );
+  out.metric(
+    "ocppcp_auto_traffic_steps_total",
+    "AutoTraffic Authorize, start and stop outcomes.",
+    "counter",
+  );
+  for (const [key, count] of sorted(traffic.steps)) {
+    const [step, outcome] = splitLast(key);
+    out.sample("ocppcp_auto_traffic_steps_total", { step, outcome }, count);
+  }
+  out.metric(
+    "ocppcp_auto_traffic_consecutive_skips",
+    "Longest run of AutoTraffic cycles skipped in a row, over all connectors.",
+    "gauge",
+  );
+  out.sample(
+    "ocppcp_auto_traffic_consecutive_skips",
+    {},
+    traffic.consecutiveSkips,
+  );
+  out.metric(
+    "ocppcp_auto_traffic_first_run_timestamp_seconds",
+    "When the first AutoTraffic cycle ran, Unix seconds; absent before any.",
+    "gauge",
+  );
+  if (traffic.firstRunAt !== null) {
+    out.sample(
+      "ocppcp_auto_traffic_first_run_timestamp_seconds",
+      {},
+      traffic.firstRunAt / 1000,
+    );
+  }
+  out.metric(
+    "ocppcp_auto_traffic_last_run_timestamp_seconds",
+    "When the latest AutoTraffic cycle ran, Unix seconds; absent before any.",
+    "gauge",
+  );
+  if (traffic.lastRunAt !== null) {
+    out.sample(
+      "ocppcp_auto_traffic_last_run_timestamp_seconds",
+      {},
+      traffic.lastRunAt / 1000,
+    );
+  }
 
   out.histogram(
     "ocppcp_ocpp_call_duration_seconds",

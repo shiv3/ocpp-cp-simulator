@@ -1,0 +1,144 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import {
+  defaultAutoTrafficConfig,
+  type AutoTrafficConfig,
+} from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+import { CLIChargePointService } from "../service";
+import type { ChargePointInitOptions } from "../types";
+
+/**
+ * #603: AutoTraffic draws its idTags from the charge point's pool, starts a
+ * cycle only on an Accepted charge point and an Available connector without a
+ * transaction, and counts the cycles it skips.
+ */
+
+const INIT: ChargePointInitOptions = {
+  cpId: "cp-traffic",
+  wsUrl: "ws://127.0.0.1:65534/never",
+  connectors: 1,
+  vendor: "v",
+  model: "m",
+  basicAuth: null,
+  idTags: ["TAG-A", "TAG-B", "TAG-C"],
+  idTagDistribution: "round-robin",
+};
+
+const CONFIG: AutoTrafficConfig = {
+  ...defaultAutoTrafficConfig,
+  enabled: true,
+  seed: 5,
+  minGapSec: 0,
+  maxGapSec: 0,
+  minDurationSec: 1,
+  maxDurationSec: 1,
+  requireAuthorize: true,
+  cpIndex: 0,
+};
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const services: CLIChargePointService[] = [];
+
+/** A service whose charge point records what traffic does, with no network. */
+function station(init: ChargePointInitOptions = INIT) {
+  const svc = new CLIChargePointService({ ...init });
+  services.push(svc);
+  const cp = (svc as unknown as { _chargePoint: Record<string, unknown> })
+    ._chargePoint;
+  (
+    cp as unknown as {
+      getConnector(id: number): { status: OCPPStatus } | undefined;
+    }
+  ).getConnector(1)!.status = OCPPStatus.Available;
+  const calls: string[] = [];
+  let booted = true;
+  Object.defineProperty(cp, "bootAccepted", { get: () => booted });
+  cp.authorizeAndWait = async (tag: string) => {
+    calls.push(`authorize:${tag}`);
+    return "Accepted";
+  };
+  cp.startTransaction = async (tag: string) => {
+    calls.push(`start:${tag}`);
+    return { started: true };
+  };
+  cp.stopTransaction = () => {
+    calls.push("stop");
+  };
+  return {
+    svc,
+    calls,
+    setBooted: (value: boolean) => {
+      booted = value;
+    },
+  };
+}
+
+afterEach(() => {
+  for (const svc of services.splice(0)) svc.cleanup(true);
+});
+
+describe("AutoTraffic on a charge point (#603)", () => {
+  it("presents the pool's tags, one per session, for Authorize and the start", async () => {
+    const { svc, calls } = station();
+    svc.setAutoTrafficConfig(1, CONFIG);
+    await wait(2_400);
+    svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+    expect(calls.slice(0, 5)).toEqual([
+      "authorize:TAG-A",
+      "start:TAG-A",
+      "stop",
+      "authorize:TAG-B",
+      "start:TAG-B",
+    ]);
+    expect(svc.getAutoTrafficCounters(1).authorizeAccepted).toBeGreaterThan(1);
+  });
+
+  it("falls back to the fixed idTag without a pool", async () => {
+    const { svc, calls } = station({
+      ...INIT,
+      idTags: undefined,
+      idTagDistribution: undefined,
+    });
+    svc.setAutoTrafficConfig(1, CONFIG);
+    await wait(300);
+    svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+    expect(calls.slice(0, 2)).toEqual(["authorize:123456", "start:123456"]);
+  });
+
+  it("skips cycles while the charge point is not Accepted", async () => {
+    const { svc, calls, setBooted } = station();
+    setBooted(false);
+    svc.setAutoTrafficConfig(1, CONFIG);
+    await wait(300);
+    const counters = svc.getAutoTrafficCounters(1);
+    expect(calls).toEqual([]);
+    expect(counters.skipped).toBeGreaterThan(0);
+    expect(counters.consecutiveSkips).toBe(counters.skipped);
+    expect(counters.started).toBe(0);
+    svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+  });
+
+  it("skips cycles while the connector is not Available", async () => {
+    const { svc, calls } = station();
+    const connector = (
+      svc as unknown as {
+        _chargePoint: {
+          getConnector(id: number): { status: OCPPStatus } | undefined;
+        };
+      }
+    )._chargePoint.getConnector(1)!;
+    connector.status = OCPPStatus.Preparing;
+    svc.setAutoTrafficConfig(1, CONFIG);
+    await wait(300);
+    expect(calls).toEqual([]);
+    expect(svc.getAutoTrafficCounters(1).skipped).toBeGreaterThan(0);
+    svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+  });
+
+  it("refuses an invalid stop time", () => {
+    const { svc } = station();
+    expect(() =>
+      svc.setAutoTrafficConfig(1, { ...CONFIG, stopAt: "later" }),
+    ).toThrow(/stopAt/);
+  });
+});

@@ -319,6 +319,7 @@ export class ChargePoint {
   /** #537: stops following the certificate store (dispose). */
   private _unwatchClientIdentity: (() => void) | null = null;
   private readonly _idTagPool: IdTagPool | null;
+  private _bootAccepted = false;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
@@ -1183,6 +1184,12 @@ export class ChargePoint {
     return this._status;
   }
 
+  /** Whether the Central System's latest BootNotification answer was
+   *  `Accepted` and the connection has not closed since (#603). */
+  get bootAccepted(): boolean {
+    return this._bootAccepted;
+  }
+
   /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
    *  by LocalChargePointService.restoreConnections to avoid issuing a
    *  second connect() against a CP whose first socket is still in its
@@ -1249,6 +1256,23 @@ export class ChargePoint {
    */
   nextIdTag(connectorId = 0): string | null {
     return this._idTagPool?.next(connectorId) ?? null;
+  }
+
+  /**
+   * The pool's tags and distribution (#603), for traffic that keeps its own
+   * seeded cursor instead of advancing the one `nextIdTag` shares. `null`
+   * without a pool.
+   */
+  idTagPoolInfo(): {
+    tags: readonly string[];
+    distribution: IdTagDistribution;
+  } | null {
+    return this._idTagPool
+      ? {
+          tags: this._idTagPool.list(),
+          distribution: this._idTagPool.distributionPolicy,
+        }
+      : null;
   }
 
   /**
@@ -2158,6 +2182,7 @@ export class ChargePoint {
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
+    this._bootAccepted = true;
     this._outbox.setBootStatus({ status: "Accepted" });
     if (
       this._ocppVersion === "OCPP-1.6J" &&
@@ -2174,10 +2199,12 @@ export class ChargePoint {
   }
 
   markBootPending(): void {
+    this._bootAccepted = false;
     this._outbox.setBootStatus({ status: "Pending" });
   }
 
   markBootRejected(retryAfterSeconds: number): void {
+    this._bootAccepted = false;
     this._outbox.setBootStatus({
       status: "Rejected",
       retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
@@ -2353,6 +2380,7 @@ export class ChargePoint {
    * a dead socket.
    */
   private teardownAfterClose(): void {
+    this._bootAccepted = false;
     // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
     // restart something already running. That arm must not survive the socket

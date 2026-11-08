@@ -62,52 +62,98 @@ const UNCAPPED: ResolvedScheduleLimit = {
   limitNumberPhases: null,
 };
 
+const DAY_SEC = 24 * 3600;
+
+function cycleSeconds(profile: ActiveChargingProfile): number {
+  return profile.recurrencyKind === RecurrencyKindType.Weekly
+    ? 7 * DAY_SEC
+    : DAY_SEC;
+}
+
+/**
+ * The instant an Absolute or Recurring schedule counts from: its
+ * `startSchedule` (1.6 §7.13), else the profile's `validFrom`, else null
+ * (the caller falls back to the transaction start). `startSchedule` is only
+ * ever set by a request that sent it, so profiles without it keep the
+ * `validFrom` / transaction-start anchor they always had.
+ */
+function scheduleAnchorMs(profile: ActiveChargingProfile): number | null {
+  for (const iso of [profile.startSchedule, profile.validFrom]) {
+    if (!iso) continue;
+    const ms = new Date(iso).getTime();
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return null;
+}
+
 /**
  * Compute "seconds since the profile's reference point" given a profile and
- * the current transaction context. The reference depends on
- * `chargingProfileKind`:
+ * the current transaction context, or `null` when the schedule is not in
+ * effect at `now`. The reference depends on `chargingProfileKind`:
  *
- * - `Absolute`: elapsed from `validFrom` / `startSchedule`. If neither is set
- *   we fall back to "seconds since transaction start" so the profile is
+ * - `Absolute`: elapsed from `startSchedule`, else `validFrom`. If neither is
+ *   set we fall back to "seconds since transaction start" so the profile is
  *   still useful in a fresh session.
  * - `Recurring` (Daily/Weekly): wraps around the cycle starting at
- *   `validFrom` / `startSchedule`.
+ *   `startSchedule`, else `validFrom`, else the transaction start.
  * - `Relative`: elapsed from transaction start.
+ *
+ * Not in effect: before an explicit `startSchedule`, or once the schedule
+ * `duration` has elapsed (per cycle for Recurring, where the duration and
+ * the periods cannot run past the cycle: 1.6 errata 3.43, 3.44).
  */
 function elapsedSecondsForProfile(
   profile: ActiveChargingProfile,
-  transactionStart: Date,
+  transactionStart: Date | null,
   now: Date,
-): number {
+): number | null {
   const nowMs = now.getTime();
-  const txMs = transactionStart.getTime();
+  const txMs = transactionStart?.getTime() ?? nowMs;
+  const anchorMs = scheduleAnchorMs(profile);
+  const started =
+    profile.startSchedule &&
+    profile.chargingProfileKind !== ChargingProfileKindType.Relative
+      ? anchorMs !== null && anchorMs <= nowMs
+      : true;
+  if (!started) return null;
 
+  let elapsed: number;
+  let horizon = Infinity;
   switch (profile.chargingProfileKind) {
-    case ChargingProfileKindType.Relative:
-      return Math.max(0, (nowMs - txMs) / 1000);
-
-    case ChargingProfileKindType.Absolute: {
-      const refIso = profile.validFrom;
-      if (!refIso) return Math.max(0, (nowMs - txMs) / 1000);
-      const refMs = new Date(refIso).getTime();
-      if (Number.isNaN(refMs)) return Math.max(0, (nowMs - txMs) / 1000);
-      return Math.max(0, (nowMs - refMs) / 1000);
-    }
-
+    case ChargingProfileKindType.Absolute:
+      elapsed = Math.max(0, (nowMs - (anchorMs ?? txMs)) / 1000);
+      break;
     case ChargingProfileKindType.Recurring: {
-      const refIso = profile.validFrom;
-      const refMs = refIso ? new Date(refIso).getTime() : txMs;
-      const elapsed = Math.max(0, (nowMs - refMs) / 1000);
-      const cycleSec =
-        profile.recurrencyKind === RecurrencyKindType.Weekly
-          ? 7 * 24 * 3600
-          : 24 * 3600;
-      return elapsed % cycleSec;
+      const cycleSec = cycleSeconds(profile);
+      elapsed = Math.max(0, (nowMs - (anchorMs ?? txMs)) / 1000) % cycleSec;
+      horizon = cycleSec;
+      break;
     }
-
     default:
-      return Math.max(0, (nowMs - txMs) / 1000);
+      elapsed = Math.max(0, (nowMs - txMs) / 1000);
   }
+  if (profile.duration !== undefined) {
+    horizon = Math.min(horizon, profile.duration);
+  }
+  return elapsed < horizon ? elapsed : null;
+}
+
+/**
+ * Whether the profile's schedule is running at `now`: it has reached its
+ * `startSchedule` and its `duration` has not elapsed. Selection of the
+ * highest stackLevel asks this first, so an ended profile yields to the next
+ * lower one (1.6 errata 3.43). `transactionStart` is null outside a
+ * transaction, where a profile anchored on it cannot have ended.
+ */
+export function isScheduleInEffect(
+  profile: ActiveChargingProfile,
+  transactionStart: Date | null,
+  now: Date,
+): boolean {
+  if (transactionStart === null && scheduleAnchorMs(profile) === null) {
+    return true;
+  }
+  return elapsedSecondsForProfile(profile, transactionStart, now) !== null;
 }
 
 /**
@@ -122,8 +168,14 @@ function selectPeriodIndex(
   const periods = profile.chargingSchedulePeriods;
   if (periods.length === 0) return null;
 
+  // A Recurring schedule does not execute periods past its cycle (errata 3.44).
+  const cycleSec =
+    profile.chargingProfileKind === ChargingProfileKindType.Recurring
+      ? cycleSeconds(profile)
+      : Infinity;
   const sorted = periods
     .map((p, idx) => ({ idx, startPeriod: p.startPeriod }))
+    .filter((p) => p.startPeriod < cycleSec)
     .sort((a, b) => a.startPeriod - b.startPeriod);
 
   let selected: number | null = null;
@@ -188,6 +240,7 @@ export function resolveScheduleLimitWatts(
   if (!profile || !transactionStart) return UNCAPPED;
 
   const elapsed = elapsedSecondsForProfile(profile, transactionStart, now);
+  if (elapsed === null) return UNCAPPED;
   const idx = selectPeriodIndex(profile, elapsed);
   if (idx == null) return UNCAPPED;
 
@@ -524,28 +577,28 @@ function addProfileBoundaries(
   const refMs = profileReferenceMs(profile, anchor);
   const anchorMs = anchor.getTime();
 
+  const endOffset = (startMs: number, horizonSec: number) =>
+    (startMs - anchorMs) / 1000 +
+    Math.min(horizonSec, profile.duration ?? Infinity);
+
   if (profile.chargingProfileKind === ChargingProfileKindType.Recurring) {
-    const cycleSec =
-      profile.recurrencyKind === RecurrencyKindType.Weekly
-        ? 7 * 24 * 3600
-        : 24 * 3600;
-    // First cycle that touches [anchorMs, anchorMs + durationSeconds).
+    const cycleSec = cycleSeconds(profile);
+    // First cycle that touches [anchorMs, anchorMs + durationSeconds): the
+    // one containing the anchor, or the schedule's first when it starts later.
     let cycleStartMs = refMs;
-    if (cycleStartMs > anchorMs) {
-      // Profile's first cycle hasn't started yet; nothing to emit until
-      // it does.
-      cycleStartMs = anchorMs; // walked forward below
-    } else {
-      const cyclesElapsed = Math.floor(
-        (anchorMs - cycleStartMs) / 1000 / cycleSec,
-      );
+    if (refMs <= anchorMs) {
+      const cyclesElapsed = Math.floor((anchorMs - refMs) / 1000 / cycleSec);
       cycleStartMs = refMs + cyclesElapsed * cycleSec * 1000;
     }
     while (cycleStartMs < anchorMs + durationSeconds * 1000) {
       for (const p of sorted) {
+        if (p.startPeriod >= cycleSec) continue;
         const offset = (cycleStartMs - anchorMs) / 1000 + p.startPeriod;
         if (offset >= 0 && offset < durationSeconds) out.add(offset);
       }
+      // The instant the cycle's schedule ends (its duration, at most the cycle).
+      const end = endOffset(cycleStartMs, cycleSec);
+      if (end >= 0 && end < durationSeconds) out.add(end);
       cycleStartMs += cycleSec * 1000;
     }
     return;
@@ -555,6 +608,10 @@ function addProfileBoundaries(
   for (const p of sorted) {
     const offset = (refMs - anchorMs) / 1000 + p.startPeriod;
     if (offset >= 0 && offset < durationSeconds) out.add(offset);
+  }
+  if (profile.duration !== undefined) {
+    const end = endOffset(refMs, Infinity);
+    if (end >= 0 && end < durationSeconds) out.add(end);
   }
 }
 
@@ -567,11 +624,7 @@ function profileReferenceMs(
       return anchor.getTime();
     case ChargingProfileKindType.Absolute:
     case ChargingProfileKindType.Recurring: {
-      if (profile.validFrom) {
-        const ms = new Date(profile.validFrom).getTime();
-        if (!Number.isNaN(ms)) return ms;
-      }
-      return anchor.getTime();
+      return scheduleAnchorMs(profile) ?? anchor.getTime();
     }
     default:
       return anchor.getTime();

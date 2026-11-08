@@ -55,6 +55,12 @@ import { EventBus } from "./server/eventBus";
 import { RegistryChargePointService } from "./server/RegistryChargePointService";
 import { createSocketConfigRepository } from "./server/socketServer";
 import { sendCommand, subscribeEvents, stopDaemon } from "./client";
+import {
+  DEFAULT_RATE_LIMIT_MAX_IPS,
+  parseTrustedProxy,
+} from "./server/accessGuard";
+import { installLogSink, parseLogLevel, parseSize } from "./logSink";
+import { CP_BULK_WAIT_MS } from "@ocpp-cp-sim/contracts/limits";
 import type { ClientLocation } from "./client";
 import type { SingleCpRuntimeTarget } from "./singleCpTarget";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
@@ -62,6 +68,9 @@ import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
+import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
+import { DEFAULT_BOOTSTRAP_PACING } from "./server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
 /** Result of a `dist/` lookup: where it was found (if at all) and every
@@ -251,6 +260,12 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpId: string | null = null;
   let cpCount = 1;
   let cpIdPattern: string | null = null;
+  const fleetTemplateFiles: string[] = [];
+  // Fleet startup pacing (#610); `undefined` keeps the built-in default.
+  let bootstrapConcurrency: string | undefined;
+  let startDelay: string | undefined;
+  let startJitter: string | undefined;
+  let startSeed: string | undefined;
   const labelEntries: Array<[string, string]> = [];
   let metrics = false;
   let metricsNoAuth = false;
@@ -306,6 +321,20 @@ export function parseArgs(argv: string[]): CLIOptions {
   let healthPath = "/v1/healthz";
   const corsOrigins: string[] = [];
   let trustForwardedHeaders = false;
+  const allowedHosts: string[] = [];
+  const trustedProxies: string[] = [];
+  let requireTls = false;
+  let rateLimitPerIp = 0;
+  let rateLimitMaxIps = DEFAULT_RATE_LIMIT_MAX_IPS;
+  let logLevel: CLIOptions["logLevel"] = null;
+  let logFile: string | null = null;
+  let logMaxBytes: number | null = null;
+  let logRotateDaily = false;
+  let logKeep = 5;
+  let shutdownStopTransactions = false;
+  let shutdownWaitMs = 5000;
+  let connectRestored = true;
+  let cpBulkWaitMs = CP_BULK_WAIT_MS;
   const extraWsHeaders: Record<string, string> = {};
   const extraWsSubprotocols: string[] = [];
   let soapCallbackUrl: string | null = null;
@@ -357,6 +386,30 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--cp-count":
         cpCount = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--fleet-template":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --fleet-template needs a file path\n");
+          process.exit(1);
+        }
+        fleetTemplateFiles.push(next);
+        i++;
+        break;
+      case "--bootstrap-concurrency":
+        bootstrapConcurrency = next ?? "";
+        i++;
+        break;
+      case "--start-delay":
+        startDelay = next ?? "";
+        i++;
+        break;
+      case "--start-jitter":
+        startJitter = next ?? "";
+        i++;
+        break;
+      case "--start-seed":
+        startSeed = next ?? "";
         i++;
         break;
       case "--cp-id-pattern":
@@ -555,6 +608,89 @@ export function parseArgs(argv: string[]): CLIOptions {
         }
         corsOrigins.push(next);
         i++;
+        break;
+      case "--allowed-host":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --allowed-host requires a host name\n");
+          process.exit(1);
+        }
+        allowedHosts.push(next);
+        i++;
+        break;
+      case "--trusted-proxy":
+        if (!next || next.startsWith("--") || !parseTrustedProxy(next)) {
+          process.stderr.write(
+            "Error: --trusted-proxy requires an IP address or CIDR (for example 10.0.0.0/8)\n",
+          );
+          process.exit(1);
+        }
+        trustedProxies.push(next);
+        i++;
+        break;
+      case "--require-tls":
+        requireTls = true;
+        break;
+      case "--rate-limit-per-ip":
+      case "--rate-limit-max-ips":
+      case "--log-keep":
+      case "--shutdown-wait-ms":
+      case "--cp-bulk-wait-ms": {
+        const value = Number(next);
+        const min = arg === "--rate-limit-max-ips" ? 1 : 0;
+        if (!next || !/^\d+$/.test(next) || value < min) {
+          process.stderr.write(
+            `Error: ${arg} requires a whole number >= ${min}\n`,
+          );
+          process.exit(1);
+        }
+        if (arg === "--rate-limit-per-ip") rateLimitPerIp = value;
+        else if (arg === "--rate-limit-max-ips") rateLimitMaxIps = value;
+        else if (arg === "--log-keep") logKeep = value;
+        else if (arg === "--shutdown-wait-ms") shutdownWaitMs = value;
+        else cpBulkWaitMs = value;
+        i++;
+        break;
+      }
+      case "--log-level": {
+        const level = parseLogLevel(next);
+        if (!level) {
+          process.stderr.write(
+            "Error: --log-level must be debug, info, warn or error\n",
+          );
+          process.exit(1);
+        }
+        logLevel = level;
+        i++;
+        break;
+      }
+      case "--log-file":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --log-file requires a file path\n");
+          process.exit(1);
+        }
+        logFile = next;
+        i++;
+        break;
+      case "--log-max-size": {
+        const bytes = parseSize(next);
+        if (bytes === null) {
+          process.stderr.write(
+            "Error: --log-max-size requires a size such as 10m, 512k or 1048576\n",
+          );
+          process.exit(1);
+        }
+        logMaxBytes = bytes;
+        i++;
+        break;
+      }
+      case "--log-rotate-daily":
+        logRotateDaily = true;
+        break;
+      case "--shutdown-stop-transactions":
+        shutdownStopTransactions = true;
+        break;
+      case "--no-connect-restored":
+        connectRestored = false;
         break;
       case "--trust-forwarded-headers":
         trustForwardedHeaders = true;
@@ -1087,6 +1223,87 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  if (fleetTemplateFiles.length > 0 && !isServerMode) {
+    // Templates are served and instantiated by the daemon; outside a server
+    // mode the flag would be accepted and ignored.
+    process.stderr.write(
+      "Error: --fleet-template needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
+  // Pacing flags: a malformed number is refused rather than turned into NaN
+  // (which would start the whole fleet at once, silently), and the flags need
+  // a server mode and a bootstrapped fleet or they would be accepted and
+  // ignored (#610).
+  const pacingFlags: Array<[string, string | undefined, number, boolean]> = [
+    ["--bootstrap-concurrency", bootstrapConcurrency, 1, false],
+    ["--start-delay", startDelay, 0, false],
+    ["--start-jitter", startJitter, 0, false],
+    ["--start-seed", startSeed, 0, true],
+  ];
+  const pacingValues: Record<string, number> = {};
+  for (const [flag, raw, min, allowNegative] of pacingFlags) {
+    if (raw === undefined) continue;
+    const value = /^-?\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(value) || (!allowNegative && value < min)) {
+      process.stderr.write(
+        `Error: ${flag} must be ${
+          allowNegative
+            ? "an integer"
+            : min === 1
+              ? "a positive integer"
+              : "a non-negative integer (milliseconds)"
+        }\n`,
+      );
+      process.exit(1);
+    }
+    pacingValues[flag] = value;
+    if (isClientMode) {
+      // `--http-port` satisfies the server-mode check below, so without this
+      // `--http-port 9700 --send … --start-delay 10` would be accepted and
+      // ignored, the hole --watch (#314) and --label (#472) already close.
+      process.stderr.write(
+        `Error: ${flag} cannot be combined with a client mode (--send, --stop or --events); it paces the charge points a server starts\n`,
+      );
+      process.exit(1);
+    }
+    if (!isServerMode || !cpId) {
+      process.stderr.write(
+        `Error: ${flag} needs a server mode (--daemon, --http-port or --web-console) and --cp-id\n`,
+      );
+      process.exit(1);
+    }
+  }
+  if (startSeed !== undefined && startJitter === undefined) {
+    process.stderr.write(
+      "Error: --start-seed has no effect without --start-jitter\n",
+    );
+    process.exit(1);
+  }
+  // setTimeout fires after 1 ms when its delay exceeds 2^31-1 ms (about 24.8
+  // days), which would silently collapse the schedule for the later charge
+  // points, so the last scheduled offset must stay below that.
+  const MAX_TIMER_MS = 2 ** 31 - 1;
+  const lastOffsetMs =
+    (Math.max(cpCount, 1) - 1) * (pacingValues["--start-delay"] ?? 0) +
+    (pacingValues["--start-jitter"] ?? 0);
+  if (lastOffsetMs > MAX_TIMER_MS) {
+    process.stderr.write(
+      `Error: (--cp-count - 1) × --start-delay + --start-jitter must not exceed ${MAX_TIMER_MS} ms (about 24.8 days), got ${lastOffsetMs}\n`,
+    );
+    process.exit(1);
+  }
+  const bootstrapPacing =
+    Object.keys(pacingValues).length === 0
+      ? undefined
+      : {
+          concurrency:
+            pacingValues["--bootstrap-concurrency"] ??
+            DEFAULT_BOOTSTRAP_PACING.concurrency,
+          startDelayMs: pacingValues["--start-delay"] ?? 0,
+          startJitterMs: pacingValues["--start-jitter"] ?? 0,
+          startSeed: pacingValues["--start-seed"] ?? 0,
+        };
   if (labels && !isServerMode) {
     // Labels are read by `cp.list` and the console only; the standalone REPL
     // / JSON paths have neither, so the flag would be accepted and ignored.
@@ -1244,6 +1461,41 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
+  // The daemon speaks plain HTTP: it can only learn that a remote client used
+  // TLS from a proxy it trusts, so the requirement is unsatisfiable without one.
+  if (
+    !isClientMode &&
+    isServerMode &&
+    requireTls &&
+    !isLoopbackHost(httpHost) &&
+    trustedProxies.length === 0
+  ) {
+    process.stderr.write(
+      "Error: --require-tls on a non-loopback bind needs --trusted-proxy: the " +
+        "daemon itself speaks plain HTTP and learns about TLS from the proxy " +
+        "in front of it.\n",
+    );
+    process.exit(1);
+  }
+
+  // On a loopback bind a same-host reverse proxy reaches the daemon from
+  // 127.0.0.1, which counts as a direct local caller unless the proxy is
+  // listed, so --require-tls would let its plain-HTTP clients through.
+  if (
+    !isClientMode &&
+    isServerMode &&
+    requireTls &&
+    isLoopbackHost(httpHost) &&
+    trustedProxies.length === 0
+  ) {
+    process.stderr.write(
+      "Warning: --require-tls without --trusted-proxy only constrains " +
+        "clients that connect from another host. Behind a reverse proxy on " +
+        "this host, add --trusted-proxy 127.0.0.1 so the proxy has to report " +
+        "https.\n",
+    );
+  }
+
   // Same all-or-nothing rule for the client-side credentials.
   if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
     process.stderr.write(
@@ -1307,6 +1559,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    fleetTemplateFiles,
+    bootstrapPacing,
     labels,
     metrics,
     metricsNoAuth,
@@ -1340,6 +1594,20 @@ export function parseArgs(argv: string[]): CLIOptions {
     allowBehaviorReload,
     corsOrigins,
     trustForwardedHeaders,
+    allowedHosts,
+    trustedProxies,
+    requireTls,
+    rateLimitPerIp,
+    rateLimitMaxIps,
+    logLevel,
+    logFile,
+    logMaxBytes,
+    logRotateDaily,
+    logKeep,
+    shutdownStopTransactions,
+    shutdownWaitMs,
+    connectRestored,
+    cpBulkWaitMs,
     serveStatic,
     webConsolePort,
     stateDb,
@@ -1431,6 +1699,19 @@ Options:
   --cp-id-pattern <tpl>    Id template used with --cp-count (default:
                            <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
                            it.
+  --fleet-template <file>  Server mode: load fleet template(s) from a JSON file
+                           (one template or an array; repeatable). Read-only;
+                           list and instantiate with fleet.template.* /
+                           fleet.create.
+  --bootstrap-concurrency <n>
+                           Server mode: charge points started at once
+                           (default: 8).
+  --start-delay <ms>       Server mode: milliseconds between the scheduled
+                           starts of consecutive charge points (default: 0).
+  --start-jitter <ms>      Server mode: push each start back by a seeded
+                           random 0..ms-1 (default: 0).
+  --start-seed <n>         Server mode: seed of --start-jitter (default: 0); the same seed
+                           gives the same schedule.
   --label <key=value>      Server mode: label every bootstrapped charge point.
                            Repeatable; split on the first '='. Requires
                            --cp-id. A charge point restored from --state-db
@@ -1574,6 +1855,32 @@ Options:
                            public origin a reverse proxy reports via
                            X-Forwarded-Proto / X-Forwarded-Host. Use only
                            behind a trusted proxy (see docs/concepts/access-control.md).
+  --trusted-proxy <ip|cidr>
+                           Believe X-Forwarded-* / Forwarded headers only from
+                           this peer (repeatable, implies the behavior of
+                           --trust-forwarded-headers for those peers). A request
+                           whose Forwarded and X-Forwarded-* disagree is refused
+                           with 400.
+  --allowed-host <name>    Answer only to this Host name (repeatable; IP literals
+                           and localhost always pass). Against DNS rebinding.
+  --require-tls            Refuse non-loopback clients that did not arrive over
+                           TLS as reported by a --trusted-proxy (health exempt).
+  --rate-limit-per-ip <n>  Requests per second per client IP (default 0 = off).
+  --rate-limit-max-ips <n> Client IPs the limiter tracks (default 10000).
+  --log-level <level>      debug (default), info, warn or error: drop console and
+                           --log-file lines below it.
+  --log-file <path>        Also append console log lines to this file.
+  --log-max-size <size>    Rotate --log-file past this size (10m, 512k, bytes).
+  --log-rotate-daily       Rotate --log-file when the local date changes.
+  --log-keep <n>           Rotated files to keep (default 5).
+  --shutdown-stop-transactions
+                           On any shutdown (signal, server.shutdown) stop running
+                           transactions and wait
+                           for the CSMS to answer before exiting.
+  --shutdown-wait-ms <ms>  Longest wait for those answers (default 5000).
+  --no-connect-restored    Restore charge points from --state-db without dialling
+                           them (connect with cp.connect).
+  --cp-bulk-wait-ms <ms>   Per-charge-point wait of cp.bulk (default 10000).
   --web-console [<port>]   Serve the bundled browser UI alongside socket.io.
                            With <port>: opens a second listener on that port.
                            Without <port>: shares the --http-port listener.
@@ -1734,7 +2041,7 @@ HTTP endpoints (see docs/entities/daemon.md):
  *     stderr. The daemon is exposed on the LAN; defaulting to open
  *     CORS would let any page in the operator's browser call it.
  */
-function resolveCorsPolicy(options: CLIOptions):
+function resolveCorsPolicy(rawOptions: CLIOptions):
   | { kind: "any" }
   | { kind: "allowlist"; origins: string[] }
   | {
@@ -1742,6 +2049,12 @@ function resolveCorsPolicy(options: CLIOptions):
       trustForwardedHeaders: boolean;
       allowedHosts?: string[];
     } {
+  // A listed `--trusted-proxy` is a stricter form of trusting the headers.
+  const options = {
+    ...rawOptions,
+    trustForwardedHeaders:
+      rawOptions.trustForwardedHeaders || rawOptions.trustedProxies.length > 0,
+  };
   if (options.corsOrigins.length > 0) {
     if (options.corsOrigins.length === 1 && options.corsOrigins[0] === "*") {
       return { kind: "any" };
@@ -1941,6 +2254,25 @@ async function main(): Promise<void> {
   // every line that follows respects it — including "[server] xxx" setup
   // chatter via serverLog.
   setGlobalLogFormat(options.logFormat);
+  // --log-level / --log-file (#621). Wraps the console only when asked for.
+  try {
+    installLogSink({
+      level: options.logLevel ?? undefined,
+      file: options.logFile
+        ? {
+            file: options.logFile,
+            maxBytes: options.logMaxBytes ?? undefined,
+            daily: options.logRotateDaily,
+            keep: options.logKeep,
+          }
+        : undefined,
+    });
+  } catch (err) {
+    process.stderr.write(
+      `Error: cannot write log file: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(1);
+  }
 
   // --trace-output (#188): construct the global TraceWriter before any CP is
   // built (CLIChargePointService.attach()es to it in its constructor, so
@@ -2007,7 +2339,17 @@ async function main(): Promise<void> {
       options.behaviorFiles,
       options.useBehaviors,
     );
+    let fleetTemplates: FleetTemplate[] = [];
+    try {
+      fleetTemplates = loadFleetTemplateFiles(options.fleetTemplateFiles);
+    } catch (err) {
+      process.stderr.write(
+        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    }
     await startServer({
+      fleetTemplates,
       behaviors,
       watchBehaviors: options.watchBehaviors,
       allowBehaviorReload: options.allowBehaviorReload,
@@ -2018,6 +2360,7 @@ async function main(): Promise<void> {
       bootstrap: buildBootstrap(options),
       bootstrapCount: options.cpCount,
       bootstrapIdPattern: options.cpIdPattern ?? undefined,
+      bootstrapPacing: options.bootstrapPacing,
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
       soapPath: options.soapPath,
@@ -2035,6 +2378,18 @@ async function main(): Promise<void> {
           }
         : null,
       cors: resolveCorsPolicy(options),
+      access: {
+        allowedHosts: options.allowedHosts,
+        trustedProxies: options.trustedProxies,
+        requireTls: options.requireTls,
+        rateLimitPerIp: options.rateLimitPerIp,
+        rateLimitMaxIps: options.rateLimitMaxIps,
+      },
+      shutdownStopTransactions: options.shutdownStopTransactions
+        ? { waitMs: options.shutdownWaitMs }
+        : undefined,
+      connectRestored: options.connectRestored,
+      cpBulkWaitMs: options.cpBulkWaitMs,
       staticDir: options.serveStatic,
       webConsolePort: options.webConsolePort,
       stateDb: options.stateDb,

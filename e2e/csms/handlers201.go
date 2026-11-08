@@ -13,20 +13,22 @@ type handler201 struct {
 	v201h.UnimplementedCSMSHandler
 
 	rec *Recorder
+	beh *Behavior
 }
 
-func register201(srv *csms.Server, rec *Recorder) error {
-	return v201h.RegisterCSMS(srv, &handler201{rec: rec})
+func register201(srv *csms.Server, rec *Recorder, beh *Behavior) error {
+	return v201h.RegisterCSMS(srv, &handler201{rec: rec, beh: beh})
 }
 
 func (h *handler201) OnBootNotification(_ context.Context, conn *csms.Conn, req v201msg.BootNotificationRequest) (v201msg.BootNotificationResponse, error) {
 	if err := h.rec.Record(conn.ID(), "BootNotification", req); err != nil {
 		return v201msg.BootNotificationResponse{}, err
 	}
+	status, interval := h.beh.NextBoot(conn.ID())
 	return v201msg.BootNotificationResponse{
 		CurrentTime: time.Now().UTC(),
-		Interval:    300,
-		Status:      "Accepted",
+		Interval:    interval,
+		Status:      status,
 	}, nil
 }
 
@@ -49,7 +51,7 @@ func (h *handler201) OnAuthorize(_ context.Context, conn *csms.Conn, req v201msg
 		return v201msg.AuthorizeResponse{}, err
 	}
 	return v201msg.AuthorizeResponse{
-		IDTokenInfo: v201msg.IdTokenInfoType{Status: "Accepted"},
+		IDTokenInfo: v201msg.IdTokenInfoType{Status: h.beh.Authorize(req.IDToken.IDToken, time.Now()).status2x()},
 	}, nil
 }
 
@@ -57,7 +59,11 @@ func (h *handler201) OnTransactionEvent(_ context.Context, conn *csms.Conn, req 
 	if err := h.rec.Record(conn.ID(), "TransactionEvent", req); err != nil {
 		return v201msg.TransactionEventResponse{}, err
 	}
-	return v201msg.TransactionEventResponse{}, nil
+	resp := v201msg.TransactionEventResponse{}
+	if req.IDToken != nil && h.beh.Policed() {
+		resp.IDTokenInfo = &v201msg.IdTokenInfoType{Status: h.beh.Authorize(req.IDToken.IDToken, time.Now()).status2x()}
+	}
+	return resp, nil
 }
 
 func (h *handler201) OnMeterValues(_ context.Context, conn *csms.Conn, req v201msg.MeterValuesRequest) (v201msg.MeterValuesResponse, error) {

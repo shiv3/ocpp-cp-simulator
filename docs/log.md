@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2434,22 +2440,24 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
 
-## [2026-11-08] ingest | Configurable reconnect policy and 2.x `RetryBackOff*` (#609)
+## [2026-11-08] ingest | Run a scenario template on a label selector (#486)
 
-- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609): new section, the canonical table of the reconnect policy (`maxAttempts`, `mode`, `baseDelayMs`, `maxDelayMs`, `jitterMs`, `bootRetryLimit`; defaults are the previous 1 s → 30 s forever), seeded jitter, giving up, and the OCPP 2.0.1 Part 4 §5.4 variables `RetryBackOffWaitMinimum` / `RandomRange` / `RepeatTimes` (decision: wait = minimum × 2^min(N−1, RepeatTimes) + random).
-- [CLI](entities/cli.md) flags `--reconnect-*` and `--boot-retry-limit`; [Daemon](entities/daemon.md) and [Control plane](concepts/control-plane.md) (`cp.create` `transport`) in sync.
-- [State persistence](concepts/state-persistence.md): schema v28 `charge_points.transport_options` (v25-v27 belong to #658, #660 and #680).
-- [Operational timeline](concepts/operational-timeline.md): format `1.4`, new kind `gave_up`.
+- New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).
 
-## [2026-11-08] lint | Reconnect policy review fixes (#609)
+## [2026-11-08] ingest | Fleet-wide charging session listing (#489)
 
-- 2.x follows the `RetryBackOff*` variables as set (no `maxDelayMs` cap unless they still equal the derived defaults); the wait plus jitter is clamped to the timer limit; the jitter stream is seeded by the charge point id when there is no simulation seed; the BootNotification retry budget is restored by every new connection and its `gave_up` entry follows the Rejected answer. The migration is schema v28 (`stored < 28`). Spec citations are Part 4 §5.4 and the Part 2 Appendices. Updated [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609), [State persistence](concepts/state-persistence.md), [GitHub issues](sources/github-issues.md).
+- `sessions.list` and the `list_charging_sessions` MCP tool accept a missing `cpId` and list across every charge point, with new `labels` (selector, fleet-wide only), `startedFrom` (inclusive) and `startedTo` (exclusive) filters; order is start time then record order. Pages: [Charging sessions](concepts/charging-sessions.md#reading-it), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [index](index.md).
 
-## [2026-11-08] ingest | WebSocket client options and the Bun / Node PoC (#611)
+## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
 
-- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-client-options-611): new section with the `transport.ws` options, the per-runtime support matrix, the PoC results (Bun 1.3.14, Node 22 `ws`), why an unsupported option refuses the charge point instead of warning, and the Local mode limits.
-- [CLI](entities/cli.md) `--ws-*` flags; [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md) (`transport.ws`) and [State persistence](concepts/state-persistence.md) in sync.
+- The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
 
-## [2026-11-08] lint | WebSocket client options moved to src/cp/shared (#611)
+## [2026-11-08] ingest | 2.x TriggerMessage(BootNotification) after an Accepted boot is Rejected (#690)
 
-- `WsClientOptions.ts` moved from `infrastructure/transport/` to `shared/` (with `ReconnectPolicy.ts` from #609): the charge point in `domain` uses it, and `check:boundaries` forbids `domain` → `infrastructure`. Updated [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-client-options-611).
+- F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
+- Page: [Control plane](concepts/control-plane.md).
+
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
+
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

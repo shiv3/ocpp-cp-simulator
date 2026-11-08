@@ -14,21 +14,23 @@ type handler16 struct {
 	v16h.UnimplementedCSMSHandler
 
 	rec    *Recorder
+	beh    *Behavior
 	nextTx atomic.Int32
 }
 
-func register16(srv *csms.Server, rec *Recorder) error {
-	return v16h.RegisterCSMS(srv, &handler16{rec: rec})
+func register16(srv *csms.Server, rec *Recorder, beh *Behavior) error {
+	return v16h.RegisterCSMS(srv, &handler16{rec: rec, beh: beh})
 }
 
 func (h *handler16) OnBootNotification(_ context.Context, conn *csms.Conn, req v16msg.BootNotificationRequest) (v16msg.BootNotificationResponse, error) {
 	if err := h.rec.Record(conn.ID(), "BootNotification", req); err != nil {
 		return v16msg.BootNotificationResponse{}, err
 	}
+	status, interval := h.beh.NextBoot(conn.ID())
 	return v16msg.BootNotificationResponse{
 		CurrentTime: time.Now().UTC(),
-		Interval:    300,
-		Status:      v16msg.RegistrationStatusAccepted,
+		Interval:    interval,
+		Status:      v16msg.RegistrationStatus(status),
 	}, nil
 }
 
@@ -51,7 +53,7 @@ func (h *handler16) OnAuthorize(_ context.Context, conn *csms.Conn, req v16msg.A
 		return v16msg.AuthorizeResponse{}, err
 	}
 	return v16msg.AuthorizeResponse{
-		IDTagInfo: v16msg.IDTagInfo{Status: v16msg.IDTagInfoStatusAccepted},
+		IDTagInfo: v16msg.IDTagInfo{Status: h.idTagStatus(req.IDTag)},
 	}, nil
 }
 
@@ -60,7 +62,7 @@ func (h *handler16) OnStartTransaction(_ context.Context, conn *csms.Conn, req v
 		return v16msg.StartTransactionResponse{}, err
 	}
 	return v16msg.StartTransactionResponse{
-		IDTagInfo:     v16msg.IDTagInfo{Status: v16msg.IDTagInfoStatusAccepted},
+		IDTagInfo:     v16msg.IDTagInfo{Status: h.idTagStatus(req.IDTag)},
 		TransactionID: h.nextTx.Add(1),
 	}, nil
 }
@@ -86,4 +88,8 @@ func (h *handler16) OnDataTransfer(_ context.Context, conn *csms.Conn, req v16ms
 	return v16msg.DataTransferResponse{
 		Status: v16msg.DataTransferResponseStatusAccepted,
 	}, nil
+}
+
+func (h *handler16) idTagStatus(idTag string) v16msg.IDTagInfoStatus {
+	return v16msg.IDTagInfoStatus(h.beh.Authorize(idTag, time.Now()).status16())
 }

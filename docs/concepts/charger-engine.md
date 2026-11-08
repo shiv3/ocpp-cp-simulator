@@ -45,7 +45,7 @@ the [CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build) page.
 **`api: 1` is a preview.** The behavior contract (`@ocpp-cp-sim/contracts/behavior`, `Behavior.api: 1`) is
 usable and tested, but it is not final until the charger-engine work is on `main` and has been used outside
 this repository. Until then a breaking change to it bumps `api` (a behavior with another `api` is refused at
-load), and the change is listed in the [log](../log.md). The word _experimental_ below marks the members most
+load), and the change is called out in the PR description and commit message of that change. The word _experimental_ below marks the members most
 likely to change; the type comments in the contract say the same.
 
 | Member                                          | Status                                                                                                                                                     |
@@ -153,7 +153,7 @@ change how the network simulation logs a discard, which rule 4 forbids). A CALL 
 (`incomingCallCompleted`) even when its first write threw and the caller answers again with a CALLERROR.
 
 `InboundCallGate` runs, once for every OCPP version: `incomingCallReceived`; `inboundPolicy`;
-`responseOverride`; `BehaviorRegistry.resolve()`; then the default path (2.x validates its payload here).
+`responseOverride`; the static [capability profile](call-precedence.md#capability-profile) (#618); `BehaviorRegistry.resolve()`; then the default path (2.x validates its payload here).
 Step 4 runs before validation, so a rule can own a malformed CALL. The full order and what wins is in
 [Who answers an inbound CALL](call-precedence.md).
 

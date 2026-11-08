@@ -614,6 +614,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
           certificateSigning: this._certificateSigning,
+          bootAccepted: () => this._bootStatus.status === "Accepted",
         };
         const fail = (error: unknown): void => {
           // The exchange refuses an answer on a connection that changed (and
@@ -950,6 +951,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       connector.id,
       status,
       stopOnInvalid,
+      request.eventType !== "Started",
     );
   }
 

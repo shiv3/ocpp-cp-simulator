@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -157,8 +162,6 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #593                                             | Inbound 1.6J CALL payloads are validated per `inboundValidation` (`off` / `warn` default / `enforce`); violations answer OCPP-J 1.6 error codes                                                                                  | [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16)                                                                                                                                                                                                                                                                       |
 | #594                                             | 1.6 SetChargingProfile replaces by `stackLevel` + purpose too; TxProfile needs the active transaction; `NotSupported` without SmartCharging                                                                                      | [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile)                                                                                                                                                                                                                                                                                 |
 | #600                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
-| #609                                             | Configurable reconnect policy (max attempts, fixed / exponential, base / max delay, seeded jitter), BootNotification retry limit, 2.x `RetryBackOff*`; giving up is a `gave_up` timeline entry                                   |
-| #611                                             | WebSocket client options (handshake timeout, compression, max payload, proxy, local address): PoC on Bun and Node, runtime support matrix, unsupported options refuse the charge point                                           |
 | #618                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
 | #635                                             | `Reset` `OnIdle` on 2.x: the pending list lives on `ChargePoint`, the default reset schedules it ([migration](../analyses/charger-engine-migration.md#reset-onidle-after-the-merge-of-main))                                     |
 | juherr/open-ev-directory#10 / #14                | Open EV Directory: individual API keys, `Authorization: Bearer` (shipped) / self-service key page (open: keys are operator-provisioned)                                                                                          | [Open EV Directory](../entities/open-ev-directory.md)                                                                                                                                                                                                                                                                                                                                |

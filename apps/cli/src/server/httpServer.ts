@@ -18,6 +18,11 @@ import {
   normalizeSoapPath,
 } from "../soapPath";
 import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
+import {
+  forwardedHeadersTrusted,
+  markForwardedUntrusted,
+  type AccessGuard,
+} from "./accessGuard";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "@ocpp-cp-sim/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-sim/contracts/labels";
 import { behaviorIdsSchema } from "@ocpp-cp-sim/contracts/methods";
@@ -200,6 +205,9 @@ function originsEqual(a: URL, b: URL): boolean {
  * outermost proxy saw, i.e. the public URL.
  */
 function forwardedOrigin(req: Request): string | null {
+  // #620: a peer that is not a listed `--trusted-proxy` has its forwarding
+  // headers ignored.
+  if (!forwardedHeadersTrusted(req)) return null;
   const proto = firstForwardedValue(req.headers.get("x-forwarded-proto"));
   const host = firstForwardedValue(req.headers.get("x-forwarded-host"));
   if (!proto || !host) return null;
@@ -595,6 +603,9 @@ export function createHttpHandlers(deps: {
   metrics?: { render: () => string; exemptFromBasicAuth: boolean } | null;
   /** Optional socket.io/Engine.IO route mounted on the same Bun listener. */
   socketIo?: SocketIoRoute | null;
+  /** #620: Host allowlist, trusted proxies, TLS requirement and per-IP rate
+   *  limit. Absent = no such checks (default). */
+  accessGuard?: AccessGuard | null;
   /** Optional MCP handler for POST /mcp. Rate limiting and body cap are
    *  applied. */
   mcp?: {
@@ -612,6 +623,7 @@ export function createHttpHandlers(deps: {
   const socketIo = deps.socketIo ?? null;
   const mcpConfig = deps.mcp ?? null;
   const metrics = deps.metrics ?? null;
+  const accessGuard = deps.accessGuard ?? null;
   const METRICS_PATH = "/metrics";
 
   // Rate limiting state for MCP handler (token bucket per invocation).
@@ -629,6 +641,23 @@ export function createHttpHandlers(deps: {
   return {
     fetch(req, server) {
       const url = new URL(req.url);
+      // Before everything else, Basic Auth included: a refused Host, a
+      // cleartext remote client or a flooding IP gets nothing to probe.
+      if (accessGuard !== null) {
+        const peer = server?.requestIP?.(req)?.address ?? null;
+        const decision = accessGuard.check(req, peer);
+        if (decision.refuse) {
+          const { status, message, retryAfter } = decision.refuse;
+          return new Response(message, {
+            status,
+            headers:
+              retryAfter !== undefined
+                ? { "retry-after": String(retryAfter) }
+                : undefined,
+          });
+        }
+        if (!decision.forwardedTrusted) markForwardedUntrusted(req);
+      }
       // Optional Basic Auth gate. Runs *before* CORS so an attacker without
       // creds can't probe internal endpoints via a same-origin request.
       // The health path is intentionally exempt so k8s probes / external
@@ -1046,6 +1075,7 @@ export function parseCreateBody(
     }
     inboundValidation = body.inboundValidation;
   }
+  const capabilityProfile = parseCapabilityProfile(body.capabilityProfile);
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1130,6 +1160,7 @@ export function parseCreateBody(
     cpoName,
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(capabilityProfile ? { capabilityProfile } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1137,5 +1168,30 @@ export function parseCreateBody(
     ...(bootNotification ? { bootNotification } : {}),
     ...(labels !== undefined ? { labels } : {}),
     ...(behaviors !== undefined ? { behaviors } : {}),
+  };
+}
+
+/** #618: `undefined` when absent, an Error when malformed. */
+function parseCapabilityProfile(
+  value: unknown,
+): ChargePointInitOptions["capabilityProfile"] {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("capabilityProfile must be an object");
+  }
+  const raw = value as Record<string, unknown>;
+  const names = (key: string): string[] | undefined => {
+    const list = raw[key];
+    if (list === undefined) return undefined;
+    if (!Array.isArray(list) || list.some((v) => typeof v !== "string")) {
+      throw new Error(`capabilityProfile.${key} must be an array of strings`);
+    }
+    return list as string[];
+  };
+  const disabledActions = names("disabledActions");
+  const triggerMessageTargets = names("triggerMessageTargets");
+  return {
+    ...(disabledActions ? { disabledActions } : {}),
+    ...(triggerMessageTargets ? { triggerMessageTargets } : {}),
   };
 }

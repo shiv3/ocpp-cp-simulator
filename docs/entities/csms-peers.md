@@ -12,7 +12,7 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/e2e-readme.md
   - scenario-templates.md
-updated: 2026-09-17
+updated: 2026-11-08
 ---
 
 # CSMS peers
@@ -52,7 +52,9 @@ The [e2e suite](../sources/e2e-readme.md) builds a gocpp-based CSMS fixture
 real WebSocket against it, asserting on the CSMS frame log. It is
 the independent implementation that validates the simulator's multi-version
 wire output; the fixture also exposes `POST /command` so tests can issue
-CSMS-initiated calls.
+CSMS-initiated calls, and `POST /behavior` / `POST /sequence` to switch its
+BootNotification answers, authorization mode and online state and to run
+commands in sequence (#623). The suite runs weekly in CI (#624).
 
 ## Any other CSMS
 

@@ -2388,3 +2388,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | First fleet-bench result and the worker-model decision (#626)
+
+- [Daemon → Measured scale ceiling](entities/daemon.md#result-first-measured-ceiling-626-2026-11-08): environment (4 CPUs shared with other tasks, 12 GiB, bun 1.3.14, loopback mock CSMS), the idle, active (15 s and 5 s cycle) tables, the knee and ceiling, the file-descriptor trap, the commands to repeat it. The "no number yet" text is gone from there and from [Limits & Roadmap](entities/daemon.md#limits--roadmap).
+- [Fleet load roadmap → 5a / 5b](analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional): 5a marked measured; 5b decided: not built, with the condition to revisit.
+- [Bench README source](sources/bench-readme.md), [GitHub issues](sources/github-issues.md): #626. New script `scripts/bench/mockCsmsServer.ts`.

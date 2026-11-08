@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Fleet, load and observability roadmap
@@ -444,7 +444,7 @@ knee for a stated machine.
 `daemon.md`. This is the cheapest item on this page and it is what makes 5b a
 decision rather than a guess.
 
-**Shipped, number pending.** [`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md)
+**Shipped, number recorded (#626).** [`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md)
 implements the shape above — it grows a fleet via `cp.create_many`, drives
 both axes (idle heartbeat-only and active start/stop-transaction, staggered),
 and diffs two `/metrics` scrapes to isolate one step's
@@ -453,12 +453,13 @@ abandoned calls (`ocppcp_ocpp_call_timeouts_total`), errors and reconnects as
 sharper knee signals. Its active axis is bounded by the control plane's
 per-connection rate limit — ten pooled sockets sustain `N ≤ 320 ×
 --tx-interval`, and a sweep past that is refused rather than run at less load
-than configured. What is **not** done: no
-real CSMS is available in this repository's CI or review sandboxes to
-actually run it against, so
-[Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
-states the method and what to record rather than a number. Running it and
-filling in that number is the remaining step before 5b can be decided.
+than configured. The first run (2026-11-08, a 4-CPU shared container, a
+loopback mock CSMS) is in
+[Daemon → Measured scale ceiling](../entities/daemon.md#result-first-measured-ceiling-626-2026-11-08):
+flat latency to about 1,200 OCPP calls/s, a knee near 1,400 and saturation near
+1,450 calls/s, which is about 2,000 charge points on a 15 s transaction cycle,
+about 1,000 on a 5 s one, and more than 2,000 idle. It is a lower bound (the
+host was busy), against a mock and not a real CSMS.
 
 ### 5b. Worker model (conditional)
 
@@ -475,6 +476,21 @@ writes through the main thread), and keeping the event stream ordered per CP.
 **Decide after 5a.** If the ceiling is comfortably above what CI jobs ask for,
 `export-k6` already covers the case where load must come from outside the
 daemon, and this phase should be dropped rather than built.
+
+**Decision (#626, 2026-11-08): do not build it now.** The number is above what
+what this project's own CI and conformance runs ask for (the e2e suites create
+one to a handful of charge points). One daemon
+held 2,000 idle charge points at about half of one core and 2,000 charge points
+cycling a transaction every 15 s without a latency change, and it saturates
+only near 1,450 OCPP calls/s on a busy 4-CPU host that also ran the CSMS and
+the load generator. Past that, `export-k6` puts the load outside the daemon.
+Workers would also bring the costs named above (a main-thread control plane,
+SQLite writes from several threads, per-CP event order) for a gain no current use needs. **Revisit if** a real need shows up for one daemon to hold more
+than about 2,000 charge points cycling every 15 s, or more than about 1,000 on
+a 5 s cycle, and re-measure first on a dedicated host with a real CSMS: the
+number here is a lower bound, and a single-threaded loop at 100% of one core
+is the signal to look for (`ocppcp_ocpp_call_duration_seconds` p95 rising
+while `calls/s` stops following the offered load).
 
 ## Phase 6 — File hot-reload
 

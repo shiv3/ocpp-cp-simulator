@@ -537,8 +537,8 @@ startup-flag ordering — is on
   without changing CP command method names.
 - Shipped: bulk CP creation, multiple supervision URLs, CP blueprints, the
   metrics endpoint, an idTag pool, seeded background traffic, `--watch` file
-  hot-reload (#295–#300, #314) and the scale benchmark below (#302) — the
-  _tooling_ for a measured ceiling; no number has been produced yet. Planned:
+  hot-reload (#295–#300, #314) and the scale benchmark below (#302), whose
+  first [measured ceiling](#measured-scale-ceiling) is recorded (#626). Planned:
   a charging-curve EV model. See
   [Fleet, load and observability roadmap](../analyses/fleet-load-and-observability-roadmap.md)
   for the full sequencing.
@@ -611,21 +611,99 @@ in front of the daemon holds chosen RPC requests (#523), which pins the RPC
 stage of the cycle bound, teardown's wait for an in-flight `cp.create_many` and
 the reconciliation of ids one registered past its client deadline — see [Source: bench README](../sources/bench-readme.md).
 
-**No number is recorded here yet.** Producing one requires a real CSMS and a
-stated machine, neither of which exists in this repository's CI or review
-sandboxes — running the benchmark is a manual step. When it is run, record
-here:
+#### Result: first measured ceiling (#626, 2026-11-08)
 
-- the **machine** (CPU model/cores, RAM, `bun --version`, this daemon's own
-  version — the script prints all four),
-- the **CSMS** used and whether it ran locally or remotely (a remote CSMS's
-  own latency dominates before the daemon's does — a different, also
-  worth-recording, knee),
-- the **N vs. p50/p95 table** for both the idle and active axes, and
-- the **knee** — the N where latency visibly diverges from baseline, or where
-  timeouts/errors/reconnects first go non-zero.
+**Environment.** One Cloudflare Container (Linux 6.18 microvm), AMD EPYC
+reported as 8 cores but **limited to 4 CPUs** by the container, 12 GiB RAM,
+`bun 1.3.14`, a daemon built from `main` at `9dbfd4c8`
+(`bun apps/cli/src/main.ts --http-port 9700 --metrics --metrics-no-auth`,
+default logging to a file). The CSMS was
+[`scripts/bench/mockCsmsServer.ts`](../../scripts/bench/mockCsmsServer.ts), an
+auto-acking mock in its own process on loopback, so the latencies below are the
+daemon's, not a CSMS's, and the run says nothing about a real CSMS's handshake
+or schema checks. `fleet-bench.ts` ran on the same machine, so **the daemon,
+the CSMS and the load generator shared the 4 CPUs**. The machine was **not
+idle**: other tasks ran on it throughout, with a load average of 3 to 7.4 on
+the 4 CPUs. Treat every figure as a **lower bound** of what a dedicated host
+gives; the p95 of the lightly loaded steps is noisy for the same reason (10 to
+53 ms for the same work). `ulimit -n` was raised to 65536 on the daemon and the
+CSMS (see below). OCPP 1.6J, `--duration 30`, `--heartbeat-interval 5`, default
+warmup, fleets grown in place.
 
-Once a number exists, it gates whether [5b, a worker
-model](../analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional)
-is worth building at all — building it before this number exists would be
-speculative.
+**Idle axis** (`--tx-interval 0`; heartbeat every 5 s; `--counts 500,1000,1500,2000`):
+
+| N    | calls (30 s) | p50 | p95  | timeouts / errors / reconnects |
+| ---- | ------------ | --- | ---- | ------------------------------ |
+| 500  | 3018         | 6ms | 32ms | 0 / 0 / 0                      |
+| 1000 | 5871         | 9ms | 46ms | 0 / 0 / 0                      |
+| 1500 | 9000         | 6ms | 18ms | 0 / 0 / 0                      |
+| 2000 | 11897        | 7ms | 53ms | 0 / 0 / 0                      |
+
+A second run of N=2000 alone gave p50 6 ms, p95 21 ms and the daemon at a
+median of about 46% of one core (peak 89% while the fleet was being created). **No knee up to 2000 idle charge points**, the most one
+`fleet-bench.ts` entry can create (`--counts` entries are capped at 2000). The
+idle ceiling is therefore **above 2000**; the run could not say by how much.
+
+**Active axis** (`--tx-interval 15`, one start/stop cycle per charge point
+every 15 s on connector 1; `--counts 250,500,1000,1500,2000`):
+
+| N    | calls (30 s) | calls/s | p50 | p95  | timeouts / errors / reconnects |
+| ---- | ------------ | ------- | --- | ---- | ------------------------------ |
+| 250  | 4500         | 150     | 5ms | 14ms | 0 / 0 / 0                      |
+| 500  | 9002         | 300     | 5ms | 10ms | 0 / 0 / 0                      |
+| 1000 | 18003        | 600     | 5ms | 10ms | 0 / 0 / 0                      |
+| 1500 | 27008        | 900     | 5ms | 10ms | 0 / 0 / 0                      |
+| 2000 | 36050        | 1200    | 5ms | 10ms | 0 / 0 / 0                      |
+
+Flat latency, but the daemon used about 80 to 100% of one core in the last two
+steps (peaks to 138% in the step transitions, when Bun's other threads run),
+so the single event loop was close to full at N=2000. To find where it fills,
+the same axis ran with a 5 s cycle (`--tx-interval 5`, `--counts 500,1000,1600`;
+`hb` columns are `-` because transactions suppress the idle heartbeat):
+
+| N    | calls (30 s) | calls/s | p50   | p95   | unconf.tx | timeouts / errors / reconnects |
+| ---- | ------------ | ------- | ----- | ----- | --------- | ------------------------------ |
+| 500  | 21016        | 700     | 5ms   | 10ms  | 0         | 0 / 0 / 0                      |
+| 1000 | 42578        | 1420    | 22ms  | 179ms | 0         | 0 / 0 / 0                      |
+| 1600 | 44215        | 1470    | 1.37s | 2.39s | 1303      | 0 / 0 / 0                      |
+
+**The knee and the ceiling.** On this machine and under this load, active
+traffic runs flat to about **1,200 OCPP calls/s** (2000 charge points on a 15 s
+cycle, or 500 on a 5 s one), turns visibly slower at about **1,400
+calls/s** (N=1000 on a 5 s cycle: p95 179 ms) and **saturates at about 1,450
+calls/s**: at N=1600 the offered load doubled but the answered calls did not
+(1,470/s), p50 reached 1.4 s and 1,303 transactions were left unconfirmed. In
+terms of fleets, that is roughly **2,000 charge points cycling a transaction
+every 15 s**, or **about 1,000 on a 5 s cycle**, and **more than 2,000 idle**
+ones. Resident memory was 0.7 GiB at 2000 idle charge points on a fresh daemon, 1.5
+GiB at the end of the 2000-charge-point active sweep and 2.1 GiB after four
+sweeps in the same process, so memory is not the limit on 12 GiB. No run showed
+`ocppcp_ocpp_call_timeouts_total`, CALLERRORs or reconnects above zero: the
+signal is latency and unconfirmed transactions, not failure.
+
+**A file-descriptor limit looks like a ceiling and is not one.** The first idle
+run, with `ulimit -n` at the container's hard limit of 1024, stopped at 999
+connected charge points at N=1000 and 2000 (`unsettled` 1 and 1001), with p50
+6 ms: a descriptor limit on the daemon or the CSMS, not the event loop.
+Raise it for both processes before a sweep past 900 (the bench README says
+how). The figures above are from the rerun.
+
+**Limits of this result.** One machine, one run per axis, a mock CSMS, a
+shared and busy 4-CPU host, 1.6J only, 30 s windows. It bounds the single
+event loop from below; it is not a capacity plan for a host of your own. To
+repeat it:
+
+```sh
+ulimit -n 65536
+bun scripts/bench/mockCsmsServer.ts &                               # prints the ws:// URL
+bun apps/cli/src/main.ts --http-port 9700 --metrics --metrics-no-auth &
+bun scripts/bench/fleet-bench.ts --csms-url <that URL> --daemon-url http://127.0.0.1:9700 \
+  --counts 500,1000,1500,2000 --duration 30                         # idle
+bun scripts/bench/fleet-bench.ts ... --counts 250,500,1000,1500,2000 --tx-interval 15   # active
+bun scripts/bench/fleet-bench.ts ... --counts 500,1000,1600 --tx-interval 5             # saturating
+```
+
+**Decision.** The worker model
+([5b](../analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional))
+is **not built** on this number; see the roadmap for the reasoning and when to
+revisit.

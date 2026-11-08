@@ -8,12 +8,13 @@ sources:
   - scripts/bench/lib.ts
   - scripts/bench/fleetBench.slowpath.test-bun.ts
   - scripts/bench/engineScale.ts
+  - scripts/bench/mockCsmsServer.ts
 related:
   - ../analyses/charger-engine-migration.md#verification-results
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Source: `scripts/bench/README.md`
@@ -23,6 +24,8 @@ timing visibly degrades" — the question
 [issue #302](github-issues.md) opened because nothing in the code enforced or
 measured one. This is a benchmark, not a test: no pass/fail assertion, only a
 printed table.
+
+**First result (#626).** [Daemon → Measured scale ceiling](../entities/daemon.md#result-first-measured-ceiling-626-2026-11-08) records the first run, against `mockCsmsServer.ts` (the smoke test's mock CSMS as its own process), and the file-descriptor trap: a limit of 1024 caps a fleet at about 999 connections.
 
 **Run.** `bun scripts/bench/fleet-bench.ts --csms-url <ws(s)://...> --daemon-url
 <http(s)://...>` against a daemon already started with `--metrics`. Flags

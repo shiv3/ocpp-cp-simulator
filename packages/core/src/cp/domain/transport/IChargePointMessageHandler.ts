@@ -109,6 +109,12 @@ export interface IChargePointMessageHandler {
     status: FirmwareStatus,
     requestId?: number,
   ): void;
+  /** OCPP 2.x ReservationStatusUpdate.req (H04.FR.01, H01.FR.16/17, #712):
+   *  a reservation ended without a transaction. 1.6 has no such message. */
+  sendReservationStatusUpdate?(
+    reservationId: number,
+    status: "Expired" | "Removed",
+  ): void;
   /** OCPP 2.x NotifyEvent.req for variable-monitor events (N07, #457):
    *  one request, one eventData per event. 1.6 has no such message. */
   sendNotifyEvent(events: readonly MonitoringEvent[]): void;

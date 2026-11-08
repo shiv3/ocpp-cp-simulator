@@ -2121,6 +2121,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
   }
 
+  /**
+   * H04.FR.01 / H01.FR.16-17 ReservationStatusUpdate.req (#712). Sent like
+   * StatusNotification: while the socket is down it is dropped (the CSMS
+   * learns the state of the station from the reconnect's boot and status
+   * notifications, and an Expired or Removed reservation has nothing to
+   * replay), see {@link send}.
+   */
+  public sendReservationStatusUpdate(
+    reservationId: number,
+    reservationUpdateStatus: "Expired" | "Removed",
+  ): void {
+    this.send("ReservationStatusUpdate", this.generateMessageId(), {
+      reservationId,
+      reservationUpdateStatus,
+    });
+  }
+
   /** N01 LogStatusNotification.req (#345); `requestId` as above, from the
    *  GetLog this station last accepted when the caller gives none. */
   public sendLogStatusNotification(

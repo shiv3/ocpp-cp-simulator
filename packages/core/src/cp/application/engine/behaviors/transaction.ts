@@ -16,7 +16,8 @@ import {
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
-import { startBlockedByReservation16 } from "./reservation";
+import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
+import { reservationAdmits } from "../../../domain/reservation/Reservation";
 
 /**
  * What the transaction defaults need from the station beyond its public API.
@@ -170,8 +171,9 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
 /**
  * Whether a remote start for `idTag` can be attempted on the connector (1.6
  * §5.11, errata 3.32): known, Operative, not Faulted, no running transaction,
- * not reserved for another idTag and not the last connector a connector-0
- * reservation of another tag keeps (§5.13).
+ * not reserved for another tag (§5.13, H03.FR.09: the tag or its parent id /
+ * groupIdToken, as the station knows it) and not the last connector a
+ * reservation without a connector keeps for its owner (§5.13, H01.FR.07).
  */
 function remoteStartable(
   cp: ChargePoint,
@@ -182,12 +184,14 @@ function remoteStartable(
   if (!connector || connector.availability !== "Operative") return false;
   if (connector.status === OCPPStatus.Faulted) return false;
   if (connector.hasRunningTransaction) return false;
-  // A reservation on this very connector. A connector-0 reservation names no
-  // connector: it keeps one connector free for its owner (the capacity rule,
-  // startBlockedByReservation16).
-  const reservation = cp.reservationManager.reservationOn(connector.id);
-  if (reservation !== undefined && reservation.idTag !== idTag) return false;
-  return !startBlockedByReservation16(cp, connectorId, idTag);
+  return (
+    startRefusalByReservation(
+      cp,
+      connectorId,
+      idTag,
+      cp.knownParentIdOf(idTag),
+    ) === null
+  );
 }
 
 /**
@@ -226,6 +230,27 @@ function remoteStart(
 }
 
 const nowDate = (cp: ChargePoint): Date => new Date(cp.clock.now());
+
+/**
+ * Whether `tagId` is a stranger to a reservation that concerns `connectorId`
+ * but could still belong to its group: the reservation names a parent idTag /
+ * groupIdToken and the station does not know the tag's own (H03.FR.07/08).
+ */
+function mayMatchThroughParent(
+  cp: ChargePoint,
+  connectorId: number,
+  tagId: string,
+): boolean {
+  if (cp.knownParentIdOf(tagId) !== undefined) return false;
+  return cp.reservationManager
+    .getAllReservations()
+    .some(
+      (r) =>
+        (r.connectorId === connectorId || r.connectorId === 0) &&
+        r.parentIdTag !== undefined &&
+        !reservationAdmits(r, tagId),
+    );
+}
 
 export async function startTransaction(
   cp: ChargePoint,
@@ -268,7 +293,9 @@ export async function startTransaction(
   // a RemoteStartTrigger node: both already went through CSMS-driven
   // authorization, so they're excluded here.
   const isLocalStart = options.triggerReason !== "RemoteStart";
-  if (isLocalStart && cp.configuration.authorizeBeforeLocalStart()) {
+  const authorizedBeforeStart =
+    isLocalStart && cp.configuration.authorizeBeforeLocalStart();
+  if (authorizedBeforeStart) {
     const status = await cp.authorizeAndWait(tagId);
     // Any non-"Accepted" status denies the local start. Deliberately NOT an
     // allowlist of denial strings: 2.x has more denial values than 1.6.
@@ -282,23 +309,51 @@ export async function startTransaction(
     }
   }
 
-  // 1.6 §5.13: a connector-0 reservation of another tag keeps a connector
-  // free for its whole validity. Checked after the Authorize gate, where an
-  // expired reservation is dropped as before; the session does not start and
-  // no StartTransaction.req is sent.
-  if (startBlockedByReservation16(cp, connectorId, tagId)) {
+  // A reservation holds its connector for its own tag (1.6 §5.13: the station
+  // "SHALL refuse charging for all incoming idTags on the reserved connector"
+  // but the reserved one, or one with the same parent idTag; 2.0.1 H03.FR.01/04:
+  // the idToken or its groupIdToken). The parent is what the station knows
+  // (Local Authorization List, Authorization Cache, a previous Authorize.conf);
+  // a local start whose tag may still match through a parent asks the CSMS for
+  // it (H03.FR.08). Checked after the Authorize gate, where an expired
+  // reservation is dropped as before. A refused start sends nothing and leaves
+  // the reservation and the connector's Reserved status alone (#721, #711).
+  // A connector-0 reservation of another tag keeps one connector free for its
+  // whole validity (the capacity rule); that session is refused the same way.
+  if (
+    isLocalStart &&
+    !authorizedBeforeStart &&
+    mayMatchThroughParent(cp, connectorId, tagId)
+  ) {
+    await cp.authorizeAndWait(tagId);
+  }
+  const parentOfTag = cp.knownParentIdOf(tagId);
+  const refusal = startRefusalByReservation(
+    cp,
+    connectorId,
+    tagId,
+    parentOfTag,
+  );
+  if (refusal !== null) {
     logger.warn(
-      `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a connector-0 reservation (OCPP 1.6 §5.13)`,
+      refusal === "reservedForOther"
+        ? `Refusing transaction start for ${tagId} on connector ${connectorId}: it is reserved for another idTag (OCPP 1.6 §5.13, 2.0.1 H03.FR.09)`
+        : `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a reservation (OCPP 1.6 §5.13, 2.0.1 H01.FR.07)`,
       LogType.TRANSACTION,
     );
     return { started: false };
   }
 
-  // §5.13: if the connector was Reserved (or the reservation is for
-  // connectorId=0 with this idTag), consume that reservation and carry its id
-  // into StartTransaction.req so CSMS can close it out. A connector-0
-  // reservation belongs to its idTag / parentIdTag only (#595).
-  const reservation = cp.reservationManager.reservationFor(connectorId, tagId);
+  // §5.13: if the connector was Reserved for this tag (or the reservation is
+  // for connectorId=0 with this idTag), consume that reservation and carry
+  // its id into StartTransaction.req / TransactionEvent(Started) so CSMS can
+  // close it out. A connector-0 reservation belongs to its idTag /
+  // parentIdTag only (#595).
+  const reservation = cp.reservationManager.reservationFor(
+    connectorId,
+    tagId,
+    parentOfTag,
+  );
   const reservationId = reservation?.reservationId;
 
   const transaction: Transaction = {

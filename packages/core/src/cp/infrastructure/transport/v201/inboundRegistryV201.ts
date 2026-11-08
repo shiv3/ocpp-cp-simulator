@@ -2,6 +2,7 @@ import { stationNow } from "../stationNow";
 import type {
   FirmwareStatusNotificationRequestV201,
   LogStatusNotificationRequestV201,
+  ReservationStatusUpdateRequestV201,
 } from "@ocpp-cp-sim/ocpp/index";
 import type {
   AuthorizeRequestV201,
@@ -150,6 +151,8 @@ export type V201Action =
   // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
   | "FirmwareStatusNotification"
   | "LogStatusNotification"
+  // #712: H04 / H01.FR.16-17 reservation ended without a transaction.
+  | "ReservationStatusUpdate"
   // #456: A02 certificate signing and its security event (A02.FR.07).
   | "SignCertificate"
   | "SecurityEventNotification"
@@ -171,6 +174,7 @@ export type V201RequestPayload =
   | ReportChargingProfilesRequestV201
   | FirmwareStatusNotificationRequestV201
   | LogStatusNotificationRequestV201
+  | ReservationStatusUpdateRequestV201
   | SignCertificateRequestV201
   | SecurityEventNotificationRequestV201
   | GetCertificateStatusRequestV201;

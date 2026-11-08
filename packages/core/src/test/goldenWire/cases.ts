@@ -95,6 +95,38 @@ export const goldenCases: GoldenCase[] = [
       },
     },
   ),
+  // OCPP 1.6 section 4.2: while Pending only what a TriggerMessage asks for
+  // may be sent; the untriggered Heartbeat stays suppressed.
+  c16(
+    "boot-pending-triggered-messages",
+    async (rig) => {
+      await settle(rig);
+      rig.cp.sendHeartbeat();
+      await settle(rig);
+      for (const requestedMessage of [
+        "StatusNotification",
+        "Heartbeat",
+        "MeterValues",
+      ]) {
+        await rig.csms.call("TriggerMessage", {
+          requestedMessage,
+          ...(requestedMessage === "Heartbeat" ? {} : { connectorId: 1 }),
+        });
+        await settle(rig);
+      }
+    },
+    {
+      responders: {
+        BootNotification: () => ({
+          result: {
+            status: "Pending",
+            currentTime: "2030-01-01T00:00:00.000Z",
+            interval: 3600,
+          },
+        }),
+      },
+    },
+  ),
   ...both(
     "boot-rejected-then-retry",
     async (rig) => {

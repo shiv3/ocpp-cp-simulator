@@ -495,6 +495,11 @@ export class OCPPMessageHandler {
    * - Rejected: nothing goes out at all until retryAfter elapses.
    * - Idle (pre-handshake): allow BootNotification only.
    */
+  /** §4.2: CALLs made inside `fn` are the answer to a TriggerMessage. */
+  public runTriggered<T>(fn: () => T): T {
+    return this._bootGate.runTriggered(fn);
+  }
+
   private isCallAllowed(action: OCPPAction): boolean {
     return this._bootGate.isCallAllowed(action);
   }

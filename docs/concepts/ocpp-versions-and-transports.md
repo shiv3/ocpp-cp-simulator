@@ -473,6 +473,19 @@ MeterValues.req carrying a `transactionId`:
 The known limitations of the OCPP-J section apply here too (a waiting resend
 does not hold back the next message; a crash loses the resend).
 
+## OCPP-J 1.6 boot gate (§4.2)
+
+Outgoing CALLs follow the status of the last `BootNotification.conf`
+(`BootGate`): `Accepted` lets everything out; before the first answer and while
+`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
+until the retry interval has passed. One exception (#725): §4.2 lets a
+`Pending` station send what the CSMS "instructed ... with a TriggerMessage.req",
+so the CALL that follows an accepted `TriggerMessage` or `ExtendedTriggerMessage`
+(StatusNotification, Heartbeat, MeterValues, the status notifications) passes
+the gate while `Pending`. Anything not triggered (transaction messages, status
+changes, heartbeats) stays suppressed, and a `Rejected` station sends nothing
+even when triggered.
+
 ## OCPP 2.x Reset OnIdle
 
 For OCPP 2.0.1 and 2.1, `Reset` with `type: OnIdle` is answered `Accepted` and

@@ -2257,6 +2257,11 @@ export class ChargePoint {
     queueMicrotask(() => this.engine.bootAccepted());
   }
 
+  /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
+  runTriggered<T>(fn: () => T): T {
+    return this._outbox.runTriggered(fn);
+  }
+
   markBootPending(): void {
     this._outbox.setBootStatus({ status: "Pending" });
   }

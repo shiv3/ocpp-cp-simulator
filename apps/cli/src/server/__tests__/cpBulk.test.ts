@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runCpBulk } from "../cpBulk";
+import { runCpBatch, runCpBulk } from "../cpBulk";
 
 const reason = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -75,5 +75,26 @@ describe("runCpBulk (#470)", () => {
     // The connect keeps running; its eventual rejection must stay handled.
     rejectLate(new Error("Connection timeout (30s)"));
     await vi.advanceTimersByTimeAsync(0);
+  });
+});
+
+describe("runCpBatch (#486)", () => {
+  it("keeps what each successful action returned, in selection order", async () => {
+    const result = await runCpBatch(
+      ["A", "B", "C"],
+      async (cpId) => {
+        if (cpId === "B") throw new Error("nope");
+        return `run-${cpId}`;
+      },
+      { waitMs: 1_000, failureReason: reason },
+    );
+    expect(result).toEqual({
+      matched: ["A", "B", "C"],
+      succeeded: [
+        { cpId: "A", value: "run-A" },
+        { cpId: "C", value: "run-C" },
+      ],
+      failed: [{ cpId: "B", reason: "nope" }],
+    });
   });
 });

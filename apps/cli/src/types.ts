@@ -1,3 +1,4 @@
+import type { BootstrapPacing } from "./server/bootstrapPacing";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -51,6 +52,8 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */
+  readonly bootstrapPacing?: BootstrapPacing;
   /**
    * `--label key=value` (#472): labels every bootstrapped charge point is
    * created with. A charge point restored from `--state-db` keeps its own.
@@ -202,6 +205,8 @@ export interface CLIOptions {
   readonly txUpdatedMeterValues?: boolean;
   /** `--inbound-validation` (#593). See ChargePointInitOptions. */
   readonly inboundValidation?: InboundValidationMode;
+  /** `--reservation-authorize-id-tag` (#595). See ChargePointInitOptions. */
+  readonly reservationAuthorizeIdTag?: boolean;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -226,6 +231,8 @@ export interface ChargePointInitOptions {
   readonly urlDistribution?: UrlDistribution;
   /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
   readonly inboundValidation?: InboundValidationMode;
+  /** OCPP 1.6 ReserveNow authorizes the idTag first (#595). Default false. */
+  readonly reservationAuthorizeIdTag?: boolean;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -390,6 +397,7 @@ export interface ChargePointStatus {
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
     readonly inboundValidation?: InboundValidationMode;
+    readonly reservationAuthorizeIdTag?: boolean;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

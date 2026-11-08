@@ -15,6 +15,10 @@ sources:
   - "issue #320"
   - "issue #321"
   - apps/cli/src/vehicleCatalogConfig.ts
+  - apps/cli/src/__tests__/tck-contract/
+  - packages/core/src/utils/tckContract.templateIds.test.ts
+  - packages/contracts/src/__tests__/tckContract.methods.test.ts
+  - "issue #346"
   - apps/cli/src/behavior/
   - packages/contracts/eslint/behavior.js
   - examples/behaviors/
@@ -468,6 +472,49 @@ names of the daemon — `connect`, `status`, `start_transaction`,
 (params, constraints, notes) lives in
 [Control plane → CP command methods](../concepts/control-plane.md#cp-command-methods);
 the server routes both surfaces through the same command handler.
+
+#### TCK contract
+
+[open-ocpp-tck](https://github.com/juherr/open-ocpp-tck) (the OCPP conformance
+runner, [#271](https://github.com/shiv3/ocpp-cp-simulator/issues/271)) runs
+this CLI as a charge point: `--json --ws-url … --cp-id … --ocpp-version …`
+with stdin kept open. The parts it depends on are a stable contract
+([#346](https://github.com/shiv3/ocpp-cp-simulator/issues/346)); the golden
+tests named below fail on an incompatible change:
+
+| Surface                 | What is promised                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Pinned by                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| JSON Lines commands     | `connect`, `status`, `start_transaction`, `stop_transaction`, `authorize`, `heartbeat`, `send_meter_value`, `transaction_event`, `load_scenario_template`, `get_scenario`, `remove_scenario`, `load_scenario`, `run_scenario`, `run_scenario_template` keep their name and the parameters of the [CP command table](../concepts/control-plane.md#cp-command-methods). The test sends the optional parameters with non-default values (`context: "Sample.Clock"`, `reason: "EVDisconnected"`, 2.0.1 `CablePluggedIn` / `EVConnected` / `EVDeparted`, `once: true`) and reads them back off the wire, because JSON mode ignores keys it does not know | `apps/cli/src/__tests__/tck-contract/tck.jsonLines.golden.bun.test.ts`    |
+| Template-once flow      | On one connector, before `connect`: `load_scenario_template`, `get_scenario`, `remove_scenario`, then `load_scenario` of the same definition with `enabled: false`. The scenario id is kept (`<templateId>-c<connector>`), the disabled copy does not auto-start when the station boots, and `run_scenario` with the original id starts it                                                                                                                                                                                                                                                                                                          | same                                                                      |
+| Parameter shapes        | The keys of each command above and whether each is optional                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `packages/contracts/src/__tests__/tckContract.methods.test.ts`            |
+| Response envelope       | `{id, ok: true, data?}` / `{id, ok: false, error}`; `data` is absent, not `null`, for commands without a result; `load_scenario_template` answers `{scenarioId}` (`<templateId>-c<connector>`), `remove_scenario` answers `{removed}`                                                                                                                                                                                                                                                                                                                                                                                                               | same                                                                      |
+| Events                  | `{event, data, timestamp}` on the same stream, e.g. `boot_notification`, `scenario_started`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | same                                                                      |
+| Exit                    | EOF on stdin ends the process with exit code 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | same                                                                      |
+| Wire log lines          | In the default `--log-format plain`, every frame is one stdout line `[<ISO-8601 UTC ms>] [INFO] [WebSocket] Sent: <raw frame>` or `… Received: <raw frame>`; the frame text is what went over the socket, except that secrets are redacted (below)                                                                                                                                                                                                                                                                                                                                                                                                  | `apps/cli/src/__tests__/tck-contract/tck.wireLogLines.golden.bun.test.ts` |
+| `cert16-*` template ids | Every id that was shipped keeps resolving through `load_scenario_template` / `run_scenario_template`. The set only grows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `packages/core/src/utils/tckContract.templateIds.test.ts`                 |
+
+Rules when changing these:
+
+- New parameters are optional. A command or parameter is not renamed or
+  removed without an alias that keeps the old name working for at least one
+  minor release.
+- A `cert16-*` template is not removed or renamed in one step: register the
+  old id as an alias entry for a release first. The TCK pins the image by
+  digest, so the alias period is what gives it time to re-pin. Whether the JSON
+  templates stay owned here is open (the Gherkin scenarios may become the
+  source and the templates generated); the ids stay stable either way.
+- The golden tests are not updated to make them pass. A deliberate break is a
+  wire or default change: announce it in the release notes and tell the TCK
+  repository.
+- Frames on stdout pass the [log redactor](../concepts/log-format.md): a secret
+  in a payload (`AuthorizationKey`, `BasicAuthPassword`, `password`, private
+  keys) reads `[redacted]`, so a TCK assertion cannot depend on its value.
+
+The TCK reads the rest of the surface only through these: the trace file
+(`--trace-output`, [Trace format](../concepts/trace-format.md)) and the flags
+`--ws-url`, `--cp-id`, `--ocpp-version`, `--basic-auth-user` /
+`--basic-auth-pass` and the security flags; `--connectors` reaches it only
+through the TCK's `SIM_EXTRA_ARGS`.
 
 ### 3. Daemon / Server Mode
 

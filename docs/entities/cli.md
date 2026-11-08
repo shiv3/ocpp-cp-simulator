@@ -95,7 +95,7 @@ ocpp-cp-sim --daemon
 > the repository variable `NPM_PUBLISH=true` — the first version is published
 > by hand from the release asset, the trusted publisher is then registered on
 > npmjs.com, and the variable is set. Until that first publish has happened
-> this page does not advertise `npm install -g ocpsim`, for the
+> this page does not advertise `npm install -g ocpp-cp-simulator`, for the
 > reason #321 gives: a documented install command must resolve. The package
 > needs Bun at run time whichever way it is installed — the bin is
 > `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun`

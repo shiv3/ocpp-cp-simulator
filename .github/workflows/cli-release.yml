@@ -6,7 +6,7 @@ name: Release CLI
 #
 #   bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 #
-# or, from the npm registry, with `npm install -g ocpsim` — the
+# or, from the npm registry, with `npm install -g ocpp-cp-simulator` — the
 # `publish-npm` job below publishes the very tarball the release carries.
 #
 # `cli-latest` is a rolling pre-release this workflow re-points at every CLI
@@ -235,7 +235,7 @@ jobs:
           ./scripts/verify-cli-tarball.sh --expect-dist rolling.tgz
 
   # Publishes the release's tarball to the npm registry as `ocpp-cp-simulator`,
-  # so `npm install -g ocpsim` / `npx ocpsim` resolve.
+  # so `npm install -g ocpp-cp-simulator` / `npx ocpp-cp-simulator` resolve.
   #
   # - Gated on the repository variable NPM_PUBLISH=true, which is set once the
   #   package exists on npm and has this workflow registered as a trusted
@@ -280,17 +280,17 @@ jobs:
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "${{ github.repository }}" \
-            --pattern "ocpsim-${VERSION}.tgz"
-          ls -lh "ocpsim-${VERSION}.tgz"
+            --pattern "ocpp-cp-simulator-${VERSION}.tgz"
+          ls -lh "ocpp-cp-simulator-${VERSION}.tgz"
 
       - name: Publish to npm
         run: |
           set -euo pipefail
-          if [ -n "$(npm view "ocpsim@${VERSION}" version 2>/dev/null)" ]; then
-            echo "::notice::ocpsim@${VERSION} is already on npm; nothing to publish"
+          if [ -n "$(npm view "ocpp-cp-simulator@${VERSION}" version 2>/dev/null)" ]; then
+            echo "::notice::ocpp-cp-simulator@${VERSION} is already on npm; nothing to publish"
             exit 0
           fi
           DIST_TAG=latest
           case "$VERSION" in *-*|*+*) DIST_TAG=next ;; esac
-          npm publish "ocpsim-${VERSION}.tgz" --access public --tag "$DIST_TAG"
-          npm view "ocpsim@${VERSION}" version
+          npm publish "ocpp-cp-simulator-${VERSION}.tgz" --access public --tag "$DIST_TAG"
+          npm view "ocpp-cp-simulator@${VERSION}" version

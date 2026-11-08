@@ -894,15 +894,15 @@ describe("variable monitors schema, v21 (#457)", () => {
   });
 });
 
-describe("fleet templates schema, v26 (#445)", () => {
-  it("creates fleet_templates on a database stamped 25 and keeps its data", () => {
+describe("fleet templates schema, v27 (#445)", () => {
+  it("creates fleet_templates on a database stamped 26 and keeps its data", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       db.run(
         "INSERT INTO blueprints (id, name, definition, updated_at) VALUES ('bp', 'BP', '{}', '2026-11-08T00:00:00Z')",
       );
       db.exec("DROP TABLE fleet_templates");
-      db.run("UPDATE schema_meta SET value = '25' WHERE key = 'version'");
+      db.run("UPDATE schema_meta SET value = '26' WHERE key = 'version'");
       expect(tables(db)).not.toContain("fleet_templates");
 
       runMigrations(db);
@@ -914,7 +914,7 @@ describe("fleet templates schema, v26 (#445)", () => {
       const version = db.get<{ value: string }>(
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
-      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(26);
+      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(27);
       expect(Number(version?.value)).toBe(SCHEMA_VERSION);
 
       // A database from before the table, at 24, takes the same step; a

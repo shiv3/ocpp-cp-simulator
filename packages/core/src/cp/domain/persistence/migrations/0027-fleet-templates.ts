@@ -2,7 +2,7 @@ import type { Database } from "../Database";
 import type { Migration } from "./index";
 
 /**
- * The `fleet_templates` table (#445), shared by `SCHEMA_SQL` and the v26
+ * The `fleet_templates` table (#445), shared by `SCHEMA_SQL` and the v27
  * migration so the two cannot drift.
  */
 export const FLEET_TEMPLATES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS fleet_templates (
@@ -14,12 +14,12 @@ export const FLEET_TEMPLATES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS fleet_templ
 );`;
 
 /**
- * v25 → v26 (#445): the `fleet_templates` table. Additive; `IF NOT EXISTS` in
+ * v26 → v27 (#445): the `fleet_templates` table. Additive; `IF NOT EXISTS` in
  * `SCHEMA_SQL` has usually created it by now, and the `sqlite_master` probe
  * keeps the step correct on its own.
  */
-export const migration0026FleetTemplates: Migration = {
-  version: 26,
+export const migration0027FleetTemplates: Migration = {
+  version: 27,
   name: "fleet-templates",
   up(db: Database): void {
     const present = db.get<{ name: string }>(

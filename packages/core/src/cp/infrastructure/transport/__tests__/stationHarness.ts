@@ -1,3 +1,4 @@
+import type { ChargePointCapabilityProfile } from "../../../domain/charge-point/CapabilityProfile";
 // Test-only helpers for bun tests that drive a real ChargePoint against the
 // mock CSMS (#348 DataTransfer, #389 expert calls).
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
@@ -15,6 +16,8 @@ export interface StationOptions {
   readonly connectors?: number;
   /** The --state-db database; in-memory state when absent. */
   readonly database?: Database | null;
+  /** Static capability profile (#618). */
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
 }
 
 /** A charge point pointed at `csms`, not connected yet. */
@@ -35,7 +38,9 @@ export function stationFor(
     {},
     [],
     version,
-    {},
+    options.capabilityProfile
+      ? { capabilityProfile: options.capabilityProfile }
+      : {},
   );
   cp.events.on("error", () => undefined);
   return cp;

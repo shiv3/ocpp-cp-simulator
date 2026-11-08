@@ -1,5 +1,6 @@
 import * as fs from "fs";
 
+import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
@@ -95,6 +96,7 @@ interface ChargePointRow {
   behaviors: string | null;
   tx_updated_meter_values: number | null;
   inbound_validation: string | null;
+  capability_profile: string | null;
 }
 
 interface CPRegistryOptions {
@@ -247,7 +249,7 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
-        "inbound_validation " +
+        "inbound_validation, capability_profile " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -323,6 +325,8 @@ export class CPRegistry {
         row.inbound_validation === "enforce"
           ? { inboundValidation: row.inbound_validation }
           : {}),
+        // #618: NULL, or JSON this build cannot read, restores as no profile.
+        ...restoreCapabilityProfile(row.capability_profile),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -1017,6 +1021,12 @@ export class CPRegistry {
         ],
         ["tx_updated_meter_values", init.txUpdatedMeterValues ? 1 : null],
         ["inbound_validation", init.inboundValidation ?? null],
+        [
+          "capability_profile",
+          init.capabilityProfile
+            ? JSON.stringify(init.capabilityProfile)
+            : null,
+        ],
       ],
       ["cp_id"],
       // The row keeps the time it was first created.
@@ -1260,6 +1270,31 @@ function restoreBehaviors(
   return { init: { behaviors: kept }, column: row.behaviors };
 }
 
+function restoreCapabilityProfile(
+  raw: string | null,
+): { capabilityProfile: ChargePointCapabilityProfile } | Record<string, never> {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (typeof parsed !== "object" || parsed === null) return {};
+  const { disabledActions, triggerMessageTargets } = parsed as Record<
+    string,
+    unknown
+  >;
+  const names = (value: unknown): string[] | undefined =>
+    Array.isArray(value) && value.every((v) => typeof v === "string")
+      ? (value as string[])
+      : undefined;
+  const profile: {
+    -readonly [
+      K in keyof ChargePointCapabilityProfile
+    ]: ChargePointCapabilityProfile[K];
+  } = {};
+  const disabled = names(disabledActions);
+  const targets = names(triggerMessageTargets);
+  if (disabled) profile.disabledActions = disabled;
+  if (targets) profile.triggerMessageTargets = targets;
+  return { capabilityProfile: profile };
+}
+
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
@@ -1325,6 +1360,7 @@ function preserveOmittedInit(
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
     inboundValidation: next.inboundValidation ?? existing.inboundValidation,
+    capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
   };
 }
 

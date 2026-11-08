@@ -153,7 +153,7 @@ line's overrides apply to its charge points only.
 
 ## Persistence and files
 
-- With `--state-db` templates live in the `fleet_templates` table (schema v26)
+- With `--state-db` templates live in the `fleet_templates` table (schema v27)
   and survive a restart; without it the repository keeps them in memory, like
   [blueprints](state-persistence.md). A stored row that no longer matches the
   schema is skipped, not fatal.

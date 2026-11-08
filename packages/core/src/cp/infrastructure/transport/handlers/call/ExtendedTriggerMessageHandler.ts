@@ -10,7 +10,7 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "../../../../domain/types/FirmwareLogStatus";
-import { sendWhileTriggered } from "./OtherCallHandlers";
+import { isUnknownConnector, sendWhileTriggered } from "./OtherCallHandlers";
 
 /**
  * §2 ExtendedTriggerMessage.req (OCPP 1.6 Security Whitepaper): a superset
@@ -42,6 +42,19 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
           : ""),
       LogType.OCPP,
     );
+
+    // Same rule as TriggerMessage (§5.17): no connector, no message to send.
+    if (
+      (payload.requestedMessage === "StatusNotification" ||
+        payload.requestedMessage === "MeterValues") &&
+      isUnknownConnector(context, payload.connectorId)
+    ) {
+      context.logger.warn(
+        `Extended trigger message ${payload.requestedMessage} rejected: connector ${payload.connectorId} does not exist`,
+        LogType.OCPP,
+      );
+      return { status: "Rejected" };
+    }
 
     switch (payload.requestedMessage) {
       case "StatusNotification": {

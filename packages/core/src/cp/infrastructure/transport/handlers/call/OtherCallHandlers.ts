@@ -50,6 +50,18 @@ export class ChangeConfigurationHandler implements CallHandler<
   }
 }
 
+/** A `connectorId` above 0 that names no connector of the station. */
+export function isUnknownConnector(
+  context: HandlerContext,
+  connectorId: number | undefined,
+): boolean {
+  return (
+    connectorId !== undefined &&
+    connectorId > 0 &&
+    context.chargePoint.getConnector(connectorId) === undefined
+  );
+}
+
 /**
  * §4.2: the message an accepted TriggerMessage asks for may go out while the
  * boot gate is Pending, so the deferred effect runs inside the gate's
@@ -93,6 +105,21 @@ export class TriggerMessageHandler implements CallHandler<
     // OCPP 1.6J §6.51: the response is sent first (Accepted/Rejected), then
     // the CP fires the requested message after answering. The effect is
     // deferred via HandlerOutcome so the CALLRESULT goes out before the new CALL.
+    // §5.17: "the Charge Point SHALL indicate whether it will send it or
+    // not". StatusNotification and MeterValues need a connector, and nothing
+    // would follow for one that does not exist.
+    if (
+      (payload.requestedMessage === "StatusNotification" ||
+        payload.requestedMessage === "MeterValues") &&
+      isUnknownConnector(context, payload.connectorId)
+    ) {
+      context.logger.warn(
+        `Trigger message ${payload.requestedMessage} rejected: connector ${payload.connectorId} does not exist`,
+        LogType.OCPP,
+      );
+      return { status: "Rejected" };
+    }
+
     switch (payload.requestedMessage) {
       case "StatusNotification": {
         const response = { status: "Accepted" } as const;

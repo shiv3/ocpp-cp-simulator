@@ -34,6 +34,7 @@ function buildContext() {
       [1, { id: 1 }],
       [2, { id: 2 }],
     ]),
+    getConnector: (id: number) => (id === 1 || id === 2 ? { id } : undefined),
   };
 
   const ctx: HandlerContext = {
@@ -167,6 +168,33 @@ describe("ExtendedTriggerMessageHandler", () => {
         ["Idle", undefined],
       ]);
     }
+  });
+
+  it("rejects StatusNotification and MeterValues for a connector that does not exist (§5.17)", () => {
+    const { ctx, calls } = buildContext();
+    const handler = new ExtendedTriggerMessageHandler();
+    for (const requestedMessage of [
+      "StatusNotification",
+      "MeterValues",
+    ] as const) {
+      expect(
+        handler.handle({ requestedMessage, connectorId: 99 }, ctx),
+      ).toEqual({
+        status: "Rejected",
+      });
+    }
+    expect(calls).toEqual({});
+  });
+
+  it("still sends a Heartbeat for any connectorId", () => {
+    const { ctx, calls } = buildContext();
+    const res = new ExtendedTriggerMessageHandler().handle(
+      { requestedMessage: "Heartbeat", connectorId: 99 },
+      ctx,
+    );
+    if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
+    res.afterResponseSettled();
+    expect(calls.sendHeartbeat).toEqual([[]]);
   });
 
   it("reports the upload in progress with its requestId (N01.FR.12)", () => {

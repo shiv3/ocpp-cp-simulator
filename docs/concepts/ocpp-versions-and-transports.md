@@ -682,6 +682,16 @@ set; the advertised key is always the connector's own:
   `configSet` node or, on 1.6J, `ChangeConfiguration` instead). 2.x has no
   `ChangeConfiguration` and no `SignedMeterDataMode` variable.
 
+## OCPP-J 1.6 TriggerMessage and a connector that does not exist
+
+§5.17: "the Charge Point SHALL indicate whether it will send it or not". On 1.6J
+`TriggerMessage` and `ExtendedTriggerMessage` for `StatusNotification` or
+`MeterValues` with a `connectorId` above 0 that names no connector are answered
+`Rejected` and nothing is scheduled (#738). Connector 0, an absent
+`connectorId` and the messages that take no connector (Heartbeat,
+BootNotification, the status notifications) behave as before: a
+`TriggerMessage(Heartbeat, connectorId 99)` still sends the Heartbeat.
+
 ## SOAP versions (1.2, 1.5, 1.6S)
 
 OCPP 1.2, 1.5, and 1.6 (SOAP) all use SOAP 1.2 / WS-Addressing over HTTP

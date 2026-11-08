@@ -135,6 +135,7 @@ import {
   AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
+import { inboundV16Violation } from "./codec/validateV16";
 import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
 import type { GenerationToken } from "./network-sim/NetworkSimController";
@@ -1454,6 +1455,23 @@ export class OCPPMessageHandler {
         "This action is not supported",
       );
       return;
+    }
+
+    // The gate has run: policies, overrides and behavior rules may own a
+    // malformed CALL (docs/concepts/call-precedence.md); validation guards
+    // only what reaches the default handler (#593).
+    const mode = this._chargePoint.inboundValidation;
+    if (mode !== "off") {
+      const violation = inboundV16Violation(action, payload);
+      if (violation) {
+        const message = `Inbound ${action} ${violation.errorCode}: ${violation.description}`;
+        if (mode === "enforce") {
+          this._logger.warn(message, LogType.OCPP);
+          exchange.replyError(violation.errorCode, violation.description);
+          return;
+        }
+        this._logger.warn(`${message} (handler still runs)`, LogType.OCPP);
+      }
     }
 
     try {

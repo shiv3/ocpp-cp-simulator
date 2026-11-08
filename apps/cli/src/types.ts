@@ -3,6 +3,7 @@ import type {
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 
@@ -221,6 +222,8 @@ export interface ChargePointInitOptions {
   /** All supervision URLs, when more than one was given. OCPP-J only. */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is

@@ -30,7 +30,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP versions and transports
@@ -803,6 +803,29 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
   all of them through unchanged. The canonical statement, with the reasoning
   and the tradeoff, is in
   [Scenario format → Charging curve](scenario-format.md#charging-curve-v12).
+
+## Inbound CALL validation on OCPP-J 1.6
+
+An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` (`ChargePoint` transport option `inboundValidation`, `ChargePoint.setInboundValidation()`, and `inboundValidation` in the CLI `ChargePointInitOptions`) has three values:
+
+| Value     | A schema-invalid CALL                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------ |
+| `off`     | is not checked; the handler runs                                                                 |
+| `warn`    | (default) is logged as a warning in the `OCPP` log; the handler still runs and answers as before |
+| `enforce` | is answered with a CALLERROR (OCPP-J 1.6 §4.2.3) and the handler does not run                    |
+
+The error code follows the first kind of violation, most structural first (formats count, as for 1.6-S):
+
+| Code                           | When                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `FormationViolation`           | the payload is not an object, has a property the schema does not declare, or breaks the structure otherwise |
+| `OccurenceConstraintViolation` | a required field is missing, or an array has too few or too many items                                      |
+| `TypeConstraintViolation`      | a field has the wrong JSON type                                                                             |
+| `PropertyConstraintViolation`  | right type, invalid value: enum, range, length, pattern, `date-time` / `uri` format                         |
+
+The codes use the **1.6 spelling**: `FormationViolation` (2.x says `FormatViolation`) and `OccurenceConstraintViolation` (the 1.6 specification spells it with one `r`; 2.x corrected it). The CALLERROR description names the action and the failing properties, cut to 255 characters.
+
+Validation runs after the [inbound gate](call-precedence.md): an inbound policy, a response override and a scenario or code rule answer first, so any of them can own a malformed CALL; it guards only what reaches the default handler. An action without a request schema is left to the handler lookup (`NotImplemented`). Wire behavior under `off` and `warn` is unchanged; the golden wire fixtures did not change.
 
 ## Inbound CS→CP request validation
 

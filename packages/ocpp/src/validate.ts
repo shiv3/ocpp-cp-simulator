@@ -203,3 +203,29 @@ export function strictValidationErrors(
     `${error.instancePath} ${error.message ?? ""}`.trim(),
   );
 }
+
+/** One schema violation, with the keyword that failed (for error-code mapping). */
+export interface ValidationIssue {
+  /** JSON-schema keyword: `required`, `type`, `enum`, `maxLength`, ... */
+  readonly keyword: string;
+  readonly instancePath: string;
+  readonly message: string;
+}
+
+/** Like strictValidationErrors, but keeps the failing keyword of each issue. */
+export function strictValidationIssues(
+  schema: object,
+  data: unknown,
+): ValidationIssue[] {
+  const validate = strictValidatorFor(schema);
+
+  if (validate(data)) {
+    return [];
+  }
+
+  return (validate.errors ?? []).map((error) => ({
+    keyword: error.keyword,
+    instancePath: error.instancePath,
+    message: `${error.instancePath} ${error.message ?? ""}`.trim(),
+  }));
+}

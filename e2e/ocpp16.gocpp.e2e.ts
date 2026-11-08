@@ -443,6 +443,33 @@ test(
 );
 
 test(
+  "enforce: a Reset with an invalid type is answered with a PropertyConstraintViolation CALLERROR (#593)",
+  async () => {
+    const cpId = "cp16-inbound-validation";
+    const cp = makeChargePoint(cpId);
+    cp.setInboundValidation("enforce");
+
+    try {
+      await connectBootReady(cp, cpId);
+      const response = await csms.command({
+        cpId,
+        action: "Reset",
+        type: "Warm",
+      });
+
+      // The CSMS client reports the CALLERROR as a failed command whose error
+      // carries the OCPP-J 1.6 code; the station did not reset.
+      expect(response.ok).toBe(false);
+      expect(JSON.stringify(response)).toContain("PropertyConstraintViolation");
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
+    } finally {
+      await cp.disconnect();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
   "ReserveNow and CancelReservation return accepted command results",
   async () => {
     const cpId = "cp16-reserve";

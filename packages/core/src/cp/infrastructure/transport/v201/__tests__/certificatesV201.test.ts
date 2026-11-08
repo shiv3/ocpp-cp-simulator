@@ -414,6 +414,7 @@ describe.each(VERSIONS)(
           ...context(store, 10, maxChainSize).ctx,
           certificateSigning: {
             requestSignature: vi.fn(),
+            requestCombinedSignature: vi.fn(),
             certificateStored,
             certificateInstalled,
           },
@@ -449,6 +450,25 @@ describe.each(VERSIONS)(
         );
         expect(rejected.response).toEqual({ status: "Rejected" });
         expect(certificateStored).not.toHaveBeenCalled();
+      });
+
+      // #553 + #564: a combined certificate (certificateType omitted) is the
+      // Charging Station certificate, so it is handed on like one.
+      it("reports a combined certificate as the Charging Station certificate", async () => {
+        const store = new CertificateStore();
+        const root = await selfSignedRoot("01", "Root");
+        const csr = await store.generateNewCsr("CP", "CPO");
+        const { ctx, certificateStored } = signingContext(store);
+
+        const accepted = await handlers.CertificateSigned(
+          { certificateChain: await leafForCsr("02", csr, root) },
+          ctx,
+        );
+
+        expect(accepted.response).toEqual({ status: "Accepted" });
+        expect(certificateStored).toHaveBeenCalledExactlyOnceWith(
+          "ChargingStationCertificate",
+        );
       });
 
       it("comes after an Accepted chain's answer, not before", async () => {

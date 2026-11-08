@@ -30,10 +30,9 @@ export class Outbox implements IChargePointMessageHandler {
   }
 
   authorize(
-    tagId: Parameters<IChargePointMessageHandler["authorize"]>[0],
-    idTokenType?: Parameters<IChargePointMessageHandler["authorize"]>[1],
+    ...args: Parameters<IChargePointMessageHandler["authorize"]>
   ): ReturnType<IChargePointMessageHandler["authorize"]> {
-    return this.handler.authorize(tagId, idTokenType);
+    return this.handler.authorize(...args);
   }
 
   sendTransactionEvent(

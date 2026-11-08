@@ -161,7 +161,8 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
 
 /**
  * The start of a remote start on either version (1.6 §5.11, 2.x F01):
- * `AuthorizeRemoteTxRequests` asks for an Authorize.req first, then the
+ * `AuthorizeRemoteTxRequests` asks for an Authorize.req first (not on 2.x for a
+ * `Central` or `NoAuthorization` token, F01.FR.02), then the
  * scenario waiting on the connector gets the request or the default starts
  * the transaction with `triggerReason: "RemoteStart"` (so the local
  * authorize gate does not authorize twice).
@@ -173,7 +174,14 @@ function remoteStart(
   remoteStartId: number | undefined,
   idTokenType?: IdTokenTypeName,
 ): void {
-  if (cp.configuration.authorizeRemoteTxRequests()) {
+  // F01.FR.01 applies only when idToken.type is NOT Central or
+  // NoAuthorization; F01.FR.02 starts those without checking authorization
+  // (2.0.1 edition 4 and 2.1 edition 2 alike). The CSMS checks the token when
+  // it processes the TransactionEvent (F01.FR.03).
+  const skipsAuthorize =
+    isOcpp2Version(cp.ocppVersion) &&
+    (idTokenType === "Central" || idTokenType === "NoAuthorization");
+  if (cp.configuration.authorizeRemoteTxRequests() && !skipsAuthorize) {
     if (!isOcpp2Version(cp.ocppVersion)) {
       cp.logger.info(
         `AuthorizeRemoteTxRequests=true: sending Authorize.req for ${idTag}`,

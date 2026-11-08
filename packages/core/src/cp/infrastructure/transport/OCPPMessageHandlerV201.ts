@@ -308,6 +308,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _signBackoff: SignCertificateBackoff;
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
+    requestCombinedSignature: () => this.sendSignCertificate(),
     certificateStored: (use) => {
       if (use === "ChargingStationCertificate") {
         // #564 A02.FR.08: the next connection presents it, whatever becomes

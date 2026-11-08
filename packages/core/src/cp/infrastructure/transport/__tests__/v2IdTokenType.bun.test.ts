@@ -129,7 +129,7 @@ describe.each(VERSIONS)("%s IdToken.type (#599)", (version) => {
       return frame[2];
     };
 
-    it.each(["Central", "eMAID", "KeyCode"])(
+    it.each(["eMAID", "KeyCode", "ISO15693"])(
       "carries %s into Authorize and the Started event",
       async (type) => {
         await withStation(version, async (csms, cp) => {
@@ -150,6 +150,19 @@ describe.each(VERSIONS)("%s IdToken.type (#599)", (version) => {
         });
       },
     );
+
+    it("starts a Central remote start without an Authorize (F01.FR.02)", async () => {
+      await withStation(version, async (csms, cp) => {
+        cp.configuration.setRuntimeValue("AuthorizeRemoteTxRequests", true);
+        const expected = { idToken: "REMOTE-C", type: "Central" };
+        expect(
+          await ask(csms, { remoteStartId: 6, idToken: expected }),
+        ).toEqual({ status: "Accepted" });
+        const started = await csms.waitForFrame(eventOf("Started"));
+        expect((started[3] as { idToken: unknown }).idToken).toEqual(expected);
+        expect(csms.received.some((f) => f[2] === "Authorize")).toBe(false);
+      });
+    });
 
     it("carries a 2.1 standard type as sent", async () => {
       if (version !== "OCPP-2.1") return;

@@ -30,7 +30,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP versions and transports
@@ -422,12 +422,52 @@ serial queue. It reaches the persisted offline queue only when the socket
 closes, so a process that ends without closing it, such as a crash, loses
 the resend.
 An [expert call](expert-ocpp-calls.md) is never resent, and a MeterValues.req
-without a `transactionId` is not transaction-related. OCPP-S (1.2 / 1.5 /
-1.6S) does not retry: a SOAP Fault answering these messages is reported as an
-error and the message is not sent again. On 1.6S that deviates from the OCPP-S
-1.6 errata sheet (3.2), which has a Charge Point retry transaction-related
-messages after a Fault
-([#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585)).
+without a `transactionId` is not transaction-related. OCPP-S 1.2 and 1.5 do
+not retry: a SOAP Fault answering these messages is reported as an error and
+the message is not sent again. Only the 1.6 errata sheet was checked, not the
+1.2 and 1.5 specs. OCPP-S 1.6 retries; see the next section.
+
+### Deviation: OCPP-S 1.6 retries after a SOAP Fault
+
+The OCPP-S 1.6 errata sheet (v1.0, 2019-12-04) makes the SOAP Fault the way
+to report a failure to process a message (3.1) and, in 3.2, replaces the
+"SHOULD NOT resend" of its §4 with: "the sender SHOULD NOT resend the same
+message, except transaction-related message, a Charge Point SHALL retry these
+a couple of times". It also has the station send a simple message such as a
+Heartbeat to tell a failure to process from a connection issue, and treats an
+HTTP error status like a Fault. Since
+[#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585) `OCPPSoapHandler`
+does this on 1.6S for StartTransaction.req, StopTransaction.req and a
+MeterValues.req carrying a `transactionId`:
+
+- **A Fault or an HTTP error status** answering one is a failure to process.
+  Before it counts, the station sends a Heartbeat through the request chain.
+  If that Heartbeat is answered, even by a Fault or an HTTP error, the Central
+  System is reachable and the failure counts. If it is not (a network error or
+  a timeout) the failure is a connection issue: the message is dropped with a
+  `warn`, as before, because SOAP has no offline queue. A network error or a
+  timeout of the message itself is a connection issue too and is not retried.
+- **`transactionMessageRejected`** is emitted on every counted failure, with
+  `reason` `callError` and `errorCode` the Fault code (`SOAP Fault Receiver`)
+  or `HTTP <status>`.
+- **The resend** goes through the request chain after
+  `TransactionMessageRetryInterval` seconds times the number of transmissions
+  so far, with a new message id, and ends after `TransactionMessageAttempts`
+  transmissions: `transactionMessageDiscarded` and a `warn`. Both keys are
+  read at each failure, and a resend that finds the attempts limit lowered is
+  discarded.
+- **A StartTransaction.req whose transaction no longer runs** is discarded
+  instead of resent, as on OCPP-J (#527): a conf the station would ignore
+  would leave a transaction open on the Central System. A discarded
+  StartTransaction.req leaves the `0` placeholder and a connector still in
+  `Preparing` goes to `Charging`, as on OCPP-J.
+- **Stop and dispose** (`onWebSocketClosed`) cancel every waiting resend, each
+  with a `warn` and a `transactionMessageDiscarded`: SOAP has no offline queue
+  to salvage it to. A failure whose Heartbeat probe is still in flight at that
+  moment schedules nothing.
+
+The known limitations of the OCPP-J section apply here too (a waiting resend
+does not hold back the next message; a crash loses the resend).
 
 ## OCPP 2.x Reset OnIdle
 

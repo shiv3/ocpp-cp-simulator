@@ -57,6 +57,7 @@ function runParseArgs(args: string[]) {
     "  watch: options.watch,",
     "  oedBaseUrl: options.oedBaseUrl,",
     "  oedApiKeyFile: options.oedApiKeyFile,",
+    "  bootstrapPacing: options.bootstrapPacing ?? null,",
     "  labels: options.labels ?? null,",
     "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
     "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
@@ -1223,4 +1224,121 @@ describe("parseArgs --label (#472)", () => {
       );
     },
   );
+});
+
+describe("parseArgs startup pacing (#610)", () => {
+  const DAEMON = [
+    "--daemon",
+    "--cp-id",
+    "CP",
+    "--cp-count",
+    "20",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
+  it("has no pacing unless asked for, so the built-in default applies", () => {
+    const result = runParseArgs(DAEMON);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).bootstrapPacing).toBeNull();
+  });
+
+  it("collects the four flags and fills the rest from the defaults", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--bootstrap-concurrency",
+      "2",
+      "--start-delay",
+      "250",
+      "--start-jitter",
+      "100",
+      "--start-seed",
+      "7",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).bootstrapPacing).toEqual({
+      concurrency: 2,
+      startDelayMs: 250,
+      startJitterMs: 100,
+      startSeed: 7,
+    });
+    const partial = runParseArgs([...DAEMON, "--start-delay", "50"]);
+    expect(JSON.parse(partial.stdout).bootstrapPacing).toEqual({
+      concurrency: 8,
+      startDelayMs: 50,
+      startJitterMs: 0,
+      startSeed: 0,
+    });
+  });
+
+  it.each([
+    [["--bootstrap-concurrency", "0"], "--bootstrap-concurrency must be"],
+    [["--bootstrap-concurrency", "x"], "--bootstrap-concurrency must be"],
+    [["--start-delay", "-1"], "--start-delay must be"],
+    [["--start-jitter", "1.5"], "--start-jitter must be"],
+    [
+      ["--start-seed", "3"],
+      "--start-seed has no effect without --start-jitter",
+    ],
+  ])("refuses %j", (flags, message) => {
+    const result = runParseArgs([...DAEMON, ...flags]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+  });
+
+  it("refuses the flags outside a server mode or without --cp-id", () => {
+    const standalone = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--start-delay",
+      "10",
+    ]);
+    expect(standalone.status).toBe(1);
+    expect(standalone.stderr).toContain("--start-delay needs a server mode");
+    const noCp = runParseArgs(["--daemon", "--start-delay", "10"]);
+    expect(noCp.status).toBe(1);
+    expect(noCp.stderr).toContain("--start-delay needs a server mode");
+  });
+
+  it("refuses the flags combined with a client mode, even next to --http-port", () => {
+    const result = runParseArgs([
+      "--http-port",
+      "9700",
+      "--send",
+      '{"method":"cp.list"}',
+      "--cp-id",
+      "CP",
+      "--start-delay",
+      "10",
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "--start-delay cannot be combined with a client mode",
+    );
+  });
+
+  it("refuses a schedule longer than a timer can hold, and accepts the largest one", () => {
+    const tooLong = runParseArgs([...DAEMON, "--start-delay", "200000000"]);
+    expect(tooLong.status).toBe(1);
+    expect(tooLong.stderr).toContain("must not exceed 2147483647 ms");
+    // (20 - 1) × 113025455 = 2147483645, plus a jitter of 2.
+    const edge = runParseArgs([
+      ...DAEMON,
+      "--start-delay",
+      "113025455",
+      "--start-jitter",
+      "2",
+    ]);
+    expect(edge.status).toBe(0);
+    const over = runParseArgs([
+      ...DAEMON,
+      "--start-delay",
+      "113025455",
+      "--start-jitter",
+      "3",
+    ]);
+    expect(over.status).toBe(1);
+  });
 });

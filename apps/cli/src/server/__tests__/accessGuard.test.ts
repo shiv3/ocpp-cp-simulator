@@ -33,6 +33,12 @@ describe("parseTrustedProxy / loopback", () => {
     expect(parseTrustedProxy("fd00::/8")).not.toBeNull();
     expect(parseTrustedProxy("10.0.0.0/33")).toBeNull();
     expect(parseTrustedProxy("nope")).toBeNull();
+    // A mapped range is written against 128 bits: /104 is the IPv4 /8.
+    expect(parseTrustedProxy("::ffff:10.0.0.0/104")).toMatchObject({
+      family: 4,
+      bits: 8,
+    });
+    expect(parseTrustedProxy("::ffff:10.0.0.0/64")).toBeNull();
     expect(parseTrustedProxy("1.2.3.4/8/9")).toBeNull();
   });
   it("knows loopback, including mapped IPv4", () => {

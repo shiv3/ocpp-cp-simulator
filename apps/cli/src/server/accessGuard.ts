@@ -110,6 +110,12 @@ export function parseTrustedProxy(entry: string): Range | null {
   if (prefix !== undefined) {
     if (!/^\d+$/.test(prefix)) return null;
     bits = Number(prefix);
+    // `::ffff:10.0.0.0/104` is written against the 128-bit mapped form, but
+    // the address is stored as IPv4: drop the 96 bits of the mapping prefix.
+    if (ip.family === 4 && /^::ffff:/i.test(address.trim())) {
+      if (bits < 96) return null;
+      bits -= 96;
+    }
     if (bits > max) return null;
   }
   return { ...ip, bits };

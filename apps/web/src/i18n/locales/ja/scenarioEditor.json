@@ -156,5 +156,19 @@
   "scenarioEditor.callResponse.kindResult": "CALLRESULT(ペイロード付きで応答)",
   "scenarioEditor.callResponse.payload": "ペイロード(JSON)",
   "scenarioEditor.useBehavior.behaviorId": "ビヘイビア ID",
-  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "例: my-behavior"
+  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "例: my-behavior",
+  "scenarioEditor.useBehavior.mode": "モード",
+  "scenarioEditor.useBehavior.modeUse": "使用(パラメータ指定)",
+  "scenarioEditor.useBehavior.modeDisable": "この実行中は無効にする",
+  "scenarioEditor.useBehavior.disableHelp": "実行中は、このビヘイビアが応答する CALL すべてに、充電器の OCPP バージョンの単純な accepted 応答だけを返し、後続の処理は行いません。パラメータは指定できません。",
+  "scenarioEditor.useBehavior.paramsJson": "パラメータ (JSON)",
+  "scenarioEditor.useBehavior.paramsJsonPlaceholder": "{\"key\": \"value\"}",
+  "scenarioEditor.params.reset": "既定値に戻す",
+  "scenarioEditor.params.firmware.stepMs": "ステータス間隔 (ms)",
+  "scenarioEditor.params.firmware.failAt": "失敗で終了",
+  "scenarioEditor.params.firmware.startAt": "開始タイミング",
+  "scenarioEditor.params.signedFirmware.stepMs": "ステータス間隔 (ms)",
+  "scenarioEditor.params.logs.uploadMs": "アップロード時間 (ms)",
+  "scenarioEditor.params.reset.delayMs": "リセットまでの遅延 (ms)",
+  "scenarioEditor.params.unlock.outcome": "結果"
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@ocpp-cp-sim/core",
+  "name": "@ocpp-cp-simulator/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,8 @@
     "./schema/scenario.schema.json": "./schema/scenario.schema.json"
   },
   "dependencies": {
-    "@ocpp-cp-sim/contracts": "workspace:*",
-    "@ocpp-cp-sim/k6-runtime": "workspace:*",
-    "@ocpp-cp-sim/ocpp": "workspace:*"
+    "@ocpp-cp-simulator/contracts": "workspace:*",
+    "@ocpp-cp-simulator/k6-runtime": "workspace:*",
+    "@ocpp-cp-simulator/ocpp": "workspace:*"
   }
 }

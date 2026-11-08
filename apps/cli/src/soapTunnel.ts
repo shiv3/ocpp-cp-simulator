@@ -17,7 +17,7 @@
  *            container). Nothing to clean up: we did not create the tunnel.
  */
 
-import { redactSensitiveText } from "@ocpp-cp-sim/core/cp/shared/redaction";
+import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import { isHttpUrl, joinSoapCallbackUrl } from "./soapCallbackUrl";
 
 const DEFAULT_TIMEOUT_MS = 15_000;

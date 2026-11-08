@@ -6,7 +6,7 @@ import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 function node(
   id: string,

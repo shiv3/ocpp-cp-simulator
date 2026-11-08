@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { flush } from "../../test/harness";
 import TemplateGallery from "./TemplateGallery";
 

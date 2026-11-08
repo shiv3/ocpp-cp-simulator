@@ -29,6 +29,9 @@
     "apps/*"
   ],
   "bin": {
+    "ocpp-cp-simulator": "dist-cli/main.js",
+    "ocpsim": "dist-cli/main.js",
+    "cp-sim": "dist-cli/main.js",
     "ocpp-cp-sim": "dist-cli/main.js"
   },
   "files": [
@@ -39,14 +42,16 @@
     "dev": "vite",
     "build": "vite build",
     "build:cli": "bun build --target=bun --outfile=dist-cli/main.js apps/cli/src/main.ts",
-    "test": "vitest run && bun test bun.test",
+    "test": "vitest run && bun test --isolate bun.test",
     "test:vitest": "vitest run",
-    "test:bun": "bun test bun.test",
+    "test:bun": "bun test --isolate bun.test",
     "test:bun:cli": "bun test apps/cli/src/__tests__",
     "test:bench-slow": "bun test ./scripts/bench/fleetBench.slowpath.test-bun.ts",
-    "test:e2e": "bun run e2e/support/buildCsms.ts && bun test --timeout 60000 ./e2e/ocpp16.gocpp.e2e.ts ./e2e/chargingProfile.gocpp.e2e.ts ./e2e/ocpp201.gocpp.e2e.ts ./e2e/ocpp21.gocpp.e2e.ts ./e2e/scenario.gocpp.e2e.ts ./e2e/comprehensive.gocpp.e2e.ts",
+    "test:e2e": "bun run e2e/support/buildCsms.ts && bun test --timeout 60000 ./e2e/ocpp16.gocpp.e2e.ts ./e2e/chargingProfile.gocpp.e2e.ts ./e2e/ocpp201.gocpp.e2e.ts ./e2e/ocpp21.gocpp.e2e.ts ./e2e/scenario.gocpp.e2e.ts ./e2e/comprehensive.gocpp.e2e.ts ./e2e/behavior.gocpp.e2e.ts ./e2e/daemonShutdown.gocpp.e2e.ts",
+    "lint:e2e-csms": "test -z \"$(gofmt -l e2e/csms)\" && go -C e2e/csms vet ./...",
+    "test:e2e-csms": "go -C e2e/csms test -race -count=1 ./...",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:bun": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=./coverage/bun bun.test",
+    "test:coverage:bun": "bun test --isolate --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=./coverage/bun bun.test",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc -b",
     "check:boundaries": "bun run scripts/check-package-boundaries.ts && bun run scripts/check-direct-time.ts && bun run scripts/check-single-writer.ts",

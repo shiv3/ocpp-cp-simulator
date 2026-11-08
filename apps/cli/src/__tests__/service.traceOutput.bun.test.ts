@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { CLIChargePointService } from "../service";
 import { setGlobalTraceWriter, TraceWriter } from "../trace/TraceWriter";
-import { LogType, type Logger } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { LogType, type Logger } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import { testCpInit } from "./testCpInit";
 
 function readRecords(filePath: string): Array<Record<string, unknown>> {

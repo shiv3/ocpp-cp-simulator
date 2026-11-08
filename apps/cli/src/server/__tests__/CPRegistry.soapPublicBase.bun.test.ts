@@ -3,8 +3,8 @@ import { describe, it, expect, spyOn } from "bun:test";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 
 const CSMS = "http://127.0.0.1:1/steve/services/CentralSystemService";
 

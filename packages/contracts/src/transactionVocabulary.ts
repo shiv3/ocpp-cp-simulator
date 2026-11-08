@@ -135,3 +135,44 @@ export const METER_READING_CONTEXTS = [
 /** Same vocabulary as `ReadingContext` in MeterValueBuilder (1.6 §7.35 and
  *  2.0.1 ReadingContextEnumType spell it identically). */
 export type MeterReadingContext = (typeof METER_READING_CONTEXTS)[number];
+
+/**
+ * OCPP 2.0.1 `IdTokenEnumType` (Part 2 §3.43), the `type` of an `IdToken` in
+ * Authorize and TransactionEvent. Certificate based authorization
+ * (`iso15118CertificateHashData`) is a separate path (#599).
+ */
+export const ID_TOKEN_TYPE_VALUES_V201 = [
+  "Central",
+  "eMAID",
+  "ISO14443",
+  "ISO15693",
+  "KeyCode",
+  "Local",
+  "MacAddress",
+  "NoAuthorization",
+] as const;
+
+/**
+ * The values `IdTokenEnumStringType` (2.1 edition 2, Part 2 Appendices
+ * ch. 7.1) adds to the 2.0.1 ones. On 2.1 `IdToken.type` is a free string up
+ * to 20 characters and this list only names the standard values; on 2.0.1
+ * these three are not valid.
+ */
+export const ID_TOKEN_TYPE_VALUES_V21_ONLY = [
+  "DirectPayment",
+  "EVCCID",
+  "VIN",
+] as const;
+
+/** Every standard value of both editions; what the control plane, the JSON
+ *  mode and the scenario schema accept. The 2.1-only ones are downgraded to
+ *  the default (with a warning) when the station speaks 2.0.1. */
+export const ID_TOKEN_TYPE_VALUES = [
+  ...ID_TOKEN_TYPE_VALUES_V201,
+  ...ID_TOKEN_TYPE_VALUES_V21_ONLY,
+] as const;
+
+export type IdTokenTypeName = (typeof ID_TOKEN_TYPE_VALUES)[number];
+
+/** The `IdToken.type` sent when a caller names none. */
+export const DEFAULT_ID_TOKEN_TYPE: IdTokenTypeName = "ISO14443";

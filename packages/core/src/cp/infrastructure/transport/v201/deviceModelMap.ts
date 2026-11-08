@@ -12,6 +12,10 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["OCPPCommCtrlr/HeartbeatInterval", "HeartbeatInterval"],
   ["OCPPCommCtrlr/WebSocketPingInterval", "WebSocketPingInterval"],
   ["OCPPCommCtrlr/ResetRetries", "ResetRetries"],
+  // #609: Part 4 §5.4 reconnect back-off (variables: Part 2 Appendices, OCPPCommCtrlr).
+  ["OCPPCommCtrlr/RetryBackOffWaitMinimum", "RetryBackOffWaitMinimum"],
+  ["OCPPCommCtrlr/RetryBackOffRandomRange", "RetryBackOffRandomRange"],
+  ["OCPPCommCtrlr/RetryBackOffRepeatTimes", "RetryBackOffRepeatTimes"],
   // #490: OCPP 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12 — variableInstance
   // "TransactionEvent" ("MessageAttemptsTransactionEvent" is only the
   // section title).
@@ -26,6 +30,8 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   // #529: OCPP 2.0.1 / 2.1 Part 2 §2.1.3 "DefaultMessageTimeout" —
   // variableInstance "Default", ReadOnly, seconds.
   ["OCPPCommCtrlr/MessageTimeout/Default", "MessageTimeout"],
+  // #702: OCPPCommCtrlr.OfflineThreshold (Part 2 §2.1.8, B04.FR.01/02).
+  ["OCPPCommCtrlr/OfflineThreshold", "OfflineThreshold"],
   ["TxCtrlr/EVConnectionTimeOut", "ConnectionTimeOut"],
   ["SampledDataCtrlr/TxUpdatedInterval", "MeterValueSampleInterval"],
   ["SampledDataCtrlr/TxUpdatedMeasurands", "MeterValuesSampledData"],
@@ -39,6 +45,7 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["AuthCtrlr/LocalPreAuthorize", "LocalPreAuthorize"],
   ["AuthCtrlr/LocalAuthorizeOffline", "LocalAuthorizeOffline"],
   ["AuthCtrlr/OfflineTxForUnknownIdEnabled", "AllowOfflineTxForUnknownId"],
+  ["AuthCtrlr/MasterPassGroupId", "MasterPassGroupId"],
   ["AuthCacheCtrlr/Enabled", "AuthorizationCacheEnabled"],
   // #709: H01.FR.18/19, the 2.x name of 1.6 ReserveConnectorZeroSupported:
   // whether a ReserveNow may leave the EVSE open. ReadOnly (Part 2 §2.8.3).

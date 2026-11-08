@@ -1,12 +1,12 @@
 // apps/cli/src/exportK6/runExportK6.ts
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
-import { SUPPORTED_ASSERTION_TYPES } from "@ocpp-cp-sim/k6-runtime/assertions";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
+import { SUPPORTED_ASSERTION_TYPES } from "@ocpp-cp-simulator/k6-runtime/assertions";
 import type {
   ScenarioJson,
   ScenarioNodeJson,
-} from "@ocpp-cp-sim/k6-runtime/types";
+} from "@ocpp-cp-simulator/k6-runtime/types";
 import { RUNTIME_FILES } from "./runtimeManifest";
 import { RUNTIME_SOURCES } from "./runtimeSources";
 import {
@@ -221,7 +221,7 @@ const REFUSED_BEHAVIOR_NODES: Readonly<Record<string, string>> = {
   callResponse:
     ": answering a CALL the scenario took over needs a station behavior engine, which the k6 runtime does not have",
   useBehavior:
-    ": selecting a loaded behavior needs a station behavior engine, which the k6 runtime does not have",
+    ': selecting a behavior, setting its params (schema 1.6) or disabling it (mode "disable") needs a station behavior engine, which the k6 runtime does not have; a k6 behavior runs with its declared defaults',
 };
 
 /** Does `value` hold a `{ "$from": … }` reference anywhere? */

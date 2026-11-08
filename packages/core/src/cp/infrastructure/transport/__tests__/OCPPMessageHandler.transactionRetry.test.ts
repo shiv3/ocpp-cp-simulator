@@ -322,6 +322,70 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
   });
 
+  it("a written but unanswered transaction message queued at shutdown goes to the offline queue and is replayed after the boot", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    // No answer when a graceful shutdown stops waiting (§3.7).
+    expect(handler.queueUnansweredTransactionCall()).toBe(true);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+
+    socket.connected = true;
+    handler.flushPendingQueue();
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    expect(socket.last().payload).toEqual(first.payload);
+  });
+
+  it("a shutdown with a second transaction message queued behind the unanswered one replays both (#790)", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    // Serialized behind the first (§4.1.1): not on the wire yet.
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: {
+        ...connector.transaction!,
+        stopTime: new Date(),
+        meterStop: 10,
+      },
+      connectorId: 1,
+    });
+    expect(socket.written).toHaveLength(1);
+
+    expect(handler.queueUnansweredTransactionCall()).toBe(true);
+    // The queued CALL must not be written while the socket is closing.
+    expect(socket.written).toHaveLength(1);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+
+    socket.connected = true;
+    handler.flushPendingQueue();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.last().payload).toEqual(first.payload);
+    socket.callResult(socket.last().id, {
+      transactionId: 1,
+      idTagInfo: { status: "Accepted" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.written).toHaveLength(3);
+    expect(socket.written.map((w) => w.action)).toEqual([
+      "StartTransaction",
+      "StartTransaction",
+      "StopTransaction",
+    ]);
+  });
+
   it("a link that keeps dropping does not extend the count: discarded after TransactionMessageAttempts transmissions", async () => {
     const { socket, connector, handler, rejected, discarded } = setup();
     handler.sendTransactionEvent({

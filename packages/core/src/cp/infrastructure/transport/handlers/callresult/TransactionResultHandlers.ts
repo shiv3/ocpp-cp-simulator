@@ -6,8 +6,8 @@ import type {
   AuthorizeResponseV16,
   StartTransactionResponseV16,
   StopTransactionResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
-import type { AuthorizeRequestV16 } from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
+import type { AuthorizeRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 import type { CsmsAuthorizationResult } from "../../../../domain/auth/StationAuthorization";

@@ -6,10 +6,10 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 
 /**
  * #529, OCPP 2.0.1 / 2.1 E13 (2.0.1 Table 120 / 2.1 E13 use case,
@@ -144,6 +144,7 @@ function setup(
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),
       messageTimeout: vi.fn(() => config.timeout ?? 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
     },

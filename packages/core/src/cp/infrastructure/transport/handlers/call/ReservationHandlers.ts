@@ -4,7 +4,7 @@ import type {
   CancelReservationResponseV16,
   ReserveNowRequestV16,
   ReserveNowResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { LogType } from "../../../../shared/Logger";
 import { reserveNowRefusal16 } from "../../../../application/engine/behaviors/reservation";
 import { defaultBehavior16 } from "./defaultBehavior";

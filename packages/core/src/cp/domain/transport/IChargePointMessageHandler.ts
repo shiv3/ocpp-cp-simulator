@@ -11,6 +11,7 @@ import type {
 } from "../types/FirmwareLogStatus";
 import type {
   BootNotification,
+  BootReason,
   ChargePointErrorCode,
   OCPPStatus,
 } from "../types/OcppTypes";
@@ -20,7 +21,10 @@ import type {
 } from "../connector/MeterValueBuilder";
 import type { TransactionLifecycleEvent } from "./TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../monitoring/MonitorEvaluation";
-import type { TransactionUpdateOptions } from "../connector/Transaction";
+import type {
+  IdTokenTypeName,
+  TransactionUpdateOptions,
+} from "../connector/Transaction";
 
 /** Where scenarios register the responders that answer a CSMS-initiated
  *  DataTransfer.req, one per `vendorId` (#574). */
@@ -29,8 +33,16 @@ export interface DataTransferVendorRegistry {
   unregisterVendor(vendorId: string): void;
 }
 
+export interface AuthorizeSendHooks {
+  onWritten?: () => void;
+  onDropped?: (reason: string) => void;
+}
+
 export interface IChargePointMessageHandler {
-  sendBootNotification(bootPayload: BootNotification): void;
+  sendBootNotification(
+    bootPayload: BootNotification,
+    reason?: BootReason,
+  ): void;
   sendHeartbeat(): void;
   sendStatusNotification(
     connectorId: number,
@@ -44,7 +56,15 @@ export interface IChargePointMessageHandler {
       suppressChargingStateTransactionEvent?: boolean;
     },
   ): void;
-  authorize(tagId: string): void;
+  /** `idTokenType` is the OCPP 2.x `IdToken.type` (#599); 1.x ignores it.
+   *  `hooks` (OCPP 2.x only, #762): `onWritten` fires when the CALL is on the
+   *  wire (it may wait behind another CALL, Part 4 §4.1.1), `onDropped` when it
+   *  never gets there. Handlers that do not queue CALLs ignore them. */
+  authorize(
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+    hooks?: AuthorizeSendHooks,
+  ): void;
   sendTransactionEvent(event: TransactionLifecycleEvent): void;
   /** A driven OCPP 2.x TransactionEvent(Updated) (#335). 1.6 handlers have
    *  no such message and log a warning instead of sending anything. */
@@ -142,6 +162,9 @@ export interface IChargePointMessageHandler {
    *  on 2.x, the only version that reconnects for a renewed client
    *  certificate; absent means none. */
   hasTransactionMessagesInFlight?(): boolean;
+  /** Queue the transaction-related CALL written but not answered (1.6; the
+   *  2.x handler queues it on close anyway). Absent means none. */
+  queueUnansweredTransactionCall?(): boolean;
   onWebSocketClosed(): void;
   flushPendingQueue(): void;
 }

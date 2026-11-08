@@ -7,7 +7,7 @@ import type {
   ReportDataType,
   VariableAttributeType,
   VariableCharacteristicsType,
-} from "@ocpp-cp-sim/ocpp/types/v201/notify-report";
+} from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
 import type { ConfigurationValue } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import { evseValueKey } from "../../../domain/charge-point/runtimeValueKeys";

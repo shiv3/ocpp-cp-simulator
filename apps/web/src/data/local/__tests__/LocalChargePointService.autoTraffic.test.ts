@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultAutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
-import { UnsupportedFeatureError } from "@ocpp-cp-sim/client/interfaces/UnsupportedFeatureError";
+import { defaultAutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import { UnsupportedFeatureError } from "@ocpp-cp-simulator/client/interfaces/UnsupportedFeatureError";
 import { LocalChargePointService } from "../LocalChargePointService";
 
 // #374: ChargePointService declares the auto-traffic methods (#300), but only

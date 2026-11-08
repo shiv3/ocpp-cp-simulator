@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isValidNotifyEventRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
-import { isValidNotifyEventRequestV21 } from "@ocpp-cp-sim/ocpp/v21/index";
+import { isValidNotifyEventRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
+import { isValidNotifyEventRequestV21 } from "@ocpp-cp-simulator/ocpp/v21/index";
 import type { ChargePoint } from "../ChargePoint";
 import { makeChargePoint } from "./chargePointFixtures";
 

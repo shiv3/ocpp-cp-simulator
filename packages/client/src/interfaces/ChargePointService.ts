@@ -1,89 +1,95 @@
-import type { VehicleCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
+import type { VehicleCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import type {
+  PowerLossOptions,
+  PowerRestoreOptions,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioExecutionMode,
   ScenarioExecutionState,
   ScenarioMode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
 import type {
   OCPPAvailability,
   OCPPStatus,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { LogEntry } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type {
   TimelineEntry,
   TimelinePage,
   TimelineQuery,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
-import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
-import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
-import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/TransportConfig";
+import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
+import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import type {
   ServerInfo,
   SimulatorConfigInput,
   WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 
 export interface ConnectorSnapshot {
   id: number;
@@ -143,6 +149,11 @@ export interface ChargePointSnapshot {
     inboundValidation?: "off" | "warn" | "enforce";
     /** #595: OCPP 1.6 ReserveNow authorizes the idTag first. */
     reservationAuthorizeIdTag?: boolean;
+    /** #618: static capability profile. */
+    capabilityProfile?: {
+      disabledActions?: readonly string[];
+      triggerMessageTargets?: readonly string[];
+    };
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -159,6 +170,8 @@ export interface ChargePointSnapshot {
     labels?: Labels;
     /** Ids of the loaded behaviors it runs; absent: every loaded behavior. */
     behaviors?: readonly string[];
+    /** Params the selection sets on behaviors (#654), by behavior id. */
+    behaviorParams?: BehaviorParamsByIdWire;
   };
 }
 
@@ -172,6 +185,9 @@ export interface CreateChargePointParams {
    */
   supervisionUrls?: readonly string[];
   urlDistribution?: UrlDistribution;
+  /** Transport settings (#609): reconnect policy and BootNotification retry
+   *  limit. Omitted fields keep the built-in behaviour. */
+  transport?: TransportConfig;
   /**
    * Resolved idTags (#299). Declared here because the facade is where the
    * previous pool feature was silently dropped: `parseCreateBody` produced the
@@ -204,6 +220,11 @@ export interface CreateChargePointParams {
   /** #595: OCPP 1.6 ReserveNow authorizes the idTag first.
    *  Omitted on an update keeps the current value. */
   reservationAuthorizeIdTag?: boolean;
+  /** #618: static capability profile (omitted on an update keeps it). */
+  capabilityProfile?: {
+    disabledActions?: readonly string[];
+    triggerMessageTargets?: readonly string[];
+  };
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;
@@ -222,7 +243,14 @@ export interface CreateChargePointParams {
   labels?: Labels;
   /** Ids of the loaded behaviors to run; absent: all (on update: keep the current). */
   behaviors?: readonly string[];
+  /** Params for the behaviors, by id (#654); JSON only. On update, omitted keeps the current ones. */
+  behaviorParams?: BehaviorParamsByIdWire;
 }
+
+/** Behavior id to the JSON object of its params. */
+export type BehaviorParamsByIdWire = Readonly<
+  Record<string, Readonly<Record<string, unknown>>>
+>;
 
 export type ChargePointEvent =
   | { type: "status"; status: OCPPStatus }
@@ -523,6 +551,25 @@ export interface ChargePointService {
     ruleId: string,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
 
+  /** #455: the station loses power (socket gone, transactions kept). */
+  powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<{ ok: true; transactions: number } | { ok: false; error: string }>;
+  /** #455: power returns; the station boots and recovers its transactions. */
+  powerRestore(
+    cpId: string,
+    options?: PowerRestoreOptions,
+  ): Promise<
+    | {
+        ok: true;
+        outageMs: number;
+        recovery: "resume" | "end" | "none";
+        transactions: number;
+      }
+    | { ok: false; error: string }
+  >;
+
   // Lifecycle
   connect(id: string): Promise<void>;
   disconnect(id: string): Promise<void>;
@@ -530,7 +577,12 @@ export interface ChargePointService {
   sendHeartbeat(id: string): Promise<void>;
   startHeartbeat(id: string, intervalSeconds: number): Promise<void>;
   stopHeartbeat(id: string): Promise<void>;
-  authorize(id: string, tagId: string): Promise<void>;
+  /** `idTokenType`: OCPP 2.x `IdToken.type`, default `ISO14443` (#599). */
+  authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void>;
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer
    *  (#348). `data`: string, or an object (JSON-encoded on 1.6). */
   sendDataTransfer(

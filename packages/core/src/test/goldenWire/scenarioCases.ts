@@ -86,6 +86,14 @@ function callPayload(
         { idTag: "LOCAL-2", idTagInfo: { status: "Accepted" } },
       ],
     },
+    "resilience-temporary-unavailable-recovery:ChangeAvailability#0": {
+      connectorId: 1,
+      type: "Inoperative",
+    },
+    "resilience-temporary-unavailable-recovery:ChangeAvailability#1": {
+      connectorId: 1,
+      type: "Operative",
+    },
     "cert16-tc052-cancel-reservation-rejected:CancelReservation": {
       reservationId: 4242,
     },
@@ -226,29 +234,48 @@ function operatorFor(templateId: string): Operator {
 }
 
 /** Per-template extra CSMS-side or EV-side steps run once the run started. */
-const SIDE_STEPS: Readonly<Record<string, (rig: Rig) => Promise<void>>> = {
-  // These three wait for the connector to reach a status; the EV side
-  // (plug-in, a local start, a fault) is what the operator does by hand.
-  "multi-status-monitor": async (rig) => {
-    await new Promise((r) => setTimeout(r, 400));
-    rig.plugIn();
-    await new Promise((r) => setTimeout(r, 400));
-    await rig.cp.startTransaction("MSM-1", 1);
-    await new Promise((r) => setTimeout(r, 400));
-    rig.cp.updateConnectorStatus(1, OCPPStatus.Faulted);
-    await new Promise((r) => setTimeout(r, 400));
-  },
-  "smart-charging": async (rig) => {
-    await new Promise((r) => setTimeout(r, 400));
-    rig.plugIn();
-    await new Promise((r) => setTimeout(r, 400));
-    await rig.cp.startTransaction("SC-1", 1);
-    await new Promise((r) => setTimeout(r, 700));
-    rig.cp.stopTransaction(1);
-  },
-};
+export const SIDE_STEPS: Readonly<Record<string, (rig: Rig) => Promise<void>>> =
+  {
+    // #444: the operator cuts the connection once the run is waiting for it.
+    "resilience-communication-loss-recovery": async (rig) => {
+      await new Promise((r) => setTimeout(r, 600));
+      rig.csms.dropConnection();
+    },
+    // #455: the power goes once a transaction runs, and comes back 300 ms later.
+    "resilience-power-loss-recovery": async (rig) => {
+      const deadline = Date.now() + 20_000;
+      while (!rig.cp.getConnector(1)?.hasRunningTransaction) {
+        if (Date.now() > deadline)
+          throw new Error("no transaction to interrupt");
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      rig.cp.powerLoss();
+      await new Promise((r) => setTimeout(r, 300));
+      rig.cp.restorePower({ transactions: "end" });
+    },
+    // These three wait for the connector to reach a status; the EV side
+    // (plug-in, a local start, a fault) is what the operator does by hand.
+    "multi-status-monitor": async (rig) => {
+      await new Promise((r) => setTimeout(r, 400));
+      rig.plugIn();
+      await new Promise((r) => setTimeout(r, 400));
+      await rig.cp.startTransaction("MSM-1", 1);
+      await new Promise((r) => setTimeout(r, 400));
+      rig.cp.updateConnectorStatus(1, OCPPStatus.Faulted);
+      await new Promise((r) => setTimeout(r, 400));
+    },
+    "smart-charging": async (rig) => {
+      await new Promise((r) => setTimeout(r, 400));
+      rig.plugIn();
+      await new Promise((r) => setTimeout(r, 400));
+      await rig.cp.startTransaction("SC-1", 1);
+      await new Promise((r) => setTimeout(r, 700));
+      rig.cp.stopTransaction(1);
+    },
+  };
 
-async function runTemplate(rig: Rig, templateId: string): Promise<void> {
+export async function runTemplate(rig: Rig, templateId: string): Promise<void> {
   const template = scenarioTemplates.find((t) => t.id === templateId);
   if (!template) throw new Error(`unknown template ${templateId}`);
   const cp = rig.cp;
@@ -329,6 +356,12 @@ async function runTemplate(rig: Rig, templateId: string): Promise<void> {
  * here (and a fixture), never a silent change of what "every template" covers.
  */
 export const PINNED_TEMPLATE_IDS: readonly string[] = [
+  "resilience-communication-loss-recovery",
+  "resilience-connector-fault-recovery",
+  "resilience-ev-disconnect-recovery",
+  "resilience-temporary-unavailable-recovery",
+  "resilience-authorization-rejected",
+  "resilience-power-loss-recovery",
   "cert16-octt-strictness-probe",
   "cert16-reservation-basic",
   "cert16-tc001-cold-boot",

@@ -13,7 +13,7 @@ import {
 import { t as translate, type MessageKey } from "../../../i18n";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /** What one charge point did: done, failed with an error, or skipped with
  *  the reason it had nothing to do. */

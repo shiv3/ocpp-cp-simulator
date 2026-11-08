@@ -1,7 +1,7 @@
 import { retargetScenarioToConnector } from "../../components/scenario/scenarioPersistence";
 import { serializeScenarioGraph } from "../../components/scenario/scenarioSerialize";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { ChargePointRun } from "./useAllActiveScenarioRuns";
 import { buildScenarioUrl, type ScenarioLibraryItem } from "./useAllScenarios";
 

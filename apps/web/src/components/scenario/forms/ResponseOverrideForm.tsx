@@ -4,7 +4,7 @@ import type { NodeFormComponentProps, NodeFormData } from "./types";
 import {
   RESPONSE_OVERRIDE_ACTIONS,
   RESPONSE_OVERRIDE_STATUSES,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 const DEFAULT_ACTION: (typeof RESPONSE_OVERRIDE_ACTIONS)[number] =
   "RemoteStartTransaction";

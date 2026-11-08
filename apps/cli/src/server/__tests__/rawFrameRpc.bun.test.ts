@@ -8,8 +8,8 @@ import { connectTestClient } from "./socketHarness";
 import {
   startMockCsms,
   type MockCsms,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
-import { RemoteChargePointService } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { RemoteChargePointService } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 import { handleJsonCommand } from "../../jsonMode";
 
 /**

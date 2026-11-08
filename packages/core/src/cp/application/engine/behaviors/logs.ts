@@ -1,10 +1,27 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
 
-/** Time the simulated 1.6 upload takes. */
-const UPLOAD_MS = 2000;
+/** The knobs of the 1.6 upload; the default is the former constant. */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      uploadMs: {
+        type: "integer",
+        minimum: 0,
+        maximum: 3_600_000,
+        title: "Upload time (ms)",
+        description: "Time between Uploading and Uploaded (OCPP 1.6 only)",
+      },
+    },
+  },
+  defaults: { uploadMs: 2000 },
+};
 
 interface GetLogRequest {
   logType?: string;
@@ -30,6 +47,7 @@ export function logsBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.logs",
+    params: PARAMS,
     onCall: {
       GetLog: {
         mode: "replace",
@@ -72,7 +90,7 @@ export function logsBehavior(cp: ChargePoint): Behavior {
               ctx.state.inFlight = true;
               try {
                 ctx.notify.logStatus("Uploading", { requestId: req.requestId });
-                await ctx.sleep(UPLOAD_MS);
+                await ctx.sleep(ctx.params.uploadMs as number);
                 if (ctx.state.run !== run) return;
                 ctx.notify.logStatus("Uploaded", { requestId: req.requestId });
               } finally {

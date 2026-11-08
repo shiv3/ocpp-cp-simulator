@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { UnsupportedFeatureError } from "@ocpp-cp-sim/client/interfaces/UnsupportedFeatureError";
+import { UnsupportedFeatureError } from "@ocpp-cp-simulator/client/interfaces/UnsupportedFeatureError";
 import { LocalChargePointService } from "../LocalChargePointService";
 
 // #471: labels (#446) belong to daemon charge points; a local one has none, so

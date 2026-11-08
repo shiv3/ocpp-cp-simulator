@@ -2,7 +2,7 @@ import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   ExtendedTriggerMessageRequestV16,
   ExtendedTriggerMessageResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { LogType } from "../../../../shared/Logger";
 import { logTriggerStatus, signedFirmwareTriggerStatus } from "./triggerStatus";
@@ -43,6 +43,14 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
       LogType.OCPP,
     );
 
+    // #618: a target the capability profile leaves out is not implemented.
+    if (
+      context.chargePoint.isTriggerTargetSupported?.(
+        payload.requestedMessage,
+      ) === false
+    ) {
+      return { status: "NotImplemented" };
+    }
     // Same rule as TriggerMessage (§5.17): no connector, no message to send.
     if (
       (payload.requestedMessage === "StatusNotification" ||

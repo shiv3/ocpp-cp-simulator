@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "../behavior/runBehavior";
 import { InboundCallGate } from "../../cp/infrastructure/transport/inbound/InboundCallGate";
 import { BehaviorRegistry } from "../../cp/application/behavior/BehaviorRegistry";
@@ -72,7 +72,8 @@ describe("work outlives its stop", () => {
       open = r;
     });
     let ctx0:
-      import("@ocpp-cp-sim/contracts/behavior").BehaviorContext | undefined;
+      | import("@ocpp-cp-simulator/contracts/behavior").BehaviorContext
+      | undefined;
     const wrapped: Behavior = {
       ...b,
       onCall: {

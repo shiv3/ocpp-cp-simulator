@@ -6,7 +6,7 @@ import Settings from "../../components/Settings";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { NetworkSimEditor } from "../components/network-sim/NetworkSimEditor";
 import VehicleProfilesCard from "../components/vehicle/VehicleProfilesCard";
-import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import type { NetworkSimLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 const SettingsPage: React.FC = () => {
   const { t: tr } = useTranslation();

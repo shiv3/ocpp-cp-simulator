@@ -53,12 +53,16 @@ import {
   resolveEffectivePhaseLimit,
 } from "./ChargingScheduleResolver";
 import {
-  effectiveChargingPowerW,
   electricalModelOf,
   resolveActivePhases,
-  resolveSocForCurve,
   withNormalizedChargingCurve,
 } from "./ChargingCurve";
+import {
+  resolveOperatingPoint,
+  vehicleTermOf,
+  type OperatingPoint,
+} from "./OperatingPoint";
+import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import {
   partitionProfiles,
   upsertProfile,
@@ -450,7 +454,13 @@ export class Connector {
         // `MeterValueBuilder` reports, instead of the curve only ever
         // affecting the *reported* number while the register kept climbing
         // on its original trajectory.
-        getScheduleLimitWatts: () => this.effectiveMeterCapWatts(),
+        getScheduleLimitWatts: () => {
+          // The register tick is a tick owner: it announces a schedule
+          // crossing, the resolve itself is pure (#327).
+          const point = this.operatingPoint();
+          this.announceScheduleCrossing(point.scheduleLimitW);
+          return point.accumulationCapW;
+        },
       },
       this.logger,
       this.clock,
@@ -653,15 +663,6 @@ export class Connector {
   }
 
   /**
-   * The schedule's watt cap now, side-effect-free like
-   * {@link activePhaseCount}: reading it announces no crossing. For a reader
-   * that is not a sampling path, such as the 2.x `EVSE.Power` value (#538).
-   */
-  scheduleLimitWattsNow(): number {
-    return this.resolveScheduleConstraints(this.nowDate()).watts;
-  }
-
-  /**
    * Snapshot of the last resolved "paused" state, used to detect crossings of
    * the limit=0 boundary across schedule periods. `null` means nothing has
    * been announced yet.
@@ -676,41 +677,54 @@ export class Connector {
   private lastSchedulePaused: boolean | null = null;
 
   /**
-   * The cap the meter scheduler should accumulate energy against: the
-   * charging-profile limit ({@link currentScheduleLimitWatts}), additionally
-   * narrowed by the battery-acceptance curve when one is configured (#301).
+   * Every physical quantity for this instant, resolved once (#327): the
+   * schedule limit and phase count from one timestamp, then acceptance,
+   * offer, currents, voltage, power factor and SoC from those. The energy
+   * register ({@link MeterValueScheduler}) and the MeterValues builder both
+   * read this record and never re-derive, so they cannot disagree and a new
+   * limit term has exactly one place to go: {@link resolveOperatingPoint}.
    *
-   * Deliberately a no-op when there is no curve, or `maxChargingPowerKw` is
-   * unconfigured — a fraction of an unknown ceiling isn't a wattage, and a
-   * scenario with no curve must accumulate exactly as it did before this
-   * field existed (its increment/bezier trajectory is its own contract, not
-   * bounded by `maxChargingPowerKw`). This intentionally does not use
-   * {@link effectiveChargingPowerW}'s "0 when both ceilings are infinite"
-   * fallback for that no-curve case — that fallback is fine for a *reported*
-   * sample but would freeze the register for any curve-less connector with
-   * no active profile.
+   * Pure, and the only resolver path: any reader (the console, behaviors'
+   * snapshot, `EVSE.Power` #538) calls this and has no bookkeeping. A schedule
+   * crossing is announced by the tick owners instead, with
+   * {@link announceScheduleCrossingNow}: the register tick and the code that
+   * sends a sample set.
    */
-  private effectiveMeterCapWatts(): number {
-    const scheduleW = this.currentScheduleLimitWatts();
-    // Resolved first so the schedule latch bookkeeping still runs (#301).
-    if (this.energyOfferSuspendedValue) return 0;
-    if (this.invalidIdAllowanceUsedUp()) return 0;
-    const curve = this._evSettings.chargingCurve;
-    const maxKw = this._evSettings.maxChargingPowerKw ?? 0;
-    const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
-    if (!curve || curve.length === 0 || !Number.isFinite(evMaxW)) {
-      return scheduleW;
-    }
-    return effectiveChargingPowerW({
-      evMaxW,
-      curve,
-      socPercent: resolveSocForCurve(
-        this.soc,
-        this.transaction?.initialSoc,
-        this._evSettings.initialSoc,
-      ),
-      scheduleLimitWatts: scheduleW,
+  operatingPoint(): OperatingPoint {
+    const now = this.nowDate();
+    const { watts, activePhases } = this.resolveScheduleConstraints(now);
+    return resolveOperatingPoint({
+      at: now.getTime(),
+      charging: this.status === OCPPStatus.Charging,
+      soc: this.soc,
+      schedule: { scheduleLimitW: watts, activePhases },
+      vehicle: vehicleTermOf(this._evSettings),
+      session: { initialSoc: this.sessionIntent().initialSoc },
+      fault: {
+        energyOfferSuspended: this.energyOfferSuspendedValue,
+        // Resolved after the schedule, as before (#301); E05.FR.02.
+        energyHeld: this.invalidIdAllowanceUsedUp(),
+      },
     });
+  }
+
+  /**
+   * Announce a schedule crossing (`scheduleLimitChange`) if the paused/active
+   * boundary moved since the last announcement. For a tick owner to call once
+   * before it samples; edge-triggered, so an extra call at an unchanged
+   * boundary emits nothing.
+   */
+  announceScheduleCrossingNow(): void {
+    this.announceScheduleCrossing(this.operatingPoint().scheduleLimitW);
+  }
+
+  /** This session's opening and target SoC: see {@link resolveSessionIntent}. */
+  sessionIntent(): SessionIntent {
+    return resolveSessionIntent(
+      this.transaction,
+      this._evSettings,
+      this.autoConfig.stopAtTargetSoc,
+    );
   }
 
   private socFromMeterValue(meterValueWh: number): number | null {
@@ -721,8 +735,7 @@ export class Connector {
         : this._evSettings.batteryCapacityKwh;
     if (capacity <= 0) return null;
 
-    const initial =
-      this.transaction?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const initial = this.sessionIntent().initialSoc ?? 0;
     const meterStart = this.transaction?.meterStart ?? 0;
     const deliveredKWh = Math.max(0, meterValueWh - meterStart) / 1000;
     const derived = initial + (deliveredKWh / capacity) * 100;
@@ -1198,7 +1211,7 @@ export class Connector {
     const txStart = this.transaction?.startTime ?? null;
     const isValid = (profile: ActiveChargingProfile) => {
       if (profile.validFrom && new Date(profile.validFrom) > now) return false;
-      if (profile.validTo && new Date(profile.validTo) < now) return false;
+      if (profile.validTo && new Date(profile.validTo) <= now) return false;
       // A schedule past its `duration` (or not yet at its `startSchedule`)
       // yields to the next lower stackLevel (1.6 errata 3.43).
       return isScheduleInEffect(profile, txStart, now);
@@ -1447,7 +1460,10 @@ export class Connector {
       }
       return;
     }
-    const opening = transaction.initialSoc ?? this._evSettings.initialSoc;
+    const opening = resolveSessionIntent(
+      transaction,
+      this._evSettings,
+    ).initialSoc;
     if (opening === undefined) {
       // No opening value anywhere, and the SoC on hand belongs to a session
       // that has ended — so there is nothing to replace it *with*, and keeping
@@ -1618,14 +1634,15 @@ export class Connector {
     if (!this.meterScheduler.isActive()) return;
     const current = this.effectiveSocPercent();
     if (current === null) return;
-    if (current < this._evSettings.targetSoc) return;
+    const targetSoc = this.sessionIntent().targetSoc;
+    if (targetSoc === undefined || current < targetSoc) return;
 
     // We've reached or exceeded the target SoC. A coarse curve / increment tick
     // can land WELL past the target in a single step (e.g. 95% when the target
     // is 80%), and we only stop *after* the value was applied — so clamp the
     // meter back to the energy for exactly the target SoC and re-sync before
     // stopping. Otherwise the session ends at the overshot value (#105).
-    const targetMeterWh = this.meterWhForSoc(this._evSettings.targetSoc);
+    const targetMeterWh = this.meterWhForSoc(targetSoc);
     if (targetMeterWh !== null && this.meterValueWh > targetMeterWh) {
       this.meterValueWh = targetMeterWh;
       this.eventsEmitter.emit("meterValueChange", {
@@ -1659,8 +1676,7 @@ export class Connector {
         ? transactionCapacity
         : this._evSettings.batteryCapacityKwh;
     if (capacity <= 0) return null;
-    const initial =
-      this.transaction?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const initial = this.sessionIntent().initialSoc ?? 0;
     const meterStart = this.transaction?.meterStart ?? 0;
     const deliveredKWh = ((soc - initial) / 100) * capacity;
     if (deliveredKWh <= 0) return meterStart;

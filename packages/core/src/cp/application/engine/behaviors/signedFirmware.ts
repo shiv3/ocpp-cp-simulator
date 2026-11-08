@@ -1,10 +1,27 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { checkFirmwareSigningCertificate } from "../../../domain/security/signingCertificate";
 import { LogType } from "../../../shared/Logger";
 
-/** Time between two statuses of the simulated update. */
-const STEP_MS = 2000;
+/** The knobs of the simulated update; the defaults are the former constants. */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      stepMs: {
+        type: "integer",
+        minimum: 0,
+        maximum: 3_600_000,
+        title: "Step (ms)",
+        description: "Time between two statuses of the update",
+      },
+    },
+  },
+  defaults: { stepMs: 2000 },
+};
 
 interface SignedUpdateFirmwareRequest {
   requestId: number;
@@ -44,6 +61,7 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.signedFirmware",
+    params: PARAMS,
     onCall: {
       SignedUpdateFirmware: {
         mode: "replace",
@@ -156,7 +174,7 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
                       .sendSecurityEventNotification("FirmwareUpdated")
                       .catch(() => undefined);
                   }
-                  await ctx.sleep(STEP_MS);
+                  await ctx.sleep(ctx.params.stepMs as number);
                 }
               } finally {
                 if (ctx.state.run === run) ctx.state.inFlight = false;

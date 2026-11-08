@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
-import { subscribeResultSchema } from "@ocpp-cp-sim/contracts/index";
+import { subscribeResultSchema } from "@ocpp-cp-simulator/contracts/index";
 import {
   connectTestClient,
   startTestServer,

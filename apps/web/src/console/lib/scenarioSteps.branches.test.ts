@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { forkScenario } from "../test/scenarioFixtures";
 import {
   addParallelBranch,

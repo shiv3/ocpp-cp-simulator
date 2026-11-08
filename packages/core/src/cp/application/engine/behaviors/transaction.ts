@@ -1,4 +1,4 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type {
   ChargePoint,
   StartTransactionOptions,
@@ -8,6 +8,7 @@ import type {
 import type { Connector } from "../../../domain/connector/Connector";
 import type {
   StopTransactionReason,
+  IdTokenTypeName,
   Transaction,
 } from "../../../domain/connector/Transaction";
 import {
@@ -18,6 +19,7 @@ import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
 import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
 import { reservationAdmits } from "../../../domain/reservation/Reservation";
+import { decideRemoteStart } from "./remoteStartValidation";
 
 /**
  * What the transaction defaults need from the station beyond its public API.
@@ -82,7 +84,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
-          remoteStart(cp, resolved, idTag, undefined);
+          void remoteStart(cp, resolved, idTag, undefined);
           return { response: { status: "Accepted" } };
         },
       },
@@ -119,21 +121,20 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const req = request as {
             evseId?: number;
             remoteStartId: number;
-            idToken: { idToken: string };
+            idToken: { idToken: string; type?: string };
           };
-          const connectorId = req.evseId ?? 1;
-          const connector = cp.getConnector(connectorId);
-          if (!connector || connector.availability !== "Operative") {
-            return { response: { status: "Rejected" } };
-          }
+          const decision = decideRemoteStart(cp, req);
+          if (!decision.ok) return { response: decision.rejection };
+          const connectorId = decision.connectorId;
           return {
             response: { status: "Accepted" },
             after: async () => {
-              remoteStart(
+              await remoteStart(
                 cp,
                 connectorId,
                 req.idToken.idToken,
                 req.remoteStartId,
+                requestIdTokenType(req.idToken.type),
               );
             },
           };
@@ -195,29 +196,63 @@ function remoteStartable(
 }
 
 /**
- * The start of a remote start on either version (1.6 §5.11, 2.x F01):
- * `AuthorizeRemoteTxRequests` asks for an Authorize.req first, then the
- * scenario waiting on the connector gets the request or the default starts
- * the transaction with `triggerReason: "RemoteStart"` (so the local
+ * The start of a remote start on either version (1.6 §5.11, 2.x F01).
+ *
+ * 1.6: `AuthorizeRemoteTxRequests` asks for an Authorize.req alongside the
+ * start. 2.x (F01.FR.01/02): with `AuthorizeRemoteStart` true and an
+ * `idToken.type` other than `Central` / `NoAuthorization` the station behaves
+ * as for a local action and starts only after the authorization (local list,
+ * cache or Authorize.req) is `Accepted`; otherwise it starts without checking
+ * and sends no Authorize. The RequestStartTransaction answer has gone out
+ * before this runs. A scenario waiting on the connector gets the request
+ * (with the Authorize sent alongside, as before); otherwise the default
+ * starts the transaction with `triggerReason: "RemoteStart"` (so the local
  * authorize gate does not authorize twice).
  */
-function remoteStart(
+async function remoteStart(
   cp: ChargePoint,
   connectorId: number,
   idTag: string,
   remoteStartId: number | undefined,
-): void {
-  if (cp.configuration.authorizeRemoteTxRequests()) {
-    if (!isOcpp2Version(cp.ocppVersion)) {
+  idTokenType?: IdTokenTypeName,
+): Promise<void> {
+  const ocpp2 = isOcpp2Version(cp.ocppVersion);
+  const centrallyAuthorized =
+    idTokenType === "Central" || idTokenType === "NoAuthorization";
+  if (cp.configuration.authorizeRemoteTxRequests() && !centrallyAuthorized) {
+    if (!ocpp2) {
       cp.logger.info(
         `AuthorizeRemoteTxRequests=true: sending Authorize.req for ${idTag}`,
         LogType.OCPP,
       );
     }
-    cp.authorize(idTag);
+    if (ocpp2 && !cp.isScenarioHandled(connectorId)) {
+      const status = await cp.authorizeAndWait(idTag, undefined, idTokenType, {
+        failClosed: true,
+      });
+      if (status !== "Accepted") {
+        cp.logger.warn(
+          `Authorize.conf ${status} for ${idTag}; not starting the remote transaction on connector ${connectorId} (F01.FR.01)`,
+          LogType.TRANSACTION,
+        );
+        cp.events.emit("authorizeDenied", {
+          connectorId,
+          tagId: idTag,
+          status,
+        });
+        return;
+      }
+    } else {
+      cp.authorize(idTag, idTokenType);
+    }
   }
   if (cp.isScenarioHandled(connectorId)) {
-    cp.notifyRemoteStartReceived(connectorId, idTag, remoteStartId);
+    cp.notifyRemoteStartReceived(
+      connectorId,
+      idTag,
+      remoteStartId,
+      idTokenType,
+    );
     return;
   }
   // Note it so a scenario that arms on this connector shortly after can tell
@@ -226,7 +261,21 @@ function remoteStart(
   void cp.startTransaction(idTag, connectorId, undefined, undefined, {
     triggerReason: "RemoteStart",
     ...(remoteStartId !== undefined ? { remoteStartId } : {}),
+    ...(idTokenType !== undefined ? { idTokenType } : {}),
   });
+}
+
+/**
+ * The `idToken.type` of a RequestStartTransaction (#599, F01.FR.04: the
+ * Charging Station SHALL use the request's IdToken in the TransactionEvent).
+ * The CALL schema already holds it to `IdTokenEnumType` on 2.0.1; on 2.1 it is
+ * a free string of at most 20 characters (IdTokenEnumStringType is only the
+ * list of standard values), so it is carried as sent.
+ */
+function requestIdTokenType(
+  type: string | undefined,
+): IdTokenTypeName | undefined {
+  return type ? (type as IdTokenTypeName) : undefined;
 }
 
 const nowDate = (cp: ChargePoint): Date => new Date(cp.clock.now());
@@ -293,10 +342,17 @@ export async function startTransaction(
   // a RemoteStartTrigger node: both already went through CSMS-driven
   // authorization, so they're excluded here.
   const isLocalStart = options.triggerReason !== "RemoteStart";
+  // NoAuthorization has no token to authorize (IdTokenEnumType, #599).
   const authorizedBeforeStart =
-    isLocalStart && cp.configuration.authorizeBeforeLocalStart();
+    isLocalStart &&
+    options.idTokenType !== "NoAuthorization" &&
+    cp.configuration.authorizeBeforeLocalStart();
   if (authorizedBeforeStart) {
-    const status = await cp.authorizeAndWait(tagId);
+    const status = await cp.authorizeAndWait(
+      tagId,
+      undefined,
+      options.idTokenType,
+    );
     // Any non-"Accepted" status denies the local start. Deliberately NOT an
     // allowlist of denial strings: 2.x has more denial values than 1.6.
     if (status !== "Accepted") {
@@ -367,6 +423,9 @@ export async function startTransaction(
     meterSent: false,
     reservationId,
     remoteStartId: options.remoteStartId,
+    ...(options.idTokenType !== undefined
+      ? { idTokenType: options.idTokenType }
+      : {}),
     startTriggerReason: options.triggerReason,
     startChargingState: options.chargingState,
     batteryCapacityKwh,
@@ -444,7 +503,7 @@ export function stopTransaction(
 
   connector.stopAutoMeterValue();
   connector.patchTransaction({
-    stopTime: nowDate(cp),
+    stopTime: options.stoppedAt ?? nowDate(cp),
     meterStop: connector.meterValue,
     ...(reason ? { stopReason: reason } : {}),
     ...(options.triggerReason

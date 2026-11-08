@@ -34,10 +34,10 @@ import {
   type StatusTriggerNodeData,
   type TransactionNodeData,
   type UnlockOutcomeNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { MessageKey } from "../../../i18n";
-import type { CurvePoint } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type { CurvePoint } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import CancelReservationForm from "./CancelReservationForm";
 import CertQuirksForm from "./CertQuirksForm";
 import ConfigSetForm from "./ConfigSetForm";
@@ -720,6 +720,10 @@ function useBehaviorNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
     behaviorId: stringValue(
       (nodeData as Partial<UseBehaviorNodeData>).behaviorId,
     ),
+    ...compactDefined({
+      mode: (nodeData as Partial<UseBehaviorNodeData>).mode,
+      params: (nodeData as Partial<UseBehaviorNodeData>).params,
+    }),
   };
 }
 
@@ -729,6 +733,18 @@ function useBehaviorFormToNodeData(
   return {
     ...baseFromForm(formData),
     behaviorId: stringValue(formData.behaviorId),
+    // "use" is the default: only "disable" is written, and a disabled node
+    // carries no params.
+    ...(formData.mode === "disable"
+      ? { mode: "disable" as const }
+      : compactDefined({
+          params:
+            typeof formData.params === "object" &&
+            formData.params !== null &&
+            !Array.isArray(formData.params)
+              ? (formData.params as Record<string, unknown>)
+              : undefined,
+        })),
   };
 }
 

@@ -9,7 +9,7 @@ import {
   isValidInstallCertificateResponseV21,
   isValidSecurityEventNotificationRequestV201,
   isValidSecurityEventNotificationRequestV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import type { Database } from "../../../../domain/persistence/Database";
 import { computeCertificateHashData } from "../../../../domain/security/certificateHash";
@@ -414,6 +414,7 @@ describe.each(VERSIONS)(
           ...context(store, 10, maxChainSize).ctx,
           certificateSigning: {
             requestSignature: vi.fn(),
+            isKnownSignRequestId: () => true,
             requestCombinedSignature: vi.fn(),
             certificateStored,
             certificateInstalled,

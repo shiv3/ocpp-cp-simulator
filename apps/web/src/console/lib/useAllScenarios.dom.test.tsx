@@ -6,8 +6,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildScenarioUrl, useAllScenarios } from "./useAllScenarios";
 import { createFakeChargePointService } from "../test/harness";
 import { DataContext } from "../../data/providers/DataProvider";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {

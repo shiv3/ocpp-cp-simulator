@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   ScenarioNodeType,
   type ScenarioNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   NODE_FORM_REGISTRY,
   meterValueFormToNodeData,
@@ -199,6 +199,40 @@ describe("NODE_FORM_REGISTRY", () => {
         formData,
       ),
     );
+  });
+
+  it("round-trips useBehavior params and mode (#654)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.USE_BEHAVIOR];
+    expectFormRoundTrip(ScenarioNodeType.USE_BEHAVIOR, {
+      label: "Tune",
+      behaviorId: "default.firmware",
+      params: { stepMs: 500, failAt: "DownloadFailed" },
+    });
+    expectFormRoundTrip(ScenarioNodeType.USE_BEHAVIOR, {
+      label: "Off",
+      behaviorId: "default.firmware",
+      mode: "disable",
+    });
+    // "use" is the default and stays out of the file; a disabled node has no params.
+    expect(
+      entry.formToNodeData({ behaviorId: "x", mode: "use" } as NodeFormData),
+    ).not.toHaveProperty("mode");
+    expect(
+      entry.formToNodeData({
+        behaviorId: "x",
+        mode: "disable",
+        params: { a: 1 },
+      } as NodeFormData),
+    ).not.toHaveProperty("params");
+    // A node saved before 1.6 is unchanged.
+    expect(
+      entry.formToNodeData(
+        entry.nodeDataToForm({
+          label: "u",
+          behaviorId: "x",
+        } as ScenarioNodeData),
+      ),
+    ).toEqual({ label: "u", behaviorId: "x" });
   });
 
   describe("csmsCallTrigger behavior (#566)", () => {

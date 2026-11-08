@@ -7,11 +7,11 @@ import {
   flush,
   renderConsole,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointService,
   ChargePointSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 function cpSnapshot(
   overrides: Partial<ChargePointSnapshot> = {},

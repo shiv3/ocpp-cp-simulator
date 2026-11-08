@@ -1,4 +1,4 @@
-import type { CpBulkResult } from "@ocpp-cp-sim/contracts/index";
+import type { CpBulkResult } from "@ocpp-cp-simulator/contracts/index";
 
 export interface CpBatchOutcome<T> {
   readonly matched: string[];

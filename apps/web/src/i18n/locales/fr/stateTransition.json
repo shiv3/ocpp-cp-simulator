@@ -1,0 +1,14 @@
+{
+  "stateTransition.node.current": "● Actuel",
+  "stateTransition.timeline.empty": "Aucun historique de transitions d’états pour l’instant",
+  "stateTransition.timeline.previous": "Précédent",
+  "stateTransition.timeline.pause": "Pause",
+  "stateTransition.timeline.play": "Lecture",
+  "stateTransition.timeline.next": "Suivant",
+  "stateTransition.timeline.loop": "Lecture en boucle",
+  "stateTransition.timeline.history": "📋 Historique des transitions",
+  "stateTransition.viewer.title": "Diagramme de transitions d’états",
+  "stateTransition.viewer.legend.current": "État actuel",
+  "stateTransition.viewer.legend.suspended": "Suspendu",
+  "stateTransition.viewer.legend.inoperative": "Hors service"
+}

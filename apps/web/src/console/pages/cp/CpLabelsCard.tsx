@@ -8,7 +8,7 @@ import {
   labelRowsFromMap,
   type LabelRow,
 } from "@/components/chargePointConfig";
-import type { Labels } from "@ocpp-cp-sim/contracts/index";
+import type { Labels } from "@ocpp-cp-simulator/contracts/index";
 import { describeError } from "./connectorActions";
 
 export interface CpLabelsCardProps {

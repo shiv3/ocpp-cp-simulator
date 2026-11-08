@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React from "react";
 import { cn } from "@/lib/utils";
 import { appBuildLabel } from "@/lib/appBuildLabel";
-import { formatVersionLabel } from "@ocpp-cp-sim/contracts/buildVersion";
+import { formatVersionLabel } from "@ocpp-cp-simulator/contracts/buildVersion";
 
 const REPO_URL = "https://github.com/shiv3/ocpp-cp-simulator";
 

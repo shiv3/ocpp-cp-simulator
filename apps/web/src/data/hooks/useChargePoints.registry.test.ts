@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { RemoteRegistrySubscriptionEvent } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { RemoteRegistrySubscriptionEvent } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 interface HookHarness {
   readonly state: any[];

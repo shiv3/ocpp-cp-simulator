@@ -9,15 +9,15 @@ import {
   ScenarioNodeType,
   type DelayNodeData,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   createFakeChargePointService,
   pushEvent,
   renderConsole,
 } from "../../../test/harness";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import multiStatusMonitor from "@ocpp-cp-sim/core/utils/scenarios/multi-status-monitor.json";
-import statusTriggeredActions from "@ocpp-cp-sim/core/utils/scenarios/status-triggered-actions.json";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import multiStatusMonitor from "@ocpp-cp-simulator/core/utils/scenarios/multi-status-monitor.json";
+import statusTriggeredActions from "@ocpp-cp-simulator/core/utils/scenarios/status-triggered-actions.json";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {

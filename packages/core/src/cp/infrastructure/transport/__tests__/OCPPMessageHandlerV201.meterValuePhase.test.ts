@@ -3,7 +3,8 @@ import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import type { MeterValuesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { MeterValuesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
 
 /**
  * Transport-boundary regression for #301 finding 1: `MeterValueBuilder`
@@ -58,7 +59,10 @@ function threePhaseConnectorStub(): unknown {
     // Three phases in use: no profile restricts them (#301).
     activePhaseCount: () => 3,
     // One resolve, one instant (#301).
-    scheduleConstraints: () => ({ watts: Infinity, activePhases: 3 }),
+    announceScheduleCrossingNow() {},
+    operatingPoint() {
+      return stubOperatingPoint(this, Infinity, 3);
+    },
   };
 }
 
@@ -72,6 +76,7 @@ function createMockChargePoint(connector: unknown): ChargePoint {
       meterValuesSampledData: vi.fn(() => ["Current.Import"]),
       // #529: a written TransactionEvent arms its MessageTimeout.
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
     },
   } as unknown as ChargePoint;
 }

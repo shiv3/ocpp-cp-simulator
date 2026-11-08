@@ -5,8 +5,8 @@ import type { Socket } from "socket.io-client";
 import {
   startMockCsms,
   type MockCsms,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
-import { tcpPort } from "@ocpp-cp-sim/core/test/bunServe";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 import {
   connectTestClient,

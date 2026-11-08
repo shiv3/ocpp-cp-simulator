@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SimulatorConfigInput } from "@ocpp-cp-sim/contracts/index";
+import type { SimulatorConfigInput } from "@ocpp-cp-simulator/contracts/index";
 import { mergeWriteOnlyConfigSecrets } from "./configPort";
 
 function input(

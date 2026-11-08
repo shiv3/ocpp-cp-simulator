@@ -22,7 +22,7 @@ import type {
   StatusNotificationResponseV16,
   StopTransactionRequestV16,
   StopTransactionResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import {
   type OcppCallOutcome,
@@ -918,6 +918,9 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
+    // The sender is the tick owner: announce a schedule crossing after the
+    // read, so this sample describes the state before the status flip (#327).
+    connector.announceScheduleCrossingNow();
     const payload = this._wireProfile.toMeterValuesRequest(
       connectorId,
       transactionId,

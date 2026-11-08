@@ -77,7 +77,7 @@ describe("package boundaries of the real tree (#578)", () => {
     expect([...snap.manifests!.keys()].sort()).toEqual(
       [...PACKAGE_NAMES].sort(),
     );
-    expect(snap.manifests!.get("core")!.name).toBe("@ocpp-cp-sim/core");
+    expect(snap.manifests!.get("core")!.name).toBe("@ocpp-cp-simulator/core");
   });
 });
 
@@ -86,7 +86,7 @@ describe("package boundaries on synthetic input", () => {
     const r = checkBoundaries(
       snapshot({
         "packages/contracts/src/a.ts":
-          'import { x } from "@ocpp-cp-sim/core/cp/b";\nexport const y = x;',
+          'import { x } from "@ocpp-cp-simulator/core/cp/b";\nexport const y = x;',
         "packages/core/src/cp/b.ts": "export const x = 1;",
       }),
     );
@@ -313,9 +313,9 @@ describe("import cycles (#570)", () => {
     const contracts = "packages/contracts/src/x.ts";
     const r = checkBoundaries(
       snapshot({
-        [A]: 'import { x } from "@ocpp-cp-sim/contracts/x";\nexport const a = x;',
+        [A]: 'import { x } from "@ocpp-cp-simulator/contracts/x";\nexport const a = x;',
         [contracts]:
-          'import { a } from "@ocpp-cp-sim/core/cp/a";\nexport const x = a;',
+          'import { a } from "@ocpp-cp-simulator/core/cp/a";\nexport const x = a;',
       }),
     );
     expect(r.cycles).toEqual([[contracts, A]]);
@@ -381,33 +381,36 @@ describe("workspace package specifiers", () => {
     expect(resolveExport({ "./a": "./a.ts" }, "./b")).toBeNull();
   });
 
-  it("resolves @ocpp-cp-sim/<pkg>/<path> to a file, or reports it unresolved", () => {
+  it("resolves @ocpp-cp-simulator/<pkg>/<path> to a file, or reports it unresolved", () => {
     const manifests = new Map<string, PackageManifest>([
-      ["@ocpp-cp-sim/core", { dir: "packages/core", exports: coreExports }],
+      [
+        "@ocpp-cp-simulator/core",
+        { dir: "packages/core", exports: coreExports },
+      ],
     ]);
     const at = (spec: string) =>
       resolveSpecifier("apps/cli/src/a.ts", spec, files, {}, manifests);
-    expect(at("@ocpp-cp-sim/core/cp/b")).toEqual({
+    expect(at("@ocpp-cp-simulator/core/cp/b")).toEqual({
       path: "packages/core/src/cp/b.ts",
       viaPackage: true,
     });
-    expect(at("@ocpp-cp-sim/core/schema/scenario.schema.json")).toEqual({
+    expect(at("@ocpp-cp-simulator/core/schema/scenario.schema.json")).toEqual({
       path: "packages/core/schema/scenario.schema.json",
       viaPackage: true,
     });
     // a directory import has to say /index: the pattern is a file pattern
-    expect(at("@ocpp-cp-sim/core/cp")).toEqual({
-      unresolved: "@ocpp-cp-sim/core/cp",
+    expect(at("@ocpp-cp-simulator/core/cp")).toEqual({
+      unresolved: "@ocpp-cp-simulator/core/cp",
     });
-    expect(at("@ocpp-cp-sim/core/cp/index")).toEqual({
+    expect(at("@ocpp-cp-simulator/core/cp/index")).toEqual({
       path: "packages/core/src/cp/index.ts",
       viaPackage: true,
     });
-    expect(at("@ocpp-cp-sim/core/cp/missing")).toEqual({
-      unresolved: "@ocpp-cp-sim/core/cp/missing",
+    expect(at("@ocpp-cp-simulator/core/cp/missing")).toEqual({
+      unresolved: "@ocpp-cp-simulator/core/cp/missing",
     });
-    expect(at("@ocpp-cp-sim/nope/x")).toEqual({
-      unresolved: "@ocpp-cp-sim/nope/x",
+    expect(at("@ocpp-cp-simulator/nope/x")).toEqual({
+      unresolved: "@ocpp-cp-simulator/nope/x",
     });
     expect(at("zod")).toBeNull();
   });
@@ -417,7 +420,8 @@ describe("workspace package specifiers", () => {
       snapshot({
         "apps/cli/src/a.ts":
           'import { x } from "../../../packages/core/src/cp/b";',
-        "apps/cli/src/c.ts": 'import { x } from "@ocpp-cp-sim/core/cp/b";',
+        "apps/cli/src/c.ts":
+          'import { x } from "@ocpp-cp-simulator/core/cp/b";',
         "packages/core/src/cp/b.ts": "export const x = 1;",
       }),
     );
@@ -433,7 +437,7 @@ describe("package manifests", () => {
     extra: Partial<PackageManifest> = {},
   ): PackageManifest => ({
     dir: pkg,
-    name: `@ocpp-cp-sim/${pkg.split("/")[1]}`,
+    name: `@ocpp-cp-simulator/${pkg.split("/")[1]}`,
     private: true,
     exports: pkg.startsWith("packages/") ? { "./*": "./src/*.ts" } : undefined,
     ...extra,
@@ -446,7 +450,7 @@ describe("package manifests", () => {
       ]),
     );
   const sources = {
-    "apps/cli/src/a.ts": 'import { x } from "@ocpp-cp-sim/core/cp/b";',
+    "apps/cli/src/a.ts": 'import { x } from "@ocpp-cp-simulator/core/cp/b";',
     "packages/core/src/cp/b.ts": "export const x = 1;",
   };
   const run = (manifests: ReturnType<typeof all>, rootManifestText = "{}") =>
@@ -457,7 +461,9 @@ describe("package manifests", () => {
     expect(
       run(
         all({
-          "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "workspace:*" } },
+          "apps/cli": {
+            dependencies: { "@ocpp-cp-simulator/core": "workspace:*" },
+          },
         }),
       ),
     ).toEqual([]);
@@ -465,42 +471,44 @@ describe("package manifests", () => {
 
   it("reports a missing, an unused and a wrongly ranged dependency", () => {
     expect(run(all())).toEqual([
-      'apps/cli/package.json: 1 import(s) of @ocpp-cp-sim/core but it is not in "dependencies"',
+      'apps/cli/package.json: 1 import(s) of @ocpp-cp-simulator/core but it is not in "dependencies"',
     ]);
     expect(
       run(
         all({
           "apps/cli": {
             dependencies: {
-              "@ocpp-cp-sim/core": "workspace:*",
-              "@ocpp-cp-sim/trace": "workspace:*",
+              "@ocpp-cp-simulator/core": "workspace:*",
+              "@ocpp-cp-simulator/trace": "workspace:*",
             },
           },
         }),
       ),
     ).toEqual([
-      "apps/cli/package.json: declares @ocpp-cp-sim/trace but nothing imports it",
+      "apps/cli/package.json: declares @ocpp-cp-simulator/trace but nothing imports it",
     ]);
     expect(
       run(
         all({
-          "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "^1.0.0" } },
+          "apps/cli": { dependencies: { "@ocpp-cp-simulator/core": "^1.0.0" } },
         }),
       ),
     ).toEqual([
-      'apps/cli/package.json: @ocpp-cp-sim/core must be "workspace:*", not "^1.0.0"',
+      'apps/cli/package.json: @ocpp-cp-simulator/core must be "workspace:*", not "^1.0.0"',
     ]);
   });
 
   it("reports a wrong name, a public package, a missing exports map and a missing manifest", () => {
     const m = all({
-      "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "workspace:*" } },
+      "apps/cli": {
+        dependencies: { "@ocpp-cp-simulator/core": "workspace:*" },
+      },
       trace: { name: "trace", private: false, exports: undefined },
     });
     m.delete("ocpp");
     expect(run(m)).toEqual([
       "packages/ocpp/package.json is missing",
-      'packages/trace/package.json: name is "trace", expected "@ocpp-cp-sim/trace"',
+      'packages/trace/package.json: name is "trace", expected "@ocpp-cp-simulator/trace"',
       'packages/trace/package.json: "private" must be true',
       'packages/trace/package.json: a package needs an "exports" map',
     ]);
@@ -510,7 +518,7 @@ describe("package manifests", () => {
     const r = checkBoundaries({
       ...snapshot({
         "packages/contracts/src/a.ts":
-          'import { x } from "@ocpp-cp-sim/core/cp/b";',
+          'import { x } from "@ocpp-cp-simulator/core/cp/b";',
         "packages/core/src/cp/b.ts": "export const x = 1;",
       }),
       manifests: all(),
@@ -524,9 +532,11 @@ describe("package manifests", () => {
     expect(
       run(
         all({
-          "apps/cli": { dependencies: { "@ocpp-cp-sim/core": "workspace:*" } },
+          "apps/cli": {
+            dependencies: { "@ocpp-cp-simulator/core": "workspace:*" },
+          },
         }),
-        '{ "dependencies": { "@ocpp-cp-sim/core": "workspace:*" } }',
+        '{ "dependencies": { "@ocpp-cp-simulator/core": "workspace:*" } }',
       ),
     ).toEqual([
       'package.json: the published root package must not use any "workspace:" dependency',

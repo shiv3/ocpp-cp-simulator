@@ -1,4 +1,4 @@
-import type { Blueprint } from "@ocpp-cp-sim/contracts/index";
+import type { Blueprint } from "@ocpp-cp-simulator/contracts/index";
 
 /**
  * Read-only hardware profiles, returned by `blueprint.list` alongside stored

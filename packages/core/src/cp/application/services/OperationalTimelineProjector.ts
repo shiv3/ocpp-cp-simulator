@@ -90,6 +90,16 @@ export class OperationalTimelineProjector {
         data: { attempt, delayMs },
       });
     });
+    on("gaveUp", ({ target, attempts }) => {
+      this.timeline.record({
+        kind: "gave_up",
+        summary:
+          target === "reconnect"
+            ? `Gave up reconnecting after ${attempts} attempt${attempts === 1 ? "" : "s"}`
+            : `Gave up BootNotification retries after ${attempts} retr${attempts === 1 ? "y" : "ies"}`,
+        data: { target, attempts },
+      });
+    });
     on("bootNotificationResult", ({ status, interval }) => {
       if (this.incident?.link === "up" && status === "Accepted") {
         this.incident.link = "booted";
@@ -98,6 +108,23 @@ export class OperationalTimelineProjector {
         kind: "boot_notification",
         summary: `BootNotification ${status}`,
         data: { status, interval },
+      });
+      this.checkRecovery();
+      if (this.incident?.link === "booted" && this.settleTimer === null) {
+        this.settleTimer = this.clock.setTimeout(() => {
+          this.settleTimer = null;
+          this.closeIncident(this.unrestoredConnectors().length === 0);
+        }, RECOVERY_SETTLE_MS);
+      }
+    });
+    on("reconnectResumed", ({ offlineMs, reportedAll }) => {
+      // No BootNotification on a pure reconnect (#702): the resumed link is
+      // the booted state.
+      if (this.incident?.link === "up") this.incident.link = "booted";
+      this.timeline.record({
+        kind: "reconnected_without_boot",
+        summary: "Reconnected without BootNotification",
+        data: { offlineMs, reportedAll },
       });
       this.checkRecovery();
       if (this.incident?.link === "booted" && this.settleTimer === null) {
@@ -146,6 +173,22 @@ export class OperationalTimelineProjector {
         summary: `Network fault injected by rule ${ruleId} (${ruleType}, reconnect blocked ${formatSeconds(reconnectDelayMs)})`,
         data: { ruleId, ruleType, reconnectDelayMs },
         at: startedAt,
+      });
+    });
+    on("powerLost", ({ transactions }) => {
+      this.timeline.record({
+        kind: "power_lost",
+        summary: `Power lost (${transactions} transaction${transactions === 1 ? "" : "s"} interrupted)`,
+        data: { transactions },
+      });
+    });
+    on("powerRestored", ({ outageMs, recovery, transactions }) => {
+      this.timeline.record({
+        kind: "power_restored",
+        summary: `Power restored after ${formatSeconds(outageMs)}${
+          recovery === "none" ? "" : `, transactions: ${recovery}`
+        }`,
+        data: { outageMs, recovery, transactions },
       });
     });
     on("transactionStarted", ({ connectorId, tagId }) => {

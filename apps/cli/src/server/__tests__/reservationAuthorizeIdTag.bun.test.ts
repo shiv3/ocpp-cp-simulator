@@ -5,9 +5,12 @@ import type { Socket } from "socket.io-client";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import {
+  runMigrations,
+  SCHEMA_VERSION,
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { CLIChargePointService } from "../../service";
 import {
   connectTestClient,
@@ -179,7 +182,7 @@ describe("reservationAuthorizeIdTag on --state-db (#595)", () => {
   });
 });
 
-describe("schema v25 → v26 migration (#595)", () => {
+describe("schema v25 → current migration (#595, migration 0030)", () => {
   it("adds reservation_authorize_id_tag to a v25 database that has only #593's inbound_validation", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
@@ -211,7 +214,7 @@ describe("schema v25 → v26 migration (#595)", () => {
         db.get<{ value: string }>(
           "SELECT value FROM schema_meta WHERE key = 'version'",
         )?.value,
-      ).toBe("26");
+      ).toBe(String(SCHEMA_VERSION));
       expect(
         db.get<{ a: number | null; v: string }>(
           "SELECT reservation_authorize_id_tag AS a, inbound_validation AS v FROM charge_points WHERE cp_id = 'CP-V25'",

@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import { type MessageKey } from "../../../i18n";

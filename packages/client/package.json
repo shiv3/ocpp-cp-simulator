@@ -1,5 +1,5 @@
 {
-  "name": "@ocpp-cp-sim/client",
+  "name": "@ocpp-cp-simulator/client",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@ocpp-cp-sim/contracts": "workspace:*",
-    "@ocpp-cp-sim/core": "workspace:*"
+    "@ocpp-cp-simulator/contracts": "workspace:*",
+    "@ocpp-cp-simulator/core": "workspace:*"
   }
 }

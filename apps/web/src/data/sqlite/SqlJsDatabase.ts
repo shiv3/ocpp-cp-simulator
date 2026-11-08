@@ -9,8 +9,8 @@ import type {
   Database,
   SqlParam,
   SqlRow,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
 import { createDurableFlusher } from "./durableFlush";
 import { loadBlob, saveBlob } from "./IndexedDbBlobStore";
 

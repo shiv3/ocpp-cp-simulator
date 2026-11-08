@@ -80,7 +80,7 @@ done
 #    is still there and still produced by the roll script.
 # ---------------------------------------------------------------------------
 grep -q 'releases/download/cli-latest/ocpp-cp-simulator.tgz' .github/workflows/cli-release.yml || {
-  echo "::error file=.github/workflows/cli-release.yml::release notes no longer advertise the rolling cli-latest URL"
+  echo "::error file=.github/workflows/cli-release.yml::the workflow no longer references the rolling cli-latest URL"
   rc=1
 }
 grep -qE '^ *\./scripts/roll-cli-latest\.sh' .github/workflows/cli-release.yml || {

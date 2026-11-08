@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { ChangeAvailabilityRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { ChangeAvailabilityRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
@@ -38,7 +38,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
     interval: 300,
   });
 
-  for (const evseId of [0, 1, 2]) {
+  for (const evseId of [1, 2]) {
     await csms.waitForFrame(statusNotificationFrame(evseId, "Available"));
   }
 }
@@ -84,9 +84,6 @@ describe("OCPP 2.0.1 ChangeAvailability", () => {
         { status: "Accepted" },
       ]);
 
-      const unavailable0 = await csms.waitForFrame(
-        statusNotificationFrame(0, "Unavailable"),
-      );
       const unavailable1 = await csms.waitForFrame(
         statusNotificationFrame(1, "Unavailable"),
       );
@@ -94,11 +91,6 @@ describe("OCPP 2.0.1 ChangeAvailability", () => {
         statusNotificationFrame(2, "Unavailable"),
       );
 
-      expect(unavailable0[3]).toMatchObject({
-        evseId: 0,
-        connectorId: 0,
-        connectorStatus: "Unavailable",
-      });
       for (const frame of [unavailable1, unavailable2]) {
         expect(frame[3]).toMatchObject({
           connectorId: 1,
@@ -107,7 +99,7 @@ describe("OCPP 2.0.1 ChangeAvailability", () => {
       }
 
       const cpWideResultIndex = csms.received.indexOf(cpWideResult);
-      for (const frame of [unavailable0, unavailable1, unavailable2]) {
+      for (const frame of [unavailable1, unavailable2]) {
         expect(csms.received.indexOf(frame)).toBeGreaterThan(cpWideResultIndex);
       }
 

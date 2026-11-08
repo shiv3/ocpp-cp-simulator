@@ -18,7 +18,7 @@
  *   it), not on the connector's electrical model (#323).
  */
 
-import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/index";
 import { HandlerCallError } from "../HandlerCallError";
 import { stationNow } from "../../stationNow";
 import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
@@ -29,7 +29,7 @@ import type {
   GetCompositeScheduleResponseV16,
   SetChargingProfileRequestV16,
   SetChargingProfileResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { Connector } from "../../../../domain/connector/Connector";
 import {
   OCPPStatus,

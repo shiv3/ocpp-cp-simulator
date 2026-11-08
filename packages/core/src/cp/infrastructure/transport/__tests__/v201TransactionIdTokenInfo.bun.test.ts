@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { bootedChargePoint } from "./stationHarness";
@@ -182,6 +182,36 @@ describe("OCPP 2.0.1 TransactionEvent.conf idTokenInfo (#447)", () => {
       cp.updateConnectorStatus(1, OCPPStatus.Charging);
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.SuspendedEVSE);
       expect(cp.getConnector(1)?.energyHeld).toBe(true);
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("flags a refusal that answers an Updated as mid-session (#603)", async () => {
+    const csms = startMockCsms();
+    const { cp, started, rejections } = await startedTransaction(
+      csms,
+      "CP201-MID",
+      false,
+    );
+    try {
+      csms.replyCallResult(started[1] as string, {
+        idTokenInfo: { status: "Accepted" },
+      });
+      cp.sendTransactionUpdate(1, { triggerReason: "Authorized" });
+      const updated = await csms.waitForFrame(eventOf("Updated"));
+      csms.replyCallResult(updated[1] as string, {
+        idTokenInfo: { status: "Blocked" },
+      });
+
+      const deadline = Date.now() + 2_000;
+      while (rejections.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(rejections).toEqual([
+        { connectorId: 1, status: "Blocked", stopped: false, midSession: true },
+      ]);
     } finally {
       cp.disconnect();
       await csms.stop();

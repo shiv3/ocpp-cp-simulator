@@ -8,9 +8,22 @@ import {
   ChargingRateUnitType,
   OCPPStatus,
 } from "../../types/OcppTypes";
-import { buildSampledValues } from "../MeterValueBuilder";
+import { buildSampledValues as buildSamples } from "../MeterValueBuilder";
 import type { Transaction } from "../Transaction";
 import { ChargingProfileStore } from "../../charge-point/ChargingProfileStore";
+
+/**
+ * What a MeterValues sender does: read the samples (pure), then announce a
+ * schedule crossing as the tick owner (#327). The announcement used to be a
+ * side effect of the read.
+ */
+function buildSampledValues(
+  ...args: Parameters<typeof buildSamples>
+): ReturnType<typeof buildSamples> {
+  const samples = buildSamples(...args);
+  args[0].announceScheduleCrossingNow();
+  return samples;
+}
 
 function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));
@@ -1293,6 +1306,19 @@ describe("profile validity is judged at the same instant as the periods (#301)",
   }
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it("drops a Tx profile at exactly validTo (K01.FR.37: valid while now < validTo, #707)", () => {
+    const connector = makeConnector();
+    sessionAt(connector);
+    const validTo = new Date(START.getTime() + 30_000);
+    connector.addChargingProfile(
+      windowedTx({ validTo: validTo.toISOString() }),
+    );
+    expect(
+      connector.getActiveChargingProfile(new Date(validTo.getTime() - 1)),
+    ).not.toBeNull();
+    expect(connector.getActiveChargingProfile(validTo)).toBeNull();
+  });
 
   it("keeps a Tx profile whose validTo has not passed at the pinned instant", () => {
     const connector = makeConnector();

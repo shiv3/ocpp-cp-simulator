@@ -1,10 +1,10 @@
 import { expect, it } from "bun:test";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
-import { FakeCsms } from "@ocpp-cp-sim/core/test/goldenWire/FakeCsms";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { FakeCsms } from "@ocpp-cp-simulator/core/test/goldenWire/FakeCsms";
 import { CPRegistry } from "../../server/CPRegistry";
 import { EventBus } from "../../server/eventBus";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 const wait = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 

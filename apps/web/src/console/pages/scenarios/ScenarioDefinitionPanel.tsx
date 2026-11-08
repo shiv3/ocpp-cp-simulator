@@ -6,7 +6,7 @@ import { Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { t as tNow } from "../../../i18n";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../components/EmptyState";
 import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../../lib/scenarioSteps";

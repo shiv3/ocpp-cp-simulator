@@ -3,7 +3,7 @@ import React, { useEffect, useId, useState } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { defaultAutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { defaultAutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import { useConnectorView } from "@/data/hooks/useConnectorView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";

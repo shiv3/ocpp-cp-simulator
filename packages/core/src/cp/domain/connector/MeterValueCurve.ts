@@ -13,7 +13,7 @@ import {
   calculateBezierPoint,
   evaluateCurveKwh,
   type CurvePoint,
-} from "@ocpp-cp-sim/k6-runtime/curve";
+} from "@ocpp-cp-simulator/k6-runtime/curve";
 
 export { calculateBezierPoint, evaluateCurveKwh };
 export type { CurvePoint };

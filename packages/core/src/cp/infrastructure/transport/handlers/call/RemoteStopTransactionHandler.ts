@@ -2,7 +2,7 @@ import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   RemoteStopTransactionRequestV16,
   RemoteStopTransactionResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { defaultBehavior16 } from "./defaultBehavior";
 
 /**

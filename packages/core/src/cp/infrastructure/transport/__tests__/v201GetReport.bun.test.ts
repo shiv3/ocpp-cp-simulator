@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type {
   GetReportRequestV201,
   NotifyReportRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
@@ -49,7 +49,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
     interval: 300,
   });
 
-  for (const evseId of [0, 1]) {
+  for (const evseId of [1]) {
     await csms.waitForFrame(
       (frame) =>
         frame[0] === 2 &&
@@ -74,7 +74,7 @@ function notifyReportPayload(frame: OcppFrame): NotifyReportRequestV201 {
 
 describe("OCPP 2.0.1 GetReport", () => {
   it("answers over the device-model and filters by componentVariable", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = new ChargePoint(
       "CP201-GET-REPORT",
       DefaultBootNotification,

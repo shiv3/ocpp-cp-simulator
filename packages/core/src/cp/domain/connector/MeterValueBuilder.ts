@@ -1,11 +1,4 @@
 import type { Connector } from "./Connector";
-import {
-  currentAmpsFor,
-  effectiveChargingPowerW,
-  effectiveVoltageV,
-  effectivePowerFactor,
-  resolveSocForCurve,
-} from "./ChargingCurve";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
 export type ReadingContext =
@@ -52,6 +45,50 @@ export function toOcppJ16Wire(samples: SampledValue[]): SampledValue[] {
 }
 
 /**
+ * The unit OCPP 2.0.1 / 2.1 Part 2 Appendices ch. 2 (Standardized Units of
+ * Measure) assigns to a measurand, or `undefined` for a unitless one
+ * (`Power.Factor`) and one this table does not know.
+ *
+ * The builder leaves `Frequency` (1.6 errata 3.86: 1.6 has no Hz) and the
+ * measurands it does not model without a unit, which is right for 1.6 but on
+ * 2.x the Appendix says the default of `unit` is always `Wh`: a 50 Hz sample
+ * without `unitOfMeasure` reads as 50 Wh (#713). The 2.x message handler fills
+ * the gap from here; 1.6 never calls this.
+ */
+export function unitOfMeasurandV2x(measurand: string): string | undefined {
+  if (measurand === "Power.Factor") return undefined;
+  switch (measurand) {
+    case "Frequency":
+      return "Hz";
+    case "Voltage":
+      return "V";
+    case "SoC":
+      return "Percent";
+    case "RPM":
+      return "RPM";
+    case "Temperature":
+      return "Celsius";
+  }
+  // Quantity families, by the prefix the enum names them with.
+  if (measurand.startsWith("Current.")) return "A";
+  if (measurand.startsWith("Energy.Active.")) return "Wh";
+  if (measurand.startsWith("Energy.Reactive.")) return "varh";
+  if (measurand.startsWith("Energy.Apparent.")) return "VAh";
+  if (measurand.startsWith("Power.Active.")) return "W";
+  if (measurand.startsWith("Power.Reactive.")) return "var";
+  if (measurand.startsWith("Power.Offered")) return "W";
+  // 2.1-only measurands (Appendix ch. 2 / MeasurandEnumType, #766).
+  if (measurand.startsWith("Voltage.")) return "V";
+  if (measurand.startsWith("Power.Import.")) return "W";
+  if (measurand.startsWith("Power.Export.")) return "W";
+  if (measurand.startsWith("Display.RemainingTime")) return "s";
+  if (/^Display\..*SOC$/.test(measurand)) return "Percent";
+  if (measurand.startsWith("EnergyRequest.")) return "Wh";
+  if (measurand === "Display.BatteryEnergyCapacity") return "Wh";
+  return undefined;
+}
+
+/**
  * Default electrical characteristics used when the connector domain doesn't
  * model the value directly. Real Charge Points read these off the meter
  * hardware; the simulator synthesizes plausible numbers so CSMS-side parsers
@@ -78,44 +115,24 @@ export function buildSampledValues(
 ): SampledValue[] {
   const samples: SampledValue[] = [];
   const meterWh = connector.meterValue;
-  const soc = connector.soc;
-  // Power.Active.Import — what the battery actually accepts right now,
-  // curve included — and Power.Offered — what the EVSE/profile makes
-  // available, independent of the battery's own acceptance (#301: a 100 kW
-  // charger still *offers* 100 kW to a nearly-full battery that only draws
-  // 10 kW of it).
-  const settings = connector.evSettings;
-  // Both schedule-derived constraints come from one resolve at one instant.
-  // Resolving them separately took the watt cap from one schedule period and
-  // the phase divisor from the next whenever a boundary fell between the two
-  // calls — a 10 A three-phase period capping at 6900 W and then being divided
-  // as one phase, reported as 30 A. This is also the one call in a sample
-  // build that can emit `scheduleLimitChange` (#301).
-  const { watts: scheduleLimitW, activePhases } =
-    connector.scheduleConstraints();
-  const powerW = derivedInstantaneousPowerW(connector, scheduleLimitW);
-  const offeredW = derivedOfferedPowerW(connector, scheduleLimitW);
-  // Both currents divide by the phases actually in use, the same count the
-  // watt cap was converted on — not the connector's wiring. A 10 A
-  // single-phase limit caps a 3-phase connector at 2300 W, and dividing that
-  // across three wires reported 3.3 A for a line carrying 10, so the sample
-  // contradicted the profile it was produced under (#301).
-  const currentA = currentAmpsFor(powerW, settings ?? {}, activePhases);
-  const offeredCurrentA = currentAmpsFor(
+  // Formatting only: every physical quantity below comes from one operating
+  // point resolved at one instant (#327), so the samples of a MeterValue
+  // describe one instant and the energy register reads the same record. The
+  // read is pure: the code that sends the sample set announces a schedule
+  // crossing first (`Connector.announceScheduleCrossingNow`).
+  const point = connector.operatingPoint();
+  const {
+    soc,
+    acceptedW: powerW,
     offeredW,
-    settings ?? {},
-    activePhases,
-  );
-  // The same cap expressed in the units the bounded samples are printed in.
-  // `Infinity` when no profile is active, which makes the bound a no-op.
-  const limitA = currentAmpsFor(scheduleLimitW, settings ?? {}, activePhases);
-  // The voltage that actually produced `currentA`, not the raw configured
-  // value: a `voltageV` of 0, negative or non-finite falls back to 230 in the
-  // derivation, and reporting the raw number here would put a `Voltage` sample
-  // on the wire that the `Current.Import` beside it contradicts (#301).
-  const voltageV = effectiveVoltageV(settings ?? {});
-  const powerFactor = effectivePowerFactor(settings ?? {});
-  const phases = activePhases;
+    currentA,
+    offeredCurrentA,
+    limitA,
+    voltageV,
+    powerFactor,
+    scheduleLimitW,
+    activePhases: phases,
+  } = point;
 
   for (const measurand of measurands) {
     const sample = buildSingleSample(measurand, context, {
@@ -342,74 +359,11 @@ function formatPowerFactor(value: number): string {
 /**
  * #538: the instantaneous active power, in whole watts, exactly as a
  * `Power.Active.Import` sample would report it now, but without announcing
- * a schedule crossing (see `Connector.scheduleLimitWattsNow`).
+ * a schedule crossing (see `Connector.operatingPoint`).
  */
 export function reportedActivePowerW(connector: Connector): number {
-  // Not charging draws nothing (as in derivedInstantaneousPowerW), and a
-  // schedule limit is never negative: skip resolving the schedule.
+  // Not charging draws nothing: skip resolving the schedule.
   if (connector.status !== "Charging") return 0;
-  const limitW = connector.scheduleLimitWattsNow();
-  return Number(
-    formatBounded(derivedInstantaneousPowerW(connector, limitW), limitW, 0),
-  );
-}
-
-/**
- * Best-effort instantaneous power estimate based on whatever rate the
- * scheduler is currently driving. We don't expose the scheduler's tick
- * delta, so we fall back to the EV-settings max charging power when
- * charging, or 0 when not. Good enough for CSMS-side parser testing.
- *
- * This is what the battery actually *accepts* — the charging curve lowers
- * demand here (#301) — and it is also the same effective power
- * {@link Connector}'s meter scheduler accumulates the energy register
- * against, via `effectiveChargingPowerW` (see `Connector.ts`). A billing
- * MeterValue built from this module and the register it reads therefore
- * always agree with each other.
- */
-function derivedInstantaneousPowerW(
-  connector: Connector,
-  scheduleLimitWatts: number,
-): number {
-  // `OCPPStatus.Charging` import is avoided here to keep this module free
-  // of cycles; check via the public string value.
-  if (connector.status !== "Charging") return 0;
-  const settings = connector.evSettings;
-  const maxKw = settings?.maxChargingPowerKw ?? 0;
-  const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
-  return effectiveChargingPowerW({
-    evMaxW,
-    curve: settings?.chargingCurve,
-    socPercent: resolveSocForCurve(
-      connector.soc,
-      connector.transaction?.initialSoc,
-      settings?.initialSoc,
-    ),
-    scheduleLimitWatts,
-  });
-}
-
-/**
- * What the EVSE offers right now — `Power.Offered` / `Current.Offered` — as
- * distinct from what the battery accepts (#301). The charging curve
- * describes battery acceptance, not EVSE capability: a 100 kW charger still
- * *offers* 100 kW to a nearly-full battery even though the battery only
- * draws a fraction of it, so the curve is deliberately not passed here.
- * Still capped by the active charging profile — that cap is the EVSE's own
- * limit, set by the CSMS, not a battery-acceptance concern.
- */
-function derivedOfferedPowerW(
-  connector: Connector,
-  scheduleLimitWatts: number,
-): number {
-  if (connector.status !== "Charging") return 0;
-  const settings = connector.evSettings;
-  const maxKw = settings?.maxChargingPowerKw ?? 0;
-  const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
-  return effectiveChargingPowerW({
-    evMaxW,
-    curve: undefined,
-    socPercent: connector.soc,
-    scheduleLimitWatts,
-  });
+  const point = connector.operatingPoint();
+  return Number(formatBounded(point.acceptedW, point.scheduleLimitW, 0));
 }

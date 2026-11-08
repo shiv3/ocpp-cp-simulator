@@ -4,8 +4,8 @@ import * as x509 from "@peculiar/x509";
 import type {
   CertificateSignedRequestV16,
   CertificateSignedResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
-import { isValidCertificateSignedRequestV16 } from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
+import { isValidCertificateSignedRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
 import { CERTIFICATE_PEM_RE } from "../../../../domain/security/certificateHash";
 import { checkSignedChain } from "../../../../domain/security/signedChain";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";

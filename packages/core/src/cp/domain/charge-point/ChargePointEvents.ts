@@ -1,5 +1,6 @@
 import type { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 import type { ActiveChargingProfile } from "../connector/Connector";
+import type { IdTokenTypeName } from "../connector/Transaction";
 
 /** The CSMS's answer to BootNotification.req, as every OCPP version words it. */
 export type RegistrationStatus = "Accepted" | "Pending" | "Rejected";
@@ -78,10 +79,18 @@ export interface ChargePointEvents {
    *  any status transition the answer causes (#395). `connected` only means
    *  the socket opened; this is what says the CSMS registered the station. */
   bootNotificationResult: BootNotificationResult;
+  /** #702: the socket reopened after a connection loss and the station went
+   *  on without a BootNotification (OCPP-J 2.0.1 §5.4). `reportedAll` says
+   *  whether the outage exceeded `OfflineThreshold` (B04.FR.01). */
+  reconnectResumed: { offlineMs: number; reportedAll: boolean };
   disconnected: { code: number; reason: string };
   /** Emitted each time the transport schedules a reconnect after an
    *  unrequested close; `delayMs` is the wait before the next attempt. */
   reconnecting: { attempt: number; delayMs: number };
+  /** #609: the charge point stopped retrying — the reconnect policy's
+   *  `maxAttempts`, or its `bootRetryLimit` for BootNotification retries,
+   *  was reached. `attempts` counts the attempts made. */
+  gaveUp: { target: "reconnect" | "boot_notification"; attempts: number };
   /** Emitted when a network-sim disconnect rule fires, before the socket is
    *  closed, so the `disconnected` that follows can be attributed to it
    *  (#448). */
@@ -137,6 +146,8 @@ export interface ChargePointEvents {
     connectorId: number;
     tagId: string;
     remoteStartId?: number;
+    /** 2.x: the `idToken.type` the CSMS sent (#599). */
+    idTokenType?: IdTokenTypeName;
   };
   /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
    *  has registered as the stop-side handler for this connector. The
@@ -174,6 +185,16 @@ export interface ChargePointEvents {
     transactionId: number;
     reason?: string;
   };
+  /** The station lost power (#455): the socket is gone and nothing is sent
+   *  until power is restored. `transactions` is how many were running. */
+  powerLost: { transactions: number };
+  /** Power came back (#455) after `outageMs`; the station boots again.
+   *  `recovery` is what it decided for the interrupted transactions. */
+  powerRestored: {
+    outageMs: number;
+    recovery: "resume" | "end" | "none";
+    transactions: number;
+  };
   /** Emitted by AuthorizeResultHandler whenever an Authorize.conf arrives,
    *  tagId-correlated via the original Authorize.req payload (issue #181).
    *  `ChargePoint.authorizeAndWait` listens for this to resolve the
@@ -200,6 +221,10 @@ export interface ChargePointEvents {
     connectorId: number;
     status: string;
     stopped: boolean;
+    /** OCPP 2.x: the refusal answered a TransactionEvent after `Started`
+     *  (an `Updated` carrying the idToken), not the start. Absent
+     *  otherwise (#603). */
+    midSession?: true;
   };
   /** A transmission of a transaction-related message failed. OCPP 2.0.1 /
    *  2.1 TransactionEvent (E13.FR.02): the CSMS answered it with a CALLERROR

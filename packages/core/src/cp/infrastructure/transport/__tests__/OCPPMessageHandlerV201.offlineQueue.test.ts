@@ -6,10 +6,10 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 
 /**
  * #528, OCPP 2.0.1 / 2.1 E11 (Connection Loss During Transaction):
@@ -38,6 +38,10 @@ class FakeSocket {
   held: Settle[] = [];
   /** CALLs `sendAction` refuses next (network-sim refusal, not_accepted). */
   refuseNext = 0;
+  /** The CSMS answers each written CALL at once. A 2.x station sends the
+   *  next CALL only after the answer (#708); tests that need a CALL left
+   *  unanswered switch it off. */
+  autoAnswer = false;
   private handler: Handler | null = null;
   setMessageHandler(handler: Handler): void {
     this.handler = handler;
@@ -66,6 +70,12 @@ class FakeSocket {
     }
     this.calls.push({ messageId, action, payload });
     onSettled?.({ outcome: "written" });
+    if (this.autoAnswer) {
+      // The answer comes after the write returns, as on a real socket.
+      queueMicrotask(() =>
+        this.handler?.(OCPPMessageType.CALLRESULT, messageId, action, {}),
+      );
+    }
     return true;
   }
   /** The pipeline drains on close: every held frame settles socket_closed. */
@@ -108,6 +118,10 @@ const SCHEMAS: Record<string, object> = {
 
 /** Lets pending microtasks run between steps. */
 const settle = () => Promise.resolve();
+/** Let the fake CSMS answer a chain of CALLs, one microtask each. */
+const drain = async () => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
 
 function transaction(): Transaction {
   return {
@@ -154,6 +168,7 @@ function setup(ocppVersion: string) {
       transactionMessageAttempts: vi.fn(() => 3),
       transactionMessageRetryInterval: vi.fn(() => 60),
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
     },
@@ -187,10 +202,13 @@ function setup(ocppVersion: string) {
     handler.onWebSocketClosed();
   };
   /** The socket comes back and BootNotification is Accepted. */
-  const reconnect = () => {
+  const reconnect = async (answer = true) => {
     socket.connected = true;
     socket.holding = false;
+    // The replay is one CALL at a time (#708): the CSMS answers each.
+    socket.autoAnswer = answer;
     handler.flushPendingQueue();
+    await drain();
   };
   return {
     socket,
@@ -233,7 +251,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       await settle();
       expect(socket.transactionEvents()).toEqual([]);
 
-      reconnect();
+      await reconnect();
       const replayed = socket.transactionPayloads();
       expect(replayed.map((p) => [p.eventType, p.seqNo, p.offline])).toEqual([
         ["Started", 0, true],
@@ -262,7 +280,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         idTokenInfo: { status: "Invalid" },
       });
 
-      reconnect();
+      await reconnect();
       const events = socket.transactionEvents();
       expect(events).toHaveLength(2);
       expect(events[1].messageId).not.toBe(first.messageId);
@@ -284,7 +302,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       vi.advanceTimersByTime(10 * 60_000);
       expect(socket.transactionEvents()).toHaveLength(1);
 
-      reconnect();
+      await reconnect();
       const payloads = socket.transactionPayloads();
       expect(payloads.map((p) => [p.seqNo, p.offline])).toEqual([
         [0, undefined],
@@ -301,7 +319,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       close();
       await settle();
 
-      reconnect();
+      await reconnect();
       expect(socket.transactionEvents()).toHaveLength(3);
       expect(socket.transactionPayloads()[2].offline).toBe(true);
     });
@@ -314,7 +332,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       close();
       await settle();
 
-      reconnect();
+      await reconnect();
       expect(
         socket.transactionPayloads().map((p) => [p.eventType, p.offline]),
       ).toEqual([
@@ -337,7 +355,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       await settle();
       handler.onWebSocketClosed();
 
-      reconnect();
+      await reconnect();
       expect(
         socket.transactionPayloads().map((p) => [p.eventType, p.offline]),
       ).toEqual([
@@ -361,7 +379,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       // Dropped with socket_closed, it waits in the E11 queue instead.
       expect(handler.hasTransactionMessagesInFlight()).toBe(false);
 
-      reconnect();
+      await reconnect(false);
       expect(
         socket.transactionPayloads().map((p) => [p.eventType, p.offline]),
       ).toEqual([["Started", true]]);
@@ -378,7 +396,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       await settle();
       handler.onWebSocketClosed();
 
-      reconnect();
+      await reconnect();
       expect(
         socket.transactionPayloads().map((p) => [p.eventType, p.offline]),
       ).toEqual([
@@ -398,7 +416,9 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       update();
       expect(socket.transactionEvents()).toEqual([]);
 
+      socket.autoAnswer = true;
       handler.flushPendingQueue();
+      await drain();
       expect(
         socket.transactionPayloads().map((p) => [p.eventType, p.seqNo]),
       ).toEqual([
@@ -413,7 +433,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       socket.callError(socket.transactionEvents()[0].messageId);
       close();
       await settle();
-      reconnect();
+      await reconnect(false);
       const replay = socket.transactionEvents()[1];
       socket.callError(replay.messageId);
       expect(rejected.map((r) => r.attempt)).toEqual([1, 1]);
@@ -431,7 +451,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       close();
       start();
       await settle();
-      reconnect();
+      await reconnect();
       socket.callResult(socket.transactionEvents()[0].messageId, {});
       vi.advanceTimersByTime(10 * 60_000);
       expect(socket.transactionEvents()).toHaveLength(1);
@@ -445,7 +465,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       await settle();
       handler.flushPendingQueue();
       expect(socket.transactionEvents()).toEqual([]);
-      reconnect();
+      await reconnect();
       expect(socket.transactionEvents()).toHaveLength(1);
     });
 
@@ -462,7 +482,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       handler.flushPendingQueue();
       close();
       await settle();
-      reconnect();
+      await reconnect();
       expect(
         socket.transactionPayloads().map((p) => [p.eventType, p.offline]),
       ).toEqual([
@@ -494,7 +514,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       update();
       expect(socket.transactionEvents()).toEqual([]);
 
-      reconnect();
+      await reconnect();
       expect(
         socket
           .transactionPayloads()
@@ -511,7 +531,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       close();
       start();
       await settle();
-      reconnect();
+      await reconnect();
       socket.callResult(socket.transactionEvents()[0].messageId, {});
       vi.mocked(logger.warn).mockClear();
 
@@ -530,7 +550,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       close();
       handler.sendHeartbeat();
       await settle();
-      reconnect();
+      await reconnect();
       expect(socket.calls).toEqual([]);
     });
   },

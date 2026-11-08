@@ -1,8 +1,8 @@
 import {
   SCENARIO_SCHEMA_VERSION,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
 
 /**
  * Browser-only file I/O helpers for scenario JSON files. Lifted out of

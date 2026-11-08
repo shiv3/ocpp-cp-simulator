@@ -4,11 +4,11 @@ import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useDataContext } from "@/data/providers/DataProvider";
-import type { OcppCallOutcome } from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+import type { OcppCallOutcome } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import {
   getOcppCallCatalog,
   type OcppCallCatalog,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/codec/ocppCallCatalog";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/codec/ocppCallCatalog";
 import EmptyState from "../../components/EmptyState";
 import { type MessageKey } from "../../../i18n";
 

@@ -5,6 +5,8 @@ summary: Which test runner / harness covers what — the blocking tsc type-check
 sources:
   - package.json (test and typecheck scripts)
   - .github/workflows/ci.yml
+  - .tool-versions
+  - scripts/bun-test-shard.sh
   - codecov.yml
   - e2e/README.md
   - scripts/steve-verify/README.md
@@ -70,6 +72,31 @@ files in three fixed shards (`scripts/bun-test-shard.sh`: tracked
 packaging smokes stay in `test`. Every job has a timeout, and a new push to a
 pull request cancels the run for the previous push.
 
+`test`, `test:bun`, `test:coverage:bun` and the shard script run `bun test
+--isolate`, so each file gets a fresh global and module registry and cannot
+inherit what an earlier file left behind (#803). Without it, on Bun 1.4.x,
+every test ending on a rejected `expect(...).rejects` that runs after
+`goldenWire.bun.test.ts` (340 `test.concurrent` cases) in the same process
+stalls the event loop for seconds: `E11 1.6 GetConfiguration` in
+`engineLifecycle.bun.test.ts` took 23–41 s against a 5 s timeout. The same
+test takes 63 ms on Bun 1.3.13 and 1.5 ms with `--isolate`. The full suite
+was not slower with `--isolate` (346 s against 363 s). The
+mechanism inside Bun is not established: the same cases run outside
+`bun:test` leave no such stall. The CI shards hid it, because those two files
+land in different shards. `test:bun:cli` deliberately runs **without**
+`--isolate` (see below).
+
+The Bun version comes from `.tool-versions` (`bun 1.4.3`). mise reads it, and
+so does `oven-sh/setup-bun` in every workflow through `bun-version-file`, so
+local runs, CI and the release builds use the same Bun. Before #803 CI pinned
+1.3.14 in `.bun-version`, which mise ignores, and the release workflows built
+with `latest`. 1.4.3 is pinned, not the newer 1.4.4: its WebSocket client
+breaks seven tests that pass on 1.4.3, and the files fail on their own as
+well. `handshakeRefusal` no longer names a refused handshake, `tlsSecurityProfiles`
+gets a different close for a refused connection, and `v201LocalAuthList` sees
+its connection closed with `1002 Received new message inside a fragmented
+message`. Re-run those three files before raising the pin.
+
 Coverage (`bun run test:coverage` / `test:coverage:bun`, uploaded to Codecov
 in CI) merges both reports — `coverage/lcov.info` (Vitest) and
 `coverage/bun/lcov.info` (Bun) — so the **line** coverage of code exercised
@@ -96,8 +123,8 @@ Three distinct defects were stacked behind it, each masked by the one before:
   `restoreAllMocks` / `resetAllMocks` / `clearAllMocks` and the fake-timer
   helpers — **no `hoisted`, `doMock`, `importActual`, `stubEnv` or
   `resetModules`**. The file therefore died at module load under Bun.
-- With that fixed, real cross-file leakage appeared. Bun keeps **one module
-  registry for the whole run**, so `vi.mock()` (Bun's `mock.module`) stays in
+- With that fixed, real cross-file leakage appeared. Without `--isolate`, Bun
+  keeps **one module registry for the whole run**, so `vi.mock()` (Bun's `mock.module`) stays in
   force for every file that runs after the one that called it. The
   `RemoteChargePointService` mock installed by `client.remote.test.ts` was
   still installed when `client.socket.test.ts` ran next, so the file that
@@ -113,7 +140,9 @@ Three distinct defects were stacked behind it, each masked by the one before:
   in the log to point at.
 
 `bun run test:bun:cli` (`bun test apps/cli/src/__tests__`) now runs in CI, so the
-overlap is checked on every pull request. The rules that follow from it, for
+overlap is checked on every pull request. It runs without `--isolate`, unlike
+`test:bun`: the shared registry is what lets it catch these leaks, and running
+the directory the way a developer types it is the point. The rules that follow from it, for
 anything added to that directory:
 
 - use only the `vi` API listed above — the intersection of the two runners;
@@ -146,13 +175,13 @@ already covers all 7) and so would not have caught either defect.
 
 ## Layers beyond unit tests
 
-| Layer                                                                                        | Runs in CI? | What it proves                                                                                                                                          |
-| -------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vitest / Bun test (above)                                                                    | yes         | Units, UI, CLI entry, socket server, `bun:sqlite`, protocol schemas, scenario schema conformance of every shipped JSON                                  |
-| [gocpp e2e](../sources/e2e-readme.md) (`bun run test:e2e`)                                   | no (local)  | Real WebSocket CP ↔ independent Go CSMS across OCPP 1.6 / 2.0.1 / 2.1; `all-cases.json` under every version; 1.6 charging profiles (#323)               |
-| [steve-verify](../sources/steve-verify-readme.md)                                            | no (local)  | All 47 `cert16-*` templates against a real SteVe, CSMS-side actions driven over SteVe's REST API, uniqueId-correlated assertions                        |
-| [Testcontainers (Java)](../sources/testcontainers-java-readme.md)                            | no (proto)  | A CSMS project can embed the Docker image and assert a scenario verdict; the same RPC sequence is guarded in CI by `harnessScenarioVerdict.bun.test.ts` |
-| Scenario assertions ([Scenario format](../concepts/scenario-format.md#assertions--verdicts)) | at run time | Declarative pass/fail over the OCPP transcript of any scenario run, with conformance vs compatibility axes                                              |
+| Layer                                                                                        | Runs in CI? | What it proves                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vitest / Bun test (above)                                                                    | yes         | Units, UI, CLI entry, socket server, `bun:sqlite`, protocol schemas, scenario schema conformance of every shipped JSON                                                                    |
+| [gocpp e2e](../sources/e2e-readme.md) (`bun run test:e2e`)                                   | weekly      | Real WebSocket CP ↔ independent Go CSMS across OCPP 1.6 / 2.0.1 / 2.1; `all-cases.json` under every version; 1.6 charging profiles (#323); Pending / authorization / offline paths (#623) |
+| [steve-verify](../sources/steve-verify-readme.md)                                            | no (local)  | All 47 `cert16-*` templates against a real SteVe, CSMS-side actions driven over SteVe's REST API, uniqueId-correlated assertions                                                          |
+| [Testcontainers (Java)](../sources/testcontainers-java-readme.md)                            | no (proto)  | A CSMS project can embed the Docker image and assert a scenario verdict; the same RPC sequence is guarded in CI by `harnessScenarioVerdict.bun.test.ts`                                   |
+| Scenario assertions ([Scenario format](../concepts/scenario-format.md#assertions--verdicts)) | at run time | Declarative pass/fail over the OCPP transcript of any scenario run, with conformance vs compatibility axes                                                                                |
 
 The `analyze` test matrix (`apps/cli/src/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes

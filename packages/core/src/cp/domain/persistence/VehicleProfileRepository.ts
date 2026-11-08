@@ -1,7 +1,7 @@
 import {
   MAX_VEHICLE_PROFILES,
   vehicleProfileSchema,
-} from "@ocpp-cp-sim/contracts/vehicle";
+} from "@ocpp-cp-simulator/contracts/vehicle";
 import type { VehicleProfile } from "../vehicle/VehicleProfile";
 import type { Database } from "./Database";
 

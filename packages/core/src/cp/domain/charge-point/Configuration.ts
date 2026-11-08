@@ -2,6 +2,10 @@ import type { ChargePoint } from "./ChargePoint";
 import { OcppFeatureProfile } from "../types/OcppTypes";
 import { isOcpp2Version } from "../types/OcppVersion";
 import { MAX_TIMER_MS } from "../../shared/timers";
+import {
+  DEFAULT_RECONNECT_POLICY,
+  retryBackOffDefaults,
+} from "../../shared/ReconnectPolicy";
 import { SIGNED_METER_MODES } from "../connector/SignedMeterData";
 import {
   MAX_MONITOR_SEVERITY,
@@ -463,6 +467,63 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
+    // #702: OCPP 2.0.1 / 2.1 OCPPCommCtrlr.OfflineThreshold (Part 2 §2.1.8,
+    // Required, ReadWrite, seconds): after an offline period longer than this
+    // the station reports all its connectors when it is back (B04.FR.01), else
+    // only those whose status changed (B04.FR.02). 2.x only.
+    OfflineThreshold: {
+      name: "OfflineThreshold",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+    } as IntegerConfigurationKey,
+    // #702: simulator option, 2.x only. false (default): a reconnect after a
+    // connection loss sends no BootNotification while the boot data is
+    // unchanged (OCPP-J 2.0.1 §5.4); true keeps the BootNotification on every
+    // connect.
+    BootOnReconnect: {
+      name: "BootOnReconnect",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
+    // #598: OCPP 2.0.1 / 2.1 AuthCtrlr.MasterPassGroupId (Part 2 §2.3): tokens
+    // of this group can stop transactions but cannot start one. "" (default)
+    // = no master pass. 2.x only.
+    MasterPassGroupId: {
+      name: "MasterPassGroupId",
+      required: false,
+      readonly: false,
+      type: "string",
+    } as StringConfigurationKey,
+    // #609: OCPP 2.0.1 / 2.1 OCPPCommCtrlr RetryBackOff* (Part 4 §5.4; variables in the Part 2 Appendices), 2.x
+    // only. Seconds to wait before the first reconnect, the random extra
+    // wait [0, RandomRange], and how many times the wait doubles.
+    RetryBackOffWaitMinimum: {
+      name: "RetryBackOffWaitMinimum",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 1,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+    } as IntegerConfigurationKey,
+    RetryBackOffRandomRange: {
+      name: "RetryBackOffRandomRange",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+    } as IntegerConfigurationKey,
+    RetryBackOffRepeatTimes: {
+      name: "RetryBackOffRepeatTimes",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: 30,
+    } as IntegerConfigurationKey,
     // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
     // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
     // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
@@ -474,6 +535,16 @@ export const ConfigurationKeys = {
       type: "integer",
       min: MIN_MONITOR_SEVERITY,
       max: MAX_MONITOR_SEVERITY,
+    } as IntegerConfigurationKey,
+    // #554: simulator key (no OCPP variable): most TransactionEvents the E11
+    // offline queue holds before it drops Updated ones (E11.FR.04/05). 0 =
+    // no limit. 2.x only.
+    OfflineQueueMaxEvents: {
+      name: "OfflineQueueMaxEvents",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
     } as IntegerConfigurationKey,
     // #537: OCPP 2.x `SecurityCtrlr` variables (2.0.1 / 2.1 Part 2
     // referenced components §2.2.4, §2.2.7-§2.2.9). 1.6 has none of them,
@@ -604,6 +675,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     value: string,
   ): StringConfigurationValue => ({ key, value });
 
+  // A stand-in without a policy (a test double) gets the built-in one.
+  const retryBackOff = retryBackOffDefaults(
+    cp.reconnectPolicy ?? DEFAULT_RECONNECT_POLICY,
+  );
+
   return [
     // ── Core profile ────────────────────────────────────────────────────
     boolVal(ConfigurationKeys.Core.AllowOfflineTxForUnknownId, false),
@@ -715,10 +791,42 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
       : []),
+    // #702: 2.x only (OCPPCommCtrlr.OfflineThreshold, and the simulator's
+    // BootOnReconnect option). The spec gives no default threshold: 60 s.
+    // #598: 2.x only (AuthCtrlr.MasterPassGroupId); "" = no master pass.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [
+          intVal(ConfigurationKeys.Custom.OfflineThreshold, 60),
+          boolVal(ConfigurationKeys.Custom.BootOnReconnect, false),
+          strVal(ConfigurationKeys.Custom.MasterPassGroupId, ""),
+        ]
+      : []),
+    // #609: 2.x only (OCPPCommCtrlr.RetryBackOff*); the defaults give the
+    // reconnect schedule the configured policy gives (1 s doubling to 30 s).
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [
+          intVal(
+            ConfigurationKeys.Custom.RetryBackOffWaitMinimum,
+            retryBackOff.waitMinimumSeconds,
+          ),
+          intVal(
+            ConfigurationKeys.Custom.RetryBackOffRandomRange,
+            retryBackOff.randomRangeSeconds,
+          ),
+          intVal(
+            ConfigurationKeys.Custom.RetryBackOffRepeatTimes,
+            retryBackOff.repeatTimes,
+          ),
+        ]
+      : []),
     // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
     // only Emergency events while offline.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.OfflineQueuingSeverity, 0)]
+      : []),
+    // #554: 2.x only; the E11 queue holds at most this many TransactionEvents.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.OfflineQueueMaxEvents, 1000)]
       : []),
     // #537: 2.x only (SecurityCtrlr). CertificateEntries starts at 0; the
     // charge point sets it from its certificate store once both exist.

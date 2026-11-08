@@ -7,6 +7,11 @@ sources:
   - packages/core/src/cp/domain/connector/Connector.ts
   - packages/core/src/cp/domain/charge-point/ChargingProfileStore.ts
   - packages/core/src/cp/infrastructure/transport/handlers/call/SmartChargingHandlers.ts
+  - packages/core/src/cp/infrastructure/transport/v201/smartChargingV201.ts
+  - "issue #705"
+  - "issue #706"
+  - "issue #735"
+  - "issue #707"
   - "issue #723"
   - "issue #729"
   - "issue #737"
@@ -86,3 +91,53 @@ composite starts, now) and a `chargingSchedule` with `duration`,
 `chargingSchedule.startSchedule`: the 1.6 errata 3.57 says the field "must be
 omitted" when a ChargingSchedule is part of a `GetCompositeSchedule.conf`
 (§6.22, §7.13). The 2.x answer is a different message and is not affected.
+
+## SetChargingProfile preconditions (2.0.1 and 2.1)
+
+One handler serves both versions. A request the station refuses installs
+nothing and answers `Rejected` with a `statusInfo.reasonCode`:
+
+| Request                                                                                                                              | Answer                         | Clause          |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ | --------------- |
+| `TxProfile` on an EVSE with no running transaction                                                                                   | `Rejected`, `TxNotFound`       | K01.FR.09       |
+| `TxProfile` whose `transactionId` is not the EVSE's running transaction (the `transactionId` the station sent in `TransactionEvent`) | `Rejected`, `TxNotFound`       | K01.FR.33       |
+| `TxDefaultProfile` on EVSE 0 while a `TxDefaultProfile` with the same `stackLevel` and another `id` is installed on a specific EVSE  | `Rejected`, `DuplicateProfile` | K01.FR.52       |
+| `TxDefaultProfile` on an EVSE while one with the same `stackLevel` and another `id` is installed on EVSE 0                           | `Rejected`, `DuplicateProfile` | K01.FR.53       |
+| `TxProfile` on EVSE 0, `ChargingStationMaxProfile` on an EVSE, unknown purposes / kinds, unrepresentable schedules                   | `Rejected` (no reason code)    | existing checks |
+
+A `TxProfile` that matches the running transaction is accepted, applies to that
+transaction only and is removed when the transaction ends. A `TxProfile`
+without `transactionId` binds to the running transaction (K01.FR.03 is an
+obligation of the CSMS; the station does not reject the omission). The same
+`id` replaces the installed profile (K01.FR.05); two specific EVSEs may reuse a
+stack level.
+
+## GetChargingProfiles (2.0.1 and 2.1)
+
+The answer is `Accepted` (or `NoProfiles`) and the profiles follow in
+`ReportChargingProfiles` requests, one per EVSE. `evseId` scopes the search
+(K09.FR.04-06):
+
+| `evseId` in the request | Profiles reported                                                        |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `n > 0`                 | Only those installed on EVSE `n` (station-level profiles are not added). |
+| `0`                     | Only the station-level ones (`ChargingStationMaxProfile`, EVSE 0).       |
+| absent                  | All of them: the station-level group first, then each EVSE.              |
+
+Every report carries the request's `requestId` (K09.FR.01). When the profiles
+span more than one report, every report but the last has `tbc: true`
+(K09.FR.02); the last one omits `tbc`, and so does the only report of a
+single-group answer.
+
+## Validity window and schedule anchor (2.0.1 and 2.1)
+
+`validFrom` / `validTo` (the validity window) and the schedule's
+`startSchedule` (where the periods count from) are stored and reported as
+separate fields, as sent: K01.FR.36 / K01.FR.37 make the profile valid when
+`validFrom <= now < validTo`, and K01.FR.30 starts imposing a schedule at its
+`startSchedule`. `GetChargingProfiles` reports back exactly what was set, and
+leaves out a field that was not sent (a profile with only `startSchedule` has
+no `validFrom`). The anchor table above applies to 2.x too: an Absolute or
+Recurring schedule counts from `startSchedule`, else `validFrom`, else the
+transaction start. The 2.x `duration` and `minChargingRate` of a schedule are
+not stored yet.

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { stubOperatingPoint } from "../../../../domain/connector/__tests__/operatingPointStub";
 import type { ChargePointEvents } from "../../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../../domain/connector/Transaction";
 import { OCPPStatus } from "../../../../domain/types/OcppTypes";
@@ -128,6 +129,10 @@ function setup(
     soc: null,
     evSettings: undefined,
     scheduleConstraints: () => ({ watts: Infinity, activePhases: 1 }),
+    announceScheduleCrossingNow() {},
+    operatingPoint() {
+      return stubOperatingPoint(this, Infinity, 1);
+    },
     assignTransactionId(id: number) {
       this.transactionId = id;
     },

@@ -3,7 +3,7 @@ import {
   meterNodeToCurveConfig,
   applyCurveConfigToMeterNode,
 } from "../meterValueNodeConfig";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
 describe("meterValueNodeConfig mapping (scenario MeterValue node ↔ curve modal)", () => {
   describe("meterNodeToCurveConfig", () => {

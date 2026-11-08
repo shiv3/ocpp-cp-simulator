@@ -3,20 +3,20 @@ import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FIELD_LABELS } from "@/components/vehicle/vehicleChoice";
-import { VehicleCatalogError } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
+import { VehicleCatalogError } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import { describeError } from "../../pages/cp/connectorActions";
 import {
   markRemovedUpstream,
   refreshFromCatalog,
   type RefreshChange,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/importProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile";
 import {
   EDITABLE_SPEC_FIELDS as EDITABLE,
   effectiveSpecs,
   missingFields,
   type EditableSpecField,
   type VehicleProfile,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { useVehicleProfiles } from "@/data/hooks/useVehicleProfiles";
 import { cn } from "@/lib/utils";
 

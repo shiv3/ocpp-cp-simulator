@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../data/providers/DataProvider";
 
 /**

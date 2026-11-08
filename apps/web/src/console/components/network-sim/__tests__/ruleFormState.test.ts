@@ -10,13 +10,13 @@ import {
   cpLayerToForm,
   formToCpLayer,
 } from "../ruleFormState";
-import { validateLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import { validateLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import type {
   NetworkSimLayerConfig,
   LatencyRule,
   ManualDisconnectRule,
   PeriodicDisconnectRule,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 describe("ruleFormState", () => {
   describe("layerConfigToForm", () => {

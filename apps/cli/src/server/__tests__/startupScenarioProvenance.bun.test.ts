@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { CLIChargePointService } from "../../service";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { startMockCsms } from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 import type { ChargePointInitOptions } from "../../types";
 import { CPRegistry } from "../CPRegistry";
 import { clearStartupProvenance } from "../startupScenarioRows";

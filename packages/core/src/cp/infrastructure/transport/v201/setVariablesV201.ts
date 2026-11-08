@@ -1,13 +1,21 @@
 import type {
   SetVariablesRequestV201,
   SetVariablesResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   ConfigurationChangeStatus,
   ConfigurationStore,
 } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelContext } from "./getVariablesV201";
 import { resolveDeviceModelVariable } from "./deviceModelMap";
+import { unknownMeasurands } from "./measurandEnum";
+
+/** The configuration keys behind the MemberLists over MeasurandEnumType
+ *  (`SampledDataCtrlr.TxUpdatedMeasurands`, `AlignedDataCtrlr.Measurands`). */
+const MEASURAND_LIST_KEYS: ReadonlySet<string> = new Set([
+  "MeterValuesSampledData",
+  "MeterValuesAlignedData",
+]);
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
 
@@ -64,6 +72,32 @@ export function handleSetVariablesV201(
         component: data.component,
         variable: data.variable,
       };
+    }
+
+    // B05.FR.07: a MemberList value "incorrectly formatted for the given
+    // Variable" is Rejected - here a member outside MeasurandEnumType
+    // (Temperature and RPM are 1.6 measurands). The previous list is kept.
+    if (context.ocppVersion !== undefined && MEASURAND_LIST_KEYS.has(v16Key)) {
+      const members = data.attributeValue
+        .split(",")
+        .map((m) => m.trim())
+        .filter((m) => m !== "");
+      const unknown = unknownMeasurands(members, context.ocppVersion);
+      if (unknown.length > 0) {
+        return {
+          attributeStatus: "Rejected",
+          attributeStatusInfo: {
+            reasonCode: "InvalidValue",
+            additionalInfo:
+              `Not a MeasurandEnumType value: ${unknown.join(", ")}`.slice(
+                0,
+                512,
+              ),
+          },
+          component: data.component,
+          variable: data.variable,
+        };
+      }
     }
 
     const attributeStatus = mapChangeStatus(

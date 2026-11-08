@@ -15,7 +15,7 @@ sources:
   - apps/cli/src/behavior/BehaviorLibrary.ts
   - apps/cli/src/exportK6/runExportK6Behavior.ts
   - apps/web/src/components/scenario/ScenarioEditor.tsx
-  - "issues #566, #569, #575, #600, #618"
+  - "issues #566, #569, #575, #600, #618, #654"
 related:
   - call-precedence.md
   - scenario-format.md
@@ -42,7 +42,7 @@ the [CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build) page.
 
 ## Stability
 
-**`api: 1` is a preview.** The behavior contract (`@ocpp-cp-sim/contracts/behavior`, `Behavior.api: 1`) is
+**`api: 1` is a preview.** The behavior contract (`@ocpp-cp-simulator/contracts/behavior`, `Behavior.api: 1`) is
 usable and tested, but it is not final until the charger-engine work is on `main` and has been used outside
 this repository. Until then a breaking change to it bumps `api` (a behavior with another `api` is refused at
 load), and the change is called out in the PR description and commit message of that change. The word _experimental_ below marks the members most
@@ -91,7 +91,7 @@ InboundCallGate / CallExchange  ◄──►  OCPP adapters (1.6 JSON, 2.x, SOAP
 ### Where this is going
 
 One engine. The scenario executor is meant to become a client of the same `ctx` (a node is a `ctx` verb:
-see the mapping in [Scenario or behavior?](../analyses/scenario-or-behavior.md#json-node-and-ctx-verb)), so
+see the mapping in [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity)), so
 that JSON and code converge instead of drifting; until then they share the gate, the registry and the
 default behaviors, which is where they meet. The k6 runtime keeps its own host
 (`packages/k6-runtime/src/behaviorHost.ts`) over its client until a measurement shows a reason to unify it;
@@ -153,7 +153,7 @@ change how the network simulation logs a discard, which rule 4 forbids). A CALL 
 (`incomingCallCompleted`) even when its first write threw and the caller answers again with a CALLERROR.
 
 `InboundCallGate` runs, once for every OCPP version: `incomingCallReceived`; `inboundPolicy`;
-`responseOverride`; `BehaviorRegistry.resolve()`; then the default path (2.x validates its payload here).
+`responseOverride`; the static [capability profile](call-precedence.md#capability-profile) (#618); `BehaviorRegistry.resolve()`; then the default path (2.x validates its payload here).
 Step 4 runs before validation, so a rule can own a malformed CALL. The full order and what wins is in
 [Who answers an inbound CALL](call-precedence.md).
 
@@ -169,7 +169,7 @@ the gate. See [OCPP versions and transports](ocpp-versions-and-transports.md#soa
 
 ### Behavior API
 
-Types only, in `packages/contracts/src/behavior.ts` (import `@ocpp-cp-sim/contracts/behavior`; it is not
+Types only, in `packages/contracts/src/behavior.ts` (import `@ocpp-cp-simulator/contracts/behavior`; it is not
 re-exported from the package index, whose names would collide). `api: 1` is a [preview](#stability).
 
 ```ts
@@ -229,36 +229,84 @@ export type CallOutcome =
 
 `BehaviorContext`, one line per member and the error each can throw:
 
-| Member                                                           | What it does                                                                                                                                                                             | Throws                                                                       |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `now()`                                                          | Epoch ms on the station's clock                                                                                                                                                          | —                                                                            |
-| `sleep(ms)`                                                      | Wait on the clock                                                                                                                                                                        | `BehaviorStopped`                                                            |
-| `until(promise, { ms })`                                         | The promise's value, or a timeout after `ms`                                                                                                                                             | `BehaviorTimeout`, `BehaviorStopped`                                         |
-| `random(stream)`                                                 | A seeded stream named `<behaviorId>/<stream>`; `int(min, max)` is inclusive at both ends                                                                                                 | —                                                                            |
-| `stopping`                                                       | True once the behavior was unloaded or the station disposed, and (for a reload) once the old code is asked to stop                                                                       | —                                                                            |
-| `state`                                                          | `readonly` in the contract: change its keys, never assign it (core refuses). JSON only; held by the engine and persisted                                                                 | assigning throws `TypeError`                                                 |
-| `send(action, payload, opts?)`                                   | A station-initiated CALL through the normal path; passes `beforeSend`                                                                                                                    | `OcppCallNoAnswerError` (dropped, timed out), `BehaviorStopped`              |
-| `raw(frame)` — experimental                                      | A frame as given, via `RawFrameSender`; needs `raw-frames`                                                                                                                               | missing capability; `BehaviorStopped`                                        |
-| `plugIn`, `unplug`, `authorize`, `startCharging`, `stopCharging` | Physical verbs, independent of the OCPP version; need `physical`. `unplug` runs the EV-side disconnect (a running transaction stops or suspends per `StopTransactionOnEVSideDisconnect`) | missing capability; `BehaviorStopped`                                        |
-| `setConnectorStatus` — experimental                              | Writes a status; needs `physical`                                                                                                                                                        | missing capability; `BehaviorStopped`                                        |
-| `accepted(action)`, `rejected(action)`                           | The valid canned response of this station's version (`{}` for 1.6 `UpdateFirmware`, `{ status: "Accepted" }` on 2.x); either spelling of the action                                      | when the action has no such answer (`ctx.rejected("UpdateFirmware")` on 1.6) |
-| `notify`                                                         | `firmwareStatus(status, { requestId? })`, `signedFirmwareStatus(status, requestId)`, `logStatus(status, { requestId? })`, `diagnosticsStatus(status)`                                    | `BehaviorStopped`                                                            |
-| `defaultBehavior(req)`                                           | In an `extend` handler: run the default, register its follow-up, return its response                                                                                                     | outside `extend`; when the default answers an error                          |
-| `connector(id)`, `charger`                                       | Read-only snapshots. `charger` is `{ id, ocppVersion, status, connectorIds }`: branch on `charger.ocppVersion` for version-specific code                                                 | —                                                                            |
-| `log(message)`                                                   | Write to the station log                                                                                                                                                                 | —                                                                            |
+| Member                                                           | What it does                                                                                                                                                                                                                                             | Throws                                                                       |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `now()`                                                          | Epoch ms on the station's clock                                                                                                                                                                                                                          | —                                                                            |
+| `sleep(ms)`                                                      | Wait on the clock                                                                                                                                                                                                                                        | `BehaviorStopped`                                                            |
+| `until(promise, { ms })`                                         | The promise's value, or a timeout after `ms`                                                                                                                                                                                                             | `BehaviorTimeout`, `BehaviorStopped`                                         |
+| `random(stream)`                                                 | A seeded stream named `<behaviorId>/<stream>`; `int(min, max)` is inclusive at both ends                                                                                                                                                                 | —                                                                            |
+| `stopping`                                                       | True once the behavior was unloaded or the station disposed, and (for a reload) once the old code is asked to stop                                                                                                                                       | —                                                                            |
+| `state`                                                          | `readonly` in the contract: change its keys, never assign it (core refuses). JSON only; held by the engine and persisted                                                                                                                                 | assigning throws `TypeError`                                                 |
+| `send(action, payload, opts?)`                                   | A station-initiated CALL through the normal path; passes `beforeSend`                                                                                                                                                                                    | `OcppCallNoAnswerError` (dropped, timed out), `BehaviorStopped`              |
+| `raw(frame)` — experimental                                      | A frame as given, via `RawFrameSender`; needs `raw-frames`                                                                                                                                                                                               | missing capability; `BehaviorStopped`                                        |
+| `plugIn`, `unplug`, `authorize`, `startCharging`, `stopCharging` | Physical verbs, independent of the OCPP version; need `physical`. `unplug` runs the EV-side disconnect (a running transaction stops or suspends per `StopTransactionOnEVSideDisconnect`)                                                                 | missing capability; `BehaviorStopped`                                        |
+| `setConnectorStatus` — experimental                              | Writes a status; needs `physical`                                                                                                                                                                                                                        | missing capability; `BehaviorStopped`                                        |
+| `accepted(action)`, `rejected(action)`                           | The valid canned response of this station's version (`{}` for 1.6 `UpdateFirmware`, `{ status: "Accepted" }` on 2.x); either spelling of the action                                                                                                      | when the action has no such answer (`ctx.rejected("UpdateFirmware")` on 1.6) |
+| `notify`                                                         | `firmwareStatus(status, { requestId? })`, `signedFirmwareStatus(status, requestId)`, `logStatus(status, { requestId? })`, `diagnosticsStatus(status)`                                                                                                    | `BehaviorStopped`                                                            |
+| `defaultBehavior(req)`                                           | In an `extend` handler: run the default, register its follow-up, return its response                                                                                                                                                                     | outside `extend`; when the default answers an error                          |
+| `connector(id)`, `charger`                                       | Read-only snapshots. `connector(id).power` is `{ acceptedW, offeredW, soc, limitedBy }` from the connector's operating point (#327). `charger` is `{ id, ocppVersion, status, connectorIds }`: branch on `charger.ocppVersion` for version-specific code | —                                                                            |
+| `log(message)`                                                   | Write to the station log                                                                                                                                                                                                                                 | —                                                                            |
 
 A context that outlives its scope (a closure the behavior kept after an unload, a grace time that ended, the
 connection of a CALL's handler) does nothing: the members above that act throw `BehaviorStopped`, which the
 engine swallows. `ctx.state` of an unloaded behavior is a loose object, not the engine's entry.
 
 Behavior modules import types only. They must not use module-scope mutable state, `Date`, `Math.random` or
-timers (one module instance serves every station); the ESLint config `@ocpp-cp-sim/contracts/eslint-behavior`
+timers (one module instance serves every station); the ESLint config `@ocpp-cp-simulator/contracts/eslint-behavior`
 reports these. The API must work on k6: no `AbortController`, `URL`, `structuredClone`, `queueMicrotask`,
 `performance`, async generators or `for await`; `ocpp-cp-sim behavior build` checks this.
 
 Waits (`sleep`, `until`) run on the station's clock. When the behavior is unloaded, the station is disposed, or
 (for a user behavior's CALL handler and its `after`) the connection closes, a pending wait rejects with
 `BehaviorStopped`.
+
+### Params
+
+**Issue #654.** A behavior declares its knobs as data and reads them from `ctx.params`:
+
+```ts
+const behavior: Behavior = {
+  api: 1,
+  id: "slow-firmware",
+  params: {
+    schema: {
+      type: "object",
+      properties: { stepMs: { type: "integer", minimum: 0 } },
+    },
+    defaults: { stepMs: 2000 },
+  },
+  onCall: {/* … ctx.sleep(ctx.params.stepMs as number) … */},
+};
+```
+
+- **The schema is a closed subset of JSON Schema** (`packages/core/src/cp/application/behavior/paramsSchema.ts`):
+  `type` (`object`, `string`, `number`, `integer`, `boolean`, `array`, `null`), `enum`, `const`, `minimum`,
+  `maximum`, `minLength`, `maxLength`, `properties`, `required`, `additionalProperties` (a boolean), `items`,
+  `minItems`, `maxItems`, and `title` / `description` (labels for the editor). Any other keyword (`pattern`,
+  `$ref`, `oneOf`, …) makes the behavior fail to load, so nobody believes a constraint is enforced when it is not.
+  An object refuses keys that are not in `properties` unless `additionalProperties` is `true` (a typo is an
+  error, not a no-op). The root must have `type: "object"` and `defaults` must fit it.
+- **Merge, then validate, at arm time.** `ctx.params` is the behavior's `defaults`, then the keys the station's
+  selection set, then each running scenario's `useBehavior` params (oldest first), shallow (one level; a key
+  replaces the whole value). The merged object is validated when the behavior is armed: loaded (`cp.create`,
+  `cp.behaviors.set`, `--behavior-params`), selected by a run (`useBehavior`), or re-selected by a reload (a new
+  version whose schema no longer fits the params in force is refused and the old one keeps running). A mismatch
+  throws a message naming the behavior and the path (`Behavior default.firmware: invalid params: params.stepMs:
+expected integer, got "2000" (strings are not converted)`). Nothing is coerced.
+- **JSON only.** Params are checked to be plain JSON (no function, `undefined`, `NaN`, class instance, cycle;
+  nesting up to 8; 16 KiB per behavior; the name `__proto__` is refused). They are values, never a module, a path or
+  a URL, and nothing in the engine evaluates a string. The wire carries them as data like the ids.
+- **Read-only, and fixed per context.** `ctx.params` is a deeply frozen copy made when the context is made: a
+  CALL's handler and its `after` see the params the CALL arrived with; a `main` keeps the ones it started with
+  (changing the params with `cp.behaviors.set` changes the behavior in place like a reload: `main` and the
+  hook context restart and `ctx.state` stays, while the layers of running scenarios and the CALLs the behavior
+  has open are kept, so a run's layer still ends with its run and no CALL is answered `InternalError`). A behavior without `params` gets `{}` and refuses params set for it.
+- **Built-ins are selected the same way.** A `default.*` behavior always answers; selecting it (`useBehavior`,
+  `behaviorParams`) only sets its params. [Which ones have knobs](../entities/default-behaviors.md#params).
+- **Disable.** `useBehavior` `mode: "disable"` is a scenario rule per action that answers `ctx.accepted(action)`
+  and does nothing after ([order](call-precedence.md#params-and-disable-in-the-order)).
+- **k6.** The k6 behavior host gives a behavior its declared `defaults` as `ctx.params`; a selector cannot set them
+  there, and `export-k6` refuses a `useBehavior` node.
 
 ### BehaviorRegistry
 
@@ -278,7 +326,8 @@ is the reference for fields.
   `skipValidation`. It waits for settlement.
 - `{ "$from": "call.payload.requestId" }` as a whole payload value in `ocppCall` and `callResponse`, resolved
   against the exchange of that branch. A missing path fails the run.
-- `useBehavior` node: selects a behavior already loaded on the station, by id. Data only.
+- `useBehavior` node: selects a behavior already loaded on the station, by id. Data only. Schema 1.6 adds
+  `params` and `mode: "disable"` ([Params](#params)).
 
 The runtime contract (a disconnect before answering, a run that ends unanswered, an answer after a reconnect, a
 send that failed, the time before answering, a `callResponse` without an exchange) is the table in the
@@ -426,19 +475,29 @@ carries on. Delivery is in the table above.
   id: absent runs every loaded behavior, `[]` none. Unknown ids are `invalid_params` naming the loaded ids.
 - The four spellings of "select" are one thing:
 
-  | Where                         | Spelling                                                                        | Scope                          |
-  | ----------------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
-  | Command line                  | `--use-behavior <id>` (repeatable)                                              | The charge points it starts    |
-  | RPC / MCP at creation, update | `behaviors: string[]` on `cp.create`, `cp.create_many`, `cp.update`, blueprints | One charge point, persisted    |
-  | RPC / MCP at run time         | `cp.behaviors.set { cpId, behaviors }` (`null` = all)                           | One charge point, in place     |
-  | Scenario                      | `useBehavior` node                                                              | A run (dormant behaviors only) |
+  | Where                         | Spelling                                                                                             | Scope                       |
+  | ----------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------- |
+  | Command line                  | `--use-behavior <id>` (repeatable), `--behavior-params <id>=<json>` for params                       | The charge points it starts |
+  | RPC / MCP at creation, update | `behaviors: string[]` and `behaviorParams` on `cp.create`, `cp.create_many`, `cp.update`, blueprints | One charge point, persisted |
+  | RPC / MCP at run time         | `cp.behaviors.set { cpId, behaviors, behaviorParams }` (`null` = all)                                | One charge point, in place  |
+  | Scenario                      | `useBehavior` node, with `params` or `mode`                                                          | A run                       |
 
 - It persists with the charge point (`charge_points.behaviors`; `NULL` = all). A selection is checked before it
   is written; a refused `cp.update` leaves the old station connected and as it was. On restore an id no longer
   loaded, or one the station cannot run, is left out with a warning; any other failure skips that station with a
   warning and keeps its row; an unreadable stored value selects none.
-- `behavior.list` returns the library (id, file), whether `--watch-behaviors` is on, and `defaults`: the built-in
-  behaviors with the actions each answers.
+- `behavior.list` returns the library (id, file, and its params schema and defaults when it declares params),
+  whether `--watch-behaviors` is on, and `defaults`: the built-in behaviors with the actions each answers and
+  their params.
+- **Params travel with the selection.** `behaviorParams` is a map of behavior id to a JSON object, accepted
+  wherever `behaviors` is, stored with the charge point (`charge_points.behavior_params`, schema v29; `NULL` =
+  none) and restored with it. A key is a `default.*` id or one of the selected behaviors; a key that is neither,
+  or a value that does not fit the schema, is `invalid_params` before anything is written. `cp.update` keeps the
+  params when they are omitted and replaces them when given; `cp.behaviors.set` replaces the whole selection, so
+  omitting them there means "no params". On restore, a stored entry the behavior no longer accepts (a reloaded file
+  changed its schema) is left out of memory with a warning and the station comes back with that behavior on its
+  defaults. No path, URL or source text is accepted anywhere in this: the tests in
+  `apps/cli/src/server/__tests__/behaviorParams.bun.test.ts` ("no code over the wire") hold it.
 - **Reload** (`behavior.reload`, `--watch-behaviors`) re-reads the files given at start. It is opt-in
   (`--allow-behavior-reload`, or implied by `--watch-behaviors`). A station takes a whole file or none of it; an
   unchanged bundle is skipped by hash; a file that fails keeps its old version. Reloads run one at a time, each

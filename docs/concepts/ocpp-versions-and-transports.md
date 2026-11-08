@@ -3,6 +3,10 @@ title: OCPP versions and transports
 type: concept
 summary: What the simulator speaks — OCPP-J 1.6J (default), 2.0.1 and 2.1 over WebSocket, and OCPP-S 1.2 / 1.5 / 1.6S over SOAP 1.2 + WS-Addressing — and which surfaces support which.
 sources:
+  - packages/core/src/cp/shared/WsClientOptions.ts
+  - "issue #611"
+  - packages/core/src/cp/shared/ReconnectPolicy.ts
+  - "issue #609"
   - packages/ocpp/src/ (generated from packages/ocpp/vendor/ocpp-schemas)
   - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
@@ -92,6 +96,123 @@ sticky across reconnects the same way and an override answers once.
 
 On OCPP-J (1.6, 2.0.1, 2.1) the connection URL is the configured endpoint, a `/` and the charge point identity. The identity is percent-encoded as one path segment with `encodeURIComponent` (OCPP-J 1.6 §3.1.1, RFC 3986; #742): `CP001` stays `CP001`, `a/b` becomes `a%2Fb`, `a%41` becomes `a%2541`, `RDAM 123` becomes `RDAM%20123`. The builder (`buildOcppWebSocketUrl`) adds the `/` itself, so an endpoint with or without a trailing `/` gives the same URL. The HTTP Basic Auth username stays the unencoded identity ([Security profiles](security-profiles.md)).
 
+## Reconnect policy and `RetryBackOff*` (#609)
+
+When an OCPP-J connection closes without the charge point asking for it, the
+transport waits and reconnects. The wait and the point at which it stops are
+the **reconnect policy**, one object per charge point (`transport.reconnect` on
+`cp.create`, the `--reconnect-*` flags in the [CLI](../entities/cli.md), the
+`charge_points.transport_options` column of the [state database](state-persistence.md)).
+Every field is optional and **the defaults are the schedule before the policy
+existed**: 1 s, doubling to 30 s, forever, no jitter.
+
+| Field            | Default       | Meaning                                                                                                                                                                                                                                                                                                         |
+| ---------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxAttempts`    | `-1`          | Reconnect attempts after a loss before giving up; `-1` unlimited, `0` never reconnects. The count restarts when a connection opens.                                                                                                                                                                             |
+| `mode`           | `exponential` | `exponential` waits `min(baseDelayMs × 2^(attempt−1), maxDelayMs)`; `fixed` waits `baseDelayMs` every time.                                                                                                                                                                                                     |
+| `baseDelayMs`    | `1000`        | Wait before the first attempt.                                                                                                                                                                                                                                                                                  |
+| `maxDelayMs`     | `30000`       | Cap of the exponential wait; must be ≥ `baseDelayMs`.                                                                                                                                                                                                                                                           |
+| `jitterMs`       | `0`           | A random extra wait in `[0, jitterMs]`, drawn from the charge point's seeded `reconnect` stream: the same seed replays the same waits. Without a simulation seed (the CLI and `cp.create` set none) the stream is seeded by the charge point id, so the same id replays the same waits. No draw happens at `0`. |
+| `bootRetryLimit` | `-1`          | Automatic BootNotification re-sends after a `Rejected` answer (§4.2) before stopping; `-1` unlimited. An `Accepted` answer or a new connection restores the budget. Applies to SOAP too.                                                                                                                        |
+
+An invalid value is refused when the charge point is created (a typo does not
+silently leave the default in place). The delay a network-simulation
+`reconnectDelayMs` reserves still wins when it is longer than the computed wait
+([network simulation](network-simulation.md)).
+
+**Giving up** — `maxAttempts` or `bootRetryLimit` reached — logs a warning, emits
+`gaveUp` and records a `gave_up` entry (`target` `reconnect` or
+`boot_notification`, `attempts`) in the [operational timeline](operational-timeline.md).
+On 2.x this is an opt-in deviation: OCPP 2.0.1 Part 4 §5.4 says the station keeps reconnecting, and the default (`-1`, unlimited) does. The charge point then stays offline until an explicit `connect`, which starts
+with a fresh budget; so does every new connection: the BootNotification budget
+is restored when a socket opens, not only on an `Accepted` answer. The
+`gave_up` entry of a BootNotification follows the `Rejected` answer that caused it.
+
+**OCPP 2.0.1 / 2.1 (Part 4 §5.4 "Reconnecting").** A 2.x charge point reads three
+`OCPPCommCtrlr` variables, ReadWrite and persisted like the others, and they
+replace `baseDelayMs`, `jitterMs` and the number of doublings:
+
+| Variable                  | Unit    | Meaning                                                               |
+| ------------------------- | ------- | --------------------------------------------------------------------- |
+| `RetryBackOffWaitMinimum` | seconds | The first wait; at least 1.                                           |
+| `RetryBackOffRandomRange` | seconds | A random extra wait in `[0, RandomRange]` added to every wait.        |
+| `RetryBackOffRepeatTimes` | count   | How many times the wait doubles (0–30); after that it stays constant. |
+
+The wait before attempt N is `RetryBackOffWaitMinimum × 2^min(N−1, RepeatTimes)`
+plus the random extra (Part 4 §5.4 describes the doubling and the random range
+in prose, not as a formula; the variables are defined in the Part 2 Appendices
+under `OCPPCommCtrlr`). `RepeatTimes` 2 with a minimum of 20 s waits 20, 40, 80,
+80 s. The spec sets no ceiling, so a CSMS's values are followed as set: only the
+timer's own limit (2147483647 ms) applies, to the wait and to the wait plus the
+random extra. One exception keeps the default schedule: while the three variables
+still equal the values derived from the policy (nobody changed them), `maxDelayMs`
+caps the doubled part, so 1, 2, 4, 8, 16 does not become 32 s on the sixth attempt.
+`mode: fixed` never doubles and `maxAttempts` still ends the loop. The
+variable defaults are derived from the policy (whole seconds, at least 1 for the
+minimum), so a 2.x charge point with no policy reconnects after 1, 2, 4, 8, 16
+and 30 s, like 1.6; a policy with sub-second values is rounded up in the
+variables. A 1.6 charge point has none of the three keys.
+
+Local mode (the browser) does not take the policy: the reconnect loop of the web
+console's charge points keeps the defaults.
+
+## WebSocket client options (#611)
+
+`transport.ws` — next to `transport.reconnect`, same places: `cp.create`, the
+`--ws-*` flags of the [CLI](../entities/cli.md), `charge_points.transport_options` —
+sets what the OCPP-J client asks of its WebSocket. Every field is optional and a
+charge point without them behaves as before.
+
+| Field                | CLI flag                        | Meaning                                                                                                                                    | Bun | Node (`ws`) | Browser |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --- | ----------- | ------- |
+| `handshakeTimeoutMs` | `--ws-handshake-timeout-ms`     | An attempt that has not opened within this many ms is closed; the [reconnect policy](#reconnect-policy-and-retrybackoff-609) then applies. | yes | yes         | yes     |
+| `perMessageDeflate`  | `--ws-no-compression` (`false`) | `false` stops offering `permessage-deflate` on the upgrade; `true` offers it (the default).                                                | yes | yes         | no      |
+| `maxPayloadBytes`    | `--ws-max-payload`              | Largest incoming message; a larger one closes the socket (1006 on `ws`).                                                                   | no  | yes         | no      |
+| `proxy`              | `--ws-proxy`                    | `http://` or `https://` proxy the upgrade goes through with `CONNECT`.                                                                     | yes | no          | no      |
+| `localAddress`       | `--ws-local-address`            | Local IP the connection binds to.                                                                                                          | no  | yes         | no      |
+
+**What the table means.** _yes_ is measured (below), not read from documentation.
+The handshake timeout is _yes_ everywhere because the transport enforces it itself
+with a timer: no runtime does it for us (Bun never times a handshake out).
+
+**An option the runtime cannot honour is refused, not ignored.** The charge point
+is not created: `cp.create` answers an error such as
+`WebSocket option "localAddress" is not supported on bun (supported on: node)`,
+the CLI exits 1 with the same text, and a charge point restored from the state
+database that needs an option the current runtime lacks is skipped with that
+warning (the row is kept). Issue #611 asked for a startup warning; a warning
+would leave a test running behind a proxy it never used or with a payload limit
+it never enforced, so the simulator fails instead. `transport.ws` on a SOAP
+version is refused for the same reason: it has no WebSocket.
+
+Values are validated when the charge point is created: `handshakeTimeoutMs` > 0,
+`maxPayloadBytes` an integer > 0, `proxy` an `http(s)://` URL, `localAddress`
+non-empty. The refusal probe that explains a refused upgrade ([#288](https://github.com/shiv3/ocpp-cp-simulator/issues/288))
+goes through the same `proxy`.
+
+**Local mode** (the web console's browser charge points) takes none of this:
+`WebSocket` in a browser cannot set compression, payload limits, a proxy or a
+source address, and Local charge points keep the default handshake behaviour.
+
+**PoC (2026-11-08, Bun 1.3.14 and Node 22 with `ws`).** Each option was passed
+to the client constructor against a local server that records the upgrade
+request, a silent TCP server and a recording `CONNECT` proxy:
+
+| Option                     | Bun 1.3.14                                                                                                                                  | Node 22 + `ws`                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `perMessageDeflate: false` | No `Sec-WebSocket-Extensions` sent (default offers `permessage-deflate; client_max_window_bits`). A `compression: false` option is ignored. | Honoured, same result.                                           |
+| `maxPayload` 1 KB          | **Ignored**: a 2 MB message is delivered whole.                                                                                             | Honoured: `Max payload size exceeded`, close 1006.               |
+| `localAddress` 127.0.0.2   | **Ignored**: the server sees 127.0.0.1.                                                                                                     | Honoured: the server sees 127.0.0.2.                             |
+| `proxy`                    | Honoured: the proxy receives `CONNECT host:port`. `HTTP_PROXY` / `http_proxy` are **not** used for WebSockets.                              | No proxy option; it needs an agent and none is bundled.          |
+| handshake timeout          | No option; a silent server leaves the socket `CONNECTING` for the whole 6 s observed.                                                       | `handshakeTimeout` honoured (`Opening handshake has timed out`). |
+
+The Bun half runs on every CI build as
+`packages/core/src/cp/infrastructure/transport/__tests__/OCPPWebSocket.wsOptions.bun.test.ts`,
+including a canary for the two options Bun ignores: if a Bun release starts
+honouring one, that test fails and the matrix in
+[`WsClientOptions.ts`](../../packages/core/src/cp/shared/WsClientOptions.ts)
+is corrected.
+
 ## WebSocket ping (`WebSocketPingInterval`)
 
 An OCPP-J charge point sends a WebSocket ping frame every
@@ -175,7 +296,8 @@ each transmission counts as failed once:
   CALLRESULT arriving later is ignored.
 
 `MessageTimeout` is a 2.x-only key (default 30, like the 1.6 serial queue's
-30 s CALL timeout), read at each transmission. The CSMS addresses it as
+30 s CALL timeout), read at each transmission; it is also the time after
+which an unanswered CALL frees the [one-CALL-in-flight slot](#one-call-in-flight-on-2x-ocpp-j-411). The CSMS addresses it as
 `OCPPCommCtrlr.MessageTimeout` with `variableInstance = "Default"` (2.0.1
 and 2.1 §2.1.3 "DefaultMessageTimeout"). The spec makes it ReadOnly: the
 CSMS sets it through a NetworkConnectionProfile, and this simulator answers
@@ -198,21 +320,10 @@ see [variable monitoring](variable-monitoring.md#monitoringctrlr-variables),
 #538). Every other mapped variable has no instance and answers whatever
 instance the CSMS names, as before.
 
-While a resend is pending (a TransactionEvent failed and is neither settled
-nor discarded: its resend waits out `MessageAttemptInterval`, or was written
-and has neither been answered nor failed; an earlier transmission that timed
-out and only waits for a late answer holds nothing back, so a resend dropped
-before the wire releases the hold), the next
-TransactionEvent the station builds waits for it, E13.FR.04: "The Charging
-Station SHALL discard the message and continue with the next
-transaction-related message". An `Ended` built during the retry of `Started`
-goes out after `Started` is answered or discarded, never before, and so does
-every event built after it, in order (#565). This is the only hold: 2.x has
-no serial queue (see `send`), so an event already written when an earlier one
-fails is not recalled, and the CSMS orders those by `seqNo`; the
-[E11 replay](#e11-offline-queue-for-transactionevent) is a burst for the same
-reason. There is no id to resolve on 2.x: the station chooses the
-`transactionId`. When
+A waiting resend holds back the next TransactionEvent (E13.FR.03/04: "continue
+with the next transaction-related message"), so `Ended` does not overtake a
+resent `Started` ([one CALL in flight](#one-call-in-flight-on-2x-ocpp-j-411)).
+When
 the WebSocket closes (network loss, disconnect, reset, delete), a resend
 still waiting and a written TransactionEvent still waiting for its answer
 are not dropped: they go to the
@@ -258,8 +369,13 @@ is restored (E11 "Connection Loss During Transaction", #528):
 - **E13 still applies to a replayed event**, with fresh counters: its
   `MessageAttempts[TransactionEvent]` budget and `transactionMessageRejected`
   `attempt` restart at 1, as a 1.6 replay goes through the serial queue
-  anew. A row leaves the queue when its replay is handed to the socket; a
-  close before the answer queues the event again. A replay the socket
+  anew. A row stays in the table (and so survives a crash) until the CSMS
+  answers the replay or the event is discarded after
+  `MessageAttempts[TransactionEvent]` failures (#554); a close before the
+  answer hands the same row back to the queue, in its place, instead of
+  adding a second one. After a restart every remaining row replays again
+  with `offline: true`, so the CSMS may see an event twice and
+  de-duplicates by `transactionId` and `seqNo`. A replay the socket
   refuses while the connection stays up (a network-sim refusal or
   overflow) stays at the head of the queue, with a `warn` (category
   `TRANSACTION`); the replay stops there, and that row, the rows behind it
@@ -269,9 +385,9 @@ is restored (E11 "Connection Loss During Transaction", #528):
   `pending_messages` by charge point id, and `cp.update` can switch
   `ocppVersion` over the same `--state-db`. When a handler starts, its
   queue deletes every row it does not replay, with one `warn` (category
-  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`
-  and `NotifyEvent`, the 1.6 handler anything but StartTransaction,
-  StopTransaction and MeterValues. Such a row never holds back a new
+  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`,
+  `NotifyEvent` and `SecurityEventNotification`, the 1.6 handler anything but
+  StartTransaction, StopTransaction and MeterValues. Such a row never holds back a new
   TransactionEvent.
 - **NotifyEvent** (#538): monitor events at or below
   `MonitoringCtrlr.OfflineQueuingSeverity` are queued too (N07.FR.04,
@@ -285,6 +401,13 @@ is restored (E11 "Connection Loss During Transaction", #528):
   the oldest report, never a TransactionEvent, with one `warn` at the
   first drop of an outage and one with the count at the replay.
   See [variable monitoring](variable-monitoring.md#offline-queuing).
+- **SecurityEventNotification** (#552): a critical security event
+  (A04.FR.02, Appendix 1; the list is in
+  [Security profiles](security-profiles.md#ocpp-201-and-21-behaviour)) produced
+  while offline is queued too and replayed in the same pass, in production
+  order, as built: the request carries the time of the event and no `offline`
+  marker. A queued security event never holds a live TransactionEvent back; a
+  refused replay stays at the head. A replayed row (and a NotifyEvent row) stays in the queue until the CSMS answers: a close while the CALL waits for the one-CALL slot, or before the answer, puts it back for the next replay (#664), and a critical event written online but unanswered at a close is queued the same way. At most 1000 are kept per charge point.
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, the NotifyEvents above the severity and the rest are
   dropped while offline, as before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is
@@ -295,23 +418,55 @@ is restored (E11 "Connection Loss During Transaction", #528):
   StatusNotifications first, then the replay, as on 1.6
   (`ChargePoint.markBootAccepted` defers the flush to a microtask).
 
+- **Size limit** (#554, E11.FR.04 / E11.FR.05). The simulator key
+  `OfflineQueueMaxEvents` (2.x only, ReadWrite, default `1000`, `0` = no
+  limit; not an OCPP variable, the spec sets none for the size, and it is
+  not in the device model, so a CSMS cannot reach it with
+  `GetVariables` / `SetVariables`: set it in the simulator's own
+  configuration) bounds the
+  TransactionEvents in the queue, rows whose replay awaits an answer
+  included. With the queue full, only `Updated` events are dropped; `Started`
+  and `Ended` never are. E11.FR.05 fixes the order: intermediate messages
+  first (the 2nd, 4th, 6th, ...), "not start dropping messages from the
+  start or stop adding messages to the queue". The simulator therefore
+  thins: the candidates are the idle queued `Updated` rows in queue order
+  (`D`), a per-outage cursor `k` (starting at 1) picks `D[k]` and advances,
+  and since the list shifts left after each drop the drops fall on the 2nd,
+  4th, 6th, ... original rows. At the end of `D` the cursor wraps to 1,
+  which halves the density again; the cursor resets at the replay. The
+  first queued `Updated` goes only when it is the only candidate (a queue of
+  `Started` and one `Authorized` `Updated` makes room for a new periodic
+  sample by dropping the `Authorized` one). A new event is always queued,
+  except that a new `Updated` is dropped itself when no idle queued
+  `Updated` exists; a new `Started` or `Ended` is queued past the limit with
+  a `warn`. Each insert drops until the queue is under the limit again, so
+  a queue left above it (events queued past the limit, rows loaded after a
+  restart) shrinks back. A row whose replay awaits its answer is not
+  dropped. A dropped event leaves a gap in the `seqNo` of its transaction,
+  which is how the CSMS sees the loss. One `warn` (category `TRANSACTION`)
+  at the first drop of an outage, naming the first dropped event, one with
+  the count at the replay.
+- **E14 `GetTransactionStatus`** (#554): `messagesInQueue` is `true` while a
+  TransactionEvent of the asked `transactionId` (of any transaction when the
+  request names none) is still to be delivered: queued, replayed but not
+  yet answered, or live and not yet settled (awaiting its answer or the
+  wait for an E13 resend). It is `false` once the CSMS has answered them all
+  or they were discarded. `ongoingIndicator` is only sent for a request with
+  a `transactionId`: `true` while that transaction has not stopped
+  (E14.FR.02), `false` for a stopped or unknown one (E14.FR.01/03); without
+  an id it is omitted (E14.FR.06, #700).
+
 Limits:
 
-- The queue has no size cap for TransactionEvents (only the NotifyEvent
-  reports are capped, #538), so the E11.FR.04/FR.05 memory-pressure drop
-  of `Updated` events is not modelled.
-- The replay goes out as a burst: 2.x has no serial queue (see the hold
-  above, which covers only events built while a resend is pending), so the
-  station does not wait for one answer before sending the next replayed
-  event.
-- A row leaves the table when its replay is handed to the socket, as on
-  1.6. A process crash before the answer loses it, where the E04 failure
-  postcondition keeps an unanswered event in the queue.
+- The replay goes out as a burst: 2.x has no serial queue (see the known
+  limitation above), so the station does not wait for one answer before
+  sending the next replayed event.
+- A live event (never queued) that is written and unanswered when the
+  process crashes is lost: only the E11 queue is durable. A replayed event
+  is durable until answered (#554), as the E04 failure postcondition asks.
 - A restart replays the queued events, but the 2.x `transactionId` and
   `seqNo` counter of a transaction restored after the restart are not
   persisted, so its later events do not continue the replayed ones.
-- `GetTransactionStatus` answers `messagesInQueue: false` whatever the
-  queue holds (E14).
 
 ## OCPP-J 1.6 triggered status notifications
 
@@ -576,6 +731,12 @@ ends. A station-wide reset waits for all connectors, while an EVSE-scoped reset
 waits only for that EVSE. Multiple scoped resets remain independent, and an
 Immediate reset supersedes only pending resets in the scope it resets.
 
+An EVSE-scoped reset (`evseId`, B11.FR.08) does not reboot the station: it ends
+that EVSE's transaction, reports the EVSE `Unavailable` and then in the state it
+had (`Reserved` and an Inoperative `Unavailable` are kept, B11.FR.02/05), and
+sends no BootNotification. That holds for an OnIdle reset that ran later too
+(#699). Only a reset without `evseId` reboots and cold-boots (B11.FR.03/04).
+
 The decision uses whether a transaction is actually running, not whether a
 stopped transaction object is still attached to the connector. The queue is
 also rechecked after adding a scheduled reset and after connector removal, so a
@@ -620,6 +781,111 @@ earlier "nothing unless an auto-meter is configured"); `0` sends none.
   (#527) is not sampled: its `0` is a placeholder the CSMS never issued. Until
   StartTransaction.conf arrives a sample carries the placeholder `0`.
 - Only 1.x: the 2.x sampling below is unchanged.
+
+## Reconnect without BootNotification (OCPP 2.x, #702)
+
+OCPP-J 2.0.1 §5.4: when reconnecting, a charging station "SHOULD NOT send a
+BootNotification unless one or more of the elements in the BootNotification
+have changed". On 2.0.1 and 2.1 the station follows it. The transport's
+automatic reconnect after a connection loss (a CSMS close, a network-sim cut)
+reopens the socket and **sends no `BootNotification`** when
+
+- the last `BootNotification` was `Accepted` and the boot data is unchanged, and
+- `BootOnReconnect` (a 2.x simulator key, default `false`) is not `true`.
+
+A first connect, an operator `connect()`, a `Reset`, a boot that a closed
+socket lost, a last boot that was `Pending` or `Rejected`, and changed boot data
+all still send it, and so does `TriggerMessage(BootNotification)` while the boot
+is not `Accepted` (after an `Accepted` boot the request is answered `Rejected`,
+F06.FR.17, so a resumed link rejects it too). OCPP 1.x and SOAP always boot on
+connect: that is a deliberate choice of the simulator, not something the spec
+requires (OCPP-J 1.6 §5.4 carries the same "should not send" sentence); the
+issue is 2.x-only and the 1.6 certification flows rely on the boot.
+
+Instead the station resumes what an accepted boot starts (B04, E11):
+
+- **Status reports.** The connection loss made the idle connectors `Unavailable`
+  locally only. Each connector's status is derived again from its state: one
+  the loss made `Unavailable` gets the status it had back (`Reserved` only
+  while its reservation is still held, else `Available`), one made
+  `Inoperative` meanwhile stays `Unavailable`, and a status changed during the
+  outage (a plug-in, a stop) stands. A `StatusNotification` goes out for each
+  connector whose status differs from what the CSMS last **answered**
+  (B04.FR.02): a notification still in flight when the link closed counts as
+  not delivered and is sent again. Statuses are compared as the 2.x wire
+  carries them (`Preparing` and `Charging` are both `Occupied`). All
+  connectors are reported when the outage lasted longer than
+  `OCPPCommCtrlr.OfflineThreshold` seconds (B04.FR.01; key
+  `OfflineThreshold`, 2.x only, default `60`, the spec gives none). The
+  station scope is never reported on 2.x
+  ([connectors only](#ocpp-2x-statusnotification-reports-connectors-only)).
+- **Reservations** survive the loss with their expiry (a link loss is not a
+  reboot, and B01.FR.13 even keeps `Reserved` across a reboot). A `Reset` still
+  drops them, as before: persisting a reservation across a reboot is not
+  modeled. Station-level charging profiles (connectorId 0) are cleared by the
+  teardown (`ConnectionClosed`) but restored by the resume, minus those whose
+  `validTo` passed during the outage (#799): without a boot the CSMS has no cue
+  to push its limits again. A connection loss that ends in a boot (first
+  start, `Reset`, a changed boot data or `BootOnReconnect`) still leaves them
+  cleared; connector and transaction profiles stay.
+- The heartbeat timer (with the interval in force), the clock-aligned samples
+  and the variable-monitoring reports are re-armed.
+- The [E11 queue](#e11-offline-queue-for-transactionevent) is replayed after
+  the status reports, as after an accepted boot.
+
+`connected` is emitted as always; no `boot_notification` event follows it on
+such a reconnect, and the [operational timeline](operational-timeline.md)
+records `reconnected_without_boot` (`offlineMs`, `reportedAll`) in its place.
+
+## OCPP 2.x BootNotification reason
+
+`BootNotificationRequest.reason` (B01.FR.09, `BootReasonEnumType`) carries the
+cause of the boot (#691). `ChargePoint.boot(reason)` remembers it until the
+boot is `Accepted`, so a retry after `Rejected` repeats it; an accepted boot
+falls back to `PowerUp`, which is also the reason of a plain (re)connect.
+
+| Cause                                                                         | `reason`         |
+| ----------------------------------------------------------------------------- | ---------------- |
+| First boot, a reconnect that boots, renewed-certificate reconnect (A02.FR.08) | `PowerUp`        |
+| CSMS `Reset` (Immediate, or OnIdle with an idle target)                       | `RemoteReset`    |
+| `Reset` OnIdle that was answered `Scheduled` and ran later                    | `ScheduledReset` |
+| CSMS `TriggerMessage(BootNotification)`                                       | `Triggered`      |
+| Control-plane reset (`cp.reset`, CLI / web console)                           | `LocalReset`     |
+
+OCPP 1.6 has no `reason` field and is unchanged.
+
+## Units of 2.x meter value samples
+
+On OCPP 2.0.1 / 2.1 every sample in `MeterValues` and in a `TransactionEvent`'s `meterValue` carries `unitOfMeasure.unit`, except `Power.Factor`, which is unitless. Part 2 Appendices ch. 2 makes `Wh` the default of `unit`, so a sample without one reads as watt-hours: a 50 Hz `Frequency` sample used to be read as 50 Wh (#713). The unit comes from the measurand (`unitOfMeasurandV2x` in `MeterValueBuilder.ts`): `Hz` for `Frequency`, `A` for `Current.*`, `W` / `var` for `Power.Active.*` / `Power.Reactive.*`, `Wh` / `varh` / `VAh` for `Energy.Active.*` / `Energy.Reactive.*` / `Energy.Apparent.*`, `V`, `Percent` for `SoC`. The signed energy register reports `kWh`. OCPP 1.6 output is unchanged: 1.6 has no `Hz`, so `Frequency` stays without a unit there (errata 3.86).
+
+## Measurand lists on 2.x
+
+`SampledDataCtrlr.TxUpdatedMeasurands` and `AlignedDataCtrlr.Measurands` are MemberLists over `MeasurandEnumType`. On OCPP 2.0.1 / 2.1 `SetVariables` checks every member against the enum of the station's version (the vendored Part 3 schema): a member outside it (`Temperature` and `RPM` are 1.6 measurands, `Foo` is nothing) answers `attributeStatus: Rejected` with `attributeStatusInfo.reasonCode: InvalidValue` (B05.FR.07) and keeps the previous list. An empty list is valid. The same list still reaches the station by other routes (persisted state, scenarios, `a sample override), so the 2.x handler also drops measurands outside the enum before it builds a sample and logs a warning: a schema-invalid `MeterValues`or`TransactionEvent` `meterValue`is never sent (#714). OCPP 1.6 is unchanged:`ChangeConfiguration`still accepts`Temperature`and`RPM`. Code: `transport/v201/measurandEnum.ts`, `setVariablesV201.ts`.
+
+## OCPP 2.x StatusNotification reports connectors only
+
+B01.FR.05 sends a StatusNotification "for each Connector", and G03 / G04
+Note 2 say the message only supports connector statuses; EVSEs and connectors
+are numbered from 1. The 2.0.1 / 2.1 station therefore sends no
+StatusNotification for the station scope (the OCPP 1.6 `connectorId` 0 main
+controller, formerly `{ evseId: 0, connectorId: 0 }`) after boot, after a
+station-wide ChangeAvailability or for a `TriggerMessage(StatusNotification)`
+without an EVSE (#703). OCPP 1.6 `connectorId: 0` is unchanged. Station
+availability is not reported separately; a `ChargingStation.AvailabilityState`
+NotifyEvent (G04.FR.05, a MAY) is not sent.
+
+## One CALL in flight on 2.x (OCPP-J §4.1.1)
+
+OCPP-J 2.0.1 / 2.1 Part 4 §4.1.1: a Charging Station "SHALL NOT send a CALL message to the other party unless the CALL message it sent before has been responded to or has timed out". The 2.x handler (#708) keeps one slot per connection, as the 1.6 handler does with its serial queue:
+
+- A CALL waits in the handler's queue until the slot is free. The slot is taken when the CALL is handed to the socket and freed by its CALLRESULT or CALLERROR, by `OCPPCommCtrlr.MessageTimeout` seconds after it was written (the pending entry stays, so a late answer is still recognised), by a write that failed, or by a close.
+- Inbound CALLs are answered at once; their CALLRESULT/CALLERROR is not queued behind outgoing CALLs.
+- Order is queue order, with one rule for TransactionEvent (E13.FR.03/04): a TransactionEvent does not go out while an older TransactionEvent waits out its `MessageAttemptInterval`, has a transmission queued or still awaits its answer. A resent `Started` is therefore never overtaken by `Ended`; other CALLs keep flowing meanwhile. A message discarded after its last attempt frees the next one.
+- A CALL a caller gave up on (an [expert call](expert-ocpp-calls.md) whose wait ended) is taken out of the queue if it was not written yet.
+- On a close, a TransactionEvent still in the queue is queued offline with the other unsettled ones, in creation order ([E11](#e11-offline-queue-for-transactionevent)); any other queued CALL is dropped and its caller told (`socket_closed`). A replay after Boot Accepted goes through the same queue, so the replayed events are sent one at a time.
+- The write failures the socket reports while it stays open (a full network-simulation queue) free the slot and the next CALL goes on; a replayed TransactionEvent refused at the hand-over is held at the head of the E11 queue (#554), and one that waited for the slot and is refused only then keeps its row for the next replay.
+
+There is no burst mode: OCPP 1.6 is serial too, and the spec has no exception.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
@@ -1029,6 +1295,19 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 - **Replacement.** A profile replaces the installed one with the same `chargingProfileId`, or with the same `stackLevel` and `chargingProfilePurpose`, in the same scope (the connector's profiles, or the station store for `connectorId` 0). The `charging_profile_applied` timeline event reports `replaced: true` only when the **same id** was updated; a profile displaced by the same-slot rule is named in `replacedIds` (and in the summary: "… applied …, replacing profile 1"), see [Operational timeline](operational-timeline.md#smart-charging-profiles). OCPP 2.x keeps replacing by id only.
 - **TxProfile preconditions.** A `TxProfile` for a connector without a **running** transaction (one whose `stopTime` is still unset; a closed transaction that is still attached does not count) answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
 - **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule` are all answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` / `Unknown` status. On **1.6-S** there is no CALLERROR: the SOAP server turns the same refusal into a generic SOAP Fault, `Dispatch error for SetChargingProfile: SmartCharging is not supported` (likewise for the other two operations). The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
+
+## Inbound CALL validation on OCPP 2.0.1 / 2.1
+
+An inbound CALL on a 2.x charge point whose payload fails the request schema of its action is answered with a CALLERROR (always on; the `inboundValidation` setting is 1.6J only). The code follows OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715), using the same keyword mapping as [1.6J](#inbound-call-validation-on-ocpp-j-16), most structural first:
+
+| Code                            | When                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `FormatViolation`               | the payload is not an object, or has a property the schema does not declare |
+| `OccurrenceConstraintViolation` | a required property is missing, or an array has too few or too many items   |
+| `TypeConstraintViolation`       | a property has the wrong JSON type                                          |
+| `PropertyConstraintViolation`   | right type, invalid value: enum, range, length, pattern                     |
+
+The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. The code is classified against the request schema of the station's own version (the 2.1 schema on a 2.1 station, so a 2.1-only action gets the right code too, #750). Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
 
 ## Inbound CS→CP request validation
 

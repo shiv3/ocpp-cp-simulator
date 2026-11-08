@@ -3,7 +3,7 @@ import type {
   GetMonitoringReportRequestV201,
   NotifyMonitoringReportRequestV21,
   SetVariableMonitoringRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   isValidClearVariableMonitoringResponseV201,
   isValidGetMonitoringReportResponseV201,
@@ -11,14 +11,14 @@ import {
   isValidSetMonitoringLevelResponseV201,
   isValidSetVariableMonitoringRequestV201,
   isValidSetVariableMonitoringResponseV201,
-} from "@ocpp-cp-sim/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201/index";
 import {
   isValidClearVariableMonitoringResponseV21,
   isValidNotifyMonitoringReportRequestV21,
   isValidSetMonitoringLevelResponseV21,
   isValidSetVariableMonitoringRequestV21,
   isValidSetVariableMonitoringResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import {
   ConfigurationKeys,
   ConfigurationStore,

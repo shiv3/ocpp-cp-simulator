@@ -2,7 +2,7 @@ import type { MessageKey } from "../../i18n";
 import { useEffect, useState } from "react";
 
 import { useDataContext } from "../providers/DataProvider";
-import type { RemoteConnectionState } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 /** The daemon connection as the UI shows it. */
 export type RemoteHealth = "checking" | "ok" | "down";

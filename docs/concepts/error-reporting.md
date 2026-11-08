@@ -39,8 +39,13 @@ The console's variables are **inlined by Vite at build time**. A `SENTRY_DSN`
 given to a daemon at run time does not reach the console that daemon serves:
 the bundle has to be built with `VITE_SENTRY_DSN`
 (`docker build --build-arg VITE_SENTRY_DSN=…`, see
-[Docker image](../entities/docker-image.md#error-reporting)). The desktop app
-is not covered.
+[Docker image](../entities/docker-image.md#error-reporting)). The
+[desktop app](../entities/desktop-app.md) wires nothing of its own: the Tauri
+shell reports nothing, but its daemon sidecar is the compiled CLI and
+inherits the app's environment, so it reports when the app is started with
+`SENTRY_DSN` set (an app launched from the macOS Finder does not see a
+shell's variables). Its console reports only if it was built with
+`VITE_SENTRY_DSN`.
 
 The release is the build's own version: `appVersion()` on the CLI side, the
 console's build label without its `v` on the other, both from

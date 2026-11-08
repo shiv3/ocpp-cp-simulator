@@ -49,7 +49,10 @@ console's build label without its `v` on the other, both from
 
 ## What is sent
 
-- **Errors only.** No tracing (`tracesSampleRate` unset), no session replay.
+- **Errors only.** No tracing (`tracesSampleRate` unset), no session replay,
+  no session (release health) reports: the console drops the SDK's
+  `BrowserSession` integration, the CLI / daemon its `ProcessSession` one and
+  the per-request sessions of its HTTP servers (`sessions: false`).
 - **CLI / daemon:** uncaught exceptions, unhandled rejections and the error a
   `Fatal:` exit reports, flushed (up to 2 s) before the process exits.
   Unhandled rejections still exit the process with code 1, as they do without

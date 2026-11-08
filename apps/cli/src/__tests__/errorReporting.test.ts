@@ -25,8 +25,47 @@ function fakeSentry() {
       name: "OnUnhandledRejection",
       options,
     })),
+    bunServerIntegration: vi.fn((options: unknown) => ({
+      name: "BunServer",
+      options,
+    })),
+    bunHttpServerIntegration: vi.fn((options: unknown) => ({
+      name: "BunHttpServer",
+      options,
+    })),
+    httpIntegration: vi.fn((options: unknown) => ({ name: "Http", options })),
   };
 }
+
+type Integration = { name: string; options?: unknown };
+
+/**
+ * The integrations the SDK ends up with for these `init` options, as
+ * `getIntegrationsToSetup` in `@sentry/core` resolves them: an array
+ * overrides the defaults of the same name, a function replaces them.
+ */
+function resolveIntegrations(
+  options: { integrations?: unknown },
+  defaults: Integration[],
+): Integration[] {
+  const { integrations } = options;
+  if (typeof integrations === "function")
+    return (integrations as (d: Integration[]) => Integration[])(defaults);
+  const added = (integrations as Integration[] | undefined) ?? [];
+  const overridden = new Set(added.map(({ name }) => name));
+  return [...defaults.filter(({ name }) => !overridden.has(name)), ...added];
+}
+
+/** `@sentry/bun`'s defaults that matter here, as the SDK builds them. */
+const BUN_DEFAULTS: Integration[] = [
+  { name: "Console" },
+  { name: "Http" },
+  { name: "OnUncaughtException" },
+  { name: "OnUnhandledRejection" },
+  { name: "ProcessSession" },
+  { name: "BunServer" },
+  { name: "BunHttpServer" },
+];
 
 describe("readErrorReportingConfig", () => {
   it("is off without SENTRY_DSN", () => {
@@ -87,12 +126,39 @@ describe("initErrorReporting", () => {
     );
 
     // The SDK's default `warn` mode would keep a broken process running.
+    expect(
+      resolveIntegrations(sentry.init.mock.calls[0]![0], BUN_DEFAULTS).filter(
+        ({ name }) => name === "OnUnhandledRejection",
+      ),
+    ).toEqual([{ name: "OnUnhandledRejection", options: { mode: "strict" } }]);
     expect(sentry.onUnhandledRejectionIntegration).toHaveBeenCalledWith({
       mode: "strict",
     });
-    expect(sentry.init.mock.calls[0]![0].integrations).toEqual([
-      { name: "OnUnhandledRejection", options: { mode: "strict" } },
-    ]);
+  });
+
+  it("sends no session reports (errors only)", async () => {
+    const sentry = fakeSentry();
+    await initErrorReporting(
+      { dsn: DSN, release: "1.0.0" },
+      async () => sentry as never,
+    );
+
+    const resolved = resolveIntegrations(
+      sentry.init.mock.calls[0]![0],
+      BUN_DEFAULTS,
+    );
+    // ProcessSession reports the process as a session; the HTTP servers
+    // (the daemon's Bun.serve listeners) aggregate one per request.
+    expect(resolved.map(({ name }) => name).sort()).toEqual(
+      BUN_DEFAULTS.map(({ name }) => name)
+        .filter((name) => name !== "ProcessSession")
+        .sort(),
+    );
+    for (const name of ["BunServer", "BunHttpServer", "Http"]) {
+      expect(resolved.filter((i) => i.name === name)).toEqual([
+        { name, options: { sessions: false } },
+      ]);
+    }
   });
 
   it("starts without reporting when the SDK fails to load", async () => {

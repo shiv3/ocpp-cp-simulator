@@ -16,7 +16,7 @@ related:
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
   - charging-sessions.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Local vs Remote mode (browser)
@@ -38,6 +38,21 @@ must match the daemon's `--health-path`, see [Daemon → Health](../entities/dae
 
 There is no toggle — the mode is decided once on page load and never
 overridden.
+
+## Switching daemons (Remote mode)
+
+In Remote mode the sidebar lists the daemon that served the console ("This
+server") and the addresses you saved (#619). Picking one points the console at
+that daemon: it first answers the health probe (`{ "ok": true }`), then the
+Socket.IO connection must come up within 8 seconds. If either step fails, the
+previous daemon stays selected and the sidebar says so. The saved list
+(`ocpp-cp.saved-daemons`, at most 20 `http(s)://host[:port]` origins with an
+optional name) and the last choice (`ocpp-cp.active-daemon`) live in
+`localStorage`; after a reload the console re-selects the last daemon if it
+still answers, else it falls back to the serving daemon. Addresses with
+embedded credentials are refused, so no password is stored. The other daemon
+must allow the console's origin ([`--cors-origin`](../entities/daemon.md)).
+Local mode has no switcher and never touches these keys.
 
 ## Consequences
 

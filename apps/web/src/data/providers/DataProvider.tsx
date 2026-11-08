@@ -1,6 +1,8 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
+  useRef,
   useEffect,
   useMemo,
   useState,
@@ -23,6 +25,12 @@ import {
   defaultEVSettings,
   setUserDefaultEVSettings,
 } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import {
+  loadActiveDaemon,
+  loadSavedDaemons,
+  normalizeDaemonUrl,
+  storeActiveDaemon,
+} from "../savedDaemons";
 import { withNormalizedChargingCurve } from "@ocpp-cp-sim/core/cp/domain/connector/ChargingCurve";
 
 const DEFAULT_EV_STORAGE_KEY = "ocpp-cp.default-ev-settings";
@@ -82,6 +90,54 @@ function readStorage(key: string): string | null {
   }
 }
 
+const SWITCH_TIMEOUT_MS = 8000;
+
+/** Resolves when `url` answers its health probe with `{ ok: true }`. */
+async function probeDaemon(url: string): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SWITCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${url}${HEALTH_PATH}`, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`health probe answered ${res.status}`);
+    const body = (await res.json()) as { ok?: unknown } | null;
+    if (!body || body.ok !== true) throw new Error("not an ocpp-cp-sim daemon");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Waits until the service for `url` reports a connected socket. */
+function waitForConnection(
+  current: () => RemoteChargePointService | null,
+  url: string,
+  currentUrl: () => string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      const service = current();
+      if (
+        currentUrl() === url &&
+        service?.getConnectionState() === "connected"
+      ) {
+        resolve();
+        return;
+      }
+      if (Date.now() - started > SWITCH_TIMEOUT_MS) {
+        reject(new Error("daemon connection timed out"));
+        return;
+      }
+      setTimeout(tick, 100);
+    };
+    // Let React commit the new service first.
+    setTimeout(tick, 0);
+  });
+}
+
 interface DataContextValue {
   /** Current runtime mode — auto-detected from the page origin's health
    *  probe (see HEALTH_PATH; default `/v1/healthz`), no manual toggle.
@@ -89,6 +145,14 @@ interface DataContextValue {
    *  static builds. */
   mode: RuntimeMode;
   serverUrl: string;
+  /** Remote mode: the origin that served the console (the daemon it was
+   *  detected on). Absent in tests and in Local mode. */
+  originUrl?: string;
+  /** Remote mode (#619): point the console at another daemon. Resolves once
+   *  the daemon answered its health probe and the connection is up; rejects
+   *  — leaving the previous daemon in place — when it cannot be reached.
+   *  Absent in Local mode. */
+  switchDaemon?: (url: string) => Promise<void>;
   /** Browser-side user-configured default EV settings.
    *  `null` means "no override — fall back to the built-in defaults". */
   defaultEvSettings: EVSettings | null;
@@ -131,6 +195,7 @@ export const DataProvider: React.FC<DataProviderProps> = ({
 
   const [mode, setModeState] = useState<RuntimeMode | null>(initialMode);
   const [serverUrl, setServerUrlState] = useState<string>(initialServerUrl);
+  const [originUrl, setOriginUrl] = useState<string>(initialServerUrl);
   const [defaultEvSettings, setDefaultEvSettingsState] =
     useState<EVSettings | null>(() => loadDefaultEvFromStorage());
 
@@ -188,7 +253,24 @@ export const DataProvider: React.FC<DataProviderProps> = ({
           (body as { ok?: unknown }).ok === true
         ) {
           setModeState("remote");
+          setOriginUrl(origin);
           setServerUrlState(origin);
+          // #619: re-select the daemon chosen last, when it is still saved.
+          // An unreachable one is dropped by the first failed health probe
+          // below, falling back to the origin.
+          const active = loadActiveDaemon();
+          if (
+            active &&
+            active !== origin &&
+            loadSavedDaemons().some((d) => d.url === active)
+          ) {
+            void probeDaemon(active).then(
+              () => {
+                if (!cancelled) setServerUrlState(active);
+              },
+              () => storeActiveDaemon(null),
+            );
+          }
         } else {
           setModeState("local");
         }
@@ -203,7 +285,10 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     };
   }, [modeOverride]);
 
-  const jotaiStore = useMemo(() => createStore(), []);
+  // A new store per daemon: the previous daemon's per-charge-point UI state
+  // must not leak onto another one's ids.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const jotaiStore = useMemo(() => createStore(), [serverUrl]);
 
   // sql.js takes a moment to load (WASM fetch + parse + IndexedDB read),
   // so we only open it when we KNOW we're in local mode — remote mode
@@ -267,6 +352,36 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     }
   }, [mode, localChargePointService]);
 
+  const serviceRef = useRef<RemoteChargePointService | null>(null);
+  serviceRef.current = remoteChargePointService;
+  const serverUrlRef = useRef(serverUrl);
+  serverUrlRef.current = serverUrl;
+
+  const switchDaemon = useCallback(async (target: string): Promise<void> => {
+    const next = normalizeDaemonUrl(target);
+    if (!next) throw new Error("invalid daemon address");
+    const previous = serverUrlRef.current;
+    if (next === previous) return;
+    // 1. The daemon must answer its health probe (CORS and auth included).
+    await probeDaemon(next);
+    // 2. Switch, then wait for the socket to connect. Failing here puts
+    //    the previous daemon back.
+    setServerUrlState(next);
+    try {
+      await waitForConnection(
+        () => serviceRef.current,
+        next,
+        () => serverUrlRef.current,
+      );
+    } catch (err) {
+      setServerUrlState(previous);
+      throw err;
+    }
+    storeActiveDaemon(next === originRef.current ? null : next);
+  }, []);
+  const originRef = useRef(originUrl);
+  originRef.current = originUrl;
+
   const chargePointService: ChargePointService =
     remoteChargePointService ?? localChargePointService;
   const effectiveDefaultEvSettings = useMemo(
@@ -297,12 +412,22 @@ export const DataProvider: React.FC<DataProviderProps> = ({
         ? {
             mode: mode as RuntimeMode,
             serverUrl,
+            originUrl: mode === "remote" ? originUrl : undefined,
+            switchDaemon: mode === "remote" ? switchDaemon : undefined,
             defaultEvSettings,
             setDefaultEvSettings,
             chargePointService,
           }
         : null,
-    [ready, mode, serverUrl, defaultEvSettings, chargePointService],
+    [
+      ready,
+      mode,
+      serverUrl,
+      originUrl,
+      switchDaemon,
+      defaultEvSettings,
+      chargePointService,
+    ],
   );
 
   if (!ready || !value) {

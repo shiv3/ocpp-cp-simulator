@@ -2445,3 +2445,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
 
 - The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | Save and switch between multiple daemons (#619)
+
+- Remote-mode sidebar daemon switcher: saved addresses in `localStorage`, health probe + connection wait before a switch, automatic return to the previous daemon on failure, last choice restored on reload. Local mode unaffected. Pages: [Local vs Remote mode](concepts/local-vs-remote-mode.md), [Web console](entities/web-console.md).

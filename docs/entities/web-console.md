@@ -1214,6 +1214,7 @@ current vehicle's fields
 
 ## What the console can do
 
+- Remote mode: save daemon addresses and switch between them from the sidebar ([Local vs Remote mode](../concepts/local-vs-remote-mode.md#switching-daemons-remote-mode), #619).
 - Create charge points and connectors, connect to a CSMS over OCPP-J
   (1.6J / 2.0.1 / 2.1) or — in Local mode, send-only — the SOAP versions
   (see [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md)).

@@ -119,6 +119,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -290,6 +291,12 @@ export interface ChargePointTransportOptions {
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
+  /**
+   * OCPP 1.6 ReserveNow: authorize the reservation's idTag (local rules, then
+   * Authorize.req) before accepting; a tag that is not `Accepted` answers
+   * `Rejected` (#595). Default `false`.
+   */
+  readonly reservationAuthorizeIdTag?: boolean;
 }
 
 export class ChargePoint {
@@ -425,6 +432,17 @@ export class ChargePoint {
     this._inboundValidation = mode;
   }
 
+  private _reservationAuthorizeIdTag: boolean;
+
+  /** See {@link ChargePointTransportOptions.reservationAuthorizeIdTag}. */
+  get reservationAuthorizeIdTag(): boolean {
+    return this._reservationAuthorizeIdTag;
+  }
+
+  setReservationAuthorizeIdTag(enabled: boolean): void {
+    this._reservationAuthorizeIdTag = enabled;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -460,6 +478,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._inboundValidation =
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._reservationAuthorizeIdTag =
+      transportOptions.reservationAuthorizeIdTag ?? false;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -533,13 +553,21 @@ export class ChargePoint {
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEVSE);
-        } else if (!paused && connector.status === OCPPStatus.SuspendedEVSE) {
+        } else if (
+          !paused &&
+          connector.status === OCPPStatus.SuspendedEVSE &&
+          !connector.energyHeld
+        ) {
           this._logger.info(
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
         }
+      });
+      // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
+      connector.events.on("invalidIdEnergyExhausted", () => {
+        this.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
     }
@@ -1390,7 +1418,8 @@ export class ChargePoint {
     return this._webSocket.isConnected();
   }
 
-  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452):
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452) and
+   *  report a conflict with the Local Authorization List (#744):
    *  called by the Authorize / StartTransaction / StopTransaction result
    *  handlers. A no-op while the cache is disabled or for an identifier of
    *  the Local Authorization List (1.6 §3.5.3). */
@@ -1403,6 +1432,21 @@ export class ChargePoint {
         `Authorization cache updated: ${idToken} → ${result.status}`,
         LogType.TRANSACTION,
       );
+    }
+    // 1.6 §3.5.2: tell the CSMS when its verdict contradicts the Local
+    // Authorization List. 2.x has no such notification (its StatusNotification
+    // carries no errorCode).
+    if (
+      !isOcpp2Version(this._ocppVersion) &&
+      this._authorization.conflictsWithLocalList(idToken, result.status)
+    ) {
+      this._logger.warn(
+        `CSMS verdict ${result.status} for ${idToken} conflicts with the Local Authorization List; sending LocalListConflict`,
+        LogType.OCPP,
+      );
+      this.sendStatusNotificationRaw(0, this._status, {
+        errorCode: "LocalListConflict",
+      });
     }
   }
 
@@ -1420,7 +1464,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1428,19 +1474,33 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;
@@ -1596,6 +1656,35 @@ export class ChargePoint {
   /** #396: the answer to an incoming CSMS CALL is decided. */
   notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
     this._events.emit("incomingCallCompleted", completion);
+  }
+
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
+  holdEnergyOnInvalidId(connector: Connector): void {
+    const allowance = this._configuration.maxEnergyOnInvalidId();
+    if (connector.holdEnergyForInvalidId(allowance)) {
+      this.reportEnergyHeld(connector);
+    }
+  }
+
+  private reportEnergyHeld(connector: Connector): void {
+    if (!connector.hasRunningTransaction) return;
+    if (
+      connector.status === OCPPStatus.Charging ||
+      connector.status === OCPPStatus.Preparing ||
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.info(
+        `Connector ${connector.id} energy delivery stopped after a non-Accepted id → SuspendedEVSE`,
+        LogType.TRANSACTION,
+      );
+      this.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+    }
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf
@@ -2219,6 +2308,11 @@ export class ChargePoint {
     queueMicrotask(() => this._outbox.flushPendingQueue());
     // After the post-boot status fan-out, and with the gate already open.
     queueMicrotask(() => this.engine.bootAccepted());
+  }
+
+  /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
+  runTriggered<T>(fn: () => T): T {
+    return this._outbox.runTriggered(fn);
   }
 
   markBootPending(): void {
@@ -2915,6 +3009,17 @@ export class ChargePoint {
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);
       return;
+    }
+
+    // Energy held after a non-Accepted id (E05.FR.02): whichever path asks
+    // for Charging, the register is stopped, so report SuspendedEVSE.
+    if (
+      status === OCPPStatus.Charging &&
+      connector.energyHeld &&
+      connector.hasRunningTransaction
+    ) {
+      if (connector.status === OCPPStatus.SuspendedEVSE) return;
+      status = OCPPStatus.SuspendedEVSE;
     }
 
     this._engine.dispatch({

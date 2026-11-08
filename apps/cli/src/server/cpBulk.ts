@@ -1,5 +1,11 @@
 import type { CpBulkResult } from "@ocpp-cp-sim/contracts/index";
 
+export interface CpBatchOutcome<T> {
+  readonly matched: string[];
+  readonly succeeded: Array<{ cpId: string; value: T }>;
+  readonly failed: Array<{ cpId: string; reason: string }>;
+}
+
 /**
  * `cp.bulk` fan-out (#470): run one action on every selected charge point at
  * once and report each outcome. Partial success is the result, not an error —
@@ -20,6 +26,27 @@ export async function runCpBulk(
     readonly failureReason: (err: unknown) => string;
   },
 ): Promise<CpBulkResult> {
+  const batch = await runCpBatch(cpIds, act, options);
+  return {
+    matched: batch.matched,
+    succeeded: batch.succeeded.map((entry) => entry.cpId),
+    failed: batch.failed,
+  };
+}
+
+/**
+ * The fan-out behind `runCpBulk`, keeping what each action returned (#486:
+ * the scenario id a started template got), so `cp.scenario.run` shares the
+ * parallelism, the per-CP wait cap and the partial-success contract.
+ */
+export async function runCpBatch<T>(
+  cpIds: readonly string[],
+  act: (cpId: string) => Promise<T>,
+  options: {
+    readonly waitMs: number;
+    readonly failureReason: (err: unknown) => string;
+  },
+): Promise<CpBatchOutcome<T>> {
   // One cap for the whole batch: every action starts in the same tick, so a
   // timer per charge point would only be up to 1,000 timers due together.
   // `Promise.race` keeps a handler on each action, so a rejection landing
@@ -37,11 +64,12 @@ export async function runCpBulk(
   const outcomes = await Promise.allSettled(
     cpIds.map((cpId) => Promise.race([act(cpId), cap])),
   ).finally(() => clearTimeout(timer));
-  const succeeded: string[] = [];
+  const succeeded: Array<{ cpId: string; value: T }> = [];
   const failed: Array<{ cpId: string; reason: string }> = [];
   outcomes.forEach((outcome, index) => {
     const cpId = cpIds[index];
-    if (outcome.status === "fulfilled") succeeded.push(cpId);
+    if (outcome.status === "fulfilled")
+      succeeded.push({ cpId, value: outcome.value as T });
     else failed.push({ cpId, reason: options.failureReason(outcome.reason) });
   });
   return { matched: [...cpIds], succeeded, failed };

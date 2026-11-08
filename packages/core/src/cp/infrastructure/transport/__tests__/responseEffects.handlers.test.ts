@@ -23,6 +23,7 @@ function buildContext() {
 
   const chargePoint = {
     id: "test-cp",
+    runTriggered: <T>(fn: () => T): T => fn(),
     applyRemoteReset: record("applyRemoteReset"),
     sendCurrentStatusNotification: record("sendCurrentStatusNotification"),
     sendHeartbeat: record("sendHeartbeat"),

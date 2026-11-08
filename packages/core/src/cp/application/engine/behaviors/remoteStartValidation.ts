@@ -167,7 +167,7 @@ export function decideRemoteStart(
   // A reservation belongs to this request when it was made for this idToken
   // or for this groupIdToken (F01.FR.21 / F01.FR.22).
   const reservedForOther = (id: number): boolean => {
-    const reservation = cp.reservationManager.getReservationForConnector(id);
+    const reservation = cp.reservationManager.peekReservationForConnector(id);
     if (!reservation) return false;
     const group = request.groupIdToken?.idToken;
     return (
@@ -176,7 +176,7 @@ export function decideRemoteStart(
     );
   };
   const reservedForRequest = (id: number): boolean =>
-    cp.reservationManager.getReservationForConnector(id) !== undefined &&
+    cp.reservationManager.peekReservationForConnector(id) !== undefined &&
     !reservedForOther(id);
 
   if (request.evseId !== undefined) {

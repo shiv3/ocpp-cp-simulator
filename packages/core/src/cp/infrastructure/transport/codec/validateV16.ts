@@ -3,6 +3,8 @@ import {
   schemas,
   validationErrors,
 } from "@ocpp-cp-sim/ocpp/index";
+import { strictValidationIssues } from "@ocpp-cp-sim/ocpp/validate";
+import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/enums";
 import { requestSchemaKey } from "./requestSchemaKey";
 
 export interface V16ValidationResult {
@@ -47,4 +49,85 @@ export function outgoingV16Warning(
     return null;
   }
   return `Outgoing ${action} failed v16 schema validation: ${result.errors.join("; ")}`;
+}
+
+/** What an inbound 1.6J CALL is answered with when its payload is invalid. */
+export interface InboundV16Violation {
+  readonly errorCode: OCPPErrorCodeV16;
+  readonly description: string;
+}
+
+const OCCURRENCE_KEYWORDS = new Set(["required", "minItems", "maxItems"]);
+const PROPERTY_KEYWORDS = new Set([
+  "enum",
+  "const",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "format",
+]);
+
+/**
+ * Check an inbound 1.6J CALL payload against the bundled request schema and
+ * pick the OCPP-J 1.6 §4.2.3 error code for the first kind of violation, most
+ * structural first:
+ *
+ * - `FormationViolation`: the payload is not an object, has a property the
+ *   schema does not declare, or breaks the PDU structure in another way
+ * - `OccurenceConstraintViolation` (the spelling of the 1.6 spec): a required
+ *   field is missing, or an array has too few / many items
+ * - `TypeConstraintViolation`: a field has the wrong JSON type
+ * - `PropertyConstraintViolation`: a field has the right type and an invalid
+ *   value (enum, range, length, pattern, format)
+ *
+ * Returns `null` when valid, and for an action without a request schema
+ * (the handler lookup answers `NotImplemented` for those). Never throws.
+ */
+export function inboundV16Violation(
+  action: string,
+  payload: unknown,
+): InboundV16Violation | null {
+  const schema = v16Schemas[requestSchemaKey(action, "V16")];
+  if (!schema) return null;
+  let issues;
+  try {
+    issues = strictValidationIssues(schema as object, payload);
+  } catch {
+    return null;
+  }
+  if (issues.length === 0) return null;
+  const description = `Invalid ${action} payload: ${issues
+    .map((issue) => issue.message)
+    .join("; ")}`.slice(0, 255);
+  const codeOf = (issue: (typeof issues)[number]): OCPPErrorCodeV16 => {
+    if (issue.instancePath === "" && issue.keyword === "type") {
+      return OCPPErrorCodeV16.FormationViolation;
+    }
+    if (OCCURRENCE_KEYWORDS.has(issue.keyword)) {
+      return OCPPErrorCodeV16.OccurenceConstraintViolation;
+    }
+    if (issue.keyword === "type")
+      return OCPPErrorCodeV16.TypeConstraintViolation;
+    if (PROPERTY_KEYWORDS.has(issue.keyword)) {
+      return OCPPErrorCodeV16.PropertyConstraintViolation;
+    }
+    return OCPPErrorCodeV16.FormationViolation;
+  };
+  const rank = [
+    OCPPErrorCodeV16.FormationViolation,
+    OCPPErrorCodeV16.OccurenceConstraintViolation,
+    OCPPErrorCodeV16.TypeConstraintViolation,
+    OCPPErrorCodeV16.PropertyConstraintViolation,
+  ];
+  const errorCode = issues
+    .map(codeOf)
+    .reduce((best, code) =>
+      rank.indexOf(code) < rank.indexOf(best) ? code : best,
+    );
+  return { errorCode, description };
 }

@@ -1352,7 +1352,9 @@ c201("remote-start-unknown-evse", async (r) => {
   await settle(r);
 });
 c201("remote-start-any-evse", async (r) => {
-  const idToken = { idToken: "TAG-A", type: "Central" };
+  // The case is about EVSE selection, so the type is fixed and the recorded
+  // wire does not depend on how the started event reports a request type.
+  const idToken = { idToken: "TAG-A", type: "ISO14443" };
   await r.csms.call("RequestStartTransaction", { remoteStartId: 1, idToken });
   await settle(r);
   await r.csms.call("RequestStartTransaction", { remoteStartId: 2, idToken });

@@ -116,7 +116,8 @@ function checkIdToken(
  * - F01.FR.23: an EVSE that is Unavailable or Faulted is rejected.
  * - `evseId` is optional (F01.FR.06; F01.FR.07 lets the station reject
  *   without it); without it the station picks an EVSE reserved for this
- *   idToken or group first, then an Available / Preparing one.
+ *   idToken or group first, then a Preparing one (the cable is plugged in,
+ *   F01.FR.20), then an Available one.
  *
  * Reason codes are Appendix ch. 5 codes only. Where the Appendix has none
  * (an inoperative EVSE, no free EVSE) the code is `Unspecified` and
@@ -210,7 +211,11 @@ export function decideRemoteStart(
   const free =
     candidates.find(
       (c) => c.status === "Reserved" && reservedForRequest(c.id),
-    ) ?? candidates.find((c) => ["Available", "Preparing"].includes(c.status));
+    ) ??
+    // F01 is "Cable Plugin First" (F01.FR.20): the EVSE where the cable is
+    // plugged in comes before one that is merely free.
+    candidates.find((c) => c.status === "Preparing") ??
+    candidates.find((c) => c.status === "Available");
   if (!free) {
     return reject("Unspecified", "No EVSE is free to start a transaction");
   }

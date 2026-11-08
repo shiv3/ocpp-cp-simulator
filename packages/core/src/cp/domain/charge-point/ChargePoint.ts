@@ -119,6 +119,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -1397,7 +1398,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1405,14 +1408,15 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
     let replaced: boolean;
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      replaced = this._stationProfiles.add(profile, options);
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      replaced = connector.addChargingProfile(profile, options);
     }
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,

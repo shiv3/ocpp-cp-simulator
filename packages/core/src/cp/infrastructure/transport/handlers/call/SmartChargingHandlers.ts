@@ -18,6 +18,8 @@
  *   it), not on the connector's electrical model (#323).
  */
 
+import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+import { HandlerCallError } from "../HandlerCallError";
 import { stationNow } from "../../stationNow";
 import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
@@ -197,6 +199,13 @@ function applyProfileStatus(
 /**
  * §5.10 SetChargingProfile.req
  *
+ * Replacement: a profile with the same `chargingProfileId`, or with the same
+ * `stackLevel` and `chargingProfilePurpose`, on the same connector (or the
+ * station store) replaces the installed one. TxProfile preconditions: the
+ * connector has an active transaction and `transactionId`, when given, is its
+ * id, else `Rejected`. Without SmartCharging in `SupportedFeatureProfiles`
+ * the answer is CALLERROR `NotSupported`.
+ *
  * Routing:
  *   - `connectorId = 0` → ChargePoint.stationProfiles (single station copy)
  *   - `connectorId > 0` → that Connector's profile array
@@ -215,6 +224,20 @@ export class SetChargingProfileHandler implements CallHandler<
   ): SetChargingProfileResponseV16 {
     const { connectorId, csChargingProfiles } = payload;
 
+    // Without the SmartCharging feature profile the station does not know the
+    // message at all: OCPP-J 1.6 §4.2.3 `NotSupported`, not a Rejected status
+    // (#594).
+    if (!context.chargePoint.configuration.smartChargingSupported()) {
+      context.logger.warn(
+        "SetChargingProfile: SmartCharging is not in SupportedFeatureProfiles → NotSupported",
+        LogType.OCPP,
+      );
+      throw new HandlerCallError(
+        OCPPErrorCodeV16.NotSupported,
+        "SmartCharging is not supported",
+      );
+    }
+
     context.logger.info(
       `SetChargingProfile received for connector ${connectorId}: profileId=${csChargingProfiles.chargingProfileId}, purpose=${csChargingProfiles.chargingProfilePurpose}, stackLevel=${csChargingProfiles.stackLevel}`,
       LogType.OCPP,
@@ -231,6 +254,33 @@ export class SetChargingProfileHandler implements CallHandler<
         LogType.OCPP,
       );
       return { status: "Rejected" };
+    }
+
+    // §3.13.3 / SetChargingProfile.req: a TxProfile belongs to the transaction
+    // running on its connector. With no transaction there is nothing to bind
+    // it to, and a transactionId that is not the active one names another
+    // transaction; both are Rejected (#594).
+    if (
+      csChargingProfiles.chargingProfilePurpose ===
+      ChargingProfilePurposeType.TxProfile
+    ) {
+      const transaction =
+        context.chargePoint.getConnector(connectorId)?.transaction;
+      if (!transaction) {
+        context.logger.warn(
+          `SetChargingProfile rejected: TxProfile but connector ${connectorId} has no active transaction`,
+          LogType.OCPP,
+        );
+        return { status: "Rejected" };
+      }
+      const requested = csChargingProfiles.transactionId;
+      if (requested != null && requested !== transaction.id) {
+        context.logger.warn(
+          `SetChargingProfile rejected: TxProfile transactionId ${requested} is not the active transaction ${transaction.id}`,
+          LogType.OCPP,
+        );
+        return { status: "Rejected" };
+      }
     }
 
     const periods = csChargingProfiles.chargingSchedule.chargingSchedulePeriod;
@@ -252,7 +302,12 @@ export class SetChargingProfileHandler implements CallHandler<
     };
 
     if (
-      !context.chargePoint.applyChargingProfile(profile, "SetChargingProfile")
+      !context.chargePoint.applyChargingProfile(
+        profile,
+        "SetChargingProfile",
+        // §3.13.2: the same stackLevel and purpose replaces, as the same id.
+        { replaceSameSlot: true },
+      )
     ) {
       context.logger.warn(`Connector ${connectorId} not found`, LogType.OCPP);
       return { status: "Rejected" };

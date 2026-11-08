@@ -30,7 +30,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP versions and transports
@@ -803,6 +803,14 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
   all of them through unchanged. The canonical statement, with the reasoning
   and the tradeoff, is in
   [Scenario format → Charging curve](scenario-format.md#charging-curve-v12).
+
+## OCPP 1.6 SetChargingProfile
+
+`SetChargingProfile.req` on **OCPP 1.6J** (and 1.6-S, through the shared handler; #594):
+
+- **Replacement.** A profile replaces the installed one with the same `chargingProfileId`, or with the same `stackLevel` and `chargingProfilePurpose`, in the same scope (the connector's profiles, or the station store for `connectorId` 0). The `charging_profile_applied` timeline event reports `replaced: true` for both. OCPP 2.x keeps replacing by id only.
+- **TxProfile preconditions.** A `TxProfile` for a connector without an active transaction answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
+- **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, the request is answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` status. The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
 
 ## Inbound CS→CP request validation
 

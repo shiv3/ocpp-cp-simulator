@@ -2384,3 +2384,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Charger engine web strings under the console i18n (#634)
 
 - The `callResponse` and `useBehavior` nodes (node, form, palette item, registry title) and the `csmsCallTrigger` behavior controls (`observe` / `replace`, the `onBusy` group) use `scenarioEditor.*` / `scenarioNodes.*` keys in `en`, `ja` and `zh-CN`; `i18n.test.ts` stays green. Left in English on purpose, as on main: `stepSummary` text, default node labels saved into scenarios, and the protocol terms `CALLRESULT` / `CALLERROR`. See [Web console internationalization](concepts/web-console-i18n.md).
+
+## [2026-11-08] ingest | OCPP 1.6 SetChargingProfile replacement and TxProfile preconditions (#594)
+
+- `SetChargingProfile` on 1.6 replaces by `chargingProfileId` or by `stackLevel` + purpose (2.x unchanged), rejects a TxProfile without an active transaction or with another `transactionId`, and answers CALLERROR `NotSupported` when `SupportedFeatureProfiles` lacks `SmartCharging`. Handlers can now answer a CALLERROR by throwing `HandlerCallError`. No golden fixture changed.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [GitHub issues](sources/github-issues.md).

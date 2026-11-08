@@ -948,44 +948,60 @@ describe("text redactor parity with the structured redactor (#515)", () => {
     }
   });
 
-  // #519: the quoted-value and PEM patterns scan across lines; none of them
-  // may backtrack quadratically on a long run. #547: under Bun this row
-  // also runs, and JavaScriptCore spends ~100 ms per long value before it
-  // gives up a match (2-3 s for the list, over 5 s on CI, `main` included),
-  // so it gets its own budget. A quadratic run at 200k characters takes
-  // minutes on either engine, so both budgets still catch one.
-  it(
-    "stays linear on long runs after a quoted name",
-    { timeout: "Bun" in globalThis ? 15_000 : 2000 },
-    () => {
-      const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
-        char.repeat(200_000),
-      );
-      const pemBody = "A".repeat(200_000);
-      const texts = [
-        ...runs,
-        ...runs.map((run) => `password=${run}`),
-        ...runs.map((run) => `password="${run}`),
-        `password="${"a\n".repeat(100_000)}`,
-        'password="a\n'.repeat(20_000),
-        `password="${"\nx".repeat(100_000)}`,
-        `password="a\n${"passwor".repeat(30_000)}`,
-        `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
-        `password="a\n${"\\p".repeat(100_000)}`,
-        `password="a\n${"\\passwor".repeat(25_000)}`,
-        `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
-        `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
-        `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
-        `privateKey="-----BEGIN K-----\n${pemBody}`,
-        `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
-        `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
-      ];
-      for (const text of texts) {
-        expect(typeof redactSensitiveText(text)).toBe("string");
+  // #519: the quoted-value and PEM scans cross lines; none of them may
+  // backtrack quadratically on a long run. The same budget on every runtime
+  // (#567): a quadratic run at 200k characters takes minutes.
+  it("stays linear on long runs after a quoted name", { timeout: 2000 }, () => {
+    const runs = ["_", "-", '"', " ", "\\", "\n"].map((char) =>
+      char.repeat(200_000),
+    );
+    const pemBody = "A".repeat(200_000);
+    const texts = [
+      ...runs,
+      ...runs.map((run) => `password=${run}`),
+      ...runs.map((run) => `password="${run}`),
+      `password="${"a\n".repeat(100_000)}`,
+      'password="a\n'.repeat(20_000),
+      `password="${"\nx".repeat(100_000)}`,
+      `password="a\n${"passwor".repeat(30_000)}`,
+      `privateKey="-----BEGIN K-----\n${"passwor".repeat(30_000)}`,
+      `password="a\n${"\\p".repeat(100_000)}`,
+      `password="a\n${"\\passwor".repeat(25_000)}`,
+      `privateKey="-----BEGIN K-----\n${"\\passwor".repeat(25_000)}`,
+      `privateKey="-----BEGIN K-----\n${"-----END ".repeat(20_000)}`,
+      `privateKey="-----BEGIN K-----\n${"-----END K.".repeat(20_000)}`,
+      `privateKey="-----BEGIN K-----\n${pemBody}`,
+      `privateKey="-----BEGIN K-----\n${'a"'.repeat(100_000)}`,
+      `privateKey="-----BEGIN K-----\n${"-----END K----- ".repeat(12_500)}`,
+    ];
+    for (const text of texts) {
+      expect(typeof redactSensitiveText(text)).toBe("string");
+    }
+    expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
+      `privateKey="${REDACTED_VALUE}"`,
+    );
+  });
+
+  // #567: JavaScriptCore ran the quoted-value regex at ~8 µs per character
+  // (4-5 s for 200k `_` on CI, `main` included). The value is cut in code
+  // now, so each call is milliseconds on every runtime; the 500 ms bound is
+  // generous for CI and well under the old cost.
+  it.each(["_", "-", "\\", " ", "a"])(
+    "redacts a long quoted value behind a secret name quickly (%j)",
+    (char) => {
+      const run = char.repeat(200_000);
+      for (const [prefix, suffix] of [
+        ['password="', ""],
+        ["password='", "'"],
+        ['password="', '"'],
+        ['password=\\"', ""],
+        ['password\\":\\"', '\\"'],
+      ]) {
+        const started = performance.now();
+        const out = redactSensitiveText(`${prefix}${run}${suffix}`);
+        expect(performance.now() - started).toBeLessThan(500);
+        expect(out).not.toContain(run.slice(0, 50));
       }
-      expect(redactSensitiveText(texts.at(-3) ?? "")).toBe(
-        `privateKey="${REDACTED_VALUE}"`,
-      );
     },
   );
 
@@ -1279,16 +1295,9 @@ describe("escaped JSON and nested assignments (#531)", () => {
     },
   );
 
-  // Under Bun (`redaction.bun.test.ts`) JavaScriptCore spends seconds on a
-  // quoted value behind a name followed by `_` runs (`password="___…`), as it
-  // does on `main`: the pre-existing pass, not this one (#547). So it gets its
-  // own budget, as the list above does; a quadratic run at 200k characters
-  // takes minutes on either engine, so both budgets still catch one.
   it(
     "stays linear on long runs inside escaped and nested values",
-    {
-      timeout: "Bun" in globalThis ? 60_000 : 2000,
-    },
+    { timeout: 2000 },
     () => {
       const runs = ["_", "-", '"', "'", "\\", '\\"', "\\\\", "a'\"\\-_ "].map(
         (chars) => chars.repeat(Math.ceil(200_000 / chars.length)),

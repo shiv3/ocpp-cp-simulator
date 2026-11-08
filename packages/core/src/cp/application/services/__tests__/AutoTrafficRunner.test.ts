@@ -554,4 +554,69 @@ describe("stopping ends the session it started (#300)", () => {
     await advance(120_000);
     expect(h.events).toEqual(["stop"]);
   });
+
+  describe("sessionModel intent (#327)", () => {
+    const INTENT: AutoTrafficConfig = { ...CONFIG, sessionModel: "intent" };
+
+    it("hands the drawn intent to the start and counts a station-side end as completed without a second stop", async () => {
+      let running = true;
+      const intents: unknown[] = [];
+      const h = hooks({
+        startTransaction: async (_id, _tag, intent) => {
+          intents.push(intent);
+          h.events.push("start");
+        },
+        sessionRunning: () => running,
+      });
+      const runner = new AutoTrafficRunner(INTENT, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000); // the gap, then the start
+        expect(intents).toHaveLength(1);
+        expect(intents[0]).toMatchObject({
+          initialSoc: expect.any(Number),
+          targetSoc: expect.any(Number),
+        });
+        running = false; // the connector reached the target and stopped
+        await advance(1_000);
+        expect(h.events).toEqual(["start"]);
+        expect(runner.counters.completed).toBe(1);
+      } finally {
+        runner.stop();
+      }
+    });
+
+    it("stops a session whose vehicle never reaches the target at the duration ceiling", async () => {
+      const h = hooks({ sessionRunning: () => true });
+      const runner = new AutoTrafficRunner(INTENT, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000);
+        await advance(9_000);
+        expect(h.events).toEqual(["start"]);
+        await advance(1_000); // 10 s ceiling
+        expect(h.events).toEqual(["start", "stop"]);
+        expect(runner.counters.stopAccepted).toBe(1);
+      } finally {
+        runner.stop();
+      }
+    });
+
+    it("passes no intent under the duration model", async () => {
+      const seen: unknown[] = [];
+      const h = hooks({
+        startTransaction: async (_id, _tag, intent) => {
+          seen.push(intent);
+        },
+      });
+      const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000);
+        expect(seen).toEqual([undefined]);
+      } finally {
+        runner.stop();
+      }
+    });
+  });
 });

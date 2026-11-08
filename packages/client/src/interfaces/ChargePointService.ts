@@ -76,6 +76,7 @@ import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transp
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import type { ReadonlyChargerCapabilities } from "@ocpp-cp-sim/contracts/chargerCapabilities";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
@@ -156,6 +157,8 @@ export interface ChargePointSnapshot {
     /** #609 / #611: reconnect policy and WebSocket client options; the
      *  proxy URL's credentials are removed. */
     transport?: TransportConfigWire;
+    /** What the charger hardware delivers per connector (#327). */
+    chargerCapabilities?: ReadonlyChargerCapabilities;
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -224,6 +227,9 @@ export interface CreateChargePointParams {
     disabledActions?: readonly string[];
     triggerMessageTargets?: readonly string[];
   };
+  /** Charger-side delivery caps per connector (#327); omitted on an update
+   *  keeps the current ones. */
+  chargerCapabilities?: ReadonlyChargerCapabilities;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;

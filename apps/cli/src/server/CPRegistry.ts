@@ -1,6 +1,10 @@
 import * as fs from "fs";
 
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
+import {
+  chargerCapabilitiesProblem,
+  type ChargerCapabilities,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargerCapabilities";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
 import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
@@ -99,6 +103,7 @@ interface ChargePointRow {
   tx_updated_meter_values: number | null;
   inbound_validation: string | null;
   capability_profile: string | null;
+  charger_capabilities: string | null;
   transport_options: string | null;
 }
 
@@ -258,7 +263,7 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
-        "inbound_validation, capability_profile, transport_options " +
+        "inbound_validation, capability_profile, charger_capabilities, transport_options " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -343,6 +348,8 @@ export class CPRegistry {
         ...restoreTransport(row),
         // #618: NULL, or JSON this build cannot read, restores as no profile.
         ...restoreCapabilityProfile(row.capability_profile),
+        // #327: NULL, or JSON this build cannot read, restores as no cap.
+        ...restoreChargerCapabilities(row.charger_capabilities),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -1086,6 +1093,12 @@ export class CPRegistry {
             : null,
         ],
         [
+          "charger_capabilities",
+          init.chargerCapabilities
+            ? JSON.stringify(init.chargerCapabilities)
+            : null,
+        ],
+        [
           "transport_options",
           init.transport ? JSON.stringify(init.transport) : null,
         ],
@@ -1395,6 +1408,16 @@ function restoreBehaviorParams(
   return Object.keys(kept).length > 0 ? { behaviorParams: kept } : {};
 }
 
+function restoreChargerCapabilities(
+  raw: string | null,
+): { chargerCapabilities: ChargerCapabilities } | Record<string, never> {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (parsed === null || chargerCapabilitiesProblem(parsed) !== null) {
+    return {};
+  }
+  return { chargerCapabilities: parsed as ChargerCapabilities };
+}
+
 function restoreCapabilityProfile(
   raw: string | null,
 ): { capabilityProfile: ChargePointCapabilityProfile } | Record<string, never> {
@@ -1488,6 +1511,8 @@ function preserveOmittedInit(
     inboundValidation: next.inboundValidation ?? existing.inboundValidation,
     transport: next.transport ?? existing.transport,
     capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
+    chargerCapabilities:
+      next.chargerCapabilities ?? existing.chargerCapabilities,
   };
 }
 

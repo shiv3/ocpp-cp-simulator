@@ -11,6 +11,10 @@
 import { z } from "zod";
 import { normalizeKeyName, redactSensitiveValue } from "./redaction";
 import { OBJ_MAX_BYTES, STR_256, STR_64K, boundedObject } from "./limits";
+import {
+  chargerCapabilitiesSchema,
+  type ReadonlyChargerCapabilities,
+} from "./chargerCapabilities";
 import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "./securityProfile";
 import {
@@ -86,6 +90,8 @@ interface FullCpConfig {
   behaviors?: readonly string[];
   /** Params the selection sets on behaviors (#654), by behavior id. */
   behaviorParams?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** What the charger hardware delivers per connector (#327). */
+  chargerCapabilities?: ReadonlyChargerCapabilities;
 }
 
 /**
@@ -138,6 +144,14 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     labels: config.labels,
     behaviors: config.behaviors ? [...config.behaviors] : undefined,
     behaviorParams: config.behaviorParams,
+    chargerCapabilities: config.chargerCapabilities
+      ? {
+          connectors: config.chargerCapabilities.connectors.map((c) => ({
+            connectorId: c.connectorId,
+            maxDeliveryPowerW: c.maxDeliveryPowerW,
+          })),
+        }
+      : undefined,
   };
 }
 
@@ -190,6 +204,7 @@ export const wireCpConfigSchema = z
     labels: labelsSchema.optional(),
     behaviors: z.array(STR_256).optional(),
     behaviorParams: z.record(STR_256, boundedObject(16_384)).optional(),
+    chargerCapabilities: chargerCapabilitiesSchema.optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;

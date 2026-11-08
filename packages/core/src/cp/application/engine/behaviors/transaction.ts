@@ -271,6 +271,12 @@ export async function startTransaction(
     startChargingState: options.chargingState,
     batteryCapacityKwh,
     initialSoc,
+    ...(options.targetSoc !== undefined
+      ? { targetSoc: options.targetSoc }
+      : {}),
+    ...(options.stopAtTarget !== undefined
+      ? { stopAtTarget: options.stopAtTarget }
+      : {}),
   };
 
   if (initialSoc !== undefined) {

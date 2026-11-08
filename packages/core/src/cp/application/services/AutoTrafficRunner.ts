@@ -4,12 +4,16 @@ import {
   emptyAutoTrafficCounters,
   type AutoTrafficConfig,
   type AutoTrafficCounters,
+  type AutoTrafficIntent,
 } from "../../domain/connector/AutoTraffic";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 
 /** How often a session whose time is up re-checks for power (#798). */
 const POWER_RECHECK_MS = 1000;
+
+/** How often an intent session checks whether its target was reached (#327). */
+const INTENT_RECHECK_MS = 1000;
 
 export interface AutoTrafficHooks {
   /**
@@ -30,7 +34,16 @@ export interface AutoTrafficHooks {
   startTransaction: (
     connectorId: number,
     idTag: string,
+    intent?: AutoTrafficIntent,
   ) => Promise<void | boolean>;
+  /**
+   * `sessionModel: "intent"` only (#327): whether the connector still has the
+   * transaction this runner started. The vehicle reaching its target SoC ends
+   * it from the station's side (the connector's auto-stop); the runner notices
+   * here and counts the session completed instead of stopping it again.
+   * Absent: the session only ends at its ceiling.
+   */
+  sessionRunning?: (connectorId: number) => boolean;
   stopTransaction: (connectorId: number) => Promise<void>;
   /**
    * Whether the station is without power (#798). A session whose duration
@@ -135,7 +148,7 @@ export class AutoTrafficRunner {
     this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
-        void this.runStep(step.start, step.durationSec);
+        void this.runStep(step.start, step.durationSec, step.intent);
       },
       Math.max(0, step.gapSec * 1000),
     );
@@ -164,7 +177,11 @@ export class AutoTrafficRunner {
 
   private lastSkipReason: string | null = null;
 
-  private async runStep(start: boolean, durationSec: number): Promise<void> {
+  private async runStep(
+    start: boolean,
+    durationSec: number,
+    intent?: AutoTrafficIntent,
+  ): Promise<void> {
     if (this.stopped) return;
     if (this.expired()) {
       this.hooks.log(
@@ -222,7 +239,7 @@ export class AutoTrafficRunner {
         this.counters.authorizeAccepted++;
       }
       const started = await this.hooks
-        .startTransaction(this.connectorId, idTag)
+        .startTransaction(this.connectorId, idTag, intent)
         .catch((err: unknown) => {
           this.counters.startRejected++;
           throw err;
@@ -262,6 +279,11 @@ export class AutoTrafficRunner {
       return;
     }
 
+    if (intent && this.hooks.sessionRunning) {
+      // The ceiling is the drawn duration; the target usually comes first.
+      this.watchIntentSession(this.clock.now() + durationSec * 1000);
+      return;
+    }
     this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
@@ -269,6 +291,28 @@ export class AutoTrafficRunner {
       },
       Math.max(0, durationSec * 1000),
     );
+  }
+
+  /** Re-check an intent session every second until the station ended it
+   *  (target reached) or the ceiling passes (#327). */
+  private watchIntentSession(ceilingAtMs: number): void {
+    this.timer = this.clock.setTimeout(() => {
+      this.timer = null;
+      if (this.stopped) return;
+      if (this.hooks.sessionRunning?.(this.connectorId) === false) {
+        // The vehicle reached its target and the station stopped the
+        // transaction: the session completed on its own.
+        this.sessionOpen = false;
+        this.counters.completed++;
+        this.scheduleNext();
+        return;
+      }
+      if (this.clock.now() >= ceilingAtMs) {
+        void this.endSession();
+        return;
+      }
+      this.watchIntentSession(ceilingAtMs);
+    }, INTENT_RECHECK_MS);
   }
 
   private async endSession(): Promise<void> {

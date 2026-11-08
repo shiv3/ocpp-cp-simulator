@@ -235,6 +235,36 @@ export const goldenCases: GoldenCase[] = [
     rig.cp.stopTransaction(1, "Local");
     await settle(rig);
   }),
+  // #327: a charger cap of 11 kW on a 22 kW three-phase vehicle. Power.Offered
+  // and Power.Active.Import both read the capped value (one operating point),
+  // per phase on three phases; with the vehicle at 22 kW and no cap they
+  // would read 22 kW.
+  ...both("charger-cap-meter-values", async (rig) => {
+    await charging(rig);
+    const connector = rig.cp.getConnector(1)!;
+    // 2.0.1 leaves the connector in Preparing until the EVSE energizes it.
+    if (connector.status !== OCPPStatus.Charging) {
+      rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      await settle(rig);
+    }
+    connector.evSettings = {
+      ...connector.evSettings,
+      maxChargingPowerKw: 22,
+      currentType: "AC",
+      phases: 3,
+      voltageV: 230,
+    };
+    connector.setMaxDeliveryPowerW(11_000);
+    rig.cp.configuration.applyChange(
+      "MeterValuesSampledData",
+      "Energy.Active.Import.Register,Power.Active.Import,Power.Offered,Current.Import",
+    );
+    rig.cp.setMeterValue(1, 1500);
+    rig.cp.sendMeterValue(1);
+    await settle(rig);
+    rig.cp.stopTransaction(1, "Local");
+    await settle(rig);
+  }),
   ...both(
     "start-denied-by-authorize",
     async (rig) => {

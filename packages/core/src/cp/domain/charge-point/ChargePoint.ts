@@ -1,3 +1,7 @@
+import {
+  maxDeliveryPowerWFor,
+  type ChargerCapabilities,
+} from "./ChargerCapabilities";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -211,6 +215,12 @@ export interface StartTransactionOptions {
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
   chargingState?: TransactionChargingState;
+  /** Target SoC of this session in percent (#327); the writer of
+   *  `Transaction.targetSoc`. Absent: the connector's EV settings default. */
+  targetSoc?: number;
+  /** Stop the session when it reaches the target SoC (#327); absent: the
+   *  connector's `stopAtTargetSoc` setting decides. */
+  stopAtTarget?: boolean;
 }
 
 /**
@@ -358,6 +368,9 @@ export type InboundValidationMode = "off" | "warn" | "enforce";
 export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
 
 export interface ChargePointTransportOptions {
+  /** What the charger hardware delivers per connector (#327). Absent:
+   *  no connector is capped. */
+  readonly chargerCapabilities?: ChargerCapabilities;
   /** Static capability profile (#618). Absent: nothing is disabled. */
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** OCPP 1.6J only. Default `warn`. */
@@ -643,6 +656,9 @@ export class ChargePoint {
         this._logger,
         () => this._stationProfiles,
         this._clock,
+      );
+      connector.setMaxDeliveryPowerW(
+        maxDeliveryPowerWFor(transportOptions.chargerCapabilities, connectorId),
       );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners

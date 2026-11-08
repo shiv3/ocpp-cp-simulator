@@ -1133,6 +1133,8 @@ function toInitOptions(
       params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
     inboundValidation: params.inboundValidation ?? existing?.inboundValidation,
     capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
+    chargerCapabilities:
+      params.chargerCapabilities ?? existing?.chargerCapabilities,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1206,6 +1208,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           ...(status.config.transport === undefined
             ? {}
             : { transport: redactTransport(status.config.transport) }),
+          chargerCapabilities: status.config.chargerCapabilities,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,

@@ -25,6 +25,7 @@ import {
 } from "./accessGuard";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "@ocpp-cp-sim/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-sim/contracts/labels";
+import { chargerCapabilitiesProblem } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargerCapabilities";
 import {
   behaviorIdsSchema,
   behaviorParamsSchema,
@@ -1079,6 +1080,13 @@ export function parseCreateBody(
     inboundValidation = body.inboundValidation;
   }
   const capabilityProfile = parseCapabilityProfile(body.capabilityProfile);
+  let chargerCapabilities: ChargePointInitOptions["chargerCapabilities"];
+  if (body.chargerCapabilities !== undefined) {
+    const problem = chargerCapabilitiesProblem(body.chargerCapabilities);
+    if (problem) throw new Error(problem);
+    chargerCapabilities =
+      body.chargerCapabilities as ChargePointInitOptions["chargerCapabilities"];
+  }
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1176,6 +1184,7 @@ export function parseCreateBody(
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
     ...(capabilityProfile ? { capabilityProfile } : {}),
+    ...(chargerCapabilities ? { chargerCapabilities } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

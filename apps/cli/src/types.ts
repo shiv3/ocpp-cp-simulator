@@ -7,6 +7,7 @@ import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transp
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
+import type { ChargerCapabilities } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargerCapabilities";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
@@ -250,6 +251,8 @@ export interface CLIOptions {
   /** `--reconnect-*` and `--boot-retry-limit` (#609). */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** Charger-side delivery caps per connector (#327). */
+  readonly chargerCapabilities?: ChargerCapabilities;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -277,6 +280,8 @@ export interface ChargePointInitOptions {
   /** Transport settings (#609): reconnect policy. Persisted. */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** Charger-side delivery caps per connector (#327). Persisted. */
+  readonly chargerCapabilities?: ChargerCapabilities;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -449,6 +454,7 @@ export interface ChargePointStatus {
     readonly inboundValidation?: InboundValidationMode;
     readonly capabilityProfile?: ChargePointCapabilityProfile;
     readonly transport?: TransportConfig;
+    readonly chargerCapabilities?: ChargerCapabilities;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

@@ -2388,3 +2388,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | Heterogeneous fleet templates (#445)
+
+- New `concepts/fleet-templates.md`: the shared schema (D09), `fleet.template.*` and `fleet.create`, resolve-then-create semantics, `wsUrl` / `autoConnect` precedence, `--fleet-template` files.
+- `concepts/control-plane.md`: method row and `related`. `concepts/state-persistence.md`: `fleet_templates` table (schema v25). `entities/mcp-endpoint.md`: five tools. `entities/daemon.md`, `entities/cli.md`: `--fleet-template`. `sources/github-issues.md`, `index.md`: entries.
+- `docs/examples/fleet-templates/operations-lab.json`: example, validated by a test.

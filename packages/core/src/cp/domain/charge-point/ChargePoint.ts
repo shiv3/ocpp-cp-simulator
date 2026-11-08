@@ -229,6 +229,10 @@ export interface StartTransactionOptions {
   /** OCPP 2.x `IdToken.type` of the transaction's Authorize and
    *  TransactionEvents (#599); `ISO14443` when absent. */
   idTokenType?: IdTokenTypeName;
+  /** The `groupIdToken` of a RequestStartTransaction (F01.FR.21/22): the group
+   *  the reservation check uses for this start, before what the station
+   *  knows of the token. */
+  groupIdToken?: string;
 }
 
 /**

@@ -122,6 +122,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             evseId?: number;
             remoteStartId: number;
             idToken: { idToken: string; type?: string };
+            groupIdToken?: { idToken: string };
           };
           const decision = decideRemoteStart(cp, req);
           if (!decision.ok) return { response: decision.rejection };
@@ -135,6 +136,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
                 req.idToken.idToken,
                 req.remoteStartId,
                 requestIdTokenType(req.idToken.type),
+                req.groupIdToken?.idToken,
               );
             },
           };
@@ -215,6 +217,7 @@ async function remoteStart(
   idTag: string,
   remoteStartId: number | undefined,
   idTokenType?: IdTokenTypeName,
+  groupIdToken?: string,
 ): Promise<void> {
   const ocpp2 = isOcpp2Version(cp.ocppVersion);
   const centrallyAuthorized =
@@ -262,6 +265,7 @@ async function remoteStart(
     triggerReason: "RemoteStart",
     ...(remoteStartId !== undefined ? { remoteStartId } : {}),
     ...(idTokenType !== undefined ? { idTokenType } : {}),
+    ...(groupIdToken !== undefined ? { groupIdToken } : {}),
   });
 }
 
@@ -383,7 +387,9 @@ export async function startTransaction(
   ) {
     await cp.authorizeAndWait(tagId);
   }
-  const parentOfTag = cp.knownParentIdOf(tagId);
+  // The group the request named is what decided to accept it (F01.FR.21/22);
+  // the station may not know the token's own.
+  const parentOfTag = options.groupIdToken ?? cp.knownParentIdOf(tagId);
   const refusal = startRefusalByReservation(
     cp,
     connectorId,

@@ -780,6 +780,34 @@ for (const version of ["1.6", "2.0.1"] as const) {
     { responders: groupResponders[version] },
   );
 }
+// F01.FR.21/22: a RequestStartTransaction whose groupIdToken is the
+// reservation's group starts on the reserved EVSE with the reservation id,
+// also when the station does not know the token's group (a Central token is
+// never sent to Authorize) (#818, #660).
+for (const [, add] of [
+  ["2.0.1", c201],
+  ["2.1", c21],
+] as const) {
+  add("res-request-start-group", async (r) => {
+    await r.csms.call("ReserveNow", {
+      id: 19,
+      evseId: 1,
+      expiryDateTime: FUT,
+      idToken: { idToken: "OWNER", type: "ISO14443" },
+      groupIdToken: { idToken: "GROUP", type: "Central" },
+    });
+    await settle(r);
+    await r.csms.call("RequestStartTransaction", {
+      idToken: { idToken: "MEMBER", type: "Central" },
+      groupIdToken: { idToken: "GROUP", type: "Central" },
+      remoteStartId: 5,
+      evseId: 1,
+    });
+    await settle(r);
+    await r.remoteStop();
+    await settle(r);
+  });
+}
 // #721, 1.6 §5.13: a RemoteStartTransaction for another tag on a reserved
 // connector answers Rejected; the reservation stays.
 c16("res-remote-start-other-tag", async (r) => {

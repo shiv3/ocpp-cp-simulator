@@ -579,9 +579,12 @@ Instead the station resumes what an accepted boot starts (B04, E11):
 - **Reservations** survive the loss with their expiry (a link loss is not a
   reboot, and B01.FR.13 even keeps `Reserved` across a reboot). A `Reset` still
   drops them, as before: persisting a reservation across a reboot is not
-  modeled. Station-level charging profiles (connectorId 0) are still
-  cleared by every connection loss (`ConnectionClosed`), and no boot follows
-  to hint at it; connector and transaction profiles stay.
+  modeled. Station-level charging profiles (connectorId 0) are cleared by the
+  teardown (`ConnectionClosed`) but restored by the resume, minus those whose
+  `validTo` passed during the outage (#799): without a boot the CSMS has no cue
+  to push its limits again. A connection loss that ends in a boot (first
+  start, `Reset`, a changed boot data or `BootOnReconnect`) still leaves them
+  cleared; connector and transaction profiles stay.
 - The heartbeat timer (with the interval in force), the clock-aligned samples
   and the variable-monitoring reports are re-armed.
 - The [E11 queue](#e11-offline-queue-for-transactionevent) is replayed after

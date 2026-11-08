@@ -32,7 +32,10 @@ import type {
   RegistrationStatus,
 } from "./ChargePointEvents";
 import { ConfigurationStore } from "./ConfigurationStore";
-import type { IChargePointMessageHandler } from "../transport/IChargePointMessageHandler";
+import type {
+  AuthorizeSendHooks,
+  IChargePointMessageHandler,
+} from "../transport/IChargePointMessageHandler";
 import {
   OCPPWebSocket,
   type SocketClose,
@@ -366,6 +369,10 @@ export class ChargePoint {
   /** #702: the reservations held when the outage began; a resumed link gets
    *  them back (a reboot does not). */
   private _reservationsAtDrop: Reservation[] = [];
+  /** #799: the station-level charging profiles held when the outage began.
+   *  The teardown empties the store; a resumed link (no BootNotification, so
+   *  the CSMS has no cue to push its limits again) gets them back. */
+  private _stationProfilesAtDrop: ActiveChargingProfile[] = [];
   /** #702: the status the CSMS last *answered* for each connector (0 = the
    *  charge point). A StatusNotification still in flight when the link closed
    *  is not in it, so a resume sends that one again (B04.FR.02). */
@@ -1717,21 +1724,28 @@ export class ChargePoint {
    * a NOT-valid local-list or cache entry resolves its status (#452);
    * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
    * A timeout once the socket is gone applies the offline rules.
+   *
+   * On OCPP 2.x the CALL may wait behind another one (Part 4 §4.1.1, #708), so
+   * the timeout is armed when the Authorize is written, not when it is queued
+   * (#762), and lasts at least `MessageTimeout`. `failClosed` (F01.FR.01: energy
+   * transfer only after authorization was obtained) makes an unanswered
+   * Authorize resolve "Unknown" instead of warn-and-proceed "Accepted".
    */
   authorizeAndWait(
     tagId: string,
     timeoutMs = 10000,
     idTokenType?: IdTokenTypeName,
+    options: { failClosed?: boolean } = {},
   ): Promise<string> {
     const decision = this._authorization.decide(tagId, this.isOnline());
     if (decision.kind !== "askCsms") {
       return Promise.resolve(this.localAuthorizationStatus(tagId, decision));
     }
 
-    if (idTokenType === undefined) this.authorize(tagId);
-    else this.authorize(tagId, idTokenType);
-
-    return new Promise<string>((resolve) => {
+    const queued = isOcpp2Version(this.ocppVersion);
+    let armTimeout: () => void = () => undefined;
+    let onNotSent: () => void = () => undefined;
+    const result = new Promise<string>((resolve) => {
       let settled = false;
       let timeoutId: TimerHandle | null = null;
 
@@ -1769,10 +1783,18 @@ export class ChargePoint {
       this._events.on("authorizeResult", handler);
       this._events.on("disconnected", disconnectHandler);
 
-      timeoutId = this._clock.setTimeout(() => {
+      const waitMs = queued
+        ? Math.max(timeoutMs, this.configuration.messageTimeout() * 1000)
+        : timeoutMs;
+      armTimeout = () => {
+        if (settled || timeoutId) return;
+        timeoutId = this._clock.setTimeout(onTimeout, waitMs);
+      };
+
+      const onTimeout = () => {
         cleanup();
         if (!this.isOnline()) {
-          decideOffline(`Timeout (${timeoutMs}ms) and offline`);
+          decideOffline(`Timeout (${waitMs}ms) and offline`);
           return;
         }
         const refusal = this._authorization.decideUnanswered(tagId);
@@ -1784,13 +1806,49 @@ export class ChargePoint {
           resolve(this.localAuthorizationStatus(tagId, refusal));
           return;
         }
+        if (options.failClosed) {
+          this._logger.warn(
+            `Timeout (${waitMs}ms) awaiting Authorize.conf for ${tagId}; not authorized (F01.FR.01)`,
+            LogType.TRANSACTION,
+          );
+          resolve("Unknown");
+          return;
+        }
         this._logger.warn(
-          `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
+          `Timeout (${waitMs}ms) awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
           LogType.TRANSACTION,
         );
         resolve("Accepted");
-      }, timeoutMs);
+      };
+
+      // Never written (not connected, dropped, socket closed): offline the
+      // offline rules decide at once, otherwise the timeout decides, as for
+      // an unanswered CALL.
+      onNotSent = () => {
+        if (settled) return;
+        if (!this.isOnline()) {
+          cleanup();
+          decideOffline("Authorize not sent");
+          return;
+        }
+        armTimeout();
+      };
+
+      // The listeners and timer are set before the CALL goes out, so a
+      // synchronous write arms the timer.
+      if (queued) {
+        this.authorize(tagId, idTokenType, {
+          onWritten: () => armTimeout(),
+          onDropped: () => onNotSent(),
+        });
+      } else {
+        if (idTokenType === undefined) this.authorize(tagId);
+        else this.authorize(tagId, idTokenType);
+        armTimeout();
+      }
     });
+
+    return result;
   }
 
   /** The status a local (no Authorize round trip) decision resolves to. */
@@ -2479,6 +2537,7 @@ export class ChargePoint {
     this._statusAtDrop = new Map();
     this._cascadedAtDrop = new Map();
     this._reservationsAtDrop = [];
+    this._stationProfilesAtDrop = [];
   }
 
   /**
@@ -2499,6 +2558,7 @@ export class ChargePoint {
     const atDrop = this._statusAtDrop;
     const cascaded = this._cascadedAtDrop;
     const reservations = this._reservationsAtDrop;
+    const stationProfiles = this._stationProfilesAtDrop;
     this.clearOutage();
     const reportAll = offlineMs > this._configuration.offlineThreshold() * 1000;
     this._logger.info(
@@ -2517,6 +2577,16 @@ export class ChargePoint {
         .restore(reservations)
         .map((reservation) => reservation.connectorId),
     );
+
+    // Likewise the station-level charging profiles (ChargingStationMaxProfile,
+    // station TxDefaultProfile): without a boot the CSMS has no cue to push
+    // them again, and nothing allows dropping them on a connection loss
+    // (#799). A profile that expired during the outage stays gone.
+    const resumedAt = this._nowDate();
+    for (const profile of stationProfiles) {
+      if (profile.validTo && new Date(profile.validTo) <= resumedAt) continue;
+      this.applyChargingProfile(profile, "SetChargingProfile");
+    }
 
     // What the CSMS last answered is what it knows; the station's own state
     // now decides what is true, and the difference is reported (B04.FR.02).
@@ -2627,6 +2697,7 @@ export class ChargePoint {
         ),
       ]);
       this._reservationsAtDrop = this._reservationManager.getAllReservations();
+      this._stationProfilesAtDrop = [...this._stationProfiles.all()];
     }
     // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
@@ -2768,8 +2839,13 @@ export class ChargePoint {
     }
   }
 
-  authorize(tagId: string, idTokenType?: IdTokenTypeName): void {
-    if (idTokenType === undefined) this._outbox.authorize(tagId);
+  authorize(
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+    hooks?: AuthorizeSendHooks,
+  ): void {
+    if (hooks !== undefined) this._outbox.authorize(tagId, idTokenType, hooks);
+    else if (idTokenType === undefined) this._outbox.authorize(tagId);
     else this._outbox.authorize(tagId, idTokenType);
   }
 

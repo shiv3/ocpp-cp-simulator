@@ -97,7 +97,10 @@ import {
   type NotifyEventReport,
 } from "./v201/notifyEventV201";
 import { isQueuedOffline } from "../../domain/monitoring/monitoringCtrlrKeys";
-import type { IChargePointMessageHandler } from "../../domain/transport/IChargePointMessageHandler";
+import type {
+  AuthorizeSendHooks,
+  IChargePointMessageHandler,
+} from "../../domain/transport/IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import { patchTransaction } from "./handlers/patchTransaction";
 import {
@@ -1698,6 +1701,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public authorize(
     tagId: string,
     idTokenType: IdTokenTypeName = DEFAULT_ID_TOKEN_TYPE,
+    hooks?: AuthorizeSendHooks,
   ): void {
     if (idTokenType === "NoAuthorization") {
       // Nothing to authorize: the token is empty (IdTokenEnumType).
@@ -1705,13 +1709,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         "[v2.0.1] IdToken type NoAuthorization: no Authorize sent",
         LogType.OCPP,
       );
+      hooks?.onDropped?.("no_authorization");
       return;
     }
     const messageId = this.generateMessageId();
     const payload: AuthorizeRequestV201 = {
       idToken: this.wireIdToken(tagId, idTokenType),
     };
-    this.send("Authorize", messageId, payload);
+    this.send(
+      "Authorize",
+      messageId,
+      payload,
+      hooks?.onDropped,
+      undefined,
+      hooks?.onWritten,
+    );
   }
 
   private patchTx(

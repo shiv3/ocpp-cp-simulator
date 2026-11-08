@@ -33,6 +33,11 @@ export interface DataTransferVendorRegistry {
   unregisterVendor(vendorId: string): void;
 }
 
+export interface AuthorizeSendHooks {
+  onWritten?: () => void;
+  onDropped?: (reason: string) => void;
+}
+
 export interface IChargePointMessageHandler {
   sendBootNotification(
     bootPayload: BootNotification,
@@ -51,8 +56,15 @@ export interface IChargePointMessageHandler {
       suppressChargingStateTransactionEvent?: boolean;
     },
   ): void;
-  /** `idTokenType` is the OCPP 2.x `IdToken.type` (#599); 1.x ignores it. */
-  authorize(tagId: string, idTokenType?: IdTokenTypeName): void;
+  /** `idTokenType` is the OCPP 2.x `IdToken.type` (#599); 1.x ignores it.
+   *  `hooks` (OCPP 2.x only, #762): `onWritten` fires when the CALL is on the
+   *  wire (it may wait behind another CALL, Part 4 §4.1.1), `onDropped` when it
+   *  never gets there. Handlers that do not queue CALLs ignore them. */
+  authorize(
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+    hooks?: AuthorizeSendHooks,
+  ): void;
   sendTransactionEvent(event: TransactionLifecycleEvent): void;
   /** A driven OCPP 2.x TransactionEvent(Updated) (#335). 1.6 handlers have
    *  no such message and log a warning instead of sending anything. */

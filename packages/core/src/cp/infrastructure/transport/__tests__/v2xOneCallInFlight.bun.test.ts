@@ -81,6 +81,47 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     }, 15_000);
 
+    // #762: the Authorize timeout starts when the CALL is written, not when it
+    // is queued behind an unanswered CALL, and an unanswered Authorize on the
+    // F01.FR.01 path does not authorize.
+    it("an Authorize waiting for the slot does not time out before it is sent (#762)", async () => {
+      const csms = startMockCsms({ answerStatusNotifications: false });
+      const cp = await boot(csms, version);
+      try {
+        cp.configuration.setRuntimeValue("MessageTimeout", 1);
+        await csms.waitForFrame(callOf("StatusNotification"));
+        // The unanswered StatusNotification holds the slot for ~1 s; the
+        // caller's own timeout (300 ms) is shorter than that.
+        const outcome = cp.authorizeAndWait("TAG-762", 300, undefined, {
+          failClosed: true,
+        });
+        const authorize = await csms.waitForCall("Authorize");
+        csms.replyCallResult(authorize.messageId, {
+          idTokenInfo: { status: "Blocked" },
+        });
+        // Before the fix this resolved "Accepted" after 300 ms, unsent.
+        expect(await outcome).toBe("Blocked");
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    }, 15_000);
+
+    it("an unanswered Authorize on the remote-start path is not authorized (F01.FR.01, #762)", async () => {
+      const csms = startMockCsms({ answerStatusNotifications: false });
+      const cp = await boot(csms, version);
+      try {
+        cp.configuration.setRuntimeValue("MessageTimeout", 1);
+        const outcome = cp.authorizeAndWait("TAG-762B", 100, undefined, {
+          failClosed: true,
+        });
+        expect(await outcome).toBe("Unknown");
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    }, 15_000);
+
     it("a resent Started is not overtaken by Ended (E13)", async () => {
       const csms = startMockCsms({ answerStatusNotifications: false });
       const cp = await boot(csms, version);

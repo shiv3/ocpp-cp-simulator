@@ -190,7 +190,9 @@ async function remoteStart(
       );
     }
     if (ocpp2 && !cp.isScenarioHandled(connectorId)) {
-      const status = await cp.authorizeAndWait(idTag, undefined, idTokenType);
+      const status = await cp.authorizeAndWait(idTag, undefined, idTokenType, {
+        failClosed: true,
+      });
       if (status !== "Accepted") {
         cp.logger.warn(
           `Authorize.conf ${status} for ${idTag}; not starting the remote transaction on connector ${connectorId} (F01.FR.01)`,

@@ -56,7 +56,12 @@ import {
   resolveActivePhases,
   withNormalizedChargingCurve,
 } from "./ChargingCurve";
-import { resolveOperatingPoint, type OperatingPoint } from "./OperatingPoint";
+import {
+  resolveOperatingPoint,
+  vehicleTermOf,
+  type OperatingPoint,
+} from "./OperatingPoint";
+import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import {
   partitionProfiles,
   upsertProfile,
@@ -383,7 +388,13 @@ export class Connector {
         // `MeterValueBuilder` reports, instead of the curve only ever
         // affecting the *reported* number while the register kept climbing
         // on its original trajectory.
-        getScheduleLimitWatts: () => this.operatingPoint().accumulationCapW,
+        getScheduleLimitWatts: () => {
+          // The register tick is a tick owner: it announces a schedule
+          // crossing, the resolve itself is pure (#327).
+          const point = this.operatingPoint();
+          this.announceScheduleCrossing(point.scheduleLimitW);
+          return point.accumulationCapW;
+        },
       },
       this.logger,
       this.clock,
@@ -607,32 +618,43 @@ export class Connector {
    * read this record and never re-derive, so they cannot disagree and a new
    * limit term has exactly one place to go: {@link resolveOperatingPoint}.
    *
-   * Announces a schedule crossing exactly as {@link scheduleConstraints} does.
-   * One call per consumer tick is all that is needed; the edge-triggered latch
-   * no longer has to be argued idempotent against a second call in the same
-   * sample build.
+   * Pure, and the only resolver path: any reader (the console, behaviors'
+   * snapshot, `EVSE.Power` #538) calls this and has no bookkeeping. A schedule
+   * crossing is announced by the tick owners instead, with
+   * {@link announceScheduleCrossingNow}: the register tick and the code that
+   * sends a sample set.
    */
   operatingPoint(): OperatingPoint {
-    const point = this.peekOperatingPoint();
-    this.announceScheduleCrossing(point.scheduleLimitW);
-    return point;
+    const now = this.nowDate();
+    const { watts, activePhases } = this.resolveScheduleConstraints(now);
+    return resolveOperatingPoint({
+      at: now.getTime(),
+      charging: this.status === OCPPStatus.Charging,
+      soc: this.soc,
+      schedule: { scheduleLimitW: watts, activePhases },
+      vehicle: vehicleTermOf(this._evSettings),
+      session: { initialSoc: this.sessionIntent().initialSoc },
+      fault: { energyOfferSuspended: this.energyOfferSuspendedValue },
+    });
   }
 
-  /** {@link operatingPoint} without announcing a schedule crossing, for a
-   *  reader that is not a sampling path (#538). */
-  peekOperatingPoint(): OperatingPoint {
-    const { watts, activePhases } = this.resolveScheduleConstraints(
-      this.nowDate(),
+  /**
+   * Announce a schedule crossing (`scheduleLimitChange`) if the paused/active
+   * boundary moved since the last announcement. For a tick owner to call once
+   * before it samples; edge-triggered, so an extra call at an unchanged
+   * boundary emits nothing.
+   */
+  announceScheduleCrossingNow(): void {
+    this.announceScheduleCrossing(this.operatingPoint().scheduleLimitW);
+  }
+
+  /** This session's opening and target SoC: see {@link resolveSessionIntent}. */
+  sessionIntent(): SessionIntent {
+    return resolveSessionIntent(
+      this.transaction,
+      this._evSettings,
+      this.autoConfig.stopAtTargetSoc,
     );
-    return resolveOperatingPoint({
-      charging: this.status === OCPPStatus.Charging,
-      settings: this._evSettings,
-      soc: this.soc,
-      transactionInitialSoc: this.transaction?.initialSoc,
-      scheduleLimitW: watts,
-      activePhases,
-      energyOfferSuspended: this.energyOfferSuspendedValue,
-    });
   }
 
   private socFromMeterValue(meterValueWh: number): number | null {
@@ -643,8 +665,7 @@ export class Connector {
         : this._evSettings.batteryCapacityKwh;
     if (capacity <= 0) return null;
 
-    const initial =
-      this.transaction?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const initial = this.sessionIntent().initialSoc ?? 0;
     const meterStart = this.transaction?.meterStart ?? 0;
     const deliveredKWh = Math.max(0, meterValueWh - meterStart) / 1000;
     const derived = initial + (deliveredKWh / capacity) * 100;
@@ -1329,7 +1350,10 @@ export class Connector {
       }
       return;
     }
-    const opening = transaction.initialSoc ?? this._evSettings.initialSoc;
+    const opening = resolveSessionIntent(
+      transaction,
+      this._evSettings,
+    ).initialSoc;
     if (opening === undefined) {
       // No opening value anywhere, and the SoC on hand belongs to a session
       // that has ended — so there is nothing to replace it *with*, and keeping
@@ -1491,14 +1515,15 @@ export class Connector {
     if (!this.meterScheduler.isActive()) return;
     const current = this.effectiveSocPercent();
     if (current === null) return;
-    if (current < this._evSettings.targetSoc) return;
+    const targetSoc = this.sessionIntent().targetSoc;
+    if (targetSoc === undefined || current < targetSoc) return;
 
     // We've reached or exceeded the target SoC. A coarse curve / increment tick
     // can land WELL past the target in a single step (e.g. 95% when the target
     // is 80%), and we only stop *after* the value was applied — so clamp the
     // meter back to the energy for exactly the target SoC and re-sync before
     // stopping. Otherwise the session ends at the overshot value (#105).
-    const targetMeterWh = this.meterWhForSoc(this._evSettings.targetSoc);
+    const targetMeterWh = this.meterWhForSoc(targetSoc);
     if (targetMeterWh !== null && this.meterValueWh > targetMeterWh) {
       this.meterValueWh = targetMeterWh;
       this.eventsEmitter.emit("meterValueChange", {
@@ -1532,8 +1557,7 @@ export class Connector {
         ? transactionCapacity
         : this._evSettings.batteryCapacityKwh;
     if (capacity <= 0) return null;
-    const initial =
-      this.transaction?.initialSoc ?? this._evSettings.initialSoc ?? 0;
+    const initial = this.sessionIntent().initialSoc ?? 0;
     const meterStart = this.transaction?.meterStart ?? 0;
     const deliveredKWh = ((soc - initial) / 100) * capacity;
     if (deliveredKWh <= 0) return meterStart;

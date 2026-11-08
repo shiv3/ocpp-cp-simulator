@@ -938,6 +938,9 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
+    // The sender is the tick owner: announce a schedule crossing after the
+    // read, so this sample describes the state before the status flip (#327).
+    connector.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).

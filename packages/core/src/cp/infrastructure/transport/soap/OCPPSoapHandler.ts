@@ -859,6 +859,9 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
+    // The sender is the tick owner: announce a schedule crossing after the
+    // read, so this sample describes the state before the status flip (#327).
+    connector.announceScheduleCrossingNow();
     const payload = this._wireProfile.toMeterValuesRequest(
       connectorId,
       transactionId,

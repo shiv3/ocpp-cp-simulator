@@ -59,9 +59,9 @@ export function buildSampledValues(
   const meterWh = connector.meterValue;
   // Formatting only: every physical quantity below comes from one operating
   // point resolved at one instant (#327), so the samples of a MeterValue
-  // describe one instant and the energy register reads the same record. This
-  // is also the one call in a sample build that can emit
-  // `scheduleLimitChange`.
+  // describe one instant and the energy register reads the same record. The
+  // read is pure: the code that sends the sample set announces a schedule
+  // crossing first (`Connector.announceScheduleCrossingNow`).
   const point = connector.operatingPoint();
   const {
     soc,
@@ -301,11 +301,11 @@ function formatPowerFactor(value: number): string {
 /**
  * #538: the instantaneous active power, in whole watts, exactly as a
  * `Power.Active.Import` sample would report it now, but without announcing
- * a schedule crossing (see `Connector.peekOperatingPoint`).
+ * a schedule crossing (see `Connector.operatingPoint`).
  */
 export function reportedActivePowerW(connector: Connector): number {
   // Not charging draws nothing: skip resolving the schedule.
   if (connector.status !== "Charging") return 0;
-  const point = connector.peekOperatingPoint();
+  const point = connector.operatingPoint();
   return Number(formatBounded(point.acceptedW, point.scheduleLimitW, 0));
 }

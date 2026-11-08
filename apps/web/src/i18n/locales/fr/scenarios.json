@@ -170,5 +170,12 @@
   "scenarios.editor.afterStep": "Après cette étape",
   "scenarios.editor.endOfScenario": "Fin du scénario",
   "scenarios.editor.loopBackTo": "Retour à l’étape {{n}} · {{title}}",
-  "scenarios.editor.outlineOnlyNote": "Ce scénario a une forme que l’éditeur d’étapes ne sait pas dessiner (une seconde bifurcation ou une étape non atteinte). Ses étapes sont listées dans l’ordre d’exécution ; vous pouvez modifier leurs réglages, pas leurs liens."
+  "scenarios.editor.outlineOnlyNote": "Ce scénario a une forme que l’éditeur d’étapes ne sait pas dessiner (une seconde bifurcation ou une étape non atteinte). Ses étapes sont listées dans l’ordre d’exécution ; vous pouvez modifier leurs réglages, pas leurs liens.",
+  "scenarios.editor.issue.missingStart": "Ce scénario n’a pas de nœud Start : il ne peut pas s’exécuter.",
+  "scenarios.editor.issue.multipleStart": "Il y a plusieurs nœuds Start ; seul le premier est exécuté.",
+  "scenarios.editor.issue.edgeIntoStart": "Un lien revient vers Start ; il n’est jamais suivi.",
+  "scenarios.editor.issue.edgeOutOfEnd": "Un lien part d’un nœud End ; il n’est jamais suivi.",
+  "scenarios.editor.issue.extraOutgoing": "L’étape {{n}} ({{title}}) a plusieurs étapes suivantes, mais seul Start lance des branches en parallèle : à l’exécution, seule la première est suivie.",
+  "scenarios.editor.issue.danglingEdge": "Un lien pointe vers une étape inexistante ; cette branche s’arrête là.",
+  "scenarios.editor.issue.unreachable": "L’étape {{n}} ({{title}}) n’est pas atteinte depuis Start : elle ne s’exécute jamais."
 }

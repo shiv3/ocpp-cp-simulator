@@ -8,6 +8,7 @@ sources:
   - packages/core/src/cp/application/scenario/WaitControl.ts
   - packages/core/src/cp/application/verification/ScenarioAssertions.ts
   - packages/core/src/scenario/scenarioSchemaValidator.ts
+  - packages/core/src/scenario/scenarioConnectionRules.ts
   - packages/core/src/scenario/deepPartialMatch.ts
   - packages/core/src/cp/domain/connector/ChargingCurve.ts
   - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
@@ -31,7 +32,7 @@ related:
   - ../entities/cli.md
   - vehicle-profiles.md
   - charger-engine.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Scenario File Format (v1.6)
@@ -430,6 +431,29 @@ assertions alone, so a continued run can `PASS`.
 `id`, `source`, `target` are required strings. xyflow adds further UI fields
 (`sourceHandle`, `targetHandle`, `type`, `animated`, ...) which the schema
 allows but does not require.
+
+### Connection rules
+
+The edge type does not say which nodes may connect; the rules below are what
+`ScenarioExecutor` honours, written down in
+[`scenarioConnectionRules.ts`](../../packages/core/src/scenario/scenarioConnectionRules.ts)
+(`connectionRule`, `validateScenarioGraph`). They are advisory like the schema:
+the web console's editor lists the issues above the steps and never blocks Save.
+
+| Node type   | Edges in | Edges out                                                     |
+| ----------- | -------- | ------------------------------------------------------------- |
+| `start`     | none     | any number — **only START runs several in parallel**          |
+| `end`       | any      | none                                                          |
+| every other | any      | one — with more, only the first edge to an existing node runs |
+
+Loops (an edge back to an earlier node) and joins (several edges into one node)
+are allowed; Stop ends an endless loop. `validateScenarioGraph` reports
+`missingStart` (error: the run throws "No start node found"), `multipleStart`,
+`edgeIntoStart`, `edgeOutOfEnd`, `extraOutgoing` (a fork anywhere but START),
+`danglingEdge` and `unreachable` (no path from START). Every shipped template
+is clean (tested). Note that a fork after a step, as the console's "+ Add
+parallel branch" builds when the chain already has steps, is `extraOutgoing`:
+at run time only its first branch runs.
 
 ## Assertions & verdicts
 

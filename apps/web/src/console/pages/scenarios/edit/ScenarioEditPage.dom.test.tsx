@@ -597,6 +597,57 @@ describe("ScenarioEditPage", () => {
     expect(hasUnsavedChanges(container)).toBe(true);
   });
 
+  it("warns about wiring the executor would only half run, and stays quiet for a clean scenario", async () => {
+    // A fork after a step: only START runs branches in parallel.
+    const midFork: ScenarioDefinition = {
+      ...fanOutFixture,
+      edges: [
+        { id: "m1", source: "start-1", target: "trigger-available" },
+        { id: "m2", source: "trigger-available", target: "notify-available" },
+        { id: "m3", source: "trigger-available", target: "trigger-charging" },
+        { id: "m4", source: "notify-available", target: "end-available" },
+        { id: "m5", source: "trigger-charging", target: "meter-charging" },
+        { id: "m6", source: "meter-charging", target: "end-charging" },
+        { id: "m7", source: "start-1", target: "trigger-faulted" },
+        { id: "m8", source: "trigger-faulted", target: "notify-faulted" },
+        { id: "m9", source: "notify-faulted", target: "end-faulted" },
+      ],
+    };
+    const warned = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor",
+      {
+        service: createFakeChargePointService({
+          listScenarioDefinitions: vi.fn(async () => [midFork]),
+        }),
+      },
+    );
+    await flush();
+    const banner = warned.container.querySelector(
+      '[data-testid="graph-issues"]',
+    );
+    expect(banner?.textContent).toContain(
+      "only Start runs branches in parallel",
+    );
+    expect(
+      banner?.querySelector('[data-issue="extraOutgoing"]'),
+    ).not.toBeNull();
+    await unmount(warned.root);
+
+    const clean = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=multi-status-monitor",
+      {
+        service: createFakeChargePointService({
+          listScenarioDefinitions: vi.fn(async () => [fanOutFixture]),
+        }),
+      },
+    );
+    cleanup = () => unmount(clean.root);
+    await flush();
+    expect(
+      clean.container.querySelector('[data-testid="graph-issues"]'),
+    ).toBeNull();
+  });
+
   it("opens a linear scenario in the step list, and in the graph with view=graph", async () => {
     const fixture = linearFixture();
     const service = createFakeChargePointService({

@@ -182,6 +182,7 @@ function buildChargePointConfig(
     connectorNumber,
     wsURL: localConfig.wsURL,
     ocppVersion: localConfig.ocppVersion,
+    txUpdatedMeterValues: localConfig.txUpdatedMeterValues,
     basicAuthEnabled: localConfig.basicAuthSettings.enabled,
     basicAuthUsername: localConfig.basicAuthSettings.username,
     basicAuthPassword: getConfigBasicAuthPassword(localConfig),

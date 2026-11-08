@@ -165,6 +165,7 @@ Get/SetVariables and GetBaseReport reach the keys through the device model
 | `AuthCtrlr.LocalPreAuthorize`            | `LocalPreAuthorize`          |
 | `AuthCtrlr.LocalAuthorizeOffline`        | `LocalAuthorizeOffline`      |
 | `AuthCtrlr.OfflineTxForUnknownIdEnabled` | `AllowOfflineTxForUnknownId` |
+| `AuthCtrlr.MasterPassGroupId`            | `MasterPassGroupId`          |
 | `LocalAuthListCtrlr.Enabled`             | `LocalAuthListEnabled`       |
 
 - `AuthCacheLifeTime` exists on 2.x charge points only, so a 1.6
@@ -224,8 +225,9 @@ with ISO `expiresAt`, `insertedAt` and `updatedAt`.
 
 - No `StatusNotification` with `LocalListConflict` (§3.5.2) is sent when a
   CSMS answer contradicts the Local Authorization List.
-- No Master Pass group (`AuthCtrlr.MasterPassGroupId`, C12.FR.09) and no
-  `AuthCacheCtrlr.DisablePostAuthorize`.
+- A Master Pass group (`AuthCtrlr.MasterPassGroupId`, C12.FR.09) only
+  refuses a `RequestStartTransaction` whose `groupIdToken` is that group (C16.FR.03, #598); the local stop
+  path does not use it. There is no `AuthCacheCtrlr.DisablePostAuthorize`.
 - `AuthCacheCtrlr.LifeTime` runs from the entry's last update by the CSMS,
   as 2.1 C10.FR.10 has it ("since idTokenInfo was last updated"). 2.0.1
   has no such requirement: its §2.4.3 / C10.FR.08 count the lifetime

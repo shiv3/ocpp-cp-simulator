@@ -95,7 +95,20 @@ export type ApplySignedChainOutcome =
   | { status: "Accepted"; chain: StoredCertificateChain }
   | { status: "Malformed" }
   | { status: "NoPendingCsr" }
-  | { status: "PublicKeyMismatch" };
+  | { status: "PublicKeyMismatch" }
+  /** The leaf's `notAfter` has passed (A02.FR.06, #587). */
+  | { status: "Expired" }
+  /** The leaf's `notBefore` is in the future and the caller asked for that
+   *  to be refused (2.1 A02.FR.06, #587). */
+  | { status: "NotYetValid" };
+
+export interface ApplySignedChainOptions {
+  /** Refuse a leaf that is not valid yet. 2.1 A02.FR.06 asks for the current
+   *  date to be within the validity period; 2.0.1 states the same check but
+   *  the station keeps accepting such a leaf and waits for `notBefore`
+   *  (A02.FR.08, #537). */
+  readonly rejectNotYetValid?: boolean;
+}
 
 /**
  * Safe snapshot of the store. Holds public material only (certificates and
@@ -297,7 +310,9 @@ export class CertificateStore {
 
   /**
    * OCPP 2.x CertificateSigned: accepts the chain only when a CSR is pending
-   * for `use` and the leaf carries that CSR's public key (A02.FR.06; a
+   * for `use`, the leaf carries that CSR's public key and the current date is
+   * not after its `notAfter` (A02.FR.06; before its `notBefore` too when
+   * `rejectNotYetValid` is set, #587; a
    * chain that fails is not valid for this station, A02.FR.07). On success
    * the chain replaces any older chain of the same use (A02.FR.09/10: the
    * newest certificate is the one used) and the CSR is no longer pending.
@@ -306,13 +321,17 @@ export class CertificateStore {
   applySignedChain(
     use: SignedCertificateUse,
     pemChain: readonly string[],
+    options: ApplySignedChainOptions = {},
   ): Promise<ApplySignedChainOutcome> {
-    return this.runExclusive(() => this.applySignedChainNow(use, pemChain));
+    return this.runExclusive(() =>
+      this.applySignedChainNow(use, pemChain, options),
+    );
   }
 
   private async applySignedChainNow(
     use: SignedCertificateUse,
     pemChain: readonly string[],
+    options: ApplySignedChainOptions,
   ): Promise<ApplySignedChainOutcome> {
     if (pemChain.length === 0) return { status: "Malformed" };
     let chain: StoredCertificateChain;
@@ -329,6 +348,14 @@ export class CertificateStore {
     if (!pending) return { status: "NoPendingCsr" };
     if (!bytesEqual(pending.publicKey, leafKey)) {
       return { status: "PublicKeyMismatch" };
+    }
+    // Checked after the key, so a chain answering a superseded CSR is told
+    // apart from an invalid answer to this one (#587).
+    const leaf = new x509.X509Certificate(chain.pems[0]);
+    const now = this.clock.now();
+    if (now >= leaf.notAfter.getTime()) return { status: "Expired" };
+    if (options.rejectNotYetValid && now < leaf.notBefore.getTime()) {
+      return { status: "NotYetValid" };
     }
 
     // Bound before the change is announced, so a listener reading

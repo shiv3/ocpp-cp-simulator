@@ -60,6 +60,9 @@ export interface CertificateWireMapping {
   readonly signedUseTo: (use: SignedCertificateUse) => string | undefined;
   /** The chains a `V2GCertificateChain` query lists (M03.FR.05). */
   readonly v2gChainUses: readonly SignedCertificateUse[];
+  /** 2.1 A02.FR.06: a leaf that is not valid yet is Rejected. 2.0.1 accepts
+   *  it and waits for its `notBefore` (A02.FR.08, #587). */
+  readonly rejectNotYetValid: boolean;
 }
 
 export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -69,6 +72,7 @@ export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
   signedUseFrom: signedUseFromV201,
   signedUseTo: signedUseToV201,
   v2gChainUses: ["V2GCertificate"],
+  rejectNotYetValid: false,
 };
 
 export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -80,6 +84,7 @@ export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
   // #537 M03.FR.05: 2.1 has no query value of its own for ISO 15118-20
   // certificates, so its V2G chains are listed under V2GCertificateChain.
   v2gChainUses: V2G_CERTIFICATE_USES,
+  rejectNotYetValid: true,
 };
 
 /** `childCertificateHashData` is 0..4 in both 2.0.1 and 2.1. */
@@ -342,12 +347,14 @@ function answerDeleteCertificate(
  * serves both the CSMS and the 15118 connection; the simulator has no
  * 15118 stack, so it is the Charging Station certificate.
  *
- * Only an Accepted chain ends the CSR's resend back-off (#537), through
- * `certificateInstalled`: A02.FR.17 asks about a CertificateSigned "for
- * this CSR". The station has no A02.FR.06 period or hierarchy check, so a
- * chain whose leaf matches the CSR's key is Accepted and no rejection can
- * be tied to this CSR as an invalid answer: A02.FR.20 has no case to apply
- * to yet.
+ * The CSR's resend back-off ends on an Accepted chain (#537), through
+ * `certificateInstalled` (A02.FR.17 asks about a CertificateSigned "for this
+ * CSR"), and on a rejection of a chain whose leaf matches the CSR's key but
+ * is not valid (#587, A02.FR.20), through `certificateRejected`. Any other
+ * rejection leaves it running. The validity period is checked (A02.FR.06): an
+ * expired leaf is Rejected; a leaf not valid yet is Rejected on 2.1 and
+ * accepted on 2.0.1, which waits for its `notBefore` (A02.FR.08). The
+ * Certificate Properties and the operator hierarchy are not checked.
  */
 async function certificateSigned(
   mapping: CertificateWireMapping,
@@ -399,6 +406,7 @@ async function certificateSigned(
     const outcome = await ctx.chargePoint.certificateStore.applySignedChain(
       use,
       pems,
+      { rejectNotYetValid: mapping.rejectNotYetValid },
     );
     if (outcome.status === "Accepted") {
       ctx.logger.info(
@@ -417,7 +425,15 @@ async function certificateSigned(
       Malformed: "malformed certificate chain",
       NoPendingCsr: `no pending CSR for ${use}`,
       PublicKeyMismatch: "the leaf does not match the pending CSR's public key",
+      Expired: "the leaf certificate has expired",
+      NotYetValid: "the leaf certificate is not valid yet",
     }[outcome.status];
+    // #587 A02.FR.20: an invalid certificate answering this CSR (its key
+    // matched) ends the resends until the CSMS triggers a new signature. A
+    // chain for a superseded CSR, or none pending, leaves them running.
+    if (outcome.status === "Expired" || outcome.status === "NotYetValid") {
+      ctx.certificateSigning?.certificateRejected(use);
+    }
   }
   ctx.logger.warn(`CertificateSigned rejected: ${reason}`, LogType.OCPP);
   return {

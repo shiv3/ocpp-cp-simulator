@@ -21,7 +21,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # OCPP 1.6 security profiles
@@ -342,7 +342,8 @@ CALLERROR.
   which M04.FR.08 allows.
 - `CertificateSigned` splits `certificateChain` into PEM certificates, leaf
   first. It answers `Accepted` only when a CSR is pending for the chain's use and the
-  leaf carries that CSR's public key (A02.FR.06). The chain then replaces any
+  leaf carries that CSR's public key and the current date is within the leaf's
+  validity period (A02.FR.06, #587; below). The chain then replaces any
   older chain of the same use, and the CSR is no longer pending. An absent
   `certificateType` means the Charging Station certificate: per the field
   description, the certificate then serves both the CSMS and the 15118
@@ -414,16 +415,25 @@ CALLERROR.
   out. One sequence runs per
   certificate use. It ends on an `Accepted` `CertificateSigned` for that use
   and on a non-`Accepted` answer to the current `SignCertificate` request.
-  A chain rejected for any reason (over `MaxCertificateChainSize`,
+  A chain rejected for most reasons (over `MaxCertificateChainSize`,
   malformed, a public-key mismatch, no pending CSR, an unsupported
   `certificateType`) leaves it running, still bounded by
   `CertSigningRepeatTimes`; a chain answering a CSR a newer one replaced is
-  such a mismatch. This is the simulator's reading (#537): A02.FR.17 asks
-  about a `CertificateSigned` "for this CSR", and the station has no
-  A02.FR.06 period or hierarchy check, so a chain whose leaf matches the
-  CSR's key is `Accepted` and no rejection can be tied to this CSR as an
-  invalid answer. A02.FR.20, which ends the resends on an invalid answer,
-  has no case to apply to yet. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
+  such a mismatch. A02.FR.17 asks about a `CertificateSigned` "for this
+  CSR", so only a chain whose leaf matches the pending CSR's key can end the
+  sequence by itself: `Accepted`, or `Rejected` because the leaf is not
+  valid (A02.FR.07, A02.FR.20, #587), after which no `SignCertificate` goes
+  out until the CSMS sends a `TriggerMessage`.
+  **Validity (A02.FR.06, #587).** The key is checked first. A leaf whose
+  `notAfter` has passed is `Rejected` on 2.0.1 and 2.1: the certificate is
+  discarded, nothing is stored or switched to, and an
+  `InvalidChargingStationCertificate` security event follows the answer
+  (A02.FR.07). A leaf whose `notBefore` is still ahead is `Rejected` the same
+  way on 2.1, whose A02.FR.06 asks for the current date to be within the
+  period; on 2.0.1 it is `Accepted` and the station switches at `notBefore`
+  (A02.FR.08, below). The Certificate Properties and the operator hierarchy
+  that A02.FR.06 also names are not checked; only the leaf's period is, not
+  that of the chain's other members. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
   the same resend count, so a sequence that reached
   `CertSigningRepeatTimes` or ended does not start over on a reconnect. A
   request the close left unanswered was never accepted and starts no wait.
@@ -668,7 +678,7 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                       | M03.FR.05                                    |
 | TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                              | F06.FR.04, A02.FR.02/03/13                   |
 | TriggerMessage `SignV2G20Certificate`, `SignCombinedCertificate`      | Implemented on 2.1                       | F06.FR.08 (#553)                             |
-| Resend SignCertificate with back-off                                  | Implemented                              | A02.FR.17-19; A02.FR.20 has no case yet      |
+| Resend SignCertificate with back-off                                  | Implemented                              | A02.FR.17-20                                 |
 | 2.x `security_event_notification`                                     | Implemented                              | A04.FR.01                                    |
 | Queue critical SecurityEventNotification while offline                | Implemented on 2.x                       | A04.FR.02, Part 2 Appendices ch. 1 (#552)    |
 | `SecurityCtrlr.CertificateEntries`                                    | Implemented                              | variable; the limit of M05.FR.06             |

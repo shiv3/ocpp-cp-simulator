@@ -243,8 +243,13 @@ is restored (E11 "Connection Loss During Transaction", #528):
 - **E13 still applies to a replayed event**, with fresh counters: its
   `MessageAttempts[TransactionEvent]` budget and `transactionMessageRejected`
   `attempt` restart at 1, as a 1.6 replay goes through the serial queue
-  anew. A row leaves the queue when its replay is handed to the socket; a
-  close before the answer queues the event again. A replay the socket
+  anew. A row stays in the table (and so survives a crash) until the CSMS
+  answers the replay or the event is discarded after
+  `MessageAttempts[TransactionEvent]` failures (#554); a close before the
+  answer hands the same row back to the queue, in its place, instead of
+  adding a second one. After a restart every remaining row replays again
+  with `offline: true`, so the CSMS may see an event twice and
+  de-duplicates by `transactionId` and `seqNo`. A replay the socket
   refuses while the connection stays up (a network-sim refusal or
   overflow) stays at the head of the queue, with a `warn` (category
   `TRANSACTION`); the replay stops there, and that row, the rows behind it
@@ -254,9 +259,9 @@ is restored (E11 "Connection Loss During Transaction", #528):
   `pending_messages` by charge point id, and `cp.update` can switch
   `ocppVersion` over the same `--state-db`. When a handler starts, its
   queue deletes every row it does not replay, with one `warn` (category
-  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`
-  and `NotifyEvent`, the 1.6 handler anything but StartTransaction,
-  StopTransaction and MeterValues. Such a row never holds back a new
+  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`,
+  `NotifyEvent` and `SecurityEventNotification`, the 1.6 handler anything but
+  StartTransaction, StopTransaction and MeterValues. Such a row never holds back a new
   TransactionEvent.
 - **NotifyEvent** (#538): monitor events at or below
   `MonitoringCtrlr.OfflineQueuingSeverity` are queued too (N07.FR.04,
@@ -270,6 +275,13 @@ is restored (E11 "Connection Loss During Transaction", #528):
   the oldest report, never a TransactionEvent, with one `warn` at the
   first drop of an outage and one with the count at the replay.
   See [variable monitoring](variable-monitoring.md#offline-queuing).
+- **SecurityEventNotification** (#552): a critical security event
+  (A04.FR.02, Appendix 1; the list is in
+  [Security profiles](security-profiles.md#ocpp-201-and-21-behaviour)) produced
+  while offline is queued too and replayed in the same pass, in production
+  order, as built: the request carries the time of the event and no `offline`
+  marker. A queued security event never holds a live TransactionEvent back; a
+  refused replay stays at the head. At most 1000 are kept per charge point.
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, the NotifyEvents above the severity and the rest are
   dropped while offline, as before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is
@@ -280,22 +292,53 @@ is restored (E11 "Connection Loss During Transaction", #528):
   StatusNotifications first, then the replay, as on 1.6
   (`ChargePoint.markBootAccepted` defers the flush to a microtask).
 
+- **Size limit** (#554, E11.FR.04 / E11.FR.05). The simulator key
+  `OfflineQueueMaxEvents` (2.x only, ReadWrite, default `1000`, `0` = no
+  limit; not an OCPP variable, the spec sets none for the size, and it is
+  not in the device model, so a CSMS cannot reach it with
+  `GetVariables` / `SetVariables`: set it in the simulator's own
+  configuration) bounds the
+  TransactionEvents in the queue, rows whose replay awaits an answer
+  included. With the queue full, only `Updated` events are dropped; `Started`
+  and `Ended` never are. E11.FR.05 fixes the order: intermediate messages
+  first (the 2nd, 4th, 6th, ...), "not start dropping messages from the
+  start or stop adding messages to the queue". The simulator therefore
+  thins: the candidates are the idle queued `Updated` rows in queue order
+  (`D`), a per-outage cursor `k` (starting at 1) picks `D[k]` and advances,
+  and since the list shifts left after each drop the drops fall on the 2nd,
+  4th, 6th, ... original rows. At the end of `D` the cursor wraps to 1,
+  which halves the density again; the cursor resets at the replay. The
+  first queued `Updated` goes only when it is the only candidate (a queue of
+  `Started` and one `Authorized` `Updated` makes room for a new periodic
+  sample by dropping the `Authorized` one). A new event is always queued,
+  except that a new `Updated` is dropped itself when no idle queued
+  `Updated` exists; a new `Started` or `Ended` is queued past the limit with
+  a `warn`. Each insert drops until the queue is under the limit again, so
+  a queue left above it (events queued past the limit, rows loaded after a
+  restart) shrinks back. A row whose replay awaits its answer is not
+  dropped. A dropped event leaves a gap in the `seqNo` of its transaction,
+  which is how the CSMS sees the loss. One `warn` (category `TRANSACTION`)
+  at the first drop of an outage, naming the first dropped event, one with
+  the count at the replay.
+- **E14 `GetTransactionStatus`** (#554): `messagesInQueue` is `true` while a
+  TransactionEvent of the asked `transactionId` (of any transaction when the
+  request names none) is still to be delivered: queued, replayed but not
+  yet answered, or live and not yet settled (awaiting its answer or the
+  wait for an E13 resend). It is `false` once the CSMS has answered them all
+  or they were discarded. A request without `transactionId` is answered
+  without `ongoingIndicator` (E14.FR.06).
+
 Limits:
 
-- The queue has no size cap for TransactionEvents (only the NotifyEvent
-  reports are capped, #538), so the E11.FR.04/FR.05 memory-pressure drop
-  of `Updated` events is not modelled.
 - The replay goes out as a burst: 2.x has no serial queue (see the known
   limitation above), so the station does not wait for one answer before
   sending the next replayed event.
-- A row leaves the table when its replay is handed to the socket, as on
-  1.6. A process crash before the answer loses it, where the E04 failure
-  postcondition keeps an unanswered event in the queue.
+- A live event (never queued) that is written and unanswered when the
+  process crashes is lost: only the E11 queue is durable. A replayed event
+  is durable until answered (#554), as the E04 failure postcondition asks.
 - A restart replays the queued events, but the 2.x `transactionId` and
   `seqNo` counter of a transaction restored after the restart are not
   persisted, so its later events do not continue the replayed ones.
-- `GetTransactionStatus` answers `messagesInQueue: false` whatever the
-  queue holds (E14).
 
 ## Transaction message retries (OCPP-J 1.6)
 
@@ -422,12 +465,52 @@ serial queue. It reaches the persisted offline queue only when the socket
 closes, so a process that ends without closing it, such as a crash, loses
 the resend.
 An [expert call](expert-ocpp-calls.md) is never resent, and a MeterValues.req
-without a `transactionId` is not transaction-related. OCPP-S (1.2 / 1.5 /
-1.6S) does not retry: a SOAP Fault answering these messages is reported as an
-error and the message is not sent again. On 1.6S that deviates from the OCPP-S
-1.6 errata sheet (3.2), which has a Charge Point retry transaction-related
-messages after a Fault
-([#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585)).
+without a `transactionId` is not transaction-related. OCPP-S 1.2 and 1.5 do
+not retry: a SOAP Fault answering these messages is reported as an error and
+the message is not sent again. Only the 1.6 errata sheet was checked, not the
+1.2 and 1.5 specs. OCPP-S 1.6 retries; see the next section.
+
+### Deviation: OCPP-S 1.6 retries after a SOAP Fault
+
+The OCPP-S 1.6 errata sheet (v1.0, 2019-12-04) makes the SOAP Fault the way
+to report a failure to process a message (3.1) and, in 3.2, replaces the
+"SHOULD NOT resend" of its §4 with: "the sender SHOULD NOT resend the same
+message, except transaction-related message, a Charge Point SHALL retry these
+a couple of times". It also has the station send a simple message such as a
+Heartbeat to tell a failure to process from a connection issue, and treats an
+HTTP error status like a Fault. Since
+[#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585) `OCPPSoapHandler`
+does this on 1.6S for StartTransaction.req, StopTransaction.req and a
+MeterValues.req carrying a `transactionId`:
+
+- **A Fault or an HTTP error status** answering one is a failure to process.
+  Before it counts, the station sends a Heartbeat through the request chain.
+  If that Heartbeat is answered, even by a Fault or an HTTP error, the Central
+  System is reachable and the failure counts. If it is not (a network error or
+  a timeout) the failure is a connection issue: the message is dropped with a
+  `warn`, as before, because SOAP has no offline queue. A network error or a
+  timeout of the message itself is a connection issue too and is not retried.
+- **`transactionMessageRejected`** is emitted on every counted failure, with
+  `reason` `callError` and `errorCode` the Fault code (`SOAP Fault Receiver`)
+  or `HTTP <status>`.
+- **The resend** goes through the request chain after
+  `TransactionMessageRetryInterval` seconds times the number of transmissions
+  so far, with a new message id, and ends after `TransactionMessageAttempts`
+  transmissions: `transactionMessageDiscarded` and a `warn`. Both keys are
+  read at each failure, and a resend that finds the attempts limit lowered is
+  discarded.
+- **A StartTransaction.req whose transaction no longer runs** is discarded
+  instead of resent, as on OCPP-J (#527): a conf the station would ignore
+  would leave a transaction open on the Central System. A discarded
+  StartTransaction.req leaves the `0` placeholder and a connector still in
+  `Preparing` goes to `Charging`, as on OCPP-J.
+- **Stop and dispose** (`onWebSocketClosed`) cancel every waiting resend, each
+  with a `warn` and a `transactionMessageDiscarded`: SOAP has no offline queue
+  to salvage it to. A failure whose Heartbeat probe is still in flight at that
+  moment schedules nothing.
+
+The known limitations of the OCPP-J section apply here too (a waiting resend
+does not hold back the next message; a crash loses the resend).
 
 ## OCPP 2.x Reset OnIdle
 
@@ -505,7 +588,10 @@ would change the wire for every existing 2.x integration.
 
 A charge point created with `txUpdatedMeterValues: true` (`cp.create`,
 `cp.update`, `cp.create_many`, the MCP `cp_create` tools) or with
-`--tx-updated-meter-values` opts in. It is persisted with `--state-db`.
+`--tx-updated-meter-values` opts in. It is persisted with `--state-db`. The
+[web console](../entities/web-console.md) has a checkbox for it on the Add and
+Edit forms of an OCPP 2.0.1 / 2.1 charge point (#550); in Local mode it is a
+setting of the shared config, so it applies to every browser charge point.
 
 | Scheduler sample, OCPP 2.x | Option off (default) | Option on                                         |
 | -------------------------- | -------------------- | ------------------------------------------------- |
@@ -830,6 +916,27 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 **Tracing.** Under `warn` and `enforce` a violation is traced, not only logged: the inbound CALL's [trace record](trace-format.md#validation-violations-meta) carries `meta.validation = { mode, errorCode, description }` (the code is what `enforce` answers, and what `warn` would have). The charge point writes one structured `Inbound validation: {json}` line on the `WebSocket` log channel for it; `--trace-output` and the `logLinesToTrace` adapter turn it into the `meta` field. Under `off` nothing is checked and nothing is traced.
 
 **With SmartCharging not advertised (#594).** `NotImplemented` (no handler) comes before validation, and the `NotSupported` that `SetChargingProfile` answers when `SmartCharging` is missing from `SupportedFeatureProfiles` comes from inside the handler. So on such a station, under `enforce`, an invalid `SetChargingProfile` payload gets the constraint-violation CALLERROR and a valid one gets `NotSupported`.
+
+## OCPP 1.6 SetChargingProfile
+
+`SetChargingProfile.req` on **OCPP 1.6J** (and 1.6-S, through the shared handler; #594):
+
+- **Replacement.** A profile replaces the installed one with the same `chargingProfileId`, or with the same `stackLevel` and `chargingProfilePurpose`, in the same scope (the connector's profiles, or the station store for `connectorId` 0). The `charging_profile_applied` timeline event reports `replaced: true` only when the **same id** was updated; a profile displaced by the same-slot rule is named in `replacedIds` (and in the summary: "… applied …, replacing profile 1"), see [Operational timeline](operational-timeline.md#smart-charging-profiles). OCPP 2.x keeps replacing by id only.
+- **TxProfile preconditions.** A `TxProfile` for a connector without a **running** transaction (one whose `stopTime` is still unset; a closed transaction that is still attached does not count) answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
+- **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule` are all answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` / `Unknown` status. On **1.6-S** there is no CALLERROR: the SOAP server turns the same refusal into a generic SOAP Fault, `Dispatch error for SetChargingProfile: SmartCharging is not supported` (likewise for the other two operations). The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
+
+## Inbound CALL validation on OCPP 2.0.1 / 2.1
+
+An inbound CALL on a 2.x charge point whose payload fails the request schema of its action is answered with a CALLERROR (always on; the `inboundValidation` setting is 1.6J only). The code follows OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715), using the same keyword mapping as [1.6J](#inbound-call-validation-on-ocpp-j-16), most structural first:
+
+| Code                            | When                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `FormatViolation`               | the payload is not an object, or has a property the schema does not declare |
+| `OccurrenceConstraintViolation` | a required property is missing, or an array has too few or too many items   |
+| `TypeConstraintViolation`       | a property has the wrong JSON type                                          |
+| `PropertyConstraintViolation`   | right type, invalid value: enum, range, length, pattern                     |
+
+The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. Both 2.0.1 and 2.1 stations validate against the 2.0.1 request schemas; a 2.1-only action has its own handler and answers its own way. Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
 
 ## Inbound CS→CP request validation
 

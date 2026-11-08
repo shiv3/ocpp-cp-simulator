@@ -450,11 +450,29 @@ CALLERROR.
   `techInfo` (at most 255), the bounds of the 1.6 whitepaper, 2.0.1 and
   2.1 schemas; a longer value is `invalid_params` (#537; before, a WARN
   only). On 2.x, success means the CALL was handed over and written, not that
-  the CSMS answered it. It is dropped while offline: the 2.x
+  the CSMS answered it. While offline (A04.FR.02, #552), a critical event is
+  queued in the 2.x
   [offline queue](ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent)
-  (#528) holds only `TransactionEvent` and `NotifyEvent`, so the A04.FR.02
-  queue is not modelled. A dropped CALL (the socket is not connected, or the
-  network-simulation pipeline dropped it) answers `disconnected` on the
+  (#528) with the time it happened and sent after the next Boot Accepted;
+  the call succeeds once it is queued. Critical are the 16 types whose
+  "Critical" column is Yes in the Security Events table of the Part 2 Appendices (2.0.1 edition 4 and 2.1
+  edition 2 list the same ones; the 1.6 Security Whitepaper edition 4 has its own
+  table with 1.6 names, where `InvalidFirmwareSignature` is not critical): `FirmwareUpdated`, `SettingSystemTime`, `StartupOfTheDevice`,
+  `ResetOrReboot`, `SecurityLogWasCleared`, `MemoryExhaustion`,
+  `TamperDetectionActivated`, `InvalidFirmwareSignature`,
+  `InvalidFirmwareSigningCertificate`, `InvalidCsmsCertificate`,
+  `InvalidChargingStationCertificate`, `DiscardedRenewedClientCertificate`,
+  `InvalidTLSVersion`, `InvalidTLSCipherSuite`, `MaintenanceLoginAccepted`
+  and `MaintenanceLoginFailed`. Any other type, a vendor's own included, is
+  dropped while offline. A critical event whose CALL the pipeline drops
+  after the socket was seen up (`socket_closed`, `write_failed`) is queued
+  the same way; a behavior drop, a full pipeline queue and a disposed
+  handler stay dropped. A queued event that the socket accepts on the
+  replay but then loses mid-write is not queued again. The queue keeps at most
+  1000 such events per charge point and drops the oldest past that, with
+  one `warn` at the first drop and one with the count at the replay. A
+  dropped CALL (a non-critical event offline, or the network-simulation
+  pipeline dropping it) answers `disconnected` on the
   control plane and the MCP tool, like a dropped first
   `get_15118_ev_certificate` CALL, and fails in JSON Lines mode. 1.6 still
   answers success once the CALL is queued or the boot gate suppressed it, and
@@ -652,14 +670,11 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | TriggerMessage `SignV2G20Certificate`, `SignCombinedCertificate`      | Implemented on 2.1                       | F06.FR.08 (#553)                             |
 | Resend SignCertificate with back-off                                  | Implemented                              | A02.FR.17-19; A02.FR.20 has no case yet      |
 | 2.x `security_event_notification`                                     | Implemented                              | A04.FR.01                                    |
-| Queue SecurityEventNotification while offline                         | Deferred: needs the 2.x queue of #528    | A04.FR.02                                    |
+| Queue critical SecurityEventNotification while offline                | Implemented on 2.x                       | A04.FR.02, Part 2 Appendices ch. 1 (#552)    |
 | `SecurityCtrlr.CertificateEntries`                                    | Implemented                              | variable; the limit of M05.FR.06             |
 | `MaxCertificateChainSize`                                             | Implemented                              | A02.FR.16                                    |
 | `serialNumber` without leading zeroes                                 | Implemented                              | `CertificateHashDataType.serialNumber` field |
 | 1.6: keep the CSMS root the connection uses                           | Implemented                              | whitepaper M04.FR.06                         |
-
-Offline queuing (A04.FR.02) is left to a follow-up: the 2.x offline queue of
-#528 does not take `SecurityEventNotification`.
 
 ### Persistence
 

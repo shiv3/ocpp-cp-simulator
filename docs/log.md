@@ -2404,6 +2404,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | TriggerMessage SignV2G20Certificate and SignCombinedCertificate on 2.1 (#553)
 
 - F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
+
 ## [2026-11-08] ingest | 2.x offline queue: E14, size limit, durable until answered (#554)
 
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): a replayed row stays in `pending_messages` until the CSMS answers (a crash replays it again); the simulator key `OfflineQueueMaxEvents` (default 1000, 0 = no limit) bounds the queue and drops `Updated` events only (E11.FR.04/05); `GetTransactionStatus` reports `messagesInQueue` from the queue. The three matching limits are removed.
@@ -2412,3 +2413,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] fix | 2.x offline queue review follow-ups (#554)
 
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): a new meter-value `Updated` never displaces a queued non-meter-value `Updated`; the queue is trimmed until it is under the limit; `OfflineQueueMaxEvents` is not reachable with `GetVariables` / `SetVariables`. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] fix | 2.x offline queue: thin the Updated events as E11.FR.05 requires (#554)
+
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): the full queue drops intermediate `Updated` messages (2nd, 4th, 6th, ...) with a cursor, never from the front and never by refusing a new message; the earlier "oldest meter-value first" and "a new meter-value `Updated` never displaces..." rules are replaced. `GetTransactionStatus` without `transactionId` sets no `ongoingIndicator` (E14.FR.06).

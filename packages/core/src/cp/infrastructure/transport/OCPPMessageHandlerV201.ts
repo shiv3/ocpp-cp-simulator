@@ -200,13 +200,6 @@ const QUEUED_ON_OCPP2: ReadonlySet<V201QueuedAction> = new Set([
   "NotifyEvent",
 ]);
 
-/** #554: trigger reasons of the periodic meter values, the `Updated` events
- *  dropped first from a full queue. */
-const METER_VALUE_TRIGGERS: ReadonlySet<string> = new Set([
-  "MeterValuePeriodic",
-  "MeterValueClock",
-]);
-
 /** How the logs name a TransactionEvent. */
 function describeTransactionEvent(
   payload: TransactionEventRequestV201,
@@ -291,6 +284,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   /** Updated TransactionEvents dropped from the full queue since the last
    *  replay (#554, E11.FR.04/05); reported and reset by `flushPendingQueue`. */
   private _droppedTransactionEvents = 0;
+  /** E11.FR.05 thinning cursor: index into the idle queued `Updated` rows
+   *  of the next row to drop; 1 at the start of an outage. */
+  private _thinningCursor = 1;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -1106,14 +1102,18 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /**
    * #554, E11.FR.04 / E11.FR.05: keep the E11 queue under
-   * `OfflineQueueMaxEvents` (0 = no limit). With the queue full, an `Updated`
-   * event is dropped, never a `Started` or `Ended`: the oldest queued
-   * `Updated` carrying a meter-value trigger first, else the oldest
-   * `Updated`. A new meter-value `Updated` never displaces a queued
-   * non-meter-value `Updated` (`Authorized`, `ChargingStateChanged`, ...): it
-   * is dropped itself when no queued meter-value `Updated` can go. When no
-   * queued `Updated` can go, a new `Updated` is dropped, and a new `Started`
-   * or `Ended` is queued past the limit. Rows are dropped until the queue is
+   * `OfflineQueueMaxEvents` (0 = no limit). With the queue full, only an
+   * `Updated` event is dropped, never a `Started` or `Ended`. E11.FR.05
+   * fixes the order: intermediate messages first (the 2nd, 4th, 6th, ...),
+   * not from the start of the queue and not by refusing new messages. The
+   * candidates are the idle queued `Updated` rows in queue order (`D`); a
+   * cursor `k` (1 at the start of an outage) picks `D[k]` and advances. The
+   * list shifts left after each drop, so successive drops remove the 2nd,
+   * 4th, 6th, ... original rows; at the end of `D` the cursor wraps to 1,
+   * which halves the density again. `D[0]` goes only when it is the only
+   * candidate. The new event is always queued, unless it is an `Updated` and
+   * no idle queued `Updated` exists; a new `Started` or `Ended` is queued
+   * past the limit when nothing can go. Rows are dropped until the queue is
    * under the limit, so a queue left above it (events queued past it, rows
    * loaded after a restart) shrinks back. A row whose replay awaits its
    * answer is not dropped. The dropped events leave a `seqNo` gap the CSMS
@@ -1126,24 +1126,32 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     if (limit <= 0) return true;
     const isUpdated = (p: unknown) =>
       (p as TransactionEventRequestV201).eventType === "Updated";
-    const isMeterUpdated = (p: unknown) =>
-      isUpdated(p) &&
-      METER_VALUE_TRIGGERS.has(
-        (p as TransactionEventRequestV201).triggerReason,
-      );
-    const newIsMeterUpdated = isMeterUpdated(message.payload);
     while (this._pendingQueue.payloadsOf("TransactionEvent").length >= limit) {
+      const candidates = this._pendingQueue.idleRows(
+        "TransactionEvent",
+        isUpdated,
+      );
+      if (candidates.length > 1 && this._thinningCursor >= candidates.length) {
+        this._thinningCursor = 1;
+      }
       const victim =
-        this._pendingQueue.idleRows("TransactionEvent", isMeterUpdated)[0] ??
-        (newIsMeterUpdated
-          ? undefined
-          : this._pendingQueue.idleRows("TransactionEvent", isUpdated)[0]);
+        candidates.length > 1
+          ? candidates[this._thinningCursor]
+          : candidates[0];
       const first = this._droppedTransactionEvents === 0;
       if (victim !== undefined) {
+        const dropped = this._pendingQueue.payloadOfRow(victim);
         this._pendingQueue.remove(victim);
-        this.noteDroppedTransactionEvent(first, message.payload, limit);
+        if (candidates.length > 1) this._thinningCursor += 1;
+        this.noteDroppedTransactionEvent(
+          first,
+          message.payload,
+          limit,
+          dropped as TransactionEventRequestV201 | undefined,
+        );
         continue;
       }
+      this._thinningCursor = 1;
       if (message.payload.eventType === "Updated") {
         this.noteDroppedTransactionEvent(first, message.payload, limit);
         return false;
@@ -1161,11 +1169,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     first: boolean,
     payload: TransactionEventRequestV201,
     limit: number,
+    dropped?: TransactionEventRequestV201,
   ): void {
     this._droppedTransactionEvents += 1;
     if (!first) return;
     this._logger.warn(
-      `[v2.0.1] Offline queue full (${limit} TransactionEvents, OfflineQueueMaxEvents): dropping Updated events until the connection is back, while keeping Started and Ended (E11.FR.04/05); triggered by ${describeTransactionEvent(payload)}`,
+      `[v2.0.1] Offline queue full (${limit} TransactionEvents, OfflineQueueMaxEvents): dropping Updated events until the connection is back, while keeping Started and Ended (E11.FR.04/05); triggered by ${describeTransactionEvent(payload)}${dropped ? `; first dropped: ${describeTransactionEvent(dropped)}` : ""}`,
       LogType.TRANSACTION,
     );
   }
@@ -2325,6 +2334,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       this._droppedTransactionEvents = 0;
     }
+    this._thinningCursor = 1;
     if (this._droppedNotifyEvents > 0) {
       this._logger.warn(
         `[v2.0.1] Dropped ${this._droppedNotifyEvents} queued NotifyEvent report(s) during the outage (cap ${MAX_QUEUED_NOTIFY_EVENTS})`,

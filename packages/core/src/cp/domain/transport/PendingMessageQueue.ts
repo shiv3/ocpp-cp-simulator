@@ -135,6 +135,11 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
       .map((item) => item.messageId);
   }
 
+  /** #554: the payload of the row `messageId`, if queued. */
+  payloadOfRow(messageId: string): unknown {
+    return this.items.find((item) => item.messageId === messageId)?.payload;
+  }
+
   /** Queued payloads of `action`, delivering ones included (#554). */
   payloadsOf(action: A): unknown[] {
     return this.items

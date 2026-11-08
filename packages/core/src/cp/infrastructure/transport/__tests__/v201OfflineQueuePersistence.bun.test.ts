@@ -332,7 +332,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     });
 
-    it("drops Updated events from a full queue, meter values first, never Started or Ended (#554)", async () => {
+    it("drops Updated events from a full queue, never Started or Ended (#554)", async () => {
       const db = BunSqliteDatabase.open(":memory:");
       let run: ReturnType<typeof station> | undefined;
       try {
@@ -348,7 +348,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         handler.sendTransactionUpdate(1, {
           triggerReason: "MeterValuePeriodic",
         });
-        // Full (3). The next Updated pushes the oldest meter-value one out.
+        // Full (3). The next Updated pushes out the 2nd Updated (E11.FR.05).
         handler.sendTransactionUpdate(1, { triggerReason: "MeterValueClock" });
         await Promise.resolve();
         const queued = rows(db).map((r) => JSON.parse(r.payload));
@@ -383,7 +383,32 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     });
 
-    it("keeps a new meter-value Updated from displacing an Authorized Updated (#554)", async () => {
+    it("thins the Updated events from the middle, keeping the first and the last (E11.FR.05, #554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const { tx, handler } = station(db, version, silentLogger(), 4);
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        for (let i = 0; i < 6; i++) {
+          handler.sendTransactionUpdate(1, {
+            triggerReason: "MeterValuePeriodic",
+          });
+        }
+        await Promise.resolve();
+        // Samples 1..6 arrive; the 2nd, then the 4th, then the 3rd of the
+        // remaining ones go. Neither the oldest nor only the newest are kept.
+        expect(rows(db).map((r) => JSON.parse(r.payload).seqNo)).toEqual([
+          0, 1, 5, 6,
+        ]);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("queues a new meter-value Updated and drops the lone Authorized Updated (E11.FR.05, #554)", async () => {
       const db = BunSqliteDatabase.open(":memory:");
       try {
         const { tx, handler } = station(db, version, silentLogger(), 2);
@@ -399,7 +424,11 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         await Promise.resolve();
         expect(
           rows(db).map((r) => JSON.parse(r.payload).triggerReason),
-        ).toEqual(["Authorized", "Authorized"]);
+        ).toEqual(["Authorized", "MeterValuePeriodic"]);
+        expect(rows(db).map((r) => JSON.parse(r.payload).eventType)).toEqual([
+          "Started",
+          "Updated",
+        ]);
       } finally {
         db.close();
       }

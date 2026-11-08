@@ -51,7 +51,8 @@ export function handleGetTransactionStatusV201(
 
   return {
     response: {
-      ongoingIndicator,
+      // E14.FR.06: no ongoingIndicator without a transactionId.
+      ...(req.transactionId !== undefined && { ongoingIndicator }),
       messagesInQueue:
         ctx.hasTransactionEventsToDeliver?.(req.transactionId) ?? false,
     } satisfies GetTransactionStatusResponseV201,

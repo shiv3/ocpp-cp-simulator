@@ -36,12 +36,11 @@ describe("GetTransactionStatus messagesInQueue (#554)", () => {
         {},
         ctx((id) => id === undefined),
       ).response,
-    ).toEqual({ ongoingIndicator: false, messagesInQueue: true });
+    ).toEqual({ messagesInQueue: true });
   });
 
   it("answers false without a queue", () => {
     expect(handleGetTransactionStatusV201({}, ctx()).response).toEqual({
-      ongoingIndicator: false,
       messagesInQueue: false,
     });
   });

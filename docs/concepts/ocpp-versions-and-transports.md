@@ -292,27 +292,34 @@ is restored (E11 "Connection Loss During Transaction", #528):
   `GetVariables` / `SetVariables`: set it in the simulator's own
   configuration) bounds the
   TransactionEvents in the queue, rows whose replay awaits an answer
-  included. With the queue full, `Updated` events are dropped and
-  `Started` and `Ended` never are: a queued `Updated` with trigger reason
-  `MeterValuePeriodic` or `MeterValueClock` goes first (oldest first), else
-  the oldest queued `Updated` — except that a new meter-value `Updated`
-  never displaces a queued non-meter-value one (`Authorized`,
-  `ChargingStateChanged`, ...): with no queued meter-value `Updated` it is
-  dropped itself. If none can go, a new `Updated` is dropped itself, while a
-  new `Started` or `Ended` is queued past the limit with a `warn`. Each
-  insert drops until the queue is under the limit again, so a queue left
-  above it (events queued past the limit, rows loaded after a restart)
-  shrinks back. A dropped event leaves a gap in the `seqNo` of its transaction,
+  included. With the queue full, only `Updated` events are dropped; `Started`
+  and `Ended` never are. E11.FR.05 fixes the order: intermediate messages
+  first (the 2nd, 4th, 6th, ...), "not start dropping messages from the
+  start or stop adding messages to the queue". The simulator therefore
+  thins: the candidates are the idle queued `Updated` rows in queue order
+  (`D`), a per-outage cursor `k` (starting at 1) picks `D[k]` and advances,
+  and since the list shifts left after each drop the drops fall on the 2nd,
+  4th, 6th, ... original rows. At the end of `D` the cursor wraps to 1,
+  which halves the density again; the cursor resets at the replay. The
+  first queued `Updated` goes only when it is the only candidate (a queue of
+  `Started` and one `Authorized` `Updated` makes room for a new periodic
+  sample by dropping the `Authorized` one). A new event is always queued,
+  except that a new `Updated` is dropped itself when no idle queued
+  `Updated` exists; a new `Started` or `Ended` is queued past the limit with
+  a `warn`. Each insert drops until the queue is under the limit again, so
+  a queue left above it (events queued past the limit, rows loaded after a
+  restart) shrinks back. A row whose replay awaits its answer is not
+  dropped. A dropped event leaves a gap in the `seqNo` of its transaction,
   which is how the CSMS sees the loss. One `warn` (category `TRANSACTION`)
-  at the first drop of an outage, one with the count at the replay. The
-  order of the drops is the simulator's choice; the rule that only
-  `Updated` events go is E11.FR.04/FR.05's.
+  at the first drop of an outage, naming the first dropped event, one with
+  the count at the replay.
 - **E14 `GetTransactionStatus`** (#554): `messagesInQueue` is `true` while a
   TransactionEvent of the asked `transactionId` (of any transaction when the
   request names none) is still to be delivered: queued, replayed but not
   yet answered, or live and not yet settled (awaiting its answer or the
   wait for an E13 resend). It is `false` once the CSMS has answered them all
-  or they were discarded.
+  or they were discarded. A request without `transactionId` is answered
+  without `ongoingIndicator` (E14.FR.06).
 
 Limits:
 

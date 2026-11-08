@@ -2445,3 +2445,13 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
 
 - The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | Power loss simulation and transaction recovery (#455)
+
+- New [Power loss and transaction recovery](concepts/power-loss.md): `ChargePoint.powerLoss` / `restorePower`, `power.loss` (`restoreAfterMs?`) and `power.restore` RPC methods and the `power_loss` / `power_restore` MCP tools. The socket vanishes, transactions and the undelivered queue survive; after the Accepted boot the station resumes (1.x default, 2.1 within `txResumptionTimeoutSeconds`, E17.FR.10/14, `TxResumed`) or ends them (1.6 `StopTransaction` `PowerLoss`; 2.x `Ended` + `AbnormalCondition` + `PowerLoss`, E17.FR.20/21; 2.0.1 default). Timeline format 1.4 adds `power_lost` / `power_restored`. Golden cases `power-loss-resume`, `power-loss-end`, `power-loss-queued-then-end`; no existing fixture changed.
+- Pages: [Power loss](concepts/power-loss.md), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Operational timeline](concepts/operational-timeline.md), [Network simulation](concepts/network-simulation.md), [Charging sessions](concepts/charging-sessions.md), [GitHub issues](sources/github-issues.md), [index](index.md).
+
+## [2026-11-08] ingest | Built-in resilience scenario templates (#444)
+
+- Six `resilience-*` templates (communication loss, connector fault, EV disconnect, temporary unavailable, authorization rejected, power loss), each with assertions that end in a run verdict, built on the existing scenario engine, network simulation and the #455 power-loss primitive. New golden frames per template and `resilienceTemplates.bun.test.ts` (verdict passes with the injection, fails on an empty run).
+- Pages: [Built-in scenario templates](entities/scenario-templates.md#resilience-templates-resilience-), [GitHub issues](sources/github-issues.md), [index](index.md).

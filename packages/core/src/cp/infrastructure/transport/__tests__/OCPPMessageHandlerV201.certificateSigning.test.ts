@@ -157,6 +157,8 @@ function setup(version: Version) {
     hasResponseOverride: vi.fn(() => false),
     consumeResponseOverride: vi.fn(() => null),
     clearResponseOverride: vi.fn(),
+    adoptRenewedClientCertificate: vi.fn(() => Promise.resolve()),
+    useRenewedClientCertificate: vi.fn(() => Promise.resolve()),
   } as unknown as ChargePoint;
   const logger = {
     info: vi.fn(),
@@ -252,12 +254,104 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
     expect(second.payload.csr).not.toBe(first.payload.csr);
   });
 
-  it("still answers NotImplemented for SignCombinedCertificate", async () => {
-    const { socket } = setup(version);
-    expect(await trigger(socket, "SignCombinedCertificate")).toEqual({
-      status: "NotImplemented",
+  // #553: 2.1 F06.FR.08. 2.0.1 has no V2G20 certificate and keeps
+  // answering NotImplemented for SignCombinedCertificate.
+  if (version === "OCPP-2.0.1") {
+    it("answers NotImplemented for SignCombinedCertificate", async () => {
+      const { socket } = setup(version);
+      expect(await trigger(socket, "SignCombinedCertificate")).toEqual({
+        status: "NotImplemented",
+      });
+      expect(socket.calls("SignCertificate")).toEqual([]);
     });
-  });
+  } else {
+    it("answers TriggerMessage SignV2G20Certificate, then sends a new CSR for V2G20Certificate (F06.FR.08)", async () => {
+      const { socket, certificateStore } = setup(version);
+
+      const answer = await trigger(socket, "SignV2G20Certificate");
+      expect(answer).toEqual({ status: "Accepted" });
+      expect(validTrigger(answer)).toBe(true);
+      await settle(socket, 1);
+
+      const sign = socket.calls("SignCertificate");
+      expect(sign).toHaveLength(1);
+      expect(socket.wire.indexOf(sign[0])).toBeGreaterThan(
+        socket.wire.findIndex((e) => e.kind === "result"),
+      );
+      expect(sign[0].payload.certificateType).toBe("V2G20Certificate");
+      expect(sign[0].payload.csr).toBe(
+        certificateStore.pendingCsr("V2G20Certificate"),
+      );
+      expect(validSign(sign[0].payload)).toBe(true);
+    });
+
+    it("stores the V2G20Certificate chain that answers the trigger (F06.FR.08)", async () => {
+      const { socket, certificateStore } = setup(version);
+      await trigger(socket, "SignV2G20Certificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+
+      const root = await selfSignedRoot("01", "V2G20 Root");
+      const leaf = await leafForCsr("02", sign.payload.csr as string, root);
+      const answer = await deliverSigned(socket, {
+        certificateChain: leaf,
+        certificateType: "V2G20Certificate",
+      });
+
+      expect(answer).toEqual({ status: "Accepted" });
+      expect(validSigned(answer)).toBe(true);
+      expect(
+        certificateStore.listSignedChains("V2G20Certificate"),
+      ).toHaveLength(1);
+      // The chain names no OCSP responder, so nothing is asked (M06.FR.07).
+      expect(socket.calls("GetCertificateStatus")).toHaveLength(0);
+    });
+
+    it("answers TriggerMessage SignCombinedCertificate, then sends one CSR without a certificateType (F06.FR.08)", async () => {
+      const { socket, certificateStore } = setup(version);
+
+      const answer = await trigger(socket, "SignCombinedCertificate");
+      expect(answer).toEqual({ status: "Accepted" });
+      expect(validTrigger(answer)).toBe(true);
+      await settle(socket, 1);
+
+      const sign = socket.calls("SignCertificate");
+      expect(sign).toHaveLength(1);
+      expect(socket.wire.indexOf(sign[0])).toBeGreaterThan(
+        socket.wire.findIndex((e) => e.kind === "result"),
+      );
+      // The 2.1 enum text: omitted means the certificate serves the CSMS and
+      // the 15118 connection alike.
+      expect(sign[0].payload).not.toHaveProperty("certificateType");
+      expect(sign[0].payload.csr).toBe(
+        certificateStore.pendingCsr("ChargingStationCertificate"),
+      );
+      expect(validSign(sign[0].payload)).toBe(true);
+    });
+
+    it("stores the chain that answers the combined trigger as the Charging Station certificate, and resends the request unchanged", async () => {
+      const { socket, certificateStore } = setup(version);
+      await trigger(socket, "SignCombinedCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+
+      // A02.FR.17-19: the back-off resends what was sent.
+      vi.advanceTimersByTime(10_000);
+      expect(socket.calls("SignCertificate")[1].payload).toEqual(sign.payload);
+
+      const root = await selfSignedRoot("01", "Combined Root");
+      const leaf = await leafForCsr("02", sign.payload.csr as string, root);
+      const answer = await deliverSigned(socket, { certificateChain: leaf });
+
+      expect(answer).toEqual({ status: "Accepted" });
+      expect(validSigned(answer)).toBe(true);
+      expect(
+        certificateStore.listSignedChains("ChargingStationCertificate"),
+      ).toHaveLength(1);
+    });
+  }
 
   it("resends the same request after W then 2W, CertSigningRepeatTimes times (A02.FR.17-19)", async () => {
     const { socket } = setup(version);

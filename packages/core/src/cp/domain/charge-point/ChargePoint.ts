@@ -2010,6 +2010,25 @@ export class ChargePoint {
    * supersedes it.
    */
   async useRenewedClientCertificate(): Promise<void> {
+    await this.switchClientCertificate(true);
+  }
+
+  /**
+   * #564: the same switch without the reconnect: the renewed certificate is
+   * handed to the transport as soon as the chain is stored, so the next
+   * connection presents it even if the CertificateSigned answer is dropped
+   * before it is written (a manual disconnect while network simulation holds
+   * it). The reconnect of an open connection stays with
+   * {@link useRenewedClientCertificate}, run once the answer is written, so
+   * the answer goes out on the connection that received the request.
+   * Handing the same identity over again changes nothing, and neither call
+   * runs on a connect, so no connection reconnects for it again.
+   */
+  async adoptRenewedClientCertificate(): Promise<void> {
+    await this.switchClientCertificate(false);
+  }
+
+  private async switchClientCertificate(reconnect: boolean): Promise<void> {
     if (this._clientCertificateSwitchReleased) return;
     this.cancelClientCertificateSwitch();
     const request = this._clientCertificateSwitchSeq;
@@ -2029,7 +2048,8 @@ export class ChargePoint {
         `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
         LogType.WEBSOCKET,
       );
-      // Unref'd: a wait of days must not keep the process alive.
+      // Unref'd: a wait of days must not keep the process alive. When it
+      // passes, an open connection reconnects whichever call set it.
       this._cancelClientCertificateSwitchTimer = setTimeoutAt(
         identity.notBefore.getTime(),
         () => {
@@ -2041,6 +2061,7 @@ export class ChargePoint {
       return;
     }
     webSocket.useRenewedClientCertificate(identity);
+    if (!reconnect) return;
     // A station that is not connected (back-off, simulated outage, manual
     // disconnect) presents it at its next connection, on that one's timing.
     if (!webSocket.isOpenOrConnecting()) {
@@ -2053,6 +2074,7 @@ export class ChargePoint {
     this.reconnectWithRenewedCertificate(
       webSocket.currentGeneration(),
       this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      identity.cert,
     );
   }
 
@@ -2062,11 +2084,14 @@ export class ChargePoint {
   private reconnectWithRenewedCertificate(
     generation: GenerationToken,
     deadline: number,
+    cert: string,
   ): void {
     this._cancelClientCertificateSwitchTimer = null;
     const webSocket = this._webSocket;
     if (!webSocket?.isOpenOrConnecting()) return;
     if (webSocket.currentGeneration() !== generation) return;
+    // Opened with it meanwhile (#564): nothing to switch.
+    if (webSocket.presentsClientCertificate(cert)) return;
     if (
       this._outbox.hasTransactionMessagesInFlight() &&
       this._clock.now() < deadline
@@ -2076,7 +2101,7 @@ export class ChargePoint {
           this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS,
           deadline,
         ),
-        () => this.reconnectWithRenewedCertificate(generation, deadline),
+        () => this.reconnectWithRenewedCertificate(generation, deadline, cert),
         { clock: this._clock },
       );
       return;

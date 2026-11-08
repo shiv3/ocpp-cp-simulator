@@ -1,3 +1,7 @@
+import {
+  maxDeliveryPowerWFor,
+  type ChargerCapabilities,
+} from "./ChargerCapabilities";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -364,6 +368,9 @@ export type InboundValidationMode = "off" | "warn" | "enforce";
 export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
 
 export interface ChargePointTransportOptions {
+  /** What the charger hardware delivers per connector (#327). Absent:
+   *  no connector is capped. */
+  readonly chargerCapabilities?: ChargerCapabilities;
   /** Static capability profile (#618). Absent: nothing is disabled. */
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** OCPP 1.6J only. Default `warn`. */
@@ -645,6 +652,9 @@ export class ChargePoint {
         this._logger,
         () => this._stationProfiles,
         this._clock,
+      );
+      connector.setMaxDeliveryPowerW(
+        maxDeliveryPowerWFor(transportOptions.chargerCapabilities, connectorId),
       );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners

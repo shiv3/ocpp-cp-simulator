@@ -72,7 +72,7 @@ export function buildSampledValues(
     limitA,
     voltageV,
     powerFactor,
-    scheduleLimitW,
+    boundW,
     activePhases: phases,
   } = point;
 
@@ -86,7 +86,7 @@ export function buildSampledValues(
       offeredCurrentA,
       voltageV,
       powerFactor,
-      limitW: scheduleLimitW,
+      limitW: boundW,
       limitA,
     });
     if (sample) samples.push(sample);
@@ -108,10 +108,11 @@ export function buildSampledValues(
           voltageV,
           powerFactor,
           // A leg carries a third of the whole-connector power, so the bound
-          // that applies to it is a third of the whole-connector cap. The
+          // that applies to it is a third of the whole-connector bound (the
+          // schedule limit narrowed by the charger cap). The
           // current legs each carry the aggregate line current, so their bound
           // is unchanged.
-          limitW: scheduleLimitW / 3,
+          limitW: boundW / 3,
           limitA,
         });
         if (perPhase) samples.push({ ...perPhase, phase });
@@ -307,5 +308,5 @@ export function reportedActivePowerW(connector: Connector): number {
   // Not charging draws nothing: skip resolving the schedule.
   if (connector.status !== "Charging") return 0;
   const point = connector.operatingPoint();
-  return Number(formatBounded(point.acceptedW, point.scheduleLimitW, 0));
+  return Number(formatBounded(point.acceptedW, point.boundW, 0));
 }

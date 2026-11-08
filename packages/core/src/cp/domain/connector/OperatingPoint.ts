@@ -22,17 +22,26 @@ export interface OperatingPoint {
   at: number;
   /** Active charging-profile cap in watts, `Infinity` when uncapped. */
   scheduleLimitW: number;
+  /** The charger's delivery cap for this connector in watts (hardware, not
+   *  the CSMS), `Infinity` when none is declared (#327). */
+  chargerCapW: number;
+  /** The tightest limit the report is bounded by: the schedule limit and the
+   *  charger cap, `Infinity` when neither exists. Samples round against this,
+   *  never past it. */
+  boundW: number;
   /** Phases in use: the wiring (1 for DC) narrowed by the profile. */
   activePhases: number;
   /** What the battery accepts now, curve included; 0 unless `Charging`. */
   acceptedW: number;
-  /** What the EVSE offers now, curve excluded; 0 unless `Charging`. */
+  /** What the EVSE offers now, curve excluded; 0 unless the EVSE is
+   *  energized: a running transaction in `Charging` or `SuspendedEV`
+   *  (see {@link FaultTerm.offering}). */
   offeredW: number;
   /** Line current for {@link acceptedW}, over {@link activePhases}. */
   currentA: number;
   /** Line current for {@link offeredW}, over {@link activePhases}. */
   offeredCurrentA: number;
-  /** {@link scheduleLimitW} in amperes, `Infinity` when uncapped. */
+  /** {@link boundW} in amperes, `Infinity` when unbounded. */
   limitA: number;
   /** The voltage that produced the currents, not the raw configured value. */
   voltageV: number;
@@ -52,8 +61,9 @@ export interface OperatingPoint {
    *
    * - charging with a curve (and a finite vehicle ceiling):
    *   `accumulationCapW === acceptedW`;
-   * - no curve: `accumulationCapW === scheduleLimitW` (the charger cap joins
-   *   it here when it exists, #327 step 4);
+   * - no curve: `accumulationCapW === boundW`, the schedule limit narrowed by
+   *   the charger cap, so the register and `Power.Active.Import` cannot
+   *   disagree about it;
    * - energy offer suspended: `0`;
    * - any other status: same as the charging case. Whether the register ticks
    *   at all is the scheduler's decision, not the point's.
@@ -64,13 +74,14 @@ export interface OperatingPoint {
    * on the wire. `"suspended"` while the energy offer is withheld,
    * `"schedule"` when the profile cap is below what the vehicle would take,
    * `"vehicle"` when the vehicle's ceiling or curve is the tightest known
-   * term, `"none"` when nothing is known to bind. The charger cap joins in
-   * step 4.
+   * term, `"charger"` when the charger cap is below the schedule limit and
+   * the vehicle's ceiling, `"none"` when nothing is known to bind.
    */
   limitedBy: OperatingPointLimit;
 }
 
-export type OperatingPointLimit = "schedule" | "vehicle" | "suspended" | "none";
+export type OperatingPointLimit =
+  "schedule" | "charger" | "vehicle" | "suspended" | "none";
 
 /** The CSMS allocation, resolved from one instant. */
 export interface ScheduleTerm {
@@ -102,8 +113,40 @@ export interface SessionTerm {
   initialSoc: number | undefined;
 }
 
+/**
+ * The charger side: what the hardware can deliver on this connector (#327).
+ * Immutable at run time (blueprint, `cp.create`); `Infinity` when unknown.
+ */
+export interface ChargerTerm {
+  /** Delivery cap in watts, `Infinity` when none is declared. */
+  maxDeliveryW: number;
+}
+
+/** The charger term for a declared cap in watts (`undefined`: none). */
+export function chargerTermOf(
+  maxDeliveryPowerW: number | undefined,
+): ChargerTerm {
+  return {
+    maxDeliveryW:
+      maxDeliveryPowerW !== undefined &&
+      Number.isFinite(maxDeliveryPowerW) &&
+      maxDeliveryPowerW > 0
+        ? maxDeliveryPowerW
+        : Infinity,
+  };
+}
+
 /** What can pause or zero the offer. */
 export interface FaultTerm {
+  /**
+   * The EVSE is energizing the connector: a running transaction in `Charging`
+   * or `SuspendedEV`. `SuspendedEVSE` (the EVSE withholds energy) and every
+   * state before or after the session offer nothing. In `SuspendedEV` the EVSE
+   * still offers energy and the vehicle takes none (OCPP 1.6 §7.7, 2.0.1
+   * ChargingStateEnumType), which is why `Power.Offered` (1.6 §7.31, 2.0.1
+   * §3.50) reads the offer there and `Power.Active.Import` reads 0.
+   */
+  offering: boolean;
   /** `SuspendedEV`: the register ticks but the offer is withheld. */
   energyOfferSuspended: boolean;
 }
@@ -120,6 +163,7 @@ export interface OperatingPointInputs {
   schedule: ScheduleTerm;
   vehicle: VehicleTerm;
   session: SessionTerm;
+  charger: ChargerTerm;
   fault: FaultTerm;
 }
 
@@ -139,8 +183,13 @@ export function vehicleTermOf(settings: EVSettings | undefined): VehicleTerm {
 export function resolveOperatingPoint(
   inputs: OperatingPointInputs,
 ): OperatingPoint {
-  const { at, schedule, vehicle, session, fault } = inputs;
+  const { at, schedule, vehicle, session, charger, fault } = inputs;
   const { scheduleLimitW, activePhases } = schedule;
+  const chargerCapW = charger.maxDeliveryW;
+  // The one narrowing of the CSMS allocation by the hardware: every term
+  // below (acceptance, offer, register bound, report bound) reads it, so a
+  // cap cannot bind one and not another.
+  const boundW = Math.min(scheduleLimitW, chargerCapW);
   const { maxW: evMaxW, curve, electrical } = vehicle;
   const curveSoc = resolveSocForCurve(
     inputs.soc,
@@ -153,17 +202,17 @@ export function resolveOperatingPoint(
         evMaxW,
         curve,
         socPercent: curveSoc,
-        scheduleLimitWatts: scheduleLimitW,
+        scheduleLimitWatts: boundW,
       })
     : 0;
   // The curve describes battery acceptance, not EVSE capability: a 100 kW
   // charger still offers 100 kW to a nearly full battery (#301).
-  const offeredW = inputs.charging
+  const offeredW = fault.offering
     ? effectiveChargingPowerW({
         evMaxW,
         curve: undefined,
         socPercent: null,
-        scheduleLimitWatts: scheduleLimitW,
+        scheduleLimitWatts: boundW,
       })
     : 0;
 
@@ -171,25 +220,27 @@ export function resolveOperatingPoint(
   if (fault.energyOfferSuspended) {
     accumulationCapW = 0;
   } else if (!curve || curve.length === 0 || !Number.isFinite(evMaxW)) {
-    accumulationCapW = scheduleLimitW;
+    accumulationCapW = boundW;
   } else {
     accumulationCapW = effectiveChargingPowerW({
       evMaxW,
       curve,
       socPercent: curveSoc,
-      scheduleLimitWatts: scheduleLimitW,
+      scheduleLimitWatts: boundW,
     });
   }
 
   return {
     at,
     scheduleLimitW,
+    chargerCapW,
+    boundW,
     activePhases,
     acceptedW,
     offeredW,
     currentA: currentAmpsFor(acceptedW, electrical, activePhases),
     offeredCurrentA: currentAmpsFor(offeredW, electrical, activePhases),
-    limitA: currentAmpsFor(scheduleLimitW, electrical, activePhases),
+    limitA: currentAmpsFor(boundW, electrical, activePhases),
     voltageV: effectiveVoltageV(electrical),
     powerFactor: effectivePowerFactor(electrical),
     soc: inputs.soc,
@@ -197,6 +248,7 @@ export function resolveOperatingPoint(
     limitedBy: limitedByOf(
       fault.energyOfferSuspended,
       scheduleLimitW,
+      chargerCapW,
       effectiveChargingPowerW({
         evMaxW,
         curve,
@@ -214,13 +266,15 @@ export function resolveOperatingPoint(
 function limitedByOf(
   suspended: boolean,
   scheduleLimitW: number,
+  chargerCapW: number,
   vehicleW: number,
   evMaxW: number,
 ): OperatingPointLimit {
   if (suspended) return "suspended";
-  if (Number.isFinite(evMaxW) && scheduleLimitW < vehicleW) return "schedule";
-  if (!Number.isFinite(evMaxW) && Number.isFinite(scheduleLimitW)) {
-    return "schedule";
-  }
-  return Number.isFinite(evMaxW) ? "vehicle" : "none";
+  const capW = Math.min(scheduleLimitW, chargerCapW);
+  // Equal limits are attributed to the CSMS allocation: it is the term a
+  // user can change at run time.
+  const capBy = chargerCapW < scheduleLimitW ? "charger" : "schedule";
+  if (Number.isFinite(evMaxW)) return capW < vehicleW ? capBy : "vehicle";
+  return Number.isFinite(capW) ? capBy : "none";
 }

@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2425,6 +2431,33 @@ other. Reworded on all three pages to say what is and is not watched (the
 - `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).
 
-## [2026-11-08] ingest | 2.x SetChargingProfile rejects a TxProfile without its transaction and duplicate TxDefaultProfile stack levels (#705)
+## [2026-11-08] ingest | OCPP-S 1.6 retries transaction-related messages after a SOAP Fault (#585)
 
-- K01.FR.09 / K01.FR.33: a `TxProfile` on an EVSE with no running transaction, or naming another transaction, answers `Rejected` with `reasonCode = TxNotFound`. K01.FR.52 / K01.FR.53: a `TxDefaultProfile` repeating a `stackLevel` across EVSE 0 and a specific EVSE under another `id` answers `Rejected` with `DuplicateProfile`. New page: [Smart charging](concepts/smart-charging.md). New golden case `201-set-charging-profile-preconditions` (the golden rig has no 2.1 version; the 2.1 path is covered by the handler unit test). No existing fixture changes.
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault): the "OCPP-S does not retry" sentence now covers 1.2 and 1.5 only; new section on the 1.6S deviation (errata 3.2): Heartbeat probe, `TransactionMessageAttempts` / `TransactionMessageRetryInterval`, `transactionMessageRejected` / `transactionMessageDiscarded`, discard of an outlived StartTransaction, cancel on stop and dispose. 1.2 and 1.5 were not checked against their specs.
+- [GitHub issues](sources/github-issues.md): #585.
+
+## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
+
+- [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] ingest | Run a scenario template on a label selector (#486)
+
+- New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).
+
+## [2026-11-08] ingest | Fleet-wide charging session listing (#489)
+
+- `sessions.list` and the `list_charging_sessions` MCP tool accept a missing `cpId` and list across every charge point, with new `labels` (selector, fleet-wide only), `startedFrom` (inclusive) and `startedTo` (exclusive) filters; order is start time then record order. Pages: [Charging sessions](concepts/charging-sessions.md#reading-it), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [index](index.md).
+
+## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
+
+- The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | 2.x TriggerMessage(BootNotification) after an Accepted boot is Rejected (#690)
+
+- F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
+- Page: [Control plane](concepts/control-plane.md).
+
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
+
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

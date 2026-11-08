@@ -9,7 +9,7 @@ updated: 2026-11-08
 
 Start at [Overview](overview.md). Conventions for pages are in
 [Conventions](conventions.md); the maintenance schema is
-[`CLAUDE.md`](../CLAUDE.md); recent activity is in [Log](log.md).
+[`CLAUDE.md`](../CLAUDE.md); history is in git (`git log -- docs/`); the old [Log](log.md) is a frozen archive (2026-11-08).
 
 ## Entities (`entities/`)
 
@@ -43,8 +43,8 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Log format](concepts/log-format.md)                                     | One log-line shape across stderr, `logs` table, browser download and `logs.get`; newest-first `limit` windowing; retention                                                                                                        |
 | [Network simulation](concepts/network-simulation.md)                     | Seeded latency / disconnect fault injection; layering and null semantics; RPC methods; timer behaviors; limitations                                                                                                               |
 | [Operational timeline](concepts/operational-timeline.md)                 | Per-CP in-memory event projection: stable kinds, `seq` order, fault incidents, runs, profiles, transaction msg rejects (#448, #469, #490, #527)                                                                                   |
-| [Smart charging](concepts/smart-charging.md)                             | How charging profiles are evaluated and answered: 2.x SetChargingProfile preconditions (TxProfile needs the transaction, duplicate TxDefaultProfile stack levels) (#705)                                                          |
-| [Charging sessions](concepts/charging-sessions.md)                       | One normalized record per transaction (1.6 and 2.x): duration, energy, stop reason, outcome; persisted; `sessions.list` (#447)                                                                                                    |
+| [Smart charging](concepts/smart-charging.md)                             | How charging profiles are stored and evaluated: schedule anchor (`startSchedule`), `duration`, stack fall-through, composite; 2.x SetChargingProfile preconditions (#705, #723)                                                   |
+| [Charging sessions](concepts/charging-sessions.md)                       | One normalized record per transaction (1.6 and 2.x): duration, energy, stop reason, outcome; persisted; `sessions.list`, also fleet-wide (#447, #489)                                                                             |
 | [Local authorization](concepts/local-authorization.md)                   | Local list → cache → Authorize.req or offline rules (unknown refused); persisted CSMS-fed cache, 1.6 + 2.x; RPC/MCP seam (#452)                                                                                                   |
 | [Access control](concepts/access-control.md)                             | Bind gate, Basic Auth gate, CORS policy table, reverse-proxy 403 fix (`--cors-origin` / `--trust-forwarded-headers`)                                                                                                              |
 | [OCPP 1.6 security profiles](concepts/security-profiles.md)              | Profiles 1–3, TLS flags, SteVe examples, security messages and keys, certificate store, use mapping, 2.x certificate handlers                                                                                                     |
@@ -69,7 +69,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [scripts/poc/README.md](sources/socketio-bun-poc.md)                              | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |
 | [packages/core/src/utils/scenarios/README.md](sources/cert16-templates-readme.md) | Authoritative cert16 ↔ test-case mapping, side effects, responseOverride matrix, out-of-scope list    |
 | [scripts/bench/README.md](sources/bench-readme.md)                                | Fleet scale benchmark: sweeps N vs. p50/p95 OCPP call latency via cp.create_many + /metrics diffing   |
-| [GitHub issues](sources/github-issues.md)                                         | Index of issue / PR numbers the wiki cites, with the pages that cite them                             |
+| [GitHub issues](sources/github-issues.md)                                         | Archive (frozen 2026-11-08): issue / PR numbers the wiki cited, with the pages that cited them        |
 
 ## Analyses (`analyses/`)
 

@@ -74,5 +74,6 @@
   "scenarioRun.run.editScenario": "编辑场景",
   "scenarioRun.run.gone": "运行 {{runId}} 已不再活动",
   "scenarioRun.run.showingCurrent": " — 正在显示当前运行 {{runId}}。",
-  "scenarioRun.run.cpScopeNote": "这是充电桩范围的场景 — 触发器触发时会按连接器自动运行,不能在此手动启动。此控制台中已禁用启动。"
+  "scenarioRun.run.cpScopeNote": "这是充电桩范围的场景 — 触发器触发时会按连接器自动运行,不能在此手动启动。此控制台中已禁用启动。",
+  "scenarioRun.loopBack": "然后回到步骤 {{n}}"
 }

@@ -11,7 +11,15 @@ import {
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import i18n from "../../i18n";
 import { isLiveRunState } from "./scenarioRunState";
-import { createDefaultNode, deriveLinearSteps } from "./scenarioSteps";
+import { createDefaultNode } from "./scenarioSteps";
+
+/** An edge that jumps back to (or joins) a step already drawn: a loop or a
+ *  join. It leaves the last step of its lane, which ends there. */
+export interface StepLink {
+  id: string;
+  source: string;
+  target: string;
+}
 
 export interface StepBranch {
   name: string;
@@ -20,9 +28,9 @@ export interface StepBranch {
 
 /**
  * The shape the run views (Steps and Graph) can draw: a chain, optionally
- * ending in one fork whose branches each run to their end. Anything else
- * (a join, a loop, a second fork, a node no walk reaches) is `supported:
- * false`, and the caller falls back to `RunTimeline`'s flat list.
+ * ending in one fork whose branches each run to their end, plus `links` for
+ * loops and joins. Anything else (a second fork, a node no walk reaches) is
+ * `supported: false`, and the caller falls back to a flat outline.
  */
 export interface StepLayout {
   supported: boolean;
@@ -31,9 +39,16 @@ export interface StepLayout {
    *  at once after it. */
   main: ScenarioNode[];
   fork: null | { branches: StepBranch[] };
+  /** Loops and joins; see `StepLink`. */
+  links: StepLink[];
 }
 
-const UNSUPPORTED: StepLayout = { supported: false, main: [], fork: null };
+const UNSUPPORTED: StepLayout = {
+  supported: false,
+  main: [],
+  fork: null,
+  links: [],
+};
 
 const defaultLabels = new Map<string, Set<string>>();
 
@@ -71,21 +86,13 @@ export function deriveStepLayout(
     else outgoing.set(edge.source, [edge]);
   }
 
-  // Without a fork anywhere, the linear walk already decides (dangling edge,
-  // cycle, orphan, unreached END) — one rule for the editor and these views.
-  if (![...outgoing.values()].some((edges) => edges.length > 1)) {
-    const linear = deriveLinearSteps(def);
-    return linear.isLinear
-      ? { supported: true, main: linear.steps, fork: null }
-      : UNSUPPORTED;
-  }
-
   const start = def.nodes.find((n) => n.type === ScenarioNodeType.START);
   if (!start) return UNSUPPORTED;
 
   const nodesById = new Map(def.nodes.map((n) => [n.id, n]));
   const visited = new Set<string>([start.id]);
   const main: ScenarioNode[] = [];
+  const links: StepLink[] = [];
   let current = start;
   let forkEdges: Edge[] | null = null;
 
@@ -97,42 +104,64 @@ export function deriveStepLayout(
       break;
     }
     const target = nodesById.get(out[0].target);
-    // A dangling edge or a cycle in the chain before the fork.
-    if (!target || visited.has(target.id)) return UNSUPPORTED;
-    visited.add(target.id);
+    // A dangling edge, or an edge back into START.
+    if (!target || target.id === start.id) return UNSUPPORTED;
     if (target.type === ScenarioNodeType.END) break;
+    if (visited.has(target.id)) {
+      // A loop back into the chain: the chain ends here, drawn as a link.
+      links.push(linkOf(out[0]));
+      break;
+    }
+    visited.add(target.id);
     main.push(target);
     current = target;
   }
 
-  // The only fork is not on the chain from START: it sits on an orphan.
-  if (!forkEdges) return UNSUPPORTED;
-
   const branches: StepBranch[] = [];
-  for (const [index, edge] of forkEdges.entries()) {
+  for (const [index, edge] of (forkEdges ?? []).entries()) {
     const steps: ScenarioNode[] = [];
     let target = nodesById.get(edge.target);
     // A branch ends at END, at a node with no outgoing edge, or at a dangling
     // edge (the executor just stops that branch there).
     while (target && target.type !== ScenarioNodeType.END) {
-      // Reached twice: a join of two branches, or a loop back.
-      if (visited.has(target.id)) return UNSUPPORTED;
+      // The branch's first step is already placed: not an editable lane.
+      if (visited.has(target.id) && steps.length === 0) return UNSUPPORTED;
       visited.add(target.id);
       steps.push(target);
       const out: Edge[] = outgoing.get(target.id) ?? [];
       if (out.length > 1) return UNSUPPORTED; // a second fork
-      target = out.length === 1 ? nodesById.get(out[0].target) : undefined;
+      const next: ScenarioNode | undefined =
+        out.length === 1 ? nodesById.get(out[0].target) : undefined;
+      if (next && next.type !== ScenarioNodeType.END && visited.has(next.id)) {
+        // A join of two branches, or a loop back: a link, the lane ends.
+        if (next.id === start.id) return UNSUPPORTED;
+        links.push(linkOf(out[0]));
+        break;
+      }
+      target = next;
     }
     branches.push({ name: branchName(steps[0], index), steps });
   }
 
+  // A step no walk reaches (END may stand alone: nothing leads there).
   const orphan = def.nodes.some(
     (n) => n.type !== ScenarioNodeType.END && !visited.has(n.id),
   );
   if (orphan) return UNSUPPORTED;
 
-  return { supported: true, main, fork: { branches } };
+  return {
+    supported: true,
+    main,
+    fork: forkEdges ? { branches } : null,
+    links,
+  };
 }
+
+const linkOf = (edge: Edge): StepLink => ({
+  id: edge.id,
+  source: edge.source,
+  target: edge.target,
+});
 
 /** Every step of the layout in display order: main, then each branch. */
 export function layoutSteps(layout: StepLayout): ScenarioNode[] {

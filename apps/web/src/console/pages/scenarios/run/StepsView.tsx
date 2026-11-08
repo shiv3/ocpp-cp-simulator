@@ -1,12 +1,17 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { Check, GripVertical, Plus } from "lucide-react";
+import { Check, GripVertical, Plus, Repeat } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
 import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
-import { stepSummary, type StepLane } from "../../../lib/scenarioSteps";
+import {
+  canAddBranch,
+  laneLinkTarget,
+  stepSummary,
+  type StepLane,
+} from "../../../lib/scenarioSteps";
 import { layoutSteps, stepIndexOf } from "../../../lib/stepLayout";
 import {
   dropNeighbours,
@@ -290,7 +295,30 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
     );
   };
 
-  const renderLane = (steps: ScenarioNode[], lane: StepLane) => {
+  /** "Back to step N" under a lane a loop link closes. */
+  const loopNote = (steps: ScenarioNode[]) => {
+    const last = steps[steps.length - 1];
+    const target = last ? laneLinkTarget(layout, last.id) : null;
+    if (target === null) return null;
+    return (
+      <p
+        data-loop-to={target}
+        className="mt-1.5 flex items-center gap-1.5 text-xs text-cx-muted"
+      >
+        <Repeat className="h-3.5 w-3.5" aria-hidden />
+        {t("scenarioRun.loopBack", { n: stepIndexOf(layout, target) ?? "" })}
+      </p>
+    );
+  };
+
+  const renderLane = (steps: ScenarioNode[], lane: StepLane) => (
+    <>
+      {renderLaneBoxes(steps, lane)}
+      {loopNote(steps)}
+    </>
+  );
+
+  const renderLaneBoxes = (steps: ScenarioNode[], lane: StepLane) => {
     const ids = steps.map((s) => s.id);
     if (!canInsert) {
       return (
@@ -378,7 +406,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
           })}
         </div>
       )}
-      {editable && onAddBranch && (
+      {editable && onAddBranch && canAddBranch(layout) && (
         <button
           type="button"
           onClick={onAddBranch}

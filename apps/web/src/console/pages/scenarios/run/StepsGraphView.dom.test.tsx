@@ -44,7 +44,7 @@ describe("StepsGraphView", () => {
     // 5 steps, 2 branches.
     expect(container.querySelectorAll("[data-node-id]")).toHaveLength(5);
     expect(
-      container.querySelectorAll("svg[data-graph-edges] path"),
+      container.querySelectorAll("svg[data-graph-edges] > path"),
     ).toHaveLength(7);
     // A start dot and one end ring per branch.
     expect(container.querySelectorAll("[data-graph-start]")).toHaveLength(1);
@@ -74,7 +74,7 @@ describe("StepsGraphView", () => {
       executedNodeIds: ["plug", "status", "wait"],
     });
     const strokes = Array.from(
-      container.querySelectorAll("svg[data-graph-edges] path"),
+      container.querySelectorAll("svg[data-graph-edges] > path"),
     ).map((p) => p.getAttribute("data-to"));
     expect(strokes).toContain("wait");
     const toWait = container.querySelector(

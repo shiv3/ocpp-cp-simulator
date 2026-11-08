@@ -76,5 +76,6 @@
   "scenarioRun.run.editScenario": "Modifier le scénario",
   "scenarioRun.run.gone": "L’exécution {{runId}} n’est plus active",
   "scenarioRun.run.showingCurrent": " — affichage de l’exécution en cours {{runId}}.",
-  "scenarioRun.run.cpScopeNote": "Ce scénario a une portée borne : il s’exécute automatiquement sur chaque connecteur quand son déclencheur se déclenche, et non via un Lancer manuel ici. Lancer est désactivé sur cette console."
+  "scenarioRun.run.cpScopeNote": "Ce scénario a une portée borne : il s’exécute automatiquement sur chaque connecteur quand son déclencheur se déclenche, et non via un Lancer manuel ici. Lancer est désactivé sur cette console.",
+  "scenarioRun.loopBack": "Puis retour à l’étape {{n}}"
 }

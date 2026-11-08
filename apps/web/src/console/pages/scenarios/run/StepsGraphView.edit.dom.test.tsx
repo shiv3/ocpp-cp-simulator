@@ -111,7 +111,7 @@ describe("StepsGraphView (editable)", () => {
     await render();
     expect(container.querySelectorAll("[data-node-id]")).toHaveLength(5);
     expect(
-      container.querySelectorAll("svg[data-graph-edges] path"),
+      container.querySelectorAll("svg[data-graph-edges] > path"),
     ).toHaveLength(7);
     await click(cardButton("charge"));
     expect(onSelectStep).toHaveBeenCalledWith("charge");

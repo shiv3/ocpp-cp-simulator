@@ -1,13 +1,5 @@
 import { useTranslation } from "react-i18next";
-import React, {
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronUp, Maximize2, Trash2, X } from "lucide-react";
 
@@ -18,10 +10,10 @@ import { saveEditorScenario } from "../../../../components/scenario/scenarioPers
 import { serializeScenarioGraph } from "../../../../components/scenario/scenarioSerialize";
 import ScenarioEvSettingsFields from "../../../../components/scenario/ScenarioEvSettingsFields";
 import { compactScenarioEvSettings } from "../../../../components/scenario/compactScenarioEvSettings";
-import type {
-  ScenarioDefinition,
-  ScenarioNodeData,
+import {
   ScenarioNodeType,
+  type ScenarioDefinition,
+  type ScenarioNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../../../data/providers/DataProvider";
 import EmptyState from "../../../components/EmptyState";
@@ -32,6 +24,8 @@ import {
   findStepLane,
   insertLaneStep,
   moveLaneStep,
+  laneLinkTarget,
+  setLaneLink,
   removeLaneStep,
   updateStepData,
   type StepLane,
@@ -46,12 +40,7 @@ import StepsView from "../run/StepsView";
 import { nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
 import StepInspector from "./StepInspector";
-
-// The ReactFlow graph editor is heavy, and only the fallback for a shape
-// the card graph cannot draw: load it only then.
-const ScenarioEditor = lazy(
-  () => import("../../../../components/scenario/ScenarioEditor"),
-);
+import UnsupportedOutline from "./UnsupportedOutline";
 
 type EditorView = "steps" | "graph";
 
@@ -164,8 +153,6 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const [confirmLeave, setConfirmLeave] = useState<"cancel" | "close" | null>(
     null,
   );
-  /** Set once the ReactFlow editor opened: it stays for this visit. */
-  const [fullGraph, setFullGraph] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,14 +191,10 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     [scenario],
   );
 
-  // A shape the Steps view cannot draw is only shown as a graph. Pinned in
-  // the URL (below) rather than derived on each render, so an edit that makes
-  // it drawable again does not eject the user from the graph mid-edit.
-  const forcedGraph = layout !== null && !layout.supported;
-  const view: EditorView = forcedGraph ? "graph" : requestedView;
-  // Same for the editor: ReactFlow, once open, stays until Steps is picked.
-  if (forcedGraph && !fullGraph) setFullGraph(true);
-  const showFullGraph = forcedGraph || fullGraph;
+  // A shape neither view can draw (a second fork, a step nothing leads to)
+  // is listed as an outline: its steps stay editable, their wiring does not.
+  const drawable = layout === null || layout.supported;
+  const view: EditorView = requestedView;
 
   const dirty = useMemo(() => {
     if (!scenario || !original) return false;
@@ -220,9 +203,15 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
 
   const selectedNode = useMemo(
     () =>
-      (layout && layoutSteps(layout).find((s) => s.id === selectedStepId)) ??
+      (scenario &&
+        scenario.nodes.find(
+          (n) =>
+            n.id === selectedStepId &&
+            n.type !== ScenarioNodeType.START &&
+            n.type !== ScenarioNodeType.END,
+        )) ??
       null,
-    [layout, selectedStepId],
+    [scenario, selectedStepId],
   );
   const selectedPlace =
     layout && selectedNode ? findStepLane(layout, selectedNode.id) : null;
@@ -230,6 +219,12 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     (layout && layoutSteps(layout).find((s) => s.id === pendingDelete)) ?? null;
   const selectedNumber =
     layout && selectedNode ? stepIndexOf(layout, selectedNode.id) : null;
+  const allSteps = layout ? layoutSteps(layout) : [];
+  const closesLane =
+    layout !== null &&
+    selectedPlace !== null &&
+    selectedPlace.index === selectedPlace.length - 1 &&
+    !(layout.fork && selectedPlace.lane === "main");
 
   const handleMetaChange = (patch: Partial<ScenarioDefinition>) => {
     setScenario((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -285,15 +280,12 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     setScenario(updateStepData(scenario, nodeId, data));
   };
 
-  const handleGraphChange = useCallback(
-    (graph: Pick<ScenarioDefinition, "nodes" | "edges">) => {
-      setScenario((prev) => (prev ? { ...prev, ...graph } : prev));
-    },
-    [],
-  );
+  const handleLaneLink = (nodeId: string, targetId: string | null) => {
+    if (!scenario || !layout) return;
+    setScenario(setLaneLink(scenario, layout, nodeId, targetId));
+  };
 
   const setView = (view: EditorView) => {
-    if (view === "steps") setFullGraph(false);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -303,11 +295,6 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       { replace: true },
     );
   };
-
-  useEffect(() => {
-    if (forcedGraph && requestedView !== "graph") setView("graph");
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- setView only wraps the stable setSearchParams
-  }, [forcedGraph, requestedView]);
 
   const users = library?.users ?? [];
   const runningUsers = users.filter((user) => user.running).length;
@@ -575,23 +562,18 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         </div>
       )}
 
-      <SegmentedControl
-        label={t("scenarios.editor.editorView")}
-        className="mb-4"
-        value={view}
-        onChange={setView}
-        options={[
-          {
-            value: "steps",
-            label: t("scenarios.editor.viewSteps"),
-            disabled: !layout.supported,
-            title: layout.supported
-              ? undefined
-              : t("scenarios.editor.stepsUnavailable"),
-          },
-          { value: "graph", label: t("scenarios.editor.viewGraph") },
-        ]}
-      />
+      {drawable && (
+        <SegmentedControl
+          label={t("scenarios.editor.editorView")}
+          className="mb-4"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "steps", label: t("scenarios.editor.viewSteps") },
+            { value: "graph", label: t("scenarios.editor.viewGraph") },
+          ]}
+        />
+      )}
 
       {pendingDelete && (
         <InlineConfirm
@@ -608,37 +590,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         />
       )}
 
-      {view === "graph" && showFullGraph ? (
-        <>
-          {!layout.supported && (
-            <p className="mb-2 text-xs text-cx-muted">
-              {t("scenarios.editor.fullGraphNote")}
-            </p>
-          )}
-          <div
-            className={cn(
-              "overflow-hidden rounded-xl border border-cx-border",
-              isPanel ? "h-[60vh] min-h-[420px]" : "h-[70vh] min-h-[480px]",
-            )}
-          >
-            <Suspense
-              fallback={
-                <div className="p-4 text-sm text-cx-muted">
-                  {t("scenarios.editor.loadingGraph")}
-                </div>
-              }
-            >
-              <ScenarioEditor
-                key={scenario.id}
-                cpId={cpId}
-                connectorId={connectorId}
-                scenario={scenario}
-                onGraphChange={handleGraphChange}
-              />
-            </Suspense>
-          </div>
-        </>
-      ) : (
+      {
         // A container query, not the window width: the editor sits on a page
         // or in a side panel the user can drag wide, and only its own width
         // says whether the inspector fits beside the steps (the mock's
@@ -650,7 +602,13 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           >
             {/* min-w-0: the graph scrolls sideways inside its own column. */}
             <div className="min-w-0">
-              {view === "graph" ? (
+              {!drawable ? (
+                <UnsupportedOutline
+                  scenario={scenario}
+                  selectedStepId={selectedStepId}
+                  onSelectStep={setSelectedStepId}
+                />
+              ) : view === "graph" ? (
                 <StepsGraphView
                   layout={layout}
                   editable
@@ -680,48 +638,86 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                 "@[860px]:sticky @[860px]:top-4",
               )}
             >
-              {selectedNode && selectedPlace && selectedNumber !== null ? (
+              {selectedNode ? (
                 <>
                   <div className="mb-3 flex items-center gap-2 border-b border-cx-border pb-3">
                     <span
                       className="min-w-0 flex-1 text-xs text-cx-muted"
                       title={nodeTitle(selectedNode)}
                     >
-                      {t("scenarios.editor.step")}{" "}
-                      <span className="font-mono">{selectedNumber}</span>
-                      {selectedPlace.lane !== "main" &&
-                        ` · ${layout.fork?.branches[selectedPlace.lane]?.name ?? ""}`}
+                      {selectedPlace && selectedNumber !== null ? (
+                        <>
+                          {t("scenarios.editor.step")}{" "}
+                          <span className="font-mono">{selectedNumber}</span>
+                          {selectedPlace.lane !== "main" &&
+                            ` · ${layout?.fork?.branches[selectedPlace.lane]?.name ?? ""}`}
+                        </>
+                      ) : (
+                        nodeTitle(selectedNode)
+                      )}
                     </span>
-                    <InspectorAction
-                      label={t("scenarios.editor.moveUp", {
-                        n: selectedNumber,
-                      })}
-                      disabled={selectedPlace.index === 0}
-                      onClick={() => handleMove(selectedNode.id, -1)}
-                    >
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    </InspectorAction>
-                    <InspectorAction
-                      label={t("scenarios.editor.moveDown", {
-                        n: selectedNumber,
-                      })}
-                      disabled={
-                        selectedPlace.index === selectedPlace.length - 1
-                      }
-                      onClick={() => handleMove(selectedNode.id, 1)}
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </InspectorAction>
-                    <InspectorAction
-                      label={t("scenarios.editor.deleteStep", {
-                        n: selectedNumber,
-                      })}
-                      danger
-                      onClick={() => handleDelete(selectedNode.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </InspectorAction>
+                    {selectedPlace && selectedNumber !== null && (
+                      <>
+                        <InspectorAction
+                          label={t("scenarios.editor.moveUp", {
+                            n: selectedNumber,
+                          })}
+                          disabled={selectedPlace.index === 0}
+                          onClick={() => handleMove(selectedNode.id, -1)}
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </InspectorAction>
+                        <InspectorAction
+                          label={t("scenarios.editor.moveDown", {
+                            n: selectedNumber,
+                          })}
+                          disabled={
+                            selectedPlace.index === selectedPlace.length - 1
+                          }
+                          onClick={() => handleMove(selectedNode.id, 1)}
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </InspectorAction>
+                        <InspectorAction
+                          label={t("scenarios.editor.deleteStep", {
+                            n: selectedNumber,
+                          })}
+                          danger
+                          onClick={() => handleDelete(selectedNode.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </InspectorAction>
+                      </>
+                    )}
                   </div>
+                  {layout && closesLane && (
+                    <label className="mb-3 flex flex-col gap-1 text-xs text-cx-muted">
+                      {t("scenarios.editor.afterStep")}
+                      <select
+                        aria-label={t("scenarios.editor.afterStep")}
+                        value={laneLinkTarget(layout, selectedNode.id) ?? ""}
+                        onChange={(e) =>
+                          handleLaneLink(
+                            selectedNode.id,
+                            e.target.value === "" ? null : e.target.value,
+                          )
+                        }
+                        className="rounded-md border border-cx-border-strong bg-cx-card px-2 py-1.5 text-sm text-cx-fg"
+                      >
+                        <option value="">
+                          {t("scenarios.editor.endOfScenario")}
+                        </option>
+                        {allSteps.map((step) => (
+                          <option key={step.id} value={step.id}>
+                            {t("scenarios.editor.loopBackTo", {
+                              n: stepIndexOf(layout, step.id) ?? "",
+                              title: nodeTitle(step),
+                            })}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <StepInspector
                     node={selectedNode}
                     onChange={(data) =>
@@ -738,7 +734,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
             </div>
           </div>
         </div>
-      )}
+      }
     </div>
   );
 };

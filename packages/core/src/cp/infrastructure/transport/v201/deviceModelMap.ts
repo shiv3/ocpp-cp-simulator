@@ -41,6 +41,7 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["AuthCtrlr/LocalPreAuthorize", "LocalPreAuthorize"],
   ["AuthCtrlr/LocalAuthorizeOffline", "LocalAuthorizeOffline"],
   ["AuthCtrlr/OfflineTxForUnknownIdEnabled", "AllowOfflineTxForUnknownId"],
+  ["AuthCtrlr/MasterPassGroupId", "MasterPassGroupId"],
   ["AuthCacheCtrlr/Enabled", "AuthorizationCacheEnabled"],
   ["AuthCacheCtrlr/LifeTime", "AuthCacheLifeTime"],
   ["TxCtrlr/StopTxOnInvalidId", "StopTransactionOnInvalidId"],

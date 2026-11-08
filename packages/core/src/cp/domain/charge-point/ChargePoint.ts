@@ -91,6 +91,7 @@ import {
   OCPPStatus,
 } from "../types/OcppTypes";
 import type {
+  IdTokenTypeName,
   StopTransactionReason,
   TransactionChargingState,
   TransactionStartTriggerReason,
@@ -119,6 +120,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -191,6 +193,9 @@ export interface StartTransactionOptions {
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
   chargingState?: TransactionChargingState;
+  /** OCPP 2.x `IdToken.type` of the transaction's Authorize and
+   *  TransactionEvents (#599); `ISO14443` when absent. */
+  idTokenType?: IdTokenTypeName;
 }
 
 /**
@@ -1438,7 +1443,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1446,19 +1453,33 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;
@@ -1535,11 +1556,13 @@ export class ChargePoint {
     connectorId: number,
     tagId: string,
     remoteStartId?: number,
+    idTokenType?: IdTokenTypeName,
   ): void {
     this._events.emit("remoteStartReceived", {
       connectorId,
       tagId,
       ...(remoteStartId !== undefined ? { remoteStartId } : {}),
+      ...(idTokenType !== undefined ? { idTokenType } : {}),
     });
   }
 
@@ -1678,13 +1701,18 @@ export class ChargePoint {
    * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
    * A timeout once the socket is gone applies the offline rules.
    */
-  authorizeAndWait(tagId: string, timeoutMs = 10000): Promise<string> {
+  authorizeAndWait(
+    tagId: string,
+    timeoutMs = 10000,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<string> {
     const decision = this._authorization.decide(tagId, this.isOnline());
     if (decision.kind !== "askCsms") {
       return Promise.resolve(this.localAuthorizationStatus(tagId, decision));
     }
 
-    this.authorize(tagId);
+    if (idTokenType === undefined) this.authorize(tagId);
+    else this.authorize(tagId, idTokenType);
 
     return new Promise<string>((resolve) => {
       let settled = false;
@@ -2660,8 +2688,9 @@ export class ChargePoint {
     }
   }
 
-  authorize(tagId: string): void {
-    this._outbox.authorize(tagId);
+  authorize(tagId: string, idTokenType?: IdTokenTypeName): void {
+    if (idTokenType === undefined) this._outbox.authorize(tagId);
+    else this._outbox.authorize(tagId, idTokenType);
   }
 
   set status(newStatus: ChargePointStatus) {

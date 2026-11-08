@@ -6,15 +6,23 @@ sources:
   - packages/core/src/utils/scenarioTemplates.ts
   - packages/core/src/utils/scenarios/*.json
   - packages/core/src/utils/scenarios/README.md
+  - packages/core/src/utils/tckContract.templateIds.test.ts
+  - "issue #346"
 related:
   - ../concepts/scenario-format.md
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Built-in scenario templates
+
+> **The `cert16-*` ids are an external contract.** open-ocpp-tck addresses the
+> templates by id, so the set of ids only grows: a rename or removal keeps the
+> old id working as an alias for at least one minor release, and
+> `tckContract.templateIds.test.ts` fails otherwise. See
+> [CLI → TCK contract](cli.md#tck-contract) (#346).
 
 Every built-in template is a flat `ScenarioDefinition` JSON file under
 [`packages/core/src/utils/scenarios/`](../../packages/core/src/utils/scenarios/) — the same

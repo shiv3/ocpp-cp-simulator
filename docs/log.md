@@ -2400,3 +2400,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
 
 - `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.
+
+## [2026-11-08] ingest | TCK contract golden tests (#346)
+
+- [CLI](entities/cli.md#tck-contract): new "TCK contract" section listing what open-ocpp-tck depends on (the JSON Lines commands it sends, the response and event envelopes, exit 0 on stdin EOF, the `Sent:` / `Received:` stdout lines, the `cert16-*` template ids) and the rules for changing it. Three tests pin it, named so they read as protecting an external consumer: `apps/cli/src/__tests__/tck-contract/tck.jsonLines.golden.bun.test.ts` (the real CLI against a stub CSMS, 1.6J and 2.0.1), `tck.wireLogLines.golden.bun.test.ts` (the producer of the wire lines, which only the parsers were tested for), and `packages/core/src/utils/tckContract.templateIds.test.ts` (48 pinned ids). [Built-in scenario templates](entities/scenario-templates.md) carries a note on the stable ids.

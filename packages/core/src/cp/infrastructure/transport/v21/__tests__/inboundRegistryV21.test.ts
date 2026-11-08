@@ -78,6 +78,13 @@ const SKIPPED_CP_ACTIONS = [
   "VatNumberValidation",
 ] as const;
 
+function callErrorFor(action: string): unknown {
+  const handler = buildV21InboundRegistry().get(action);
+  expect(handler).toBeDefined();
+  return (handler?.handle({}, {} as never) as V201HandlerResult | undefined)
+    ?.callError;
+}
+
 function responseFor(action: string): unknown {
   const handler = buildV21InboundRegistry().get(action);
   expect(handler).toBeDefined();
@@ -109,12 +116,15 @@ describe("buildV21InboundRegistry", () => {
     );
   });
 
+  it("answers SetDefaultTariff and ChangeTransactionTariff with CALLERROR NotSupported (I07.FR.01, I11.FR.01)", () => {
+    for (const action of ["SetDefaultTariff", "ChangeTransactionTariff"]) {
+      expect(callErrorFor(action)).toMatchObject({ code: "NotSupported" });
+    }
+  });
+
   it("returns Tier-3 acknowledgements for v21 CSMS net-new actions", () => {
     expect(responseFor("AFRRSignal")).toEqual({ status: "Rejected" });
     expect(responseFor("AdjustPeriodicEventStream")).toEqual({
-      status: "Rejected",
-    });
-    expect(responseFor("ChangeTransactionTariff")).toEqual({
       status: "Rejected",
     });
     expect(responseFor("ClearDERControl")).toEqual({
@@ -134,12 +144,64 @@ describe("buildV21InboundRegistry", () => {
     expect(responseFor("SetDERControl")).toEqual({
       status: "NotSupported",
     });
-    expect(responseFor("SetDefaultTariff")).toEqual({ status: "Rejected" });
     expect(responseFor("UpdateDynamicSchedule")).toEqual({
       status: "Rejected",
     });
-    expect(responseFor("UsePriorityCharging")).toEqual({
-      status: "NoProfile",
+  });
+
+  describe("UsePriorityCharging (K21)", () => {
+    const answer = (
+      transactionId: string,
+      activate: boolean,
+      stopTime: Date | null = null,
+    ): unknown => {
+      const handler = buildV21InboundRegistry().get("UsePriorityCharging");
+      const ctx = {
+        chargePoint: {
+          connectors: new Map([
+            [
+              1,
+              {
+                hasRunningTransaction: stopTime === null,
+                transaction: { cpTransactionId: "tx-1", stopTime },
+              },
+            ],
+          ]),
+        },
+      };
+      return (
+        handler?.handle({ transactionId, activate }, ctx as never) as
+          V201HandlerResult | undefined
+      )?.response;
+    };
+
+    it("is Rejected / TxNotFound for a transaction that is not ongoing (K21.FR.02)", () => {
+      expect(answer("tx-9", true)).toEqual({
+        status: "Rejected",
+        statusInfo: { reasonCode: "TxNotFound" },
+      });
+      expect(answer("tx-9", false)).toEqual({
+        status: "Rejected",
+        statusInfo: { reasonCode: "TxNotFound" },
+      });
+    });
+
+    it("is Rejected / TxNotFound for a transaction that has ended but is still attached (K21.FR.02)", () => {
+      expect(answer("tx-1", true, new Date())).toEqual({
+        status: "Rejected",
+        statusInfo: { reasonCode: "TxNotFound" },
+      });
+    });
+
+    it("is NoProfile for an ongoing transaction and activate = true (K21.FR.01)", () => {
+      expect(answer("tx-1", true)).toEqual({
+        status: "NoProfile",
+        statusInfo: { reasonCode: "NotFound" },
+      });
+    });
+
+    it("is Accepted for an ongoing transaction and activate = false (K21.FR.06)", () => {
+      expect(answer("tx-1", false)).toEqual({ status: "Accepted" });
     });
   });
 });

@@ -73,6 +73,10 @@ describe("resilience templates end in a passing verdict (#444)", () => {
         try {
           const first = rig.csms.frames.length;
           await runTemplate(rig, id);
+          // The probe of the communication-loss template is fire-and-forget
+          // and leaves a few event-loop turns after the run ended.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await rig.csms.settle(400);
           const frames = toFrames(rig.csms.frames.slice(first));
           const results = evaluateAssertions(assertionsOf(id), frames);
           expect(results.length).toBeGreaterThan(0);

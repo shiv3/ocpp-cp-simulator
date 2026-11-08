@@ -1122,7 +1122,7 @@ export class Connector {
     const txStart = this.transaction?.startTime ?? null;
     const isValid = (profile: ActiveChargingProfile) => {
       if (profile.validFrom && new Date(profile.validFrom) > now) return false;
-      if (profile.validTo && new Date(profile.validTo) < now) return false;
+      if (profile.validTo && new Date(profile.validTo) <= now) return false;
       // A schedule past its `duration` (or not yet at its `startSchedule`)
       // yields to the next lower stackLevel (1.6 errata 3.43).
       return isScheduleInEffect(profile, txStart, now);

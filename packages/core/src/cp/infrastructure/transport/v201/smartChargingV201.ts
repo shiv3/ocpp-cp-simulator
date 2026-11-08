@@ -47,6 +47,7 @@ type IncomingChargingProfile = {
   stackLevel: number;
   chargingProfilePurpose: string;
   chargingProfileKind: string;
+  transactionId?: string;
   recurrencyKind?: string;
   validFrom?: string;
   validTo?: string;
@@ -177,8 +178,12 @@ function v201ProfileToDomain(
     chargingProfileKind: kind,
     chargingRateUnit: rateUnit,
     recurrencyKind,
-    validFrom: chargingProfile.validFrom ?? schedule.startSchedule,
+    // Validity window and schedule anchor stay apart (K01.FR.30, K01.FR.36,
+    // K01.FR.37): `validFrom` / `validTo` bound when the profile may apply,
+    // `startSchedule` is where the periods count from.
+    validFrom: chargingProfile.validFrom,
     validTo: chargingProfile.validTo,
+    startSchedule: schedule.startSchedule,
     chargingSchedulePeriods: periods.map((period) => ({
       startPeriod: period.startPeriod,
       limit: period.limit as number,
@@ -195,13 +200,13 @@ function domainProfileToV201(
     stackLevel: profile.stackLevel,
     chargingProfilePurpose: purposeToV201(profile.chargingProfilePurpose),
     chargingProfileKind: profile.chargingProfileKind,
-    recurrencyKind: profile.recurrencyKind,
-    validFrom: profile.validFrom,
-    validTo: profile.validTo,
+    ...(profile.recurrencyKind && { recurrencyKind: profile.recurrencyKind }),
+    ...(profile.validFrom && { validFrom: profile.validFrom }),
+    ...(profile.validTo && { validTo: profile.validTo }),
     chargingSchedule: [
       {
         id: profile.chargingProfileId,
-        startSchedule: profile.validFrom,
+        ...(profile.startSchedule && { startSchedule: profile.startSchedule }),
         chargingRateUnit: profile.chargingRateUnit,
         chargingSchedulePeriod:
           profile.chargingSchedulePeriods as ReportChargingProfileType["chargingSchedule"][number]["chargingSchedulePeriod"],
@@ -259,25 +264,91 @@ function isCoherentProfileTarget(
   return true;
 }
 
+function rejected(reasonCode?: string): SetChargingProfileResponseV201 {
+  return reasonCode === undefined
+    ? { status: "Rejected" }
+    : { status: "Rejected", statusInfo: { reasonCode } };
+}
+
+/**
+ * K01.FR.09 / K01.FR.33: a TxProfile needs a transaction running on its EVSE,
+ * and a `transactionId` it names has to be that transaction. Returns the
+ * reason code to reject with, or null when the profile may be installed.
+ * A TxProfile without `transactionId` binds to the running transaction (the
+ * CSMS SHALL send one, K01.FR.03; the station does not turn the omission
+ * into a rejection).
+ */
+function txProfileRejection(
+  ctx: V201InboundContext,
+  evseId: number,
+  transactionId: string | undefined,
+): string | null {
+  const connector = ctx.chargePoint.getConnector(evseId);
+  // A closed transaction can stay attached: only a running one counts.
+  const transaction = connector?.hasRunningTransaction
+    ? connector.transaction
+    : null;
+  if (!transaction) return "TxNotFound";
+  if (
+    transactionId !== undefined &&
+    transactionId !== String(transaction.cpTransactionId ?? transaction.id)
+  ) {
+    return "TxNotFound";
+  }
+  return null;
+}
+
+/**
+ * K01.FR.52 / K01.FR.53: a TxDefaultProfile on EVSE 0 may not share its
+ * `stackLevel` with a different-id TxDefaultProfile on a specific EVSE, nor
+ * the reverse. The same id is a replacement (K01.FR.05), not a duplicate.
+ */
+function duplicatesTxDefaultAcrossScopes(
+  ctx: V201InboundContext,
+  profile: ActiveChargingProfile,
+  evseId: number,
+): boolean {
+  const clashes = (other: ActiveChargingProfile) =>
+    other.chargingProfilePurpose ===
+      ChargingProfilePurposeType.TxDefaultProfile &&
+    other.stackLevel === profile.stackLevel &&
+    other.chargingProfileId !== profile.chargingProfileId;
+  if (evseId === 0) {
+    return [...ctx.chargePoint.connectors.values()].some((c) =>
+      c.chargingProfiles.some(clashes),
+    );
+  }
+  return ctx.chargePoint.stationProfiles.all().some(clashes);
+}
+
 export function handleSetChargingProfileV201(
   payload: unknown,
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as SetChargingProfileRequestV201;
-  const domain = v201ProfileToDomain(
-    req.chargingProfile as unknown as IncomingChargingProfile,
-    req.evseId,
-  );
+  const incoming = req.chargingProfile as unknown as IncomingChargingProfile;
+  const domain = v201ProfileToDomain(incoming, req.evseId);
   if (!domain || !isCoherentProfileTarget(domain, req.evseId)) {
-    return {
-      response: { status: "Rejected" } satisfies SetChargingProfileResponseV201,
-    };
+    return { response: rejected() };
+  }
+
+  if (domain.chargingProfilePurpose === ChargingProfilePurposeType.TxProfile) {
+    const reasonCode = txProfileRejection(
+      ctx,
+      req.evseId,
+      incoming.transactionId,
+    );
+    if (reasonCode) return { response: rejected(reasonCode) };
+  } else if (
+    domain.chargingProfilePurpose ===
+      ChargingProfilePurposeType.TxDefaultProfile &&
+    duplicatesTxDefaultAcrossScopes(ctx, domain, req.evseId)
+  ) {
+    return { response: rejected("DuplicateProfile") };
   }
 
   if (!ctx.chargePoint.applyChargingProfile(domain, "SetChargingProfile")) {
-    return {
-      response: { status: "Rejected" } satisfies SetChargingProfileResponseV201,
-    };
+    return { response: rejected() };
   }
 
   return {
@@ -364,7 +435,12 @@ function getCandidateProfiles(
   ctx: V201InboundContext,
   evseId: number | undefined,
 ): ActiveChargingProfile[] {
-  const profiles = [...ctx.chargePoint.stationProfiles.all()];
+  // K09.FR.04-06: an EVSE n > 0 reports the profiles installed on that EVSE,
+  // EVSE 0 only the station-level ones, no evseId all of them.
+  const profiles: ActiveChargingProfile[] = [];
+  if (evseId === undefined || evseId === 0) {
+    profiles.push(...ctx.chargePoint.stationProfiles.all());
+  }
   if (evseId === undefined) {
     for (const connector of ctx.chargePoint.connectors.values()) {
       profiles.push(...connector.chargingProfiles);
@@ -426,7 +502,10 @@ export function handleGetChargingProfilesV201(
       status: "Accepted",
     } satisfies GetChargingProfilesResponseV201,
     afterResult: () => {
-      for (const [evseId, profiles] of groupByConnectorId(matches)) {
+      // One report per EVSE; K09.FR.02: every report but the last says more
+      // follow, so the CSMS can tell when the answer is complete.
+      const groups = [...groupByConnectorId(matches)];
+      groups.forEach(([evseId, profiles], index) => {
         const chargingProfile = profiles.map(domainProfileToV201) as [
           ReportChargingProfileType,
           ...ReportChargingProfileType[],
@@ -434,10 +513,11 @@ export function handleGetChargingProfilesV201(
         ctx.sendCall("ReportChargingProfiles", {
           requestId: req.requestId,
           chargingLimitSource: REPORT_SOURCE,
+          ...(index < groups.length - 1 && { tbc: true }),
           evseId,
           chargingProfile,
         } satisfies ReportChargingProfilesRequestV201);
-      }
+      });
     },
   };
 }

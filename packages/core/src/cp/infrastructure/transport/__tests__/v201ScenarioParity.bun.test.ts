@@ -65,7 +65,7 @@ function newChargePoint(id: string): {
   csms: MockCsms;
   chargePoint: ChargePoint;
 } {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const chargePoint = new ChargePoint(
     id,
     DefaultBootNotification,

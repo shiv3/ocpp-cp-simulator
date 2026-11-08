@@ -39,6 +39,7 @@ import {
   splitStopReason,
   type MeterReadingContext,
   type StartTransactionCommandOptions,
+  type IdTokenTypeName,
   type StopTransactionCommandOptions,
   type TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -594,8 +595,12 @@ export class LocalChargePointService implements ChargePointService {
     this.getExistingChargePointOrThrow(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
-    this.getExistingChargePointOrThrow(id).authorize(tagId);
+  async authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).authorize(tagId, idTokenType);
   }
 
   async sendDataTransfer(

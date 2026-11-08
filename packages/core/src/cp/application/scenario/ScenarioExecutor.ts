@@ -1016,7 +1016,11 @@ export class ScenarioExecutor {
           data.tagId ||
           this.callbacks.onResolveIdTag?.() ||
           DEFAULT_ID_TAG;
-        const options = this.remoteStartOptions;
+        // #599: the node's own idTokenType rides in the options; without
+        // one the callback is called exactly as before.
+        const options: StartTransactionOptions | null = data.idTokenType
+          ? { ...this.remoteStartOptions, idTokenType: data.idTokenType }
+          : this.remoteStartOptions;
         this.remoteStartTagId = null;
         this.remoteStartOptions = null;
         const outcome = options
@@ -1312,6 +1316,11 @@ export class ScenarioExecutor {
         triggerReason: "RemoteStart",
         ...(answer.remoteStartId !== undefined
           ? { remoteStartId: answer.remoteStartId }
+          : {}),
+        // The type the CSMS sent; a Transaction node's own idTokenType wins
+        // (executeTransaction spreads the node's value last).
+        ...(answer.idTokenType !== undefined
+          ? { idTokenType: answer.idTokenType }
           : {}),
       };
     }

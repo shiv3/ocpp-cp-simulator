@@ -205,6 +205,9 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
         chargingState: "EVConnected",
       }),
     ).toEqual({ id: "t2", ok: true });
+    // The reply to start_transaction does not wait for the Authorize round
+    // trip of a local start: the update needs the transaction to exist.
+    await waitForPayloads(csms, "TransactionEvent", 1);
     expect(
       await cp.request("transaction_event", {
         connector: 1,

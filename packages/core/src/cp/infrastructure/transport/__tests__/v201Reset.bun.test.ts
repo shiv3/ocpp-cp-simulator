@@ -57,6 +57,21 @@ async function expectNoFrame(
   }
 }
 
+/** An EVSE-scoped reset reports the EVSE Unavailable (B11.FR.08), no boot. */
+function evseUnavailableAfter(
+  csms: MockCsms,
+  afterIndex: number,
+  evseId: number,
+): (frame: OcppFrame) => boolean {
+  return (frame) =>
+    csms.received.indexOf(frame) > afterIndex &&
+    frame[0] === 2 &&
+    frame[2] === "StatusNotification" &&
+    (frame[3] as { evseId?: number }).evseId === evseId &&
+    (frame[3] as { connectorStatus?: string }).connectorStatus ===
+      "Unavailable";
+}
+
 async function bootAccepted(csms: MockCsms): Promise<void> {
   const boot = await csms.waitForCall("BootNotification");
   csms.replyCallResult(boot.messageId, {
@@ -113,7 +128,7 @@ function newChargePoint(
   csms: MockCsms;
   cp: ChargePoint;
 } {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const cp = new ChargePoint(
     id,
     DefaultBootNotification,
@@ -285,7 +300,9 @@ describe("OCPP 2.0.1 Reset", () => {
 
       const afterEnd = csms.received.length - 1;
       cp.scheduleResetOnIdle(1);
-      await csms.waitForFrame(
+      await csms.waitForFrame(evseUnavailableAfter(csms, afterEnd, 1));
+      await expectNoFrame(
+        csms,
         callFrameAfter(csms, afterEnd, "BootNotification"),
       );
     } finally {
@@ -323,25 +340,16 @@ describe("OCPP 2.0.1 Reset", () => {
       const ended = await csms.waitForFrame(
         transactionEventFrameAfter(csms, beforeStop, "Ended"),
       );
-      const boot = await csms.waitForFrame(
-        callFrameAfter(csms, csms.received.indexOf(ended), "BootNotification"),
-      );
-      const bootIndex = csms.received.indexOf(boot);
-      csms.replyCallResult(boot[1] as string, {
-        status: "Accepted",
-        currentTime: "2026-06-24T00:00:00.000Z",
-        interval: 0,
-      });
+      // The EVSE reset keeps an Inoperative EVSE Unavailable (B11.FR.02) and
+      // does not reboot the station.
       await csms.waitForFrame(
-        (frame) =>
-          csms.received.indexOf(frame) > bootIndex &&
-          frame[0] === 2 &&
-          frame[2] === "StatusNotification" &&
-          (frame[3] as { evseId?: number }).evseId === 1 &&
-          (frame[3] as { connectorStatus?: string }).connectorStatus ===
-            "Unavailable",
+        evseUnavailableAfter(csms, csms.received.indexOf(ended), 1),
       );
       expect((await cp.startTransaction("TAG-202", 1)).started).toBe(false);
+      await expectNoFrame(
+        csms,
+        callFrameAfter(csms, csms.received.indexOf(ended), "BootNotification"),
+      );
     } finally {
       cp.disconnect();
       await csms.stop();
@@ -369,6 +377,10 @@ describe("OCPP 2.0.1 Reset", () => {
         transactionEventFrameAfter(csms, resultIndex, "Ended"),
       );
       await csms.waitForFrame(
+        evseUnavailableAfter(csms, csms.received.indexOf(endedFrame), 1),
+      );
+      await expectNoFrame(
+        csms,
         callFrameAfter(
           csms,
           csms.received.indexOf(endedFrame),
@@ -481,12 +493,15 @@ describe("OCPP 2.0.1 Reset", () => {
         ),
       );
       await csms.waitForFrame(
-        callFrameAfter(
-          csms,
-          csms.received.indexOf(firstEnded),
-          "BootNotification",
-        ),
+        evseUnavailableAfter(csms, csms.received.indexOf(firstEnded), 1),
       );
+      expect(
+        csms.received.some(
+          (frame, i) =>
+            i > csms.received.indexOf(firstEnded) &&
+            evseUnavailableAfter(csms, -1, 2)(frame),
+        ),
+      ).toBe(false);
     } finally {
       cp.disconnect();
       await csms.stop();
@@ -581,14 +596,11 @@ describe("OCPP 2.0.1 Reset", () => {
           "Ended",
         ),
       );
-      const firstBoot = await csms.waitForFrame(
-        callFrameAfter(
-          csms,
-          csms.received.indexOf(firstEnded),
-          "BootNotification",
-        ),
+      // The scoped reset cycles EVSE 1 only (B11.FR.08): no boot, and the
+      // reset pending for EVSE 2 is still queued.
+      await csms.waitForFrame(
+        evseUnavailableAfter(csms, csms.received.indexOf(firstEnded), 1),
       );
-      await bootAcceptedAfter(csms, csms.received.indexOf(firstBoot) - 1);
 
       const beforeSecondStop = csms.received.length - 1;
       cp.stopTransaction(2, "Local");
@@ -596,9 +608,13 @@ describe("OCPP 2.0.1 Reset", () => {
         transactionEventFrameAfter(csms, beforeSecondStop, "Ended"),
       );
       await csms.waitForFrame(
+        evseUnavailableAfter(csms, csms.received.indexOf(secondEnded), 2),
+      );
+      await expectNoFrame(
+        csms,
         callFrameAfter(
           csms,
-          csms.received.indexOf(secondEnded),
+          csms.received.indexOf(immediate),
           "BootNotification",
         ),
       );
@@ -740,7 +756,7 @@ describe("OCPP 2.0.1 Reset", () => {
     }
   });
 
-  it("accepts v21 ImmediateAndResume without ending the active transaction", async () => {
+  it("rejects v21 ImmediateAndResume while a transaction runs (B13.FR.01)", async () => {
     const { csms, cp } = newChargePoint(
       "CP21-RESET-IMMEDIATE-AND-RESUME",
       "OCPP-2.1",
@@ -758,18 +774,67 @@ describe("OCPP 2.0.1 Reset", () => {
       expect(result).toEqual([
         3,
         "reset-immediate-and-resume",
-        { status: "Accepted" },
+        { status: "Rejected" },
       ]);
 
       const resultIndex = csms.received.indexOf(result);
-      const boot = await csms.waitForFrame(
+      await expectNoFrame(
+        csms,
         callFrameAfter(csms, resultIndex, "BootNotification"),
       );
-      expect(csms.received.indexOf(boot)).toBeGreaterThan(resultIndex);
       await expectNoFrame(
         csms,
         transactionEventFrameAfter(csms, resultIndex, "Ended"),
       );
+      expect(cp.getConnector(1)?.hasRunningTransaction).toBe(true);
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("accepts v21 ImmediateAndResume as an Immediate reset without a transaction (B13.FR.02)", async () => {
+    const { csms, cp } = newChargePoint(
+      "CP21-RESET-IMMEDIATE-AND-RESUME-IDLE",
+      "OCPP-2.1",
+    );
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+
+      const result = await sendReset(csms, "reset-resume-idle", {
+        type: "ImmediateAndResume",
+      });
+      expect(result).toEqual([3, "reset-resume-idle", { status: "Accepted" }]);
+      await csms.waitForFrame(
+        callFrameAfter(csms, csms.received.indexOf(result), "BootNotification"),
+      );
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("rejects v21 ImmediateAndResume with an evseId while another EVSE charges (B13.FR.01/02)", async () => {
+    const { csms, cp } = newChargePoint(
+      "CP21-RESET-RESUME-OTHER-EVSE",
+      "OCPP-2.1",
+      2,
+    );
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-21", 2);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const result = await sendReset(csms, "reset-resume-evse1", {
+        type: "ImmediateAndResume",
+        evseId: 1,
+      });
+      expect(result).toEqual([3, "reset-resume-evse1", { status: "Rejected" }]);
+      expect(cp.getConnector(2)?.hasRunningTransaction).toBe(true);
     } finally {
       cp.disconnect();
       await csms.stop();

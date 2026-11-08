@@ -80,7 +80,7 @@ const notifyEventsFrom = (csms: MockCsms, from: number) =>
 describe("OCPP 2.x offline NotifyEvent queuing (#538, N07.FR.04)", () => {
   for (const v of VERSIONS) {
     it(`${v.version}: publishes OfflineQueuingSeverity as a ReadWrite 0-9 variable`, async () => {
-      const csms = startMockCsms();
+      const csms = startMockCsms({ answerCalls: true });
       const cp = await bootedChargePoint(
         csms,
         `CP-OQS-${v.version}`,
@@ -115,7 +115,7 @@ describe("OCPP 2.x offline NotifyEvent queuing (#538, N07.FR.04)", () => {
     });
 
     it(`${v.version}: queues the events at or below the severity offline and replays them before the re-check`, async () => {
-      const csms = startMockCsms();
+      const csms = startMockCsms({ answerCalls: true });
       const cp = await bootedChargePoint(
         csms,
         `CP-OFFLINE-NE-${v.version}`,

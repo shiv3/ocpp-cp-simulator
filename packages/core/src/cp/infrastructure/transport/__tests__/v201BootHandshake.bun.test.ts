@@ -40,19 +40,8 @@ describe("OCPP 2.0.1 boot handshake", () => {
         interval: 300,
       });
 
-      const status0 = await csms.waitForFrame(
-        (f) =>
-          f[0] === 2 &&
-          f[2] === "StatusNotification" &&
-          (f[3] as { evseId?: number; connectorId?: number }).evseId === 0 &&
-          (f[3] as { evseId?: number; connectorId?: number }).connectorId === 0,
-      );
-      expect(status0[3]).toMatchObject({
-        evseId: 0,
-        connectorId: 0,
-        connectorStatus: "Available",
-      });
-
+      // B01.FR.05: connectors only; the station scope (evseId 0) has no
+      // StatusNotification (#703).
       for (const evseId of [1, 2]) {
         const status = await csms.waitForFrame(
           (f) =>

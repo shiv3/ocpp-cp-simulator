@@ -305,7 +305,23 @@
                   "tagId": { "type": "string" },
                   "batteryCapacityKwh": { "type": "number" },
                   "initialSoc": { "type": "number" },
-                  "stopReason": { "type": "string" }
+                  "stopReason": { "type": "string" },
+                  "idTokenType": {
+                    "type": "string",
+                    "enum": [
+                      "Central",
+                      "eMAID",
+                      "ISO14443",
+                      "ISO15693",
+                      "KeyCode",
+                      "Local",
+                      "MacAddress",
+                      "NoAuthorization",
+                      "DirectPayment",
+                      "EVCCID",
+                      "VIN"
+                    ]
+                  }
                 }
               }
             }

@@ -87,7 +87,7 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.5`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.6`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
@@ -95,6 +95,7 @@ consumers must ignore kinds and fields they do not know. `1.1` added the three
 fields, and made `errorCode` conditional (#527, #529). `1.4` added `power_lost` and
 `power_restored` (#455).
 `1.5` added `gave_up` (#609).
+`1.6` added `reconnected_without_boot` (#702).
 
 ## Kinds
 
@@ -106,6 +107,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `disconnected`                  | CP        | `code`, `reason`                                                     | The socket closes, after the charge point's own teardown.                                                                                                                                                   |
 | `reconnecting`                  | CP        | `attempt`, `delayMs`                                                 | The transport schedules a reconnect after an unrequested close.                                                                                                                                             |
 | `boot_notification`             | CP        | `status`, `interval`                                                 | A BootNotification.conf is processed, whatever its status.                                                                                                                                                  |
+| `reconnected_without_boot`      | CP        | `offlineMs`, `reportedAll`                                           | (2.x) The link is back and no BootNotification is sent, because the boot data is unchanged (OCPP-J 5.4, #702).                                                                                              |
 | `status_change`                 | CP        | `from`, `to`                                                         | The charge point status changes; repeats of the same status are skipped.                                                                                                                                    |
 | `connector_status`              | connector | `from`, `to`                                                         | A connector status changes; repeats are skipped.                                                                                                                                                            |
 | `network_fault_injected`        | CP        | `ruleId`, `ruleType`, `reconnectDelayMs`                             | A `manual-disconnect` or `periodic-disconnect` rule fires, before the socket closes. Opens an incident.                                                                                                     |
@@ -216,7 +218,8 @@ carries its `incidentId`. The incident closes with `recovery_completed`, whose
 `durationMs` runs from the injection, as soon as all of these hold:
 
 1. the socket is connected again,
-2. the CSMS accepted a BootNotification on that connection, and
+2. the CSMS accepted a BootNotification on that connection, or (2.x) the link
+   resumed without one (`reconnected_without_boot`), and
 3. every connector is back to the status it had when the fault fired
    (a connector removed since is ignored).
 

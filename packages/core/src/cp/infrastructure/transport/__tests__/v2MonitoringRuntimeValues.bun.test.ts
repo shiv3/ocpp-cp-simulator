@@ -35,7 +35,7 @@ async function withStation(
   version: string,
   body: (csms: MockCsms) => Promise<void>,
 ): Promise<void> {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const cp = await bootedChargePoint(csms, `CP-RUNTIME-${version}`, version);
   try {
     await body(csms);
@@ -201,7 +201,7 @@ describe("OCPP 2.x runtime device-model values (#538)", () => {
       });
       expect(frame[0]).toBe(4);
       // The station's answer to any 2.x payload outside its schema.
-      expect(frame[2]).toBe("FormatViolation");
+      expect(frame[2]).toBe("PropertyConstraintViolation");
       expect(isValidSetVariableMonitoringResponseV201(frame[3])).toBe(false);
     });
   });

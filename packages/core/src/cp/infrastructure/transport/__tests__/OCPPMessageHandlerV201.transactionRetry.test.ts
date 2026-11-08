@@ -123,6 +123,7 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
       // #529: the timeout trigger is covered in
       // OCPPMessageHandlerV201.transactionTimeout.test.ts.
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       meterValuesSampledData: vi.fn(() => []),
     },
   };
@@ -304,7 +305,9 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("does not hold back the next transaction message while a retry waits", () => {
+  // E13.FR.03/04 with Part 4 §4.1.1 (#708): the next transaction-related
+  // message waits for a resend; it does not overtake it.
+  it("holds back the next TransactionEvent while a retry waits, then sends it after the resend is answered", () => {
     const { socket, tx, handler } = setup();
     handler.sendTransactionEvent({
       phase: "started",
@@ -313,11 +316,18 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     });
     socket.callError(socket.last().messageId);
     handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
-    expect(
+    const types = () =>
       socket
         .transactionEvents()
-        .map((c) => (c.payload as TransactionEventRequestV201).eventType),
-    ).toEqual(["Started", "Updated"]);
+        .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+    expect(types()).toEqual(["Started"]);
+
+    // The resend comes first (interval 60 s * 1 transmission)...
+    vi.advanceTimersByTime(60_000);
+    expect(types()).toEqual(["Started", "Started"]);
+    // ...and Updated once the resend is answered.
+    socket.callResult(socket.last().messageId, {});
+    expect(types()).toEqual(["Started", "Started", "Updated"]);
   });
 
   it("reads the settings at each CALLERROR", () => {

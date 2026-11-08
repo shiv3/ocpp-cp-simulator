@@ -8,9 +8,12 @@ import { METHODS } from "../methods";
 // does not know, so a renamed parameter would not fail the TCK's calls, it
 // would silently stop having an effect. This pins each command's parameter
 // keys and which of them are optional, so a rename, a removal or an optional
-// parameter turning required fails here. Adding an OPTIONAL parameter is
-// allowed: update the entry and docs/entities/cli.md. Do not edit an entry to
-// make a rename pass; add an alias and keep the old key (cli.md rules).
+// parameter turning required fails here. The rule (#346): required keys and
+// existing keys must not change; a NEW key must be optional. Adding an
+// OPTIONAL parameter is allowed: add it to the entry and docs/entities/cli.md
+// (`idTokenType` of authorize / start_transaction came in with #672). Do not
+// edit an entry to make a rename or a removal pass; add an alias and keep the
+// old key (cli.md rules).
 
 /** `[key, "required" | "optional"]` for every key of a command's params. */
 function shape(command: keyof typeof METHODS): Array<[string, string]> {
@@ -29,10 +32,14 @@ const TCK_COMMANDS = {
   connect: [],
   status: [],
   heartbeat: [],
-  authorize: [["tagId", "optional"]],
+  authorize: [
+    ["idTokenType", "optional"],
+    ["tagId", "optional"],
+  ],
   start_transaction: [
     ["chargingState", "optional"],
     ["connector", "required"],
+    ["idTokenType", "optional"],
     ["tagId", "optional"],
     ["triggerReason", "optional"],
   ],

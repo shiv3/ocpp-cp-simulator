@@ -749,6 +749,9 @@ export class CLIChargePointService {
         ...(init.inboundValidation
           ? { inboundValidation: init.inboundValidation }
           : {}),
+        ...(init.transport?.reconnect
+          ? { reconnect: init.transport.reconnect }
+          : {}),
         ...(init.capabilityProfile
           ? { capabilityProfile: init.capabilityProfile }
           : {}),

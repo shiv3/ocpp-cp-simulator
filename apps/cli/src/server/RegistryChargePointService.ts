@@ -1094,6 +1094,8 @@ function toInitOptions(
     // still failing over to the stale pool, and still persisting it.
     supervisionUrls: params.supervisionUrls,
     urlDistribution: params.urlDistribution,
+    // #609: an update that omits `transport` keeps the current settings.
+    transport: params.transport ?? existing?.transport,
     // Same rule as the URLs above: `cp.update` fully specifies the pool, so
     // there is no `existing` fallback — an update that drops `idTagPool`
     // means the charge point no longer has one.

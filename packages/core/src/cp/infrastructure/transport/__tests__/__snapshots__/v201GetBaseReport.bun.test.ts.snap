@@ -73,6 +73,69 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "name": "OCPPCommCtrlr",
           },
           "variable": {
+            "name": "RetryBackOffWaitMinimum",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "1",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffRandomRange",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffRepeatTimes",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "5",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 30,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
             "instance": "TransactionEvent",
             "name": "MessageAttempts",
           },

@@ -663,6 +663,56 @@ describe("txUpdatedMeterValues schema, v22 (#347)", () => {
   });
 });
 
+describe("transport options schema, v28 (#609)", () => {
+  const columns = (db: BunSqliteDatabase) =>
+    db
+      .all<{ name: string }>("PRAGMA table_info(charge_points)")
+      .map((c) => c.name);
+
+  it.each(["24", "27"])(
+    "adds the column to a database stamped %s and keeps its rows",
+    (stamp) => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        db.run(
+          "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at) " +
+            "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-11-08T00:00:00Z')",
+        );
+        db.exec("ALTER TABLE charge_points DROP COLUMN transport_options");
+        db.run("UPDATE schema_meta SET value = ? WHERE key = 'version'", [
+          stamp,
+        ]);
+        expect(columns(db)).not.toContain("transport_options");
+
+        runMigrations(db);
+
+        expect(columns(db)).toContain("transport_options");
+        expect(
+          db.get<{ cp_id: string; transport_options: string | null }>(
+            "SELECT cp_id, transport_options FROM charge_points",
+          ),
+        ).toEqual({ cp_id: "CP1", transport_options: null });
+        expect(
+          Number(
+            db.get<{ value: string }>(
+              "SELECT value FROM schema_meta WHERE key = 'version'",
+            )?.value,
+          ),
+        ).toBe(SCHEMA_VERSION);
+        expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(28);
+
+        // Re-running on a database that has the column is a no-op.
+        db.run("UPDATE schema_meta SET value = ? WHERE key = 'version'", [
+          stamp,
+        ]);
+        expect(() => runMigrations(db)).not.toThrow();
+      } finally {
+        db.close();
+      }
+    },
+  );
+});
+
 describe("engine state schema, v23", () => {
   it("creates engine_state on a database stamped 22 and keeps its other rows", () => {
     const db = BunSqliteDatabase.open(":memory:");

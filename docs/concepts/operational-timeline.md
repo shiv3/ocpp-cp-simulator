@@ -87,13 +87,14 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.4`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.5`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
 `transaction_message_discarded` (#490). `1.3` added their `action` and `reason`
 fields, and made `errorCode` conditional (#527, #529). `1.4` added `power_lost` and
 `power_restored` (#455).
+`1.5` added `gave_up` (#609).
 
 ## Kinds
 
@@ -125,6 +126,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `charging_profile_applied`      | either    | profile fields, `source`, `replaced`                                 | A SetChargingProfile is accepted; an update of the same id is one entry with `replaced: true`; a 1.6 profile that displaced others in its slot (same `stackLevel` and purpose) lists them in `replacedIds`. |
 | `charging_profile_cleared`      | either    | `connectorId`, `reason`, `profiles`                                  | At least one profile is removed from one scope (see [Smart-charging profiles](#smart-charging-profiles)).                                                                                                   |
 | `charging_profile_expired`      | either    | profile fields                                                       | A profile's `validTo` passes while it is still installed.                                                                                                                                                   |
+| `gave_up`                       | CP        | `target` (`reconnect` or `boot_notification`), `attempts`            | The reconnect policy's `maxAttempts` or the `bootRetryLimit` is reached and the charge point stops retrying (#609).                                                                                         |
 
 `transaction_started` and `transaction_id_assigned` never record the 1.6
 placeholder transaction id (`0` until StartTransaction.conf):

@@ -35,6 +35,7 @@ import {
   normalizeLabels,
   type Labels,
 } from "@ocpp-cp-sim/contracts/labels";
+import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
 import type { ChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
@@ -97,6 +98,7 @@ interface ChargePointRow {
   tx_updated_meter_values: number | null;
   inbound_validation: string | null;
   capability_profile: string | null;
+  transport_options: string | null;
 }
 
 interface CPRegistryOptions {
@@ -249,7 +251,7 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
-        "inbound_validation, capability_profile " +
+        "inbound_validation, capability_profile, transport_options " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -325,6 +327,8 @@ export class CPRegistry {
         row.inbound_validation === "enforce"
           ? { inboundValidation: row.inbound_validation }
           : {}),
+        // #609: NULL restores the built-in behaviour.
+        ...restoreTransport(row),
         // #618: NULL, or JSON this build cannot read, restores as no profile.
         ...restoreCapabilityProfile(row.capability_profile),
       };
@@ -1027,6 +1031,10 @@ export class CPRegistry {
             ? JSON.stringify(init.capabilityProfile)
             : null,
         ],
+        [
+          "transport_options",
+          init.transport ? JSON.stringify(init.transport) : null,
+        ],
       ],
       ["cp_id"],
       // The row keeps the time it was first created.
@@ -1217,6 +1225,26 @@ function restoreLabels(row: ChargePointRow): Labels | undefined {
 }
 
 /**
+ * #609: the stored transport settings, or nothing. A value that is not JSON or
+ * fails the schema is dropped with a warning, so one damaged row does not stop
+ * the restore: the charge point comes back with the built-in behaviour.
+ */
+function restoreTransport(
+  row: ChargePointRow,
+): Pick<ChargePointInitOptions, "transport"> {
+  const raw = safeJsonParse<unknown>(row.transport_options);
+  if (raw === null) return {};
+  const parsed = transportConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.warn(
+      `[CPRegistry] ignoring invalid stored transport options for ${row.cp_id}`,
+    );
+    return {};
+  }
+  return { transport: parsed.data };
+}
+
+/**
  * Read the stored selection back, for a station that speaks `ocppVersion`.
  *
  * What this run cannot honor is left out of memory only: an id the library
@@ -1360,6 +1388,7 @@ function preserveOmittedInit(
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
     inboundValidation: next.inboundValidation ?? existing.inboundValidation,
+    transport: next.transport ?? existing.transport,
     capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
   };
 }

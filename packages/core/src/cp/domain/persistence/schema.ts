@@ -189,7 +189,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- NULL (a row older than the column) is the default, warn.
   inbound_validation TEXT,
   -- #618: JSON static capability profile; NULL is none.
-  capability_profile TEXT
+  capability_profile TEXT,
+  -- #609: the per-charge-point transport settings (reconnect policy, ...), a
+  -- JSON object. NULL: the built-in behaviour.
+  transport_options TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"

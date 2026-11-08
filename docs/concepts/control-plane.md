@@ -3,6 +3,8 @@ title: Socket.IO control plane
 type: concept
 summary: The one wire contract every client of the daemon uses — `rpc` acks for commands (CP-scoped and daemon-level methods), `event` push envelopes with room-scoped subscriptions, closed error codes, zod-validated schemas.
 sources:
+  - packages/contracts/src/transportConfig.ts
+  - "issue #609"
   - packages/contracts/src/
   - packages/contracts/src/__tests__/importBoundary.test.ts (#578)
   - apps/cli/src/server/
@@ -212,6 +214,7 @@ one rather than restating a subset.
 | `autoConnect`                                     | boolean                                        | Connect immediately after the call.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `labels`                                          | object of string values                        | Generic grouping metadata (`{ "site": "lyon-01", "env": "lab" }`) — see [Charge-point labels](#charge-point-labels).                                                                                                                                                                                                                                                                                                                                                                                             |
 | `behaviors`                                       | array of strings                               | Ids of the loaded [behaviors](#behaviors) this charge point runs. Absent: every loaded behavior; `[]`: none. Ids only, never code. `cp.update` keeps an omitted list.                                                                                                                                                                                                                                                                                                                                            |
+| `transport`                                       | object                                         | `{ reconnect: { maxAttempts, mode, baseDelayMs, maxDelayMs, jitterMs, bootRetryLimit } }` — every field optional, a typo or out-of-range value is refused. See [Reconnect policy](ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609). An update that omits it keeps the current value.                                                                                                                                                                                                       |
 
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.

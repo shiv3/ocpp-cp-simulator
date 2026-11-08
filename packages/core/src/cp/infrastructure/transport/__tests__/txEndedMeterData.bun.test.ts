@@ -12,6 +12,7 @@ import {
   callsOf,
 } from "./stationHarness";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { MainMeter } from "../../../domain/charge-point/MainMeter";
 import { TX_ENDED_SAMPLES_MAX } from "../../../domain/connector/Transaction";
 
 /**
@@ -285,6 +286,53 @@ describe("OCPP 2.x transaction-end meter data (#607)", () => {
       // Idle connector: the clock-aligned MeterValues go out as before.
       emit(Date.UTC(2030, 0, 1, 0, 30));
       await csms.waitForCall("MeterValues");
+      cp.disconnect();
+    } finally {
+      stop();
+      await csms.stop();
+    }
+  });
+
+  it("SendDuringIdle is station-wide: a transaction on one EVSE silences every EVSE and the main meter (J01.FR.20)", async () => {
+    const csms = startMockCsms();
+    const stop = answerEverythingElse(csms, []);
+    try {
+      const cp = await bootedChargePoint(
+        csms,
+        "CP607-v2-idle-all",
+        "OCPP-2.0.1",
+        {
+          connectors: 2,
+        },
+      );
+      cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+      cp.configuration.applyChange("MeterValuesAlignedData", REGISTER);
+      cp.configuration.applyChange("AlignedDataSendDuringIdle", "true");
+      (cp as unknown as { _mainMeter: MainMeter })._mainMeter = new MainMeter(
+        {},
+        () => cp.connectors,
+        { now: () => Date.now() } as never,
+      );
+      cp.startTransaction("TAG-607", 1);
+      await csms.waitForFrame((f) => callOf("TransactionEvent")(f));
+      const emit = (
+        cp as unknown as { emitClockAlignedSamples(ms: number): void }
+      ).emitClockAlignedSamples.bind(cp);
+      emit(Date.UTC(2030, 0, 1, 0, 15));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // EVSE 2 is idle but the station has a transaction; so is the main meter.
+      expect(callsOf(csms, "MeterValues")).toHaveLength(0);
+
+      cp.stopTransaction(1);
+      await csms.waitForFrame(ended);
+      emit(Date.UTC(2030, 0, 1, 0, 30));
+      await csms.waitForFrame(
+        (f) =>
+          callOf("MeterValues")(f) &&
+          (f[3] as { evseId?: number }).evseId === 0,
+      );
+      // Idle again: both EVSEs and the main meter report.
+      expect(callsOf(csms, "MeterValues").length).toBeGreaterThanOrEqual(3);
       cp.disconnect();
     } finally {
       stop();

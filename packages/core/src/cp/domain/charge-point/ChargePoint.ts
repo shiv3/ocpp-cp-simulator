@@ -3086,13 +3086,18 @@ export class ChargePoint {
     const measurands = this._configuration.meterValuesAlignedData();
     if (measurands.length === 0) return;
     const timestamp = new Date(boundaryMs);
-    // 2.x AlignedDataCtrlr.SendDuringIdle: a connector in a transaction gets
-    // no clock-aligned MeterValues (#607).
-    const idleOnly =
+    // 2.x AlignedDataCtrlr.SendDuringIdle is a station-level variable: while
+    // any transaction runs, no clock-aligned values go out for any EVSE or the
+    // main meter (J01.FR.20; J01.FR.19 is the per-EVSE form the variable does
+    // not have here).
+    if (
       isOcpp2Version(this._ocppVersion) &&
-      this._configuration.alignedDataSendDuringIdle();
+      this._configuration.alignedDataSendDuringIdle() &&
+      [...this._connectors.values()].some((c) => c.hasRunningTransaction)
+    ) {
+      return;
+    }
     this._connectors.forEach((connector) => {
-      if (idleOnly && connector.hasRunningTransaction) return;
       if (
         this.sendSampleInTransactionEvent(connector, {
           triggerReason: "MeterValueClock",

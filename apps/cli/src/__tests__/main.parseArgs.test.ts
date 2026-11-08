@@ -427,6 +427,51 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     });
   });
 
+  it("collects --ws-* flags into transport.ws and refuses what Bun ignores (#611)", () => {
+    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+    const ok = runParseArgs([
+      ...base,
+      "--ws-handshake-timeout-ms",
+      "4000",
+      "--ws-no-compression",
+      "--ws-proxy",
+      "http://proxy.example:3128",
+    ]);
+    expect(ok.status).toBe(0);
+    expect(JSON.parse(ok.stdout).transport).toEqual({
+      ws: {
+        handshakeTimeoutMs: 4000,
+        perMessageDeflate: false,
+        proxy: "http://proxy.example:3128",
+      },
+    });
+
+    const payload = runParseArgs([...base, "--ws-max-payload", "1024"]);
+    expect(payload.status).toBe(1);
+    expect(payload.stderr).toContain(
+      '"maxPayloadBytes" is not supported on bun',
+    );
+    const local = runParseArgs([...base, "--ws-local-address", "10.0.0.5"]);
+    expect(local.status).toBe(1);
+    expect(local.stderr).toContain('"localAddress" is not supported on bun');
+    const badProxy = runParseArgs([...base, "--ws-proxy", "socks5://p:1"]);
+    expect(badProxy.status).toBe(1);
+    expect(badProxy.stderr).toContain("ws.proxy");
+    const soap = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:9000/cs",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      "--soap-callback-url",
+      "http://127.0.0.1:9100/cb",
+      "--ws-no-compression",
+    ]);
+    expect(soap.status).toBe(1);
+    expect(soap.stderr).toContain("SOAP versions have none");
+  });
+
   it("rejects bad reconnect flag values (#609)", () => {
     const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
     const fail = (flags: string[], message: string) => {

@@ -944,6 +944,12 @@ export function parseCreateBody(
       "wsUrl must be a single URL for the OCPP SOAP versions; several supervision URLs are an OCPP-J feature",
     );
   }
+  // #611: same reasoning — the SOAP versions have no WebSocket to configure.
+  if (transport?.ws && isSoapVersion(ocppVersion)) {
+    throw new Error(
+      "transport.ws applies to the OCPP-J WebSocket; the SOAP versions have none",
+    );
+  }
   // Every entry is checked here, not just the first. A later member is only
   // touched at reconnect time, where `buildOcppWebSocketUrl` calls `new URL()`
   // synchronously inside a `setTimeout` callback — a malformed one throws

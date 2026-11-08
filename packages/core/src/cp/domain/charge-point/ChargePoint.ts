@@ -153,6 +153,10 @@ import {
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
 import {
+  assertWsClientOptions,
+  type WsClientOptions,
+} from "../../infrastructure/transport/WsClientOptions";
+import {
   resolveReconnectPolicy,
   type ReconnectPolicy,
 } from "../../infrastructure/transport/ReconnectPolicy";
@@ -288,6 +292,12 @@ export interface ChargePointTransportOptions {
    * retry limit applies to every transport.
    */
   readonly reconnect?: Partial<ReconnectPolicy>;
+  /**
+   * #611: WebSocket client options (handshake timeout, compression, max
+   * payload, proxy, local address). OCPP-J only. The constructor throws
+   * `UnsupportedWsOptionError` for an option this runtime would ignore.
+   */
+  readonly ws?: WsClientOptions;
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
@@ -451,6 +461,9 @@ export class ChargePoint {
   ) {
     this._clock = simulation.clock ?? realClock;
     this._reconnectPolicy = resolveReconnectPolicy(transportOptions.reconnect);
+    // Before any state is built: a refused option must not leave a half-made
+    // charge point behind.
+    const wsClientOptions = assertWsClientOptions(transportOptions.ws);
     this._rngSource =
       simulation.seed === undefined
         ? systemRngStreams
@@ -568,6 +581,7 @@ export class ChargePoint {
         tls,
       );
       this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
+      this._webSocket.setWsClientOptions(wsClientOptions);
       const reconnectRng = this.rng("reconnect");
       this._webSocket.setReconnectPolicy(this._reconnectPolicy, () =>
         reconnectRng.next(),

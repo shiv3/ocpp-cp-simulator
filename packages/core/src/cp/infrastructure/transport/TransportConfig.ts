@@ -1,4 +1,5 @@
 import type { ReconnectPolicy } from "./ReconnectPolicy";
+import type { WsClientOptions } from "./WsClientOptions";
 
 /**
  * Per-charge-point transport settings, kept in one object so the control
@@ -9,4 +10,7 @@ import type { ReconnectPolicy } from "./ReconnectPolicy";
 export interface TransportConfig {
   /** #609: reconnect policy and BootNotification retry limit. */
   readonly reconnect?: Partial<ReconnectPolicy>;
+  /** #611: WebSocket client options. A runtime that cannot honour one
+   *  refuses the charge point (`UnsupportedWsOptionError`). */
+  readonly ws?: WsClientOptions;
 }

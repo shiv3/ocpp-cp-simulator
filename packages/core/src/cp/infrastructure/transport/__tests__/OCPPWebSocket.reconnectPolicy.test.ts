@@ -9,6 +9,7 @@ class FakeWebSocket {
   readyState: number = WebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onclose: ((ev: CloseEvent) => void) | null = null;
+  options: unknown;
   send(): void {}
   close(): void {
     this.simulateClose();
@@ -33,6 +34,7 @@ vi.mock("../wsUrlWithBasic", async (importOriginal) => ({
     onclose?: (ev: CloseEvent) => void;
   }) => {
     const fake = new FakeWebSocket();
+    fake.options = options;
     fake.onopen = options.onopen ?? null;
     fake.onclose = options.onclose ?? null;
     sockets.push(fake);
@@ -148,5 +150,50 @@ describe("OCPPWebSocket reconnect policy (#609)", () => {
     current().simulateClose();
     expect(notices.map((n) => n.attempt)).toEqual([1, 1]);
     expect(gaveUp).toEqual([]);
+  });
+
+  describe("WebSocket client options (#611)", () => {
+    it("hands the options to the socket opener", () => {
+      ws.setWsClientOptions({ perMessageDeflate: false, proxy: "http://p:1" });
+      ws.connect();
+      expect((current().options as { ws?: unknown }).ws).toEqual({
+        perMessageDeflate: false,
+        proxy: "http://p:1",
+      });
+    });
+
+    it("passes none when none are set", () => {
+      ws.connect();
+      expect((current().options as { ws?: unknown }).ws).toBeUndefined();
+    });
+
+    it("closes an attempt that has not opened in time, then reconnects by policy", () => {
+      ws.setWsClientOptions({ handshakeTimeoutMs: 2000 });
+      ws.connect();
+      const first = current();
+      vi.advanceTimersByTime(1999);
+      expect(first.readyState).toBe(WebSocket.CONNECTING);
+      vi.advanceTimersByTime(1);
+      expect(first.readyState).toBe(WebSocket.CLOSED);
+      expect(notices.map((n) => n.delayMs)).toEqual([1000]);
+      vi.advanceTimersByTime(1000);
+      expect(sockets.length).toBe(2);
+    });
+
+    it("an attempt that opens in time is left alone", () => {
+      ws.setWsClientOptions({ handshakeTimeoutMs: 2000 });
+      ws.connect();
+      vi.advanceTimersByTime(1500);
+      current().simulateOpen();
+      vi.advanceTimersByTime(10_000);
+      expect(current().readyState).toBe(WebSocket.OPEN);
+      expect(notices).toEqual([]);
+    });
+
+    it("no timer runs without the option", () => {
+      ws.connect();
+      vi.advanceTimersByTime(120_000);
+      expect(current().readyState).toBe(WebSocket.CONNECTING);
+    });
   });
 });

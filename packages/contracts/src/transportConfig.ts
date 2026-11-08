@@ -52,9 +52,55 @@ export const reconnectConfigSchema = z
     { message: "maxDelayMs must be >= baseDelayMs" },
   );
 
+export const wsClientConfigSchema = z
+  .object({
+    handshakeTimeoutMs: z
+      .number()
+      .gt(0)
+      .max(2_147_483_647)
+      .optional()
+      .describe(
+        "Close a connection attempt that has not opened within this many ms; the reconnect policy then applies. Works on every runtime (Bun never times a handshake out by itself).",
+      ),
+    perMessageDeflate: z
+      .boolean()
+      .optional()
+      .describe(
+        "false stops offering permessage-deflate on the upgrade; true offers it (the default). Bun and Node.",
+      ),
+    maxPayloadBytes: z
+      .number()
+      .int()
+      .gt(0)
+      .optional()
+      .describe(
+        "Largest incoming message in bytes; a larger one closes the socket. Node (ws) only: Bun ignores it, so a Bun daemon refuses the charge point.",
+      ),
+    proxy: z
+      .string()
+      .max(2048)
+      .refine((v) => /^https?:\/\/[^\s/]+/.test(v), {
+        message: "proxy must be an http:// or https:// URL",
+      })
+      .optional()
+      .describe(
+        "HTTP(S) proxy the WebSocket upgrade goes through (CONNECT). Bun only; the HTTP_PROXY environment variable is not used for WebSockets.",
+      ),
+    localAddress: z
+      .string()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe(
+        "Local IP address the connection binds to. Node (ws) only: Bun ignores it, so a Bun daemon refuses the charge point.",
+      ),
+  })
+  .strict();
+
 export const transportConfigSchema = z
   .object({
     reconnect: reconnectConfigSchema.optional(),
+    ws: wsClientConfigSchema.optional(),
   })
   .strict();
 

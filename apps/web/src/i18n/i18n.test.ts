@@ -63,7 +63,9 @@ describe("locale completeness", () => {
   });
 
   it("has no Japanese or Chinese characters in en", () => {
-    const cjk = /[぀-ヿ㐀-鿿＀-￯]/;
+    // \p{Script=Han} adds the supplementary-plane ideographs (e.g. 𠮷)
+    // that the BMP ranges miss.
+    const cjk = /[぀-ヿ㐀-鿿＀-￯]|\p{Script=Han}/u;
     expect(Object.keys(en).filter((k) => cjk.test(en[k]))).toEqual([]);
   });
 

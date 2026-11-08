@@ -2119,11 +2119,32 @@ export class ChargePoint {
     requestId?: number,
   ): void {
     this._outbox.sendFirmwareStatusNotification(status, requestId);
+    // Whichever route sent it (control plane, scenario, behavior), the engine
+    // holds what was last reported, so a TriggerMessage answers it (#596).
+    // The 2.x handler names the last accepted request when none is given,
+    // except for Idle.
+    const reported =
+      requestId ??
+      (status === "Idle" ? undefined : this._lastFirmwareRequestId);
+    this.engine.dispatch({
+      type: "reported",
+      kind: "firmware",
+      status,
+      ...(reported !== undefined ? { requestId: reported } : {}),
+    });
   }
 
   /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
   sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
     this._outbox.sendLogStatusNotification(status, requestId);
+    const reported =
+      requestId ?? (status === "Idle" ? undefined : this._lastLogRequestId);
+    this.engine.dispatch({
+      type: "reported",
+      kind: "log",
+      status,
+      ...(reported !== undefined ? { requestId: reported } : {}),
+    });
   }
 
   /** `requestId` of the last UpdateFirmware.req this station accepted, so a

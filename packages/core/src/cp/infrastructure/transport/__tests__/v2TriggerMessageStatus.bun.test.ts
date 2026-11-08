@@ -85,6 +85,20 @@ async function withStation(
   }
 }
 
+/** Waits until the CSMS has received the station's own status report. */
+async function sentBy(
+  csms: MockCsms,
+  action: string,
+  status: string,
+): Promise<void> {
+  await csms.waitForFrame(
+    (f) =>
+      f[0] === 2 &&
+      f[2] === action &&
+      (f[3] as { status?: string }).status === status,
+  );
+}
+
 async function startOn(
   csms: MockCsms,
   cp: ChargePoint,
@@ -113,7 +127,16 @@ describe.each(VERSIONS)("%s TriggerMessage (#596)", (version) => {
       expect(first[3]).toMatchObject({
         eventType: "Updated",
         triggerReason: "Trigger",
+        // F06.FR.07: at least the chargingState, and a meter sample.
+        transactionInfo: { chargingState: expect.any(String) },
       });
+      const sampled = (
+        first[3] as {
+          meterValue: { sampledValue: { context?: string }[] }[];
+        }
+      ).meterValue[0]!.sampledValue;
+      expect(sampled.length).toBeGreaterThan(0);
+      expect(sampled.every((v) => v.context === "Trigger")).toBe(true);
     });
   });
 
@@ -185,6 +208,65 @@ describe.each(VERSIONS)("%s TriggerMessage (#596)", (version) => {
       expect((await follow("FirmwareStatusNotification"))[3]).toEqual({
         status: "Idle",
       });
+    });
+  });
+
+  it("reports a status the control plane sent (firmware_status_notification) with the request's id (L01.FR.26)", async () => {
+    await withStation(version, async (csms, cp, trigger) => {
+      csms.send([
+        2,
+        "uf-2",
+        "UpdateFirmware",
+        {
+          requestId: 11,
+          firmware: {
+            location: "https://example.invalid/fw.bin",
+            retrieveDateTime: "2026-06-24T00:00:00.000Z",
+          },
+        },
+      ]);
+      await csms.waitForFrame(resultOf("uf-2"));
+      cp.sendFirmwareStatusNotification("Downloading");
+      await sentBy(csms, "FirmwareStatusNotification", "Downloading");
+      const a = await trigger("FirmwareStatusNotification");
+      expect((await a.follow("FirmwareStatusNotification"))[3]).toEqual({
+        status: "Downloading",
+        requestId: 11,
+      });
+      // The last sent status that is not Installed is repeated, a failure too.
+      cp.sendFirmwareStatusNotification("DownloadFailed");
+      await sentBy(csms, "FirmwareStatusNotification", "DownloadFailed");
+      const b = await trigger("FirmwareStatusNotification");
+      expect((await b.follow("FirmwareStatusNotification"))[3]).toEqual({
+        status: "DownloadFailed",
+        requestId: 11,
+      });
+      // L01.FR.25: Installed is answered with Idle, without a requestId.
+      cp.sendFirmwareStatusNotification("Installed", 11);
+      await sentBy(csms, "FirmwareStatusNotification", "Installed");
+      const c = await trigger("FirmwareStatusNotification");
+      expect((await c.follow("FirmwareStatusNotification"))[3]).toEqual({
+        status: "Idle",
+      });
+    });
+  });
+
+  it("reports an Uploading log status sent by the control plane (F06.FR.14)", async () => {
+    await withStation(version, async (csms, cp, trigger) => {
+      cp.sendLogStatusNotification("Uploading", 12);
+      await sentBy(csms, "LogStatusNotification", "Uploading");
+      const a = await trigger("LogStatusNotification");
+      expect((await a.follow("LogStatusNotification"))[3]).toEqual({
+        status: "Uploading",
+        requestId: 12,
+      });
+      cp.sendLogStatusNotification("Uploaded", 12);
+      await sentBy(csms, "LogStatusNotification", "Uploaded");
+      const b = await trigger("LogStatusNotification");
+      expect((await b.follow("LogStatusNotification"))[3]).toEqual({
+        status: "Idle",
+      });
+      void csms;
     });
   });
 

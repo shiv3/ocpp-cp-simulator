@@ -84,32 +84,43 @@ export function handleUnlockConnectorV201(
   return { response };
 }
 
-/** FirmwareStatusEnumType values of an update that has not ended (L01):
- *  the others (`Installed`, the failures, `Idle`) leave nothing in progress. */
-const FIRMWARE_IN_PROGRESS: ReadonlySet<string> = new Set([
-  "Downloading",
-  "Downloaded",
-  "DownloadScheduled",
-  "DownloadPaused",
-  "Installing",
-  "InstallScheduled",
-  "InstallRebooting",
-  "SignatureVerified",
+/** L01.FR.25 / L01.FR.26 (and L02.FR.16 / FR.17): a TriggerMessage for
+ *  FirmwareStatusNotification answers the last sent status, except `Installed`
+ *  which is answered with `Idle`; with nothing sent yet (F06.FR.16) it is
+ *  `Idle`. A report with a requestId is mandatory unless the message was
+ *  triggered AND no update is ongoing, which is what `Idle` says. */
+const FIRMWARE_ENDED_AS_IDLE: ReadonlySet<string> = new Set([
+  "Installed",
+  "Idle",
 ]);
 
-/** UploadLogStatusEnumType values of an upload that has not ended (N01). */
+/** UploadLogStatusEnumType values of an upload that has not ended (F06.FR.14;
+ *  F06.FR.15: not uploading is `Idle`, which N01.FR.13 lets go without a
+ *  requestId when triggered). */
 const LOG_IN_PROGRESS: ReadonlySet<string> = new Set(["Uploading"]);
+
+/** The `chargingState` a triggered TransactionEvent reports for a connector
+ *  status; any other status of a running transaction is `EVConnected`. */
+const TRIGGER_CHARGING_STATE: Record<
+  string,
+  "Charging" | "SuspendedEV" | "SuspendedEVSE"
+> = {
+  Charging: "Charging",
+  SuspendedEV: "SuspendedEV",
+  SuspendedEVSE: "SuspendedEVSE",
+};
 
 function reportTriggeredStatus(
   status: string,
   requestId: number | null,
-  inProgress: ReadonlySet<string>,
+  idle: { has(status: string): boolean },
   send: (status: string, requestId?: number) => void,
+  idleWhenIn = true,
 ): void {
-  if (inProgress.has(status)) {
-    send(status, requestId ?? undefined);
-  } else {
+  if (idle.has(status) === idleWhenIn) {
     send("Idle");
+  } else {
+    send(status, requestId ?? undefined);
   }
 }
 
@@ -177,7 +188,7 @@ export const handleTriggerMessageV201 = (
               connectorId === 0 ||
               c.id === connectorId),
         )
-        .map((c) => c.id);
+        .map((c) => ({ id: c.id, status: String(c.status) }));
       if (targets.length === 0) {
         return {
           response: {
@@ -192,17 +203,23 @@ export const handleTriggerMessageV201 = (
       return {
         response: accepted,
         afterResult: () => {
-          for (const id of targets) {
+          // F06.FR.07: triggerReason Trigger, transactionInfo with at least
+          // the chargingState, and the most recent meter sample.
+          for (const { id, status } of targets) {
             ctx.chargePoint.sendTransactionUpdate(id, {
               triggerReason: "Trigger",
+              chargingState: TRIGGER_CHARGING_STATE[status] ?? "EVConnected",
+              meterValues: true,
+              context: "Trigger",
             });
           }
         },
       };
     }
 
-    // #596 L01 / N01: the status the engine holds (`default.firmware`,
-    // `default.logs`), or Idle when no update / upload is in progress. Idle
+    // #596 L01.FR.25/26, F06.FR.14-16: the last status the station sent for
+    // the update / the upload (the engine holds it however it was sent), Idle
+    // when none, after `Installed` or, for a log, when not uploading. Idle
     // carries no requestId.
     case "FirmwareStatusNotification": {
       const { status, requestId } = ctx.chargePoint.engine.state.firmware;
@@ -212,7 +229,7 @@ export const handleTriggerMessageV201 = (
           reportTriggeredStatus(
             status,
             requestId,
-            FIRMWARE_IN_PROGRESS,
+            FIRMWARE_ENDED_AS_IDLE,
             (s, id) =>
               ctx.chargePoint.sendFirmwareStatusNotification(s as never, id),
           ),
@@ -224,8 +241,13 @@ export const handleTriggerMessageV201 = (
       return {
         response: accepted,
         afterResult: () =>
-          reportTriggeredStatus(status, requestId, LOG_IN_PROGRESS, (s, id) =>
-            ctx.chargePoint.sendLogStatusNotification(s as never, id),
+          reportTriggeredStatus(
+            status,
+            requestId,
+            LOG_IN_PROGRESS,
+            (s, id) =>
+              ctx.chargePoint.sendLogStatusNotification(s as never, id),
+            false,
           ),
       };
     }

@@ -5,6 +5,7 @@ summary: Stateless Model Context Protocol endpoint served by the daemon so MCP c
 sources:
   - apps/cli/src/server/mcp/tools.ts
   - apps/cli/src/server/mcp/schemaResources.ts
+  - packages/ocpp/src/schemaSources.ts
   - apps/cli/src/server/__tests__/mcpSchemaResources.test.ts
   - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - "issue #613"
@@ -131,13 +132,21 @@ subscriptions.
 | `ocpp-schema://NOTICE`                         | The attribution and license text, `text/plain`                                                                                                                                |
 
 One resource exists per vendored schema file (181 for 2.1, 128 for 2.0.1, 78 for
-1.6, plus the notice). The schema is the vendored object with no key added,
-removed or rewritten, serialized with 4-space indentation (the whitespace of
-the original files may differ). Every schema read returns the license notice as
-a second content item, so the attribution (OCA; CC BY-ND 4.0 for the 2.1
-schemas) always travels with the schema. The files are bundled from
-[`packages/ocpp/vendor/ocpp-schemas/`](../../packages/ocpp/vendor/ocpp-schemas/NOTICE),
-which stays verbatim-only ([Conventions](../conventions.md#layers)).
+1.6, plus the notice). The schema text is **byte-identical** to the vendored
+file: nothing is parsed or re-serialized, because the files are CC BY-ND and
+may be redistributed only unmodified. The URI is built from the file name.
+Every schema read returns the vendored `NOTICE` verbatim as a second content
+item, and the description of every resource (the notice included) carries the
+attribution "© Open Charge Alliance, CC BY-ND 4.0" with the license link
+<https://creativecommons.org/licenses/by-nd/4.0/>, so attribution and license
+travel with the schema. The same license covers the 1.6, 2.0.1 and 2.1
+schemas. An unknown URI, or one that tries to leave the list
+(`ocpp-schema://v21/../NOTICE`), is answered with a JSON-RPC error. The texts
+are compiled into the binary from
+[`packages/ocpp/vendor/ocpp-schemas/`](../../packages/ocpp/vendor/ocpp-schemas/NOTICE)
+by `bun run gen:ocpp` (`packages/ocpp/src/schemaSources.ts`, generated); the
+vendored directory stays verbatim-only ([Conventions](../conventions.md#layers),
+[Vendored OCPP schemas](../sources/vendored-ocpp-schemas.md)).
 
 ## Generic Escape Hatch
 

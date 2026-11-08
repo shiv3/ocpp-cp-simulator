@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
@@ -916,7 +917,6 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
-  const timeline = METHODS["timeline.get"].params.shape;
   mcp.tool("tail_logs", {
     description:
       "Read the end of a charge point's log: the last `lines` entries " +
@@ -942,8 +942,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .optional()
         .describe("Keep entries at this level or more severe"),
       type: z
-        .string()
-        .min(1)
+        .enum(Object.values(LogType) as [LogType, ...LogType[]])
         .optional()
         .describe("Keep entries of this log type"),
       contains: z
@@ -965,6 +964,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  const timeline = METHODS["timeline.get"].params.shape;
   mcp.tool("get_timeline", {
     description:
       "Retrieve a charge point's operational timeline (#448): normalized, " +

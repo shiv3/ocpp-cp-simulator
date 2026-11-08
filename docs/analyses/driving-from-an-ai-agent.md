@@ -13,7 +13,7 @@ related:
   - ../concepts/log-format.md
   - ../sources/testcontainers-java-readme.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Driving the simulator from an AI agent or test harness

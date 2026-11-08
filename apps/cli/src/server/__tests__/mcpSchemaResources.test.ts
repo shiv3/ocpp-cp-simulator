@@ -5,7 +5,11 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
 import { createMcpHandler } from "../mcp/mcpServer";
-import { OCPP_SCHEMA_NOTICE, listOcppSchemas } from "../mcp/schemaResources";
+import {
+  OCPP_SCHEMA_LICENSE_URL,
+  OCPP_SCHEMA_NOTICE,
+  listOcppSchemas,
+} from "../mcp/schemaResources";
 import { tailLogEntries } from "../mcp/tools";
 
 const vendorDir = join(
@@ -66,27 +70,47 @@ describe("OCPP schema MCP resources (#613)", () => {
     expect(new Set(uris).size).toBe(uris.length);
   });
 
-  it("returns the schema unmodified, with the license notice", async () => {
+  it("returns the schema byte for byte, with the license notice", async () => {
     const res = await rpc("resources/read", {
       uri: "ocpp-schema://v21/BootNotification/request",
     });
     const [schema, notice] = res.result.contents;
-    const onDisk = JSON.parse(
+    // Bytes, not parsed values: a re-serialized schema is a modified one.
+    expect(schema.text).toBe(
       readFileSync(join(vendorDir, "v21/BootNotificationRequest.json"), "utf8"),
     );
-    expect(JSON.parse(schema.text)).toEqual(onDisk);
     expect(notice.uri).toBe("ocpp-schema://NOTICE");
-    expect(notice.text).toContain("CC BY-ND 4.0");
+    expect(notice.text).toBe(readFileSync(join(vendorDir, "NOTICE"), "utf8"));
+    expect(notice.text).toContain(OCPP_SCHEMA_LICENSE_URL);
   });
 
-  it("serves the vendored NOTICE verbatim", () => {
-    expect(OCPP_SCHEMA_NOTICE).toBe(
-      readFileSync(join(vendorDir, "NOTICE"), "utf8"),
-    );
+  it("serves the vendored NOTICE verbatim, and it names the license and links it", () => {
+    const onDisk = readFileSync(join(vendorDir, "NOTICE"), "utf8");
+    expect(OCPP_SCHEMA_NOTICE).toBe(onDisk);
+    expect(onDisk).toContain("Open Charge Alliance");
+    expect(onDisk).toContain("CC BY-ND 4.0");
+    expect(onDisk).toContain("https://creativecommons.org/licenses/by-nd/4.0/");
   });
 
-  it("serves every vendored file under a URI built from its file name", () => {
-    const listed = new Map(listOcppSchemas().map((e) => [e.uri, e.schema]));
+  it("links the license in the description of the notice and of every schema", async () => {
+    const res = await rpc("resources/list");
+    const resources = res.result.resources as Array<{
+      uri: string;
+      description?: string;
+    }>;
+    expect(resources.length).toBeGreaterThan(300);
+    for (const resource of resources) {
+      expect(resource.description, resource.uri).toContain(
+        OCPP_SCHEMA_LICENSE_URL,
+      );
+      expect(resource.description, resource.uri).toContain(
+        "Open Charge Alliance",
+      );
+    }
+  });
+
+  it("serves every vendored file byte for byte under a URI built from its file name", () => {
+    const listed = new Map(listOcppSchemas().map((e) => [e.uri, e.text]));
     let checked = 0;
     for (const version of ["v16", "v201", "v21"]) {
       for (const file of readdirSync(join(vendorDir, version))) {
@@ -97,14 +121,26 @@ describe("OCPP schema MCP resources (#613)", () => {
         const direction = m[2] === "Response" ? "response" : "request";
         const action = version === "v16" ? base.replace(/Response$/, "") : m[1];
         const uri = `ocpp-schema://${version}/${action}/${direction}`;
-        const onDisk = JSON.parse(
+        expect(listed.get(uri), uri).toBe(
           readFileSync(join(vendorDir, version, file), "utf8"),
         );
-        expect(listed.get(uri), uri).toEqual(onDisk);
         checked += 1;
       }
     }
     expect(checked).toBe(listed.size);
+  });
+
+  it("refuses a URI that is not a listed schema, traversal included", async () => {
+    for (const uri of [
+      "ocpp-schema://v21/NoSuchMessage/request",
+      "ocpp-schema://v21/../NOTICE",
+      "ocpp-schema://v21/BootNotification/../../v16/Authorize/request",
+      "ocpp-schema://v16/../../../../etc/passwd",
+    ]) {
+      const res = await rpc("resources/read", { uri });
+      expect((res as { error?: unknown }).error, uri).toBeDefined();
+      expect(res.result, uri).toBeUndefined();
+    }
   });
 });
 
@@ -131,6 +167,16 @@ describe("tail_logs (#613)", () => {
     ).toEqual(["Boot accepted", "d"]);
     expect(tailLogEntries(entries, { contains: "boot" })).toHaveLength(1);
     expect(tailLogEntries(undefined, {})).toEqual([]);
+  });
+  it("refuses a log type that does not exist", async () => {
+    const res = await rpc("tools/call", {
+      name: "tail_logs",
+      arguments: { cpId: "x", type: "NoSuchType" },
+    });
+    expect(
+      (res as { error?: unknown }).error !== undefined ||
+        res.result?.isError === true,
+    ).toBe(true);
   });
   it("is advertised and answers an empty tail for a charge point without logs", async () => {
     const list = await rpc("tools/list");

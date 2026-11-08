@@ -1,16 +1,18 @@
 import type { McpServer } from "mcp-lite";
-import { schemas } from "@ocpp-cp-sim/ocpp/schemas";
+import { schemaNotice, schemaSources } from "@ocpp-cp-sim/ocpp/schemaSources";
 
 /**
  * #613: the OCA JSON Schemas of every OCPP message as MCP resources, so an
  * agent can read the schema of a message before it builds a `send_ocpp_call`
  * payload.
  *
- * The content is the vendored schema object serialized with the vendored
- * files' own 4-space indent: no key is added, removed or rewritten. Every
- * read also returns the vendored NOTICE (attribution, CC BY-ND 4.0 for the
- * 2.1 schemas) as a second content item, so the license travels with the
- * schema.
+ * The content is the text of the vendored file, byte for byte: the OCA schemas
+ * are CC BY-ND 4.0 and may be redistributed only unmodified, so nothing is
+ * parsed and re-serialized on the way (`schemaSources` is generated from the
+ * files by `scripts/generate-ocpp.ts`). The URI is built from the file name.
+ * Every read also returns the vendored NOTICE as a second content item, and
+ * every resource's description carries the license link, so the attribution
+ * and the license travel with the schema.
  */
 
 export const OCPP_SCHEMA_VERSIONS = ["v16", "v201", "v21"] as const;
@@ -24,22 +26,15 @@ const VERSION_LABEL: Record<OcppSchemaVersion, string> = {
 
 export const OCPP_SCHEMA_NOTICE_URI = "ocpp-schema://NOTICE";
 
-/** Verbatim text of `packages/ocpp/vendor/ocpp-schemas/NOTICE`. */
-export const OCPP_SCHEMA_NOTICE = [
-  "OCPP JSON Schemas — Attribution",
-  "================================",
-  "These JSON Schema files are the official Open Charge Alliance (OCA) OCPP message",
-  "schemas, vendored VERBATIM (unmodified) from the public repository:",
-  "  https://github.com/mobilityhouse/ocpp  @ commit d6b003d9f3ab411994f67d428ea51a82991f49e0",
-  "under ocpp/{v16,v201,v21}/schemas/.",
-  "",
-  "OCPP and its schemas are (c) Open Charge Alliance. The OCPP 2.1 schemas are licensed",
-  "Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0). The files",
-  "here are redistributed unmodified, with attribution; they are NOT modified (no patches/",
-  "overrides applied). Generated TypeScript types/validators derived from them live under",
-  "src/ocpp/ and are this project's own work.",
-  "",
-].join("\n");
+/** Verbatim text of `packages/ocpp/vendor/ocpp-schemas/NOTICE` (generated). */
+export const OCPP_SCHEMA_NOTICE = schemaNotice;
+
+/** The license of the OCA schemas, which CC BY-ND 4.0 §3(a)(1)(A)(iii) asks us to link. */
+export const OCPP_SCHEMA_LICENSE_URL =
+  "https://creativecommons.org/licenses/by-nd/4.0/";
+
+/** One line of attribution, repeated in every resource description. */
+const ATTRIBUTION = `© Open Charge Alliance, CC BY-ND 4.0 (${OCPP_SCHEMA_LICENSE_URL}), unmodified`;
 
 export interface OcppSchemaEntry {
   version: OcppSchemaVersion;
@@ -47,7 +42,8 @@ export interface OcppSchemaEntry {
   action: string;
   direction: "request" | "response";
   uri: string;
-  schema: object;
+  /** The vendored file's text, unmodified. */
+  text: string;
 }
 
 export function schemaUri(
@@ -62,31 +58,13 @@ export function schemaUri(
 export function listOcppSchemas(): OcppSchemaEntry[] {
   const entries: OcppSchemaEntry[] = [];
   for (const version of OCPP_SCHEMA_VERSIONS) {
-    for (const [key, schema] of Object.entries(schemas[version])) {
-      // Generated keys are "<action>Request<V>" / "<action>Response<V>", with
-      // the action camel-cased (so "AFRRSignal" is "afrrSignal"). Recover the
-      // exact casing from the schema's own `$id` or `title` when it carries
-      // the same name, else capitalize the first letter.
-      const m = /^(.+?)(Request|Response)V\d+$/.exec(key);
-      if (!m) continue;
-      const direction = m[2] === "Request" ? "request" : "response";
-      const fallback = m[1][0].toUpperCase() + m[1].slice(1);
-      const named = schema as { $id?: unknown; title?: unknown };
-      const candidates = [
-        typeof named.$id === "string" ? named.$id.split(":").pop() : undefined,
-        typeof named.title === "string" ? named.title : undefined,
-      ];
-      const action =
-        candidates
-          .map((c) => c?.replace(/(Request|Response)$/, ""))
-          .find((c) => c && c.toLowerCase() === fallback.toLowerCase()) ??
-        fallback;
+    for (const source of schemaSources[version]) {
       entries.push({
         version,
-        action,
-        direction,
-        uri: schemaUri(version, action, direction),
-        schema,
+        action: source.action,
+        direction: source.direction,
+        uri: schemaUri(version, source.action, source.direction),
+        text: source.text,
       });
     }
   }
@@ -98,8 +76,7 @@ export function registerSchemaResources(mcp: McpServer): void {
     OCPP_SCHEMA_NOTICE_URI,
     {
       name: "OCPP JSON Schemas: license notice",
-      description:
-        "Attribution and license (OCA; CC BY-ND 4.0 for the 2.1 schemas) of the OCPP JSON Schemas served as resources.",
+      description: `Attribution and license of the OCPP JSON Schemas served as resources: ${ATTRIBUTION}.`,
       mimeType: "text/plain",
     },
     async (uri) => ({
@@ -119,10 +96,7 @@ export function registerSchemaResources(mcp: McpServer): void {
       entry.uri,
       {
         name: `${VERSION_LABEL[entry.version]} ${entry.action} ${entry.direction}`,
-        description:
-          `JSON Schema of the ${entry.action} ${entry.direction} (${VERSION_LABEL[entry.version]}), ` +
-          "as published by the Open Charge Alliance, unmodified. " +
-          `License notice: ${OCPP_SCHEMA_NOTICE_URI}`,
+        description: `JSON Schema, ${ATTRIBUTION}. Notice: ${OCPP_SCHEMA_NOTICE_URI}`,
         mimeType: "application/schema+json",
       },
       async (uri) => ({
@@ -130,7 +104,7 @@ export function registerSchemaResources(mcp: McpServer): void {
           {
             uri: uri.href,
             type: "text",
-            text: JSON.stringify(entry.schema, null, 4),
+            text: entry.text,
             mimeType: "application/schema+json",
           },
           {

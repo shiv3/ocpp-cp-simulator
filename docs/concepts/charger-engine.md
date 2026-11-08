@@ -81,7 +81,7 @@ InboundCallGate / CallExchange  ◄──►  OCPP adapters (1.6 JSON, 2.x, SOAP
 3. **JSON scenarios stay.** They keep GUI editing, pause / step / resume, and fleet declaration. They drive
    the engine and may select behaviors. Existing files keep working unchanged.
 4. **No behavior change unless configured.** With no behavior configured, the bytes on the wire and their
-   order are the same as before. In particular 2.x `UpdateFirmware` stays ack-only by default. This is
+   order are the same as before. In particular 2.x `UpdateFirmware` stays ack-only by default (its train is the opt-in param `train`, #600). The one deliberate exception is 2.x `GetLog` (#601), which now sends `Uploading` and `Uploaded` after an accepted request, as 1.6 does; `default.logs` with `auto: false` brings the old wire back. This is
    judged by the [golden wire test](../analyses/testing-strategy.md#golden-wire-test), whose fixtures are
    recorded on the base commit, never on the branch.
 5. **No code over the wire.** Socket.IO, MCP and OCPP accept JSON only (#569 forbids executable content).

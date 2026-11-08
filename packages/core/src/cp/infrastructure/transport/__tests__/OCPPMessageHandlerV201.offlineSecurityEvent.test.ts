@@ -111,6 +111,7 @@ function setup(ocppVersion: string) {
       messageTimeout: () => 30,
       meterValuesSampledData: () => [],
       offlineQueuingSeverity: () => 5,
+      offlineQueueMaxEvents: () => 1000,
     },
   };
   const handler = new OCPPMessageHandlerV201(

@@ -1089,6 +1089,33 @@ export class CLIChargePointService {
     );
   }
 
+  /** Whether the socket to the CSMS is open right now (#622). */
+  isOnline(): boolean {
+    return this._chargePoint.isOnline();
+  }
+
+  /** Ids of the connectors with a session running right now (#622). */
+  openTransactionConnectorIds(): number[] {
+    return [...this._chargePoint.connectors.values()]
+      .filter((connector) => connector.hasRunningTransaction)
+      .map((connector) => connector.id);
+  }
+
+  /**
+   * Subscribe to the frames this charge point writes to and reads from its
+   * socket, as the `Sent: <raw>` / `Received: <raw>` lines the logger emits
+   * (#622: a graceful shutdown waits for the CSMS to answer the stops).
+   * Returns the unsubscribe function.
+   */
+  onWireFrame(
+    handler: (direction: "Sent" | "Received", raw: string) => void,
+  ): () => void {
+    return this._chargePoint.logger.on("log.WebSocket", (entry) => {
+      const match = /^(Sent|Received): (.*)$/s.exec(entry.message);
+      if (match) handler(match[1] as "Sent" | "Received", match[2]);
+    });
+  }
+
   /** Whether the connector still exists. A reload held for one that has been
    *  removed can never be applied, and nothing else would say so (#314). */
   hasConnector(connectorId: number): boolean {

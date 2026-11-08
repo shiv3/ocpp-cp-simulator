@@ -31,6 +31,13 @@ import { RegistryChargePointService } from "./RegistryChargePointService";
 import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
+import {
+  createAccessGuard,
+  DEFAULT_RATE_LIMIT_MAX_IPS,
+  isAccessGuardActive,
+  type AccessGuardOptions,
+} from "./accessGuard";
+import { stopTransactionsAndWait } from "./gracefulShutdown";
 import { getGlobalLogFormat } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import { expandIdPattern } from "@ocpp-cp-sim/contracts/index";
 import {
@@ -182,6 +189,24 @@ export interface ServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms: boolean;
+  /**
+   * #620: Host allowlist, trusted proxies, TLS requirement and per-IP rate
+   * limit on the HTTP listeners. Absent or all-empty = none of them.
+   */
+  readonly access?: AccessGuardOptions;
+  /**
+   * #622: on SIGINT / SIGTERM stop every running transaction and wait up to
+   * `waitMs` for the CSMS to receive the stops before the process exits.
+   * Absent = exit at once, as before.
+   */
+  readonly shutdownStopTransactions?: { readonly waitMs: number };
+  /**
+   * #622: `false` rebuilds the charge points of `--state-db` without dialling
+   * them (operators connect them with `cp.connect`). Default `true`.
+   */
+  readonly connectRestored?: boolean;
+  /** #622: `cp.bulk` per-charge-point wait (ms). Default `CP_BULK_WAIT_MS`. */
+  readonly cpBulkWaitMs?: number;
   /**
    * Re-read the blueprint-instantiated idTag files and scenario files this
    * process loaded when they change on disk (#314). Off by default: a daemon
@@ -476,7 +501,18 @@ export async function startServer(
     startupTargets,
     opts.autoConnect === true,
   );
-  registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
+  // #622 `--no-connect-restored`: the fleet comes back as it was stored and
+  // stays offline until `cp.connect` / `cp.bulk` says otherwise. A charge point
+  // `--cp-id` names is still dialled by the bootstrap loop below.
+  if (opts.connectRestored === false) {
+    if (restored.length > 0) {
+      serverLog(
+        `--no-connect-restored: ${restored.length} restored CP(s) stay disconnected`,
+      );
+    }
+  } else {
+    registry.connectRestored(restored.filter((cpId) => !dialLater.has(cpId)));
+  }
   // Fixed for the daemon's lifetime and answered by both transports:
   // `server.info` over Socket.IO and over MCP `call_method` must describe
   // the same daemon, so the one object is handed to both below (#354
@@ -507,6 +543,7 @@ export async function startServer(
     chargePointService,
     fileReload,
     webConsoleBasicAuth: opts.webConsoleBasicAuth,
+    cpBulkWaitMs: opts.cpBulkWaitMs,
     requestShutdown: () => {
       lifecycle?.requestShutdown();
     },
@@ -528,6 +565,16 @@ export async function startServer(
   lifecycle = createLifecycle({
     pidPath: opts.pidPath,
     registry,
+    beforeShutdown: opts.shutdownStopTransactions
+      ? async (skip) => {
+          await stopTransactionsAndWait(
+            registry,
+            opts.shutdownStopTransactions?.waitMs ?? 0,
+            serverLog,
+            skip,
+          );
+        }
+      : undefined,
     onShutdownStart: () => {
       stopBehaviorWatch();
       fileReload?.close();
@@ -557,6 +604,7 @@ export async function startServer(
     vehicleCatalog,
     chargePointService,
     fileReload,
+    cpBulkWaitMs: opts.cpBulkWaitMs,
   });
   const mcpHandler = createMcpHandler(runtimeDeps);
 
@@ -572,7 +620,28 @@ export async function startServer(
       }
     : null;
 
+  const accessGuard =
+    opts.access && isAccessGuardActive(opts.access)
+      ? createAccessGuard({ ...opts.access, healthPath: opts.healthPath })
+      : null;
+  if (accessGuard) {
+    serverLog(
+      "Access guard: " +
+        [
+          (opts.access?.allowedHosts?.length ?? 0) > 0 &&
+            `allowed hosts ${opts.access?.allowedHosts?.join(", ")}`,
+          accessGuard.restrictsForwardedHeaders &&
+            `trusted proxies ${opts.access?.trustedProxies?.join(", ")}`,
+          opts.access?.requireTls && "TLS required for non-loopback clients",
+          (opts.access?.rateLimitPerIp ?? 0) > 0 &&
+            `${opts.access?.rateLimitPerIp} req/s per IP (max ${opts.access?.rateLimitMaxIps ?? DEFAULT_RATE_LIMIT_MAX_IPS} IPs tracked)`,
+        ]
+          .filter(Boolean)
+          .join("; "),
+    );
+  }
   const apiHandlers = createHttpHandlers({
+    accessGuard,
     registry,
     bus,
     lifecycle,
@@ -586,6 +655,7 @@ export async function startServer(
   });
   const consoleHandlers = opts.staticDir
     ? createHttpHandlers({
+        accessGuard,
         registry,
         bus,
         lifecycle,

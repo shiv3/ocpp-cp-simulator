@@ -740,7 +740,7 @@ describe("OCPP 2.0.1 Reset", () => {
     }
   });
 
-  it("accepts v21 ImmediateAndResume without ending the active transaction", async () => {
+  it("rejects v21 ImmediateAndResume while a transaction runs (B13.FR.01)", async () => {
     const { csms, cp } = newChargePoint(
       "CP21-RESET-IMMEDIATE-AND-RESUME",
       "OCPP-2.1",
@@ -758,17 +758,41 @@ describe("OCPP 2.0.1 Reset", () => {
       expect(result).toEqual([
         3,
         "reset-immediate-and-resume",
-        { status: "Accepted" },
+        { status: "Rejected" },
       ]);
 
       const resultIndex = csms.received.indexOf(result);
-      const boot = await csms.waitForFrame(
+      await expectNoFrame(
+        csms,
         callFrameAfter(csms, resultIndex, "BootNotification"),
       );
-      expect(csms.received.indexOf(boot)).toBeGreaterThan(resultIndex);
       await expectNoFrame(
         csms,
         transactionEventFrameAfter(csms, resultIndex, "Ended"),
+      );
+      expect(cp.getConnector(1)?.hasRunningTransaction).toBe(true);
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("accepts v21 ImmediateAndResume as an Immediate reset without a transaction (B13.FR.02)", async () => {
+    const { csms, cp } = newChargePoint(
+      "CP21-RESET-IMMEDIATE-AND-RESUME-IDLE",
+      "OCPP-2.1",
+    );
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+
+      const result = await sendReset(csms, "reset-resume-idle", {
+        type: "ImmediateAndResume",
+      });
+      expect(result).toEqual([3, "reset-resume-idle", { status: "Accepted" }]);
+      await csms.waitForFrame(
+        callFrameAfter(csms, csms.received.indexOf(result), "BootNotification"),
       );
     } finally {
       cp.disconnect();

@@ -43,6 +43,7 @@ import type {
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -927,8 +928,15 @@ export class RemoteChargePointService implements ChargePointService {
     await this.runCpRpc(id, "stop_heartbeat");
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
-    await this.runCpRpc(id, "authorize", { tagId });
+  async authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void> {
+    await this.runCpRpc(id, "authorize", {
+      tagId,
+      ...(idTokenType ? { idTokenType } : {}),
+    });
   }
 
   async sendDataTransfer(
@@ -1012,6 +1020,7 @@ export class RemoteChargePointService implements ChargePointService {
       ...(options?.chargingState
         ? { chargingState: options.chargingState }
         : {}),
+      ...(options?.idTokenType ? { idTokenType: options.idTokenType } : {}),
     });
   }
 

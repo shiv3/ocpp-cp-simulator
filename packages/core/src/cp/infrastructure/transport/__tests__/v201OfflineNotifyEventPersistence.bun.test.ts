@@ -89,6 +89,7 @@ function station(db: BunSqliteDatabase, ocppVersion: string) {
       transactionMessageAttempts: () => 3,
       transactionMessageRetryInterval: () => 60,
       messageTimeout: () => 30,
+      offlineQueueMaxEvents: () => 1000,
       meterValuesSampledData: () => [],
       offlineQueuingSeverity: () => 5,
     },

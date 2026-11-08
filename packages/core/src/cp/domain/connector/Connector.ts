@@ -19,7 +19,7 @@ import type {
   RecurrencyKindType,
 } from "../types/OcppTypes";
 import { OCPPStatus, ChargingProfilePurposeType } from "../types/OcppTypes";
-import type { ScenarioMode } from "../../application/scenario/ScenarioTypes";
+import type { ScenarioMode } from "@ocpp-cp-simulator/contracts/scenario";
 import type { Transaction } from "./Transaction";
 import {
   applyPatchToTransaction,

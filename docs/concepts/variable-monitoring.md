@@ -25,7 +25,7 @@ sources:
 related:
   - ocpp-versions-and-transports.md
   - state-persistence.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # OCPP 2.x variable monitoring
@@ -46,7 +46,8 @@ version surface.
 
 ## The device model behind a monitor
 
-A monitor targets a component/variable pair resolved through the same map as
+A monitor targets a component/variable pair resolved through the same
+[Device Model registry](../entities/device-model.md) as
 `GetVariables` / `SetVariables`
 ([`deviceModelMap.ts`](../../packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts)):
 each 2.x variable there is backed by a configuration key, a 1.6 key or a

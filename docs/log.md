@@ -2388,3 +2388,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | Device Model registry with variable metadata (#604)
+
+- The 2.x component/variable mapping moved from `deviceModelMap.ts` into a typed registry (`packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts`) with mutability, data type, values list, limits, unit, default and persistence per variable; GetVariables, SetVariables, SetVariableMonitoring and GetBaseReport resolve through it, shared 1.6 keys still map to the `ConfigurationStore`. `ClockCtrlr`, `DeviceDataCtrlr`, `TariffCostCtrlr` and `ISO15118Ctrlr` are registered without variables; `TxCtrlr.TxStartPoint` / `TxStopPoint` are registered `ReadOnly` (#569: no writable variable without simulated behavior). Wire output unchanged. New page: [Device Model registry](entities/device-model.md); updated [Variable monitoring](concepts/variable-monitoring.md) and [Local authorization](concepts/local-authorization.md).

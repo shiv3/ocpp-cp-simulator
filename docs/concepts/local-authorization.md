@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Local authorization
@@ -155,7 +155,7 @@ deletion of the charge point.
 ## OCPP 2.x
 
 OCPP 2.0.1 and 2.1 charge points run the same decision on the same store.
-Get/SetVariables and GetBaseReport reach the keys through the device model
+Get/SetVariables and GetBaseReport reach the keys through the [device model registry](../entities/device-model.md)
 (2.0.1 Part 2, referenced components §2.3–§2.4):
 
 | Component.Variable                       | Store key                    |

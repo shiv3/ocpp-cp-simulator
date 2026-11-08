@@ -50,6 +50,8 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /** `--fleet-template <file>`, repeatable (#445). */
+  readonly fleetTemplateFiles: readonly string[];
   /**
    * `--label key=value` (#472): labels every bootstrapped charge point is
    * created with. A charge point restored from `--state-db` keeps its own.

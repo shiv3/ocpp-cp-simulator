@@ -49,6 +49,8 @@ import { VehicleProfileRepository } from "@ocpp-cp-sim/core/cp/domain/persistenc
 import { OpenEvDirectoryClient } from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
+import { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
+import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
 import { BlueprintRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
@@ -96,6 +98,8 @@ export interface ServerOptions {
    */
   readonly bootstrapCount?: number;
   readonly bootstrapIdPattern?: string;
+  /** Templates read from `--fleet-template` files (#445); read-only. */
+  readonly fleetTemplates?: readonly FleetTemplate[];
   /**
    * SOAP callback inputs, kept unresolved so a fleet can derive one address
    * per charge point. `bootstrap.soapCallbackUrl` is already resolved for the
@@ -296,6 +300,12 @@ export async function startServer(
   // blueprints in memory, so a per-transport instance would make a blueprint
   // saved over socket.io `not_found` over MCP, and vice versa.
   const blueprints = new BlueprintRepository(database);
+  // #445: the same for fleet templates; `--fleet-template` files are held by
+  // the repository, read-only.
+  const fleetTemplates = new FleetTemplateRepository(
+    database,
+    opts.fleetTemplates ?? [],
+  );
   // #458: one store and one catalog client for both transports, for the
   // same reason as the blueprints above.
   const vehicleProfiles = new VehicleProfileRepository(database);
@@ -502,6 +512,7 @@ export async function startServer(
     scenarioRepository,
     connectorSettingsRepository,
     blueprints,
+    fleetTemplates,
     vehicleProfiles,
     vehicleCatalog,
     chargePointService,
@@ -553,6 +564,7 @@ export async function startServer(
     scenarioRepository,
     connectorSettingsRepository,
     blueprints,
+    fleetTemplates,
     vehicleProfiles,
     vehicleCatalog,
     chargePointService,

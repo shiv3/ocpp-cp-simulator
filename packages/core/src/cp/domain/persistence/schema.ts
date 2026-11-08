@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -207,6 +207,16 @@ CREATE TABLE IF NOT EXISTS blueprints (
   updated_at  TEXT NOT NULL
 );
 
+-- Heterogeneous fleet templates (#445): blueprint and scenario-template ids
+-- composed into one reusable fleet. Daemon-side only, like \`blueprints\`.
+CREATE TABLE IF NOT EXISTS fleet_templates (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  definition  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS charge_point_state (
   cp_id             TEXT PRIMARY KEY,
   desired_connected INTEGER NOT NULL DEFAULT 0,
@@ -378,6 +388,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "logs", perCp: true, resetOnStateReset: true },
   { name: "charge_points", perCp: true, resetOnStateReset: true },
   { name: "blueprints", perCp: false, resetOnStateReset: true },
+  { name: "fleet_templates", perCp: false, resetOnStateReset: true },
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
   { name: "engine_state", perCp: true, resetOnStateReset: true },
@@ -738,6 +749,9 @@ export function runMigrations(db: Database): void {
       db.exec("ALTER TABLE charge_points ADD COLUMN behaviors TEXT");
     }
   }
+
+  // v24 → v25 (#445): the `fleet_templates` table, `IF NOT EXISTS` in
+  // SCHEMA_SQL like the v14 step. Additive.
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

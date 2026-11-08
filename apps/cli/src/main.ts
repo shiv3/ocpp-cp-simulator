@@ -58,6 +58,8 @@ import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
+import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
 /** Result of a `dist/` lookup: where it was found (if at all) and every
@@ -189,6 +191,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpId: string | null = null;
   let cpCount = 1;
   let cpIdPattern: string | null = null;
+  const fleetTemplateFiles: string[] = [];
   const labelEntries: Array<[string, string]> = [];
   let metrics = false;
   let metricsNoAuth = false;
@@ -290,6 +293,14 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--cp-count":
         cpCount = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--fleet-template":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --fleet-template needs a file path\n");
+          process.exit(1);
+        }
+        fleetTemplateFiles.push(next);
         i++;
         break;
       case "--cp-id-pattern":
@@ -946,6 +957,14 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  if (fleetTemplateFiles.length > 0 && !isServerMode) {
+    // Templates are served and instantiated by the daemon; outside a server
+    // mode the flag would be accepted and ignored.
+    process.stderr.write(
+      "Error: --fleet-template needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
   if (labels && !isServerMode) {
     // Labels are read by `cp.list` and the console only; the standalone REPL
     // / JSON paths have neither, so the flag would be accepted and ignored.
@@ -1166,6 +1185,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    fleetTemplateFiles,
     labels,
     metrics,
     metricsNoAuth,
@@ -1286,6 +1306,10 @@ Options:
   --cp-id-pattern <tpl>    Id template used with --cp-count (default:
                            <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
                            it.
+  --fleet-template <file>  Server mode: load fleet template(s) from a JSON file
+                           (one template or an array; repeatable). Read-only;
+                           list and instantiate with fleet.template.* /
+                           fleet.create.
   --label <key=value>      Server mode: label every bootstrapped charge point.
                            Repeatable; split on the first '='. Requires
                            --cp-id. A charge point restored from --state-db
@@ -1819,7 +1843,17 @@ async function main(): Promise<void> {
       options.behaviorFiles,
       options.useBehaviors,
     );
+    let fleetTemplates: FleetTemplate[] = [];
+    try {
+      fleetTemplates = loadFleetTemplateFiles(options.fleetTemplateFiles);
+    } catch (err) {
+      process.stderr.write(
+        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    }
     await startServer({
+      fleetTemplates,
       behaviors,
       watchBehaviors: options.watchBehaviors,
       allowBehaviorReload: options.allowBehaviorReload,

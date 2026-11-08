@@ -2396,3 +2396,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | The renewed client certificate no longer depends on the CertificateSigned answer (#564)
 
 - On 2.0.1 / 2.1 profile 3 the renewed Charging Station certificate is handed to the transport when the chain is stored (`certificateStored`, `ChargePoint.adoptRenewedClientCertificate`), not from the `afterResult` effect; that effect keeps only the reconnect of an open connection, and skips it when the open connection already presents the certificate (`OCPPWebSocket.presentsClientCertificate`). Handing the same identity over twice is a no-op. Page touched: [Security profiles](concepts/security-profiles.md#renewed-client-certificate). Wire behavior is unchanged (golden fixtures untouched).
+
+## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
+
+- `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.

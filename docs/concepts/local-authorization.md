@@ -26,7 +26,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Local authorization
@@ -192,6 +192,10 @@ Get/SetVariables and GetBaseReport reach the keys through the device model
 **Behaviour change in #452 (2.x wire).** Under the default configuration
 (cache disabled), ClearCache now answers `Rejected` instead of `Accepted`.
 GetBaseReport lists the five new variables.
+
+### CustomerInformation
+
+A 2.x `CustomerInformation` (N09 / N10, #602) names a customer by `idToken` and / or `customerIdentifier` (both matched like any identifier, case insensitively). Without `idToken`, `customerIdentifier` and `customerCertificate` the answer is `Invalid` (reason code `MissingParam`); with `report` and `clear` both false it is `Rejected` (`NoAction`); otherwise `Accepted`. Once the answer settled, `report` sends the Authorization Cache entry, the Local Authorization List entry and the running transactions of the customer in `NotifyCustomerInformation` (`seqNo` from 0, `tbc` on every part but the last, parts of at most 512 characters, the report taken before a `clear`), and `clear` removes the matching Authorization Cache entries, whatever `AuthorizationCacheEnabled` says. A `clear` alone sends no `NotifyCustomerInformation`. The Local Authorization List belongs to the CSMS and is never cleared, and a `customerCertificate` alone matches nothing: the simulator keeps no per-certificate customer data.
 
 ## Control-plane seam
 

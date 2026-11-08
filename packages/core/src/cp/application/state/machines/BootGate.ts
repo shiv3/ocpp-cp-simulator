@@ -50,6 +50,18 @@ export class BootGate {
   }
 
   /**
+   * §4.2: "While Rejected, the Charge Point SHALL NOT respond to any Central
+   * System initiated message." True from the Rejected answer until the retry
+   * interval has passed, i.e. until the retry BootNotification is due. Pending
+   * and Accepted answer as usual.
+   */
+  isInboundSilenced(now?: Date): boolean {
+    if (this._status.status !== "Rejected") return false;
+    const currentTime = now ?? new Date(this.clock.now());
+    return currentTime < this._status.retryAfter;
+  }
+
+  /**
    * Run `fn` as the answer to an accepted TriggerMessage. §4.2: a Pending
    * station may send "unless it has been instructed by the Central System to
    * do so with a TriggerMessage.req", so a CALL made synchronously inside

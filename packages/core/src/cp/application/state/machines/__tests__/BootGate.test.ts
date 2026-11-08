@@ -301,6 +301,22 @@ describe("BootGate", () => {
   });
 });
 
+describe("BootGate.isInboundSilenced (§4.2)", () => {
+  const retryAfter = new Date("2030-01-01T00:00:00Z");
+
+  it("is silent only while Rejected and before the retry is due", () => {
+    const gate = new BootGate();
+    expect(gate.isInboundSilenced()).toBe(false);
+    gate.set({ status: "Pending" });
+    expect(gate.isInboundSilenced()).toBe(false);
+    gate.set({ status: "Accepted" });
+    expect(gate.isInboundSilenced()).toBe(false);
+    gate.set({ status: "Rejected", retryAfter });
+    expect(gate.isInboundSilenced(new Date("2029-12-31T23:59:59Z"))).toBe(true);
+    expect(gate.isInboundSilenced(retryAfter)).toBe(false);
+  });
+});
+
 describe("BootGate.runTriggered (§4.2)", () => {
   const retryAfter = new Date("2030-01-01T00:00:00Z");
   const before = new Date("2029-12-31T23:59:00Z");

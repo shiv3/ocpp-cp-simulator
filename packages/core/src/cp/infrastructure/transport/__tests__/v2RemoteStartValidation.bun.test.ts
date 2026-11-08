@@ -33,7 +33,7 @@ async function withStation(
   ) => Promise<void>,
   connectors = 2,
 ): Promise<void> {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const cp = new ChargePoint(
     "CP-RST-VALIDATION",
     DefaultBootNotification,

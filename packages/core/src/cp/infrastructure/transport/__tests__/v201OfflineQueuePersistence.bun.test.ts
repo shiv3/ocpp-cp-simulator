@@ -32,6 +32,16 @@ class FakeSocket {
   answer(messageId: string): void {
     this.handler!(3, messageId, "", {});
   }
+  /** A 2.x station sends the next CALL only after the answer (#708): answer
+   *  every written CALL, one at a time, until no new one appears. */
+  async answerAll(): Promise<void> {
+    let answered = 0;
+    while (answered < this.calls.length) {
+      this.answer(this.calls[answered]!.messageId);
+      answered += 1;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
   onCloseTransaction(): void {}
   isConnected(): boolean {
     return this.connected;
@@ -151,6 +161,11 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         after = station(db, version);
         after.socket.connected = true;
         after.handler.flushPendingQueue();
+        // #708: one CALL in flight; the second waits for the answer.
+        expect(after.socket.calls).toHaveLength(1);
+        // #554: the rows stay until the CSMS answers.
+        expect(rows(db)).toHaveLength(2);
+        await after.socket.answerAll();
         const replayed = after.socket.calls.map(
           (c) => c.payload as TransactionEventRequestV201,
         );
@@ -161,10 +176,6 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         for (const payload of replayed) {
           expect(strictValidationErrors(SCHEMAS[version], payload)).toEqual([]);
         }
-        // #554: the rows stay until the CSMS answers.
-        expect(rows(db)).toHaveLength(2);
-        for (const call of after.socket.calls)
-          after.socket.answer(call.messageId);
         expect(rows(db)).toEqual([]);
       } finally {
         // Clear the replays' MessageTimeout timers before the next file.
@@ -196,6 +207,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         expect(rows(db)).toHaveLength(2);
 
         after.handler.flushPendingQueue();
+        await after.socket.answerAll();
         const replayed = after.socket.calls.map(
           (c) => c.payload as TransactionEventRequestV201,
         );
@@ -203,6 +215,42 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           ["Started", 0],
           ["Updated", 1],
         ]);
+      } finally {
+        after?.handler.onWebSocketClosed();
+        db.close();
+      }
+    });
+
+    it("keeps the row of a replay that waited for the slot and was refused only then (#554, #708)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      let after: ReturnType<typeof station> | undefined;
+      try {
+        const before = station(db, version);
+        before.handler.sendTransactionEvent({
+          phase: "started",
+          transaction: before.tx,
+          connectorId: 1,
+        });
+        before.handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+        await Promise.resolve();
+
+        after = station(db, version);
+        after.socket.connected = true;
+        after.handler.flushPendingQueue();
+        // Started holds the slot; Updated waits and is refused when its turn
+        // comes (a full network-simulation queue).
+        expect(after.socket.calls).toHaveLength(1);
+        after.socket.refuseNext = 1;
+        after.socket.answer(after.socket.calls[0].messageId);
+        expect(after.socket.calls).toHaveLength(1);
+        expect(
+          rows(db).map(
+            (row) =>
+              (JSON.parse(row.payload) as { eventType: string }).eventType,
+          ),
+        ).toEqual(["Updated"]);
       } finally {
         after?.handler.onWebSocketClosed();
         db.close();

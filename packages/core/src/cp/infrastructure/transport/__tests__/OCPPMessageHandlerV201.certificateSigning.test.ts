@@ -49,6 +49,13 @@ type WireEvent =
 
 class FakeSocket {
   readonly wire: WireEvent[] = [];
+  /** What the CSMS answers at once, per action, after the write returns. A
+   *  2.x station sends the next CALL only after the answer (#708); the tests
+   *  answer SignCertificate themselves, since its answer starts the back-off. */
+  readonly autoAnswers = new Map<string, unknown>([
+    ["SecurityEventNotification", {}],
+    ["GetCertificateStatus", { status: "Failed" }],
+  ]);
   private handler:
     | ((type: number, id: string, action: string, payload: unknown) => void)
     | null = null;
@@ -74,6 +81,10 @@ class FakeSocket {
   ): boolean {
     this.wire.push({ kind: "call", messageId, action, payload });
     onSettled?.({ outcome: "written" });
+    if (this.autoAnswers.has(action)) {
+      const answer = this.autoAnswers.get(action);
+      queueMicrotask(() => this.deliverResult(messageId, answer));
+    }
     return true;
   }
   sendResult(
@@ -183,6 +194,21 @@ async function settle(socket: FakeSocket, count: number): Promise<void> {
   });
 }
 
+/** Lets the fake CSMS answer a chain of CALLs, one microtask each. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+}
+
+/** Two CSRs in a row: the second SignCertificate waits behind the unanswered
+ *  first (§4.1.1) until its MessageTimeout. */
+async function twoSignRequests(socket: FakeSocket): Promise<void> {
+  await trigger(socket, "SignChargingStationCertificate");
+  await settle(socket, 1);
+  await trigger(socket, "SignChargingStationCertificate");
+  vi.advanceTimersByTime(30_000);
+  await settle(socket, 2);
+}
+
 let seq = 0;
 
 async function trigger(
@@ -246,10 +272,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
   it("generates a new key pair on every trigger (A02.FR.02)", async () => {
     const { socket } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 2);
+    await twoSignRequests(socket);
     const [first, second] = socket.calls("SignCertificate");
     expect(second.payload.csr).not.toBe(first.payload.csr);
   });
@@ -458,8 +481,12 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
       const { socket, handler } = setup(version);
       await trigger(socket, "SignChargingStationCertificate");
       await settle(socket, 1);
+      // One CALL at a time (#708): the manual request goes out once the
+      // triggered one is answered.
+      const [triggered] = socket.calls("SignCertificate");
+      socket.deliverResult(triggered.messageId, { status: "Accepted" });
       await handler.sendSignCertificate();
-      const [triggered, manual] = socket.calls("SignCertificate");
+      const [, manual] = socket.calls("SignCertificate");
       socket.deliverResult(manual.messageId, { status: "Accepted" });
       vi.advanceTimersByTime(10_000);
       const resent = socket.calls("SignCertificate")[2];
@@ -648,7 +675,11 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
           sign.payload,
         );
 
-        // A second rejection does not start the sequence over either.
+        // A second rejection does not start the sequence over either. The
+        // CSMS answers the resend first (one CALL in flight, §4.1.1).
+        socket.deliverResult(socket.calls("SignCertificate")[1].messageId, {
+          status: "Accepted",
+        });
         await deliverSigned(socket, await payload());
         vi.advanceTimersByTime(20_000);
         expect(socket.calls("SignCertificate")).toHaveLength(3);
@@ -659,10 +690,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
     it("does not let a chain for a CSR a newer trigger replaced cut the current CSR's resends", async () => {
       const { socket } = setup(version);
-      await trigger(socket, "SignChargingStationCertificate");
-      await settle(socket, 1);
-      await trigger(socket, "SignChargingStationCertificate");
-      await settle(socket, 2);
+      await twoSignRequests(socket);
       const [stale, current] = socket.calls("SignCertificate");
       socket.deliverResult(current.messageId, { status: "Accepted" });
 
@@ -723,10 +751,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
   it("ignores a late answer to a request a newer CSR replaced", async () => {
     const { socket } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 2);
+    await twoSignRequests(socket);
     const [stale, current] = socket.calls("SignCertificate");
     socket.deliverResult(current.messageId, { status: "Accepted" });
     vi.advanceTimersByTime(5_000);
@@ -739,10 +764,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
   it("does not start the back-off on a replaced request's Accepted", async () => {
     const { socket } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 2);
+    await twoSignRequests(socket);
     const [stale, current] = socket.calls("SignCertificate");
     socket.deliverResult(stale.messageId, { status: "Accepted" });
     vi.advanceTimersByTime(5_000);
@@ -979,6 +1001,7 @@ describe.each([
     await trigger(env.socket, "SignV2GCertificate");
     await settle(env.socket, 1);
     const [sign] = env.socket.calls("SignCertificate");
+    env.socket.deliverResult(sign.messageId, { status: "Accepted" });
     const root = await selfSignedRoot("01", "V2G Root");
     const sub = await subCa("02", "V2G Sub-CA", root, {
       ocspUrl: "http://ocsp.example.com/sub",
@@ -1022,12 +1045,15 @@ describe.each([
 
   it("caches an Accepted ocspResult and keeps nothing for Failed (M06.FR.02-04, FR.06)", async () => {
     const env = setup(version);
+    env.socket.autoAnswers.delete("GetCertificateStatus");
     await installV2gChain(env);
-    const [leafRequest, subRequest] = env.socket.calls("GetCertificateStatus");
+    const [leafRequest] = env.socket.calls("GetCertificateStatus");
     env.socket.deliverResult(leafRequest.messageId, {
       status: "Accepted",
       ocspResult: OCSP_RESPONSE_GOOD_BASE64,
     });
+    // The sub-CA's request goes after the leaf's answer.
+    const subRequest = env.socket.calls("GetCertificateStatus")[1];
     env.socket.deliverResult(subRequest.messageId, { status: "Failed" });
 
     const [leafHash, subHash] =
@@ -1041,14 +1067,18 @@ describe.each([
   it("asks again at boot and then every week (M06.FR.06, FR.10)", async () => {
     const env = setup(version);
     await installV2gChain(env);
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(2);
 
     env.handler.setBootStatus({ status: "Accepted" });
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(4);
 
     vi.advanceTimersByTime(7 * 24 * 3600 * 1000 - 1);
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(4);
     vi.advanceTimersByTime(1);
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(6);
 
     env.handler.onWebSocketClosed();

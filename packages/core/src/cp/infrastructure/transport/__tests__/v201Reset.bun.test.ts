@@ -128,7 +128,7 @@ function newChargePoint(
   csms: MockCsms;
   cp: ChargePoint;
 } {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const cp = new ChargePoint(
     id,
     DefaultBootNotification,

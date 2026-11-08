@@ -656,7 +656,9 @@ both("ns-remote-stop-drop", async (r) => {
     : r.csms.callNoWait("RequestStopTransaction", { transactionId: id }));
   await wait(100);
   await dropAndBack(r);
-  await wait(1000);
+  // 2.x sends one CALL at a time (#708): three CALLs under 500 ms latency
+  // need more than 1 s.
+  await wait(r.is16 ? 1000 : 3500);
   await settle(r);
 });
 both("ns-remote-start-drop", async (r) => {
@@ -673,7 +675,9 @@ both("ns-remote-start-drop", async (r) => {
       }));
   await wait(100);
   await dropAndBack(r);
-  await wait(1000);
+  // 2.x sends one CALL at a time (#708): three CALLs under 500 ms latency
+  // need more than 1 s.
+  await wait(r.is16 ? 1000 : 3500);
   await settle(r);
 });
 both("ns-reset-drop", async (r) => {
@@ -682,7 +686,9 @@ both("ns-reset-drop", async (r) => {
   r.csms.callNoWait("Reset", { type: r.is16 ? "Soft" : "Immediate" });
   await wait(100);
   await dropAndBack(r);
-  await wait(1000);
+  // 2.x sends one CALL at a time (#708): three CALLs under 500 ms latency
+  // need more than 1 s.
+  await wait(r.is16 ? 1000 : 3500);
   await settle(r);
 });
 both("ns-avail-drop", async (r) => {
@@ -1786,6 +1792,20 @@ c16("meter-callerror-no-retry", async (r) => {
   r.cp.setMeterValue(1, 100);
   r.cp.sendMeterValue(1);
   await wait(2500);
+  await settle(r);
+});
+// E13.FR.03/04 with Part 4 §4.1.1 (#708): Ended waits for the resent Started.
+c201("event-resend-holds-ended", async (r) => {
+  cfg(r, "TransactionMessageAttempts", "3");
+  cfg(r, "TransactionMessageRetryInterval", "1");
+  r.csms.responders.TransactionEvent = (_p, c) =>
+    c.nth < 2 ? { error: { code: "InternalError", description: "x" } } : {};
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-E", 1);
+  await wait(200);
+  r.cp.stopTransaction(1);
+  await wait(3000);
   await settle(r);
 });
 c201("event-callerror-retries", async (r) => {

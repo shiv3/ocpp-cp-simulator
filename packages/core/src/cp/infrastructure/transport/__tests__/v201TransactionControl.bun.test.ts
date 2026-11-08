@@ -92,6 +92,8 @@ describe("OCPP 2.0.1 transaction control", () => {
       expect(started.triggerReason).toBe("RemoteStart");
       expect(started.transactionInfo.remoteStartId).toBe(7);
 
+      // One CALL at a time (#708): Ended goes out once Started is answered.
+      csms.send([3, startedFrame[1], {}]);
       csms.send([2, "rs-201-2", "RequestStopTransaction", { transactionId }]);
 
       const stopResult = await csms.waitForFrame(callResultFrame("rs-201-2"));
@@ -124,7 +126,7 @@ describe("OCPP 2.0.1 transaction control", () => {
         { status: "Rejected" },
       ]);
 
-      // #554 (E14): the CSMS has not answered the two TransactionEvents yet.
+      // #554 (E14): the CSMS has not answered the Ended event yet.
       csms.send([2, "rs-201-4", "GetTransactionStatus", { transactionId }]);
       expect(await csms.waitForFrame(callResultFrame("rs-201-4"))).toEqual([
         3,
@@ -132,7 +134,6 @@ describe("OCPP 2.0.1 transaction control", () => {
         { ongoingIndicator: false, messagesInQueue: true },
       ]);
 
-      csms.send([3, startedFrame[1], {}]);
       csms.send([3, endedFrame[1], {}]);
       csms.send([2, "rs-201-5", "GetTransactionStatus", {}]);
 

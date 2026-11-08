@@ -29,7 +29,7 @@ async function withStation(
   version: (typeof VERSIONS)[number],
   run: (csms: MockCsms, cp: ChargePoint) => Promise<void>,
 ): Promise<void> {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const cp = new ChargePoint(
     "CP-IDTOKEN",
     DefaultBootNotification,

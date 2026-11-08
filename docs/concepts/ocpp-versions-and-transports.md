@@ -171,7 +171,8 @@ each transmission counts as failed once:
   CALLRESULT arriving later is ignored.
 
 `MessageTimeout` is a 2.x-only key (default 30, like the 1.6 serial queue's
-30 s CALL timeout), read at each transmission. The CSMS addresses it as
+30 s CALL timeout), read at each transmission; it is also the time after
+which an unanswered CALL frees the [one-CALL-in-flight slot](#one-call-in-flight-on-2x-ocpp-j-411). The CSMS addresses it as
 `OCPPCommCtrlr.MessageTimeout` with `variableInstance = "Default"` (2.0.1
 and 2.1 §2.1.3 "DefaultMessageTimeout"). The spec makes it ReadOnly: the
 CSMS sets it through a NetworkConnectionProfile, and this simulator answers
@@ -194,10 +195,10 @@ see [variable monitoring](variable-monitoring.md#monitoringctrlr-variables),
 #538). Every other mapped variable has no instance and answers whatever
 instance the CSMS names, as before.
 
-Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
-resend does not hold back the next transaction message. E13 (Figure 62)
-describes sequential delivery; this station may deliver `Ended` before the
-resent `Started`, and the CSMS has to order the messages by `seqNo`. When
+A waiting resend holds back the next TransactionEvent (E13.FR.03/04: "continue
+with the next transaction-related message"), so `Ended` does not overtake a
+resent `Started` ([one CALL in flight](#one-call-in-flight-on-2x-ocpp-j-411)).
+When
 the WebSocket closes (network loss, disconnect, reset, delete), a resend
 still waiting and a written TransactionEvent still waiting for its answer
 are not dropped: they go to the
@@ -626,6 +627,19 @@ station-wide ChangeAvailability or for a `TriggerMessage(StatusNotification)`
 without an EVSE (#703). OCPP 1.6 `connectorId: 0` is unchanged. Station
 availability is not reported separately; a `ChargingStation.AvailabilityState`
 NotifyEvent (G04.FR.05, a MAY) is not sent.
+
+## One CALL in flight on 2.x (OCPP-J §4.1.1)
+
+OCPP-J 2.0.1 / 2.1 Part 4 §4.1.1: a Charging Station "SHALL NOT send a CALL message to the other party unless the CALL message it sent before has been responded to or has timed out". The 2.x handler (#708) keeps one slot per connection, as the 1.6 handler does with its serial queue:
+
+- A CALL waits in the handler's queue until the slot is free. The slot is taken when the CALL is handed to the socket and freed by its CALLRESULT or CALLERROR, by `OCPPCommCtrlr.MessageTimeout` seconds after it was written (the pending entry stays, so a late answer is still recognised), by a write that failed, or by a close.
+- Inbound CALLs are answered at once; their CALLRESULT/CALLERROR is not queued behind outgoing CALLs.
+- Order is queue order, with one rule for TransactionEvent (E13.FR.03/04): a TransactionEvent does not go out while an older TransactionEvent waits out its `MessageAttemptInterval`, has a transmission queued or still awaits its answer. A resent `Started` is therefore never overtaken by `Ended`; other CALLs keep flowing meanwhile. A message discarded after its last attempt frees the next one.
+- A CALL a caller gave up on (an [expert call](expert-ocpp-calls.md) whose wait ended) is taken out of the queue if it was not written yet.
+- On a close, a TransactionEvent still in the queue is queued offline with the other unsettled ones, in creation order ([E11](#e11-offline-queue-for-transactionevent)); any other queued CALL is dropped and its caller told (`socket_closed`). A replay after Boot Accepted goes through the same queue, so the replayed events are sent one at a time.
+- The write failures the socket reports while it stays open (a full network-simulation queue) free the slot and the next CALL goes on; a replayed TransactionEvent refused at the hand-over is held at the head of the E11 queue (#554), and one that waited for the slot and is refused only then keeps its row for the next replay.
+
+There is no burst mode: OCPP 1.6 is serial too, and the spec has no exception.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

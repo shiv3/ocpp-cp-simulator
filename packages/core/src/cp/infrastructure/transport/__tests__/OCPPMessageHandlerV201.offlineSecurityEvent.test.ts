@@ -32,7 +32,22 @@ class FakeSocket {
   refuseAction: string | null = null;
   /** When set, `sendAction` settles the CALL with this outcome, once, sending nothing. */
   settleOnce: string | null = null;
-  setMessageHandler(): void {}
+  /** The CSMS answers each written CALL after the write returns. A 2.x
+   *  station sends the next CALL only after the answer (#708). */
+  autoAnswer = false;
+  private handler:
+    | ((type: number, id: string, action: string, payload: unknown) => void)
+    | null = null;
+  setMessageHandler(
+    handler: (
+      type: number,
+      id: string,
+      action: string,
+      payload: unknown,
+    ) => void,
+  ): void {
+    this.handler = handler;
+  }
   onCloseTransaction(): void {}
   isConnected(): boolean {
     return this.connected;
@@ -41,7 +56,7 @@ class FakeSocket {
     return { gen: 1, closeCause: null };
   }
   sendAction(
-    _messageId: string,
+    messageId: string,
     action: string,
     payload: unknown,
     _gen: unknown,
@@ -59,6 +74,9 @@ class FakeSocket {
     }
     this.calls.push({ action, payload });
     onSettled?.({ outcome: "written" });
+    if (this.autoAnswer) {
+      queueMicrotask(() => this.handler?.(3, messageId, action, {}));
+    }
     return true;
   }
   actions(): string[] {
@@ -123,9 +141,16 @@ function setup(ocppVersion: string) {
     socket.connected = false;
     handler.onWebSocketClosed();
   };
-  const reconnect = () => {
+  const reconnect = async () => {
     socket.connected = true;
+    // The replay goes one CALL at a time (#708): the CSMS answers each.
+    socket.autoAnswer = true;
     handler.flushPendingQueue();
+    // Until the chain of answered CALLs stops growing.
+    for (let seen = -1; seen !== socket.calls.length;) {
+      seen = socket.calls.length;
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+    }
   };
   const start = () =>
     handler.sendTransactionEvent({
@@ -192,7 +217,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(socket.calls).toEqual([]);
 
       vi.setSystemTime(new Date(T0.getTime() + 600_000));
-      reconnect();
+      await reconnect();
 
       const sent = socket.securityEvents();
       expect(sent).toEqual([
@@ -209,8 +234,8 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       const { socket, handler, close, reconnect } = setup(version);
       close();
       await handler.sendSecurityEventNotification("ResetOrReboot");
-      reconnect();
-      reconnect();
+      await reconnect();
+      await reconnect();
       expect(socket.securityEvents()).toHaveLength(1);
     });
 
@@ -221,7 +246,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       await expect(
         handler.sendSecurityEventNotification("InvalidMessages"),
       ).rejects.toBeInstanceOf(OcppCallNoAnswerError);
-      reconnect();
+      await reconnect();
 
       expect(socket.calls).toEqual([]);
     });
@@ -235,7 +260,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         await handler.sendSecurityEventNotification("InvalidCsmsCertificate");
         expect(socket.calls).toEqual([]);
 
-        reconnect();
+        await reconnect();
         expect(socket.securityEvents().map((e) => e.type)).toEqual([
           "InvalidCsmsCertificate",
         ]);
@@ -251,7 +276,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         await expect(
           handler.sendSecurityEventNotification("InvalidCsmsCertificate"),
         ).rejects.toBeInstanceOf(OcppCallNoAnswerError);
-        reconnect();
+        await reconnect();
         expect(socket.calls).toEqual([]);
       },
     );
@@ -271,7 +296,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         triggerReason: "MeterValuePeriodic",
       });
 
-      reconnect();
+      await reconnect();
 
       expect(socket.actions()).toEqual([
         "TransactionEvent",
@@ -287,10 +312,10 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       await handler.sendSecurityEventNotification("MemoryExhaustion");
       socket.refuseAction = "SecurityEventNotification";
 
-      reconnect();
+      await reconnect();
       expect(socket.securityEvents()).toEqual([]);
 
-      reconnect();
+      await reconnect();
       expect(socket.securityEvents().map((e) => e.type)).toEqual([
         "StartupOfTheDevice",
         "MemoryExhaustion",
@@ -308,7 +333,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
       expect(logger.warn).toHaveBeenCalledTimes(1);
 
-      reconnect();
+      await reconnect();
 
       const sent = socket.securityEvents();
       expect(sent).toHaveLength(MAX_QUEUED_SECURITY_EVENTS);

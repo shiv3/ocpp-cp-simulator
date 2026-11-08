@@ -35,7 +35,7 @@ async function withStation(
   version: string,
   body: (csms: MockCsms) => Promise<void>,
 ): Promise<void> {
-  const csms = startMockCsms();
+  const csms = startMockCsms({ answerCalls: true });
   const cp = await bootedChargePoint(csms, `CP-RUNTIME-${version}`, version);
   try {
     await body(csms);

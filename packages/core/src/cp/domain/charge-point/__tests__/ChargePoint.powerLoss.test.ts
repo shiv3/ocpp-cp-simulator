@@ -85,6 +85,39 @@ describe("ChargePoint power loss (#455)", () => {
     expect(() => cp.powerLoss()).toThrow(PowerStateError);
   });
 
+  it("refuses to stop, start, boot or reset while off; the recovery then ends it once with PowerLoss (#798)", async () => {
+    const cp = build("OCPP-1.6J");
+    await charging(cp);
+    cp.powerLoss();
+    const code = (fn: () => unknown): string | undefined => {
+      try {
+        fn();
+      } catch (error) {
+        return (error as PowerStateError).code;
+      }
+      return undefined;
+    };
+    expect(code(() => cp.stopTransaction(1))).toBe("powered_off");
+    expect(code(() => cp.startTransaction("TAG-2", 1))).toBe("powered_off");
+    expect(code(() => cp.boot())).toBe("powered_off");
+    expect(code(() => cp.applyRemoteReset("Hard"))).toBe("powered_off");
+    // Nothing ended: the connector keeps its transaction and its status.
+    expect(cp.getConnector(1)?.hasRunningTransaction).toBe(true);
+
+    cp.restorePower({ transactions: "end" });
+    const stop = vi.spyOn(cp, "stopTransaction");
+    accepted(cp);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledWith(
+      expect.anything(),
+      "PowerLoss",
+      expect.anything(),
+    );
+    expect(cp.getConnector(1)?.hasRunningTransaction).toBe(false);
+  });
+
   it("1.6 resumes by default: nothing is stopped", async () => {
     const cp = build("OCPP-1.6J");
     await charging(cp);

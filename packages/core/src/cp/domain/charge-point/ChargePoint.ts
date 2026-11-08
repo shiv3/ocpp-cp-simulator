@@ -274,18 +274,26 @@ export interface PowerRestoreResult {
   transactions: number;
 }
 
-/** `powerLoss` while off, `powerRestore` while on. */
+/**
+ * `powerLoss` while off, `powerRestore` while on, and a transaction, boot or
+ * reset command while the station is without power (`powered_off`, #798).
+ */
 export class PowerStateError extends Error {
   constructor(
     readonly code:
-      "already_powered_off" | "not_powered_off" | "unsupported_transport",
+      | "already_powered_off"
+      | "not_powered_off"
+      | "unsupported_transport"
+      | "powered_off",
   ) {
     super(
       code === "already_powered_off"
         ? "The charge point is already without power"
         : code === "unsupported_transport"
           ? "Power loss is not simulated for OCPP-S (SOAP) charge points"
-          : "The charge point has power",
+          : code === "powered_off"
+            ? "The charge point is without power; restore it first"
+            : "The charge point has power",
     );
   }
 }
@@ -652,6 +660,7 @@ export class ChargePoint {
       // When the connector signals an auto-stop (e.g. target SoC reached),
       // end the in-flight transaction the same way the user would.
       connector.events.on("autoStopRequested", ({ reason }) => {
+        if (this._powerLoss) return;
         this._logger.info(
           `Connector ${connectorId} auto-stop requested (${reason})`,
           LogType.TRANSACTION,
@@ -2622,7 +2631,13 @@ export class ChargePoint {
     });
   }
 
+  /** A station without power starts, stops and boots nothing (#798). */
+  private assertPowered(): void {
+    if (this._powerLoss) throw new PowerStateError("powered_off");
+  }
+
   boot(): void {
+    this.assertPowered();
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
@@ -2922,6 +2937,7 @@ export class ChargePoint {
     type: ChargePointResetType,
     source: ChargePointResetSource = "ocpp-call",
   ): void {
+    this.assertPowered();
     if (source === "ocpp15-soap" && !this.isSoapChargePoint()) {
       this._logger.warn(
         "Ignoring SOAP Reset for a charge point that is not registered as a SOAP charge point",
@@ -2993,6 +3009,7 @@ export class ChargePoint {
     initialSoc?: number,
     options: StartTransactionOptions = {},
   ): Promise<StartTransactionOutcome> {
+    this.assertPowered();
     return startTransactionDefault(
       this,
       this.transactionPorts,
@@ -3009,6 +3026,9 @@ export class ChargePoint {
     reason?: StopTransactionReason,
     options: StopTransactionOptions = {},
   ): void {
+    // The recovery decides how a transaction interrupted by a power loss
+    // ends (`runPowerRecovery`); nothing ends it while the station is off.
+    this.assertPowered();
     stopTransactionDefault(
       this,
       this.transactionPorts,
@@ -3396,6 +3416,7 @@ export class ChargePoint {
     if (timeoutSec <= 0 || this.holdsConnectionTimeout(connectorId)) return;
     const handle = this._clock.setTimeout(() => {
       this._connectionTimeoutTimers.delete(connectorId);
+      if (this._powerLoss) return; // no power: nothing ends or changes (#798)
       const connector = this.getConnector(connectorId);
       if (!connector || connector.status !== OCPPStatus.Preparing) return;
       // E03.FR.05: on 2.x a transaction already started without the EV

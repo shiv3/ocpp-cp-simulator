@@ -64,6 +64,9 @@ export function resetBehavior(cp: ChargePoint): Behavior {
               response: { status: "Accepted" },
               after: async () => {
                 if (delayMs > 0) await ctx.sleep(delayMs);
+                // Power was lost while the reset waited: a station without
+                // power resets nothing (#798).
+                if (cp.poweredOff) return;
                 cp.applyRemoteReset(type);
               },
             };
@@ -93,6 +96,7 @@ export function resetBehavior(cp: ChargePoint): Behavior {
             response: { status: "Accepted" },
             after: async () => {
               if (delayMs > 0) await ctx.sleep(delayMs);
+              if (cp.poweredOff) return; // power was lost during the wait (#798)
               if (type !== "ImmediateAndResume") {
                 cp.cancelPendingResetsOnIdle(evseId);
                 for (const connector of targets) {

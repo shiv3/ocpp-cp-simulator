@@ -38,7 +38,11 @@ of the network-simulation layer and of Reset:
 | `power.restore` | `{ cpId, transactions?, txResumptionTimeoutSeconds? }`                  | `{ ok: true, outageMs, recovery, transactions }` or `{ ok: false, error }` |
 
 Errors: `cp_not_found`, `already_powered_off`, `not_powered_off`,
-`unsupported_transport` (an OCPP-S / SOAP charge point). MCP tools:
+`unsupported_transport` (an OCPP-S / SOAP charge point). While the station is off,
+starting or stopping a transaction, booting and a Reset are refused with the
+error `powered_off` (a station without power does none of them); a transaction
+interrupted by the loss ends only through the recovery after `power.restore`,
+and an auto-traffic session whose time is up waits for the power to return. MCP tools:
 `power_loss`, `power_restore` ([MCP endpoint](../entities/mcp-endpoint.md)).
 `restoreAfterMs` is the outage duration: power returns by itself (up to one
 week); without it the station stays off until `power.restore`. While off,

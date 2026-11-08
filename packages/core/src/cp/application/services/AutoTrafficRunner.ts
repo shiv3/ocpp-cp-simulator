@@ -8,6 +8,9 @@ import {
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 
+/** How often a session whose time is up re-checks for power (#798). */
+const POWER_RECHECK_MS = 1000;
+
 export interface AutoTrafficHooks {
   /**
    * The idTag a session on this connector presents (#603). The runner asks
@@ -29,6 +32,13 @@ export interface AutoTrafficHooks {
     idTag: string,
   ) => Promise<void | boolean>;
   stopTransaction: (connectorId: number) => Promise<void>;
+  /**
+   * Whether the station is without power (#798). A session whose duration
+   * ends during an outage stays open: how a transaction interrupted by a
+   * power loss ends is decided by the recovery after the restore, not by the
+   * traffic timer.
+   */
+  poweredOff?: (connectorId: number) => boolean;
   /** Whether a scenario currently owns this connector. */
   scenarioActive: (connectorId: number) => boolean;
   log: (message: string) => void;
@@ -263,6 +273,13 @@ export class AutoTrafficRunner {
 
   private async endSession(): Promise<void> {
     if (this.stopped) return;
+    if (this.hooks.poweredOff?.(this.connectorId)) {
+      this.timer = this.clock.setTimeout(() => {
+        this.timer = null;
+        void this.endSession();
+      }, POWER_RECHECK_MS);
+      return;
+    }
     try {
       this.sessionOpen = false;
       await this.hooks.stopTransaction(this.connectorId);

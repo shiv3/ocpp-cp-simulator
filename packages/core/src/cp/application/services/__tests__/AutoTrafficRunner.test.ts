@@ -51,6 +51,25 @@ describe("AutoTrafficRunner (#300)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it("leaves a session open while the station has no power and stops it once power returns (#798)", async () => {
+    let off = false;
+    const h = hooks({ poweredOff: () => off });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000); // the gap, then the start
+      expect(h.events).toEqual(["start"]);
+      off = true;
+      await advance(30_000); // the duration expires during the outage
+      expect(h.events).toEqual(["start"]);
+      off = false;
+      await advance(1_000);
+      expect(h.events).toEqual(["start", "stop"]);
+    } finally {
+      runner.stop();
+    }
+  });
+
   it("runs gap, start, duration, stop, repeat", async () => {
     const h = hooks();
     const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);

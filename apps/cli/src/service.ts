@@ -1401,6 +1401,8 @@ export class CLIChargePointService {
       // A cycle starts only on an Accepted charge point, an Available
       // connector and no active transaction (#603); otherwise it is skipped.
       startBlocker: (id) => {
+        if (this._chargePoint.poweredOff)
+          return "the charge point has no power";
         if (!this._chargePoint.bootAccepted) {
           return "the charge point is not Accepted";
         }
@@ -1423,6 +1425,7 @@ export class CLIChargePointService {
         return outcome.started;
       },
       stopTransaction: async (id) => this.stopTransaction(id),
+      poweredOff: () => this._chargePoint.poweredOff,
       // A scenario owns the connector while any executor is running: a run's
       // verdict must never depend on whether background traffic fired.
       scenarioActive: () => this._executors.size > 0,

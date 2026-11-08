@@ -1471,7 +1471,8 @@ export const METHODS = {
   // #455: a power loss is neither a network loss nor an OCPP Reset. Answers
   // `{ ok: true, ... }` or `{ ok: false, error }` (`cp_not_found`,
   // `already_powered_off`, `not_powered_off`, `unsupported_transport` for an
-  // OCPP-S (SOAP) charge point).
+  // OCPP-S (SOAP) charge point). Commands that start or stop a transaction
+  // fail with `powered_off` while the station has no power.
   "power.loss": {
     params: z.object({
       cpId: STR_64K,

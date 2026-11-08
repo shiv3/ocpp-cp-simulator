@@ -789,6 +789,46 @@ describe("behavior params schema, v29 (#654)", () => {
   });
 });
 
+describe("charger capabilities schema, v30 (#327)", () => {
+  it("adds charger_capabilities to a database stamped 29 and keeps its rows uncapped", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.exec("ALTER TABLE charge_points DROP COLUMN charger_capabilities");
+      db.run(
+        "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at, behavior_params) " +
+          "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-11-08T00:00:00Z', '{}')",
+      );
+      db.run("UPDATE schema_meta SET value = '29' WHERE key = 'version'");
+
+      runMigrations(db);
+
+      const row = db.get<{
+        cp_id: string;
+        behavior_params: string | null;
+        charger_capabilities: string | null;
+      }>(
+        "SELECT cp_id, behavior_params, charger_capabilities FROM charge_points",
+      );
+      expect(row).toEqual({
+        cp_id: "CP1",
+        behavior_params: "{}",
+        charger_capabilities: null,
+      });
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(30);
+
+      // Guarded: re-running on a database that already has the column is a no-op.
+      db.run("UPDATE schema_meta SET value = '29' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("charging sessions schema, v17 (#447)", () => {
   it("creates charging_sessions on a database stamped 16", () => {
     const db = BunSqliteDatabase.open(":memory:");

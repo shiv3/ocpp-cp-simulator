@@ -3120,6 +3120,7 @@ function mergeUpdateParams(
   );
   preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
   preserveWhenMissing(merged, "capabilityProfile", init.capabilityProfile);
+  preserveWhenMissing(merged, "chargerCapabilities", init.chargerCapabilities);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

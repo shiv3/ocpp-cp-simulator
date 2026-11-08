@@ -1127,6 +1127,8 @@ function toInitOptions(
       params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
     inboundValidation: params.inboundValidation ?? existing?.inboundValidation,
     capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
+    chargerCapabilities:
+      params.chargerCapabilities ?? existing?.chargerCapabilities,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1197,6 +1199,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           inboundValidation: status.config.inboundValidation,
           capabilityProfile: status.config.capabilityProfile,
+          chargerCapabilities: status.config.chargerCapabilities,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,

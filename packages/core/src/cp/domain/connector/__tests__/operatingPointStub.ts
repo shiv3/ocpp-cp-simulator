@@ -1,5 +1,6 @@
 import type { EVSettings } from "../EVSettings";
 import {
+  chargerTermOf,
   resolveOperatingPoint,
   vehicleTermOf,
   type OperatingPoint,
@@ -12,6 +13,8 @@ interface StubState {
   soc: number | null;
   evSettings?: Partial<EVSettings>;
   transaction?: { initialSoc?: number } | null;
+  /** The charger's delivery cap in watts, when the stub declares one. */
+  maxDeliveryPowerW?: number;
 }
 
 /**
@@ -36,6 +39,7 @@ export function stubOperatingPoint(
       initialSoc: resolveSessionIntent(state.transaction, state.evSettings)
         .initialSoc,
     },
-    fault: { energyOfferSuspended },
+    charger: chargerTermOf(state.maxDeliveryPowerW),
+    fault: { offering: state.status === "Charging", energyOfferSuspended },
   });
 }

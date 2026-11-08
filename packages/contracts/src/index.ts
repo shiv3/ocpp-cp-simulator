@@ -11,6 +11,7 @@ export * from "./events";
 export * from "./envelope";
 export * from "./vehicle";
 export * from "./labels";
+export * from "./chargerCapabilities";
 export {
   METHODS,
   EXPLICIT_METHODS,

@@ -2293,14 +2293,26 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  /** #734: the device has (re)started and has not reported it yet. */
+  private _startupEventPending = true;
+
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
-    if (
-      this._ocppVersion === "OCPP-1.6J" &&
-      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
-    ) {
-      void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+    if (this._ocppVersion === "OCPP-1.6J") {
+      // #734 A04.FR.02: events raised while the station could not send them
+      // (ResetOrReboot among them) go out first, with their own timestamps.
+      this._outbox.flushQueuedSecurityEvents();
+      // StartupOfTheDevice reports a start of the device: once per process
+      // start and once per reset, not per reconnect or triggered boot. It is
+      // consumed by the first Accepted boot either way, so a later change of
+      // the security profile does not report a startup that already passed.
+      if (this._startupEventPending) {
+        this._startupEventPending = false;
+        if ((this._configuration.getInteger("SecurityProfile") ?? 0) >= 1) {
+          void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+        }
+      }
     }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
@@ -2614,6 +2626,14 @@ export class ChargePoint {
       }
     }
     this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
+    if (
+      this._ocppVersion === "OCPP-1.6J" &&
+      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
+    ) {
+      // #734: reported once the station is back with an Accepted boot.
+      this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
+    }
+    this._startupEventPending = true;
     if (type === "Hard") {
       this.reset();
     } else {

@@ -3139,8 +3139,9 @@ export class ChargePoint {
    *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
    *   that follows is de-duplicated against it. A second unplug while so
    *   suspended sends nothing.
-   * Without a transaction the connector goes Available, as an unplug did
-   * before.
+   * Without a transaction a Preparing, Finishing or Suspended* connector goes
+   * Available (1.6 §4.9 B1); an Unavailable, Faulted or Reserved one keeps its
+   * status. The EV and cable model (#453) records the cable as unplugged.
    */
   evDisconnected(connectorId: number): void {
     const connector = this.getConnector(connectorId);
@@ -3152,8 +3153,19 @@ export class ChargePoint {
       return;
     }
 
+    connector.markEvUnplugged();
     if (!connector.hasRunningTransaction) {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      // Only the states that exist because a cable is plugged in fall back
+      // to Available (#453); an unplug does not lift an Unavailable, Faulted
+      // or Reserved connector, nor repeat an Available.
+      if (
+        connector.status === OCPPStatus.Preparing ||
+        connector.status === OCPPStatus.Finishing ||
+        connector.status === OCPPStatus.SuspendedEV ||
+        connector.status === OCPPStatus.SuspendedEVSE
+      ) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      }
       return;
     }
 
@@ -3192,6 +3204,74 @@ export class ChargePoint {
       });
     }
     this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+  }
+
+  /**
+   * A cable was plugged into the connector's EV side (#453). Idempotent: a
+   * second plug-in changes nothing. An idle `Available` connector reports
+   * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
+   * `Occupied`, the cable plugged in before the driver authorizes), which starts the
+   * ConnectionTimeOut and allows the authorize / start that follows. In any
+   * other state (a running transaction, Unavailable, Faulted, Reserved,
+   * power lost) the cable is recorded and the status stays: the plug-in
+   * does not lift them. Unplug with {@link evDisconnected}.
+   */
+  evPlugIn(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector || connectorId === 0) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (connector.evConnection !== "disconnected") return;
+    connector.markEvPluggedIn();
+    if (
+      !this.poweredOff &&
+      !connector.hasRunningTransaction &&
+      connector.status === OCPPStatus.Available
+    ) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+    }
+  }
+
+  /**
+   * The EV asks for energy (`ready`) or stops asking (#453). Needs a
+   * plugged-in cable. With a running transaction, "not ready" suspends the
+   * energy offer and reports `SuspendedEV` (1.6 §4.9 C4; 2.x TransactionEvent
+   * Updated, chargingState `SuspendedEV`, triggerReason `ChargingStateChanged`),
+   * and "ready" resumes `Charging` from that (D3). Without a transaction
+   * the readiness is recorded and nothing is sent. Idempotent.
+   */
+  evSetReady(connectorId: number, ready: boolean): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector || connectorId === 0) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (connector.evConnection === "disconnected") {
+      throw new Error(`Connector ${connectorId} has no EV plugged in`);
+    }
+    connector.markEvReady(ready);
+    if (!connector.hasRunningTransaction) return;
+    if (!ready) {
+      if (connector.status !== OCPPStatus.Charging) return;
+      connector.suspendEnergyOffer();
+      // On 2.x the status write carries the TransactionEvent(Updated).
+      this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+      return;
+    }
+    if (
+      connector.status !== OCPPStatus.SuspendedEV ||
+      !connector.energyOfferSuspended
+    ) {
+      return;
+    }
+    this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {

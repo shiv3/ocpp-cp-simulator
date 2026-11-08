@@ -19,7 +19,7 @@ import type {
   ConnectorWrite,
 } from "../../domain/connector/ConnectorRecord";
 import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
-import { OCPPStatus } from "../../domain/types/OcppTypes";
+import type { OCPPStatus } from "../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
 import {
   RESERVED_PREFIX,
@@ -1774,7 +1774,9 @@ export class ChargerEngine {
       plugIn: (connectorId) => {
         needs("physical", "ctx.plugIn");
         live();
-        host.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+        // The cable model (#453): an idle Available connector reports
+        // Preparing; in any other state the cable is only recorded.
+        host.evPlugIn(connectorId);
       },
       unplug: (connectorId) => {
         needs("physical", "ctx.unplug");

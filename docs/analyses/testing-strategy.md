@@ -187,7 +187,9 @@ in both directions in arrival order, normalizes it, and compares it with a commi
   the 54 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
   [scenario README](../../packages/core/src/utils/scenarios/README.md) describes.
   `regressionCases.ts` holds 175 more, **recorded on ca01d302 (the commit before the charger engine),
-  never on the branch**, after a review found 29 of 63 mutants of the engine survived the first set
+  never on the branch** (a fixture that a later commit of main changes is re-recorded on a worktree at
+  that commit, still never on the branch; five were after #635, three cases for `Reset` `OnIdle` were added),
+  after a review found 29 of 63 mutants of the engine survived the first set
   (no retry after CALLERROR, an offline queue flushed in the wrong order, follow-ups of a close, policy
   versus override, a TxProfile surviving its transaction, a whole-station `ChangeAvailability` during a
   transaction, `AuthorizeRemoteTxRequests`, a reservation not consumed, `ConnectionTimeOut`, the stop

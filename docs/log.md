@@ -2364,3 +2364,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] fix | OCPP 2.x Reset OnIdle follow-ups (#635)
 
 - Reset OnIdle now checks for running transactions rather than retained stopped transaction objects, rechecks immediately after scheduling, and is reevaluated when a connector is removed. Scoped Immediate resets cancel only the pending reset in their scope; other EVSE resets remain queued. An Inoperative connector stays Unavailable after the accepted reboot. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | Merge of main: Reset OnIdle in the engine (charger engine)
+
+- [Charger engine design](analyses/charger-engine.md#reset-onidle-after-the-merge-of-main): #635 ported into `default.reset` and the default stop; #572 / #574 imports follow the moves. [Testing strategy](analyses/testing-strategy.md#golden-wire-test): five fixtures re-recorded on origin/main, three `Reset` `OnIdle` cases added.

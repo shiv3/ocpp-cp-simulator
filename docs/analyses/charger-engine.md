@@ -384,7 +384,10 @@ design left open:
   file name, a user behavior opts in). The diagnostics behavior imports `infrastructure/file_upload`, the one
   place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
   own, and `default.reset` (`Reset`: the 1.6 `Accepted` and reset after the answer; the 2.x
-  `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer) and `default.availability`
+  `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer; since the merge of #635 an `OnIdle`
+  reset answered `Scheduled` is queued on the `ChargePoint` once the answer settled and runs when the last
+  targeted transaction ends, see [Reset OnIdle after the merge of main](#reset-onidle-after-the-merge-of-main))
+  and `default.availability`
   (`ChangeAvailability`: 1.6 applies the change while it builds the answer, 2.x once the answer settled) and `default.reservation` (`ReserveNow` and `CancelReservation` over
   `ReservationManager`; 1.6 moves the connector to `Reserved` / `Available` while it builds the answer, 2.x once
   the answer settled) and `default.unlock` (`UnlockConnector`: 1.6 stops a transaction in flight first, 2.x
@@ -928,3 +931,25 @@ An independent review of ca01d302..30b57145 (a verdict of "not ready to merge") 
 | Source checks easy to bypass                                                                                                                     | S1                                           | **Review fixes 2** for the cheap forms; the rest is an accepted limit (see the status above)               |
 
 What remains: the accepted limits of the two source checks; a partial reload is retried in full (stations that already run the new version restart their `main`); a reloaded module whose top level never settles stays pending in memory; `onResume` does not run on a station that never boots; the 1,000 x 6 h determinism hash was re-pinned by review fixes 1, and the 10,000-charger run is slower than in stage D2 for a reason not found. The mutation runs of the review were not repeated for this stage.
+
+## Reset OnIdle after the merge of main
+
+`origin/main` moved two commits past the base of this branch (#572 / #574, #635); the branch merged it.
+
+- **#572 / #574:** `SeededRng` lives in `packages/core/src/cp/shared/SeededRng.ts` and the outbound port
+  `IChargePointMessageHandler` in `domain/transport/`. The engine's own `rng.ts` has a private class of the
+  same name; it is unrelated and stays.
+- **#635 in the engine:** `default.reset` (`application/engine/behaviors/reset.ts`) decides `Scheduled` from
+  `connector.hasRunningTransaction` (a closed transaction object does not count) and, once the answer
+  settled, calls `ChargePoint.scheduleResetOnIdle(evseId)`. An `Immediate` or `OnIdle`-now reset that stops
+  transactions first calls `cancelPendingResetsOnIdle(evseId)`. The default `stopTransaction`
+  (`behaviors/transaction.ts`) ends with `ChargePoint.runPendingResetOnIdle()`, as does `removeConnector`;
+  the pending list is `ChargePoint._pendingResetsOnIdle`.
+- **Decision:** the pending list stays on `ChargePoint`, not in `ChargerState`. It is not persisted (as on
+  main: a restart forgets a `Scheduled` reset), and a behavior that replaces `Reset` simply never fills it.
+  `handleResetV201` is a translation again.
+- **Wire changes, recorded on origin/main** (the oracle describes main, not ca01d302): the station now boots
+  after the last stop (`201-reset-onidle-charging`); an `Inoperative` connector stays `Unavailable` after a boot
+  and a closed transaction no longer blocks the reset to `Available` (`16/201-ns-avail-drop`,
+  `16/201-restart-closed-attached`). New cases: `201-reset-onidle-idle`, `201-reset-onidle-waits-for-last`,
+  `201-reset-onidle-then-immediate`.

@@ -2823,7 +2823,22 @@ export class ChargePoint {
 
   /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
   sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
+    this._logStatusSeq++;
+    this._lastLogStatusRequestId = requestId ?? this._lastLogRequestId;
     this._outbox.sendLogStatusNotification(status, requestId);
+  }
+
+  /** Counts every LogStatusNotification this station sent, so the automatic
+   *  GetLog lifecycle can tell that something else (the control plane, a
+   *  scenario `notify` node) is driving the status train of its request
+   *  (N01.FR.09: one final status per requestId). */
+  private _logStatusSeq = 0;
+  private _lastLogStatusRequestId: number | undefined;
+  get logStatusSeq(): number {
+    return this._logStatusSeq;
+  }
+  get lastLogStatusRequestId(): number | undefined {
+    return this._lastLogStatusRequestId;
   }
 
   /** `requestId` of the last UpdateFirmware.req this station accepted, so a

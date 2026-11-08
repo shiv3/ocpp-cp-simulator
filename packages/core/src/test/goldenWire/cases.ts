@@ -833,11 +833,20 @@ export const goldenCases: GoldenCase[] = [
     await settle(rig);
   }),
   c201("get-log", async (rig) => {
+    const from = rig.csms.mark();
     await rig.csms.call("GetLog", {
       logType: "DiagnosticsLog",
       requestId: 21,
       log: { remoteLocation: rig.uploadUrl() },
     });
+    // The lifecycle's last status (N01.FR.09), not the 250 ms cut-off.
+    await rig.csms.waitForFrame(
+      (f) =>
+        f.dir === "CP>" &&
+        f.action === "LogStatusNotification" &&
+        (f.payload as { status?: string }).status === "Uploaded",
+      { from, timeoutMs: 30_000 },
+    );
     await settle(rig);
   }),
   c201("firmware-and-log-status-driven", async (rig) => {
@@ -857,6 +866,9 @@ export const goldenCases: GoldenCase[] = [
     });
     rig.cp.sendLogStatusNotification("Uploading");
     rig.cp.sendLogStatusNotification("Uploaded");
+    // Outlast the automatic lifecycle (2 s): the driven train is the only one
+    // that ends with Uploaded (N01.FR.09, #822 review).
+    await new Promise((resolve) => setTimeout(resolve, 2_600));
     await settle(rig);
   }),
 

@@ -73,6 +73,7 @@ export function logsBehavior(cp: ChargePoint): Behavior {
             const previous = ctx.state.uploadingRequestId;
             const replaces =
               auto && previous !== undefined && previous !== null;
+            const seqAtRequest = cp.logStatusSeq;
             return {
               response: {
                 status: replaces ? "AcceptedCanceled" : "Accepted",
@@ -89,23 +90,36 @@ export function logsBehavior(cp: ChargePoint): Behavior {
                         : 0) + 1;
                     ctx.state.uploadGeneration = generation;
                     const requestId = req.requestId ?? 0;
+                    // Another sender of this request's status train (the
+                    // control plane, a scenario `notify` node) takes the
+                    // lifecycle over: it sends nothing more (N01.FR.09).
+                    let seenSeq = seqAtRequest;
+                    const driven = (): boolean =>
+                      cp.logStatusSeq !== seenSeq &&
+                      cp.lastLogStatusRequestId === requestId;
                     if (typeof previous === "number") {
                       // N01.FR.20: the cancelled upload reports it.
                       ctx.notify.logStatus("AcceptedCanceled", {
                         requestId: previous,
                       });
+                      if (!driven()) seenSeq = cp.logStatusSeq;
                     }
                     ctx.state.uploadingRequestId = requestId;
+                    const send = (status: "Uploading" | "Uploaded"): void => {
+                      ctx.notify.logStatus(status, { requestId });
+                      seenSeq = cp.logStatusSeq;
+                    };
                     try {
-                      ctx.notify.logStatus("Uploading", { requestId });
+                      if (!driven()) send("Uploading");
                       await ctx.sleep(ctx.params.uploadMs as number);
                       if (
                         ctx.stopping ||
-                        ctx.state.uploadGeneration !== generation
+                        ctx.state.uploadGeneration !== generation ||
+                        driven()
                       ) {
                         return;
                       }
-                      ctx.notify.logStatus("Uploaded", { requestId });
+                      send("Uploaded");
                     } finally {
                       if (ctx.state.uploadGeneration === generation) {
                         ctx.state.uploadingRequestId = null;

@@ -182,13 +182,13 @@ first and would leave the metrics endpoint unreachable.
 | `ocppcp_ws_reconnects_total`                      | counter   | —                     | WebSocket reconnect attempts.                         |
 | `ocppcp_auto_traffic_cycles_total`                | counter   | `result`              | AutoTraffic cycles: `attempted`, `skipped`.           |
 | `ocppcp_auto_traffic_steps_total`                 | counter   | `step`, `outcome`     | AutoTraffic authorize/start/stop outcomes.            |
-| `ocppcp_auto_traffic_consecutive_skips`           | gauge     | —                     | Longest run of skipped cycles of a connector.         |
+| `ocppcp_auto_traffic_consecutive_skips`           | gauge     | —                     | Current run of skipped cycles (max over connectors).  |
 | `ocppcp_auto_traffic_first_run_timestamp_seconds` | gauge     | —                     | First AutoTraffic cycle (Unix s; absent before any).  |
 | `ocppcp_auto_traffic_last_run_timestamp_seconds`  | gauge     | —                     | Latest AutoTraffic cycle (Unix s; absent before any). |
 
 The AutoTraffic series (#603) sum the [background traffic](../concepts/control-plane.md#background-traffic)
-counters of the connectors that run it; a connector whose traffic is turned off or
-reconfigured drops out, so a counter can fall, which Prometheus reads as a reset.
+counters of the connectors that run it; a connector whose traffic is turned off
+drops out (a reconfigure keeps its counters), so a counter can fall, which Prometheus reads as a reset.
 
 **No `cpId` label, deliberately.** It is unbounded by construction once a
 daemon holds a fleet, and a Prometheus server pays for every series it has ever

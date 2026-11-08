@@ -209,8 +209,8 @@ export function renderMetrics(
   out.sample("ocppcp_ws_reconnects_total", {}, recorder.reconnects);
 
   // Sums over the running AutoTraffic connectors: a connector whose traffic
-  // is turned off or reconfigured drops out, so a counter can fall (a reset
-  // to Prometheus).
+  // is turned off drops out, so a counter can fall (a reset to Prometheus).
+  // A reconfigure keeps the runner and its counters.
   out.metric(
     "ocppcp_auto_traffic_cycles_total",
     "AutoTraffic cycles by result: attempted, or skipped (rolled out, or a start precondition failed).",
@@ -237,7 +237,7 @@ export function renderMetrics(
   }
   out.metric(
     "ocppcp_auto_traffic_consecutive_skips",
-    "Longest run of AutoTraffic cycles skipped in a row, over all connectors.",
+    "Current run of AutoTraffic cycles skipped in a row (resets on a start), the maximum over connectors.",
     "gauge",
   );
   out.sample(

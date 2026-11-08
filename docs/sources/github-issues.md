@@ -8,7 +8,7 @@ related:
   - ../log.md
   - ../analyses/fleet-load-and-observability-roadmap.md
   - ../concepts/vehicle-profiles.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Source: GitHub issues referenced by the wiki

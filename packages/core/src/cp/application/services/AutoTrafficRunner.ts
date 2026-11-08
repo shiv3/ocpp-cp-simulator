@@ -94,6 +94,19 @@ export class AutoTrafficRunner {
     }
   }
 
+  /**
+   * The CSMS answered this connector's StartTransaction with an idTagInfo that
+   * is not Accepted (#603). The session was counted `startAccepted` when the
+   * request went out; the conf corrects it to a refusal. `started` and
+   * `completed` still count the session, which the station may leave running
+   * (`StopTransactionOnInvalidId`).
+   */
+  noteStartConfRefused(): void {
+    if (!this.sessionOpen) return;
+    if (this.counters.startAccepted > 0) this.counters.startAccepted--;
+    this.counters.startRejected++;
+  }
+
   /** Replace the config. Restarts the stream, so the seed takes effect. */
   reconfigure(config: AutoTrafficConfig): void {
     this.stop();
@@ -135,6 +148,8 @@ export class AutoTrafficRunner {
     this.scheduleNext();
   }
 
+  private lastSkipReason: string | null = null;
+
   private async runStep(start: boolean, durationSec: number): Promise<void> {
     if (this.stopped) return;
     if (this.expired()) {
@@ -160,13 +175,19 @@ export class AutoTrafficRunner {
     }
     const blocker = this.hooks.startBlocker?.(this.connectorId) ?? null;
     if (blocker !== null) {
-      this.hooks.log(
-        `[auto-traffic] ${this.cpId}/${this.connectorId} cycle skipped: ${blocker}`,
-      );
+      // Once per reason: a fleet with disconnected charge points would log
+      // every cycle otherwise.
+      if (blocker !== this.lastSkipReason) {
+        this.lastSkipReason = blocker;
+        this.hooks.log(
+          `[auto-traffic] ${this.cpId}/${this.connectorId} cycle skipped: ${blocker}`,
+        );
+      }
       this.skip();
       return;
     }
 
+    this.lastSkipReason = null;
     const idTag = this.hooks.idTag?.(this.connectorId) ?? AUTO_TRAFFIC_ID_TAG;
     try {
       if (this.config.requireAuthorize) {

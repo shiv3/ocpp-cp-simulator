@@ -381,6 +381,48 @@ describe("AutoTrafficRunner idTag, preconditions and counters (#603)", () => {
     }
   });
 
+  it("moves a start the CSMS refused in its conf from accepted to rejected", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(runner.counters.startAccepted).toBe(1);
+      runner.noteStartConfRefused();
+      expect(runner.counters).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+      // Nothing to correct without an open session.
+      await advance(10_000);
+      runner.noteStartConfRefused();
+      expect(runner.counters.startRejected).toBe(1);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("logs a skipped cycle once per reason", async () => {
+    const log = vi.fn();
+    let blocker = "the connector is Charging";
+    const h = hooks({ startBlocker: () => blocker, log });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(5_000);
+      await advance(5_000);
+      const skipLogs = () =>
+        log.mock.calls.filter(([m]) => String(m).includes("cycle skipped"));
+      expect(skipLogs()).toHaveLength(1);
+      blocker = "a transaction is active";
+      await advance(5_000);
+      expect(skipLogs()).toHaveLength(2);
+    } finally {
+      runner.stop();
+    }
+  });
+
   it("records the first and the latest run", async () => {
     const h = hooks();
     const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);

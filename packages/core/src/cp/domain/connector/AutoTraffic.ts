@@ -139,6 +139,10 @@ export function emptyAutoTrafficCounters(): AutoTrafficCounters {
  *   by the charge point index so the charge points of a fleet spread over
  *   the pool.
  */
+/** `2026-11-09T10:00:00Z`, `...+09:00`, with optional fractional seconds. */
+const ISO_DATE_TIME_WITH_OFFSET =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
 export class AutoTrafficIdTagPicker {
   private readonly rng: () => number;
   private cursor: number;
@@ -278,9 +282,10 @@ export function validateAutoTrafficConfig(
   if (
     config.stopAt !== undefined &&
     (typeof config.stopAt !== "string" ||
+      !ISO_DATE_TIME_WITH_OFFSET.test(config.stopAt) ||
       Number.isNaN(Date.parse(config.stopAt)))
   ) {
-    return "stopAt must be an ISO 8601 date-time";
+    return "stopAt must be an ISO 8601 date-time with an offset (for example 2026-11-09T10:00:00Z)";
   }
   if (
     config.idTagStrategy !== undefined &&

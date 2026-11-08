@@ -82,6 +82,9 @@ describe("AutoTraffic on a charge point (#603)", () => {
     const { svc, calls } = station();
     svc.setAutoTrafficConfig(1, CONFIG);
     await wait(2_400);
+    // Read before turning the traffic off: disabling drops the runner and
+    // its counters.
+    const counters = { ...svc.getAutoTrafficCounters(1) };
     svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
     expect(calls.slice(0, 5)).toEqual([
       "authorize:TAG-A",
@@ -90,7 +93,7 @@ describe("AutoTraffic on a charge point (#603)", () => {
       "authorize:TAG-B",
       "start:TAG-B",
     ]);
-    expect(svc.getAutoTrafficCounters(1).authorizeAccepted).toBeGreaterThan(1);
+    expect(counters.authorizeAccepted).toBeGreaterThan(1);
   });
 
   it("falls back to the fixed idTag without a pool", async () => {
@@ -132,6 +135,46 @@ describe("AutoTraffic on a charge point (#603)", () => {
     await wait(300);
     expect(calls).toEqual([]);
     expect(svc.getAutoTrafficCounters(1).skipped).toBeGreaterThan(0);
+    svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+  });
+
+  it("rebuilds the idTag stream when the traffic is reconfigured", () => {
+    const { svc } = station();
+    const pickerOf = () =>
+      (
+        svc as unknown as {
+          _autoTrafficPickers: Map<number, { next(): string } | null>;
+        }
+      )._autoTrafficPickers.get(1)!;
+    svc.setAutoTrafficConfig(1, {
+      ...CONFIG,
+      minGapSec: 3600,
+      maxGapSec: 3600,
+    });
+    expect([pickerOf().next(), pickerOf().next()]).toEqual(["TAG-A", "TAG-B"]);
+    svc.setAutoTrafficConfig(1, {
+      ...CONFIG,
+      minGapSec: 3600,
+      maxGapSec: 3600,
+      idTagStrategy: "connector-affinity",
+    });
+    expect([pickerOf().next(), pickerOf().next()]).toEqual(["TAG-A", "TAG-A"]);
+    svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+  });
+
+  it("refuses a stop time that is not an ISO 8601 date-time with an offset", () => {
+    const { svc } = station();
+    for (const stopAt of ["Nov 9 2026", "2026-11-09", "2026-11-09T10:00:00"]) {
+      expect(() => svc.setAutoTrafficConfig(1, { ...CONFIG, stopAt })).toThrow(
+        /stopAt/,
+      );
+    }
+    svc.setAutoTrafficConfig(1, {
+      ...CONFIG,
+      minGapSec: 3600,
+      maxGapSec: 3600,
+      stopAt: "2099-11-09T10:00:00+09:00",
+    });
     svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
   });
 

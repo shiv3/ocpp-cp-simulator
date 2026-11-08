@@ -521,6 +521,12 @@ export class CLIChargePointService {
   private readonly _evSettingsOwnerByConnector: Map<number, string> = new Map();
   private readonly _autoTraffic = new Map<number, AutoTrafficRunner>();
   private readonly _autoTrafficConfigs = new Map<number, AutoTrafficConfig>();
+  /** The idTag stream of each running connector, rebuilt on every
+   *  reconfigure so a new strategy, cpIndex or seed takes effect (#603). */
+  private readonly _autoTrafficPickers = new Map<
+    number,
+    AutoTrafficIdTagPicker | null
+  >();
   // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
   // Populated only when a caller actually opts in (run_scenario's
   // awaitArmed); resolved and cleared by the onStateChange hook in
@@ -1319,17 +1325,32 @@ export class CLIChargePointService {
     this._autoTrafficConfigs.set(connectorId, config);
     const existing = this._autoTraffic.get(connectorId);
     if (existing) {
+      // The picker restarts with the runner's seeded stream.
+      this._autoTrafficPickers.set(
+        connectorId,
+        config.enabled
+          ? this.autoTrafficIdTagPicker(connectorId, config)
+          : null,
+      );
       existing.reconfigure(config);
-      if (!config.enabled) this._autoTraffic.delete(connectorId);
+      if (!config.enabled) {
+        this._autoTraffic.delete(connectorId);
+        this._autoTrafficPickers.delete(connectorId);
+      }
       return;
     }
     if (!config.enabled) return;
 
-    const picker = this.autoTrafficIdTagPicker(connectorId, config);
+    this._autoTrafficPickers.set(
+      connectorId,
+      this.autoTrafficIdTagPicker(connectorId, config),
+    );
     const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
       // One tag per session (#603), from the pool when the charge point has
       // one.
-      idTag: () => picker?.next() ?? AUTO_TRAFFIC_ID_TAG,
+      idTag: () =>
+        this._autoTrafficPickers.get(connectorId)?.next() ??
+        AUTO_TRAFFIC_ID_TAG,
       // A cycle starts only on an Accepted charge point, an Available
       // connector and no active transaction (#603); otherwise it is skipped.
       startBlocker: (id) => {
@@ -2839,6 +2860,7 @@ export class CLIChargePointService {
     // alongside its replacement.
     for (const runner of this._autoTraffic.values()) runner.stop();
     this._autoTraffic.clear();
+    this._autoTrafficPickers.clear();
 
     // #447: detached before the teardown, so a shutdown leaves running
     // sessions open for the next start to reconcile.
@@ -2926,6 +2948,15 @@ export class CLIChargePointService {
   }
 
   private attachEventForwarders(): void {
+    // #603: a StartTransaction.conf that is not Accepted turns a start the
+    // runner counted as accepted (the request went out) into a refusal.
+    this._unsubscribes.push(
+      this._chargePoint.events.on(
+        "startTransactionNotAccepted",
+        ({ connectorId }) =>
+          this._autoTraffic.get(connectorId)?.noteStartConfRefused(),
+      ),
+    );
     this._unsubscribes.push(
       this._chargePoint.timeline.onRecord((entry) =>
         this.emit({ event: "timeline_entry", data: entry }),

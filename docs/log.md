@@ -2393,3 +2393,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Control plane → Background traffic](concepts/control-plane.md#background-traffic): `stopAt`, `idTagStrategy`, `cpIndex`; tags from the pool with the traffic's own seeded cursor (why not `nextIdTag`); start preconditions (Accepted, Available, no transaction); the full counter list.
 - [Daemon → Metrics](entities/daemon.md#metrics): the five `ocppcp_auto_traffic_*` series. [Fleet load roadmap](analyses/fleet-load-and-observability-roadmap.md): the config sketch and the metric names as shipped. [GitHub issues](sources/github-issues.md): #603.
+
+## [2026-11-08] fix | AutoTraffic idTag pool review follow-ups (#603)
+
+- [Control plane](concepts/control-plane.md#background-traffic): reconfiguring a connector's traffic rebuilds its idTag stream; a `StartTransaction.conf` that is not Accepted moves the start from `startAccepted` to `startRejected`; `stopAt` must be an ISO 8601 date-time with an offset; the cpIndex shift versus `ChargePoint.nextIdTag`, and which stops are counted, are stated. [Daemon](entities/daemon.md#metrics): `consecutive_skips` is the current run, and a reconfigure keeps the counters. [GitHub issues](sources/github-issues.md): `updated:` bumped.

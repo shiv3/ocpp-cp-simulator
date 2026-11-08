@@ -311,7 +311,12 @@ would not give the same sequence. A `--watch` reload of the pool is seen at
 the next draw. The charge point index (`cpIndex`, else a stable hash of the
 `cpId`) is mixed into the start offset of `round-robin`, the shift of
 `connector-affinity` and the seed of `random`, so the charge points of a fleet
-sharing one tag list do not all present the same tag first. Without a pool the
+sharing one tag list do not all present the same tag first. For that reason the
+tag AutoTraffic presents for a connector can differ from the one
+`ChargePoint.nextIdTag` gives, which has no `cpIndex` shift, and the
+per-connector round-robin cursors of one charge point can present the same tag
+at the same time. Reconfiguring a connector's traffic rebuilds the stream from
+the new `idTagStrategy`, `cpIndex` and `seed`. Without a pool the
 traffic presents `123456`, as before.
 
 **Start preconditions** (#603). A cycle starts only when the charge point's
@@ -339,9 +344,14 @@ must never depend on whether background traffic fired.
 Per-connector counters are the assertion surface for a load run:
 `attempted` (cycles that ran), `skipped` (a roll below `probabilityOfStart` or
 a failed start precondition), `started`, `rejected` and `completed`, plus
-`authorizeAccepted` / `authorizeRejected`, `startAccepted` / `startRejected`,
-`stopAccepted` / `stopRejected`, `consecutiveSkips` (cycles skipped since the
-last session begun) and `firstRunAt` / `lastRunAt` (epoch ms, `null` before the
+`authorizeAccepted` / `authorizeRejected`, `startAccepted` / `startRejected`
+(`startAccepted` counts the start when `StartTransaction.req` goes out; a
+`StartTransaction.conf` whose idTagInfo is not Accepted moves it to
+`startRejected`), `stopAccepted` / `stopRejected` (the stop that ends a
+session on its own timer; the stop issued by turning the traffic off or by
+`stopAt` is not counted, and `stopRejected` is a stop that failed),
+`consecutiveSkips` (cycles skipped since the last session begun, so it
+returns to 0 on a start) and `firstRunAt` / `lastRunAt` (epoch ms, `null` before the
 first cycle). A refused Authorize or a failed start is counted and the loop
 continues; surviving those is what a load run is for. The daemon sums them
 into [`/metrics`](../entities/daemon.md#metrics) (#603).

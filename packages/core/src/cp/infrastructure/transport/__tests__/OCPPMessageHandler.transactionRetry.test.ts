@@ -343,6 +343,49 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(socket.last().payload).toEqual(first.payload);
   });
 
+  it("a shutdown with a second transaction message queued behind the unanswered one replays both (#790)", async () => {
+    const { socket, connector, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction!,
+      connectorId: 1,
+    });
+    const first = socket.last();
+    // Serialized behind the first (§4.1.1): not on the wire yet.
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: {
+        ...connector.transaction!,
+        stopTime: new Date(),
+        meterStop: 10,
+      },
+      connectorId: 1,
+    });
+    expect(socket.written).toHaveLength(1);
+
+    expect(handler.queueUnansweredTransactionCall()).toBe(true);
+    // The queued CALL must not be written while the socket is closing.
+    expect(socket.written).toHaveLength(1);
+    socket.connected = false;
+    handler.onWebSocketClosed();
+
+    socket.connected = true;
+    handler.flushPendingQueue();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.last().payload).toEqual(first.payload);
+    socket.callResult(socket.last().id, {
+      transactionId: 1,
+      idTagInfo: { status: "Accepted" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.written).toHaveLength(3);
+    expect(socket.written.map((w) => w.action)).toEqual([
+      "StartTransaction",
+      "StartTransaction",
+      "StopTransaction",
+    ]);
+  });
+
   it("a link that keeps dropping does not extend the count: discarded after TransactionMessageAttempts transmissions", async () => {
     const { socket, connector, handler, rejected, discarded } = setup();
     handler.sendTransactionEvent({

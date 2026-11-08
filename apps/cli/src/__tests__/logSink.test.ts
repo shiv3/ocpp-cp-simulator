@@ -41,6 +41,16 @@ describe("RotatingFile", () => {
     expect(fs.readFileSync(`${file}.2`, "utf-8")).toBe("line-3-xxxxxxxx\n");
   });
 
+  it("creates the file and its rotated copies readable by the owner only", () => {
+    const file = path.join(dir, "m.log");
+    const rf = new RotatingFile({ file, maxBytes: 20, keep: 1 });
+    for (let i = 0; i < 3; i++) rf.write(`line-${i}-xxxxxxxx`);
+    rf.close();
+    for (const f of [file, `${file}.1`]) {
+      expect(fs.statSync(f).mode & 0o077).toBe(0);
+    }
+  });
+
   it("rotates when the local date changes", () => {
     const file = path.join(dir, "d.log");
     let now = new Date(2026, 0, 1, 23, 59);

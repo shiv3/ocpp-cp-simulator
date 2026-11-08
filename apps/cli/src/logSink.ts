@@ -74,7 +74,7 @@ export class RotatingFile {
     this.keep = Math.max(0, options.keep ?? 5);
     this.now = options.now ?? (() => new Date());
     fs.mkdirSync(path.dirname(path.resolve(options.file)), { recursive: true });
-    this.fd = fs.openSync(options.file, "a");
+    this.fd = fs.openSync(options.file, "a", 0o600);
     this.size = fs.fstatSync(this.fd).size;
     // A file left by an earlier run counts as the day it was last written.
     this.day = localDay(
@@ -127,7 +127,7 @@ export class RotatingFile {
       }
       fs.renameSync(file, `${file}.1`);
     }
-    this.fd = fs.openSync(file, "a");
+    this.fd = fs.openSync(file, "a", 0o600);
     this.size = 0;
   }
 }

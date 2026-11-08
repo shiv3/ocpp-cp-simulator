@@ -1322,7 +1322,9 @@ export class OCPPMessageHandler {
       },
       "no answer before shutdown",
     );
-    this.pumpSerialQueue();
+    // No pump: the socket is closing, so the next queued CALL must stay
+    // unsent. Writing it here would make it the written in-flight CALL, which
+    // onWebSocketClosed discards; left in the queue it is salvaged there.
     return true;
   }
 

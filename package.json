@@ -42,7 +42,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:cli": "bun build --target=bun --outfile=dist-cli/main.js apps/cli/src/main.ts",
-    "test": "vitest run && bun test --isolate bun.test",
+    "test": "vitest run && bun run test:bun",
     "test:vitest": "vitest run",
     "test:bun": "bun test --isolate bun.test",
     "test:bun:cli": "bun test apps/cli/src/__tests__",

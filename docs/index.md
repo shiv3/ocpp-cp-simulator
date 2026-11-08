@@ -63,7 +63,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [packages/ocpp/vendor/ocpp-schemas](sources/vendored-ocpp-schemas.md)             | OCA OCPP 1.6 / 2.0.1 / 2.1 message schemas, vendored verbatim at a pinned commit; never modify        |
 | [docs/examples/scenarios](sources/example-scenarios.md)                           | `demo-charging.json` (lifecycle demo) and `all-cases.json` (node-type catalogue, cross-version e2e)   |
 | [Reverse-proxy + SSO example](sources/reverse-proxy-sso-example.md)               | nginx + Authelia compose showing `--trust-forwarded-headers` behind a proxy                           |
-| [e2e/README.md](sources/e2e-readme.md)                                            | Local-only gocpp CSMS e2e suite across 1.6 / 2.0.1 / 2.1                                              |
+| [e2e/README.md](sources/e2e-readme.md)                                            | gocpp CSMS e2e suite across 1.6 / 2.0.1 / 2.1, switchable fixture behavior, weekly CI run             |
 | [scripts/steve-verify/README.md](sources/steve-verify-readme.md)                  | Runner verifying all 47 cert16 templates against real SteVe via REST, with capability probe           |
 | [examples/testcontainers-java/README.md](sources/testcontainers-java-readme.md)   | JVM Testcontainers prototype driving the control plane and asserting a verdict                        |
 | [scripts/poc/README.md](sources/socketio-bun-poc.md)                              | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |

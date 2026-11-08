@@ -237,4 +237,7 @@ export interface Transaction {
   authorizationRejectedMidSession?: boolean;
   batteryCapacityKwh?: number; // EV battery capacity in kWh
   initialSoc?: number; // Initial State of Charge percentage (0-100)
+  /** Target SoC of this session (0-100); absent means the connector's EV
+   *  settings default applies. Persisted view of `SessionIntent.targetSoc`. */
+  targetSoc?: number;
 }

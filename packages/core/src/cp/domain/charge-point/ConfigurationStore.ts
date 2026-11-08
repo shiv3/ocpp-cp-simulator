@@ -370,6 +370,22 @@ export class ConfigurationStore {
     return this.getInteger("WebSocketPingInterval") ?? 0;
   }
 
+  /** 2.x `OCPPCommCtrlr.RetryBackOffWaitMinimum` in seconds (#609, Part 4
+   *  §5.4); the default is derived from the reconnect policy, 1 without one. */
+  retryBackOffWaitMinimum(): number {
+    return this.getInteger("RetryBackOffWaitMinimum") ?? 1;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffRandomRange` in seconds (#609). */
+  retryBackOffRandomRange(): number {
+    return this.getInteger("RetryBackOffRandomRange") ?? 0;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffRepeatTimes` (#609). */
+  retryBackOffRepeatTimes(): number {
+    return this.getInteger("RetryBackOffRepeatTimes") ?? 5;
+  }
+
   /** Canonical key `CertificateStoreMaxLength`; default `10`. */
   certificateStoreMaxLength(): number {
     return this.getInteger("CertificateStoreMaxLength") ?? 10;

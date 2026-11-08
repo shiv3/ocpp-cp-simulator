@@ -1,3 +1,4 @@
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
 import * as fs from "fs";
 import * as path from "path";
@@ -9,6 +10,7 @@ import {
 } from "socket.io";
 
 import { handleJsonCommand } from "../jsonMode";
+import { fleetTemplateNetworkSimulationError } from "./fleetTemplateFiles";
 import { runCpBatch, runCpBulk } from "./cpBulk";
 import type { CLIChargePointService } from "../service";
 import {
@@ -20,7 +22,10 @@ import {
   RPC_TIMEOUT_MS,
   RpcFailure,
   type Blueprint,
+  type FleetTemplate,
   createManyParamsSchema,
+  createParamsSchema,
+  labelsSchema,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
   ARRAY_MAX_ITEMS,
@@ -55,6 +60,8 @@ import type {
 } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
 import type { ConnectorSettingsRepository } from "@ocpp-cp-sim/client/interfaces/ConnectorSettingsRepository";
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
+import { getTemplateById } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
 import {
   isScenarioDefinitionShape,
@@ -84,6 +91,7 @@ import { appVersion } from "../appVersion";
 import {
   BehaviorNotLoadableError,
   UnknownBehaviorError,
+  BehaviorParamsError,
 } from "../behavior/BehaviorLibrary";
 import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
@@ -91,7 +99,10 @@ import {
   OcppCallNoAnswerError,
   OcppCallRejectedError,
 } from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
-import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import {
+  validateLayerConfig,
+  type NetworkSimLayerConfig,
+} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
 import { createScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
@@ -164,6 +175,8 @@ export interface SocketIoDeps {
   readonly requestShutdown?: () => void;
   /** `server.info`; absent → version only, no SOAP public base. */
   readonly serverInfo?: ServerInfo;
+  /** #622: per-charge-point wait of `cp.bulk` / `cp.scenario.run` (ms). */
+  readonly cpBulkWaitMs?: number;
   readonly webConsoleBasicAuth?: {
     readonly username: string;
     readonly password: string;
@@ -178,6 +191,8 @@ export interface SocketIoDeps {
    * transport `not_found` over the other.
    */
   readonly blueprints?: BlueprintRepository;
+  /** Shared for the same reason as `blueprints` (#445). */
+  readonly fleetTemplates?: FleetTemplateRepository;
   /** Shared for the same reason as `blueprints` (#458). */
   readonly vehicleProfiles?: VehicleProfileRepository;
   /**
@@ -202,6 +217,7 @@ export interface RuntimeSocketIoDeps extends SocketIoDeps {
   readonly chargePointService: RegistryChargePointService;
   readonly registryEvents: RegistryEventBridge | null;
   readonly blueprints: BlueprintRepository;
+  readonly fleetTemplates: FleetTemplateRepository;
   readonly vehicleProfiles: VehicleProfileRepository;
   readonly vehicleCatalog: VehicleCatalog | null;
 }
@@ -366,6 +382,8 @@ export function createRuntimeDeps(
     configRepository,
     registryEvents,
     blueprints: deps.blueprints ?? new BlueprintRepository(database),
+    fleetTemplates:
+      deps.fleetTemplates ?? new FleetTemplateRepository(database),
     vehicleProfiles:
       deps.vehicleProfiles ?? new VehicleProfileRepository(database),
     vehicleCatalog: deps.vehicleCatalog ?? null,
@@ -536,6 +554,16 @@ export async function dispatchRpcCore(
       return saveBlueprint(deps, call.params);
     case "blueprint.delete":
       return deleteBlueprint(deps, call.params);
+    case "fleet.template.list":
+      return deps.fleetTemplates.list();
+    case "fleet.template.get":
+      return getFleetTemplate(deps, call.params);
+    case "fleet.template.save":
+      return saveFleetTemplate(deps, call.params);
+    case "fleet.template.delete":
+      return deleteFleetTemplate(deps, call.params);
+    case "fleet.create":
+      return createFleet(deps, call.params);
     case "cp.update":
       return updateCp(deps, call.params);
     case "cp.delete":
@@ -576,6 +604,18 @@ export async function dispatchRpcCore(
       return saveNetworkSimCp(deps, call.params);
     case "network_sim.disconnect.trigger":
       return triggerNetworkSimDisconnect(deps, call.params);
+    case "power.loss": {
+      const { cpId, ...options } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.powerLoss(cpId, options),
+      );
+    }
+    case "power.restore": {
+      const { cpId, ...options } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.powerRestore(cpId, options),
+      );
+    }
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
     case "scenario.runs.list":
@@ -739,7 +779,10 @@ async function bulkCps(
   return runCpBulk(
     cpIds,
     (cpId) => runFacadeOperation(() => service[action](cpId)),
-    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+    {
+      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
+      failureReason: batchFailureReason,
+    },
   );
 }
 
@@ -774,7 +817,10 @@ async function runScenarioOnSelector(
           ...(once === undefined ? {} : { once }),
         }),
       ),
-    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+    {
+      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
+      failureReason: batchFailureReason,
+    },
   );
   return {
     matched: batch.matched,
@@ -1081,6 +1127,269 @@ async function createManyCps(
   return { created, failed };
 }
 
+function getFleetTemplate(
+  deps: RuntimeSocketIoDeps,
+  { id }: Params<"fleet.template.get">,
+): FleetTemplate {
+  const template = deps.fleetTemplates.get(id);
+  if (!template) throw new RpcFailure("not_found", `no fleet template "${id}"`);
+  return template;
+}
+
+function saveFleetTemplate(
+  deps: RuntimeSocketIoDeps,
+  { template }: Params<"fleet.template.save">,
+): { id: string } {
+  if (deps.fleetTemplates.isProvided(template.id)) {
+    // Refused rather than shadowed, like a built-in blueprint: the file wins at
+    // every start, so a stored copy would be dead the next time the daemon runs.
+    throw new RpcFailure(
+      "invalid_params",
+      `"${template.id}" comes from a --fleet-template file and cannot be replaced; choose another id`,
+    );
+  }
+  const layerError = fleetTemplateNetworkSimulationError(template);
+  if (layerError) throw new RpcFailure("invalid_params", layerError);
+  // The list result carries the file templates too, so the ceiling is checked
+  // against all of them before the write.
+  const all = deps.fleetTemplates.list();
+  if (all.length >= ARRAY_MAX_ITEMS && !all.some((t) => t.id === template.id)) {
+    throw new RpcFailure(
+      "invalid_params",
+      `at most ${ARRAY_MAX_ITEMS} fleet templates can exist; delete one first`,
+    );
+  }
+  deps.fleetTemplates.save(template);
+  return { id: template.id };
+}
+
+function deleteFleetTemplate(
+  deps: RuntimeSocketIoDeps,
+  { id }: Params<"fleet.template.delete">,
+): { ok: true } {
+  if (deps.fleetTemplates.isProvided(id)) {
+    throw new RpcFailure(
+      "invalid_params",
+      `"${id}" comes from a --fleet-template file and cannot be deleted`,
+    );
+  }
+  if (!deps.fleetTemplates.delete(id)) throw new RpcFailure("not_found", "");
+  return { ok: true };
+}
+
+interface FleetPlanEntry {
+  readonly cpId: string;
+  readonly params: Params<"cp.create">;
+  readonly connectors: number;
+  readonly evSettings: Blueprint["evSettings"];
+  readonly scenarioTemplateId: string | undefined;
+  readonly networkSimulation: Record<string, unknown> | undefined;
+  readonly autoConnect: boolean;
+}
+
+/**
+ * Resolve a fleet template into the exact charge points it stands for, in
+ * order, **before anything is created**: an unknown blueprint or scenario
+ * template, an invalid merged parameter block, a repeated id or a bad label
+ * set fails the whole call with `invalid_params` / `not_found` and no side
+ * effect. What can only be known by trying — an id already registered, an
+ * unreachable URL — is left to the per-charge-point report.
+ *
+ * Order is the template's own: groups in order, members in order, a range
+ * ascending. `created` and `failed` therefore come back in the same order on
+ * every call.
+ */
+function planFleet(
+  deps: RuntimeSocketIoDeps,
+  template: FleetTemplate,
+  call: Params<"fleet.create">,
+): FleetPlanEntry[] {
+  const plan: FleetPlanEntry[] = [];
+  const seen = new Set<string>();
+  const prefix = call.idPrefix ?? "";
+  for (const group of template.groups) {
+    group.members.forEach((member, line) => {
+      const where = `group "${group.name}", member ${line + 1}`;
+      const blueprint =
+        builtInBlueprints().find((b) => b.id === member.blueprintId) ??
+        deps.blueprints.get(member.blueprintId);
+      if (!blueprint) {
+        throw new RpcFailure(
+          "not_found",
+          `no blueprint "${member.blueprintId}" (${where})`,
+        );
+      }
+      const scenarioTemplateId =
+        member.scenarioTemplateId ?? blueprint.scenarioTemplateId;
+      if (scenarioTemplateId && !getTemplateById(scenarioTemplateId)) {
+        throw new RpcFailure(
+          "not_found",
+          `no scenario template "${scenarioTemplateId}" (${where})`,
+        );
+      }
+      if (member.networkSimulation !== undefined) {
+        const layer = validateLayerConfig(member.networkSimulation);
+        if (!layer.ok) {
+          throw new RpcFailure(
+            "invalid_params",
+            `${where}: invalid networkSimulation: ${layer.errors[0] ?? "invalid layer config"}`,
+          );
+        }
+      }
+      const labels = labelsSchema.safeParse({
+        ...blueprint.params.labels,
+        ...template.labels,
+        ...group.labels,
+        ...member.labels,
+      });
+      if (!labels.success) {
+        throw new RpcFailure(
+          "invalid_params",
+          `${where}: ${labels.error.issues[0]?.message ?? "invalid labels"}`,
+        );
+      }
+      const count = member.count ?? 1;
+      const first = member.startIndex ?? 1;
+      for (let i = 0; i < count; i++) {
+        const index = first + i;
+        const cpId =
+          prefix +
+          (member.cpId !== undefined
+            ? member.cpId
+            : expandIdPattern(member.idPattern as string, index));
+        if (cpId.length > MAX_GENERATED_CP_ID_LENGTH) {
+          throw new RpcFailure(
+            "invalid_params",
+            `${where}: id longer than ${MAX_GENERATED_CP_ID_LENGTH} characters`,
+          );
+        }
+        if (seen.has(cpId)) {
+          throw new RpcFailure(
+            "invalid_params",
+            `charge point id "${cpId}" appears twice in the template (${where})`,
+          );
+        }
+        seen.add(cpId);
+        const merged: Record<string, unknown> = {
+          ...blueprint.params,
+          ...(call.wsUrl !== undefined ? { wsUrl: call.wsUrl } : {}),
+          ...stripUndefined(member.overrides ?? {}),
+          cpId,
+          labels: labels.data,
+        };
+        // A SOAP callback is routed by the id inside it, so a range expands the
+        // URL with the same index as its id and every result is checked, as in
+        // cp.create_many.
+        if (typeof merged.soapCallbackUrl === "string") {
+          const url =
+            member.idPattern !== undefined
+              ? expandIdPattern(merged.soapCallbackUrl, index)
+              : merged.soapCallbackUrl;
+          if (soapCallbackRouteCpId(url) !== cpId) {
+            throw new RpcFailure(
+              "invalid_params",
+              `${where}: soapCallbackUrl must expand to a route whose charge point segment is "${cpId}"`,
+            );
+          }
+          if (url.length > MAX_SOAP_CALLBACK_URL_LENGTH) {
+            throw new RpcFailure(
+              "invalid_params",
+              `${where}: soapCallbackUrl expands to more than ${MAX_SOAP_CALLBACK_URL_LENGTH} characters`,
+            );
+          }
+          merged.soapCallbackUrl = url;
+        }
+        // Member override, then the call, then the blueprint, then off: the
+        // caller's explicit choice beats what a blueprint saved.
+        const autoConnect =
+          member.overrides?.autoConnect ??
+          call.autoConnect ??
+          blueprint.params.autoConnect ??
+          false;
+        // Connecting waits until the EV settings, scenario and network
+        // simulation are in place, so the CP never dials in a half-configured
+        // state; creation itself must not connect.
+        merged.autoConnect = false;
+        const parsed = createParamsSchema.safeParse(merged);
+        if (!parsed.success) {
+          throw new RpcFailure(
+            "invalid_params",
+            `${cpId}: ${parsed.error.issues[0]?.message ?? "invalid parameters"}`,
+          );
+        }
+        plan.push({
+          cpId,
+          params: parsed.data,
+          connectors: parsed.data.connectors ?? 1,
+          evSettings: member.evSettings ?? blueprint.evSettings,
+          scenarioTemplateId,
+          networkSimulation: member.networkSimulation,
+          autoConnect,
+        });
+      }
+    });
+  }
+  return plan;
+}
+
+/**
+ * `fleet.create` (#445): instantiate a fleet template. Every charge point is
+ * created through the same path as `cp.create_many` and is independent of the
+ * template afterwards. Partial failure is the result: a charge point that
+ * cannot be created, or configured after creation, is rolled back and reported
+ * in `failed`; the rest stay.
+ */
+async function createFleet(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"fleet.create">,
+): Promise<Result<"fleet.create">> {
+  const template = deps.fleetTemplates.get(params.templateId);
+  if (!template) {
+    throw new RpcFailure(
+      "not_found",
+      `no fleet template "${params.templateId}"`,
+    );
+  }
+  const plan = planFleet(deps, template, params);
+  const created: string[] = [];
+  const failed: Array<{ cpId: string; reason: string }> = [];
+  for (const entry of plan) {
+    try {
+      const cpId = await createOneCp(deps, entry.params);
+      try {
+        await applyBlueprintDefaults(deps, cpId, entry.connectors, {
+          evSettings: entry.evSettings,
+          scenarioTemplateId: entry.scenarioTemplateId,
+        });
+        if (entry.networkSimulation) {
+          await runFacadeOperation(() =>
+            deps.chargePointService.saveNetworkSimCp(
+              cpId,
+              entry.networkSimulation as unknown as NetworkSimLayerConfig,
+            ),
+          );
+        }
+      } catch (err) {
+        await deps.chargePointService
+          .removeChargePoint(cpId)
+          .catch(() => undefined);
+        throw err;
+      }
+      created.push(cpId);
+      if (entry.autoConnect) {
+        void deps.chargePointService.connect(cpId).catch((err) => {
+          process.stderr.write(
+            `[server] autoConnect failed for ${cpId}: ${safeLogMessage(err)}\n`,
+          );
+        });
+      }
+    } catch (err) {
+      failed.push({ cpId: entry.cpId, reason: batchFailureReason(err) });
+    }
+  }
+  return { templateId: template.id, created, failed };
+}
+
 /**
  * Apply a blueprint's EV settings and startup scenario to a created charge
  * point, one connector at a time.
@@ -1167,7 +1476,11 @@ async function setCpBehaviors(
   params: Params<"cp.behaviors.set">,
 ): Promise<{ cpId: string; behaviors: string[] }> {
   const behaviors = await runFacadeOperation(() =>
-    deps.registry.setBehaviors(params.cpId, params.behaviors ?? undefined),
+    deps.registry.setBehaviors(
+      params.cpId,
+      params.behaviors ?? undefined,
+      params.behaviorParams as Record<string, JsonObject> | undefined,
+    ),
   );
   if (behaviors === null) throw new RpcFailure("not_found", "");
   return { cpId: params.cpId, behaviors };
@@ -2546,6 +2859,7 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   // the loaded ids.
   if (
     err instanceof UnknownBehaviorError ||
+    err instanceof BehaviorParamsError ||
     err instanceof BehaviorNotLoadableError
   ) {
     return new RpcFailure("invalid_params", err.message);
@@ -2805,11 +3119,14 @@ function mergeUpdateParams(
     init.txUpdatedMeterValues,
   );
   preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
+  preserveWhenMissing(merged, "capabilityProfile", init.capabilityProfile);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);
   preserveWhenMissing(merged, "tls", init.tls);
-  preserveWhenMissing(merged, "behaviors", init.behaviors);
+  // `behaviors` and `behaviorParams` stay omitted: CPRegistry.update keeps
+  // them (in memory and, for a run that holds fewer behaviors than the row
+  // names, the stored columns as they are).
 
   if (isRecord(merged.basicAuth) && init.basicAuth) {
     const basicAuth = { ...merged.basicAuth };

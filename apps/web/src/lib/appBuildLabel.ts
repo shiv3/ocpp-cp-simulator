@@ -18,6 +18,15 @@ export function resolveBuildLabel(version: string, commit: string): string {
   );
 }
 
+/** The bare version the daemon's `appVersion()` would report for this build
+ *  (`1.2.3`, `<sha7>-dev` or `local-dev`): stamped on scenario run reports. */
+export function appVersionString(): string {
+  return resolveBuildVersion({
+    packageVersion: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "",
+    commit: typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "",
+  });
+}
+
 /** {@link resolveBuildLabel} over the build-time defines (vite.config.ts). */
 export function appBuildLabel(): string {
   return resolveBuildLabel(__APP_VERSION__, __APP_COMMIT__);

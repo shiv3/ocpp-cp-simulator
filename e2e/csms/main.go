@@ -20,7 +20,7 @@ import (
 type versionConfig struct {
 	token       string
 	subprotocol string
-	register    func(*csms.Server, *Recorder) error
+	register    func(*csms.Server, *Recorder, *Behavior) error
 }
 
 func main() {
@@ -41,6 +41,7 @@ func run() int {
 
 	stdout := bufio.NewWriter(os.Stdout)
 	rec := NewRecorder(stdout)
+	beh := newBehavior()
 	reg := newRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
@@ -75,13 +76,14 @@ func run() int {
 		// FIFO/wire order. Fine for a low-volume single-CP-per-test fixture.
 		csms.WithGlobalConcurrencyLimit(1),
 	)
-	if err := cfg.register(srv, rec); err != nil {
+	if err := cfg.register(srv, rec, beh); err != nil {
 		logger.Error("register CSMS handlers", "version", cfg.token, "error", err)
 		return 1
 	}
 
-	ocppHTTP := &http.Server{Handler: srv.Handler()}
-	controlHTTP := &http.Server{Handler: newControlHandler(cfg.token, reg)}
+	gate := newOfflineGate(beh, srv.Handler())
+	ocppHTTP := &http.Server{Handler: gate, ConnState: gate.connState}
+	controlHTTP := &http.Server{Handler: newControlHandler(cfg.token, reg, beh)}
 	errCh := make(chan error, 2)
 
 	go serveHTTP(errCh, "ocpp", ocppHTTP, ocppListener)

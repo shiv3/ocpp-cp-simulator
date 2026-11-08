@@ -46,24 +46,26 @@ runtime model.
 
 ## Status at a glance
 
-| #   | Phase                                                        | Size | Depends on | Status      | Issue |
-| --- | ------------------------------------------------------------ | ---- | ---------- | ----------- | ----- |
-| 1a  | [Bulk CP creation](#1a-bulk-cp-creation)                     | S    | —          | shipped     | #295  |
-| 1b  | [Multiple supervision URLs](#1b-multiple-supervision-urls)   | S    | —          | shipped     | #296  |
-| 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | shipped     | #297  |
-| 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | shipped     | #297  |
-| 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped     | #298  |
-| 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped     | #299  |
-| 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300  |
-| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped     | #301  |
-| 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | —          | shipped     | #315  |
-| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped     | #302  |
-| 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | conditional | #302  |
-| 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | shipped     | #314  |
+| #   | Phase                                                        | Size | Depends on | Status              | Issue      |
+| --- | ------------------------------------------------------------ | ---- | ---------- | ------------------- | ---------- |
+| 1a  | [Bulk CP creation](#1a-bulk-cp-creation)                     | S    | —          | shipped             | #295       |
+| 1b  | [Multiple supervision URLs](#1b-multiple-supervision-urls)   | S    | —          | shipped             | #296       |
+| 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | shipped             | #297       |
+| 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | shipped             | #297       |
+| 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped             | #298       |
+| 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped             | #299       |
+| 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped             | #300       |
+| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped             | #301       |
+| 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | —          | shipped             | #315       |
+| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped             | #302       |
+| 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | under consideration | #302, #626 |
+| 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | shipped             | #314       |
 
-One item is deliberately not unconditional. **5b** is gated on the number
+One item was deliberately not unconditional. **5b** was gated on the number
 that **5a** produces — building a worker model before knowing where the single
-event loop actually breaks is speculative. **4b** was optional for the same
+event loop actually breaks is speculative. 5a produced it (#626); whether to build 5b is
+under consideration in a separate issue (see the follow-up issue), and
+[5b](#5b-worker-model-conditional) records what the number does and does not show. **4b** was optional for the same
 kind of reason (it serves only CSMS implementations that validate German
 calibration-law (Eichrecht) meter data) and shipped once that use was asked
 for (#315).
@@ -309,6 +311,9 @@ AutoTrafficConfig {
   probabilityOfStart: number,      // 0..1, gate per attempt
   requireAuthorize: boolean,
   stopAfterSec?: number,
+  stopAt?: string,                 // absolute stop time, ISO 8601 (#603)
+  idTagStrategy?: IdTagDistribution, // default: the pool's own (#603)
+  cpIndex?: number,                // fleet position, mixed into the idTag draw (#603)
 }
 ```
 
@@ -321,9 +326,11 @@ CPs do not correlate.
 **Counters.** Expose per-connector attempted / started / rejected / skipped
 authorize, start and stop counts on connector status — that is the assertion
 surface. Phase 2 scrapes them **aggregated**, as
-`ocppcp_auto_traffic_sessions_total{outcome}` and
-`ocppcp_auto_traffic_skipped_total{reason}`: per-connector series would need a
-`cpId` label, which the cardinality rule forbids.
+`ocppcp_auto_traffic_cycles_total{result}` and
+`ocppcp_auto_traffic_steps_total{step,outcome}` (plus the consecutive-skip and
+first/last-run gauges, #603; the planned `sessions` / `skipped{reason}` names
+were not used, and there is no skip reason label): per-connector series would
+need a `cpId` label, which the cardinality rule forbids.
 
 **Interaction with scenarios — state the rule.** A scenario taking control of a
 connector suspends auto-traffic for that connector and resumes it on scenario
@@ -444,7 +451,7 @@ knee for a stated machine.
 `daemon.md`. This is the cheapest item on this page and it is what makes 5b a
 decision rather than a guess.
 
-**Shipped, number pending.** [`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md)
+**Shipped, number recorded (#626).** [`scripts/bench/fleet-bench.ts`](../../scripts/bench/README.md)
 implements the shape above — it grows a fleet via `cp.create_many`, drives
 both axes (idle heartbeat-only and active start/stop-transaction, staggered),
 and diffs two `/metrics` scrapes to isolate one step's
@@ -453,12 +460,15 @@ abandoned calls (`ocppcp_ocpp_call_timeouts_total`), errors and reconnects as
 sharper knee signals. Its active axis is bounded by the control plane's
 per-connection rate limit — ten pooled sockets sustain `N ≤ 320 ×
 --tx-interval`, and a sweep past that is refused rather than run at less load
-than configured. What is **not** done: no
-real CSMS is available in this repository's CI or review sandboxes to
-actually run it against, so
-[Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
-states the method and what to record rather than a number. Running it and
-filling in that number is the remaining step before 5b can be decided.
+than configured. The first run (2026-11-08, a 4-CPU shared container, a
+loopback mock CSMS) is in
+[Daemon → Measured scale ceiling](../entities/daemon.md#result-first-measured-ceiling-626-2026-11-08):
+flat latency to about 1,200 OCPP calls/s, a knee near 1,400, and answered
+calls that stopped following the offered load near 1,450 calls/s, which is
+about 2,000 charge points on a 15 s transaction cycle, about 1,000 on a 5 s
+one, and more than 2,000 idle (OCPP 1.6J). Which process limited the 5 s axis
+(daemon, mock CSMS, bench or the shared host) was not isolated, so it is a
+figure for that setup, against a mock and not a real CSMS.
 
 ### 5b. Worker model (conditional)
 
@@ -474,7 +484,29 @@ writes through the main thread), and keeping the event stream ordered per CP.
 
 **Decide after 5a.** If the ceiling is comfortably above what CI jobs ask for,
 `export-k6` already covers the case where load must come from outside the
-daemon, and this phase should be dropped rather than built.
+daemon, which is the argument against building this phase; the maintainer keeps
+the question open (see the follow-up issue).
+
+**Status (#626, 2026-11-08): under consideration, not built.** The worker
+model is being considered in a separate issue (see the follow-up issue). What
+the measurement shows, with **OCPP 1.6J** only: the number is above what this
+project's own CI and conformance runs ask for (the e2e suites create one to a
+handful of charge points). One daemon held 2,000 idle charge points at about
+half of one core and 2,000 charge points cycling a transaction every 15 s
+without a latency change, and answered calls stopped following the offered load
+only near 1,450 OCPP calls/s on a busy 4-CPU host that also ran the CSMS and the
+load generator. Past that, `export-k6` puts the load outside the daemon.
+Workers would bring the costs named above (a main-thread control plane, SQLite
+writes from several threads, per-CP event order).
+
+**Open inputs for that decision.** A real need for one daemon to hold more than
+about 2,000 charge points cycling every 15 s, or more than about 1,000 on a 5 s
+cycle; a 2.x fleet of that size (2.x TransactionEvent handling is heavier, and a
+2.x charge point that is offline writes SQLite rows per event, #554; the 2.x
+path was not measured); and a re-measurement on a dedicated host with a real
+CSMS, because the number here is a lower bound. A single-threaded loop at 100%
+of one core is the signal to look for (`ocppcp_ocpp_call_duration_seconds` p95
+rising while `calls/s` stops following the offered load).
 
 ## Phase 6 — File hot-reload
 

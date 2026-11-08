@@ -3,6 +3,10 @@ title: OCPP versions and transports
 type: concept
 summary: What the simulator speaks — OCPP-J 1.6J (default), 2.0.1 and 2.1 over WebSocket, and OCPP-S 1.2 / 1.5 / 1.6S over SOAP 1.2 + WS-Addressing — and which surfaces support which.
 sources:
+  - packages/core/src/cp/shared/WsClientOptions.ts
+  - "issue #611"
+  - packages/core/src/cp/shared/ReconnectPolicy.ts
+  - "issue #609"
   - packages/ocpp/src/ (generated from packages/ocpp/vendor/ocpp-schemas)
   - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
@@ -87,6 +91,123 @@ so no negative (refuse / ignore a CSMS call) or wait-for-call scenario was
 expressible on 2.0.1 at all; it now consults them at the same point the 1.6
 handler does, before payload validation and handler lookup, so policies are
 sticky across reconnects the same way and an override answers once.
+
+## Reconnect policy and `RetryBackOff*` (#609)
+
+When an OCPP-J connection closes without the charge point asking for it, the
+transport waits and reconnects. The wait and the point at which it stops are
+the **reconnect policy**, one object per charge point (`transport.reconnect` on
+`cp.create`, the `--reconnect-*` flags in the [CLI](../entities/cli.md), the
+`charge_points.transport_options` column of the [state database](state-persistence.md)).
+Every field is optional and **the defaults are the schedule before the policy
+existed**: 1 s, doubling to 30 s, forever, no jitter.
+
+| Field            | Default       | Meaning                                                                                                                                                                                                                                                                                                         |
+| ---------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxAttempts`    | `-1`          | Reconnect attempts after a loss before giving up; `-1` unlimited, `0` never reconnects. The count restarts when a connection opens.                                                                                                                                                                             |
+| `mode`           | `exponential` | `exponential` waits `min(baseDelayMs × 2^(attempt−1), maxDelayMs)`; `fixed` waits `baseDelayMs` every time.                                                                                                                                                                                                     |
+| `baseDelayMs`    | `1000`        | Wait before the first attempt.                                                                                                                                                                                                                                                                                  |
+| `maxDelayMs`     | `30000`       | Cap of the exponential wait; must be ≥ `baseDelayMs`.                                                                                                                                                                                                                                                           |
+| `jitterMs`       | `0`           | A random extra wait in `[0, jitterMs]`, drawn from the charge point's seeded `reconnect` stream: the same seed replays the same waits. Without a simulation seed (the CLI and `cp.create` set none) the stream is seeded by the charge point id, so the same id replays the same waits. No draw happens at `0`. |
+| `bootRetryLimit` | `-1`          | Automatic BootNotification re-sends after a `Rejected` answer (§4.2) before stopping; `-1` unlimited. An `Accepted` answer or a new connection restores the budget. Applies to SOAP too.                                                                                                                        |
+
+An invalid value is refused when the charge point is created (a typo does not
+silently leave the default in place). The delay a network-simulation
+`reconnectDelayMs` reserves still wins when it is longer than the computed wait
+([network simulation](network-simulation.md)).
+
+**Giving up** — `maxAttempts` or `bootRetryLimit` reached — logs a warning, emits
+`gaveUp` and records a `gave_up` entry (`target` `reconnect` or
+`boot_notification`, `attempts`) in the [operational timeline](operational-timeline.md).
+On 2.x this is an opt-in deviation: OCPP 2.0.1 Part 4 §5.4 says the station keeps reconnecting, and the default (`-1`, unlimited) does. The charge point then stays offline until an explicit `connect`, which starts
+with a fresh budget; so does every new connection: the BootNotification budget
+is restored when a socket opens, not only on an `Accepted` answer. The
+`gave_up` entry of a BootNotification follows the `Rejected` answer that caused it.
+
+**OCPP 2.0.1 / 2.1 (Part 4 §5.4 "Reconnecting").** A 2.x charge point reads three
+`OCPPCommCtrlr` variables, ReadWrite and persisted like the others, and they
+replace `baseDelayMs`, `jitterMs` and the number of doublings:
+
+| Variable                  | Unit    | Meaning                                                               |
+| ------------------------- | ------- | --------------------------------------------------------------------- |
+| `RetryBackOffWaitMinimum` | seconds | The first wait; at least 1.                                           |
+| `RetryBackOffRandomRange` | seconds | A random extra wait in `[0, RandomRange]` added to every wait.        |
+| `RetryBackOffRepeatTimes` | count   | How many times the wait doubles (0–30); after that it stays constant. |
+
+The wait before attempt N is `RetryBackOffWaitMinimum × 2^min(N−1, RepeatTimes)`
+plus the random extra (Part 4 §5.4 describes the doubling and the random range
+in prose, not as a formula; the variables are defined in the Part 2 Appendices
+under `OCPPCommCtrlr`). `RepeatTimes` 2 with a minimum of 20 s waits 20, 40, 80,
+80 s. The spec sets no ceiling, so a CSMS's values are followed as set: only the
+timer's own limit (2147483647 ms) applies, to the wait and to the wait plus the
+random extra. One exception keeps the default schedule: while the three variables
+still equal the values derived from the policy (nobody changed them), `maxDelayMs`
+caps the doubled part, so 1, 2, 4, 8, 16 does not become 32 s on the sixth attempt.
+`mode: fixed` never doubles and `maxAttempts` still ends the loop. The
+variable defaults are derived from the policy (whole seconds, at least 1 for the
+minimum), so a 2.x charge point with no policy reconnects after 1, 2, 4, 8, 16
+and 30 s, like 1.6; a policy with sub-second values is rounded up in the
+variables. A 1.6 charge point has none of the three keys.
+
+Local mode (the browser) does not take the policy: the reconnect loop of the web
+console's charge points keeps the defaults.
+
+## WebSocket client options (#611)
+
+`transport.ws` — next to `transport.reconnect`, same places: `cp.create`, the
+`--ws-*` flags of the [CLI](../entities/cli.md), `charge_points.transport_options` —
+sets what the OCPP-J client asks of its WebSocket. Every field is optional and a
+charge point without them behaves as before.
+
+| Field                | CLI flag                        | Meaning                                                                                                                                    | Bun | Node (`ws`) | Browser |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --- | ----------- | ------- |
+| `handshakeTimeoutMs` | `--ws-handshake-timeout-ms`     | An attempt that has not opened within this many ms is closed; the [reconnect policy](#reconnect-policy-and-retrybackoff-609) then applies. | yes | yes         | yes     |
+| `perMessageDeflate`  | `--ws-no-compression` (`false`) | `false` stops offering `permessage-deflate` on the upgrade; `true` offers it (the default).                                                | yes | yes         | no      |
+| `maxPayloadBytes`    | `--ws-max-payload`              | Largest incoming message; a larger one closes the socket (1006 on `ws`).                                                                   | no  | yes         | no      |
+| `proxy`              | `--ws-proxy`                    | `http://` or `https://` proxy the upgrade goes through with `CONNECT`.                                                                     | yes | no          | no      |
+| `localAddress`       | `--ws-local-address`            | Local IP the connection binds to.                                                                                                          | no  | yes         | no      |
+
+**What the table means.** _yes_ is measured (below), not read from documentation.
+The handshake timeout is _yes_ everywhere because the transport enforces it itself
+with a timer: no runtime does it for us (Bun never times a handshake out).
+
+**An option the runtime cannot honour is refused, not ignored.** The charge point
+is not created: `cp.create` answers an error such as
+`WebSocket option "localAddress" is not supported on bun (supported on: node)`,
+the CLI exits 1 with the same text, and a charge point restored from the state
+database that needs an option the current runtime lacks is skipped with that
+warning (the row is kept). Issue #611 asked for a startup warning; a warning
+would leave a test running behind a proxy it never used or with a payload limit
+it never enforced, so the simulator fails instead. `transport.ws` on a SOAP
+version is refused for the same reason: it has no WebSocket.
+
+Values are validated when the charge point is created: `handshakeTimeoutMs` > 0,
+`maxPayloadBytes` an integer > 0, `proxy` an `http(s)://` URL, `localAddress`
+non-empty. The refusal probe that explains a refused upgrade ([#288](https://github.com/shiv3/ocpp-cp-simulator/issues/288))
+goes through the same `proxy`.
+
+**Local mode** (the web console's browser charge points) takes none of this:
+`WebSocket` in a browser cannot set compression, payload limits, a proxy or a
+source address, and Local charge points keep the default handshake behaviour.
+
+**PoC (2026-11-08, Bun 1.3.14 and Node 22 with `ws`).** Each option was passed
+to the client constructor against a local server that records the upgrade
+request, a silent TCP server and a recording `CONNECT` proxy:
+
+| Option                     | Bun 1.3.14                                                                                                                                  | Node 22 + `ws`                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `perMessageDeflate: false` | No `Sec-WebSocket-Extensions` sent (default offers `permessage-deflate; client_max_window_bits`). A `compression: false` option is ignored. | Honoured, same result.                                           |
+| `maxPayload` 1 KB          | **Ignored**: a 2 MB message is delivered whole.                                                                                             | Honoured: `Max payload size exceeded`, close 1006.               |
+| `localAddress` 127.0.0.2   | **Ignored**: the server sees 127.0.0.1.                                                                                                     | Honoured: the server sees 127.0.0.2.                             |
+| `proxy`                    | Honoured: the proxy receives `CONNECT host:port`. `HTTP_PROXY` / `http_proxy` are **not** used for WebSockets.                              | No proxy option; it needs an agent and none is bundled.          |
+| handshake timeout          | No option; a silent server leaves the socket `CONNECTING` for the whole 6 s observed.                                                       | `handshakeTimeout` honoured (`Opening handshake has timed out`). |
+
+The Bun half runs on every CI build as
+`packages/core/src/cp/infrastructure/transport/__tests__/OCPPWebSocket.wsOptions.bun.test.ts`,
+including a canary for the two options Bun ignores: if a Bun release starts
+honouring one, that test fails and the matrix in
+[`WsClientOptions.ts`](../../packages/core/src/cp/shared/WsClientOptions.ts)
+is corrected.
 
 ## WebSocket ping (`WebSocketPingInterval`)
 

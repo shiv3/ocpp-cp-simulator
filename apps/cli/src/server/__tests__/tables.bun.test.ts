@@ -103,6 +103,10 @@ function populate(db: BunSqliteDatabase, cpIds: readonly string[]): void {
     [t],
   );
   db.run(
+    "INSERT OR REPLACE INTO fleet_templates (id, name, definition, updated_at) VALUES ('ft', 'FT', '{}', ?)",
+    [t],
+  );
+  db.run(
     "INSERT OR REPLACE INTO vehicle_profiles (id, name, body, updated_at) VALUES ('vp', 'VP', '{}', ?)",
     [t],
   );

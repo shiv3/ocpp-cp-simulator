@@ -1,11 +1,12 @@
 ---
 title: Access control (bind gate, Basic Auth, CORS, reverse proxies)
 type: concept
-summary: How the daemon decides who may reach it — loopback by default, `--unsafe-remote` or web-console Basic Auth for non-loopback binds, a bind-dependent CORS policy, and the `--cors-origin` / `--trust-forwarded-headers` fixes for consoles behind a proxy.
+summary: How the daemon decides who may reach it — loopback by default, `--unsafe-remote` or web-console Basic Auth for non-loopback binds, a bind-dependent CORS policy, the `--cors-origin` / `--trust-forwarded-headers` fixes for consoles behind a proxy, and opt-in Host allowlist, trusted proxies, TLS requirement and per-IP rate limit.
 sources:
   - apps/cli/src/server/
   - docs/examples/compose-reverse-proxy-sso.yml
   - "issue #73"
+  - "issue #620"
 related:
   - ../entities/daemon.md
   - ../entities/docker-image.md
@@ -26,7 +27,7 @@ beyond loopback (`--http-host 0.0.0.0`, a LAN address) requires one of:
   Socket.IO handshake while leaving health unauthenticated,
 - `--unsafe-remote`, for trusted networks or deployments protected by another
   boundary (the [Docker image](../entities/docker-image.md) pins this in its
-  entrypoint because a container intentionally binds non-loopback).
+  entrypoint, unless it runs the CLI ([Running the CLI](../entities/docker-image.md#running-the-cli)), because a container intentionally binds non-loopback).
 
 Otherwise startup fails before CORS comes into play. Pair remote exposure with
 a tight `--cors-origin` allowlist when browsers can reach the daemon. CORS is
@@ -192,6 +193,8 @@ ocpp-cp-sim --daemon --http-port 9700 --web-console \
 | ----------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Non-loopback (`0.0.0.0`, LAN) | `--trust-forwarded-headers` | **`same-origin` + forwarded** — also accepts `Origin` equal to `${X-Forwarded-Proto}://${X-Forwarded-Host}` (first value). |
 
+To believe those headers only from named proxies, use `--trusted-proxy` ([Hardening](#hardening-for-shared-environments)).
+
 > **Security:** only pass `--trust-forwarded-headers` when a **trusted** proxy
 > sets those headers and the daemon is **not** reachable directly. If a client
 > can hit the daemon without going through the proxy, it can spoof
@@ -204,6 +207,31 @@ A worked **nginx + Authelia** example lives at
 it is summarized in [Reverse-proxy SSO example](../sources/reverse-proxy-sso-example.md).
 A proxy that reserves the default health path is handled with `--health-path`
 ([Daemon → Health](../entities/daemon.md#health)).
+
+## Hardening for shared environments
+
+Four opt-in checks sit in front of everything else (before Basic Auth and CORS) on the API and web-console listeners. Without their flags none of them exists: requests, headers and responses are what they were (#620). The SOAP-only callback listener that serves a tunnel is not covered.
+
+| Flag                         | What it does                                                                                                                                                                                                                                                                           | Refusal                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `--allowed-host <name>`      | Repeatable. The request's own `Host` must be one of these names (and, behind a trusted proxy, the forwarded host as well), an IP literal or `localhost`. `name:port` also matches.                                                                                                     | `403 host not allowed`                    |
+| `--trusted-proxy <ip\|cidr>` | Repeatable, IPv4 or IPv6. `X-Forwarded-*` and `Forwarded` are read only when the TCP peer is in the list; from any other peer they are ignored.                                                                                                                                        | `400` on conflicting headers              |
+| `--require-tls`              | A non-loopback client must have arrived over TLS, as far as a trusted proxy reports it (`proto=https`). Direct loopback callers (the bundled CLI, local probes) pass; a request from a listed `--trusted-proxy` is never direct, even from `127.0.0.1`, and must report `proto=https`. | `403 TLS required`                        |
+| `--rate-limit-per-ip <n>`    | `n` requests per second per client IP (token bucket with a burst of `n`). `--rate-limit-max-ips` (default `10000`) bounds the IPs tracked. An IPv6 client is counted by its /64 (an IPv4-mapped address as its IPv4), so rotating addresses inside one /64 does not escape the limit.  | `429 rate limit exceeded` + `Retry-After` |
+
+Rules that make the numbers trustworthy:
+
+- **Allowed hosts** guard against DNS rebinding: a page on a name rebound to the daemon sends `Host: evil.example`, which is not listed. IP literals and `localhost` always pass because an attacker cannot rebind them. The health path is **not** exempt.
+- **Trusted proxies.** Without `--trusted-proxy`, `--trust-forwarded-headers` keeps its old meaning (believe every peer); with a list it is the list that decides, and `--trusted-proxy` alone is enough to enable the forwarded-origin CORS rule for those peers. The client address behind a proxy is the right-most `X-Forwarded-For` / `for=` entry that is not itself a trusted proxy, so an entry a client invented on the left is never used. `Forwarded` (RFC 7239) and `X-Forwarded-Proto` / `-Host` / `-For` are all read; if a trusted proxy sends both forms and they disagree on protocol, host or client, the request is refused with `400` instead of picking one. From a trusted proxy the daemon believes the **right-most** element of `Forwarded` and `X-Forwarded-Proto` / `-Host` (the hop the proxy wrote), never the left-most, which a client can set. The proxy must overwrite or strip `Forwarded`, `X-Forwarded-Proto` and `X-Forwarded-Host`, and must pass the client's `Host` through (or the internal name it sends must be listed with `--allowed-host`): the allowlist checks the request's own `Host` as well as the forwarded host, so a client cannot launder a rebound name through a forged `Forwarded: host=localhost`. A request from an unlisted peer is never refused for its headers: they are ignored.
+- **TLS.** The daemon speaks plain HTTP, so it can learn that a remote client used TLS only from a proxy it trusts. `--require-tls` on a non-loopback bind without `--trusted-proxy` is a startup error. Behind a reverse proxy on the same host (loopback bind), pass `--trusted-proxy 127.0.0.1`: without it the proxy's address counts as a direct local caller, so its plain-HTTP clients pass and the daemon prints a startup warning. With `--trusted-proxy 127.0.0.1` every loopback caller counts as the proxy, so the bundled CLI (`--send`, `--stop`, `--events`) gets `403 TLS required` on that daemon; stop it with a signal, or let the proxy connect from `127.0.0.1` and the CLI use `::1`. The health path is exempt (probes), like the Basic Auth gate.
+- **Rate limit.** Keyed on the client address above. The tracked-IP table is bounded; when it is full the least recently seen IP is dropped, which resets that IP's bucket, so the memory is capped at the cost of a flood from more than `--rate-limit-max-ips` addresses being only approximately limited. The health path is exempt.
+
+```sh
+ocpp-cp-sim --daemon --http-host 0.0.0.0 --web-console \
+  --web-console-basic-auth-user admin --web-console-basic-auth-pass secret \
+  --allowed-host sim.example.com --trusted-proxy 10.0.0.0/8 \
+  --require-tls --rate-limit-per-ip 20
+```
 
 ## Roadmap
 

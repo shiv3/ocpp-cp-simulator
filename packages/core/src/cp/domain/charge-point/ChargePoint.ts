@@ -344,6 +344,9 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
+  /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
+   *  transactions. */
+  private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -570,6 +573,18 @@ export class ChargePoint {
           this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
         }
       });
+      // #722: MeterValueSampleInterval drives the periodic MeterValues of a
+      // 1.x transaction; the interval is read when the transaction starts.
+      connector.events.on("transactionChange", ({ transaction }) => {
+        if (transaction && connector.hasRunningTransaction) {
+          this.startPeriodicSampling(connector);
+        } else this.stopPeriodicSampling(connectorId);
+      });
+      // A transaction restored after a daemon restart is running again and
+      // gets its sampler back (the restore itself emits no transactionChange).
+      connector.events.on("transactionRestored", () =>
+        this.startPeriodicSampling(connector),
+      );
       // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
       connector.events.on("invalidIdEnergyExhausted", () => {
         this.reportEnergyHeld(connector);
@@ -1200,10 +1215,10 @@ export class ChargePoint {
           }
           break;
         case "MeterValueSampleInterval":
-          // §9.1.15: takes effect on the *next* transaction. Existing
-          // per-connector schedulers keep their original cadence until
-          // restarted; the new value is honored when a fresh transaction
-          // starts (see Connector.startAutoMeterValue).
+          // §9.1.19: takes effect on the *next* transaction. The periodic
+          // sampler of a running transaction keeps its cadence; the new
+          // value is read when a fresh transaction starts
+          // (startPeriodicSampling, #722).
           this._logger.info(
             `MeterValueSampleInterval=${String(value)} (applies to next transaction)`,
             LogType.CONFIGURATION,
@@ -2687,6 +2702,9 @@ export class ChargePoint {
    */
   dispose(): void {
     this.releaseRenewedClientCertificate();
+    for (const connectorId of [...this._periodicSamplers.keys()]) {
+      this.stopPeriodicSampling(connectorId);
+    }
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
     this._engine.dispose();
@@ -2988,6 +3006,54 @@ export class ChargePoint {
       connectorId,
       context,
     );
+  }
+
+  /**
+   * #722, 1.6 errata 3.15 (Part 2 §4.7) and §3.16.1 / §9.1.19: while a
+   * transaction runs and `MeterValueSampleInterval` > 0, a MeterValues.req
+   * with the `MeterValuesSampledData` measurands goes out every interval,
+   * whatever drives the register. The connector's configured meter strategy
+   * (auto-meter curve, increment fallback) then only moves the register, so
+   * there is one sample per tick, not two schedules. 1.x only (SOAP
+   * included): on 2.x the existing sampling is unchanged.
+   *
+   * The spec does not say when the interval is read; the simulator reads it
+   * when the sampler starts (the transaction's start, or its restore after a
+   * restart), so a ChangeConfiguration applies to the next transaction.
+   * Called again for the same running transaction (the `transactionChange`
+   * that persists a `startCallError` or an id), it keeps the timer and so the
+   * phase.
+   */
+  private startPeriodicSampling(connector: Connector): void {
+    if (isOcpp2Version(this._ocppVersion)) return;
+    if (this._periodicSamplers.has(connector.id)) return;
+    connector.setStationOwnsMeterSampling(true);
+    const seconds = this._configuration.meterValueSampleInterval();
+    if (seconds <= 0) return;
+    const timer = this._clock.setInterval(() => {
+      if (!connector.hasRunningTransaction) {
+        this.stopPeriodicSampling(connector.id);
+        return;
+      }
+      // Part 2 §4.8 (errata 3.18): the `0` of a transaction whose
+      // StartTransaction.req was answered with a CALLERROR (#527) is a
+      // placeholder the CSMS never issued; a sample would name a transaction
+      // it does not know.
+      if (connector.transaction?.startCallError) return;
+      // Offline too: §3.7 "When offline, the Charge Point MUST queue any
+      // transaction-related messages", periodic MeterValues included. The
+      // outbox queues it (a MeterValues of a transaction) and replays it in
+      // order after the reconnect.
+      this.sendScheduledMeterValue(connector.id);
+    }, seconds * 1000);
+    this._periodicSamplers.set(connector.id, timer);
+  }
+
+  private stopPeriodicSampling(connectorId: number): void {
+    const timer = this._periodicSamplers.get(connectorId);
+    if (timer === undefined) return;
+    this._clock.clearInterval(timer);
+    this._periodicSamplers.delete(connectorId);
   }
 
   /**

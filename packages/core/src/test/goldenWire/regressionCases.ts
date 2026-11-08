@@ -8,6 +8,7 @@
    snapshots) that the public types do not expose */
 import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import { VirtualClock } from "../../cp/shared/clock";
 import { resolveNetworkSimConfig } from "../../cp/infrastructure/transport/network-sim";
 import type { GoldenCase as Case } from "./cases";
 import { Rig, type RigOptions } from "./rig";
@@ -292,6 +293,167 @@ both("deauthorized-keep", async (r) => {
   r.cp.stopTransaction(1);
   await settle(r);
 });
+// 1.6 errata 3.15 (§4.7, #722): MeterValueSampleInterval drives periodic
+// MeterValues.req of a running transaction. Virtual time, in-memory socket.
+const periodic = async (r: Rig, clock: VirtualClock, seconds: number) => {
+  for (let i = 0; i < seconds; i++) {
+    await clock.advanceBy(1000);
+    await settle(r);
+  }
+};
+const periodicClock = new VirtualClock();
+c16(
+  "meter-periodic-default",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicClock, 125);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicClock, seed: "g722" } },
+);
+const periodicOffClock = new VirtualClock();
+c16(
+  "meter-periodic-disabled",
+  async (r) => {
+    cfg(r, "MeterValueSampleInterval", "0");
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicOffClock, 125);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicOffClock, seed: "g722" } },
+);
+// With an auto-meter curve (a host wires the scheduler's tick to the station
+// as the CLI and the web console do) the curve moves the register every 10 s,
+// and the samples still go out once per MeterValueSampleInterval.
+const periodicCurveClock = new VirtualClock();
+c16(
+  "meter-periodic-with-curve",
+  async (r) => {
+    const connector = r.cp.getConnector(1)!;
+    connector.setOnMeterValueSend((id) => r.cp.sendScheduledMeterValue(id));
+    connector.autoMeterValueConfig = {
+      enabled: true,
+      curvePoints: [
+        { time: 0, value: 0 },
+        { time: 1800, value: 50 },
+      ],
+      intervalSeconds: 10,
+      autoCalculateInterval: false,
+    };
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicCurveClock, 125);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicCurveClock, seed: "g722" } },
+);
+// §3.7: "When offline, the Charge Point MUST queue any transaction-related
+// messages", periodic MeterValues included. The two samples taken while the
+// link is down are flushed in order after the reconnect (#722).
+const periodicOfflineClock = new VirtualClock();
+c16(
+  "meter-periodic-offline",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    r.cp.disconnect();
+    await periodicOfflineClock.advanceBy(130_000);
+    await r.connectAndBoot();
+    await settle(r);
+    await periodic(r, periodicOfflineClock, 5);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicOfflineClock, seed: "g722" } },
+);
+// A transaction restored after a restart is sampled again, from the restart.
+const periodicRestartClock = new VirtualClock();
+const periodicRestartNextClock = new VirtualClock();
+c16(
+  "meter-periodic-after-restart",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    const n = await restart(r, {
+      memory: true,
+      simulation: { clock: periodicRestartNextClock, seed: "g722" },
+    });
+    try {
+      await periodic(n, periodicRestartNextClock, 65);
+      n.cp.stopTransaction(1);
+      await settle(n);
+      await n.csms.settle(300);
+      (r.csms.frames as any).push(...n.csms.frames);
+    } finally {
+      await n.dispose();
+    }
+  },
+  { memory: true, simulation: { clock: periodicRestartClock, seed: "g722" } },
+);
+// The interval is read when the transaction starts: a ChangeConfiguration
+// from the CSMS mid-transaction applies to the next one.
+const periodicChangeClock = new VirtualClock();
+c16(
+  "meter-periodic-change-configuration",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await r.csms.call("ChangeConfiguration", {
+      key: "MeterValueSampleInterval",
+      value: "20",
+    });
+    await settle(r);
+    await periodic(r, periodicChangeClock, 65);
+    r.cp.stopTransaction(1);
+    await settle(r);
+    await r.cp.startTransaction("TAG-B", 1);
+    await settle(r);
+    await periodic(r, periodicChangeClock, 45);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicChangeClock, seed: "g722" } },
+);
+// A scenario's own meter strategy (an auto-increment node) keeps its own
+// interval next to the station's sampler: both send.
+const periodicScenarioClock = new VirtualClock();
+c16(
+  "meter-periodic-with-scenario-increment",
+  async (r) => {
+    const connector = r.cp.getConnector(1)!;
+    connector.setOnMeterValueSend((id) => r.cp.sendScheduledMeterValue(id));
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 25,
+      incrementValue: 100,
+    });
+    await periodic(r, periodicScenarioClock, 65);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicScenarioClock, seed: "g722" } },
+);
 // 1.6 errata 3.17 (§4.8): MaxEnergyOnInvalidId > 0 lets the vehicle charge
 // first, so the connector goes to Charging before the energy stops.
 c16("deauthorized-keep-with-allowance", async (r) => {

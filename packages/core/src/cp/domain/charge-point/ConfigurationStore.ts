@@ -184,6 +184,12 @@ export class ConfigurationStore {
     );
   }
 
+  /** Canonical key `MeterValueSampleInterval` (seconds); default `60`, `0` =
+   *  no periodic sample (1.6 errata 3.15, §4.7, #722). */
+  meterValueSampleInterval(): number {
+    return this.getInteger("MeterValueSampleInterval") ?? 60;
+  }
+
   /** Canonical key `ClockAlignedDataInterval` (seconds); default `0` = no
    *  clock-aligned data (#454). */
   clockAlignedDataInterval(): number {

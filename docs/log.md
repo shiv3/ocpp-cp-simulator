@@ -2437,3 +2437,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Run a scenario template on a label selector (#486)
 
 - New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).
+
+## [2026-11-08] ingest | Fleet-wide charging session listing (#489)
+
+- `sessions.list` and the `list_charging_sessions` MCP tool accept a missing `cpId` and list across every charge point, with new `labels` (selector, fleet-wide only), `startedFrom` (inclusive) and `startedTo` (exclusive) filters; order is start time then record order. Pages: [Charging sessions](concepts/charging-sessions.md#reading-it), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [index](index.md).

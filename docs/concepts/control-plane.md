@@ -523,7 +523,7 @@ goes through the same call as the per-CP method of that name.
   matches nothing answers `{ matched: [], succeeded: [], failed: [] }`, not
   `not_found`.
 - Every charge point runs at once, and each is waited for **at most 10 s**
-  (`CP_BULK_WAIT_MS`), well under the 30 s RPC deadline. A per-CP `connect`
+  (`CP_BULK_WAIT_MS`; `--cp-bulk-wait-ms` changes it, #622), well under the 30 s RPC deadline. A per-CP `connect`
   can take the full 30 s. A `connect` still pending at 10 s is reported as
   failed (`no outcome within 10000 ms; still running`) and keeps trying. A
   refused connection fails right away, with the reason the per-CP `connect`

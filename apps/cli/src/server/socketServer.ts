@@ -164,6 +164,8 @@ export interface SocketIoDeps {
   readonly requestShutdown?: () => void;
   /** `server.info`; absent → version only, no SOAP public base. */
   readonly serverInfo?: ServerInfo;
+  /** #622: per-charge-point wait of `cp.bulk` / `cp.scenario.run` (ms). */
+  readonly cpBulkWaitMs?: number;
   readonly webConsoleBasicAuth?: {
     readonly username: string;
     readonly password: string;
@@ -751,7 +753,10 @@ async function bulkCps(
   return runCpBulk(
     cpIds,
     (cpId) => runFacadeOperation(() => service[action](cpId)),
-    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+    {
+      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
+      failureReason: batchFailureReason,
+    },
   );
 }
 
@@ -786,7 +791,10 @@ async function runScenarioOnSelector(
           ...(once === undefined ? {} : { once }),
         }),
       ),
-    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+    {
+      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
+      failureReason: batchFailureReason,
+    },
   );
   return {
     matched: batch.matched,

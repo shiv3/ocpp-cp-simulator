@@ -1478,6 +1478,13 @@ export class ChargePoint {
     return this._authorization;
   }
 
+  /** Queue the transaction-related CALL written but not answered, so it is
+   *  delivered after the next boot (a graceful shutdown that stopped waiting).
+   *  Returns whether one was queued. */
+  queueUnansweredTransactionCall(): boolean {
+    return this._outbox.queueUnansweredTransactionCall();
+  }
+
   /** Whether the CSMS is reachable now (#452 offline authorization). A SOAP
    *  charge point has no connection state and counts as online, which
    *  keeps its local start flow as it was. */

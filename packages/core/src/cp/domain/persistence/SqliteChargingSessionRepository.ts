@@ -72,8 +72,25 @@ export class SqliteChargingSessionRepository implements ChargingSessionRepositor
   }
 
   list(query: ChargingSessionQuery): ChargingSessionPage {
-    const clauses = ["cp_id = ?"];
-    const params: SqlParam[] = [query.cpId];
+    const clauses: string[] = [];
+    const params: SqlParam[] = [];
+    if (query.cpId !== undefined) {
+      clauses.push("cp_id = ?");
+      params.push(query.cpId);
+    } else if (query.cpIds !== undefined) {
+      // One JSON parameter rather than a placeholder per id: a selector can
+      // match more charge points than SQLite allows variables.
+      clauses.push("cp_id IN (SELECT value FROM json_each(?))");
+      params.push(JSON.stringify(query.cpIds));
+    }
+    if (query.startedFrom !== undefined) {
+      clauses.push("started_at >= ?");
+      params.push(query.startedFrom);
+    }
+    if (query.startedTo !== undefined) {
+      clauses.push("started_at < ?");
+      params.push(query.startedTo);
+    }
     if (query.connectorId !== undefined) {
       clauses.push("connector_id = ?");
       params.push(query.connectorId);
@@ -84,7 +101,7 @@ export class SqliteChargingSessionRepository implements ChargingSessionRepositor
       );
       params.push(...query.outcomes);
     }
-    const where = ` WHERE ${clauses.join(" AND ")}`;
+    const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
 
     const total =
       this.db.get<{ n: number }>(

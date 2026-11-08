@@ -51,6 +51,9 @@ export function mergeWriteOnlyConfigSecrets(
     connectorNumber: next.connectorNumber,
     tagID: next.tagID,
     ocppVersion: next.ocppVersion,
+    ...(next.txUpdatedMeterValues !== undefined
+      ? { txUpdatedMeterValues: next.txUpdatedMeterValues }
+      : {}),
     basicAuthSettings: {
       enabled: next.basicAuthSettings.enabled,
       username: next.basicAuthSettings.username,

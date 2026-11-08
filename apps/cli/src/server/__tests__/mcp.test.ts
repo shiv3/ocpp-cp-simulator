@@ -165,6 +165,7 @@ describe("MCP server", () => {
       "behavior_list",
       "behavior_reload",
       "cp_bulk",
+      "cp_scenario_run",
       "cp_connect",
       "cp_disconnect",
       "cp_status",

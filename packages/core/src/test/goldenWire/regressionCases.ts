@@ -1339,6 +1339,36 @@ both("remote-start-inoperative", async (r) => {
   await r.remoteStart("X", 1);
   await settle(r);
 });
+// #602: CustomerInformation answers and reports through
+// NotifyCustomerInformation.
+c201("customer-information", async (r) => {
+  r.cp.authorization.seedCache([{ idToken: "TAG-C", status: "Accepted" }]);
+  const idToken = { idToken: "TAG-C", type: "Central" };
+  await r.csms.call("CustomerInformation", {
+    requestId: 1,
+    report: true,
+    clear: false,
+    idToken,
+  });
+  await r.csms.call("CustomerInformation", {
+    requestId: 2,
+    report: true,
+    clear: true,
+    idToken,
+  });
+  await r.csms.call("CustomerInformation", {
+    requestId: 3,
+    report: false,
+    clear: false,
+    idToken,
+  });
+  await r.csms.call("CustomerInformation", {
+    requestId: 4,
+    report: true,
+    clear: false,
+  });
+  await settle(r);
+});
 c201("reset-unknown-evse", async (r) => {
   await r.csms.call("Reset", { type: "Immediate", evseId: 9 });
   await settle(r);

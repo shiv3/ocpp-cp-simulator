@@ -141,6 +141,39 @@ describe("OCPPWebSocket renewed client certificate (#537)", () => {
     expect(attempts[attempts.length - 1]).toEqual({ ca: "CA", ...FIRST });
   });
 
+  // #564: the identity is handed over when the chain is stored and again once
+  // the answer is written; the second hand-over must not undo what the
+  // connections in between settled.
+  it("keeps a confirmed identity when it is handed over again (#564)", () => {
+    ws.connect();
+    lastSocket().open();
+    rotateTo(FIRST);
+
+    ws.useRenewedClientCertificate(FIRST);
+    ws.disconnectInternal();
+    ws.connect();
+    lastSocket().fail();
+
+    // Still confirmed: no alternation with a fallback, no discard.
+    expect(nextAttempt()).toBe(FIRST.cert);
+    expect(discarded).toBe(0);
+  });
+
+  it("tells whether the open connection presents a certificate (#564)", () => {
+    ws.connect();
+    expect(ws.presentsClientCertificate(CONFIGURED.cert)).toBe(true);
+    expect(ws.presentsClientCertificate(FIRST.cert)).toBe(false);
+    lastSocket().open();
+
+    ws.useRenewedClientCertificate(FIRST);
+    expect(ws.presentsClientCertificate(FIRST.cert)).toBe(false);
+    ws.disconnectInternal();
+    ws.connect();
+    lastSocket().open();
+    expect(ws.presentsClientCertificate(FIRST.cert)).toBe(true);
+    expect(ws.presentsClientCertificate(CONFIGURED.cert)).toBe(false);
+  });
+
   it("falls back to the identity confirmed before, not --tls-cert, on a second rotation (A02.FR.28)", () => {
     ws.connect();
     lastSocket().open();

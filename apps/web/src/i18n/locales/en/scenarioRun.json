@@ -75,5 +75,6 @@
   "scenarioRun.run.editScenario": "Edit scenario",
   "scenarioRun.run.gone": "Run {{runId}} is no longer active",
   "scenarioRun.run.showingCurrent": " — showing the current run {{runId}}.",
-  "scenarioRun.run.cpScopeNote": "This is a charge-point-scope scenario — it runs automatically per connector when its trigger fires, not via a manual Start here. Start is disabled on this console."
+  "scenarioRun.run.cpScopeNote": "This is a charge-point-scope scenario — it runs automatically per connector when its trigger fires, not via a manual Start here. Start is disabled on this console.",
+  "scenarioRun.loopBack": "Then back to step {{n}}"
 }

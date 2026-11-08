@@ -3,7 +3,7 @@ import type {
   CurvePoint,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
-/** Loosely-typed bag matching the ScenarioEditor node form state. */
+/** Loosely-typed bag matching the node form state. */
 export type MeterNodeFormData = Record<string, unknown>;
 
 /** Fallback curve used when a MeterValue node has none configured yet. */

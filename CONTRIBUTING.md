@@ -10,7 +10,7 @@ Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundarie
 
 ## Web console strings
 
-User-visible text in `apps/web` goes through react-i18next, never a string literal: `const { t } = useTranslation(); t("scenarios.count.step", { count })`. Add the key to `apps/web/src/i18n/locales/en/<namespace>.json` and to `ja/` and `zh-CN/` (counted nouns take `_one` / `_other` in English and `_other` in ja / zh-CN; placeholders are `{{name}}`). `bunx vitest run apps/web/src/i18n` fails when a locale misses a key or changes a placeholder, and an unknown key fails `bun run typecheck`. Do not translate OCPP action names, protocol fields, enum values, identifiers or user content. Details: [Web console internationalization](docs/concepts/web-console-i18n.md).
+User-visible text in `apps/web` goes through react-i18next, never a string literal: `const { t } = useTranslation(); t("scenarios.count.step", { count })`. Add the key to `apps/web/src/i18n/locales/en/<namespace>.json` and to `ja/`, `zh-CN/` and `fr/` (counted nouns take `_one` / `_other` in English, `_other` in ja / zh-CN and `_one` / `_many` / `_other` in fr; placeholders are `{{name}}`). `bunx vitest run apps/web/src/i18n` fails when a locale misses a key or a plural form, or changes a placeholder, and an unknown key fails `bun run typecheck`. Do not translate OCPP action names, protocol fields, enum values, identifiers or user content. Details: [Web console internationalization](docs/concepts/web-console-i18n.md).
 
 ## Triage
 

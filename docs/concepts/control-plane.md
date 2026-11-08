@@ -700,7 +700,10 @@ Guarantees a conformance driver can rely on:
   auto-meter generator, including the one a scenario meter-value node with
   `autoIncrement` starts. The option never touches a one-off sample:
   `send_meter_value`, a scenario meter-value node's single send and a CSMS
-  `TriggerMessage(MeterValues)` still produce `MeterValuesRequest`. 1.x ignores
+  `TriggerMessage(MeterValues)` still produce `MeterValuesRequest`. On 2.x a
+  triggered MeterValues carries the `MeterValuesAlignedData` measurands (the
+  sampled list when that is empty) with context `Trigger` (F06.FR.06, #692).
+  1.x ignores
   it. Clock-aligned samples have their own path
   ([`MeterValueClock`](ocpp-versions-and-transports.md#clock-aligned-meter-values-clockaligneddatainterval)),
   independent of the option. `transaction_event { "meterValues": true }`

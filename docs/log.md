@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2451,6 +2457,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
 - Page: [Control plane](concepts/control-plane.md).
 
-## [2026-11-08] ingest | Migration guard, file-per-migration framework and derived upsert placeholders
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
 
-- `SCHEMA_VERSION` is derived from `migrations/index.ts` (`MIGRATIONS`, empty today; legacy versions 3..25 stay inline in `runMigrations`), a guard test checks that versions are unique, contiguous and ascending, and the `charge_points`, `connector_runtime` and `scenario_runs` upserts are built from one `[column, value]` list (`buildUpsert`). No schema or SQL behaviour change. Page: [State persistence](concepts/state-persistence.md#migrations).
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

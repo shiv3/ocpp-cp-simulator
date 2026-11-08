@@ -729,7 +729,13 @@ them: the transaction's own `initialSoc` / `targetSoc`, else the connector's EV
 settings default. The SoC-from-register derivation, its inverse, the curve's
 opening SoC and the target-SoC auto-stop all read it, so they cannot disagree
 about the session. A target is session intent, not a car property:
-`EVSettings.targetSoc` stays as the default a session copies.
+`EVSettings.targetSoc` stays as the default a session copies. The writers of
+the session's own values are the `startTransaction` options `targetSoc` and
+`stopAtTarget` (`Transaction.targetSoc` / `Transaction.stopAtTarget`, persisted
+with the transaction in `connector_runtime.transaction_json`, so a restart
+keeps them without a migration) and its `initialSoc` argument. Today the one
+caller is auto-traffic's [`sessionModel: "intent"`](control-plane.md#background-traffic);
+`stopAtTarget` on the transaction wins over the connector's `stopAtTargetSoc`.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with

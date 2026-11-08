@@ -1529,8 +1529,8 @@ export class Connector {
    * the ChargePoint can end the transaction.
    */
   private checkAutoStop(): void {
-    if (!this.autoConfig.stopAtTargetSoc) return;
     if (!this.transaction) return;
+    if (!this.sessionIntent().stopAtTarget) return;
     if (!this.meterScheduler.isActive()) return;
     const current = this.effectiveSocPercent();
     if (current === null) return;

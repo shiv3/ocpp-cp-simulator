@@ -1420,10 +1420,22 @@ export class CLIChargePointService {
         const status = await this._chargePoint.authorizeAndWait(idTag);
         return status === "Accepted";
       },
-      startTransaction: async (id, idTag) => {
-        const outcome = await this._chargePoint.startTransaction(idTag, id);
+      // `intent` is set under `sessionModel: "intent"` (#327): the session
+      // opens at the drawn SoC, targets the drawn SoC and stops there.
+      startTransaction: async (id, idTag, intent) => {
+        const outcome = await this._chargePoint.startTransaction(
+          idTag,
+          id,
+          undefined,
+          intent?.initialSoc,
+          intent
+            ? { targetSoc: intent.targetSoc, stopAtTarget: true }
+            : undefined,
+        );
         return outcome.started;
       },
+      sessionRunning: (id) =>
+        this._chargePoint.getConnector(id)?.hasRunningTransaction ?? false,
       stopTransaction: async (id) => this.stopTransaction(id),
       poweredOff: () => this._chargePoint.poweredOff,
       // A scenario owns the connector while any executor is running: a run's

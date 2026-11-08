@@ -240,4 +240,8 @@ export interface Transaction {
   /** Target SoC of this session (0-100); absent means the connector's EV
    *  settings default applies. Persisted view of `SessionIntent.targetSoc`. */
   targetSoc?: number;
+  /** Stop this session when it reaches {@link targetSoc} (#327). Absent means
+   *  the connector's `autoConfig.stopAtTargetSoc` applies. Written by
+   *  auto-traffic's `sessionModel: "intent"`. */
+  stopAtTarget?: boolean;
 }

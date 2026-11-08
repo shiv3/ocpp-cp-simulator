@@ -295,6 +295,7 @@ scenario is loaded.
   "stopAt": "2026-11-09T18:00:00Z", // optional, absolute (#603)
   "idTagStrategy": "random", // optional (#603)
   "cpIndex": 12, // optional (#603)
+  "sessionModel": "duration", // optional: "duration" (default) | "intent" (#327)
 }
 ```
 
@@ -325,6 +326,24 @@ per-connector round-robin cursors of one charge point can present the same tag
 at the same time. Reconfiguring a connector's traffic rebuilds the stream from
 the new `idTagStrategy`, `cpIndex` and `seed`. Without a pool the
 traffic presents `123456`, as before.
+
+**Session model** (#327). `sessionModel` decides what ends a session.
+`"duration"` (the default, and what an absent field means) is the loop above and
+its seeds replay byte for byte. `"intent"` also draws a `SessionIntent` per
+cycle, an opening and a target SoC, from `initialSocMin`..`initialSocMax`
+(default 10..50) and `targetSocMin`..`targetSocMax` (default 70..100), all
+percent; a target at or below the opening SoC is raised to one point above it
+(capped at 100). The session starts with `initialSoc` and `targetSoc` written on
+the transaction and `stopAtTarget` set, so the connector's target-SoC auto-stop
+(`EnergyLimitReached`, the clamp of #105) ends it when the vehicle gets there,
+and the drawn duration is the **ceiling** for a vehicle that never does (a
+low-power or schedule-capped session). The vehicle is the connector's current EV
+settings, the same one MeterValues are built from. The intent is drawn after the
+duration and before the roll, so under `"intent"` a seed keeps the gaps and
+durations it gives under `"duration"`; the intent ends the session through
+`completed` without a `stopAccepted`. Validation:
+`sessionModel must be "duration" or "intent"`, and each bound a number from 0 to 100
+with min not above max.
 
 **Start preconditions** (#603). A cycle starts only when the charge point's
 BootNotification was `Accepted` (and the connection has not closed since), the

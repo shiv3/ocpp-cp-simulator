@@ -211,6 +211,12 @@ export interface StartTransactionOptions {
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
   chargingState?: TransactionChargingState;
+  /** Target SoC of this session in percent (#327); the writer of
+   *  `Transaction.targetSoc`. Absent: the connector's EV settings default. */
+  targetSoc?: number;
+  /** Stop the session when it reaches the target SoC (#327); absent: the
+   *  connector's `stopAtTargetSoc` setting decides. */
+  stopAtTarget?: boolean;
 }
 
 /**

@@ -289,3 +289,61 @@ describe("validateAutoTrafficConfig, #603 fields", () => {
     );
   });
 });
+
+describe("AutoTraffic sessionModel (#327)", () => {
+  const INTENT: AutoTrafficConfig = { ...CONFIG, sessionModel: "intent" };
+
+  it('keeps the duration stream byte for byte: absent equals "duration"', () => {
+    expect(sequence({ ...CONFIG, sessionModel: "duration" }, "CP1", 1)).toBe(
+      sequence(CONFIG, "CP1", 1),
+    );
+    const step = new AutoTrafficPlanner(CONFIG, "CP1", 1).next();
+    expect("intent" in step).toBe(false);
+  });
+
+  it("draws the same gaps and durations first, so a seed keeps its gap sequence", () => {
+    const duration = new AutoTrafficPlanner(CONFIG, "CP1", 1).next();
+    const intent = new AutoTrafficPlanner(INTENT, "CP1", 1).next();
+    expect(intent.gapSec).toBe(duration.gapSec);
+    expect(intent.durationSec).toBe(duration.durationSec);
+  });
+
+  it("replays the same intents for the same seed and differs for another", () => {
+    expect(sequence(INTENT, "CP1", 1)).toBe(sequence(INTENT, "CP1", 1));
+    expect(sequence(INTENT, "CP1", 1)).not.toBe(
+      sequence({ ...INTENT, seed: 8 }, "CP1", 1),
+    );
+  });
+
+  it("keeps initial and target SoC in their bounds, target above initial", () => {
+    const planner = new AutoTrafficPlanner(
+      { ...INTENT, initialSocMin: 5, initialSocMax: 90, targetSocMin: 20 },
+      "CP1",
+      1,
+    );
+    for (let i = 0; i < 300; i++) {
+      const { intent } = planner.next();
+      expect(intent!.initialSoc).toBeGreaterThanOrEqual(5);
+      expect(intent!.initialSoc).toBeLessThanOrEqual(90);
+      expect(intent!.targetSoc).toBeGreaterThan(intent!.initialSoc);
+      expect(intent!.targetSoc).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("validates the model and the SoC bounds", () => {
+    expect(validateAutoTrafficConfig(INTENT)).toBeNull();
+    expect(
+      validateAutoTrafficConfig({ ...CONFIG, sessionModel: "x" as never }),
+    ).toMatch(/sessionModel/);
+    expect(validateAutoTrafficConfig({ ...INTENT, targetSocMax: 101 })).toMatch(
+      /targetSocMax/,
+    );
+    expect(
+      validateAutoTrafficConfig({
+        ...INTENT,
+        initialSocMin: 60,
+        initialSocMax: 40,
+      }),
+    ).toMatch(/initialSocMax/);
+  });
+});

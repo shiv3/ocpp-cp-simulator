@@ -49,7 +49,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
     interval: 300,
   });
 
-  for (const evseId of [0, 1]) {
+  for (const evseId of [1]) {
     await csms.waitForFrame(
       (frame) =>
         frame[0] === 2 &&

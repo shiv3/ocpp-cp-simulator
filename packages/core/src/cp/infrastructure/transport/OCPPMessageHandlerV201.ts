@@ -1243,6 +1243,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       suppressChargingStateTransactionEvent?: boolean;
     },
   ): void {
+    // B01.FR.05 / G03 / G04 Note 2: StatusNotificationRequest reports
+    // connector statuses only, and EVSEs and connectors are numbered from 1.
+    // The station scope (connectorId 0, the OCPP 1.6 main controller) has no
+    // StatusNotification on 2.x.
+    if (connectorId === 0) {
+      this._logger.debug(
+        `[v2.0.1] StatusNotification for the station (connector 0) not sent: 2.x reports connector statuses only (${status})`,
+        LogType.OCPP,
+      );
+      return;
+    }
     const messageId = this.generateMessageId();
     const ev = v201StatusEvse(connectorId);
     const payload: StatusNotificationRequestV201 = {

@@ -447,6 +447,18 @@ An `Inoperative` availability change scheduled during a transaction remains
 `Unavailable` after the accepted reboot and continues to reject new local
 transaction starts.
 
+## OCPP 2.x StatusNotification reports connectors only
+
+B01.FR.05 sends a StatusNotification "for each Connector", and G03 / G04
+Note 2 say the message only supports connector statuses; EVSEs and connectors
+are numbered from 1. The 2.0.1 / 2.1 station therefore sends no
+StatusNotification for the station scope (the OCPP 1.6 `connectorId` 0 main
+controller, formerly `{ evseId: 0, connectorId: 0 }`) after boot, after a
+station-wide ChangeAvailability or for a `TriggerMessage(StatusNotification)`
+without an EVSE (#703). OCPP 1.6 `connectorId: 0` is unchanged. Station
+availability is not reported separately; a `ChargingStation.AvailabilityState`
+NotifyEvent (G04.FR.05, a MAY) is not sent.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

@@ -52,6 +52,9 @@ export class AutoTrafficRunner {
   private stopped = false;
   /** Whether a session this runner started is still open. */
   private sessionOpen = false;
+  /** The start conf of the open session was already counted as refused, so
+   *  a later refusal in the same session corrects nothing (#603). */
+  private startConfSettled = false;
   private startedAtMs = 0;
   readonly counters: AutoTrafficCounters = emptyAutoTrafficCounters();
 
@@ -102,7 +105,8 @@ export class AutoTrafficRunner {
    * (`StopTransactionOnInvalidId`).
    */
   noteStartConfRefused(): void {
-    if (!this.sessionOpen) return;
+    if (!this.sessionOpen || this.startConfSettled) return;
+    this.startConfSettled = true;
     if (this.counters.startAccepted > 0) this.counters.startAccepted--;
     this.counters.startRejected++;
   }
@@ -232,6 +236,7 @@ export class AutoTrafficRunner {
         return;
       }
       this.sessionOpen = true;
+      this.startConfSettled = false;
       this.counters.started++;
       this.counters.startAccepted++;
       this.counters.consecutiveSkips = 0;

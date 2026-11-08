@@ -138,6 +138,49 @@ describe("AutoTraffic on a charge point (#603)", () => {
     svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
   });
 
+  it("counts only the refused start answer once, not a mid-session 2.x refusal", async () => {
+    const { svc } = station();
+    const cp = (
+      svc as unknown as {
+        _chargePoint: {
+          notifyStartTransactionNotAccepted(
+            connectorId: number,
+            status: string,
+            stopped: boolean,
+            midSession?: boolean,
+          ): void;
+        };
+      }
+    )._chargePoint;
+    svc.setAutoTrafficConfig(1, {
+      ...CONFIG,
+      minDurationSec: 60,
+      maxDurationSec: 60,
+    });
+    await wait(300);
+    try {
+      expect(svc.getAutoTrafficCounters(1)).toMatchObject({
+        startAccepted: 1,
+        startRejected: 0,
+      });
+      // An Updated refused after the accepted start: not a start refusal.
+      cp.notifyStartTransactionNotAccepted(1, "Blocked", false, true);
+      expect(svc.getAutoTrafficCounters(1)).toMatchObject({
+        startAccepted: 1,
+        startRejected: 0,
+      });
+      // The refused start answer counts, and only once.
+      cp.notifyStartTransactionNotAccepted(1, "Invalid", false);
+      cp.notifyStartTransactionNotAccepted(1, "Invalid", false);
+      expect(svc.getAutoTrafficCounters(1)).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+    } finally {
+      svc.setAutoTrafficConfig(1, { ...CONFIG, enabled: false });
+    }
+  });
+
   it("rebuilds the idTag stream when the traffic is reconfigured", () => {
     const { svc } = station();
     const pickerOf = () =>

@@ -402,6 +402,23 @@ describe("AutoTrafficRunner idTag, preconditions and counters (#603)", () => {
     }
   });
 
+  it("counts a refused start answer once per session", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      runner.noteStartConfRefused();
+      runner.noteStartConfRefused();
+      expect(runner.counters).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
   it("logs a skipped cycle once per reason", async () => {
     const log = vi.fn();
     let blocker = "the connector is Charging";

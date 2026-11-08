@@ -347,7 +347,8 @@ a failed start precondition), `started`, `rejected` and `completed`, plus
 `authorizeAccepted` / `authorizeRejected`, `startAccepted` / `startRejected`
 (`startAccepted` counts the start when `StartTransaction.req` goes out; a
 `StartTransaction.conf` whose idTagInfo is not Accepted moves it to
-`startRejected`), `stopAccepted` / `stopRejected` (the stop that ends a
+`startRejected`, once per session; on 2.x only the answer to the `Started`
+TransactionEvent does, a refusal in the answer to a later `Updated` does not), `stopAccepted` / `stopRejected` (the stop that ends a
 session on its own timer; the stop issued by turning the traffic off or by
 `stopAt` is not counted, and `stopRejected` is a stop that failed),
 `consecutiveSkips` (cycles skipped since the last session begun, so it

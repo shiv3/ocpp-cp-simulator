@@ -1605,11 +1605,13 @@ export class ChargePoint {
     connectorId: number,
     status: string,
     stopped: boolean,
+    midSession = false,
   ): void {
     this._events.emit("startTransactionNotAccepted", {
       connectorId,
       status,
       stopped,
+      ...(midSession && { midSession: true as const }),
     });
   }
 

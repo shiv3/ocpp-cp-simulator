@@ -2404,6 +2404,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | TriggerMessage SignV2G20Certificate and SignCombinedCertificate on 2.1 (#553)
 
 - F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
+
 ## [2026-11-08] ingest | AutoTraffic: idTag pool, start preconditions, per-outcome counters (#603)
 
 - [Control plane → Background traffic](concepts/control-plane.md#background-traffic): `stopAt`, `idTagStrategy`, `cpIndex`; tags from the pool with the traffic's own seeded cursor (why not `nextIdTag`); start preconditions (Accepted, Available, no transaction); the full counter list.
@@ -2412,3 +2413,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] fix | AutoTraffic idTag pool review follow-ups (#603)
 
 - [Control plane](concepts/control-plane.md#background-traffic): reconfiguring a connector's traffic rebuilds its idTag stream; a `StartTransaction.conf` that is not Accepted moves the start from `startAccepted` to `startRejected`; `stopAt` must be an ISO 8601 date-time with an offset; the cpIndex shift versus `ChargePoint.nextIdTag`, and which stops are counted, are stated. [Daemon](entities/daemon.md#metrics): `consecutive_skips` is the current run, and a reconfigure keeps the counters. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] fix | AutoTraffic: a mid-session 2.x refusal is not a start refusal (#603)
+
+- [Control plane → Background traffic](concepts/control-plane.md#background-traffic): `startRejected` is corrected once per session and only by the answer to the start; an `Updated` answer that refuses the idToken (the `startTransactionNotAccepted` event now carries `midSession: true` on 2.x) leaves the counters alone.

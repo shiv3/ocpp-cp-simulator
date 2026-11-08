@@ -2949,12 +2949,18 @@ export class CLIChargePointService {
 
   private attachEventForwarders(): void {
     // #603: a StartTransaction.conf that is not Accepted turns a start the
-    // runner counted as accepted (the request went out) into a refusal.
+    // runner counted as accepted (the request went out) into a refusal;
+    // once per session, and only for the answer to the start.
     this._unsubscribes.push(
       this._chargePoint.events.on(
         "startTransactionNotAccepted",
-        ({ connectorId }) =>
-          this._autoTraffic.get(connectorId)?.noteStartConfRefused(),
+        ({ connectorId, midSession }) => {
+          // 2.x: an Updated that carries the idToken can be refused after
+          // the start was accepted; that is not a start refusal.
+          if (!midSession) {
+            this._autoTraffic.get(connectorId)?.noteStartConfRefused();
+          }
+        },
       ),
     );
     this._unsubscribes.push(

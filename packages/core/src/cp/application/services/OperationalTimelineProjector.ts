@@ -90,6 +90,16 @@ export class OperationalTimelineProjector {
         data: { attempt, delayMs },
       });
     });
+    on("gaveUp", ({ target, attempts }) => {
+      this.timeline.record({
+        kind: "gave_up",
+        summary:
+          target === "reconnect"
+            ? `Gave up reconnecting after ${attempts} attempt${attempts === 1 ? "" : "s"}`
+            : `Gave up BootNotification retries after ${attempts} retr${attempts === 1 ? "y" : "ies"}`,
+        data: { target, attempts },
+      });
+    });
     on("bootNotificationResult", ({ status, interval }) => {
       if (this.incident?.link === "up" && status === "Accepted") {
         this.incident.link = "booted";

@@ -82,6 +82,10 @@ export interface ChargePointEvents {
   /** Emitted each time the transport schedules a reconnect after an
    *  unrequested close; `delayMs` is the wait before the next attempt. */
   reconnecting: { attempt: number; delayMs: number };
+  /** #609: the charge point stopped retrying — the reconnect policy's
+   *  `maxAttempts`, or its `bootRetryLimit` for BootNotification retries,
+   *  was reached. `attempts` counts the attempts made. */
+  gaveUp: { target: "reconnect" | "boot_notification"; attempts: number };
   /** Emitted when a network-sim disconnect rule fires, before the socket is
    *  closed, so the `disconnected` that follows can be attributed to it
    *  (#448). */

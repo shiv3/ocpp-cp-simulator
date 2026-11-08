@@ -45,6 +45,12 @@ import {
   type ResolvedNetworkSimConfig,
   type DisconnectRuleType,
 } from "./network-sim";
+import {
+  DEFAULT_RECONNECT_POLICY,
+  nextReconnectDelayMs,
+  type ReconnectPolicy,
+  type RetryBackOffVariables,
+} from "./ReconnectPolicy";
 import type { NetworkFaultInjected } from "../../domain/charge-point/ChargePointEvents";
 import { EventEmitter } from "../../shared/EventEmitter";
 
@@ -56,6 +62,9 @@ export interface TransportObserverEvents {
   /** A reconnect was scheduled; emitted once the close that caused it has
    *  been handed to the `onclose` callback. */
   reconnectScheduled: { attempt: number; delayMs: number };
+  /** #609: the reconnect policy's `maxAttempts` was reached; no further
+   *  reconnect is scheduled until the next explicit `connect()`. */
+  reconnectGaveUp: { attempts: number };
   /** #393: the current generation ended, whatever the cause (a close, a
    *  disconnect, a reset, a simulated drop), or the transport was disposed.
    *  Emitted once per generation, before any replacement socket opens. */
@@ -182,8 +191,12 @@ export class OCPPWebSocket {
   /** #406: `WebSocketPingInterval` in seconds; 0 sends no client ping. */
   private _pingIntervalSeconds: number = 0;
   private _reconnectAttempts: number = 0;
-  private _baseReconnectDelay: number = 1000; // 1 second base delay
-  private _maxReconnectDelay: number = 30000; // 30 seconds max delay
+  /** #609: how long to wait between attempts, and when to stop. */
+  private _reconnectPolicy: ReconnectPolicy = DEFAULT_RECONNECT_POLICY;
+  /** Uniform in [0, 1); the charge point's seeded `reconnect` stream. */
+  private _reconnectRandom: () => number = Math.random;
+  /** #609: 2.x `RetryBackOff*` variables; null on 1.6. */
+  private _retryBackOff: RetryBackOffVariables | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _onOpenCallback: (() => void) | null = null;
   private _onCloseCallback:
@@ -254,6 +267,7 @@ export class OCPPWebSocket {
   readonly observers = new EventEmitter<TransportObserverEvents>();
   private _pendingReconnectNotice: { attempt: number; delayMs: number } | null =
     null;
+  private _pendingGaveUp: { attempts: number } | null = null;
   private _disposed: boolean = false;
 
   constructor(
@@ -300,6 +314,26 @@ export class OCPPWebSocket {
 
   get url(): string {
     return this._url;
+  }
+
+  /**
+   * #609: replace the reconnect policy. `random` returns a number in
+   * [0, 1) and draws the jitter; the charge point passes its seeded
+   * `reconnect` stream so a run replays. Takes effect from the next attempt.
+   */
+  setReconnectPolicy(policy: ReconnectPolicy, random?: () => number): void {
+    this._reconnectPolicy = policy;
+    if (random) this._reconnectRandom = random;
+  }
+
+  get reconnectPolicy(): ReconnectPolicy {
+    return this._reconnectPolicy;
+  }
+
+  /** #609: OCPP 2.x `RetryBackOffWaitMinimum` / `RandomRange` /
+   *  `RepeatTimes`; `null` returns to the policy alone (1.6). */
+  setRetryBackOff(variables: RetryBackOffVariables | null): void {
+    this._retryBackOff = variables;
   }
 
   /**
@@ -512,6 +546,9 @@ export class OCPPWebSocket {
       const notice = this._pendingReconnectNotice;
       this._pendingReconnectNotice = null;
       if (notice) this.observers.emit("reconnectScheduled", notice);
+      const gaveUp = this._pendingGaveUp;
+      this._pendingGaveUp = null;
+      if (gaveUp) this.observers.emit("reconnectGaveUp", gaveUp);
     };
 
     // Resolving here, per attempt, is what keeps the URL list out of
@@ -1195,13 +1232,29 @@ export class OCPPWebSocket {
 
     this._reconnectAttempts++;
 
-    // Calculate delay with exponential backoff: baseDelay * 2^(attempts - 1)
-    // Example: 1s, 2s, 4s, 8s, 16s, 30s (max)
-    const exponentialDelay =
-      this._baseReconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
-    const backoffDelay = Math.min(exponentialDelay, this._maxReconnectDelay);
+    const decision = nextReconnectDelayMs(
+      this._reconnectPolicy,
+      this._reconnectAttempts,
+      this._reconnectRandom,
+      this._retryBackOff,
+    );
+    if (decision.kind === "give-up") {
+      const attempts = this._reconnectAttempts - 1;
+      this._logger.warn(
+        `Giving up reconnecting after ${attempts} attempt(s) (reconnect.maxAttempts=${this._reconnectPolicy.maxAttempts})`,
+        LogType.WEBSOCKET,
+      );
+      // A later explicit connect() starts with a fresh budget.
+      this._reconnectAttempts = 0;
+      this._reconnectNotBefore = null;
+      this._pendingReconnectNotice = null;
+      // Announced with the close, after the disconnect it follows.
+      this._pendingGaveUp = { attempts };
+      return;
+    }
+    const backoffDelay = decision.delayMs;
 
-    // Reconnect reservation: the actual scheduled delay is the max of the exponential backoff
+    // Reconnect reservation: the actual scheduled delay is the max of the backoff
     // and the remaining time until reconnectNotBefore
     const reservationDelay = this._reconnectNotBefore
       ? Math.max(0, this._reconnectNotBefore - Date.now())

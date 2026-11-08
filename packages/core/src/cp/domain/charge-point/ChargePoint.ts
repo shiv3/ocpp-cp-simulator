@@ -152,6 +152,10 @@ import {
   SupervisionUrlPool,
   type UrlDistribution,
 } from "../../infrastructure/transport/SupervisionUrlPool";
+import {
+  resolveReconnectPolicy,
+  type ReconnectPolicy,
+} from "../../infrastructure/transport/ReconnectPolicy";
 import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
 import {
   ChargerEngine,
@@ -277,6 +281,13 @@ export interface ChargePointTransportOptions {
    */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /**
+   * #609: reconnect policy and BootNotification retry limit. Omitted fields
+   * keep {@link DEFAULT_RECONNECT_POLICY}, which is the behaviour before the
+   * policy was configurable. OCPP-J only for the reconnect part; the boot
+   * retry limit applies to every transport.
+   */
+  readonly reconnect?: Partial<ReconnectPolicy>;
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
@@ -290,6 +301,16 @@ export class ChargePoint {
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket | null;
   private readonly _clock: SimClock;
+  /** #609 */
+  private readonly _reconnectPolicy: ReconnectPolicy;
+  /** #609: automatic BootNotification re-sends since the last Accepted. */
+  private _bootRetries = 0;
+
+  /** The resolved reconnect policy (#609); also read by the default 2.x
+   *  `RetryBackOff*` variables. */
+  get reconnectPolicy(): ReconnectPolicy {
+    return this._reconnectPolicy;
+  }
 
   /** The station's current time, from its clock (virtual under a VirtualClock). */
   nowDate(): Date {
@@ -429,6 +450,7 @@ export class ChargePoint {
     simulation: ChargePointSimulationOptions = {},
   ) {
     this._clock = simulation.clock ?? realClock;
+    this._reconnectPolicy = resolveReconnectPolicy(transportOptions.reconnect);
     this._rngSource =
       simulation.seed === undefined
         ? systemRngStreams
@@ -546,6 +568,13 @@ export class ChargePoint {
         tls,
       );
       this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
+      const reconnectRng = this.rng("reconnect");
+      this._webSocket.setReconnectPolicy(this._reconnectPolicy, () =>
+        reconnectRng.next(),
+      );
+      this._webSocket.observers.on("reconnectGaveUp", ({ attempts }) =>
+        this._events.emit("gaveUp", { target: "reconnect", attempts }),
+      );
       this._webSocket.observers.on("simulatedDisconnect", (fault) =>
         this._events.emit("networkFaultInjected", fault),
       );
@@ -674,6 +703,7 @@ export class ChargePoint {
     this._clockAligned.setIntervalSeconds(
       this._configuration.clockAlignedDataInterval(),
     );
+    if (isOcpp2Version(this._ocppVersion)) this.applyRetryBackOff();
     // A value persisted with --state-db is in force from the first open.
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
@@ -1043,6 +1073,15 @@ export class ChargePoint {
   }
 
   /** Hook up subsystems that react to live Configuration changes. */
+  /** #609: hand the 2.x `RetryBackOff*` variables to the transport. */
+  private applyRetryBackOff(): void {
+    this._webSocket?.setRetryBackOff({
+      waitMinimumSeconds: this._configuration.retryBackOffWaitMinimum(),
+      randomRangeSeconds: this._configuration.retryBackOffRandomRange(),
+      repeatTimes: this._configuration.retryBackOffRepeatTimes(),
+    });
+  }
+
   private wireConfigurationListeners(): void {
     this._configuration.onChange((key, value) => {
       switch (key) {
@@ -1068,6 +1107,12 @@ export class ChargePoint {
           if (typeof value === "number") {
             this._webSocket?.setPingInterval(value);
           }
+          break;
+        case "RetryBackOffWaitMinimum":
+        case "RetryBackOffRandomRange":
+        case "RetryBackOffRepeatTimes":
+          // #609: applies from the next reconnect attempt.
+          this.applyRetryBackOff();
           break;
         case "ClockAlignedDataInterval":
           // #454: takes effect at once on the new grid while boot is Accepted.
@@ -2182,6 +2227,20 @@ export class ChargePoint {
       status: "Rejected",
       retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
     });
+    // #609: `bootRetryLimit` caps the automatic re-sends (-1: no cap).
+    const limit = this._reconnectPolicy.bootRetryLimit;
+    if (limit >= 0 && this._bootRetries >= limit) {
+      this._logger.warn(
+        `Giving up BootNotification after ${this._bootRetries} retr${this._bootRetries === 1 ? "y" : "ies"} (reconnect.bootRetryLimit=${limit})`,
+        LogType.OCPP,
+      );
+      this._events.emit("gaveUp", {
+        target: "boot_notification",
+        attempts: this._bootRetries,
+      });
+      return;
+    }
+    this._bootRetries++;
     // Re-send BootNotification.req once the interval elapses (§4.2).
     this._clock.setTimeout(() => {
       this.boot();
@@ -2206,6 +2265,7 @@ export class ChargePoint {
         : 0;
     switch (status) {
       case "Accepted":
+        this._bootRetries = 0;
         this._logger.info("Boot notification accepted", LogType.OCPP);
         this.markBootAccepted();
         break;

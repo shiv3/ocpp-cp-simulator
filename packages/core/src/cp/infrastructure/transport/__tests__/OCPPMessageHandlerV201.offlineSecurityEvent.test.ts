@@ -30,6 +30,8 @@ class FakeSocket {
   connected = true;
   /** The next CALL of this action `sendAction` refuses, once. */
   refuseAction: string | null = null;
+  /** When set, `sendAction` settles the CALL with this outcome, once, sending nothing. */
+  settleOnce: string | null = null;
   setMessageHandler(): void {}
   onCloseTransaction(): void {}
   isConnected(): boolean {
@@ -48,6 +50,12 @@ class FakeSocket {
     if (this.refuseAction === action) {
       this.refuseAction = null;
       return false;
+    }
+    if (this.settleOnce !== null) {
+      const outcome = this.settleOnce;
+      this.settleOnce = null;
+      onSettled?.({ outcome });
+      return true;
     }
     this.calls.push({ action, payload });
     onSettled?.({ outcome: "written" });
@@ -128,9 +136,18 @@ function setup(ocppVersion: string) {
 }
 
 describe("critical security events (Appendix 1)", () => {
-  it("lists the seven the specification flags critical", () => {
+  it("lists the 16 the Part 2 Appendices flag critical", () => {
     expect([...CRITICAL_SECURITY_EVENT_TYPES].sort()).toEqual([
+      "DiscardedRenewedClientCertificate",
       "FirmwareUpdated",
+      "InvalidChargingStationCertificate",
+      "InvalidCsmsCertificate",
+      "InvalidFirmwareSignature",
+      "InvalidFirmwareSigningCertificate",
+      "InvalidTLSCipherSuite",
+      "InvalidTLSVersion",
+      "MaintenanceLoginAccepted",
+      "MaintenanceLoginFailed",
       "MemoryExhaustion",
       "ResetOrReboot",
       "SecurityLogWasCleared",
@@ -138,6 +155,14 @@ describe("critical security events (Appendix 1)", () => {
       "StartupOfTheDevice",
       "TamperDetectionActivated",
     ]);
+    // Critical: No in the same table.
+    for (const t of [
+      "FailedToAuthenticateAtCsms",
+      "CsmsFailedToAuthenticate",
+      "ReconfigurationOfSecurityParameters",
+      "AttemptedReplayAttacks",
+    ])
+      expect(isCriticalSecurityEvent(t)).toBe(false);
     expect(isCriticalSecurityEvent("InvalidMessages")).toBe(false);
     expect(isCriticalSecurityEvent("VendorSpecificEvent")).toBe(false);
   });
@@ -199,6 +224,36 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 
       expect(socket.calls).toEqual([]);
     });
+
+    it.each(["socket_closed", "write_failed"])(
+      "queues a critical event the pipeline drops with %s although the socket was up",
+      async (outcome) => {
+        const { socket, handler, reconnect } = setup(version);
+        socket.settleOnce = outcome;
+
+        await handler.sendSecurityEventNotification("InvalidCsmsCertificate");
+        expect(socket.calls).toEqual([]);
+
+        reconnect();
+        expect(socket.securityEvents().map((e) => e.type)).toEqual([
+          "InvalidCsmsCertificate",
+        ]);
+      },
+    );
+
+    it.each(["queue_overflow", "disposed"])(
+      "does not queue a critical event the pipeline drops with %s",
+      async (outcome) => {
+        const { socket, handler, reconnect } = setup(version);
+        socket.settleOnce = outcome;
+
+        await expect(
+          handler.sendSecurityEventNotification("InvalidCsmsCertificate"),
+        ).rejects.toBeInstanceOf(OcppCallNoAnswerError);
+        reconnect();
+        expect(socket.calls).toEqual([]);
+      },
+    );
 
     it("sends a critical event at once while online", async () => {
       const { socket, handler } = setup(version);

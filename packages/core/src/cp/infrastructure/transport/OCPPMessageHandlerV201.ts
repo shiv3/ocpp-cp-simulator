@@ -1758,8 +1758,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * critical event ({@link isCriticalSecurityEvent}) is queued with the time
    * it happened and sent after the next Boot Accepted, and this resolves
    * once it is queued; any other event is dropped. Online it resolves once
-   * the CALL is written, not answered; it rejects with
-   * `OcppCallNoAnswerError` when the CALL is dropped.
+   * the CALL is written, not answered. A critical event whose CALL the
+   * pipeline drops because the socket closed or the write failed is queued
+   * too; any other dropped CALL rejects with `OcppCallNoAnswerError`.
    */
   public sendSecurityEventNotification(
     type: string,
@@ -1780,13 +1781,26 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         "SecurityEventNotification",
         id,
         payload,
-        (reason) =>
+        (reason) => {
+          // The socket was up at call time but the CALL never left it
+          // (A04.FR.02, #552): a critical event is queued like an offline one.
+          // A behavior that dropped it on purpose, a full pipeline queue and a
+          // disposed handler stay dropped.
+          if (
+            isCriticalSecurityEvent(type) &&
+            (reason === "socket_closed" || reason === "write_failed")
+          ) {
+            this.queueSecurityEvent(payload);
+            resolve();
+            return;
+          }
           reject(
             new OcppCallNoAnswerError(
               "dropped",
               `OCPP call ${id} dropped (${reason})`,
             ),
-          ),
+          );
+        },
         undefined,
         resolve,
       );

@@ -473,7 +473,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("security_event_notification", {
     description:
-      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected.",
+      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected, except that a critical event sent while offline is queued (A04.FR.02) and succeeds once queued.",
     // The method's own schema, so the tool advertises what it enforces.
     inputSchema: METHODS.security_event_notification.params.extend({
       cpId: z.string().describe("Charge point identifier"),

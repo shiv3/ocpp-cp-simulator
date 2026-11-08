@@ -135,3 +135,24 @@ export const METER_READING_CONTEXTS = [
 /** Same vocabulary as `ReadingContext` in MeterValueBuilder (1.6 §7.35 and
  *  2.0.1 ReadingContextEnumType spell it identically). */
 export type MeterReadingContext = (typeof METER_READING_CONTEXTS)[number];
+
+/**
+ * OCPP 2.0.1 `IdTokenEnumType` (Part 2 §3.43), the `type` of an `IdToken` in
+ * Authorize and TransactionEvent. 2.1 keeps these values. Certificate based
+ * authorization (`iso15118CertificateHashData`) is a separate path (#599).
+ */
+export const ID_TOKEN_TYPE_VALUES = [
+  "Central",
+  "eMAID",
+  "ISO14443",
+  "ISO15693",
+  "KeyCode",
+  "Local",
+  "MacAddress",
+  "NoAuthorization",
+] as const;
+
+export type IdTokenTypeName = (typeof ID_TOKEN_TYPE_VALUES)[number];
+
+/** The `IdToken.type` sent when a caller names none. */
+export const DEFAULT_ID_TOKEN_TYPE: IdTokenTypeName = "ISO14443";

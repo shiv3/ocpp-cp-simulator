@@ -47,6 +47,7 @@ import {
   splitStopReason,
   type MeterReadingContext,
   type StartTransactionCommandOptions,
+  type IdTokenTypeName,
   type StopTransactionCommandOptions,
   type TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -1202,8 +1203,8 @@ export class CLIChargePointService {
     return this._chargePoint.resolveIdTag(tagId, connectorId);
   }
 
-  authorize(tagId: string): void {
-    this._chargePoint.authorize(tagId);
+  authorize(tagId: string, idTokenType?: IdTokenTypeName): void {
+    this._chargePoint.authorize(tagId, idTokenType);
   }
 
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer (#348). */

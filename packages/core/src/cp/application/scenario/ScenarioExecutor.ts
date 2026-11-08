@@ -1015,7 +1015,11 @@ export class ScenarioExecutor {
           data.tagId ||
           this.callbacks.onResolveIdTag?.() ||
           DEFAULT_ID_TAG;
-        const options = this.remoteStartOptions;
+        // #599: the node's own idTokenType rides in the options; without
+        // one the callback is called exactly as before.
+        const options: StartTransactionOptions | null = data.idTokenType
+          ? { ...this.remoteStartOptions, idTokenType: data.idTokenType }
+          : this.remoteStartOptions;
         this.remoteStartTagId = null;
         this.remoteStartOptions = null;
         const outcome = options

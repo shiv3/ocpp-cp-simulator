@@ -217,6 +217,28 @@ describe("ScenarioExecutor node dispatch", () => {
     expect(onStartTransaction).toHaveBeenCalledWith("TAG-1", 77, 12);
   });
 
+  it("hands a start node's idTokenType to onStartTransaction (#599)", async () => {
+    const onStartTransaction = vi.fn(async () => {});
+
+    await runSingleNode(
+      ScenarioNodeType.TRANSACTION,
+      {
+        label: "Start Transaction",
+        action: "start",
+        tagId: "TAG-1",
+        idTokenType: "eMAID",
+      },
+      { onStartTransaction },
+    );
+
+    expect(onStartTransaction).toHaveBeenCalledWith(
+      "TAG-1",
+      undefined,
+      undefined,
+      { idTokenType: "eMAID" },
+    );
+  });
+
   it("dispatches transaction stop nodes to onStopTransaction", async () => {
     const onStopTransaction = vi.fn(async () => {});
 

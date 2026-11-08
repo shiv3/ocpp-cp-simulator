@@ -29,7 +29,7 @@ related:
   - ../entities/cli.md
   - vehicle-profiles.md
   - charger-engine.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Scenario File Format (v1.5)
@@ -119,7 +119,7 @@ shape depends on `type`).
 | `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                                      |
 | -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `statusChange`       | `status`                                                         |                                                                                                                                                                                              |
-| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                                    |
+| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`, `idTokenType` (#599, 2.x `IdToken.type` of a start; default `ISO14443`)                                                           |
 | `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`                   |
 | `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                              |
 | `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                              |

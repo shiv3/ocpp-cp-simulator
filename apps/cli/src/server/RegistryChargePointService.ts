@@ -66,6 +66,7 @@ import type {
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -297,8 +298,12 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
-    this.requireService(id).authorize(tagId);
+  async authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void> {
+    this.requireService(id).authorize(tagId, idTokenType);
   }
 
   /** Daemon-only: the tag a control-plane call without one presents, drawn

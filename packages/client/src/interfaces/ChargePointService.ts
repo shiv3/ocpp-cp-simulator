@@ -81,6 +81,7 @@ import type {
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -520,7 +521,12 @@ export interface ChargePointService {
   sendHeartbeat(id: string): Promise<void>;
   startHeartbeat(id: string, intervalSeconds: number): Promise<void>;
   stopHeartbeat(id: string): Promise<void>;
-  authorize(id: string, tagId: string): Promise<void>;
+  /** `idTokenType`: OCPP 2.x `IdToken.type`, default `ISO14443` (#599). */
+  authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void>;
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer
    *  (#348). `data`: string, or an object (JSON-encoded on 1.6). */
   sendDataTransfer(

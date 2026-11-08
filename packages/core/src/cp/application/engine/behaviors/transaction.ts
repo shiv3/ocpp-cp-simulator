@@ -236,7 +236,11 @@ export async function startTransaction(
   // authorization, so they're excluded here.
   const isLocalStart = options.triggerReason !== "RemoteStart";
   if (isLocalStart && cp.configuration.authorizeBeforeLocalStart()) {
-    const status = await cp.authorizeAndWait(tagId);
+    const status = await cp.authorizeAndWait(
+      tagId,
+      undefined,
+      options.idTokenType,
+    );
     // Any non-"Accepted" status denies the local start. Deliberately NOT an
     // allowlist of denial strings: 2.x has more denial values than 1.6.
     if (status !== "Accepted") {
@@ -267,6 +271,9 @@ export async function startTransaction(
     meterSent: false,
     reservationId,
     remoteStartId: options.remoteStartId,
+    ...(options.idTokenType !== undefined
+      ? { idTokenType: options.idTokenType }
+      : {}),
     startTriggerReason: options.triggerReason,
     startChargingState: options.chargingState,
     batteryCapacityKwh,

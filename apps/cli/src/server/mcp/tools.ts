@@ -16,6 +16,7 @@ import {
 } from "@ocpp-cp-sim/contracts/index";
 import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
 import {
+  ID_TOKEN_TYPE_VALUES,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   TRANSACTION_CHARGING_STATES,
@@ -345,6 +346,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "OCPP 2.x TransactionEvent(Started) chargingState (#335); default Charging. Ignored on OCPP 1.6",
         ),
+      idTokenType: z
+        .enum(ID_TOKEN_TYPE_VALUES)
+        .optional()
+        .describe(
+          "OCPP 2.x IdToken.type of the transaction's Authorize and TransactionEvents (#599); default ISO14443. Ignored on OCPP 1.6",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -356,6 +363,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             tagId: args.tagId,
             triggerReason: args.triggerReason,
             chargingState: args.chargingState,
+            idTokenType: args.idTokenType,
           },
         });
         return successResult(result);
@@ -413,6 +421,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "RFID tag or user ID to authorize. Omit to draw from the charge point's idTagPool",
         ),
+      idTokenType: z
+        .enum(ID_TOKEN_TYPE_VALUES)
+        .optional()
+        .describe(
+          "OCPP 2.x IdToken.type of the Authorize.req (#599); default ISO14443. Ignored on OCPP 1.6",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -421,6 +435,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           method: "authorize",
           params: {
             tagId: args.tagId,
+            idTokenType: args.idTokenType,
           },
         });
         return successResult(result);

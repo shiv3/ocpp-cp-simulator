@@ -57,8 +57,10 @@ import {
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
 import {
+  DEFAULT_ID_TOKEN_TYPE,
   endedStoppedReason,
   endedTriggerReason,
+  type IdTokenTypeName,
   type Transaction,
   type TransactionChargingState,
   type TransactionUpdateOptions,
@@ -1249,10 +1251,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
   }
 
-  public authorize(tagId: string): void {
+  public authorize(
+    tagId: string,
+    idTokenType: IdTokenTypeName = DEFAULT_ID_TOKEN_TYPE,
+  ): void {
     const messageId = this.generateMessageId();
     const payload: AuthorizeRequestV201 = {
-      idToken: { idToken: tagId, type: "ISO14443" },
+      idToken: { idToken: tagId, type: idTokenType },
     };
     this.send("Authorize", messageId, payload);
   }
@@ -1299,7 +1304,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
         : {}),
-      idToken: { idToken: transaction.tagId, type: "ISO14443" },
+      idToken: {
+        idToken: transaction.tagId,
+        type: transaction.idTokenType ?? DEFAULT_ID_TOKEN_TYPE,
+      },
       evse: v201TransactionEvse(connectorId),
       meterValue: [
         {
@@ -1400,7 +1408,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         ? { reservationId: transaction.reservationId }
         : {}),
       ...(transaction.tagId
-        ? { idToken: { idToken: transaction.tagId, type: "ISO14443" as const } }
+        ? {
+            idToken: {
+              idToken: transaction.tagId,
+              type: transaction.idTokenType ?? DEFAULT_ID_TOKEN_TYPE,
+            },
+          }
         : {}),
       evse: v201TransactionEvse(connectorId),
       meterValue:

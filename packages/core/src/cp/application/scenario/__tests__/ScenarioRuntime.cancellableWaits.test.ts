@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { cancelIfCancellable } from "../cancellable";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 
 function newChargePoint(): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-cancellable-waits",
     DefaultBootNotification,
     1,

@@ -5,7 +5,8 @@ import {
   StopTransactionResultHandler,
 } from "../TransactionResultHandlers";
 import { MeterValuesResultHandler } from "../OtherResultHandlers";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { OCPPStatus } from "../../../../../domain/types/OcppTypes";
 import type { BootNotification } from "../../../../../domain/types/OcppTypes";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
@@ -38,7 +39,7 @@ import type { HandlerContext } from "../../MessageHandlerRegistry";
 const bootNotification: BootNotification = DefaultBootNotification;
 
 function buildChargePoint(connectorCount = 1): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "test-cp-175",
     bootNotification,
     connectorCount,

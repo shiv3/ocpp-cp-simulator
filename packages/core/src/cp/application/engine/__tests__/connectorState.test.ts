@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { Logger, LogLevel } from "../../../shared/Logger";
 import { Connector } from "../../../domain/connector/Connector";
 import {
@@ -8,7 +9,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 
 function station(connectors = 2): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "engine-connector-state",
     DefaultBootNotification,
     connectors,

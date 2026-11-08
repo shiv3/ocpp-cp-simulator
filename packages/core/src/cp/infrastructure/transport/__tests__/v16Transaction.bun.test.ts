@@ -5,7 +5,7 @@ import type {
   StopTransactionRequestV16,
 } from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, normalizeTranscript, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -45,7 +45,7 @@ async function replyStatusNotification(
 describe("OCPP 1.6 transaction lifecycle (golden)", () => {
   it("sends StartTransaction, MeterValues, and StopTransaction with CSMS transaction id, with Preparing preceding StartTransaction on the wire (#176)", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP016-TX",
       DefaultBootNotification,
       1,
@@ -162,7 +162,7 @@ describe("OCPP 1.6 transaction lifecycle (golden)", () => {
 
   it("sends Preparing once when the connector was plugged in before the start (#496)", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP016-PLUG",
       DefaultBootNotification,
       1,

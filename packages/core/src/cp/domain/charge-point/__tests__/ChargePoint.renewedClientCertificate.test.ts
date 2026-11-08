@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  ChargePoint,
-  RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
-} from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { OcppCallNoAnswerError } from "../../errors/OcppCallErrors";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { OCPPWebSocket } from "../../../infrastructure/transport/OCPPWebSocket";
@@ -19,7 +18,7 @@ import {
  * its next connection, which keeps its own timing.
  */
 function profile3Station(version = "OCPP-2.0.1"): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-RENEW-UNIT",
     DefaultBootNotification,
     1,

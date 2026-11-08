@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import type { OperationalTimeline } from "../../../application/services/OperationalTimeline";
 import { resolveNetworkSimConfig } from "../network-sim";
@@ -63,7 +63,7 @@ describe.skipIf(!canBindBunServe())(
     it("correlates an injected disconnect with the reconnect and status recovery", async () => {
       const csms = startMockCsms();
       const stopAnswering = autoAnswer(csms);
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-TIMELINE",
         DefaultBootNotification,
         1,

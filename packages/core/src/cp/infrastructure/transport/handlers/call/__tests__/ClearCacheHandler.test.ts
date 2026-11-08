@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ClearCacheHandler } from "../OtherCallHandlers";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 
 function buildChargePoint(): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "test-cp-452",
     DefaultBootNotification,
     1,

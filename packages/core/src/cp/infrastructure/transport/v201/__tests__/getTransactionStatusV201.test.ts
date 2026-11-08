@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../domain/types/OcppTypes";
 import { Logger } from "../../../../shared/Logger";
 import type { V201InboundContext } from "../inboundRegistryV201";
@@ -17,7 +18,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
   "%s GetTransactionStatus ongoingIndicator (E14)",
   (version) => {
     function stationWithTransaction(stopped: boolean) {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-700",
         DefaultBootNotification,
         1,

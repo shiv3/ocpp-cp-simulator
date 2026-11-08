@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SignedUpdateFirmwareHandler } from "../SignedUpdateFirmwareHandler";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
@@ -14,7 +14,7 @@ import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
  * intercepted.
  */
 function buildContext() {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "test-cp-signed-firmware",
     DefaultBootNotification,
     1,

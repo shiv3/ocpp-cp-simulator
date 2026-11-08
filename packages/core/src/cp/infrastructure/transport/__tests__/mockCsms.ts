@@ -2,7 +2,8 @@
 // Imported by *.bun.test.ts files (runs under `bun test`, not vitest).
 import type { ServerWebSocket } from "bun";
 import { tcpPort } from "../../../../test/bunServe";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 export type OcppFrame = unknown[];
@@ -348,7 +349,7 @@ export async function bootedV201ChargePoint(
   csms: MockCsms,
   id: string,
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

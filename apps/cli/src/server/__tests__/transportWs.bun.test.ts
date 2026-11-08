@@ -6,7 +6,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
 import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
-import { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { UnsupportedWsOptionError } from "@ocpp-cp-simulator/core/cp/shared/WsClientOptions";
 
@@ -58,7 +58,7 @@ describe("transport.ws on the control plane (#611)", () => {
   });
 
   it("a charge point takes the supported options", () => {
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP-611",
       DefaultBootNotification,
       1,
@@ -76,21 +76,20 @@ describe("transport.ws on the control plane (#611)", () => {
   });
 
   it("refuses an option Bun would ignore, naming it", async () => {
-    expect(
-      () =>
-        new ChargePoint(
-          "CP-611",
-          DefaultBootNotification,
-          1,
-          "ws://a/ocpp/",
-          null,
-          null,
-          null,
-          {},
-          [],
-          "OCPP-1.6J",
-          { ws: { maxPayloadBytes: 1024 } },
-        ),
+    expect(() =>
+      createChargePoint(
+        "CP-611",
+        DefaultBootNotification,
+        1,
+        "ws://a/ocpp/",
+        null,
+        null,
+        null,
+        {},
+        [],
+        "OCPP-1.6J",
+        { ws: { maxPayloadBytes: 1024 } },
+      ),
     ).toThrow(UnsupportedWsOptionError);
 
     const registry = new CPRegistry(new EventBus());

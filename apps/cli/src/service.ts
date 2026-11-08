@@ -9,7 +9,8 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
-import { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
@@ -726,7 +727,7 @@ export class CLIChargePointService {
       ? centralSystemUrl
       : buildBaseUrl(init.wsUrl, init.cpId);
 
-    this._chargePoint = new ChargePoint(
+    this._chargePoint = createChargePoint(
       init.cpId,
       bootNotification,
       init.connectors,

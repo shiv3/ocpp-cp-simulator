@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import * as x509 from "@peculiar/x509";
 
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { canBindBunServe } from "../../../../test/bunServe";
 import { startMockCsms, type MockCsms } from "./mockCsms";
@@ -64,7 +65,7 @@ async function connectedStation(
   securityProfile: 0 | 1 | 2 | 3,
   tls?: { ca: string; serverName: string },
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

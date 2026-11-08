@@ -6,7 +6,7 @@ import {
 } from "../SmartChargingHandlers";
 import { HandlerCallError } from "../../HandlerCallError";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 
 /**
@@ -15,7 +15,7 @@ import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
  * SmartCharging feature profile.
  */
 function setup() {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP-SCP-594",
     DefaultBootNotification,
     2,

@@ -4,7 +4,8 @@ import type {
   TransactionEventRequestV201,
 } from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -40,7 +41,7 @@ async function bootedChargePoint(
   id: string,
   version: "OCPP-2.0.1" | "OCPP-1.6" = "OCPP-2.0.1",
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

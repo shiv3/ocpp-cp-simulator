@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import type { ChangeAvailabilityRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
@@ -46,7 +46,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
 describe("OCPP 2.0.1 ChangeAvailability", () => {
   it("applies CP-wide and single-connector availability after the CALLRESULT", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-CHANGE-AVAILABILITY",
       DefaultBootNotification,
       2,

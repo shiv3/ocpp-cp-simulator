@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import { V201_VARIABLE_TO_V16_KEY } from "../../../infrastructure/transport/v201/deviceModelMap";
 import type { ReconnectPolicy } from "../../../shared/ReconnectPolicy";
@@ -13,7 +14,7 @@ function build(
   seed?: string,
   id = "cp-609",
 ): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     id,
     DefaultBootNotification,
     1,

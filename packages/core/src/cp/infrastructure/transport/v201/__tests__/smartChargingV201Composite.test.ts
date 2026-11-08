@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GetCompositeScheduleResponseV201 } from "@ocpp-cp-simulator/ocpp/index";
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../charge-point/createChargePoint";
 import type { ChargingSchedulePeriod } from "../../../../domain/connector/Connector";
 import {
   ChargingProfileKindType,
@@ -25,7 +25,7 @@ function compositeFor(
     periods: ChargingSchedulePeriod[];
   },
 ): GetCompositeScheduleResponseV201 {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP201-COMPOSITE",
     DefaultBootNotification,
     1,

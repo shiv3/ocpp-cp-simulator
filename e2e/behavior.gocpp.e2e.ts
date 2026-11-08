@@ -2,7 +2,8 @@
 // behavior is switched per test over POST /behavior (BootNotification answer
 // sequence, authorization mode, offline) and CSMS commands run in sequence.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "../packages/core/src/cp/infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../packages/core/src/cp/domain/types/OcppTypes";
 import {
   startCsms,
@@ -35,7 +36,7 @@ afterAll(async () => {
 });
 
 function makeChargePoint(version: SimVersion, cpId: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     cpId,
     DefaultBootNotification,
     1,

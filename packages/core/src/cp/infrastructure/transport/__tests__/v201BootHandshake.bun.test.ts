@@ -1,12 +1,12 @@
 import { describe, it, expect } from "bun:test";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 describe("OCPP 2.0.1 boot handshake", () => {
   it("boots, accepts, then reports station and connector availability", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201",
       DefaultBootNotification,
       2,

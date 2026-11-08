@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 const VERSIONS = ["OCPP-2.0.1", "OCPP-2.1"] as const;
@@ -34,7 +35,7 @@ async function withStation(
   connectors = 2,
 ): Promise<void> {
   const csms = startMockCsms({ answerCalls: true });
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-RST-VALIDATION",
     DefaultBootNotification,
     connectors,

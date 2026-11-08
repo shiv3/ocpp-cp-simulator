@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { GetLogHandler } from "../GetLogHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
@@ -17,7 +17,7 @@ type LogStatus =
 
 function buildContext() {
   const sent: Array<{ status: LogStatus; requestId?: number }> = [];
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP-LOG-TEST",
     DefaultBootNotification,
     1,

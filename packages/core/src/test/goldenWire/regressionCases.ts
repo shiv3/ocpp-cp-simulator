@@ -327,6 +327,58 @@ c16("res-connector0", async (r) => {
   await reserve(r, 10, 0, "OWNER", FUT);
   await settle(r);
 });
+// #595: connector 0 is accepted once the station supports it, and a ReserveNow
+// with a held reservationId moves that reservation to the other connector.
+c16("res-connector0-supported", async (r) => {
+  r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+  await reserve(r, 20, 0, "OWNER", FUT);
+  await settle(r);
+});
+c16(
+  "res-replace-moves-connector",
+  async (r) => {
+    await reserve(r, 21, 1, "OWNER", FUT);
+    await settle(r);
+    await reserve(r, 21, 2, "OWNER", FUT);
+    await settle(r);
+  },
+  two,
+);
+// #595: a connector-0 reservation is its idTag's. A stranger starting on the
+// other connector neither consumes it (no reservationId on that
+// StartTransaction.req) nor cancels it; the owner's start does carry it.
+c16(
+  "res-connector0-stranger-starts",
+  async (r) => {
+    r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+    await reserve(r, 22, 0, "OWNER", FUT);
+    await settle(r);
+    await r.remoteStart("STRANGER", 2);
+    await settle(r);
+    await r.remoteStart("OWNER", 1);
+    await settle(r);
+  },
+  two,
+);
+// #595, 1.6 §5.13: a connector-0 reservation keeps one connector free for its
+// idTag for its whole validity. A stranger takes the first of two connectors,
+// is Rejected on the last one (RemoteStartTransaction.conf Rejected, no
+// StartTransaction.req), and the owner still gets it, carrying the reservationId.
+c16(
+  "res-connector0-keeps-a-connector",
+  async (r) => {
+    r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+    await reserve(r, 23, 0, "OWNER", FUT);
+    await settle(r);
+    await r.remoteStart("STRANGER", 1);
+    await settle(r);
+    await r.remoteStart("STRANGER2", 2);
+    await settle(r);
+    await r.remoteStart("OWNER", 2);
+    await settle(r);
+  },
+  two,
+);
 both("res-then-inoperative", async (r) => {
   await reserve(r, 11, 1, "OWNER", FUT);
   await settle(r);

@@ -2781,6 +2781,7 @@ function mergeUpdateParams(
     "txUpdatedMeterValues",
     init.txUpdatedMeterValues,
   );
+  preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

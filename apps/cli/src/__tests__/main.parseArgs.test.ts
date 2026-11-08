@@ -62,6 +62,9 @@ function runParseArgs(args: string[]) {
     "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
     "  bootstrapTxUpdatedMeterValues:",
     "    buildBootstrap(options)?.txUpdatedMeterValues ?? null,",
+    "  inboundValidation: options.inboundValidation ?? null,",
+    "  bootstrapInboundValidation:",
+    "    buildBootstrap(options)?.inboundValidation ?? null,",
     "}));",
   ].join("\n");
 
@@ -216,6 +219,31 @@ describe("parseArgs OCPP 1.6 security flags", () => {
       },
       tls: { rejectUnauthorized: true },
     });
+  });
+
+  it("--inbound-validation sets the #593 mode for the bootstrap charge point", () => {
+    const base = [
+      "--cp-id",
+      "CP-593",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ];
+    const enforce = runParseArgs([...base, "--inbound-validation", "enforce"]);
+    expect(enforce.status).toBe(0);
+    expect(JSON.parse(enforce.stdout)).toMatchObject({
+      inboundValidation: "enforce",
+      bootstrapInboundValidation: "enforce",
+    });
+
+    const unset = runParseArgs(base);
+    expect(JSON.parse(unset.stdout)).toMatchObject({
+      inboundValidation: null,
+      bootstrapInboundValidation: null,
+    });
+
+    const bad = runParseArgs([...base, "--inbound-validation", "strict"]);
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("--inbound-validation must be");
   });
 
   it("--tx-updated-meter-values turns the #347 option on for the bootstrap charge point", () => {

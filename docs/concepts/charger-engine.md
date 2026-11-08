@@ -14,7 +14,7 @@ sources:
   - packages/k6-runtime/src/behaviorHost.ts
   - apps/cli/src/behavior/BehaviorLibrary.ts
   - apps/cli/src/exportK6/runExportK6Behavior.ts
-  - apps/web/src/components/scenario/ScenarioEditor.tsx
+  - apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx
   - "issues #566, #569, #575, #600, #618, #654"
 related:
   - call-precedence.md
@@ -25,7 +25,7 @@ related:
   - ../analyses/scenario-or-behavior.md
   - ../analyses/charger-engine-migration.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Charger engine
@@ -335,7 +335,7 @@ send that failed, the time before answering, a `callResponse` without an exchang
 one test per row (`scenario15.bun.test.ts`).
 
 **The scenario editor authors all of it.** The browser Scenario Editor
-([`ScenarioEditor.tsx`](../../apps/web/src/components/scenario/ScenarioEditor.tsx)) has node forms for a
+([`ScenarioEditorContent.tsx`](../../apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx), forms in `components/scenario/forms/`) has node forms for a
 `csmsCallTrigger` with `behavior: "replace"` and `onBusy`, a `callResponse` node (kind, payload, error code,
 `skipValidation`) and a `useBehavior` node, and exports them with `schemaVersion: "1.5"`. What it does not
 give: `$from` has no dedicated control (type `{"$from": "call.payload.requestId"}` in the payload JSON box),

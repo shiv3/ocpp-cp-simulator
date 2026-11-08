@@ -107,7 +107,7 @@ describe("TemplateBrowserDialog", () => {
       Array.from(first.querySelectorAll("button")).map((b) =>
         b.textContent?.trim(),
       ),
-    ).toEqual(["Use template"]);
+    ).toEqual(["Show steps", "Use template"]);
   });
 
   it("focuses the search and narrows the list by name and description, ignoring case", async () => {
@@ -197,5 +197,27 @@ describe("TemplateBrowserDialog", () => {
     await openBrowser();
     expect(search().value).toBe("");
     expect(rows()).toHaveLength(scenarioTemplates.length);
+  });
+});
+
+describe("TemplateBrowserDialog step preview", () => {
+  it("shows a template's steps on demand, spelling out a loop", async () => {
+    await renderGallery();
+    await openBrowser();
+
+    const row = rows().find(
+      (r) => r.dataset.templateId === "status-triggered-actions",
+    )!;
+    expect(row.querySelector("ol")).toBeNull();
+    const toggle = Array.from(row.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Show steps",
+    )!;
+    await act(async () => toggle.click());
+
+    const items = Array.from(row.querySelectorAll("ol li"));
+    expect(items.length).toBe(3);
+    // Delay (#3) loops back to the Heartbeat notification (#2).
+    expect(items[2].textContent).toContain("→ #2");
+    expect(row.textContent).toContain("Hide steps");
   });
 });

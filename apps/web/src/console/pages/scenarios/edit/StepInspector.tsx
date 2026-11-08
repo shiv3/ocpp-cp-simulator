@@ -21,10 +21,8 @@ import type {
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../../components/EmptyState";
 
-// Lazy + Suspense, matching how the v2 ReactFlow editor
-// (`apps/web/src/components/scenario/ScenarioEditor.tsx`) loads this modal — it's a
-// canvas-heavy component only needed when a MeterValue step's "Configure
-// curve" action is used.
+// Lazy + Suspense: a canvas-heavy component only needed when a MeterValue
+// step's "Configure curve" action is used.
 const MeterValueCurveModal = lazy(
   () => import("../../../../components/MeterValueCurveModal"),
 );
@@ -38,7 +36,7 @@ export interface StepInspectorProps {
 /**
  * The scenario editor's step inspector: renders the registry form
  * for whichever step is selected (Task 7 brief — `entry.Component` reused
- * verbatim outside ReactFlow), plus a common Label/Description section that
+ * verbatim), plus a common Label/Description section that
  * every step type gets regardless of whether its own form surfaces those
  * fields (several registry forms, e.g. ConfigSetForm/CancelReservationForm,
  * currently render no fields of their own beyond `NoExtraConfigForm`).
@@ -83,7 +81,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
   // the window width says nothing about where the inspector sits.
   return (
     <div data-testid="step-inspector" className="@container space-y-4">
-      <h2 className="text-base font-semibold text-cx-fg">{entry.title}</h2>
+      <h2 className="text-base font-semibold text-cx-fg">{t(entry.title)}</h2>
 
       <div className="grid grid-cols-1 gap-3 border-b border-cx-border pb-4 @lg:grid-cols-2">
         <TextField

@@ -19,7 +19,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Web console (browser UI)
@@ -882,9 +882,10 @@ template: name, target type chip (`chargePoint` / `connector`), the description
 (two lines) and **Use template**. **Use template** creates the Library scenario
 exactly like the gallery's button and closes the dialog; **Enter** in the search
 uses the first template still listed. The search starts empty each time the
-dialog opens. (The old ReactFlow editor had its own picker; the console's
-scenario editor has none, so this dialog is the only way to a template beyond
-the first eight.)
+dialog opens. (This dialog is the only way to a template beyond the first eight.)
+**Show steps** under a row's description opens a read-only outline of the
+template — its steps in running order, with where a loop or fork jumps to
+(`outlineScenario`) — so a template can be read before it is used.
 
 **The editor.** `?edit=<id>` opens the [editor](#scenario-editor-steps-and-graph)
 in place of the table, with the header `← Library`, the name, the trigger, the
@@ -1006,17 +1007,18 @@ scenario or a copy of one (`libraryId`). All use the same content
   A card drags up or down within its lane like a Steps box (the card follows
   the pointer over a drop line; a press that moves less than 6 px is a click,
   so it still selects; **Escape** cancels), and a focused card takes
-  **Alt+↑ / Alt+↓** and **Delete** the same way. A scenario the layout cannot
-  draw (a join, a loop, a second fork, a node no path reaches) opens the full
-  node graph editor (ReactFlow: nodes, edges, the node palette,
-  auto-arrange, undo / redo, a node panel — double-click a node, then
-  **Save**) under the line "This scenario has joins or loops; the full graph
-  editor is used", with **Steps** disabled. Once open, that editor stays for
-  the visit even when an edit makes the scenario drawable again (picking
-  **Steps** leaves it). A **Meter Value** node there shows the connector's
-  live meter reading once the connector reports one, and its configured
-  value until then (always in the Library editor, which has no connector);
-  a reading is not an edit — no unsaved change, no undo step.
+  **Alt+↑ / Alt+↓** and **Delete** the same way. A loop or a join is drawn too: the edge that jumps back to (or joins) a card
+  already placed leaves the _last_ card of its lane as a dashed curve with an
+  arrowhead (`StepLink`, `deriveStepLayout().links`), and the Steps view says
+  "Then back to step N" under the lane. The inspector of a lane's last card has an
+  **After this step** select — _End of scenario_ or _Loop back to step N_ — that
+  sets or clears the link (`setLaneLink`); a link keeps leaving the lane's last
+  card through inserts, moves and deletes, and is dropped when its target is
+  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, an edge to a missing node. It never blocks Save. A scenario with a
+  second fork, or a node no path reaches, cannot be drawn: it is shown as an
+  outline list (steps in running order with where each jumps to) whose steps
+  can be selected and edited, but not re-wired. There is no ReactFlow editor
+  any more (retired in the round that added loops).
 
 The two views share the drag
 ([`useLaneDrag`](../../apps/web/src/console/lib/useLaneDrag.ts), pointer events, no
@@ -1041,14 +1043,11 @@ steps or graph or under them follows the editor's own width, not the
 window's (a container query: two columns above about 860 px), on the page and
 in a side panel alike. The inspector lays its fields out in two columns when
 it is wide enough itself (under the steps) and in one beside them.
-The full graph editor does not rewrite the trigger from a **Status Trigger** node, as
+The editor does not rewrite the trigger from a **Status Trigger** node, as
 the classic UI's graph editor did, so pick **On status change** in the header for a scenario that should start
-on a status. Opening a scenario in the full graph editor is
-not an edit: an edge to a missing node is hidden there, and leaves the saved
-definition only with the first save after a graph edit. Before #411 a branching
+on a status. Before #411 a branching
 scenario opened read-only, with a link to the classic UI's graph editor; before
-the Library, the Steps view showed only a single chain; before this round the
-Graph view was always the ReactFlow editor.
+the Library, the Steps view showed only a single chain.
 
 #### Editing in the side panel
 

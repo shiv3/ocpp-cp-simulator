@@ -84,7 +84,7 @@
   "settings.curve.title": "配置自动 MeterValue",
   "settings.curve.enable": "启用自动 MeterValue",
   "settings.curve.canvasHint": "点击添加控制点,拖动以移动",
-  "settings.curve.stopAtTarget": "充电至电池充满(在 EV 目标 SoC 处停止)",
+  "settings.curve.stopAtTarget": "充电至 EV 目标 SoC",
   "settings.curve.stopAtTargetHelp": "忽略图表的最大时间/数值。使用 EV 设置 → 目标 SoC,达到后将停止进行中的交易。",
   "settings.curve.presets": "预设",
   "settings.curve.linear": "线性",
@@ -99,7 +99,7 @@
   "settings.page.backToHome": "返回首页",
   "settings.page.tagsSaved": "RFID 标签 ID 已保存。",
   "settings.page.resetUnsupported": "此运行时不支持状态重置",
-  "settings.page.resetConfirm": "重置所有模拟器数据?\n\n场景、配置覆盖、充电配置文件、可用性标志、待处理消息、日志和已保存的车辆配置文件都将被清除。完成后页面将重新加载。",
+  "settings.page.resetConfirm": "重置所有模拟器数据?\n\n场景、配置覆盖、充电配置文件、可用性标志、待处理消息、日志和已保存的车辆配置文件都将被清除。在远程模式下,还会删除守护进程上注册的所有充电桩。完成后页面将重新加载。",
   "settings.page.evSaved": "默认 EV 设置已保存。新连接器将以这些值启动。",
   "settings.page.evReset": "默认 EV 设置已重置为内置默认值。",
   "settings.page.exported": "配置导出成功!",
@@ -160,5 +160,5 @@
   "settings.page.note1": "可从首页配置各个充电桩的设置",
   "settings.page.note2": "点击每个充电桩标签旁的齿轮图标以编辑其设置",
   "settings.page.note3": "使用“+ Add Charge Point”按钮添加新充电桩",
-  "settings.page.note4": "此页面仅用于批量导入/导出配置"
+  "settings.page.note4": "除批量导入/导出配置外,此页面还包含模拟器的全局设置和数据重置"
 }

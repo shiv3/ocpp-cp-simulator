@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc010-remote-start",
   "name": "Cert 1.6 Core: TC_010 Remote Start Transaction",
-  "description": "Plug in → StatusNotification(Preparing); CSMS sends RemoteStartTransaction → CP starts transaction with tag from request → StatusNotification(Charging); bounded MeterValue.req while charging.",
+  "description": "Plug in → StatusNotification(Preparing); CSMS sends RemoteStartTransaction → CP starts transaction with tag from request → StatusNotification(Charging); bounded MeterValues.req while charging.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

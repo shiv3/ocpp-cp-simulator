@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc004-charging-id-first",
   "name": "Cert 1.6 Core: TC_004 Charging Session (Identification First)",
-  "description": "idTag presented before the cable is connected: StatusNotification(Preparing) is entered on identification rather than plug-in, then StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req while charging; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "idTag presented before the cable is connected: StatusNotification(Preparing) is entered on identification rather than plug-in, then StartTransaction.req → StatusNotification(Charging); bounded MeterValues.req while charging; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

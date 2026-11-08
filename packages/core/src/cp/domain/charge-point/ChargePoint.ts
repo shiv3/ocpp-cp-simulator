@@ -555,7 +555,11 @@ export class ChargePoint {
 
   /** May TriggerMessage request `target` under the capability profile (#618)? */
   isTriggerTargetSupported(target: string): boolean {
-    return isTriggerTargetSupported(this._capabilityProfile, target);
+    return isTriggerTargetSupported(
+      this._capabilityProfile,
+      target,
+      translatesCsmsActionNames(this._ocppVersion),
+    );
   }
 
   /** See {@link InboundValidationMode}. Read on every inbound CALL. */

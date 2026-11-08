@@ -52,6 +52,11 @@ optional name) and the last choice (`ocpp-cp.active-daemon`) live in
 still answers, else it falls back to the serving daemon. Addresses with
 embedded credentials are refused, so no password is stored. The other daemon
 must allow the console's origin ([`--cors-origin`](../entities/daemon.md)).
+Limits: a daemon protected by Basic Auth cannot be switched to (the browser
+sends no credentials cross-origin, so the probe fails and the switch reports it
+unreachable after 8 s), and a daemon started with a different `--health-path`
+is not probed at that path. A run of the switch that is overtaken by a newer
+one neither commits nor rolls back.
 Local mode has no switcher and never touches these keys.
 
 ## Consequences
@@ -125,6 +130,10 @@ Local mode has no switcher and never touches these keys.
   answer from it, the run page and `/scenarios/runs` list and filter it as
   they do on the daemon, and the Local service emits the `scenario-*` events
   with a `runId` (minted per run) and `scenario-run-recorded`. A charge point
-  that is no longer defined, and **Reset all simulator data**, drop its runs.
+  removed from the saved configuration, and **Reset all simulator data**, drop
+  its runs; entering Remote mode merely releases the charge points and keeps
+  them. Open runs are tracked per connector, so one scenario id can run on two
+  connectors at once and each leaves its own report. Removing a charge point
+  while a run is open discards that run without a report, as on the daemon.
   Differences: a Local run's `simulatorVersion` is the console build's, and the
   timeline gets run attribution and `scenario_finished` only.

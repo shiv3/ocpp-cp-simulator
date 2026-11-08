@@ -333,15 +333,24 @@ export class ScenarioManager {
 
     console.log(`[ScenarioManager] Executing scenario: ${scenario.name}`);
 
+    // #394: this executor's own errors reach its own run, never the next
+    // run of the same scenario id (the event emitter is shared).
+    let run: { end: () => void; error: (message: string) => void } | null =
+      null;
+    const callbacks =
+      typeof this.callbacks === "function" ? this.callbacks() : this.callbacks;
+    const reportingErrors: ScenarioExecutorCallbacks = {
+      ...callbacks,
+      onError: (error) => {
+        run?.error(error.message);
+        callbacks.onError?.(error);
+      },
+    };
+
     // Create executor with event emitter
     const executor: ScenarioExecutor = new ScenarioExecutor(
       scenario,
-      this.recordingEvSettingsClaim(
-        typeof this.callbacks === "function"
-          ? this.callbacks()
-          : this.callbacks,
-        () => executor,
-      ),
+      this.recordingEvSettingsClaim(reportingErrors, () => executor),
       this.eventEmitter,
       {
         clock: clockOf(this.chargePoint),
@@ -350,7 +359,7 @@ export class ScenarioManager {
     );
     this.executors.set(scenarioId, executor);
 
-    const run = this.beginRun(scenarioId);
+    run = this.beginRun(scenarioId);
 
     try {
       await executor.start();
@@ -453,7 +462,9 @@ export class ScenarioManager {
    * `end()` closes it when the executor settles on its own; `null` without a
    * recorder.
    */
-  private beginRun(scenarioId: string): { end: () => void } | null {
+  private beginRun(
+    scenarioId: string,
+  ): { end: () => void; error: (message: string) => void } | null {
     const recorder = this.runRecorder;
     const emitter = this.eventEmitter;
     if (!recorder) return null;
@@ -467,18 +478,19 @@ export class ScenarioManager {
     const unsubscribe: Array<() => void> = [];
     if (emitter) {
       unsubscribe.push(
-        emitter.on("execution.error", (data) => {
-          if (data.scenarioId !== scenarioId) return;
-          hadError = true;
-          errors.push(redactSensitiveText(data.error));
-        }),
         emitter.on("wait.intervention", ({ scenarioId: id, ...rest }) => {
-          if (id === scenarioId) recorder.recordIntervention(scenarioId, rest);
+          if (id === scenarioId)
+            recorder.recordIntervention(scenarioId, this.connector.id, rest);
         }),
       );
     }
     this.openRuns.set(scenarioId, { runId, hadError: () => hadError, errors });
     return {
+      error: (message) => {
+        if (this.openRuns.get(scenarioId)?.runId !== runId) return;
+        hadError = true;
+        errors.push(redactSensitiveText(message));
+      },
       end: () => {
         unsubscribe.forEach((off) => off());
         // Only the run that is still registered: a stop (or a re-run) has
@@ -510,7 +522,7 @@ export class ScenarioManager {
     if (!recorder || !open) return;
     this.openRuns.delete(scenarioId);
     if (discard) {
-      recorder.discard(scenarioId);
+      recorder.discard(scenarioId, this.connector.id);
       this.chargePoint.timeline.endRun(this.connector.id, open.runId);
       this.runIds.delete(scenarioId);
       return;
@@ -540,13 +552,13 @@ export class ScenarioManager {
   /**
    * Stop all running scenarios
    */
-  stopAllScenarios(): void {
+  stopAllScenarios(options?: { discard?: boolean }): void {
     const activeIds = Array.from(this.executors.keys());
     if (activeIds.length > 0) {
       console.log(
         `[ScenarioManager] Stopping ${activeIds.length} active scenario(s)`,
       );
-      activeIds.forEach((id) => this.stopScenario(id));
+      activeIds.forEach((id) => this.stopScenario(id, options));
     }
   }
 
@@ -624,7 +636,9 @@ export class ScenarioManager {
     // A destroyed manager must stop reacting to the connector: otherwise
     // a replaced manager keeps firing statusChange-triggered scenarios.
     this.unsubscribeStatusChange();
-    this.stopAllScenarios();
+    // #394: tearing the manager down (the charge point is unregistered or
+    // re-registered) is not an operator stop: no report, as on the daemon.
+    this.stopAllScenarios({ discard: true });
     this.scenarios.clear();
     this.executors.clear();
   }

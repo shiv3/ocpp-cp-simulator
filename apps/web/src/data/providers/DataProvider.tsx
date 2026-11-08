@@ -193,6 +193,8 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     return DEFAULT_SERVER_URL;
   }, [serverUrlOverride]);
 
+  // Bumped by every user switch; stale probes and switches check it (#619).
+  const switchGenerationRef = useRef(0);
   const [mode, setModeState] = useState<RuntimeMode | null>(initialMode);
   const [serverUrl, setServerUrlState] = useState<string>(initialServerUrl);
   const [originUrl, setOriginUrl] = useState<string>(initialServerUrl);
@@ -264,9 +266,13 @@ export const DataProvider: React.FC<DataProviderProps> = ({
             active !== origin &&
             loadSavedDaemons().some((d) => d.url === active)
           ) {
+            const generation = switchGenerationRef.current;
             void probeDaemon(active).then(
               () => {
-                if (!cancelled) setServerUrlState(active);
+                // A switch the user started meanwhile wins over this probe.
+                if (!cancelled && switchGenerationRef.current === generation) {
+                  setServerUrlState(active);
+                }
               },
               () => storeActiveDaemon(null),
             );
@@ -362,8 +368,12 @@ export const DataProvider: React.FC<DataProviderProps> = ({
     if (!next) throw new Error("invalid daemon address");
     const previous = serverUrlRef.current;
     if (next === previous) return;
+    const generation = ++switchGenerationRef.current;
     // 1. The daemon must answer its health probe (CORS and auth included).
     await probeDaemon(next);
+    if (switchGenerationRef.current !== generation) {
+      throw new Error("superseded by a newer daemon switch");
+    }
     // 2. Switch, then wait for the socket to connect. Failing here puts
     //    the previous daemon back.
     setServerUrlState(next);
@@ -374,9 +384,14 @@ export const DataProvider: React.FC<DataProviderProps> = ({
         () => serverUrlRef.current,
       );
     } catch (err) {
-      setServerUrlState(previous);
+      // Only the latest switch rolls back: a superseded one must not undo
+      // the newer choice with its stale `previous`.
+      if (switchGenerationRef.current === generation) {
+        setServerUrlState(previous);
+      }
       throw err;
     }
+    if (switchGenerationRef.current !== generation) return;
     storeActiveDaemon(next === originRef.current ? null : next);
   }, []);
   const originRef = useRef(originUrl);

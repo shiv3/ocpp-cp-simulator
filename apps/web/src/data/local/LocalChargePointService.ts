@@ -292,13 +292,23 @@ export class LocalChargePointService implements ChargePointService {
           ocppVersion: () => chargePoint.ocppVersion,
           onRecorded: (result) => {
             // Persist before announcing: a reload right after must find it.
-            void this.database?.flush?.();
-            this.emit(chargePoint.id, {
-              type: "scenario-run-recorded",
-              connectorId: result.connectorId,
-              scenarioId: result.scenarioId,
-              runId: result.runId,
-            });
+            const announce = () =>
+              this.emit(chargePoint.id, {
+                type: "scenario-run-recorded",
+                connectorId: result.connectorId,
+                scenarioId: result.scenarioId,
+                runId: result.runId,
+              });
+            const flushed = this.database?.flush?.();
+            if (!flushed) {
+              announce();
+              return;
+            }
+            void Promise.resolve(flushed)
+              .catch((error) =>
+                console.error("Failed to persist the scenario run", error),
+              )
+              .then(announce);
           },
         }),
       ),
@@ -1489,8 +1499,16 @@ export class LocalChargePointService implements ChargePointService {
     return cp;
   }
 
+  /**
+   * Make the registered charge points match `definitions`. A charge point that
+   * drops out is released (its connections close). Its stored run history
+   * survives unless `options.forget` is set: that is for a removal from the
+   * saved configuration, not for entering Remote mode or an empty config
+   * that has not loaded (#394).
+   */
   async syncLocalChargePoints(
     definitions: LocalChargePointDefinition[],
+    options: { forget?: boolean } = {},
   ): Promise<ChargePoint[]> {
     const seen = new Set<string>();
 
@@ -1517,9 +1535,9 @@ export class LocalChargePointService implements ChargePointService {
     Array.from(this.chargePoints.keys()).forEach((id) => {
       if (!seen.has(id)) {
         this.unregisterChargePoint(id);
-        // #394: a charge point that is no longer defined takes its run
-        // history with it, as on the daemon.
-        this.scenarioRuns.deleteForChargePoint(id);
+        // #394: a charge point removed from the configuration takes its run
+        // history with it, as on the daemon. A mere release keeps it.
+        if (options.forget) this.scenarioRuns.deleteForChargePoint(id);
       }
     });
 

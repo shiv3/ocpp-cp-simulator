@@ -1685,7 +1685,9 @@ export class CLIChargePointService {
       this._chargePoint.timeline.endRun(connectorId, runId);
     }
     this._runIdByScenario.delete(scenarioId);
-    this._recorder.discard(scenarioId);
+    if (connectorId !== undefined) {
+      this._recorder.discard(scenarioId, connectorId);
+    }
   }
 
   /**
@@ -1859,7 +1861,11 @@ export class CLIChargePointService {
           });
         },
         onWaitIntervention: (intervention) => {
-          this._recorder.recordIntervention(scenarioId, intervention);
+          this._recorder.recordIntervention(
+            scenarioId,
+            connectorId,
+            intervention,
+          );
           this.emit({
             event: "scenario_wait_changed",
             data: {

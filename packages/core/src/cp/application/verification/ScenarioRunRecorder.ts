@@ -77,6 +77,12 @@ export function connectorStateSnapshot(
   };
 }
 
+/** Open runs are per connector: Local runs one scenario manager per connector,
+ *  so the same scenario id can be running on two connectors at once. */
+function openKey(connectorId: number, scenarioId: string): string {
+  return `${connectorId}\u0000${scenarioId}`;
+}
+
 interface OpenRun {
   readonly transcript: TranscriptBuffer;
   readonly startedAt: string;
@@ -113,10 +119,10 @@ export class ScenarioRunRecorder {
     connector: Connector,
     options?: { strict?: boolean },
   ): void {
-    this.discard(scenarioId);
+    this.discard(scenarioId, connector.id);
     const transcript = new TranscriptBuffer(this.deps.chargePoint.logger);
     transcript.start();
-    this.open.set(scenarioId, {
+    this.open.set(openKey(connector.id, scenarioId), {
       transcript,
       startedAt: new Date(this.now()).toISOString(),
       initialState: connectorStateSnapshot(connector),
@@ -125,24 +131,28 @@ export class ScenarioRunRecorder {
     });
   }
 
-  isOpen(scenarioId: string): boolean {
-    return this.open.has(scenarioId);
+  isOpen(scenarioId: string, connectorId: number): boolean {
+    return this.open.has(openKey(connectorId, scenarioId));
   }
 
   /** #240: an operator extended, retried or continued a parked wait. */
   recordIntervention(
     scenarioId: string,
+    connectorId: number,
     intervention: ScenarioWaitIntervention,
   ): void {
-    this.open.get(scenarioId)?.interventions.push(intervention);
+    this.open
+      .get(openKey(connectorId, scenarioId))
+      ?.interventions.push(intervention);
   }
 
   /** Drop an open run without a report (scenario deleted or replaced). */
-  discard(scenarioId: string): void {
-    const run = this.open.get(scenarioId);
+  discard(scenarioId: string, connectorId: number): void {
+    const key = openKey(connectorId, scenarioId);
+    const run = this.open.get(key);
     if (!run) return;
     run.transcript.stop();
-    this.open.delete(scenarioId);
+    this.open.delete(key);
   }
 
   /** Stop every open capture; no report is written. */
@@ -160,10 +170,11 @@ export class ScenarioRunRecorder {
     const { chargePoint } = this.deps;
     const { scenarioId, connectorId, runId, definition } = finish;
     chargePoint.timeline.endRun(connectorId, runId);
-    const run = this.open.get(scenarioId);
+    const key = openKey(connectorId, scenarioId);
+    const run = this.open.get(key);
     if (!run) return null;
     run.transcript.stop();
-    this.open.delete(scenarioId);
+    this.open.delete(key);
 
     const endedAt = new Date(this.now()).toISOString();
     const { startedAt, initialState } = run;

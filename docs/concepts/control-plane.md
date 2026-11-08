@@ -804,7 +804,7 @@ without a verdict and leaves no report. One history serves the whole daemon:
 - **`stopped`** is `true` when an operator stopped the run; a report recorded
   before the field existed has none, which reads as not stopped.
 
-Local mode records no runs ([Local vs Remote mode](local-vs-remote-mode.md#consequences)).
+Local mode records the same runs in the browser database ([Local vs Remote mode](local-vs-remote-mode.md)).
 
 ### Vehicle profiles and catalog
 

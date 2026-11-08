@@ -253,12 +253,92 @@ describe("Local scenario run history (#394)", () => {
     await settle();
     expect((await service.listScenarioRuns({})).total).toBe(2);
 
-    await service.syncLocalChargePoints([definitionOf("CP-OTHER")]);
+    await service.syncLocalChargePoints([definitionOf("CP-OTHER")], {
+      forget: true,
+    });
     const remaining = await service.listScenarioRuns({});
     expect(remaining.runs.map((r) => r.cpId)).toEqual(["CP-OTHER"]);
 
     await service.resetAllState();
     expect((await service.listScenarioRuns({})).total).toBe(0);
+  });
+
+  it("keeps run history when charge points are only released and come back (mode round trip)", async () => {
+    const { service } = await setup(await memoryDatabase());
+    await service.loadScenario(CP_ID, 1, scenario("s-trip"));
+    await service.runScenario(CP_ID, 1, "s-trip");
+    await settle();
+    expect((await service.listScenarioRuns({})).total).toBe(1);
+
+    // Entering Remote mode / an unloaded config releases without forgetting.
+    await service.syncLocalChargePoints([]);
+    await service.syncLocalChargePoints([definitionOf(CP_ID)]);
+    expect((await service.listScenarioRuns({ cpId: CP_ID })).total).toBe(1);
+  });
+
+  it("records one report per connector when the same scenario id runs on two connectors", async () => {
+    service = new LocalChargePointService(await memoryDatabase());
+    await service.syncLocalChargePoints([
+      { ...definitionOf(CP_ID), connectorNumber: 2 },
+    ]);
+    await service.loadScenario(CP_ID, 1, parking("s-same"));
+    await service.loadScenario(CP_ID, 2, {
+      ...parking("s-same"),
+      targetId: 2,
+    });
+    void service.runScenario(CP_ID, 1, "s-same");
+    void service.runScenario(CP_ID, 2, "s-same");
+    await settle();
+    await service.stopScenario(CP_ID, 1, "s-same");
+    await service.stopScenario(CP_ID, 2, "s-same");
+    await settle();
+
+    const page = await service.listScenarioRuns({ cpId: CP_ID });
+    expect(page.total).toBe(2);
+    expect(page.runs.map((r) => r.connectorId).sort()).toEqual([1, 2]);
+    expect(new Set(page.runs.map((r) => r.runId)).size).toBe(2);
+  });
+
+  it("evaluates declared assertions into the verdict, passing and failing", async () => {
+    const { service } = await setup(await memoryDatabase());
+    await service.loadScenario(
+      CP_ID,
+      1,
+      scenario("s-pass", {
+        assertions: [{ id: "a1", type: "ocpp_absent", action: "Authorize" }],
+      }),
+    );
+    await service.loadScenario(
+      CP_ID,
+      1,
+      scenario("s-fail", {
+        assertions: [{ id: "a1", type: "ocpp_sent", action: "Authorize" }],
+      }),
+    );
+    await service.runScenario(CP_ID, 1, "s-pass");
+    await service.runScenario(CP_ID, 1, "s-fail");
+    await settle();
+
+    const pass = await service.getScenarioReport(CP_ID, 1, "s-pass");
+    const fail = await service.getScenarioReport(CP_ID, 1, "s-fail");
+    expect(pass?.assertions.map((a) => a.status)).toEqual(["passed"]);
+    expect(pass?.verdict).toBe("PASS");
+    expect(fail?.assertions.map((a) => a.status)).toEqual(["failed"]);
+    expect(fail?.verdict).toBe("FAIL");
+  });
+
+  it("records an extendWait intervention in the report", async () => {
+    const { service } = await setup(await memoryDatabase());
+    await service.loadScenario(CP_ID, 1, parking("s-int"));
+    void service.runScenario(CP_ID, 1, "s-int");
+    await settle();
+    await service.extendScenarioWait(CP_ID, 1, "s-int", 30);
+    await service.stopScenario(CP_ID, 1, "s-int");
+    await settle();
+
+    const report = await service.getScenarioReport(CP_ID, 1, "s-int");
+    expect(report?.interventions).toHaveLength(1);
+    expect(report?.interventions[0]).toMatchObject({ kind: "extend" });
   });
 
   it("works without a database (in memory)", async () => {

@@ -329,14 +329,11 @@ export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
     to: `packages/core/src/cp/${t}`,
     why: "ChargePoint still builds the transport itself; clears with the ChargePoint split (#575).",
   })),
-  ...[
-    "application/scenario/ScenarioManager.ts",
-    "application/scenario/ScenarioTypes.ts",
-  ].map((t) => ({
+  {
     from: "packages/core/src/cp/domain/connector/Connector.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "Connector holds the scenario manager and its types; clears with the ChargePoint / Connector split (#575).",
-  })),
+    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
+    why: "Connector takes ScenarioMode from the scenario types; clears with the ChargePoint / Connector split (#575).",
+  },
 ];
 
 // ---------------------------------------------------------------------------

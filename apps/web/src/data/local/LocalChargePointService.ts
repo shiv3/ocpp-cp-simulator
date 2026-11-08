@@ -102,7 +102,10 @@ import {
 } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
-import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type {
+  ActiveChargingProfile,
+  Connector,
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -820,7 +823,7 @@ export class LocalChargePointService implements ChargePointService {
     connector.applyEvSettingsOverride(settings);
     // The operator now owns the override, so no run does — a run in flight
     // that claimed it earlier must not release this set when it ends (#333).
-    connector.scenarioManager?.disownEvSettingsOverride();
+    this.scenarioManagerOf(id, connector)?.disownEvSettingsOverride();
   }
 
   async getEVSettings(
@@ -1100,7 +1103,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
   ): Promise<ScenarioListItem[]> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     if (!manager) return [];
     const active = new Set(manager.getActiveScenarioIds());
     return manager.getScenarios().map((s) => {
@@ -1169,7 +1172,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     manager?.stopScenario(scenarioId);
   }
 
@@ -1179,7 +1182,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     manager?.stopScenario(scenarioId);
   }
 
@@ -1236,14 +1239,29 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     connectorId: number,
   ): ScenarioManager {
-    const manager = this.requireConnector(id, connectorId).scenarioManager;
+    const manager = this.scenarioManagerOf(
+      id,
+      this.requireConnector(id, connectorId),
+    );
     if (!manager) throw new Error("Scenario manager not available");
     return manager;
   }
 
+  private scenarioManagerOf(
+    id: string,
+    connector: Connector,
+  ): ScenarioManager | undefined {
+    return this.scenarioRuntimes.get(id)?.scenarioManager(connector.id);
+  }
+
+  /** The browser scenario runtime of charge point `id`, while registered. */
+  getScenarioRuntime(id: string): LocalScenarioRuntime | undefined {
+    return this.scenarioRuntimes.get(id);
+  }
+
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     manager?.stopAllScenarios();
   }
 
@@ -1253,7 +1271,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<void> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     manager?.removeScenario(scenarioId);
     // Drop the persisted row too so reloads don't resurrect it.
     if (this.database) {
@@ -1268,7 +1286,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     if (!manager) return null;
     return manager.getScenarioExecutionContext(scenarioId) ?? null;
   }
@@ -1300,7 +1318,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
   ): Promise<ScenarioDefinition | null> {
     const connector = this.requireConnector(id, connectorId);
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManagerOf(id, connector);
     if (!manager) return null;
     return manager.getScenario(scenarioId) ?? null;
   }

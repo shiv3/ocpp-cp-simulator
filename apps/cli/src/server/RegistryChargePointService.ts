@@ -56,6 +56,11 @@ import type {
 } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
+import {
+  PowerStateError,
+  type PowerLossOptions,
+  type PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { clearStartupProvenance } from "./startupScenarioRows";
 import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
 import type {
@@ -1022,6 +1027,36 @@ export class RegistryChargePointService implements ChargePointService {
     // Trigger the disconnect
     const manager = this.registry.getNetworkSimManager();
     return manager.triggerDisconnect(cpId, ruleId);
+  }
+
+  async powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<
+    { ok: true; transactions: number } | { ok: false; error: string }
+  > {
+    const service = this.registry.get(cpId);
+    if (!service) return { ok: false, error: "cp_not_found" };
+    try {
+      const record = service.powerLoss(options);
+      return { ok: true, transactions: record.transactions.length };
+    } catch (err) {
+      if (err instanceof PowerStateError) return { ok: false, error: err.code };
+      throw err;
+    }
+  }
+
+  async powerRestore(cpId: string, options?: PowerRestoreOptions) {
+    const service = this.registry.get(cpId);
+    if (!service) return { ok: false as const, error: "cp_not_found" };
+    try {
+      return { ok: true as const, ...service.powerRestore(options) };
+    } catch (err) {
+      if (err instanceof PowerStateError) {
+        return { ok: false as const, error: err.code };
+      }
+      throw err;
+    }
   }
 
   private listChargePointSnapshots(selector?: Labels): ChargePointSnapshot[] {

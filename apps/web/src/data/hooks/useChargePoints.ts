@@ -103,7 +103,11 @@ export function useChargePoints(
         config.Experimental.ChargePointIDs.length === 0
       ) {
         if (isLocalService) {
-          void chargePointService.syncLocalChargePoints([]);
+          // An explicitly empty saved list removes the charge points; a
+          // missing config is only "not loaded yet" and must keep history.
+          void chargePointService.syncLocalChargePoints([], {
+            forget: Boolean(config?.Experimental),
+          });
         }
         setIfActive([]);
         return () => {
@@ -129,7 +133,7 @@ export function useChargePoints(
         }));
 
       chargePointService
-        .syncLocalChargePoints(definitions)
+        .syncLocalChargePoints(definitions, { forget: true })
         .then(async () => {
           // Replay the operator's previously-clicked Connect actions so a
           // page reload comes back already connected. No-op for CPs that

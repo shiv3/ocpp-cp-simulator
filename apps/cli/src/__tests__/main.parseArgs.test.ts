@@ -66,6 +66,16 @@ function runParseArgs(args: string[]) {
     "  inboundValidation: options.inboundValidation ?? null,",
     "  bootstrapInboundValidation:",
     "    buildBootstrap(options)?.inboundValidation ?? null,",
+    "  ops: {",
+    "    allowedHosts: options.allowedHosts, trustedProxies: options.trustedProxies,",
+    "    requireTls: options.requireTls, rateLimitPerIp: options.rateLimitPerIp,",
+    "    rateLimitMaxIps: options.rateLimitMaxIps, logLevel: options.logLevel,",
+    "    logFile: options.logFile, logMaxBytes: options.logMaxBytes,",
+    "    logRotateDaily: options.logRotateDaily, logKeep: options.logKeep,",
+    "    shutdownStopTransactions: options.shutdownStopTransactions,",
+    "    shutdownWaitMs: options.shutdownWaitMs,",
+    "    connectRestored: options.connectRestored, cpBulkWaitMs: options.cpBulkWaitMs,",
+    "  },",
     "}));",
   ].join("\n");
 
@@ -1201,6 +1211,89 @@ describe("parseArgs --label (#472)", () => {
       );
     },
   );
+});
+
+describe("daemon operations flags (#620, #621, #622)", () => {
+  it("defaults keep today's behavior", () => {
+    const result = runParseArgs(["--daemon"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ops).toEqual({
+      allowedHosts: [],
+      trustedProxies: [],
+      requireTls: false,
+      rateLimitPerIp: 0,
+      rateLimitMaxIps: 10000,
+      logLevel: null,
+      logFile: null,
+      logMaxBytes: null,
+      logRotateDaily: false,
+      logKeep: 5,
+      shutdownStopTransactions: false,
+      shutdownWaitMs: 5000,
+      connectRestored: true,
+      cpBulkWaitMs: 10000,
+    });
+  });
+
+  it("parses every flag", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--allowed-host",
+      "a.example",
+      "--allowed-host",
+      "b.example:9700",
+      "--trusted-proxy",
+      "10.0.0.0/8",
+      "--require-tls",
+      "--rate-limit-per-ip",
+      "20",
+      "--rate-limit-max-ips",
+      "500",
+      "--log-level",
+      "warn",
+      "--log-file",
+      "/tmp/x.log",
+      "--log-max-size",
+      "10m",
+      "--log-rotate-daily",
+      "--log-keep",
+      "7",
+      "--shutdown-stop-transactions",
+      "--shutdown-wait-ms",
+      "9000",
+      "--no-connect-restored",
+      "--cp-bulk-wait-ms",
+      "20000",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ops).toEqual({
+      allowedHosts: ["a.example", "b.example:9700"],
+      trustedProxies: ["10.0.0.0/8"],
+      requireTls: true,
+      rateLimitPerIp: 20,
+      rateLimitMaxIps: 500,
+      logLevel: "warn",
+      logFile: "/tmp/x.log",
+      logMaxBytes: 10 * 1024 * 1024,
+      logRotateDaily: true,
+      logKeep: 7,
+      shutdownStopTransactions: true,
+      shutdownWaitMs: 9000,
+      connectRestored: false,
+      cpBulkWaitMs: 20000,
+    });
+  });
+
+  it.each([
+    [["--trusted-proxy", "not-an-ip"], "--trusted-proxy"],
+    [["--log-level", "loud"], "--log-level"],
+    [["--log-max-size", "big"], "--log-max-size"],
+    [["--rate-limit-max-ips", "0"], "--rate-limit-max-ips"],
+  ])("rejects %j", (args, flag) => {
+    const result = runParseArgs(["--daemon", ...args]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(flag);
+  });
 });
 
 describe("parseArgs startup pacing (#610)", () => {

@@ -11,6 +11,7 @@ sources:
   - packages/core/src/scenario/deepPartialMatch.ts
   - packages/core/src/cp/domain/connector/ChargingCurve.ts
   - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
+  - packages/core/src/cp/domain/connector/OperatingPoint.ts
   - packages/core/src/cp/domain/connector/Connector.ts
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
@@ -685,6 +686,15 @@ one (none is invented). So a single 6 A profile on `numberPhases: 1` reads
 the cap the meter enforces. Consecutive periods merge only when they restate
 the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
 18 A / 1 phase stays two periods though both are 4140 W.
+
+**One operating point per sample (#327).** `Connector.operatingPoint()` resolves
+the schedule limit, active phase count, battery acceptance, EVSE offer, line
+currents, voltage, power factor and SoC once, from one instant. The energy
+register (`MeterValueScheduler`) accumulates against its `accumulationCapW` and
+`MeterValueBuilder` only formats the rest, so a MeterValue's samples describe
+one instant and the register and the reported `Power.Active.Import` cannot
+disagree. The resolution (`OperatingPoint.ts`) imports nothing from the
+transport layer or `ocpp/`. This is a refactor: no wire byte changes.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with

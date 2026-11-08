@@ -166,6 +166,8 @@ export interface SocketIoDeps {
   readonly requestShutdown?: () => void;
   /** `server.info`; absent → version only, no SOAP public base. */
   readonly serverInfo?: ServerInfo;
+  /** #622: per-charge-point wait of `cp.bulk` / `cp.scenario.run` (ms). */
+  readonly cpBulkWaitMs?: number;
   readonly webConsoleBasicAuth?: {
     readonly username: string;
     readonly password: string;
@@ -578,6 +580,18 @@ export async function dispatchRpcCore(
       return saveNetworkSimCp(deps, call.params);
     case "network_sim.disconnect.trigger":
       return triggerNetworkSimDisconnect(deps, call.params);
+    case "power.loss": {
+      const { cpId, ...options } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.powerLoss(cpId, options),
+      );
+    }
+    case "power.restore": {
+      const { cpId, ...options } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.powerRestore(cpId, options),
+      );
+    }
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
     case "scenario.runs.list":
@@ -741,7 +755,10 @@ async function bulkCps(
   return runCpBulk(
     cpIds,
     (cpId) => runFacadeOperation(() => service[action](cpId)),
-    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+    {
+      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
+      failureReason: batchFailureReason,
+    },
   );
 }
 
@@ -776,7 +793,10 @@ async function runScenarioOnSelector(
           ...(once === undefined ? {} : { once }),
         }),
       ),
-    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+    {
+      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
+      failureReason: batchFailureReason,
+    },
   );
   return {
     matched: batch.matched,

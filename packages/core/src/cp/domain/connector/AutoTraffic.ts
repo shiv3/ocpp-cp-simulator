@@ -1,4 +1,5 @@
 import { cyrb128, draw, xoshiro128ss } from "../../shared/SeededRng";
+import type { IdTagDistribution } from "../auth/IdTagPool";
 
 /**
  * Background charging traffic for one connector (#300).
@@ -30,6 +31,24 @@ export interface AutoTrafficConfig {
   requireAuthorize: boolean;
   /** Stop generating after this long. Absent means "until turned off". */
   stopAfterSec?: number;
+  /**
+   * Stop generating at this absolute time (ISO 8601, #603). Whichever of
+   * this and `stopAfterSec` comes first ends the traffic. A session open at
+   * that moment is allowed to finish, like one open at `stopAfterSec`.
+   */
+  stopAt?: string;
+  /**
+   * How the idTag of a session is drawn from the charge point's idTag pool
+   * (#603). Absent means the distribution the pool was created with. With no
+   * pool the traffic presents {@link AUTO_TRAFFIC_ID_TAG}.
+   */
+  idTagStrategy?: IdTagDistribution;
+  /**
+   * The charge point's position in a fleet (#603), mixed into the idTag draw
+   * so the charge points of one fleet that share a pool do not all present
+   * the same tag first. Absent: a stable hash of the charge point id.
+   */
+  cpIndex?: number;
 }
 
 export const defaultAutoTrafficConfig: AutoTrafficConfig = {
@@ -60,17 +79,113 @@ export interface AutoTrafficStep {
  * on the plan rather than derived from logs so a test can read them directly.
  */
 export interface AutoTrafficCounters {
+  /** Cycles that ran: a scenario suspending the connector is not one. */
   attempted: number;
+  /** Sessions begun (the start was accepted). */
   started: number;
-  /** Rolled below `probabilityOfStart`. */
+  /** Cycles that did not start a session: the roll came below
+   *  `probabilityOfStart`, or a start precondition failed (#603). */
   skipped: number;
-  /** The CSMS refused the Authorize, so no session began. */
+  /** The Authorize or the start was refused, so no session began. */
   rejected: number;
   completed: number;
+  authorizeAccepted: number;
+  authorizeRejected: number;
+  startAccepted: number;
+  startRejected: number;
+  stopAccepted: number;
+  stopRejected: number;
+  /** Cycles skipped in a row since the last session begun (#603). */
+  consecutiveSkips: number;
+  /** When the first and the latest cycle ran, epoch ms (#603). */
+  firstRunAt: number | null;
+  lastRunAt: number | null;
 }
 
 export function emptyAutoTrafficCounters(): AutoTrafficCounters {
-  return { attempted: 0, started: 0, skipped: 0, rejected: 0, completed: 0 };
+  return {
+    attempted: 0,
+    started: 0,
+    skipped: 0,
+    rejected: 0,
+    completed: 0,
+    authorizeAccepted: 0,
+    authorizeRejected: 0,
+    startAccepted: 0,
+    startRejected: 0,
+    stopAccepted: 0,
+    stopRejected: 0,
+    consecutiveSkips: 0,
+    firstRunAt: null,
+    lastRunAt: null,
+  };
+}
+
+/**
+ * The idTag stream of one connector's traffic (#603).
+ *
+ * `ChargePoint.nextIdTag` draws from state the whole charge point shares
+ * (the round-robin cursor, the stream seeded by the charge point id), which
+ * scenarios and control-plane calls advance too, so what traffic presents
+ * would depend on what else ran. This reads the same tag list and
+ * distribution and keeps its own cursor and stream, seeded by the traffic
+ * seed: the same seed gives the same sequence.
+ *
+ * - `round-robin`: the next tag, from a start offset that mixes in the charge
+ *   point index and the connector.
+ * - `random`: drawn from a stream seeded by the seed, the charge point id,
+ *   the index and the connector.
+ * - `connector-affinity`: a connector always presents the same tag, shifted
+ *   by the charge point index so the charge points of a fleet spread over
+ *   the pool.
+ */
+/** `2026-11-09T10:00:00Z`, `...+09:00`, with optional fractional seconds. */
+const ISO_DATE_TIME_WITH_OFFSET =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+export class AutoTrafficIdTagPicker {
+  private readonly rng: () => number;
+  private cursor: number;
+  private readonly index: number;
+  private readonly tagsOf: () => readonly string[];
+
+  /**
+   * `tags` may be a function: a `--watch` reload swaps the pool's list
+   * (#314), and the next draw must see it.
+   */
+  constructor(
+    tags: readonly string[] | (() => readonly string[]),
+    private readonly strategy: IdTagDistribution,
+    seed: number,
+    cpId: string,
+    private readonly connectorId: number,
+    cpIndex: number | undefined,
+  ) {
+    this.tagsOf = typeof tags === "function" ? tags : () => tags;
+    if (this.tagsOf().length === 0) throw new Error("no idTags to draw from");
+    const index = cpIndex ?? cyrb128(`cp-index:${cpId}`)[0]!;
+    this.index = index >>> 0;
+    this.cursor = this.index + Math.max(0, connectorId - 1);
+    const state = cyrb128(`${seed}:${cpId}:${index}:${connectorId}:idtag`);
+    this.rng = xoshiro128ss(
+      state.every((word) => word === 0) ? [1, 2, 3, 4] : state,
+    );
+  }
+
+  next(): string {
+    const tags = this.tagsOf();
+    if (this.strategy === "connector-affinity") {
+      return tags[
+        (this.index + Math.max(0, this.connectorId - 1)) % tags.length
+      ]!;
+    }
+    if (this.strategy === "random") {
+      return tags[draw(this.rng, tags.length)]!;
+    }
+    const tag = tags[this.cursor % tags.length]!;
+    this.cursor++;
+    return tag;
+  }
 }
 
 /**
@@ -164,13 +279,33 @@ export function validateAutoTrafficConfig(
   if (config.stopAfterSec !== undefined && config.stopAfterSec < 1) {
     return "stopAfterSec must be at least 1";
   }
+  if (
+    config.stopAt !== undefined &&
+    (typeof config.stopAt !== "string" ||
+      !ISO_DATE_TIME_WITH_OFFSET.test(config.stopAt) ||
+      Number.isNaN(Date.parse(config.stopAt)))
+  ) {
+    return "stopAt must be an ISO 8601 date-time with an offset (for example 2026-11-09T10:00:00Z)";
+  }
+  if (
+    config.idTagStrategy !== undefined &&
+    !["round-robin", "random", "connector-affinity"].includes(
+      config.idTagStrategy,
+    )
+  ) {
+    return 'idTagStrategy must be "round-robin", "random" or "connector-affinity"';
+  }
+  if (
+    config.cpIndex !== undefined &&
+    (!Number.isInteger(config.cpIndex) || config.cpIndex < 0)
+  ) {
+    return "cpIndex must be a non-negative integer";
+  }
   return null;
 }
 
 /**
- * The idTag background traffic presents.
- *
- * A fixed literal for now: #299 adds a per-charge-point pool, and this is the
- * single place that will draw from it once both have landed.
+ * The idTag background traffic presents when its charge point has no idTag
+ * pool (#603). With a pool, {@link AutoTrafficIdTagPicker} draws from it.
  */
 export const AUTO_TRAFFIC_ID_TAG = "123456";

@@ -1,0 +1,138 @@
+{
+  "id": "resilience-temporary-unavailable-recovery",
+  "name": "Resilience: Temporary Unavailable Recovery",
+  "description": "Operator-driven. Send ChangeAvailability(Inoperative) then ChangeAvailability(Operative) for the connector. Passes when both calls arrived and the connector reported Unavailable and then Available (OCPP 1.6 payload checks for the statuses).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "wait-inop",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait for ChangeAvailability (Inoperative)",
+        "action": "ChangeAvailability",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "wait-unavailable",
+      "type": "statusTrigger",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Wait for Unavailable",
+        "targetStatus": "Unavailable",
+        "timeout": 60
+      }
+    },
+    {
+      "id": "wait-op",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait for ChangeAvailability (Operative)",
+        "action": "ChangeAvailability",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "wait-available",
+      "type": "statusTrigger",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Wait for Available",
+        "targetStatus": "Available",
+        "timeout": 60
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "wait-inop"
+    },
+    {
+      "id": "e2",
+      "source": "wait-inop",
+      "target": "wait-unavailable"
+    },
+    {
+      "id": "e3",
+      "source": "wait-unavailable",
+      "target": "wait-op"
+    },
+    {
+      "id": "e4",
+      "source": "wait-op",
+      "target": "wait-available"
+    },
+    {
+      "id": "e5",
+      "source": "wait-available",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-11-08T00:00:00Z",
+  "updatedAt": "2026-11-08T00:00:00Z",
+  "assertions": [
+    {
+      "id": "inoperative-received",
+      "type": "ocpp_received",
+      "action": "ChangeAvailability",
+      "description": "ChangeAvailability received"
+    },
+    {
+      "id": "went-unavailable",
+      "type": "state_transition",
+      "targetStatus": "Unavailable",
+      "description": "Connector reported Unavailable"
+    },
+    {
+      "id": "back-available",
+      "type": "state_transition",
+      "targetStatus": "Available",
+      "description": "Connector reported Available again"
+    }
+  ]
+}

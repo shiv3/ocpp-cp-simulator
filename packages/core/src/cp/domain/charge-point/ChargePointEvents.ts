@@ -174,6 +174,16 @@ export interface ChargePointEvents {
     transactionId: number;
     reason?: string;
   };
+  /** The station lost power (#455): the socket is gone and nothing is sent
+   *  until power is restored. `transactions` is how many were running. */
+  powerLost: { transactions: number };
+  /** Power came back (#455) after `outageMs`; the station boots again.
+   *  `recovery` is what it decided for the interrupted transactions. */
+  powerRestored: {
+    outageMs: number;
+    recovery: "resume" | "end" | "none";
+    transactions: number;
+  };
   /** Emitted by AuthorizeResultHandler whenever an Authorize.conf arrives,
    *  tagId-correlated via the original Authorize.req payload (issue #181).
    *  `ChargePoint.authorizeAndWait` listens for this to resolve the
@@ -200,6 +210,10 @@ export interface ChargePointEvents {
     connectorId: number;
     status: string;
     stopped: boolean;
+    /** OCPP 2.x: the refusal answered a TransactionEvent after `Started`
+     *  (an `Updated` carrying the idToken), not the start. Absent
+     *  otherwise (#603). */
+    midSession?: true;
   };
   /** A transmission of a transaction-related message failed. OCPP 2.0.1 /
    *  2.1 TransactionEvent (E13.FR.02): the CSMS answered it with a CALLERROR

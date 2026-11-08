@@ -133,6 +133,8 @@ export type TransactionNodeData = BaseNodeData & {
 export interface RemoteStartDetails {
   tagId: string;
   remoteStartId?: number;
+  /** The CSMS's `idToken.type` of a 2.x RequestStartTransaction (#599). */
+  idTokenType?: IdTokenTypeName;
 }
 
 export interface StartTransactionOptions {

@@ -1302,6 +1302,15 @@ both("remote-start-inoperative", async (r) => {
   await r.remoteStart("X", 1);
   await settle(r);
 });
+// #599: the TransactionEvent carries the idToken (type included) of the
+// RequestStartTransaction, F01.FR.04.
+c201("remote-start-central-type", async (r) => {
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+  });
+  await settle(r);
+});
 c201("reset-unknown-evse", async (r) => {
   await r.csms.call("Reset", { type: "Immediate", evseId: 9 });
   await settle(r);

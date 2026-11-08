@@ -1,5 +1,6 @@
 import type { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 import type { ActiveChargingProfile } from "../connector/Connector";
+import type { IdTokenTypeName } from "../connector/Transaction";
 
 /** The CSMS's answer to BootNotification.req, as every OCPP version words it. */
 export type RegistrationStatus = "Accepted" | "Pending" | "Rejected";
@@ -134,6 +135,8 @@ export interface ChargePointEvents {
     connectorId: number;
     tagId: string;
     remoteStartId?: number;
+    /** 2.x: the `idToken.type` the CSMS sent (#599). */
+    idTokenType?: IdTokenTypeName;
   };
   /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
    *  has registered as the stop-side handler for this connector. The

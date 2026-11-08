@@ -1498,11 +1498,13 @@ export class ChargePoint {
     connectorId: number,
     tagId: string,
     remoteStartId?: number,
+    idTokenType?: IdTokenTypeName,
   ): void {
     this._events.emit("remoteStartReceived", {
       connectorId,
       tagId,
       ...(remoteStartId !== undefined ? { remoteStartId } : {}),
+      ...(idTokenType !== undefined ? { idTokenType } : {}),
     });
   }
 

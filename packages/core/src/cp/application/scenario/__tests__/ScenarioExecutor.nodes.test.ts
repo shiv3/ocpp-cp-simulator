@@ -239,6 +239,49 @@ describe("ScenarioExecutor node dispatch", () => {
     );
   });
 
+  it.each([
+    ["the request's type when the node names none", undefined, "Central"],
+    ["the node's own type over the request's", "eMAID", "eMAID"],
+  ] as const)(
+    "a start after a remote start trigger uses %s (#599)",
+    async (_name, nodeType, expected) => {
+      const onStartTransaction = vi.fn(async () => {});
+      const executor = new ScenarioExecutor(
+        scenarioWithMiddleNodes("remote-type", [
+          node("trigger", ScenarioNodeType.REMOTE_START_TRIGGER, {
+            label: "Wait",
+            timeout: 5,
+          } as ScenarioNodeData),
+          node("start-node", ScenarioNodeType.TRANSACTION, {
+            label: "Start",
+            action: "start",
+            ...(nodeType ? { idTokenType: nodeType } : {}),
+          }),
+        ]),
+        {
+          onWaitForRemoteStart: async () => ({
+            tagId: "REMOTE-1",
+            remoteStartId: 4,
+            idTokenType: "Central",
+          }),
+          onStartTransaction,
+        },
+      );
+      await executor.start();
+
+      expect(onStartTransaction).toHaveBeenCalledWith(
+        "REMOTE-1",
+        undefined,
+        undefined,
+        {
+          triggerReason: "RemoteStart",
+          remoteStartId: 4,
+          idTokenType: expected,
+        },
+      );
+    },
+  );
+
   it("dispatches transaction stop nodes to onStopTransaction", async () => {
     const onStopTransaction = vi.fn(async () => {});
 

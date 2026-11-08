@@ -316,7 +316,10 @@
                       "KeyCode",
                       "Local",
                       "MacAddress",
-                      "NoAuthorization"
+                      "NoAuthorization",
+                      "DirectPayment",
+                      "EVCCID",
+                      "VIN"
                     ]
                   }
                 }

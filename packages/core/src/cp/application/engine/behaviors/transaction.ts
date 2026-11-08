@@ -8,6 +8,7 @@ import type {
 import type { Connector } from "../../../domain/connector/Connector";
 import type {
   StopTransactionReason,
+  IdTokenTypeName,
   Transaction,
 } from "../../../domain/connector/Transaction";
 import {
@@ -108,7 +109,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const req = request as {
             evseId?: number;
             remoteStartId: number;
-            idToken: { idToken: string };
+            idToken: { idToken: string; type?: string };
           };
           const connectorId = req.evseId ?? 1;
           const connector = cp.getConnector(connectorId);
@@ -123,6 +124,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
                 connectorId,
                 req.idToken.idToken,
                 req.remoteStartId,
+                requestIdTokenType(req.idToken.type),
               );
             },
           };
@@ -169,6 +171,7 @@ function remoteStart(
   connectorId: number,
   idTag: string,
   remoteStartId: number | undefined,
+  idTokenType?: IdTokenTypeName,
 ): void {
   if (cp.configuration.authorizeRemoteTxRequests()) {
     if (!isOcpp2Version(cp.ocppVersion)) {
@@ -177,10 +180,15 @@ function remoteStart(
         LogType.OCPP,
       );
     }
-    cp.authorize(idTag);
+    cp.authorize(idTag, idTokenType);
   }
   if (cp.isScenarioHandled(connectorId)) {
-    cp.notifyRemoteStartReceived(connectorId, idTag, remoteStartId);
+    cp.notifyRemoteStartReceived(
+      connectorId,
+      idTag,
+      remoteStartId,
+      idTokenType,
+    );
     return;
   }
   // Note it so a scenario that arms on this connector shortly after can tell
@@ -189,7 +197,21 @@ function remoteStart(
   void cp.startTransaction(idTag, connectorId, undefined, undefined, {
     triggerReason: "RemoteStart",
     ...(remoteStartId !== undefined ? { remoteStartId } : {}),
+    ...(idTokenType !== undefined ? { idTokenType } : {}),
   });
+}
+
+/**
+ * The `idToken.type` of a RequestStartTransaction (#599, F01.FR.04: the
+ * Charging Station SHALL use the request's IdToken in the TransactionEvent).
+ * The CALL schema already holds it to `IdTokenEnumType` on 2.0.1; on 2.1 it is
+ * a free string of at most 20 characters (IdTokenEnumStringType is only the
+ * list of standard values), so it is carried as sent.
+ */
+function requestIdTokenType(
+  type: string | undefined,
+): IdTokenTypeName | undefined {
+  return type ? (type as IdTokenTypeName) : undefined;
 }
 
 const nowDate = (cp: ChargePoint): Date => new Date(cp.clock.now());
@@ -235,7 +257,12 @@ export async function startTransaction(
   // a RemoteStartTrigger node: both already went through CSMS-driven
   // authorization, so they're excluded here.
   const isLocalStart = options.triggerReason !== "RemoteStart";
-  if (isLocalStart && cp.configuration.authorizeBeforeLocalStart()) {
+  // NoAuthorization has no token to authorize (IdTokenEnumType, #599).
+  if (
+    isLocalStart &&
+    options.idTokenType !== "NoAuthorization" &&
+    cp.configuration.authorizeBeforeLocalStart()
+  ) {
     const status = await cp.authorizeAndWait(
       tagId,
       undefined,

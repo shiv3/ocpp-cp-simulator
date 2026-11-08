@@ -2393,3 +2393,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `concepts/control-plane.md`: `idTokenType` on `start_transaction` and `authorize`, with the value list in the transaction parameter table.
 - `concepts/scenario-format.md`: the `transaction` node gains `idTokenType`; `entities/mcp-endpoint.md`: the `start_transaction` tool gains it.
+- Review fixes: a remote start keeps the CSMS's `idToken.type` (Authorize, TransactionEvents, parked scenarios; F01.FR.04); the 2.1-only types `DirectPayment`, `EVCCID`, `VIN` (2.1 Appendices ch. 7.1) are accepted, a 2.0.1 station falls back to `ISO14443`; `NoAuthorization` sends an empty `idToken` and no Authorize. Pages: [Control plane](concepts/control-plane.md), [Scenario format](concepts/scenario-format.md), [MCP endpoint](entities/mcp-endpoint.md) (the `authorize` row). New golden case `201-remote-start-central-type`.

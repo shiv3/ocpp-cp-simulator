@@ -1316,6 +1316,11 @@ export class ScenarioExecutor {
         ...(answer.remoteStartId !== undefined
           ? { remoteStartId: answer.remoteStartId }
           : {}),
+        // The type the CSMS sent; a Transaction node's own idTokenType wins
+        // (executeTransaction spreads the node's value last).
+        ...(answer.idTokenType !== undefined
+          ? { idTokenType: answer.idTokenType }
+          : {}),
       };
     }
   }

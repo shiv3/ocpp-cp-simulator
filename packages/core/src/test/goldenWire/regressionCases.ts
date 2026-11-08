@@ -828,6 +828,21 @@ c201("malformed-calls", async (r) => {
   }
   await settle(r);
 });
+// OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715): one CALLERROR per kind of
+// violation that malformed-calls (missing properties) does not show.
+c201("violation-codes", async (r) => {
+  for (const [a, p] of [
+    ["ChangeAvailability", { operationalStatus: 5 }],
+    ["ChangeAvailability", { operationalStatus: "Nope" }],
+    ["UnlockConnector", { evseId: 1, connectorId: 1, extra: true }],
+    ["ClearCache", "nope"],
+    ["SetVariables", { setVariableData: [] }],
+  ] as const) {
+    await r.csms.call(a, p, 3000).catch(() => undefined);
+    await wait(30);
+  }
+  await settle(r);
+});
 c16("malformed-calls", async (r) => {
   for (const [a, p] of [
     ["RemoteStartTransaction", {}],

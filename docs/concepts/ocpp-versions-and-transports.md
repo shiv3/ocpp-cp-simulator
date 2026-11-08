@@ -925,6 +925,19 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 - **TxProfile preconditions.** A `TxProfile` for a connector without a **running** transaction (one whose `stopTime` is still unset; a closed transaction that is still attached does not count) answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
 - **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule` are all answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` / `Unknown` status. On **1.6-S** there is no CALLERROR: the SOAP server turns the same refusal into a generic SOAP Fault, `Dispatch error for SetChargingProfile: SmartCharging is not supported` (likewise for the other two operations). The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
 
+## Inbound CALL validation on OCPP 2.0.1 / 2.1
+
+An inbound CALL on a 2.x charge point whose payload fails the request schema of its action is answered with a CALLERROR (always on; the `inboundValidation` setting is 1.6J only). The code follows OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715), using the same keyword mapping as [1.6J](#inbound-call-validation-on-ocpp-j-16), most structural first:
+
+| Code                            | When                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `FormatViolation`               | the payload is not an object, or has a property the schema does not declare |
+| `OccurrenceConstraintViolation` | a required property is missing, or an array has too few or too many items   |
+| `TypeConstraintViolation`       | a property has the wrong JSON type                                          |
+| `PropertyConstraintViolation`   | right type, invalid value: enum, range, length, pattern                     |
+
+The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. Both 2.0.1 and 2.1 stations validate against the 2.0.1 request schemas; a 2.1-only action has its own handler and answers its own way. Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
+
 ## Inbound CS→CP request validation
 
 An inbound SOAP request on an **OCPP 1.6-S** charge point is validated

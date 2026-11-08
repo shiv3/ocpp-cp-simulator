@@ -478,20 +478,20 @@ describe.skipIf(!canBindBunServe())(
             certificate: root.pem,
           });
           expect(install[0]).toBe(4);
-          expect(install[2]).toBe("FormatViolation");
+          expect(install[2]).toBe("PropertyConstraintViolation");
 
           const query = await call(csms, "GetInstalledCertificateIds", {
             certificateType: ["OEMRootCertificate"],
           });
           expect(query[0]).toBe(4);
-          expect(query[2]).toBe("FormatViolation");
+          expect(query[2]).toBe("PropertyConstraintViolation");
 
           const signed = await call(csms, "CertificateSigned", {
             certificateChain: root.pem,
             certificateType: "V2G20Certificate",
           });
           expect(signed[0]).toBe(4);
-          expect(signed[2]).toBe("FormatViolation");
+          expect(signed[2]).toBe("PropertyConstraintViolation");
         });
       });
 

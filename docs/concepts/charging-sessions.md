@@ -16,6 +16,8 @@ sources:
   - "issue #549"
   - "issue #527"
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
+  - packages/core/src/cp/domain/connector/EvConnection.ts
+  - "issue #453"
 related:
   - operational-timeline.md
   - state-persistence.md
@@ -28,7 +30,7 @@ related:
   - local-authorization.md
   - power-loss.md
   - smart-charging.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Charging sessions
@@ -226,6 +228,46 @@ browser reload (which restores none) leaves it `interrupted`.
 - **Console:** the charge point page's
   [Transactions](../entities/web-console.md#transactions-tab) tab.
 
+## EV and cable model
+
+Whether a cable is plugged in and whether the EV asks for energy is a small
+physical model of its own on the connector (#453), separate from the OCPP
+status it causes. `Connector.evConnection` is one of:
+
+| State                 | Meaning                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `disconnected`        | No cable, or the EV side was unplugged. The state of a new connector.            |
+| `connected-ready`     | A cable is plugged in and the EV asks for energy (right after a plug-in).        |
+| `connected-not-ready` | A cable is plugged in and the EV does not ask for energy (a paused or full car). |
+
+It is not a second state machine: three `ChargePoint` operations change it and
+turn the change into status writes, transactions and wire messages the existing
+handlers already own. They are reached by the `ev_plug_in`, `ev_ready` and
+`ev_disconnected` [methods](control-plane.md), the console's **Plug in** /
+**Unplug**, a scenario `connectorPlug` node, the behaviors' `ctx.plugIn` /
+`ctx.unplug`. The state is observable as `evConnection` on each connector of
+`status`.
+
+| Operation                            | Idle `Available` connector                                                                                      | Running transaction                                                                                                                                                             | Other states (`Unavailable`, `Faulted`, `Reserved`, no power) |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `evPlugIn` (`ev_plug_in`)            | `Preparing` (1.6 §4.9 A2; 2.x `Occupied`), ConnectionTimeOut starts                                             | Cable recorded, nothing sent                                                                                                                                                    | Cable recorded, the status stays                              |
+| `evSetReady(false)` (`ev_ready`)     | Recorded                                                                                                        | `Charging` → `SuspendedEV` (1.6 §4.9 C4), the energy offer stops (2.x: `TransactionEvent(Updated)`, `chargingState` `SuspendedEV`, `triggerReason` `ChargingStateChanged`, E10) | Recorded                                                      |
+| `evSetReady(true)`                   | Recorded                                                                                                        | `SuspendedEV` → `Charging` (1.6 §4.9 D3; 2.x: `Updated`, `chargingState` `Charging`, `ChargingStateChanged`)                                                                    | Recorded                                                      |
+| `evDisconnected` (`ev_disconnected`) | `Preparing`, `Finishing`, `SuspendedEV`, `SuspendedEVSE` → `Available` (1.6 §4.9 B1); `Available` sends nothing | [EV-side disconnect](#ev-side-disconnect-and-connection-loss)                                                                                                                   | Status stays                                                  |
+
+Rules:
+
+- A plug-in is idempotent; readiness needs a cable (`ev_ready` without one
+  fails with `Connector N has no EV plugged in`) and is idempotent.
+- A transaction implies an EV on the cable: a start without a prior plug-in, and
+  a transaction restored after a restart, show `connected-ready`.
+- The cable is **not persisted** and a restart or reconnect invents no cable
+  transition: a restored connector shows `connected-*` only when its transaction
+  or a cable-only status (`Preparing`, `Finishing`, `Suspended*`, `Charging`)
+  proves one, and never sends a status for it. A reset of an idle plugged-in
+  connector keeps `Preparing`.
+- The connector lock and a partial plug are not modelled.
+
 ## EV-side disconnect and connection loss
 
 What a running transaction does when the cable leaves the EV, or when the
@@ -247,9 +289,9 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   energy register no longer rises, while the periodic MeterValues keep going
   out, and the derived power is zero outside `Charging`. A second unplug
   while so suspended sends nothing. The connector lock is not
-  modelled. Without a running transaction, the console's **Unplug** sends
-  StatusNotification `Available`, as before, while a scenario plug-out stays a
-  no-op.
+  modelled. Without a running transaction an unplug (the console's
+  **Unplug**, a scenario plug-out) returns a `Preparing` or `Finishing`
+  connector to `Available`; a connector in another state keeps its status (#453).
 
 - **EV connection timeout.** Starting a transaction before the cable is in
   puts the connector in `Preparing` and starts the `ConnectionTimeOut` timer

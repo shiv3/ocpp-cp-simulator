@@ -94,6 +94,7 @@ import {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  toOcppJ16Wire,
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
@@ -939,7 +940,9 @@ export class OCPPMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = toOcppJ16Wire(
+      buildSampledValues(connector, measurands, context),
+    );
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).

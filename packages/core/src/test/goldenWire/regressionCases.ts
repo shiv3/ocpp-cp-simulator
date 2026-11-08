@@ -1642,6 +1642,16 @@ c16("meter-callerror-no-retry", async (r) => {
   await wait(2500);
   await settle(r);
 });
+// OCPP-J 1.6 errata (2025-04) §2.1 (#745): the Temperature unit stays `Celcius`
+// on the 1.6J wire.
+c16("meter-temperature-celcius", async (r) => {
+  cfg(r, "MeterValuesSampledData", "Energy.Active.Import.Register,Temperature");
+  await charging(r);
+  r.cp.setMeterValue(1, 100);
+  r.cp.sendMeterValue(1);
+  await wait(300);
+  await settle(r);
+});
 c201("event-callerror-retries", async (r) => {
   cfg(r, "TransactionMessageAttempts", "3");
   cfg(r, "TransactionMessageRetryInterval", "1");

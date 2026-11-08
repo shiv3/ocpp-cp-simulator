@@ -851,6 +851,10 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
   and the tradeoff, is in
   [Scenario format → Charging curve](scenario-format.md#charging-curve-v12).
 
+## Temperature unit spelling on OCPP-J 1.6
+
+The `Temperature` measurand carries `unit: "Celcius"` on OCPP-J 1.6 `MeterValues.req` — the spelling of the original JSON schemas, which OCPP-J 1.6 errata (2025-04) §2.1 advises Charge Point implementers to keep, because a Central System validating against the original schema rejects `Celsius` (#745). The vendored schema accepts both. OCPP-S 1.6 (the WSDL says `Celsius`) and OCPP 2.0.1 / 2.1 send `Celsius`. The conversion is `toOcppJ16Wire` in `MeterValueBuilder.ts`, applied only by the 1.6J handler; a future sampled `transactionData` in `StopTransaction.req` must use it too.
+
 ## Inbound CALL validation on OCPP-J 1.6
 
 An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` has three values. Set it with `--inbound-validation <off|warn|enforce>` ([CLI](../entities/cli.md), [daemon](../entities/daemon.md)), the `inboundValidation` field of `cp.create` / `cp.update` ([control plane](control-plane.md#cpcreate-parameters)), or, from library code, the `ChargePoint` transport option and `ChargePoint.setInboundValidation()`. The CLI persists it with `--state-db` ([State persistence](state-persistence.md)); a row from before the column restores as `warn`.

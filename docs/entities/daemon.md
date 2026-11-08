@@ -267,7 +267,9 @@ The reconnect flags (`--reconnect-*`, `--boot-retry-limit`, [CLI](cli.md)) set t
 policy of the charge point started with the daemon. A charge point created over the
 control plane takes `transport.reconnect` on `cp.create` / `cp.update` (an update that
 omits `transport` keeps the current one); it is stored in `charge_points.transport_options`
-and restored with the charge point. Details and defaults:
+and restored with the charge point. The WebSocket client options (`--ws-*`, `transport.ws`: handshake timeout, compression, max
+payload, proxy, local address) travel the same way; an option the daemon's runtime cannot honour
+refuses the charge point (Bun: `maxPayloadBytes`, `localAddress`). Details and defaults:
 [Reconnect policy](../concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609).
 
 ## Security posture

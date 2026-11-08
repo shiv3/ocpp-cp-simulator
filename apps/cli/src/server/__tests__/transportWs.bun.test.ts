@@ -148,4 +148,43 @@ describe("transport.ws on the control plane (#611)", () => {
       db.close();
     }
   });
+
+  it("skips, and keeps, a stored row whose option this runtime cannot honour", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const first = new CPRegistry(new EventBus(), db);
+      for (const cpId of ["CP-OK", "CP-NODE"]) {
+        first.create(
+          {
+            cpId,
+            wsUrl: "ws://a/ocpp/",
+            connectors: 1,
+            vendor: "V",
+            model: "M",
+            basicAuth: null,
+          },
+          { seedDefault: false },
+        );
+      }
+      first.shutdownAll();
+      // A row written by a Node daemon.
+      db.run(
+        "UPDATE charge_points SET transport_options = ? WHERE cp_id = 'CP-NODE'",
+        ['{"ws":{"localAddress":"10.0.0.5"}}'],
+      );
+
+      const second = new CPRegistry(new EventBus(), db);
+      try {
+        expect(second.restoreFromDatabase()).toEqual(["CP-OK"]);
+        expect(second.get("CP-NODE")).toBeUndefined();
+        expect(
+          db.all("SELECT cp_id FROM charge_points WHERE cp_id = 'CP-NODE'"),
+        ).toHaveLength(1);
+      } finally {
+        second.shutdownAll();
+      }
+    } finally {
+      db.close();
+    }
+  });
 });

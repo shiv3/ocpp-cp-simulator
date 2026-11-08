@@ -3,6 +3,8 @@ title: OCPP versions and transports
 type: concept
 summary: What the simulator speaks — OCPP-J 1.6J (default), 2.0.1 and 2.1 over WebSocket, and OCPP-S 1.2 / 1.5 / 1.6S over SOAP 1.2 + WS-Addressing — and which surfaces support which.
 sources:
+  - packages/core/src/cp/infrastructure/transport/WsClientOptions.ts
+  - "issue #611"
   - packages/core/src/cp/infrastructure/transport/ReconnectPolicy.ts
   - "issue #609"
   - packages/ocpp/src/ (generated from packages/ocpp/vendor/ocpp-schemas)
@@ -142,6 +144,63 @@ variables. A 1.6 charge point has none of the three keys.
 
 Local mode (the browser) does not take the policy: the reconnect loop of the web
 console's charge points keeps the defaults.
+
+## WebSocket client options (#611)
+
+`transport.ws` — next to `transport.reconnect`, same places: `cp.create`, the
+`--ws-*` flags of the [CLI](../entities/cli.md), `charge_points.transport_options` —
+sets what the OCPP-J client asks of its WebSocket. Every field is optional and a
+charge point without them behaves as before.
+
+| Field                | CLI flag                        | Meaning                                                                                                                                    | Bun | Node (`ws`) | Browser |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --- | ----------- | ------- |
+| `handshakeTimeoutMs` | `--ws-handshake-timeout-ms`     | An attempt that has not opened within this many ms is closed; the [reconnect policy](#reconnect-policy-and-retrybackoff-609) then applies. | yes | yes         | yes     |
+| `perMessageDeflate`  | `--ws-no-compression` (`false`) | `false` stops offering `permessage-deflate` on the upgrade; `true` offers it (the default).                                                | yes | yes         | no      |
+| `maxPayloadBytes`    | `--ws-max-payload`              | Largest incoming message; a larger one closes the socket (1006 on `ws`).                                                                   | no  | yes         | no      |
+| `proxy`              | `--ws-proxy`                    | `http://` or `https://` proxy the upgrade goes through with `CONNECT`.                                                                     | yes | no          | no      |
+| `localAddress`       | `--ws-local-address`            | Local IP the connection binds to.                                                                                                          | no  | yes         | no      |
+
+**What the table means.** _yes_ is measured (below), not read from documentation.
+The handshake timeout is _yes_ everywhere because the transport enforces it itself
+with a timer: no runtime does it for us (Bun never times a handshake out).
+
+**An option the runtime cannot honour is refused, not ignored.** The charge point
+is not created: `cp.create` answers an error such as
+`WebSocket option "localAddress" is not supported on bun (supported on: node)`,
+the CLI exits 1 with the same text, and a charge point restored from the state
+database that needs an option the current runtime lacks is skipped with that
+warning (the row is kept). Issue #611 asked for a startup warning; a warning
+would leave a test running behind a proxy it never used or with a payload limit
+it never enforced, so the simulator fails instead. `transport.ws` on a SOAP
+version is refused for the same reason: it has no WebSocket.
+
+Values are validated when the charge point is created: `handshakeTimeoutMs` > 0,
+`maxPayloadBytes` an integer > 0, `proxy` an `http(s)://` URL, `localAddress`
+non-empty. The refusal probe that explains a refused upgrade ([#288](https://github.com/shiv3/ocpp-cp-simulator/issues/288))
+goes through the same `proxy`.
+
+**Local mode** (the web console's browser charge points) takes none of this:
+`WebSocket` in a browser cannot set compression, payload limits, a proxy or a
+source address, and Local charge points keep the default handshake behaviour.
+
+**PoC (2026-11-08, Bun 1.3.14 and Node 22 with `ws`).** Each option was passed
+to the client constructor against a local server that records the upgrade
+request, a silent TCP server and a recording `CONNECT` proxy:
+
+| Option                     | Bun 1.3.14                                                                                                                                  | Node 22 + `ws`                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `perMessageDeflate: false` | No `Sec-WebSocket-Extensions` sent (default offers `permessage-deflate; client_max_window_bits`). A `compression: false` option is ignored. | Honoured, same result.                                           |
+| `maxPayload` 1 KB          | **Ignored**: a 2 MB message is delivered whole.                                                                                             | Honoured: `Max payload size exceeded`, close 1006.               |
+| `localAddress` 127.0.0.2   | **Ignored**: the server sees 127.0.0.1.                                                                                                     | Honoured: the server sees 127.0.0.2.                             |
+| `proxy`                    | Honoured: the proxy receives `CONNECT host:port`. `HTTP_PROXY` / `http_proxy` are **not** used for WebSockets.                              | No proxy option; it needs an agent and none is bundled.          |
+| handshake timeout          | No option; a silent server leaves the socket `CONNECTING` for the whole 6 s observed.                                                       | `handshakeTimeout` honoured (`Opening handshake has timed out`). |
+
+The Bun half runs on every CI build as
+`packages/core/src/cp/infrastructure/transport/__tests__/OCPPWebSocket.wsOptions.bun.test.ts`,
+including a canary for the two options Bun ignores: if a Bun release starts
+honouring one, that test fails and the matrix in
+[`WsClientOptions.ts`](../../packages/core/src/cp/infrastructure/transport/WsClientOptions.ts)
+is corrected.
 
 ## WebSocket ping (`WebSocketPingInterval`)
 

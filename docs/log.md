@@ -2395,3 +2395,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [CLI](entities/cli.md) flags `--reconnect-*` and `--boot-retry-limit`; [Daemon](entities/daemon.md) and [Control plane](concepts/control-plane.md) (`cp.create` `transport`) in sync.
 - [State persistence](concepts/state-persistence.md): schema v25 `charge_points.transport_options`.
 - [Operational timeline](concepts/operational-timeline.md): format `1.4`, new kind `gave_up`.
+
+## [2026-11-08] ingest | WebSocket client options and the Bun / Node PoC (#611)
+
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-client-options-611): new section with the `transport.ws` options, the per-runtime support matrix, the PoC results (Bun 1.3.14, Node 22 `ws`), why an unsupported option refuses the charge point instead of warning, and the Local mode limits.
+- [CLI](entities/cli.md) `--ws-*` flags; [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md) (`transport.ws`) and [State persistence](concepts/state-persistence.md) in sync.

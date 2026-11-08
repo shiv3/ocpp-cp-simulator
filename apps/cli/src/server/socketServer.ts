@@ -75,7 +75,7 @@ import {
   type EVSettingsPatch,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
-import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import {
   hasStatusNotificationOptions,
   type StatusNotificationOptions,

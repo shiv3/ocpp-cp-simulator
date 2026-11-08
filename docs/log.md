@@ -2449,3 +2449,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Save and switch between multiple daemons (#619)
 
 - Remote-mode sidebar daemon switcher: saved addresses in `localStorage`, health probe + connection wait before a switch, automatic return to the previous daemon on failure, last choice restored on reload. Local mode unaffected. Pages: [Local vs Remote mode](concepts/local-vs-remote-mode.md), [Web console](entities/web-console.md).
+
+## [2026-11-08] ingest | Scenario run history and reports in browser-local mode (#394)
+
+- New shared `ScenarioRunRecorder` (application layer) builds the run report (transcript, assertions, verdict) for both the daemon's `CLIChargePointService` and the browser's `ScenarioManager`. Local runs mint a `runId`, emit `scenario-*` events with it plus `scenario-run-recorded`, and are stored in the sql.js `scenario_runs` table (100 per charge point; dropped with the charge point and on reset). The console's Local-mode special cases are gone. Pages: [Local vs Remote mode](concepts/local-vs-remote-mode.md), [Web console](entities/web-console.md), [State persistence](concepts/state-persistence.md), [Operational timeline](concepts/operational-timeline.md), [Control plane](concepts/control-plane.md), [GitHub issues](sources/github-issues.md).

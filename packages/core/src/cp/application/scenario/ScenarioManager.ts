@@ -11,6 +11,8 @@ import type {
 } from "./ScenarioTypes";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import type { EventEmitter } from "../../shared/EventEmitter";
+import type { ScenarioRunRecorder } from "../verification/ScenarioRunRecorder";
+import { redactSensitiveText } from "../../shared/redaction";
 
 /**
  * Scenario Manager
@@ -28,6 +30,14 @@ export class ScenarioManager {
     ScenarioExecutorCallbacks | (() => ScenarioExecutorCallbacks);
   private eventEmitter?: EventEmitter<ScenarioEvents>;
   private readonly unsubscribeStatusChange: () => void;
+  /** #394: writes each finished run's report; absent when nobody reads it. */
+  private readonly runRecorder?: ScenarioRunRecorder;
+  /** The run id of each scenario that is running (see {@link getRunId}). */
+  private readonly runIds = new Map<string, string>();
+  private readonly openRuns = new Map<
+    string,
+    { runId: string; hadError: () => boolean; errors: string[] }
+  >();
   /**
    * #333: the run that owns the connector's EV settings override — the
    * executor that last *applied* its `evSettings`, compared by reference.
@@ -51,7 +61,10 @@ export class ScenarioManager {
      *  per-run state in the callbacks (e.g. the run start time) is fresh. */
     callbacks: ScenarioExecutorCallbacks | (() => ScenarioExecutorCallbacks),
     eventEmitter?: EventEmitter<ScenarioEvents>,
+    /** #394: records a report per run (transcript, assertions, verdict). */
+    runRecorder?: ScenarioRunRecorder,
   ) {
+    this.runRecorder = runRecorder;
     this.connector = connector;
     this.chargePoint = chargePoint;
     this.callbacks = callbacks;
@@ -111,9 +124,9 @@ export class ScenarioManager {
    * Remove a scenario
    */
   removeScenario(scenarioId: string): void {
-    // Stop if running
+    // Stop if running; the run is discarded, no report (like the daemon).
     if (this.executors.has(scenarioId)) {
-      this.stopScenario(scenarioId);
+      this.stopScenario(scenarioId, { discard: true });
     }
     this.scenarios.delete(scenarioId);
   }
@@ -130,6 +143,12 @@ export class ScenarioManager {
    */
   isScenarioActive(scenarioId: string): boolean {
     return this.executors.has(scenarioId);
+  }
+
+  /** #394: the id of the run in progress (or just ended) for the scenario,
+   *  when a recorder is attached. */
+  getRunId(scenarioId: string): string | undefined {
+    return this.runIds.get(scenarioId);
   }
 
   /**
@@ -331,11 +350,14 @@ export class ScenarioManager {
     );
     this.executors.set(scenarioId, executor);
 
+    const run = this.beginRun(scenarioId);
+
     try {
       await executor.start();
     } catch (error) {
       console.error(`[ScenarioManager] Scenario execution error:`, error);
     } finally {
+      run?.end();
       // Clean up when completed — but only our own slot: a re-run under the
       // same id stops this run and installs its executor before this
       // `finally` runs, and must stay stoppable.
@@ -410,16 +432,109 @@ export class ScenarioManager {
   /**
    * Stop a specific scenario
    */
-  stopScenario(scenarioId: string): void {
+  stopScenario(scenarioId: string, options?: { discard?: boolean }): void {
     const executor = this.executors.get(scenarioId);
     if (executor) {
       console.log(`[ScenarioManager] Stopping scenario: ${scenarioId}`);
+      // Read before stop() clears the parked expectation (#394): a run
+      // stopped mid-wait never reached a verifiable state, so it is BLOCKED.
+      const before = executor.getContext();
       executor.stop();
+      this.finishStoppedRun(scenarioId, before, options?.discard === true);
       this.executors.delete(scenarioId);
       // Asked of the run being stopped, not of the definition now installed
       // under its id (#333): that one may never have run.
       this.releaseEvSettingsOverride(executor);
     }
+  }
+
+  /**
+   * #394: open the report for a run that just started. Returns a handle whose
+   * `end()` closes it when the executor settles on its own; `null` without a
+   * recorder.
+   */
+  private beginRun(scenarioId: string): { end: () => void } | null {
+    const recorder = this.runRecorder;
+    const emitter = this.eventEmitter;
+    if (!recorder) return null;
+    const runId = recorder.newRunId(scenarioId);
+    this.runIds.set(scenarioId, runId);
+    recorder.begin(scenarioId, this.connector);
+    this.chargePoint.timeline.startRun(this.connector.id, runId);
+
+    let hadError = false;
+    const errors: string[] = [];
+    const unsubscribe: Array<() => void> = [];
+    if (emitter) {
+      unsubscribe.push(
+        emitter.on("execution.error", (data) => {
+          if (data.scenarioId !== scenarioId) return;
+          hadError = true;
+          errors.push(redactSensitiveText(data.error));
+        }),
+        emitter.on("wait.intervention", ({ scenarioId: id, ...rest }) => {
+          if (id === scenarioId) recorder.recordIntervention(scenarioId, rest);
+        }),
+      );
+    }
+    this.openRuns.set(scenarioId, { runId, hadError: () => hadError, errors });
+    return {
+      end: () => {
+        unsubscribe.forEach((off) => off());
+        // Only the run that is still registered: a stop (or a re-run) has
+        // already closed this one and may have opened another.
+        if (this.openRuns.get(scenarioId)?.runId !== runId) return;
+        this.openRuns.delete(scenarioId);
+        recorder.finalize({
+          scenarioId,
+          connectorId: this.connector.id,
+          runId,
+          definition: this.scenarios.get(scenarioId),
+          executionState: hadError ? "error" : "completed",
+          blocked: false,
+          errors,
+          timeout: null,
+        });
+      },
+    };
+  }
+
+  /** #394: close the report of a run that was stopped by hand. */
+  private finishStoppedRun(
+    scenarioId: string,
+    before: ReturnType<ScenarioExecutor["getContext"]>,
+    discard: boolean,
+  ): void {
+    const recorder = this.runRecorder;
+    const open = this.openRuns.get(scenarioId);
+    if (!recorder || !open) return;
+    this.openRuns.delete(scenarioId);
+    if (discard) {
+      recorder.discard(scenarioId);
+      this.chargePoint.timeline.endRun(this.connector.id, open.runId);
+      this.runIds.delete(scenarioId);
+      return;
+    }
+    const wasWaiting = before.state === "waiting";
+    recorder.finalize({
+      scenarioId,
+      connectorId: this.connector.id,
+      runId: open.runId,
+      definition: this.scenarios.get(scenarioId),
+      executionState: "completed",
+      blocked: wasWaiting,
+      errors: [],
+      timeout:
+        wasWaiting && before.currentNodeId
+          ? {
+              nodeId: before.currentNodeId,
+              expectation: before.expectation,
+            }
+          : null,
+      stopped: true,
+    });
+    // The id stays readable for the stop's own `scenario-completed` event;
+    // a later run of the scenario replaces it.
   }
 
   /**

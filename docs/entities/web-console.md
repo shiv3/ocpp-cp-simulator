@@ -1103,7 +1103,8 @@ default. The section shows the frame as sent and the CALLRESULT or CALLERROR, or
 why the call was refused; a SOAP CP gets a notice instead of the form. It
 works in both modes.
 
-The run page's **Run history** lists the daemon's recorded runs of that
+The run page's **Run history** lists the recorded runs (the daemon's, or the
+browser's `scenario_runs` table in Local mode, #394) of that
 scenario on that connector — the latest 20, newest first, with each run's
 result and verdict — plus the run the page is tracking until the daemon records
 it, so the history survives navigating away and back or a daemon restart with
@@ -1122,9 +1123,7 @@ charge point only; a link without `runCp` opens its run only when that id
 names a single one. Both re-list when the daemon
 records a run, and when a charge point is deleted or the simulator reset
 ([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
-In Local mode the run page keeps a history of this page view only, and the
-Run History page says it needs the daemon — local run reports are tracked in
-#394.
+Local mode behaves the same, from the browser database.
 
 The console shows the running build as
 `ocpp-cp-simulator · ui vX.Y.Z · daemon vX.Y.Z · GitHub` in a footer under the

@@ -226,9 +226,10 @@ A disconnect during the incident resets conditions 1 and 2, and the 60 s
 window with them. A fault firing while an incident is still open starts a new
 incident; the replaced one never gets a `recovery_completed`.
 
-**Scenario runs.** Run ids are minted by the daemon service, so scenario
-entries and run attribution exist in the daemon only; Local mode records no
-`scenario_*` entries and no `runId`. Every `scenario_*` entry carries
+**Scenario runs.** Run ids are minted by the runtime (#394: the daemon
+service and the browser's `ScenarioManager`). The daemon records every
+`scenario_*` entry; Local mode records run attribution and `scenario_finished`
+only, not `scenario_started`, `scenario_wait_changed` or `scenario_error`. Every `scenario_*` entry carries
 `scenarioId` in `data`; `scenario_finished` is recorded once per run, when its
 report is computed, so a stopped run reads `stopped: true` rather than as a
 completed one. Between a run's `scenario_started` and its

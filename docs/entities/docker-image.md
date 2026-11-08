@@ -11,6 +11,7 @@ sources:
   - docker/
   - "issue #346"
 related:
+  - ../concepts/error-reporting.md
   - cli.md
   - daemon.md
   - web-console.md
@@ -369,6 +370,24 @@ docker run --rm -p 9700:9700 \
 
 With compose, the same `HEALTH_PATH` env on the host machine flows to both the
 build args and the container env (see [`docker-compose.yml`](../../docker-compose.yml)).
+
+## Error reporting
+
+Opt-in Sentry reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)) is off in the published images. The daemon
+reads its DSN at run time, the console's is baked in at build time:
+
+```sh
+# Daemon only: any image.
+docker run --rm -p 9700:9700 -e SENTRY_DSN=https://…@….ingest.sentry.io/… \
+  ghcr.io/shiv3/ocpp-cp-simulator:latest --cp-id CP001 --ws-url wss://…
+
+# Console too: build the image with the console's DSN.
+docker build --build-arg VITE_SENTRY_DSN=https://…@….ingest.sentry.io/… \
+  -t ocpp-cp-sim:reporting .
+```
+
+`SENTRY_ENVIRONMENT` / `VITE_SENTRY_ENVIRONMENT` name the environment. What
+is sent and scrubbed: [Error reporting](../concepts/error-reporting.md).
 
 ## Behind a reverse proxy
 

@@ -25,6 +25,7 @@ sources:
   - packages/contracts/eslint/behavior.js
   - examples/behaviors/
 related:
+  - ../concepts/error-reporting.md
   - daemon.md
   - analyze.md
   - docker-image.md
@@ -1184,3 +1185,8 @@ Environment variables (server mode, #458): `OED_BASE_URL` (used when
 comes from `--oed-api-key-file`, else `OED_API_KEY_FILE`, else `OED_API_KEY`;
 the rules and failure cases are in
 [Open EV Directory → Configuration](open-ev-directory.md#configuration).
+
+Environment variables (every mode, [#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): `SENTRY_DSN` turns on opt-in Sentry
+error reporting, `SENTRY_ENVIRONMENT` names the environment. Unset, nothing is
+sent and the SDK is not loaded; see
+[Error reporting](../concepts/error-reporting.md).

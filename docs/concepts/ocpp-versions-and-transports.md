@@ -325,8 +325,10 @@ is restored (E11 "Connection Loss During Transaction", #528):
   request names none) is still to be delivered: queued, replayed but not
   yet answered, or live and not yet settled (awaiting its answer or the
   wait for an E13 resend). It is `false` once the CSMS has answered them all
-  or they were discarded. A request without `transactionId` is answered
-  without `ongoingIndicator` (E14.FR.06).
+  or they were discarded. `ongoingIndicator` is only sent for a request with
+  a `transactionId`: `true` while that transaction has not stopped
+  (E14.FR.02), `false` for a stopped or unknown one (E14.FR.01/03); without
+  an id it is omitted (E14.FR.06, #700).
 
 Limits:
 

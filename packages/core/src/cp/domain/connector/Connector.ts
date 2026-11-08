@@ -52,12 +52,11 @@ import {
   resolveEffectivePhaseLimit,
 } from "./ChargingScheduleResolver";
 import {
-  effectiveChargingPowerW,
   electricalModelOf,
   resolveActivePhases,
-  resolveSocForCurve,
   withNormalizedChargingCurve,
 } from "./ChargingCurve";
+import { resolveOperatingPoint, type OperatingPoint } from "./OperatingPoint";
 import {
   partitionProfiles,
   upsertProfile,
@@ -384,7 +383,7 @@ export class Connector {
         // `MeterValueBuilder` reports, instead of the curve only ever
         // affecting the *reported* number while the register kept climbing
         // on its original trajectory.
-        getScheduleLimitWatts: () => this.effectiveMeterCapWatts(),
+        getScheduleLimitWatts: () => this.operatingPoint().accumulationCapW,
       },
       this.logger,
       this.clock,
@@ -587,15 +586,6 @@ export class Connector {
   }
 
   /**
-   * The schedule's watt cap now, side-effect-free like
-   * {@link activePhaseCount}: reading it announces no crossing. For a reader
-   * that is not a sampling path, such as the 2.x `EVSE.Power` value (#538).
-   */
-  scheduleLimitWattsNow(): number {
-    return this.resolveScheduleConstraints(this.nowDate()).watts;
-  }
-
-  /**
    * Snapshot of the last resolved "paused" state, used to detect crossings of
    * the limit=0 boundary across schedule periods. `null` means nothing has
    * been announced yet.
@@ -610,39 +600,38 @@ export class Connector {
   private lastSchedulePaused: boolean | null = null;
 
   /**
-   * The cap the meter scheduler should accumulate energy against: the
-   * charging-profile limit ({@link currentScheduleLimitWatts}), additionally
-   * narrowed by the battery-acceptance curve when one is configured (#301).
+   * Every physical quantity for this instant, resolved once (#327): the
+   * schedule limit and phase count from one timestamp, then acceptance,
+   * offer, currents, voltage, power factor and SoC from those. The energy
+   * register ({@link MeterValueScheduler}) and the MeterValues builder both
+   * read this record and never re-derive, so they cannot disagree and a new
+   * limit term has exactly one place to go: {@link resolveOperatingPoint}.
    *
-   * Deliberately a no-op when there is no curve, or `maxChargingPowerKw` is
-   * unconfigured — a fraction of an unknown ceiling isn't a wattage, and a
-   * scenario with no curve must accumulate exactly as it did before this
-   * field existed (its increment/bezier trajectory is its own contract, not
-   * bounded by `maxChargingPowerKw`). This intentionally does not use
-   * {@link effectiveChargingPowerW}'s "0 when both ceilings are infinite"
-   * fallback for that no-curve case — that fallback is fine for a *reported*
-   * sample but would freeze the register for any curve-less connector with
-   * no active profile.
+   * Announces a schedule crossing exactly as {@link scheduleConstraints} does.
+   * One call per consumer tick is all that is needed; the edge-triggered latch
+   * no longer has to be argued idempotent against a second call in the same
+   * sample build.
    */
-  private effectiveMeterCapWatts(): number {
-    const scheduleW = this.currentScheduleLimitWatts();
-    // Resolved first so the schedule latch bookkeeping still runs (#301).
-    if (this.energyOfferSuspendedValue) return 0;
-    const curve = this._evSettings.chargingCurve;
-    const maxKw = this._evSettings.maxChargingPowerKw ?? 0;
-    const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
-    if (!curve || curve.length === 0 || !Number.isFinite(evMaxW)) {
-      return scheduleW;
-    }
-    return effectiveChargingPowerW({
-      evMaxW,
-      curve,
-      socPercent: resolveSocForCurve(
-        this.soc,
-        this.transaction?.initialSoc,
-        this._evSettings.initialSoc,
-      ),
-      scheduleLimitWatts: scheduleW,
+  operatingPoint(): OperatingPoint {
+    const point = this.peekOperatingPoint();
+    this.announceScheduleCrossing(point.scheduleLimitW);
+    return point;
+  }
+
+  /** {@link operatingPoint} without announcing a schedule crossing, for a
+   *  reader that is not a sampling path (#538). */
+  peekOperatingPoint(): OperatingPoint {
+    const { watts, activePhases } = this.resolveScheduleConstraints(
+      this.nowDate(),
+    );
+    return resolveOperatingPoint({
+      charging: this.status === OCPPStatus.Charging,
+      settings: this._evSettings,
+      soc: this.soc,
+      transactionInitialSoc: this.transaction?.initialSoc,
+      scheduleLimitW: watts,
+      activePhases,
+      energyOfferSuspended: this.energyOfferSuspendedValue,
     });
   }
 

@@ -61,6 +61,7 @@ import {
 import {
   partitionProfiles,
   upsertProfile,
+  type ApplyChargingProfileOptions,
   type ChargingProfileStore,
   type ProfileRemoveCriteria,
 } from "../charge-point/ChargingProfileStore";
@@ -1174,10 +1175,14 @@ export class Connector {
    * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
    * @returns Whether a profile with the same ID was replaced
    */
-  addChargingProfile(profile: ActiveChargingProfile): boolean {
+  addChargingProfile(
+    profile: ActiveChargingProfile,
+    options: ApplyChargingProfileOptions = {},
+  ): boolean {
     const { profiles, replaced } = upsertProfile(
       this._chargingProfiles,
       profile,
+      options,
     );
     this._chargingProfiles = profiles;
     this.emitProfileChanges();

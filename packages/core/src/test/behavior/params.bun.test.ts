@@ -326,6 +326,46 @@ describe("useBehavior params (schema 1.6)", () => {
     ]);
   });
 
+  test("a params-only change of the selection keeps a running run's layer and the open CALLs", async () => {
+    run = await runBehavior({ version: "1.6" });
+    const seen: unknown[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    run.cp.loadBehavior({
+      ...knob,
+      onCall: {
+        Reset: {
+          mode: "replace",
+          handle: async (_req, ctx) => {
+            seen.push({ ...ctx.params });
+            if (first) {
+              first = false;
+              await gate;
+            }
+            return { response: { status: "Accepted" } };
+          },
+        },
+      },
+    });
+    const scenario = startScenario(
+      run,
+      definition([use("knob", { params: { count: 5 } }), wait(60)]),
+    );
+    await run.settle();
+    const open = run.call("Reset", { type: "Soft" });
+    await run.settle();
+    run.cp.engine.reselectBehaviorParams("knob", { label: "b" });
+    release();
+    expect((await open).payload).toEqual({ status: "Accepted" });
+    await run.call("Reset", { type: "Soft" });
+    expect(scenario.state()).toBe("running");
+    expect(seen).toEqual([
+      { count: 5, label: "a" },
+      { count: 5, label: "b" },
+    ]);
+  });
+
   test("default.logs uploadMs, default.signedFirmware stepMs", async () => {
     run = await runBehavior({ version: "1.6" });
     startScenario(

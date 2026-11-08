@@ -101,6 +101,9 @@ Schema 1.6 `useBehavior` (#654) fits the order without a new step.
   answered, and its follow-up, are not affected by a run that starts or ends later.
 - **A built-in is selected without a rule.** `useBehavior` of a `default.*` id only sets a params layer; the
   default keeps answering at step 5, as it always did.
+- **Disable answers before inbound validation.** Since #593 the rules answer before the inbound check, so under
+  `inboundValidation: enforce` a malformed CALL to an action a disabled behavior covers gets the disable rule's
+  `Accepted`, not a CALLERROR. Read disable as "answers in place of the behavior", never "answers after validation".
 
 Tests: `packages/core/src/test/behavior/params.bun.test.ts` ("mode disable", "outranks a loaded code behavior").
 

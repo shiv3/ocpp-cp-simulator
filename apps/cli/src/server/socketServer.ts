@@ -2816,8 +2816,9 @@ function mergeUpdateParams(
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);
   preserveWhenMissing(merged, "tls", init.tls);
-  preserveWhenMissing(merged, "behaviors", init.behaviors);
-  preserveWhenMissing(merged, "behaviorParams", init.behaviorParams);
+  // `behaviors` and `behaviorParams` stay omitted: CPRegistry.update keeps
+  // them (in memory and, for a run that holds fewer behaviors than the row
+  // names, the stored columns as they are).
 
   if (isRecord(merged.basicAuth) && init.basicAuth) {
     const basicAuth = { ...merged.basicAuth };

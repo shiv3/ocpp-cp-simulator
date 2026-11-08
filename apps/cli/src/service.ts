@@ -3283,20 +3283,18 @@ export class CLIChargePointService {
     const engine = this._chargePoint.engine;
     const keep = new Set(wanted.map((b) => b.id));
     const have = new Set(engine.behaviorIds);
-    // A behavior whose params changed is loaded again (its `main` restarts
-    // with the new values; `ctx.state` survives an unload and load).
+    // A behavior kept with other params is changed in place: its `main`
+    // restarts with the new values, but the layers of running scenarios and
+    // its open CALLs stay.
     const before = engine.selectedParams;
-    for (const id of [...have]) {
-      if (
+    const changed = [...have].filter(
+      (id) =>
         keep.has(id) &&
         JSON.stringify(before[id] ?? null) !==
-          JSON.stringify(params?.[id] ?? null)
-      ) {
-        have.delete(id);
-        this._chargePoint.unloadBehavior(id);
-      }
-    }
+          JSON.stringify(params?.[id] ?? null),
+    );
     this.applyDefaultParams(params);
+    for (const id of changed) engine.reselectBehaviorParams(id, params?.[id]);
     // Check first, so a behavior this station cannot run changes nothing.
     for (const behavior of wanted) {
       if (!have.has(behavior.id)) engine.assertLoadable(behavior);

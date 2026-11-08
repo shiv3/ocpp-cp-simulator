@@ -148,6 +148,12 @@ export class CPRegistry {
    * back, so a run with fewer files does not shrink the stored selection.
    */
   private readonly storedSelection = new Map<string, string | null>();
+  /**
+   * The raw `behavior_params` column of the same rows, kept and written back
+   * under the same rule as {@link storedSelection}: the params of a behavior
+   * this run did not load are not lost with the selection that names it.
+   */
+  private readonly storedParams = new Map<string, string | null>();
 
   constructor(
     private readonly bus: EventBus,
@@ -357,6 +363,7 @@ export class CPRegistry {
         const svc = this.instantiate(init, { reconcileSessions: false });
         if (restored_behaviors.column !== undefined) {
           this.storedSelection.set(row.cp_id, restored_behaviors.column);
+          this.storedParams.set(row.cp_id, row.behavior_params ?? null);
         }
         // Restore per-connector runtime state (OCPP status, in-flight
         // transaction, meter, soc) BEFORE wiring the WebSocket so the
@@ -413,6 +420,7 @@ export class CPRegistry {
         // One row that cannot be rebuilt is not the daemon's end: the others
         // come back, and this one stays in the table for a start that can.
         this.storedSelection.delete(row.cp_id);
+        this.storedParams.delete(row.cp_id);
         // A step after `instantiate` failed: the service is registered but was
         // never wired. Take it out, or it sits in list() and never connects.
         const partial = this.services.get(row.cp_id);
@@ -624,6 +632,7 @@ export class CPRegistry {
       ],
     );
     this.storedSelection.delete(cpId);
+    this.storedParams.delete(cpId);
     this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
     return svc.behaviorIds();
   }
@@ -713,6 +722,7 @@ export class CPRegistry {
     const preparedInit = this.prepareInit(init);
     // A removed station's stored selection does not follow its id.
     this.storedSelection.delete(init.cpId);
+    this.storedParams.delete(init.cpId);
     this.persistCreate(preparedInit);
     let svc: CLIChargePointService;
     try {
@@ -774,6 +784,7 @@ export class CPRegistry {
       : existing.engineStateSnapshot();
     const previousInit = existing.getInit();
     const previousColumn = this.storedSelection.get(init.cpId);
+    const previousParamsColumn = this.storedParams.get(init.cpId);
     // Find out before the old station is closed: a selection this engine
     // refuses must leave the station connected and as it was.
     existing.assertBehaviorsLoadable(
@@ -787,7 +798,15 @@ export class CPRegistry {
     // this run holds fewer behaviors than it lists.
     const keepStored =
       init.behaviors === undefined && previousColumn !== undefined;
-    this.persistCreate(preparedInit, keepStored ? previousColumn : undefined); // ON CONFLICT UPDATE — leaves scenarios intact
+    // The params follow the selection: kept from the row unless the request
+    // names new ones.
+    this.persistCreate(
+      preparedInit,
+      keepStored ? previousColumn : undefined,
+      keepStored && init.behaviorParams === undefined
+        ? previousParamsColumn
+        : undefined,
+    ); // ON CONFLICT UPDATE — leaves scenarios intact
     let svc: CLIChargePointService;
     try {
       svc = this.instantiate(preparedInit, { engineState });
@@ -803,7 +822,7 @@ export class CPRegistry {
             soapCallbackUrlDerived: undefined,
           }
         : previousInit;
-      this.persistCreate(stored, previousColumn);
+      this.persistCreate(stored, previousColumn, previousParamsColumn);
       const back = this.instantiate(previousInit, { engineState });
       // Everything the success path restores: the old station comes back whole.
       this.networkSimManager?.onCpCreated(previousInit.cpId);
@@ -817,7 +836,12 @@ export class CPRegistry {
       }
       throw error;
     }
-    if (!keepStored) this.storedSelection.delete(init.cpId);
+    if (!keepStored) {
+      this.storedSelection.delete(init.cpId);
+      this.storedParams.delete(init.cpId);
+    } else if (init.behaviorParams !== undefined) {
+      this.storedParams.delete(init.cpId);
+    }
     // Attach network simulation config so the re-created CP gets its faults.
     if (this.networkSimManager) {
       this.networkSimManager.onCpCreated(preparedInit.cpId);
@@ -986,11 +1010,13 @@ export class CPRegistry {
 
   /**
    * `behaviorsColumn`, when given, is written as the `behaviors` value instead
-   * of the init's own (see {@link storedSelection}).
+   * of the init's own, `paramsColumn` likewise for `behavior_params` (see
+   * {@link storedSelection}).
    */
   private persistCreate(
     init: ChargePointInitOptions,
     behaviorsColumn?: string | null,
+    paramsColumn?: string | null,
   ): void {
     if (!this.database) return;
     this.database.run(
@@ -1059,9 +1085,11 @@ export class CPRegistry {
           : init.behaviors
             ? JSON.stringify(init.behaviors)
             : null,
-        init.behaviorParams && Object.keys(init.behaviorParams).length > 0
-          ? JSON.stringify(init.behaviorParams)
-          : null,
+        paramsColumn !== undefined
+          ? paramsColumn
+          : init.behaviorParams && Object.keys(init.behaviorParams).length > 0
+            ? JSON.stringify(init.behaviorParams)
+            : null,
         init.txUpdatedMeterValues ? 1 : null,
         init.inboundValidation ?? null,
       ],
@@ -1165,6 +1193,7 @@ export class CPRegistry {
     this.unsubscribes.delete(cpId);
     this.services.delete(cpId);
     this.storedSelection.delete(cpId);
+    this.storedParams.delete(cpId);
     if (opts.notify !== false) {
       this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
     }

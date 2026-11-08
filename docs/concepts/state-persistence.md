@@ -91,7 +91,7 @@ The `charge_points.behaviors` column (schema v24) holds the ids of the loaded be
 array; `NULL` (every row of an older database) means all of them, which is what ran before. It is written by
 `cp.create` / `cp.update` and by `cp.behaviors.set`, and read back on restore: an id the restarted daemon did not
 load (fewer `--behavior` files), or a behavior the station cannot run, is left out of that run with a warning, and the stored
-value is kept as it is until a selection is set (a `cp.update` that names none writes it back unchanged). A value that cannot be
+value is kept as it is until a selection is set (a `cp.update` that names none writes it back unchanged). The `behavior_params` column follows the same rule: while the selection is kept, a `cp.update` that names no `behaviorParams` writes the stored params back too, so a later run that has the file again finds the params of that behavior. A value that cannot be
 read selects no behavior. Only ids are stored, never code
 ([Control plane → Behaviors](control-plane.md#behaviors)).
 

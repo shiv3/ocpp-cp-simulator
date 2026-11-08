@@ -31,7 +31,7 @@ const PARAMS: BehaviorParams = {
         enum: ["retrieveDate", "now"],
         title: "Start at",
         description:
-          "Wait for the request's retrieveDate, or start as soon as the answer settled",
+          "Wait for the request's retrieveDate, or start as soon as the answer settled. now is deliberately not conformant: it retrieves before retrieveDate (OCPP 1.6 §5.16, §6.55 / errata 3.63); use it to test CSMS handling",
       },
     },
   },

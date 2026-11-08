@@ -220,6 +220,38 @@ describe("persistence", () => {
     }
   });
 
+  it("params of a behavior missing for one run survive a cp.update in it", async () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const first = await client({ database: db });
+      await rpc(first.socket, "cp.create", {
+        ...BASE,
+        cpId: "P",
+        behaviors: ["knob", "plain"],
+        behaviorParams: { knob: { count: 8 } },
+      });
+      await closeAll();
+      // The file of `knob` is missing for this run.
+      const second = await client({
+        database: db,
+        deferRestoredConnect: true,
+        behaviors: BehaviorLibrary.of([plain]),
+      });
+      const ack = await rpc(second.socket, "cp.update", {
+        ...BASE,
+        cpId: "P",
+        vendor: "Changed",
+      });
+      expect(ack.ok).toBe(true);
+      await closeAll();
+      const third = await client({ database: db, deferRestoredConnect: true });
+      expect(paramsOf(third.server, "P", "knob").count).toBe(8);
+    } finally {
+      await closeAll();
+      db.close();
+    }
+  });
+
   it("a stored param the behavior no longer accepts is dropped, the station still comes back", async () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {

@@ -920,10 +920,13 @@ export class ChargerEngine {
     if (options.params !== undefined) {
       // Refuse before anything is registered or started.
       mergeParams(behavior.id, behavior.params, [options.params]);
-      this.selectionParams.set(behavior.id, options.params);
     }
     if (!options.dormant) {
       this.registerRules(behavior, { kind: "code", behaviorId: behavior.id });
+    }
+    // Only now that nothing can throw any more: a failed load leaves no entry.
+    if (options.params !== undefined) {
+      this.selectionParams.set(behavior.id, options.params);
     }
     this.loaded.set(behavior.id, behavior);
     if (options.dormant) this.dormant.add(behavior.id);
@@ -1193,6 +1196,29 @@ export class ChargerEngine {
       this.selectionParams.set(id, params);
     } else {
       this.selectionParams.delete(id);
+    }
+  }
+
+  /**
+   * Change the params the station's selection gives a loaded code behavior,
+   * in place: the running scenarios' layers and the CALLs it has open are
+   * kept; its `main` and hook context restart with the new values (as in a
+   * reload, see {@link ChargerEngine.replaceBehavior}). Throws and changes
+   * nothing when the params do not fit the schema.
+   */
+  reselectBehaviorParams(id: string, params: JsonObject | undefined): void {
+    const behavior = this.loaded.get(id);
+    if (!behavior) {
+      throw new Error(`No behavior with id "${id}" is loaded on this station`);
+    }
+    const before = this.selectionParams.get(id);
+    this.setSelectionParams(id, params);
+    try {
+      this.replaceBehavior(behavior);
+    } catch (error) {
+      if (before) this.selectionParams.set(id, before);
+      else this.selectionParams.delete(id);
+      throw error;
     }
   }
 

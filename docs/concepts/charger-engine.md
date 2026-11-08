@@ -298,8 +298,9 @@ expected integer, got "2000" (strings are not converted)`). Nothing is coerced.
   a URL, and nothing in the engine evaluates a string. The wire carries them as data like the ids.
 - **Read-only, and fixed per context.** `ctx.params` is a deeply frozen copy made when the context is made: a
   CALL's handler and its `after` see the params the CALL arrived with; a `main` keeps the ones it started with
-  (changing the params with `cp.behaviors.set` loads the behavior again, so `main` restarts and `ctx.state`
-  stays). A behavior without `params` gets `{}` and refuses params set for it.
+  (changing the params with `cp.behaviors.set` changes the behavior in place like a reload: `main` and the
+  hook context restart and `ctx.state` stays, while the layers of running scenarios and the CALLs the behavior
+  has open are kept, so a run's layer still ends with its run and no CALL is answered `InternalError`). A behavior without `params` gets `{}` and refuses params set for it.
 - **Built-ins are selected the same way.** A `default.*` behavior always answers; selecting it (`useBehavior`,
   `behaviorParams`) only sets its params. [Which ones have knobs](../entities/default-behaviors.md#params).
 - **Disable.** `useBehavior` `mode: "disable"` is a scenario rule per action that answers `ctx.accepted(action)`

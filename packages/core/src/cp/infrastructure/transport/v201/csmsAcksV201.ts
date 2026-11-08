@@ -2,7 +2,6 @@
 import type {
   ClearDisplayMessageResponseV201,
   CostUpdatedResponseV201,
-  CustomerInformationResponseV201,
   DataTransferResponseV201,
   GetDisplayMessagesResponseV201,
   GetLocalListVersionResponseV201,
@@ -142,12 +141,6 @@ export const handleClearDisplayMessageAckV201 = (() => ({
   response: {
     status: "Unknown",
   } satisfies ClearDisplayMessageResponseV201,
-})) satisfies V201AckHandler;
-
-export const handleCustomerInformationAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies CustomerInformationResponseV201,
 })) satisfies V201AckHandler;
 
 export const handleDataTransferAckV201 = (() => ({

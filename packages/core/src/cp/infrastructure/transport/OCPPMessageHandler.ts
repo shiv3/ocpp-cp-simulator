@@ -135,6 +135,8 @@ import {
   AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
+import { HandlerCallError } from "./handlers/HandlerCallError";
+import { inboundV16Violation } from "./codec/validateV16";
 import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
 import type { GenerationToken } from "./network-sim/NetworkSimController";
@@ -1456,6 +1458,36 @@ export class OCPPMessageHandler {
       return;
     }
 
+    // The gate has run: policies, overrides and behavior rules may own a
+    // malformed CALL (docs/concepts/call-precedence.md); validation guards
+    // only what reaches the default handler (#593).
+    const mode = this._chargePoint.inboundValidation;
+    if (mode !== "off") {
+      const violation = inboundV16Violation(action, payload);
+      if (violation) {
+        const message = `Inbound ${action} ${violation.errorCode}: ${violation.description}`;
+        // Structured line for the trace (`meta.validation` on the CALL's
+        // record, packages/trace). It goes out on the WebSocket channel the
+        // trace writer already follows, before the handler or the error reply.
+        this._logger.warn(
+          `Inbound validation: ${JSON.stringify({
+            messageId,
+            action,
+            mode,
+            errorCode: violation.errorCode,
+            description: violation.description,
+          })}`,
+          LogType.WEBSOCKET,
+        );
+        if (mode === "enforce") {
+          this._logger.warn(message, LogType.OCPP);
+          exchange.replyError(violation.errorCode, violation.description);
+          return;
+        }
+        this._logger.warn(`${message} (handler still runs)`, LogType.OCPP);
+      }
+    }
+
     try {
       const context: HandlerContext = {
         chargePoint: this._chargePoint,
@@ -1472,6 +1504,16 @@ export class OCPPMessageHandler {
         ...(effect ? { effect } : {}),
       });
     } catch (error) {
+      if (error instanceof HandlerCallError) {
+        this._logger.warn(
+          `${action} answered with CALLERROR ${error.errorCode}: ${error.description}`,
+          LogType.OCPP,
+        );
+        if (exchange.state === "open") {
+          exchange.replyError(error.errorCode, error.description);
+        }
+        return;
+      }
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
       if (exchange.state === "open") {
         exchange.replyError(OCPPErrorCodeV16.InternalError, String(error));

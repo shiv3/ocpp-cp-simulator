@@ -113,6 +113,7 @@ import {
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
 import { SignCertificateBackoff } from "../../domain/security/SignCertificateBackoff";
+import { isCriticalSecurityEvent } from "../../domain/security/securityEvents";
 import {
   V2G_CERTIFICATE_USES,
   type SignedCertificateUse,
@@ -192,12 +193,16 @@ interface TransactionEventMessage {
 }
 
 /** Actions the 2.x handler queues offline and replays (#528, E11; #538,
- *  N07.FR.04). Any other row in `pending_messages` was queued by the 1.6
+ *  N07.FR.04; #552, A04.FR.02). Any other row in `pending_messages` was queued by the 1.6
  *  handler under the same charge point id: the queue deletes it on load. */
-type V201QueuedAction = Extract<V201Action, "TransactionEvent" | "NotifyEvent">;
+type V201QueuedAction = Extract<
+  V201Action,
+  "TransactionEvent" | "NotifyEvent" | "SecurityEventNotification"
+>;
 const QUEUED_ON_OCPP2: ReadonlySet<V201QueuedAction> = new Set([
   "TransactionEvent",
   "NotifyEvent",
+  "SecurityEventNotification",
 ]);
 
 /** How the logs name a TransactionEvent. */
@@ -237,6 +242,14 @@ type TransactionEventFailure =
  * queued under E11 are not counted and never dropped.
  */
 export const MAX_QUEUED_NOTIFY_EVENTS = 1000;
+
+/**
+ * #552: most SecurityEventNotification requests the offline queue keeps
+ * per charge point. Critical events are rare; the cap only bounds the
+ * persisted queue of a station that loops on one through a long outage.
+ * Past it the oldest queued event goes.
+ */
+export const MAX_QUEUED_SECURITY_EVENTS = 1000;
 
 /** Whether a queued NotifyEvent report holds only periodic ticks, whose
  *  loss the next tick makes up for. */
@@ -287,6 +300,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   /** E11.FR.05 thinning cursor: index into the idle queued `Updated` rows
    *  of the next row to drop; 1 at the start of an outage. */
   private _thinningCursor = 1;
+  /** SecurityEventNotification requests dropped from the full queue since
+   *  the last flush (#552). */
+  private _droppedSecurityEvents = 0;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -626,6 +642,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           hasTransactionEventsToDeliver: (id) =>
             this.hasTransactionEventsToDeliver(id),
           certificateSigning: this._certificateSigning,
+          bootAccepted: () => this._bootStatus.status === "Accepted",
         };
         const fail = (error: unknown): void => {
           // The exchange refuses an answer on a connection that changed (and
@@ -1884,10 +1901,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /**
    * A04 SecurityEventNotificationRequest (#537), sent by the control-plane
-   * `security_event_notification` method. Dropped while offline: the E11
-   * queue (#528) does not take it, and the A04.FR.02 queue is not modelled.
-   * Resolves once the CALL is written, not answered; rejects with
-   * `OcppCallNoAnswerError` when it is dropped.
+   * `security_event_notification` method. While offline (A04.FR.02, #552) a
+   * critical event ({@link isCriticalSecurityEvent}) is queued with the time
+   * it happened and sent after the next Boot Accepted, and this resolves
+   * once it is queued; any other event is dropped. Online it resolves once
+   * the CALL is written, not answered. A critical event whose CALL the
+   * pipeline drops because the socket closed or the write failed is queued
+   * too; any other dropped CALL rejects with `OcppCallNoAnswerError`.
    */
   public sendSecurityEventNotification(
     type: string,
@@ -1898,23 +1918,70 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       timestamp: new Date(this.clock.now()).toISOString(),
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
+    if (!this._webSocket.isConnected() && isCriticalSecurityEvent(type)) {
+      this.queueSecurityEvent(payload);
+      return Promise.resolve();
+    }
     const id = this.generateMessageId();
     return new Promise((resolve, reject) => {
       this.send(
         "SecurityEventNotification",
         id,
         payload,
-        (reason) =>
+        (reason) => {
+          // The socket was up at call time but the CALL never left it
+          // (A04.FR.02, #552): a critical event is queued like an offline one.
+          // A behavior that dropped it on purpose, a full pipeline queue and a
+          // disposed handler stay dropped.
+          if (
+            isCriticalSecurityEvent(type) &&
+            (reason === "socket_closed" || reason === "write_failed")
+          ) {
+            this.queueSecurityEvent(payload);
+            resolve();
+            return;
+          }
           reject(
             new OcppCallNoAnswerError(
               "dropped",
               `OCPP call ${id} dropped (${reason})`,
             ),
-          ),
+          );
+        },
         undefined,
         resolve,
       );
     });
+  }
+
+  /**
+   * #552, OCPP 2.0.1 / 2.1 A04.FR.02: queue a critical security event while
+   * offline, in the E11 queue (#528), so it is persisted when state
+   * persistence is on. The timestamp stays the one of the event. Past
+   * {@link MAX_QUEUED_SECURITY_EVENTS} the oldest queued event goes.
+   */
+  private queueSecurityEvent(payload: SecurityEventNotificationRequestV201) {
+    while (
+      this._pendingQueue.countOf("SecurityEventNotification") >=
+        MAX_QUEUED_SECURITY_EVENTS &&
+      this._pendingQueue.removeOldest("SecurityEventNotification")
+    ) {
+      if (this._droppedSecurityEvents === 0) {
+        this._logger.warn(
+          `[v2.0.1] Offline SecurityEventNotification queue full (${MAX_QUEUED_SECURITY_EVENTS}): dropping the oldest events until the connection is back`,
+          LogType.OCPP,
+        );
+      }
+      this._droppedSecurityEvents += 1;
+    }
+    this._pendingQueue.enqueue({
+      action: "SecurityEventNotification",
+      payload,
+    });
+    this._logger.info(
+      `[v2.0.1] Not connected, queued critical SecurityEventNotification ${payload.type} (A04.FR.02); queue size=${this._pendingQueue.size()}`,
+      LogType.OCPP,
+    );
   }
 
   /**
@@ -2342,6 +2409,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
       this._droppedNotifyEvents = 0;
     }
+    if (this._droppedSecurityEvents > 0) {
+      this._logger.warn(
+        `[v2.0.1] Dropped ${this._droppedSecurityEvents} queued SecurityEventNotification(s) during the outage (cap ${MAX_QUEUED_SECURITY_EVENTS})`,
+        LogType.OCPP,
+      );
+      this._droppedSecurityEvents = 0;
+    }
     let replayed = 0;
     this._pendingQueue.replay((queued, rowId) => {
       if (!this._webSocket.isConnected()) return false;
@@ -2404,6 +2478,41 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return "replayed";
   }
 
+  /**
+   * #552: send a queued SecurityEventNotification (A04.FR.02) as it was
+   * built, with the time of the event. The request has no offline marker. A
+   * CALL the socket refuses while it stays open keeps the row at the head
+   * and stops the replay, like a refused TransactionEvent; one a behavior's
+   * beforeSend withdrew is spent.
+   */
+  private replaySecurityEvent(
+    queued: PendingMessage<V201QueuedAction>,
+  ): "replayed" | "held" {
+    let refused = false;
+    let sending = true;
+    this.send(
+      "SecurityEventNotification",
+      this.generateMessageId(),
+      queued.payload as SecurityEventNotificationRequestV201,
+      (reason) => {
+        if (!sending) return;
+        if (reason === "dropped_by_behavior") {
+          this._logger.warn(
+            "[v2.0.1] Replay of a queued SecurityEventNotification dropped by a behavior's beforeSend",
+            LogType.OCPP,
+          );
+        } else refused = true;
+      },
+    );
+    sending = false;
+    if (!refused) return "replayed";
+    this._logger.warn(
+      `[v2.0.1] Replay of a queued SecurityEventNotification refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
+      LogType.OCPP,
+    );
+    return "held";
+  }
+
   /** Send one queued message again. Each queued action gets its own case. */
   private replayQueued(
     queued: PendingMessage<V201QueuedAction>,
@@ -2451,6 +2560,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       case "NotifyEvent": {
         const result = this.replayNotifyEvent(queued);
         // A NotifyEvent has no E13 delivery: it leaves once handed over.
+        if (result === "replayed") this._pendingQueue.remove(rowId);
+        return result;
+      }
+      case "SecurityEventNotification": {
+        const result = this.replaySecurityEvent(queued);
+        // Like a NotifyEvent, it leaves once handed over (#552, #554).
         if (result === "replayed") this._pendingQueue.remove(rowId);
         return result;
       }

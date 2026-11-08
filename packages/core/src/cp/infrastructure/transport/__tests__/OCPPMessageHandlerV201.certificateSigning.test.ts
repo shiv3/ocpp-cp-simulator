@@ -831,7 +831,8 @@ describe.each([
       const { socket, handler } = setup(version);
       vi.spyOn(socket, "isConnected").mockReturnValue(false);
 
-      const sending = handler.sendSecurityEventNotification("ResetOrReboot");
+      // Non-critical: a critical type would be queued (A04.FR.02, #552).
+      const sending = handler.sendSecurityEventNotification("InvalidMessages");
 
       await expect(sending).rejects.toBeInstanceOf(OcppCallNoAnswerError);
       await expect(sending).rejects.toMatchObject({
@@ -853,7 +854,7 @@ describe.each([
         );
 
         await expect(
-          handler.sendSecurityEventNotification("ResetOrReboot"),
+          handler.sendSecurityEventNotification("InvalidMessages"),
         ).rejects.toMatchObject({
           reason: "dropped",
           message: expect.stringContaining(outcome),

@@ -4,6 +4,7 @@ import {
   blueprintSchema,
   createManyToolSchema,
   cpBulkParamsSchema,
+  cpScenarioRunParamsSchema,
   behaviorReloadParamsSchema,
   cpBehaviorsSetParamsSchema,
   cpLabelsSetParamsSchema,
@@ -209,6 +210,25 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     handler: async (args) => {
       try {
         const result = await runRpc(deps, { method: "cp.bulk", params: args });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #486: `cp_bulk`'s selector with a scenario template; schema derived from
+  // `cp.scenario.run`'s.
+  mcp.tool("cp_scenario_run", {
+    description:
+      "Run a scenario template on one connector of every charge point carrying all the given label pairs (exact match; at least one pair, {} is refused). Returns the matched ids, the ones that started (with their scenarioId, to follow with scenario_status) and the ones that failed with the reason -- a partial result is normal, not an error. Each charge point is waited for at most 10 s.",
+    inputSchema: cpScenarioRunParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.scenario.run",
+          params: args,
+        });
         return successResult(result);
       } catch (err) {
         return errorResult(err);
@@ -473,7 +493,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("security_event_notification", {
     description:
-      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected.",
+      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected, except that a critical event sent while offline is queued (A04.FR.02) and succeeds once queued.",
     // The method's own schema, so the tool advertises what it enforces.
     inputSchema: METHODS.security_event_notification.params.extend({
       cpId: z.string().describe("Charge point identifier"),
@@ -924,14 +944,27 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   const sessions = METHODS["sessions.list"].params.shape;
   mcp.tool("list_charging_sessions", {
     description:
-      "List a charge point's charging sessions (#447): one normalized record " +
+      "List charging sessions (#447): one charge point's with cpId, or every " +
+      "charge point's when cpId is omitted (#489; labels narrows the fleet " +
+      "to a selector, startedFrom/startedTo bound the start time). One normalized record " +
       "per transaction, the same shape for OCPP 1.6 and 2.x — connector, " +
       "transaction id, idTag, start/end, duration, meter start/stop, energy " +
       "(Wh), stop reason and an outcome (active, completed, interrupted, " +
       "failed). Unknown values are null, never guessed. Newest first; no " +
       "billing or tariff data.",
     inputSchema: z.object({
-      cpId: sessions.cpId.describe("Charge point identifier"),
+      cpId: sessions.cpId.describe(
+        "Charge point identifier; omit to list across the fleet",
+      ),
+      labels: sessions.labels.describe(
+        "Fleet-wide only (not with cpId): the charge points carrying every one of these label pairs (exact match); {} or omitted = all",
+      ),
+      startedFrom: sessions.startedFrom.describe(
+        "Only sessions that started at or after this instant (ISO 8601 with a zone)",
+      ),
+      startedTo: sessions.startedTo.describe(
+        "Only sessions that started before this instant (ISO 8601 with a zone)",
+      ),
       connectorId: sessions.connectorId.describe(
         "Only sessions on this connector",
       ),

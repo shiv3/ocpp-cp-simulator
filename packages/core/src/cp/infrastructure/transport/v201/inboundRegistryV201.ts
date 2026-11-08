@@ -222,6 +222,11 @@ export interface V201InboundContext {
   readonly hasTransactionEventsToDeliver?: (transactionId?: string) => boolean;
   /** Absent in contexts built without a message handler (unit tests). */
   readonly certificateSigning?: V201CertificateSigning;
+  /**
+   * Whether the CSMS's answer to the last BootNotificationRequest was
+   * Accepted. Absent in contexts built without a message handler.
+   */
+  readonly bootAccepted?: () => boolean;
 }
 
 export interface V201HandlerResult {

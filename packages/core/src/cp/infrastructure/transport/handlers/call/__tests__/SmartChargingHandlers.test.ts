@@ -4,6 +4,7 @@ import {
   ClearChargingProfileHandler,
   GetCompositeScheduleHandler,
 } from "../SmartChargingHandlers";
+import { isValidGetCompositeScheduleResponseV16 } from "@ocpp-cp-sim/ocpp/index";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
 import {
@@ -556,5 +557,32 @@ describe("GetCompositeScheduleHandler round trip (#323)", () => {
       { startPeriod: 0, limit: 6, numberPhases: 3 },
       { startPeriod: 1800, limit: 18, numberPhases: 1 },
     ]);
+  });
+});
+
+describe("GetCompositeSchedule.conf startSchedule (errata 3.57)", () => {
+  it("omits chargingSchedule.startSchedule, keeps scheduleStart, and validates", () => {
+    const { ctx, chargePoint } = buildContext();
+    chargePoint.applyChargingProfile(
+      {
+        chargingProfileId: 1,
+        connectorId: 1,
+        stackLevel: 0,
+        chargingProfilePurpose: ChargingProfilePurposeType.TxDefaultProfile,
+        chargingProfileKind: "Absolute" as never,
+        chargingRateUnit: "W" as never,
+        chargingSchedulePeriods: [{ startPeriod: 0, limit: 5_000 }],
+      },
+      "SetChargingProfile",
+    );
+    const res = new GetCompositeScheduleHandler().handle(
+      { connectorId: 1, duration: 600 },
+      ctx,
+    );
+    expect(res.status).toBe("Accepted");
+    if (res.status !== "Accepted") return;
+    expect(res.scheduleStart).toEqual(expect.any(String));
+    expect(res.chargingSchedule).not.toHaveProperty("startSchedule");
+    expect(isValidGetCompositeScheduleResponseV16(res)).toBe(true);
   });
 });

@@ -6,6 +6,7 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { MeterValuesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
 import { schemas } from "@ocpp-cp-sim/ocpp/index";
 import { unitOfMeasurandV2x } from "../../../domain/connector/MeterValueBuilder";
+import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
 
 // #713: OCPP 2.0.1 Part 2 Appendices ch. 2 - "Default value of unit is always
 // Wh", so every 2.x sample except a unitless one must name its unit.
@@ -92,6 +93,12 @@ function measurandEnumV21(): string[] {
 
 function connectorStub(): unknown {
   return {
+    // The handler announces a schedule crossing after the read and the
+    // builder only formats the point the connector resolves (#327, #666).
+    announceScheduleCrossingNow() {},
+    operatingPoint() {
+      return stubOperatingPoint(this, Infinity, 1);
+    },
     status: "Charging",
     soc: 50,
     meterValue: 1234,

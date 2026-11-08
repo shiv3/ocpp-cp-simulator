@@ -2405,6 +2405,16 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
 
+## [2026-11-08] ingest | Inbound OCPP 1.6J CALL validation (#593)
+
+- `OCPPMessageHandler.handleCall` validates the payload of a CALL that reached the default handler against the vendored 1.6 request schema (formats checked) and, per `inboundValidation` (`off` / `warn` default / `enforce`), logs it or answers a CALLERROR with the OCPP-J 1.6 §4.2.3 code (`FormationViolation`, `OccurenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation`). Policies, overrides and rules answer first.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Who answers an inbound CALL](concepts/call-precedence.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | Inbound validation: traced violations and the `inboundValidation` setting (#593 review)
+
+- A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
 ## [2026-11-08] ingest | OCPP-S 1.6 retries transaction-related messages after a SOAP Fault (#585)
 
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault): the "OCPP-S does not retry" sentence now covers 1.2 and 1.5 only; new section on the 1.6S deviation (errata 3.2): Heartbeat probe, `TransactionMessageAttempts` / `TransactionMessageRetryInterval`, `transactionMessageRejected` / `transactionMessageDiscarded`, discard of an outlived StartTransaction, cancel on stop and dispose. 1.2 and 1.5 were not checked against their specs.

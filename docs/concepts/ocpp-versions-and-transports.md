@@ -34,7 +34,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # OCPP versions and transports
@@ -525,7 +525,11 @@ transaction with one StopTransaction.req carrying `transactionId: 0`, and a
 ChangeAvailability to `Inoperative` answers `Scheduled`.
 
 A StartTransaction.conf belongs to the transaction its request started,
-identified by the request's `idTag` and `timestamp`. When it answers a resend
+identified by the request's `idTag` and `timestamp`. So that the pair differs
+between two transactions of one tag, a start on a connector gets a `startTime`
+strictly after the previous transaction's there: a stop then a start in the
+same millisecond sends a timestamp 1 ms later than the clock (#586; 1.x only,
+2.x does not match on it). When it answers a resend
 after that transaction stopped, or after another one began on the connector,
 it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still

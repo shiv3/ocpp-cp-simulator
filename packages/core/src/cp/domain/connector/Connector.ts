@@ -1293,7 +1293,29 @@ export class Connector {
     this.onMeterSend = callback;
   }
 
+  /** `startTime` of the last transaction begun here, in ms (#586). */
+  private lastStartMs = -Infinity;
+
+  /**
+   * OCPP 1.x: a start time strictly after the previous transaction's on this
+   * connector. A StartTransaction.req is matched to its transaction by
+   * `idTag` and `timestamp`, so a stop then a start by the same tag within one
+   * millisecond must not produce the same pair (#586). The wire timestamp is
+   * 1 ms later in that one case.
+   */
+  nextStartTime(now: Date): Date {
+    const prev = Math.max(
+      this.lastStartMs,
+      this.transaction?.startTime.getTime() ?? -Infinity,
+    );
+    return now.getTime() > prev ? now : new Date(prev + 1);
+  }
+
   beginTransaction(transaction: Transaction): void {
+    this.lastStartMs = Math.max(
+      this.lastStartMs,
+      transaction.startTime.getTime(),
+    );
     this.store.write({
       kind: "transaction.set",
       transaction: recordOfTransaction(transaction),

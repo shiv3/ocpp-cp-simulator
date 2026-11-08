@@ -326,7 +326,6 @@ export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
     "infrastructure/transport/soap/dialect.ts",
     "infrastructure/transport/soap/index.ts",
     "infrastructure/transport/v201/renderConfigValue.ts",
-    "infrastructure/transport/wsUrlWithBasic.ts",
   ].map((t) => ({
     from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
     to: `packages/core/src/cp/${t}`,

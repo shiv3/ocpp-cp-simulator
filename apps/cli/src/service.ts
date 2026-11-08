@@ -1,4 +1,5 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -1015,6 +1016,9 @@ export class CLIChargePointService {
         ...(this._init.behaviors === undefined
           ? {}
           : { behaviors: [...this._init.behaviors] }),
+        ...(this._init.behaviorParams === undefined
+          ? {}
+          : { behaviorParams: { ...this._init.behaviorParams } }),
       },
     };
   }
@@ -3186,8 +3190,28 @@ export class CLIChargePointService {
    * cannot load (duplicate id, unmet `requires`) throws; the ones before it
    * stay loaded.
    */
-  loadBehaviors(behaviors: readonly Behavior[]): void {
-    for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
+  loadBehaviors(
+    behaviors: readonly Behavior[],
+    params?: Readonly<Record<string, JsonObject>>,
+  ): void {
+    this.applyDefaultParams(params);
+    for (const behavior of behaviors) {
+      const own = params?.[behavior.id];
+      this._chargePoint.loadBehavior(
+        behavior,
+        own === undefined ? {} : { params: own },
+      );
+    }
+  }
+
+  /** Set (or clear) the params the selection gives the built-in behaviors. */
+  private applyDefaultParams(
+    params: Readonly<Record<string, JsonObject>> | undefined,
+  ): void {
+    const engine = this._chargePoint.engine;
+    for (const { id } of describeDefaultBehaviors()) {
+      engine.setSelectionParams(id, params?.[id]);
+    }
   }
 
   /** The engine state that survives a rebuild (see `ChargerEngine.persistable`). */
@@ -3198,6 +3222,15 @@ export class CLIChargePointService {
   /** Put a {@link engineStateSnapshot} back, before behaviors load. */
   restoreEngineState(saved: PersistedEngineState): void {
     this._chargePoint.engine.restoreState(saved);
+  }
+
+  /**
+   * The params `ctx.params` hands the behavior with this id now (defaults,
+   * the selection's keys, then any running scenario's). Throws for an id that
+   * is neither loaded nor built in.
+   */
+  effectiveBehaviorParams(id: string): JsonObject {
+    return this._chargePoint.engine.effectiveParams(id);
   }
 
   /** Ids of the code behaviors loaded on this charge point, in load order. */
@@ -3225,10 +3258,23 @@ export class CLIChargePointService {
   setBehaviors(
     wanted: readonly Behavior[],
     selection: readonly string[] | undefined,
+    params?: Readonly<Record<string, JsonObject>>,
   ): void {
     const engine = this._chargePoint.engine;
     const keep = new Set(wanted.map((b) => b.id));
     const have = new Set(engine.behaviorIds);
+    // A behavior kept with other params is changed in place: its `main`
+    // restarts with the new values, but the layers of running scenarios and
+    // its open CALLs stay.
+    const before = engine.selectedParams;
+    const changed = [...have].filter(
+      (id) =>
+        keep.has(id) &&
+        JSON.stringify(before[id] ?? null) !==
+          JSON.stringify(params?.[id] ?? null),
+    );
+    this.applyDefaultParams(params);
+    for (const id of changed) engine.reselectBehaviorParams(id, params?.[id]);
     // Check first, so a behavior this station cannot run changes nothing.
     for (const behavior of wanted) {
       if (!have.has(behavior.id)) engine.assertLoadable(behavior);
@@ -3237,13 +3283,21 @@ export class CLIChargePointService {
       if (!keep.has(id)) this._chargePoint.unloadBehavior(id);
     }
     for (const behavior of wanted) {
-      if (!have.has(behavior.id)) this._chargePoint.loadBehavior(behavior);
+      if (!have.has(behavior.id)) {
+        const own = params?.[behavior.id];
+        this._chargePoint.loadBehavior(
+          behavior,
+          own === undefined ? {} : { params: own },
+        );
+      }
     }
     this._init = {
       ...this._init,
       ...(selection === undefined
         ? { behaviors: undefined }
         : { behaviors: [...selection] }),
+      behaviorParams:
+        params && Object.keys(params).length > 0 ? { ...params } : undefined,
     };
   }
 

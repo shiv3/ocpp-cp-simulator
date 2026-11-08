@@ -204,6 +204,20 @@ describe("runExportK6", () => {
       expect(message).toContain('unsupported node type "useBehavior" (node x)');
     });
 
+    it("useBehavior with params or mode disable (schema 1.6)", async () => {
+      for (const data of [
+        { behaviorId: "default.firmware", params: { stepMs: 500 } },
+        { behaviorId: "default.firmware", mode: "disable" },
+      ]) {
+        const message = await refuse(withNode("useBehavior", data));
+        expect(message).toContain(
+          'unsupported node type "useBehavior" (node x)',
+        );
+        expect(message).toContain("params");
+        expect(message).toContain("disable");
+      }
+    });
+
     it("csmsCallTrigger with behavior replace", async () => {
       const message = await refuse(
         withNode("csmsCallTrigger", { action: "Reset", behavior: "replace" }),

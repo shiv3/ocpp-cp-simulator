@@ -1,7 +1,29 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+
+/**
+ * The knob of UnlockConnector. `configured` is what the behavior always did:
+ * answer the connector's `unlockResponse`, which the `unlockOutcome` scenario
+ * node sets. Any other value answers that status for every connector,
+ * whatever the connector holds.
+ */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      outcome: {
+        type: "string",
+        enum: ["configured", "Unlocked", "UnlockFailed", "NotSupported"],
+        title: "Outcome",
+        description:
+          "The status to answer when the CALL gets that far; configured keeps the connector's own (set by the unlockOutcome node). OCPP 2.x has no NotSupported: it answers UnlockFailed",
+      },
+    },
+  },
+  defaults: { outcome: "configured" },
+};
 
 /**
  * The default behavior of UnlockConnector.
@@ -21,10 +43,12 @@ export function unlockBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.unlock",
+    params: PARAMS,
     onCall: {
       UnlockConnector: {
         mode: "replace",
-        handle: (request) => {
+        handle: (request, ctx) => {
+          const outcome = ctx.params.outcome as string;
           if (isOcpp2Version(cp.ocppVersion)) {
             const connector = cp.getConnector(
               (request as { evseId: number }).evseId,
@@ -35,12 +59,11 @@ export function unlockBehavior(cp: ChargePoint): Behavior {
                 response: { status: "OngoingAuthorizedTransaction" },
               };
             }
+            const wanted =
+              outcome === "configured" ? connector.unlockResponse : outcome;
             return {
               response: {
-                status:
-                  connector.unlockResponse === "Unlocked"
-                    ? "Unlocked"
-                    : "UnlockFailed",
+                status: wanted === "Unlocked" ? "Unlocked" : "UnlockFailed",
               },
             };
           }
@@ -61,11 +84,13 @@ export function unlockBehavior(cp: ChargePoint): Behavior {
             );
             cp.stopTransaction(connector, "UnlockCommand");
           }
+          const status =
+            outcome === "configured" ? connector.unlockResponse : outcome;
           cp.logger.info(
-            `UnlockConnector connector=${connectorId} → ${connector.unlockResponse}`,
+            `UnlockConnector connector=${connectorId} → ${status}`,
             LogType.OCPP,
           );
-          return { response: { status: connector.unlockResponse } };
+          return { response: { status } };
         },
       },
     },

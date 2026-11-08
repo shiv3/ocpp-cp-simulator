@@ -61,10 +61,15 @@ Socket.IO connection documented in [Control plane](../concepts/control-plane.md)
 `rpc` acks for commands and `event` push envelopes for CP / registry updates.
 The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mode.md).
 
-The **Scenario Editor** authors all of schema 1.5 ([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)):
-`csmsCallTrigger` with `behavior: "replace"` and `onBusy`, a `callResponse` node and a `useBehavior` node. `$from` has
-no control of its own (type it in the payload JSON) and the console has no selector for which behaviors a charge point
-runs (the RPC `cp.behaviors.set` does).
+The **Scenario Editor** authors all of schema 1.5 and 1.6 ([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)):
+`csmsCallTrigger` with `behavior: "replace"` and `onBusy`, a `callResponse` node and a `useBehavior` node. The
+`useBehavior` form has a mode (use / disable) and, for a behavior whose params it knows, **one form rendered from the
+params schema** (a select for an enum, a number field for an integer, a checkbox for a boolean, text for a string, a
+JSON box for anything else), filled with the defaults; it saves only the keys that differ, and "Reset to defaults"
+clears them. The built-in `default.*` behaviors are known to the console; for any other id it falls back to a JSON box
+for `params`, because the console has no list of the daemon's loaded behaviors yet (`behavior.list` has it). `$from`
+has no control of its own (type it in the payload JSON) and the console has no selector for which behaviors a charge
+point runs (the RPC `cp.behaviors.set` does).
 
 Local mode can also run **behavior code**: `LocalChargePointService.loadBehaviorBundle(id, blob | text)` imports a bundle
 built with `ocpp-cp-sim behavior build` through `import(blobUrl)` and loads it onto one charge point of the page. It is

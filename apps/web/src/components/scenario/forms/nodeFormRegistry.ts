@@ -720,6 +720,10 @@ function useBehaviorNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
     behaviorId: stringValue(
       (nodeData as Partial<UseBehaviorNodeData>).behaviorId,
     ),
+    ...compactDefined({
+      mode: (nodeData as Partial<UseBehaviorNodeData>).mode,
+      params: (nodeData as Partial<UseBehaviorNodeData>).params,
+    }),
   };
 }
 
@@ -729,6 +733,18 @@ function useBehaviorFormToNodeData(
   return {
     ...baseFromForm(formData),
     behaviorId: stringValue(formData.behaviorId),
+    // "use" is the default: only "disable" is written, and a disabled node
+    // carries no params.
+    ...(formData.mode === "disable"
+      ? { mode: "disable" as const }
+      : compactDefined({
+          params:
+            typeof formData.params === "object" &&
+            formData.params !== null &&
+            !Array.isArray(formData.params)
+              ? (formData.params as Record<string, unknown>)
+              : undefined,
+        })),
   };
 }
 

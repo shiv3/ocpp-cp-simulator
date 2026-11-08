@@ -25,7 +25,10 @@ import {
 } from "./accessGuard";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "@ocpp-cp-sim/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-sim/contracts/labels";
-import { behaviorIdsSchema } from "@ocpp-cp-sim/contracts/methods";
+import {
+  behaviorIdsSchema,
+  behaviorParamsSchema,
+} from "@ocpp-cp-sim/contracts/methods";
 import { appVersion } from "../appVersion";
 import { MAX_ID_TAGS, readIdTagsFile } from "./idTagFile";
 
@@ -1124,6 +1127,18 @@ export function parseCreateBody(
     }
     behaviors = parsed.data;
   }
+  let behaviorParams: ChargePointInitOptions["behaviorParams"];
+  if (body.behaviorParams !== undefined) {
+    // JSON only, bounded; the registry checks each entry against the schema of
+    // the behavior it names.
+    const parsed = behaviorParamsSchema.safeParse(body.behaviorParams);
+    if (!parsed.success) {
+      throw new Error(
+        "behaviorParams must be an object of behavior id to a JSON object of params",
+      );
+    }
+    behaviorParams = parsed.data as ChargePointInitOptions["behaviorParams"];
+  }
   let labels: ChargePointInitOptions["labels"];
   if (body.labels !== undefined) {
     const parsed = labelsSchema.safeParse(body.labels);
@@ -1162,6 +1177,7 @@ export function parseCreateBody(
     ...(bootNotification ? { bootNotification } : {}),
     ...(labels !== undefined ? { labels } : {}),
     ...(behaviors !== undefined ? { behaviors } : {}),
+    ...(behaviorParams !== undefined ? { behaviorParams } : {}),
   };
 }
 

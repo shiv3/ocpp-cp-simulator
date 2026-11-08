@@ -18,7 +18,7 @@ import { initErrorReporting } from "./lib/errorReporting";
 // error reporting (#794; immediate without a VITE_SENTRY_DSN).
 void Promise.all([
   i18nReady.catch(() => undefined), // a failed chunk load falls back to English
-  initErrorReporting().catch(() => ({})), // never block the first paint
+  initErrorReporting(), // never rejects: a failure leaves reporting off
 ]).then(([, rootErrorHooks]) =>
   ReactDOM.createRoot(document.getElementById("root")!, rootErrorHooks).render(
     <React.StrictMode>

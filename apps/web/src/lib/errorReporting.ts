@@ -37,8 +37,9 @@ export function readErrorReportingConfig(
 /**
  * Start Sentry when a DSN is configured and return the `createRoot` error
  * hooks that feed it. The SDK is a lazy chunk, so the default (no DSN) build
- * never downloads it; a chunk that fails to load leaves reporting off rather
- * than the console blank. Errors only: no tracing, no session replay.
+ * never downloads it; an SDK that fails to load or start leaves reporting off
+ * rather than the console blank, so this never rejects. Errors only: no
+ * tracing, no session replay.
  */
 export async function initErrorReporting(
   config: ErrorReportingConfig | null = readErrorReportingConfig(),
@@ -48,16 +49,16 @@ export async function initErrorReporting(
   let Sentry: SentryReact;
   try {
     Sentry = await load();
+    Sentry.init({
+      ...config,
+      dataCollection: restrictedDataCollection(),
+      beforeSend: (event) => scrubErrorReport(event),
+      beforeBreadcrumb: (breadcrumb) => scrubErrorReport(breadcrumb),
+    });
   } catch (err) {
-    console.warn("Error reporting disabled: the Sentry SDK did not load", err);
+    console.warn("Error reporting disabled: the Sentry SDK did not start", err);
     return {};
   }
-  Sentry.init({
-    ...config,
-    dataCollection: restrictedDataCollection(),
-    beforeSend: (event) => scrubErrorReport(event),
-    beforeBreadcrumb: (breadcrumb) => scrubErrorReport(breadcrumb),
-  });
   // Taking these hooks over replaces React's default logging, so log too.
   const capture = Sentry.reactErrorHandler();
   return {

@@ -951,6 +951,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       connector.id,
       status,
       stopOnInvalid,
+      request.eventType !== "Started",
     );
   }
 

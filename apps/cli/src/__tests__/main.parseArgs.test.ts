@@ -57,15 +57,27 @@ function runParseArgs(args: string[]) {
     "  watch: options.watch,",
     "  oedBaseUrl: options.oedBaseUrl,",
     "  oedApiKeyFile: options.oedApiKeyFile,",
+    "  fleetTemplateFiles: options.fleetTemplateFiles,",
     "  bootstrapPacing: options.bootstrapPacing ?? null,",
     "  labels: options.labels ?? null,",
     "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
+    "  transport: options.transport ?? null,",
     "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
     "  bootstrapTxUpdatedMeterValues:",
     "    buildBootstrap(options)?.txUpdatedMeterValues ?? null,",
     "  inboundValidation: options.inboundValidation ?? null,",
     "  bootstrapInboundValidation:",
     "    buildBootstrap(options)?.inboundValidation ?? null,",
+    "  ops: {",
+    "    allowedHosts: options.allowedHosts, trustedProxies: options.trustedProxies,",
+    "    requireTls: options.requireTls, rateLimitPerIp: options.rateLimitPerIp,",
+    "    rateLimitMaxIps: options.rateLimitMaxIps, logLevel: options.logLevel,",
+    "    logFile: options.logFile, logMaxBytes: options.logMaxBytes,",
+    "    logRotateDaily: options.logRotateDaily, logKeep: options.logKeep,",
+    "    shutdownStopTransactions: options.shutdownStopTransactions,",
+    "    shutdownWaitMs: options.shutdownWaitMs,",
+    "    connectRestored: options.connectRestored, cpBulkWaitMs: options.cpBulkWaitMs,",
+    "  },",
     "}));",
   ].join("\n");
 
@@ -420,6 +432,104 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.openOptions.headers).toEqual({ "X-Trace": "trace-1" });
+  });
+
+  it("collects the reconnect flags into transport.reconnect (#609)", () => {
+    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+    const none = JSON.parse(runParseArgs(base).stdout);
+    expect(none.transport).toBeNull();
+
+    const result = runParseArgs([
+      ...base,
+      "--reconnect-max-attempts",
+      "5",
+      "--reconnect-mode",
+      "fixed",
+      "--reconnect-base-delay-ms",
+      "250",
+      "--reconnect-max-delay-ms",
+      "2000",
+      "--reconnect-jitter-ms",
+      "50",
+      "--boot-retry-limit",
+      "-1",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).transport).toEqual({
+      reconnect: {
+        maxAttempts: 5,
+        mode: "fixed",
+        baseDelayMs: 250,
+        maxDelayMs: 2000,
+        jitterMs: 50,
+        bootRetryLimit: -1,
+      },
+    });
+  });
+
+  it("collects --ws-* flags into transport.ws and refuses what Bun ignores (#611)", () => {
+    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+    const ok = runParseArgs([
+      ...base,
+      "--ws-handshake-timeout-ms",
+      "4000",
+      "--ws-no-compression",
+      "--ws-proxy",
+      "http://proxy.example:3128",
+    ]);
+    expect(ok.status).toBe(0);
+    expect(JSON.parse(ok.stdout).transport).toEqual({
+      ws: {
+        handshakeTimeoutMs: 4000,
+        perMessageDeflate: false,
+        proxy: "http://proxy.example:3128",
+      },
+    });
+
+    const payload = runParseArgs([...base, "--ws-max-payload", "1024"]);
+    expect(payload.status).toBe(1);
+    expect(payload.stderr).toContain(
+      '"maxPayloadBytes" is not supported on bun',
+    );
+    const local = runParseArgs([...base, "--ws-local-address", "10.0.0.5"]);
+    expect(local.status).toBe(1);
+    expect(local.stderr).toContain('"localAddress" is not supported on bun');
+    const badProxy = runParseArgs([...base, "--ws-proxy", "socks5://p:1"]);
+    expect(badProxy.status).toBe(1);
+    expect(badProxy.stderr).toContain("ws.proxy");
+    const soap = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:9000/cs",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      "--soap-callback-url",
+      "http://127.0.0.1:9100/cb",
+      "--ws-no-compression",
+    ]);
+    expect(soap.status).toBe(1);
+    expect(soap.stderr).toContain("SOAP versions have none");
+  });
+
+  it("rejects bad reconnect flag values (#609)", () => {
+    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+    const fail = (flags: string[], message: string) => {
+      const result = runParseArgs([...base, ...flags]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+    };
+    fail(["--reconnect-mode", "linear"], "--reconnect-mode must be");
+    fail(
+      ["--reconnect-max-attempts", "-2"],
+      "--reconnect-max-attempts must be",
+    );
+    fail(["--reconnect-max-attempts", "1.5"], "an integer");
+    fail(["--reconnect-jitter-ms", "abc"], "--reconnect-jitter-ms must be");
+    fail(
+      ["--reconnect-base-delay-ms", "5000", "--reconnect-max-delay-ms", "1000"],
+      "maxDelayMs must be >= baseDelayMs",
+    );
   });
 
   it("rejects invalid security profiles", () => {
@@ -1201,6 +1311,130 @@ describe("parseArgs --label (#472)", () => {
       );
     },
   );
+});
+
+describe("parseArgs --fleet-template (#445)", () => {
+  const DAEMON = ["--daemon"];
+
+  it("collects every repeated --fleet-template", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--fleet-template",
+      "a.json",
+      "--fleet-template",
+      "b.json",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).fleetTemplateFiles).toEqual([
+      "a.json",
+      "b.json",
+    ]);
+  });
+
+  it("is empty by default", () => {
+    expect(JSON.parse(runParseArgs(DAEMON).stdout).fleetTemplateFiles).toEqual(
+      [],
+    );
+  });
+
+  it("is refused without a path and outside a server mode", () => {
+    const noPath = runParseArgs([...DAEMON, "--fleet-template"]);
+    expect(noPath.status).toBe(1);
+    expect(noPath.stderr).toContain("--fleet-template needs a file path");
+    const standalone = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--fleet-template",
+      "a.json",
+    ]);
+    expect(standalone.status).toBe(1);
+    expect(standalone.stderr).toContain("--fleet-template needs a server mode");
+  });
+});
+
+describe("daemon operations flags (#620, #621, #622)", () => {
+  it("defaults keep today's behavior", () => {
+    const result = runParseArgs(["--daemon"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ops).toEqual({
+      allowedHosts: [],
+      trustedProxies: [],
+      requireTls: false,
+      rateLimitPerIp: 0,
+      rateLimitMaxIps: 10000,
+      logLevel: null,
+      logFile: null,
+      logMaxBytes: null,
+      logRotateDaily: false,
+      logKeep: 5,
+      shutdownStopTransactions: false,
+      shutdownWaitMs: 5000,
+      connectRestored: true,
+      cpBulkWaitMs: 10000,
+    });
+  });
+
+  it("parses every flag", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--allowed-host",
+      "a.example",
+      "--allowed-host",
+      "b.example:9700",
+      "--trusted-proxy",
+      "10.0.0.0/8",
+      "--require-tls",
+      "--rate-limit-per-ip",
+      "20",
+      "--rate-limit-max-ips",
+      "500",
+      "--log-level",
+      "warn",
+      "--log-file",
+      "/tmp/x.log",
+      "--log-max-size",
+      "10m",
+      "--log-rotate-daily",
+      "--log-keep",
+      "7",
+      "--shutdown-stop-transactions",
+      "--shutdown-wait-ms",
+      "9000",
+      "--no-connect-restored",
+      "--cp-bulk-wait-ms",
+      "20000",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ops).toEqual({
+      allowedHosts: ["a.example", "b.example:9700"],
+      trustedProxies: ["10.0.0.0/8"],
+      requireTls: true,
+      rateLimitPerIp: 20,
+      rateLimitMaxIps: 500,
+      logLevel: "warn",
+      logFile: "/tmp/x.log",
+      logMaxBytes: 10 * 1024 * 1024,
+      logRotateDaily: true,
+      logKeep: 7,
+      shutdownStopTransactions: true,
+      shutdownWaitMs: 9000,
+      connectRestored: false,
+      cpBulkWaitMs: 20000,
+    });
+  });
+
+  it.each([
+    [["--trusted-proxy", "not-an-ip"], "--trusted-proxy"],
+    [["--log-level", "loud"], "--log-level"],
+    [["--log-max-size", "big"], "--log-max-size"],
+    [["--rate-limit-max-ips", "0"], "--rate-limit-max-ips"],
+  ])("rejects %j", (args, flag) => {
+    const result = runParseArgs(["--daemon", ...args]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(flag);
+  });
 });
 
 describe("parseArgs startup pacing (#610)", () => {

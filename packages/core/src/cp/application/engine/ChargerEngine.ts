@@ -7,6 +7,7 @@ import type {
   CallOutcome,
   ChargerSnapshot,
   ConnectorSnapshot,
+  JsonObject,
   JsonValue,
   RandomStream,
   TransactionEvent,
@@ -44,6 +45,11 @@ import {
   type EngineEvent,
 } from "./ChargerState";
 import { registerDefaultBehaviors } from "./behaviors";
+import {
+  EMPTY_PARAMS,
+  freezeParams,
+  mergeParams,
+} from "../behavior/paramsSchema";
 import { cannedResponse, responseProblems } from "./responseValidation";
 
 /** Ids with this prefix belong to the built-in behaviors; none can be loaded. */
@@ -72,6 +78,12 @@ export interface LoadBehaviorOptions {
    * behavior it is complete; when the last holder lets go it is idle again.
    */
   readonly dormant?: boolean;
+  /**
+   * The params the selector set (`--use-behavior` with `--behavior-params`,
+   * `cp.behaviors.set`), merged over the behavior's defaults. Validated before
+   * anything is registered, so a refusal loads nothing.
+   */
+  readonly params?: JsonObject;
 }
 
 /** What a default behavior produced for one CALL, in the shape handlers use. */
@@ -202,6 +214,21 @@ export class ChargerEngine {
   private readonly defaults = new Map<
     string,
     { behavior: Behavior; call: CallBehavior }
+  >();
+  /** The default behaviors by id (the action table above is keyed by action). */
+  private readonly defaultsById = new Map<string, Behavior>();
+  /**
+   * Params the station's selection set, per behavior id (default or loaded).
+   * Set by `cp.behaviors.set`, `cp.create` and `--behavior-params`.
+   */
+  private readonly selectionParams = new Map<string, JsonObject>();
+  /**
+   * Params a scenario run set with `useBehavior`, per behavior id and owner,
+   * oldest first. They sit on top of the selection's and end with the run.
+   */
+  private readonly paramLayers = new Map<
+    string,
+    Map<string, { owner: RuleOwner; params: JsonObject }>
   >();
 
   /** True while a loaded, non-dormant behavior has a `beforeSend` table. */
@@ -890,8 +917,16 @@ export class ChargerEngine {
     if (this.loaded.has(behavior.id)) {
       throw new Error(`Behavior ${behavior.id} is already loaded`);
     }
+    if (options.params !== undefined) {
+      // Refuse before anything is registered or started.
+      mergeParams(behavior.id, behavior.params, [options.params]);
+    }
     if (!options.dormant) {
       this.registerRules(behavior, { kind: "code", behaviorId: behavior.id });
+    }
+    // Only now that nothing can throw any more: a failed load leaves no entry.
+    if (options.params !== undefined) {
+      this.selectionParams.set(behavior.id, options.params);
     }
     this.loaded.set(behavior.id, behavior);
     if (options.dormant) this.dormant.add(behavior.id);
@@ -936,6 +971,9 @@ export class ChargerEngine {
       );
     }
     this.assertLoadable(next);
+    // The params in force must fit the new version's schema, or it is refused
+    // and the old version keeps running.
+    mergeParams(next.id, next.params, this.layersOf(next.id));
     const dormant = this.dormant.has(next.id);
     if (!dormant) {
       // Register the new rules in place of the old ones; the exchanges the old
@@ -1019,16 +1057,23 @@ export class ChargerEngine {
    * release them with `BehaviorRegistry.release`. A behavior that is not
    * dormant already serves its rules; selecting it again does nothing. Throws
    * if no behavior has that id.
+   *
+   * `params` (schema 1.6) are the run's layer over the station's selection and
+   * the behavior's defaults; they are validated first, so a refusal arms
+   * nothing, and they end with the owner like the rules. A built-in
+   * `default.*` behavior always answers: selecting one only sets its params.
    */
-  activateBehavior(id: string, owner: RuleOwner): void {
-    const behavior = this.loaded.get(id);
+  activateBehavior(id: string, owner: RuleOwner, params?: JsonObject): void {
+    const builtin = this.defaultsById.get(id);
+    const behavior = builtin ?? this.loaded.get(id);
     if (!behavior) {
       throw new Error(`No behavior with id "${id}" is loaded on this station`);
     }
-    if (!this.dormant.has(id)) return;
-    // Selecting a behavior again under the same owner (a `useBehavior` node
-    // in a loop) replaces its rules instead of registering them twice.
     const key = ruleOwnerKey(owner);
+    // Selecting a behavior again under the same owner (a `useBehavior` node
+    // in a loop) replaces its params and rules instead of stacking them.
+    this.setParamLayer(id, behavior, owner, params);
+    if (builtin || !this.dormant.has(id)) return;
     this.host.behaviors.release((held) => ruleOwnerKey(held) === key);
     this.registerRules(behavior, owner);
     const held = this.holders.get(id) ?? new Map<string, RuleOwner>();
@@ -1050,11 +1095,177 @@ export class ChargerEngine {
   }
 
   /**
+   * Schema 1.6 `useBehavior` with `mode: "disable"`: for as long as `owner`
+   * lives, every CALL of the behavior's actions is answered with the version's
+   * `accepted` answer (`ctx.accepted(action)`) and nothing follows. The rules
+   * are scenario rules, so they outrank the behavior's own (call-precedence
+   * step 3) and end with the run. Throws when no behavior has that id, when
+   * the station has no `accepted` answer for any of its actions, or when the
+   * station cannot take scenario rules.
+   */
+  disableBehavior(id: string, owner: RuleOwner): void {
+    const behavior = this.defaultsById.get(id) ?? this.loaded.get(id);
+    if (!behavior) {
+      throw new Error(`No behavior with id "${id}" is loaded on this station`);
+    }
+    const answers: Array<[string, Record<string, unknown>]> = [];
+    for (const action of Object.keys(behavior.onCall ?? {})) {
+      try {
+        answers.push([
+          action,
+          cannedResponse(action, this.host.ocppVersion, "accepted"),
+        ]);
+      } catch {
+        // Not an action of this station's version, or no plain acceptance.
+      }
+    }
+    if (answers.length === 0) {
+      throw new Error(
+        `useBehavior disable: ${id} answers no CALL on ${this.host.ocppVersion} that has an Accepted answer, so there is nothing to disable`,
+      );
+    }
+    const key = ruleOwnerKey(owner);
+    this.host.behaviors.release((held) => ruleOwnerKey(held) === key);
+    const unregister: Array<() => void> = [];
+    try {
+      for (const [action, response] of answers) {
+        unregister.push(
+          this.host.behaviors.register({
+            owner,
+            action,
+            mode: "replace",
+            take: (_call, exchange) => {
+              this.warn(
+                `${action}: answered Accepted without acting (${id} is disabled by the running scenario)`,
+              );
+              exchange.reply({ ...response });
+            },
+          } satisfies BehaviorRule),
+        );
+      }
+    } catch (error) {
+      for (const off of unregister) off();
+      throw error;
+    }
+  }
+
+  // ---- params -------------------------------------------------------------
+
+  /** The behavior with this id, built-in or loaded. */
+  private declaredBehavior(id: string): Behavior | undefined {
+    return this.defaultsById.get(id) ?? this.loaded.get(id);
+  }
+
+  /** The params layers of `id` over its defaults, oldest first. */
+  private layersOf(id: string): JsonObject[] {
+    const layers: JsonObject[] = [];
+    const selected = this.selectionParams.get(id);
+    if (selected) layers.push(selected);
+    for (const layer of this.paramLayers.get(id)?.values() ?? []) {
+      layers.push(layer.params);
+    }
+    return layers;
+  }
+
+  /**
+   * The params `ctx.params` hands out for `id` now: defaults, the station's
+   * selection, then each running scenario's layer (the newest on top).
+   * Throws when they do not fit the schema.
+   */
+  effectiveParams(id: string): JsonObject {
+    const behavior = this.declaredBehavior(id);
+    return mergeParams(id, behavior?.params, this.layersOf(id));
+  }
+
+  /**
+   * Set (or, with `undefined`, clear) the params the station's selection gives
+   * `id`. Validated with the layers already running; throws and changes
+   * nothing on a mismatch. Applies to the contexts made from now on.
+   */
+  setSelectionParams(id: string, params: JsonObject | undefined): void {
+    const behavior = this.declaredBehavior(id);
+    if (!behavior) {
+      throw new Error(`No behavior with id "${id}" is loaded on this station`);
+    }
+    const layers: JsonObject[] = params ? [params] : [];
+    for (const layer of this.paramLayers.get(id)?.values() ?? []) {
+      layers.push(layer.params);
+    }
+    mergeParams(id, behavior.params, layers);
+    if (params && Object.keys(params).length > 0) {
+      this.selectionParams.set(id, params);
+    } else {
+      this.selectionParams.delete(id);
+    }
+  }
+
+  /**
+   * Change the params the station's selection gives a loaded code behavior,
+   * in place: the running scenarios' layers and the CALLs it has open are
+   * kept; its `main` and hook context restart with the new values (as in a
+   * reload, see {@link ChargerEngine.replaceBehavior}). Throws and changes
+   * nothing when the params do not fit the schema.
+   */
+  reselectBehaviorParams(id: string, params: JsonObject | undefined): void {
+    const behavior = this.loaded.get(id);
+    if (!behavior) {
+      throw new Error(`No behavior with id "${id}" is loaded on this station`);
+    }
+    const before = this.selectionParams.get(id);
+    this.setSelectionParams(id, params);
+    try {
+      this.replaceBehavior(behavior);
+    } catch (error) {
+      if (before) this.selectionParams.set(id, before);
+      else this.selectionParams.delete(id);
+      throw error;
+    }
+  }
+
+  /** The params the station's selection gave each behavior, a copy. */
+  get selectedParams(): Record<string, JsonObject> {
+    return Object.fromEntries(this.selectionParams);
+  }
+
+  private setParamLayer(
+    id: string,
+    behavior: Behavior,
+    owner: RuleOwner,
+    params: JsonObject | undefined,
+  ): void {
+    const key = ruleOwnerKey(owner);
+    const held = this.paramLayers.get(id);
+    const others = [...(held ?? [])]
+      .filter(([otherKey]) => otherKey !== key)
+      .map(([, layer]) => layer.params);
+    const selected = this.selectionParams.get(id);
+    mergeParams(id, behavior.params, [
+      ...(selected ? [selected] : []),
+      ...others,
+      ...(params ? [params] : []),
+    ]);
+    if (!params || Object.keys(params).length === 0) {
+      held?.delete(key);
+      return;
+    }
+    const layers = held ?? new Map();
+    layers.delete(key);
+    layers.set(key, { owner, params });
+    this.paramLayers.set(id, layers);
+  }
+
+  /**
    * The runs that selected dormant behaviors let go (the end of a run): a
    * dormant behavior no owner holds any more stops its `main` and its hooks.
    * Rules are released with `BehaviorRegistry.release`, which the caller does.
    */
   deactivateBehaviors(owned: (owner: RuleOwner) => boolean): void {
+    for (const [id, layers] of [...this.paramLayers]) {
+      for (const [key, layer] of [...layers]) {
+        if (owned(layer.owner)) layers.delete(key);
+      }
+      if (layers.size === 0) this.paramLayers.delete(id);
+    }
     for (const [id, held] of [...this.holders]) {
       for (const [key, owner] of [...held]) if (owned(owner)) held.delete(key);
       if (held.size > 0) continue;
@@ -1106,6 +1317,8 @@ export class ChargerEngine {
     this.loaded.delete(id);
     this.dormant.delete(id);
     this.holders.delete(id);
+    this.selectionParams.delete(id);
+    this.paramLayers.delete(id);
     this.refreshHooked();
     this.endHookContext(id);
     this.pendingMains.get(id)?.();
@@ -1347,6 +1560,7 @@ export class ChargerEngine {
 
   /** Register the behaviors that answer when no user behavior does. */
   registerDefault(behavior: Behavior): void {
+    this.defaultsById.set(behavior.id, behavior);
     for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
       this.defaults.set(action, { behavior, call });
     }
@@ -1430,6 +1644,9 @@ export class ChargerEngine {
     const clock = host.clock;
     const behavior = this.loaded.get(behaviorId);
     const requires = new Set(behavior?.requires ?? []);
+    // Fixed for the life of the context: a CALL and its follow-up see the
+    // params the CALL arrived with.
+    const params = freezeParams(this.paramsForContext(behaviorId));
     const needs = (capability: BehaviorCapability, what: string): void => {
       if (!requires.has(capability) && !behaviorId.startsWith("default.")) {
         throw new Error(
@@ -1658,6 +1875,7 @@ export class ChargerEngine {
       rejected: (action) =>
         cannedResponse(action, host.ocppVersion, "rejected"),
       connector: connectorSnapshot,
+      params,
       get charger(): ChargerSnapshot {
         return {
           id: host.id,
@@ -1670,6 +1888,16 @@ export class ChargerEngine {
         host.logger.info(`[behavior ${behaviorId}] ${message}`, LogType.OCPP),
     };
     return ctx;
+  }
+
+  /** `effectiveParams`, but a context never fails to be made over a stale layer. */
+  private paramsForContext(id: string): JsonObject {
+    try {
+      return this.effectiveParams(id);
+    } catch (error) {
+      this.warn(`${describe(error)}; running ${id} with its defaults`);
+      return this.declaredBehavior(id)?.params?.defaults ?? EMPTY_PARAMS;
+    }
   }
 
   private warn(message: string): void {

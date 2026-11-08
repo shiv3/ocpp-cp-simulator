@@ -371,6 +371,24 @@ async function certificateSigned(
       response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
     };
   }
+  // #720 A02.FR.26 / A03.FR.22 (2.1): a requestId the station never issued.
+  // Only Rejected is asked for: nothing is stored, the pending CSR and its
+  // back-off go on, and no security event is raised. An absent requestId is
+  // handled as before (the field is optional).
+  const answeredRequestId = (req as { requestId?: number }).requestId;
+  if (
+    answeredRequestId !== undefined &&
+    ctx.certificateSigning &&
+    !ctx.certificateSigning.isKnownSignRequestId(answeredRequestId)
+  ) {
+    ctx.logger.warn(
+      `CertificateSigned rejected: unknown requestId ${answeredRequestId}`,
+      LogType.OCPP,
+    );
+    return {
+      response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
+    };
+  }
   const pems = splitPemChain(req.certificateChain);
   let reason: string;
   if (!use) {

@@ -6,11 +6,19 @@ import {
 import { strictValidationIssues } from "@ocpp-cp-sim/ocpp/validate";
 import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/enums";
 import { requestSchemaKey } from "./requestSchemaKey";
+import { violationKind, type ViolationKind } from "./violationKind";
 
 export interface V16ValidationResult {
   valid: boolean;
   errors: string[];
 }
+
+const V16_CODE_OF_KIND: Record<ViolationKind, OCPPErrorCodeV16> = {
+  format: OCPPErrorCodeV16.FormationViolation,
+  occurrence: OCPPErrorCodeV16.OccurenceConstraintViolation,
+  type: OCPPErrorCodeV16.TypeConstraintViolation,
+  property: OCPPErrorCodeV16.PropertyConstraintViolation,
+};
 
 const v16Schemas = schemas.v16 as Record<string, unknown>;
 
@@ -57,21 +65,6 @@ export interface InboundV16Violation {
   readonly description: string;
 }
 
-const OCCURRENCE_KEYWORDS = new Set(["required", "minItems", "maxItems"]);
-const PROPERTY_KEYWORDS = new Set([
-  "enum",
-  "const",
-  "minimum",
-  "maximum",
-  "exclusiveMinimum",
-  "exclusiveMaximum",
-  "multipleOf",
-  "minLength",
-  "maxLength",
-  "pattern",
-  "format",
-]);
-
 /**
  * Check an inbound 1.6J CALL payload against the bundled request schema and
  * pick the OCPP-J 1.6 §4.2.3 error code for the first kind of violation, most
@@ -104,30 +97,6 @@ export function inboundV16Violation(
   const description = `Invalid ${action} payload: ${issues
     .map((issue) => issue.message)
     .join("; ")}`.slice(0, 255);
-  const codeOf = (issue: (typeof issues)[number]): OCPPErrorCodeV16 => {
-    if (issue.instancePath === "" && issue.keyword === "type") {
-      return OCPPErrorCodeV16.FormationViolation;
-    }
-    if (OCCURRENCE_KEYWORDS.has(issue.keyword)) {
-      return OCPPErrorCodeV16.OccurenceConstraintViolation;
-    }
-    if (issue.keyword === "type")
-      return OCPPErrorCodeV16.TypeConstraintViolation;
-    if (PROPERTY_KEYWORDS.has(issue.keyword)) {
-      return OCPPErrorCodeV16.PropertyConstraintViolation;
-    }
-    return OCPPErrorCodeV16.FormationViolation;
-  };
-  const rank = [
-    OCPPErrorCodeV16.FormationViolation,
-    OCPPErrorCodeV16.OccurenceConstraintViolation,
-    OCPPErrorCodeV16.TypeConstraintViolation,
-    OCPPErrorCodeV16.PropertyConstraintViolation,
-  ];
-  const errorCode = issues
-    .map(codeOf)
-    .reduce((best, code) =>
-      rank.indexOf(code) < rank.indexOf(best) ? code : best,
-    );
+  const errorCode = V16_CODE_OF_KIND[violationKind(issues)];
   return { errorCode, description };
 }

@@ -836,6 +836,50 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.call("ClearChargingProfile", { id: 1 });
     await settle(rig);
   }),
+  // 1.6 §7.13 startSchedule/duration, errata 3.43: the ended stack-2 profile
+  // yields to stack 0, then an Absolute profile counts from startSchedule.
+  c16("smart-charging-start-schedule", async (rig) => {
+    await charging(rig);
+    const profile = (
+      id: number,
+      stackLevel: number,
+      schedule: Record<string, unknown>,
+    ) =>
+      rig.csms.call("SetChargingProfile", {
+        connectorId: 1,
+        csChargingProfiles: {
+          chargingProfileId: id,
+          stackLevel,
+          chargingProfilePurpose: "TxDefaultProfile",
+          chargingProfileKind: "Absolute",
+          chargingSchedule: { chargingRateUnit: "W", ...schedule },
+        },
+      });
+    await profile(1, 0, {
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+    });
+    await profile(2, 2, {
+      startSchedule: "2020-01-01T00:00:00Z",
+      duration: 3600,
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 3000 }],
+    });
+    await rig.csms.call("GetCompositeSchedule", {
+      connectorId: 1,
+      duration: 600,
+    });
+    await profile(3, 3, {
+      startSchedule: "2020-01-01T00:00:00Z",
+      chargingSchedulePeriod: [
+        { startPeriod: 0, limit: 11000 },
+        { startPeriod: 100_000_000, limit: 2000 },
+      ],
+    });
+    await rig.csms.call("GetCompositeSchedule", {
+      connectorId: 1,
+      duration: 600,
+    });
+    await settle(rig);
+  }),
   c201("smart-charging", async (rig) => {
     await charging(rig);
     await rig.csms.call("SetChargingProfile", {

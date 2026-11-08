@@ -1,0 +1,16 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":0,"connectorId":0}}
+{"d":"CSMS>","k":"result","id":"id-2","p":{}}
+{"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
+{"d":"CSMS>","k":"result","id":"id-3","p":{}}
+{"d":"CSMS>","k":"call","id":"id-4","a":"ChangeAvailability","p":{"operationalStatus":5}}
+{"d":"CP>","k":"error","id":"id-4","p":{"code":"TypeConstraintViolation","description":"Invalid ChangeAvailability payload: /operationalStatus must be string; /operationalStatus must be equal to one of the allowed values","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-5","a":"ChangeAvailability","p":{"operationalStatus":"Nope"}}
+{"d":"CP>","k":"error","id":"id-5","p":{"code":"PropertyConstraintViolation","description":"Invalid ChangeAvailability payload: /operationalStatus must be equal to one of the allowed values","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-6","a":"UnlockConnector","p":{"evseId":1,"connectorId":1,"extra":true}}
+{"d":"CP>","k":"error","id":"id-6","p":{"code":"FormatViolation","description":"Invalid UnlockConnector payload: must NOT have additional properties","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-7","a":"ClearCache","p":"nope"}
+{"d":"CP>","k":"error","id":"id-7","p":{"code":"FormatViolation","description":"Invalid ClearCache payload: must be object","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-8","a":"SetVariables","p":{"setVariableData":[]}}
+{"d":"CP>","k":"error","id":"id-8","p":{"code":"OccurrenceConstraintViolation","description":"Invalid SetVariables payload: /setVariableData must NOT have fewer than 1 items","details":{}}}

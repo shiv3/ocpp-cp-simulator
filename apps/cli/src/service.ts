@@ -756,6 +756,9 @@ export class CLIChargePointService {
         ...(init.capabilityProfile
           ? { capabilityProfile: init.capabilityProfile }
           : {}),
+        ...(init.chargerCapabilities
+          ? { chargerCapabilities: init.chargerCapabilities }
+          : {}),
         ...(init.transport?.ws ? { ws: init.transport.ws } : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
@@ -860,6 +863,9 @@ export class CLIChargePointService {
           : {}),
         ...(options.capabilityProfile
           ? { capabilityProfile: options.capabilityProfile }
+          : {}),
+        ...(options.chargerCapabilities
+          ? { chargerCapabilities: options.chargerCapabilities }
           : {}),
         tls: options.tls,
         tlsCaPath: options.tlsCaPath,
@@ -1009,6 +1015,7 @@ export class CLIChargePointService {
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
         inboundValidation: this._init.inboundValidation,
         capabilityProfile: this._init.capabilityProfile,
+        chargerCapabilities: this._init.chargerCapabilities,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,

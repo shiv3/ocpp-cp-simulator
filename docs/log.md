@@ -2461,8 +2461,3 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
 - `index.md`: no change (no page added).
-
-## [2026-11-08] ingest | OCPP-J error codes for invalid inbound payloads on 2.0.1 / 2.1 (#715)
-
-- A 2.x inbound CALL that fails its request schema is answered `OccurrenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation` or `FormatViolation` (Part 4 §4.3 Table 8) instead of always `FormatViolation`; the keyword mapping is shared with 1.6J.
-- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-201--21).

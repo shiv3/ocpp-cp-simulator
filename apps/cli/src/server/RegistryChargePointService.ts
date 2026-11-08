@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import * as fs from "fs";
 import type {
@@ -366,8 +367,12 @@ export class RegistryChargePointService implements ChargePointService {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void> {
-    this.requireService(id).startTransaction(connectorId, tagId, options);
+  ): Promise<StartTransactionOutcome> {
+    return this.requireService(id).startTransaction(
+      connectorId,
+      tagId,
+      options,
+    );
   }
 
   async stopTransaction(

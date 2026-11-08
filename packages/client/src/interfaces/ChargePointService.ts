@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { VehicleCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
 import type {
   AuthorizationCacheSeedEntry,
@@ -612,7 +613,7 @@ export interface ChargePointService {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void>;
+  ): Promise<StartTransactionOutcome | void>;
   stopTransaction(
     id: string,
     connectorId: number,

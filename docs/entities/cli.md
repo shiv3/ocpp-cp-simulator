@@ -493,6 +493,15 @@ tests named below fail on an incompatible change:
 | Wire log lines          | In the default `--log-format plain`, every frame is one stdout line `[<ISO-8601 UTC ms>] [INFO] [WebSocket] Sent: <raw frame>` or `… Received: <raw frame>`; the frame text is what went over the socket, except that secrets are redacted (below)                                                                                                                                                                                                                                                                                                                                                                                                  | `apps/cli/src/__tests__/tck-contract/tck.wireLogLines.golden.bun.test.ts` |
 | `cert16-*` template ids | Every id that was shipped keeps resolving through `load_scenario_template` / `run_scenario_template`. The set only grows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `packages/core/src/utils/tckContract.templateIds.test.ts`                 |
 
+`start_transaction` answers once the transaction exists or the start was
+refused ([#813](https://github.com/shiv3/ocpp-cp-simulator/issues/813)), on 1.6
+and 2.x: after the Authorize answer when the station asks one. A client can send
+the next command (`transaction_event`, `stop_transaction`) as soon as the reply
+arrives, without waiting for a `Started` event. The reply carries
+`data: {started, denialStatus?}`; `started: false` is still `ok: true`, and
+`denialStatus` is the non-Accepted Authorize status when that was the reason.
+`data` is an optional addition to the envelope.
+
 Rules when changing these:
 
 - New parameters are optional. A command or parameter is not renamed or

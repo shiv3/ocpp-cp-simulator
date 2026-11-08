@@ -221,7 +221,7 @@ const REFUSED_BEHAVIOR_NODES: Readonly<Record<string, string>> = {
   callResponse:
     ": answering a CALL the scenario took over needs a station behavior engine, which the k6 runtime does not have",
   useBehavior:
-    ": selecting a loaded behavior needs a station behavior engine, which the k6 runtime does not have",
+    ': selecting a behavior, setting its params (schema 1.6) or disabling it (mode "disable") needs a station behavior engine, which the k6 runtime does not have; a k6 behavior runs with its declared defaults',
 };
 
 /** Does `value` hold a `{ "$from": … }` reference anywhere? */

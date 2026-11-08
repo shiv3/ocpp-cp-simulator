@@ -489,24 +489,40 @@ transaction starts.
 
 ## Periodic meter values in a 1.x transaction (`MeterValueSampleInterval`, #722)
 
-OCPP 1.6 errata 3.15 (§4.7, §9.1.15): while a transaction runs and
-`MeterValueSampleInterval` is greater than zero, the charge point sends a
+OCPP 1.6 Part 2 §3.16.1 and §9.1.19: `MeterValueSampleInterval` is the
+interval between samples, "transmitted periodically at this interval from the
+start of the charging transaction", and `0` means no sampled data is
+transmitted. Errata sheet 3.15 (to §4.7) makes it mandatory: "When the value of
+the configuration variable MeterValueSampleInterval and/or
+ClockAlignedDataInterval has been set to a value greater than zero, the Charge
+Point SHALL send MeterValues at the given interval(s)." While a transaction
+runs and the value is greater than zero, the charge point therefore sends a
 `MeterValues.req` every `MeterValueSampleInterval` seconds, with the
 transaction id, `context` `Sample.Periodic` and the `MeterValuesSampledData`
-measurands. The default is `60`, so a default 1.6 transaction now sends one
-sample a minute (a wire change from the earlier "nothing unless an auto-meter
-is configured"); `0` sends none.
+measurands. This applies to every 1.x version, SOAP included. The default is
+`60` (the 1.6 specification names no default; this is the simulator's), so a
+default 1.6 transaction now sends one sample a minute (a wire change from the
+earlier "nothing unless an auto-meter is configured"); `0` sends none.
 
-- The value is read when the transaction starts. A `ChangeConfiguration`
-  applies to the next transaction.
+- The value is read when the transaction starts, or when it is restored after
+  a daemon restart; a `ChangeConfiguration` applies to the next transaction.
+  That is the simulator's choice: the specification does not say when the
+  interval is read.
 - It does not matter what drives the register. A configured auto-meter curve
   or increment fallback only moves the register at its own interval (the
   curve's `intervalSeconds`); the sample goes out on the
   `MeterValueSampleInterval` tick, so there is one sample per tick and not two
   schedules. A scenario's own meter strategy (a `meterValue` node with
-  auto-increment) keeps sending at its own interval.
-- Nothing is sent while the station is offline. 1.x only: the 2.x sampling
-  below is unchanged.
+  auto-increment) keeps sending at its own interval, so a scenario that
+  auto-increments sends both.
+- Offline, the sample is queued like any transaction-related message (§3.7:
+  "When offline, the Charge Point MUST queue any transaction-related messages",
+  "periodic or clock-aligned MeterValues.req" included) and delivered in order
+  after the reconnect.
+- A transaction whose StartTransaction.req was answered with a CALLERROR
+  (#527) is not sampled: its `0` is a placeholder the CSMS never issued. Until
+  StartTransaction.conf arrives a sample carries the placeholder `0`.
+- Only 1.x: the 2.x sampling below is unchanged.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

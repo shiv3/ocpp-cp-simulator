@@ -287,6 +287,102 @@ c16(
   },
   { memory: true, simulation: { clock: periodicCurveClock, seed: "g722" } },
 );
+// §3.7: "When offline, the Charge Point MUST queue any transaction-related
+// messages", periodic MeterValues included. The two samples taken while the
+// link is down are flushed in order after the reconnect (#722).
+const periodicOfflineClock = new VirtualClock();
+c16(
+  "meter-periodic-offline",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    r.cp.disconnect();
+    await periodicOfflineClock.advanceBy(130_000);
+    await r.connectAndBoot();
+    await settle(r);
+    await periodic(r, periodicOfflineClock, 5);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicOfflineClock, seed: "g722" } },
+);
+// A transaction restored after a restart is sampled again, from the restart.
+const periodicRestartClock = new VirtualClock();
+const periodicRestartNextClock = new VirtualClock();
+c16(
+  "meter-periodic-after-restart",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    const n = await restart(r, {
+      memory: true,
+      simulation: { clock: periodicRestartNextClock, seed: "g722" },
+    });
+    try {
+      await periodic(n, periodicRestartNextClock, 65);
+      n.cp.stopTransaction(1);
+      await settle(n);
+      await n.csms.settle(300);
+      (r.csms.frames as any).push(...n.csms.frames);
+    } finally {
+      await n.dispose();
+    }
+  },
+  { memory: true, simulation: { clock: periodicRestartClock, seed: "g722" } },
+);
+// The interval is read when the transaction starts: a ChangeConfiguration
+// from the CSMS mid-transaction applies to the next one.
+const periodicChangeClock = new VirtualClock();
+c16(
+  "meter-periodic-change-configuration",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await r.csms.call("ChangeConfiguration", {
+      key: "MeterValueSampleInterval",
+      value: "20",
+    });
+    await settle(r);
+    await periodic(r, periodicChangeClock, 65);
+    r.cp.stopTransaction(1);
+    await settle(r);
+    await r.cp.startTransaction("TAG-B", 1);
+    await settle(r);
+    await periodic(r, periodicChangeClock, 45);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicChangeClock, seed: "g722" } },
+);
+// A scenario's own meter strategy (an auto-increment node) keeps its own
+// interval next to the station's sampler: both send.
+const periodicScenarioClock = new VirtualClock();
+c16(
+  "meter-periodic-with-scenario-increment",
+  async (r) => {
+    const connector = r.cp.getConnector(1)!;
+    connector.setOnMeterValueSend((id) => r.cp.sendScheduledMeterValue(id));
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 25,
+      incrementValue: 100,
+    });
+    await periodic(r, periodicScenarioClock, 65);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicScenarioClock, seed: "g722" } },
+);
 // --- availability
 both(
   "avail-whole-two-connectors",

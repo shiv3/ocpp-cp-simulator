@@ -548,9 +548,15 @@ export class ChargePoint {
       // #722: MeterValueSampleInterval drives the periodic MeterValues of a
       // 1.x transaction; the interval is read when the transaction starts.
       connector.events.on("transactionChange", ({ transaction }) => {
-        if (transaction) this.startPeriodicSampling(connector);
-        else this.stopPeriodicSampling(connectorId);
+        if (transaction && connector.hasRunningTransaction) {
+          this.startPeriodicSampling(connector);
+        } else this.stopPeriodicSampling(connectorId);
       });
+      // A transaction restored after a daemon restart is running again and
+      // gets its sampler back (the restore itself emits no transactionChange).
+      connector.events.on("transactionRestored", () =>
+        this.startPeriodicSampling(connector),
+      );
       this._connectors.set(connectorId, connector);
     }
 
@@ -1087,7 +1093,7 @@ export class ChargePoint {
           }
           break;
         case "MeterValueSampleInterval":
-          // §9.1.15: takes effect on the *next* transaction. The periodic
+          // §9.1.19: takes effect on the *next* transaction. The periodic
           // sampler of a running transaction keeps its cadence; the new
           // value is read when a fresh transaction starts
           // (startPeriodicSampling, #722).
@@ -2811,17 +2817,24 @@ export class ChargePoint {
   }
 
   /**
-   * #722, 1.6 errata 3.15 (§4.7, §9.1.15): while a transaction runs and
-   * `MeterValueSampleInterval` > 0 (read now, at the transaction's start) a
-   * MeterValues.req with the `MeterValuesSampledData` measurands goes out
-   * every interval, whatever drives the register. The connector's configured
-   * meter strategy (auto-meter curve, increment fallback) then only moves the
-   * register, so there is one sample per tick, not two schedules. 1.x only:
-   * on 2.x the existing sampling is unchanged.
+   * #722, 1.6 errata 3.15 (Part 2 §4.7) and §3.16.1 / §9.1.19: while a
+   * transaction runs and `MeterValueSampleInterval` > 0, a MeterValues.req
+   * with the `MeterValuesSampledData` measurands goes out every interval,
+   * whatever drives the register. The connector's configured meter strategy
+   * (auto-meter curve, increment fallback) then only moves the register, so
+   * there is one sample per tick, not two schedules. 1.x only (SOAP
+   * included): on 2.x the existing sampling is unchanged.
+   *
+   * The spec does not say when the interval is read; the simulator reads it
+   * when the sampler starts (the transaction's start, or its restore after a
+   * restart), so a ChangeConfiguration applies to the next transaction.
+   * Called again for the same running transaction (the `transactionChange`
+   * that persists a `startCallError` or an id), it keeps the timer and so the
+   * phase.
    */
   private startPeriodicSampling(connector: Connector): void {
-    this.stopPeriodicSampling(connector.id);
     if (isOcpp2Version(this._ocppVersion)) return;
+    if (this._periodicSamplers.has(connector.id)) return;
     connector.setStationOwnsMeterSampling(true);
     const seconds = this._configuration.meterValueSampleInterval();
     if (seconds <= 0) return;
@@ -2830,7 +2843,15 @@ export class ChargePoint {
         this.stopPeriodicSampling(connector.id);
         return;
       }
-      if (!this.isOnline()) return;
+      // Part 2 §4.8 (errata 3.18): the `0` of a transaction whose
+      // StartTransaction.req was answered with a CALLERROR (#527) is a
+      // placeholder the CSMS never issued; a sample would name a transaction
+      // it does not know.
+      if (connector.transaction?.startCallError) return;
+      // Offline too: §3.7 "When offline, the Charge Point MUST queue any
+      // transaction-related messages", periodic MeterValues included. The
+      // outbox queues it (a MeterValues of a transaction) and replays it in
+      // order after the reconnect.
       this.sendScheduledMeterValue(connector.id);
     }, seconds * 1000);
     this._periodicSamplers.set(connector.id, timer);

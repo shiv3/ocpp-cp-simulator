@@ -127,6 +127,14 @@ export interface ConnectorEvents {
    */
   transactionChange: { transaction: Transaction | null };
   transactionIdChange: { transactionId: number };
+  /**
+   * `restoreRuntimeSnapshot` put a running transaction back after a restart.
+   * `transactionChange` stays silent on a restore (it would persist and
+   * announce what is already stored), so a subscriber that has to act on a
+   * transaction that is running again (the periodic sampler, #722) listens
+   * to this one.
+   */
+  transactionRestored: { transaction: Transaction };
   meterValueChange: { meterValue: number };
   socChange: { soc: number | null };
   availabilityChange: { availability: OCPPAvailability };
@@ -353,6 +361,11 @@ export class Connector {
     // one waiting for the next session (#301).
     this.socAwaitsNextTransaction = snapshot.socAwaitsNextTransaction ?? false;
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
+    if (this.transaction && this.hasRunningTransaction) {
+      this.eventsEmitter.emit("transactionRestored", {
+        transaction: this.transaction,
+      });
+    }
   }
 
   /**

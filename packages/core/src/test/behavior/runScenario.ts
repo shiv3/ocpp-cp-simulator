@@ -9,6 +9,7 @@ import type {
   ScenarioNode,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { EventEmitter } from "../../cp/shared/EventEmitter";
+import { rngOf } from "../../cp/shared/rng";
 import type { BehaviorRun } from "./runBehavior";
 
 export interface Step {
@@ -94,8 +95,10 @@ export function startScenario(
     state = "error";
     error = (info as { error: string }).error;
   });
+  // As ScenarioManager wires it: the stream is the station's seeded one.
   const executor = new ScenarioExecutor(def, callbacks, events, {
     clock: run.clock,
+    rng: rngOf(run.cp, `scenario:${def.targetId ?? ""}`),
   });
   const finished = executor.start().then(
     () => undefined,

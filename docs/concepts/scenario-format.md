@@ -1,7 +1,7 @@
 ---
 title: Scenario file format (v1.6)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 26 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable (1.6) and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 30 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -21,6 +21,7 @@ sources:
   - "issues #214, #240, #247, #239, #301, #332, #566, #654"
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
   - packages/core/src/cp/application/scenario/resolveFrom.ts
+  - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
   - apps/web/src/console/lib/scenarioLibrary.ts
 related:
   - ../sources/scenario-json-schema.md
@@ -54,7 +55,7 @@ that schema, not a replacement for it.
 
 - **Version `1.6`** (`schemaVersion`). Files stamped `1.0` to `1.5` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
-- Covers the full 26-node discriminated union the scenario engine supports
+- Covers the full 30-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
 - **Validation against this schema is advisory in this version**: the
   simulator warns (`console.warn` in the browser, stderr / server log on the
@@ -112,40 +113,44 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 ```
 
 Every node has `id` (string), `type` (the discriminator — a closed
-enum of the 23 values below), `position` (`{ x: number, y: number }`), and
+enum of the 30 values below), `position` (`{ x: number, y: number }`), and
 `data` (an object requiring at least `label: string`; the rest of `data`'s
 shape depends on `type`).
 
 ## Node types
 
-| `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                                      |
-| -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `statusChange`       | `status`                                                         |                                                                                                                                                                                              |
-| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                                    |
-| `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`                   |
-| `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                              |
-| `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                              |
-| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             | See [note](#connectorplug-notes) below.                                                                                                                                                      |
-| `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                                    |
-| `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                                    |
-| `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                                    |
-| `reserveNow`         | `expiryMinutes`, `idTag`                                         | `parentIdTag`, `reservationId`                                                                                                                                                               |
-| `cancelReservation`  | `reservationId`                                                  |                                                                                                                                                                                              |
-| `reservationTrigger` | —                                                                | `timeout`                                                                                                                                                                                    |
-| `start`              | —                                                                | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                                      |
-| `end`                | —                                                                |                                                                                                                                                                                              |
-| `statusNotification` | `status`                                                         | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                            |
-| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                                              |
-| `configSet`          | `key`, `value`                                                   |                                                                                                                                                                                              |
-| `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                                          |
-| `csmsCallTrigger`    | `action`                                                         | `timeout`, `payload`, `behavior`, `onBusy`. See [payload condition](#csmscalltrigger-payload-condition) and [replace](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15). |
-| `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                                   |
-| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                              |
-| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.        |
-| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                       |
-| `ocppCall`           | `action`, `payload`                                              | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                        |
-| `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"`)                     | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                              |
-| `useBehavior`        | `behaviorId`                                                     | `mode` (`"use"` \| `"disable"`), `params` (1.6). See [note](#usebehavior-params-and-disable-schema-16).                                                                                      |
+| `type`               | Required `data` fields (beyond `label`)                                      | Notable optional fields                                                                                                                                                                      |
+| -------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `statusChange`       | `status`                                                                     |                                                                                                                                                                                              |
+| `transaction`        | `action` (`"start"` \| `"stop"`)                                             | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`                                                                                                                                    |
+| `meterValue`         | `value`, `sendMessage`                                                       | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`                   |
+| `delay`              | `delaySeconds`                                                               | `until`, `jitterSeconds` (1.6). See [note](#delay-until-and-seeded-jitter).                                                                                                                  |
+| `notification`       | `messageType`, `payload`                                                     |                                                                                                                                                                                              |
+| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                                         | See [note](#connectorplug-notes) below.                                                                                                                                                      |
+| `remoteStartTrigger` | —                                                                            | `timeout`                                                                                                                                                                                    |
+| `remoteStopTrigger`  | —                                                                            | `timeout`                                                                                                                                                                                    |
+| `statusTrigger`      | `targetStatus`                                                               | `timeout`                                                                                                                                                                                    |
+| `reserveNow`         | `expiryMinutes`, `idTag`                                                     | `parentIdTag`, `reservationId`                                                                                                                                                               |
+| `cancelReservation`  | `reservationId`                                                              |                                                                                                                                                                                              |
+| `reservationTrigger` | —                                                                            | `timeout`                                                                                                                                                                                    |
+| `start`              | —                                                                            | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                                      |
+| `end`                | —                                                                            |                                                                                                                                                                                              |
+| `statusNotification` | `status`                                                                     | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                            |
+| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`)             |                                                                                                                                                                                              |
+| `configSet`          | `key`, `value`                                                               |                                                                                                                                                                                              |
+| `dataTransfer`       | `vendorId`                                                                   | `messageId`, `data`                                                                                                                                                                          |
+| `csmsCallTrigger`    | `action`                                                                     | `timeout`, `payload`, `behavior`, `onBusy`. See [payload condition](#csmscalltrigger-payload-condition) and [replace](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15). |
+| `responseOverride`   | `action`, `status`                                                           | See [note](#responseoverride-notes) below.                                                                                                                                                   |
+| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)               | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                              |
+| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                                | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.        |
+| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                                  | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                       |
+| `ocppCall`           | `action`, `payload`                                                          | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                        |
+| `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"` \| `"accepted"` \| `"rejected"`) | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                              |
+| `useBehavior`        | `behaviorId`                                                                 | `mode` (`"use"` \| `"disable"`), `params` (1.6). See [note](#usebehavior-params-and-disable-schema-16).                                                                                      |
+| `notify`             | `kind`, `status`                                                             | `requestId` (a number or a `$from`). 1.6. See [note](#the-schema-16-nodes).                                                                                                                  |
+| `switch`             | `value`, `cases`                                                             | Edges leave by `sourceHandle` `case-<n>` or `default`. 1.6. See [note](#the-schema-16-nodes).                                                                                                |
+| `choice`             | `options`                                                                    | Each option `weight`, `label`; edges leave by `sourceHandle` `option-<n>`. 1.6. See [note](#the-schema-16-nodes).                                                                            |
+| `setState`           | `key`, `value`                                                               | 1.6. See [note](#the-schema-16-nodes).                                                                                                                                                       |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -305,7 +310,7 @@ fits in are on one page: [Who answers an inbound CALL](call-precedence.md). If y
 `replace` node, `responseOverride` and a TypeScript behavior, read [Scenario or
 behavior?](../analyses/scenario-or-behavior.md).
 
-**The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6: a `csmsCallTrigger` form
+**The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6 (the 1.6 nodes of [this section](#the-schema-16-nodes) included): a `csmsCallTrigger` form
 with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
 mode and a params form), and it exports `schemaVersion: "1.6"`. There is no dedicated control for `$from` (type
 it in the payload JSON) and the `useBehavior` id is free text.
@@ -1213,6 +1218,61 @@ station behavior engine to hand them to).
 }
 ```
 
+### The schema 1.6 nodes
+
+**Issue #654, step 3.** The bounded set of nodes the format gained after params, each one a verb the station
+already has on `ctx` or a listed decision node ([the test](#what-the-format-will-not-do)). All are additive and
+optional: a 1.5 file means what it meant. In the order the issue lists them:
+
+| Addition                                         | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `callResponse` `kind: "accepted"` / `"rejected"` | Answers the CALL the branch took over with `ctx.accepted(action)` / `ctx.rejected(action)`: the valid `Accepted` / `Rejected` answer of that action on the station's OCPP version (`{}` for 1.6 `UpdateFirmware`, `{ "status": "Accepted" }` on 2.x). No `payload` (the run fails if one is given). `onBusy` takes the same kinds. The 1.6 spelling of an action works on a 2.x station.                                                                                                                                                                                                                                                                                                                                           |
+| `notify`                                         | `kind` `firmwareStatus`, `signedFirmwareStatus`, `logStatus` or `diagnosticsStatus`, a `status` from that notification's vocabulary and an optional `requestId` (`signedFirmwareStatus` needs one). Sends the notification and goes on at once: it does not wait for the CSMS, unlike `ocppCall`. A status outside the vocabulary fails the run.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `switch`                                         | `value` (a constant or a `$from`) is compared with each of `cases` (JSON constants, no `$from`) by **JSON equality**: the same type and value, object keys in any order, never a conversion (`1` is not `"1"`). The branch goes on along the edge whose `sourceHandle` is `case-<n>` for the first equal case, else `default`. A chosen handle with no edge ends the branch, with an info line in the log.                                                                                                                                                                                                                                                                                                                         |
+| `$from` roots `charger`, `connector`, `state`    | Besides `call` ([above](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)): `charger.id`, `.ocppVersion`, `.status`, `.connectorIds` as `ctx.charger` reports them; `connector.id`, `.status`, `.availability`, `.transactionId`, `.idTag`, `.power.acceptedW` / `.offeredW` / `.soc` / `.limitedBy` as `ctx.connector(id)` reports them, for the connector the scenario is bound to; `state.<key>[.<key>…]` for what `setState` stored. All read-only, whole values only. A path that names nothing, or a `connector` root in a station-level scenario, fails the run. A `$from` works in `ocppCall` and `callResponse` payloads, in `notify` `requestId`, in a `switch` `value` and in a `setState` `value`. |
+| `delay` `until`, `jitterSeconds`                 | See [below](#delay-until-and-seeded-jitter).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `choice`                                         | A seeded, weighted pick among `options` (at least two; `weight` above 0, default 1). The branch goes on along the edge whose `sourceHandle` is `option-<n>`. The draw comes from the scenario's seeded stream, so the same seed gives the same pick; a missing edge ends the branch.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `setState`                                       | Stores a JSON `value` (a whole value may be a `$from`) under `key` (letters, digits and underscores, not starting with a digit). The state is the run's: shared by its parallel branches, fresh at every start, **not persisted** (a run resumed after a daemon restart starts with an empty state).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+```json
+{
+  "nodes": [
+    {
+      "id": "pick",
+      "type": "switch",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Idle?",
+        "value": { "$from": "connector.status" },
+        "cases": ["Available", "Charging"]
+      }
+    },
+    {
+      "id": "idle",
+      "type": "notify",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Report",
+        "kind": "logStatus",
+        "status": "Uploading",
+        "requestId": 7
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "pick", "target": "idle", "sourceHandle": "case-0" }
+  ]
+}
+```
+
+#### `delay` `until` and seeded jitter
+
+`until` is an ISO-8601 instant on the station's clock: the node waits until then **or** for `delaySeconds`, whichever
+is longer, so `delaySeconds` stays the required floor (use `0`) and an instant that has passed adds nothing. An
+`until` that is not a date fails the run. `jitterSeconds` (a number of at least 0) adds a draw from 0 to
+`jitterSeconds`, in whole milliseconds, from the scenario's seeded stream: the same seed gives the same wait, and
+`0` draws nothing. `export-k6` refuses both (the k6 runtime waits for `delaySeconds` only).
+
 ### What the format will not do
 
 The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
@@ -1232,16 +1292,20 @@ things below is answered with "write a behavior and select it with `useBehavior`
 
 **The test for a new node.** A proposed node must be one of: (1) a **parameter** of a behavior, (2) a **wait**,
 (3) a **verb** the station already has on `ctx` (`send`, `plugIn`, `startCharging`, `notify`, …), or (4) one of the
-listed decision nodes (an equality `switch`, a seeded `choice`, `setState`, none of which exist yet). If it needs
+listed decision nodes (an equality `switch`, a seeded `choice`, `setState`: schema 1.6 ships all three). If it needs
 a `default` branch of its own it is a `switch` in disguise; if it needs two values it is a function. Otherwise it
 is a behavior.
 
-**Budget.** Schema 1.6 ships params and `disable`, and stops: a 1.7 needs a written case that params did not
+**Budget.** Schema 1.6 ships params, `disable` and the nodes of [the section above](#the-schema-16-nodes), and stops: a 1.7 needs a written case that params and those nodes did not
 cover. The parity of scenario nodes and `ctx` members is kept in
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
 
+- **v1.6 (nodes)**: Issue #654, step 3. Adds the `notify`, `switch`, `choice` and `setState` node types;
+  `callResponse` `kind` gains `"accepted"` and `"rejected"`; `delay` gains `until` and `jitterSeconds`; `$from`
+  gains the read-only roots `charger`, `connector` and `state`. Shipped within 1.6 (the budget above), purely
+  additive — `1.5` and older files remain valid. See [the note](#the-schema-16-nodes).
 - **v1.6**: Issue #654. `useBehavior` gains `params` (a JSON object, validated against the behavior's params
   schema when the node runs) and `mode` (`"use"` | `"disable"`); `behaviorId` may name a built-in `default.*`
   behavior. Purely additive — `1.5` and older files remain valid. See

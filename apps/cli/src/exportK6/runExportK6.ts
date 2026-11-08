@@ -193,6 +193,16 @@ function validateExportability(scenario: ScenarioJson): string[] {
         );
       }
     }
+    // Schema 1.6 (#654): a wait the k6 interpreter has no seeded stream or
+    // station clock for.
+    if (
+      node.type === "delay" &&
+      (data.until !== undefined || data.jitterSeconds !== undefined)
+    ) {
+      problems.push(
+        `delay "until" and "jitterSeconds" (schema 1.6) are not supported by export-k6 (node ${node.id}): the k6 runtime waits for delaySeconds only`,
+      );
+    }
     if (node.type === "ocppCall" && containsFrom(data.payload)) {
       problems.push(
         `ocppCall payload uses "$from", which needs a CALL taken over by a csmsCallTrigger with behavior "replace"; export-k6 does not support it (node ${node.id})`,
@@ -220,6 +230,14 @@ function validateExportability(scenario: ScenarioJson): string[] {
 const REFUSED_BEHAVIOR_NODES: Readonly<Record<string, string>> = {
   callResponse:
     ": answering a CALL the scenario took over needs a station behavior engine, which the k6 runtime does not have",
+  notify:
+    ": sending a status notification from a scenario (schema 1.6) goes through the station engine, which the k6 runtime does not have",
+  switch:
+    ": branching on a value (schema 1.6) needs the $from roots of a station, which the k6 runtime does not have",
+  choice:
+    ": a seeded choice (schema 1.6) needs the station's seeded streams, which the k6 runtime does not have",
+  setState:
+    ": the state of a run (schema 1.6) is read through $from, which the k6 runtime does not have",
   useBehavior:
     ': selecting a behavior, setting its params (schema 1.6) or disabling it (mode "disable") needs a station behavior engine, which the k6 runtime does not have; a k6 behavior runs with its declared defaults',
 };

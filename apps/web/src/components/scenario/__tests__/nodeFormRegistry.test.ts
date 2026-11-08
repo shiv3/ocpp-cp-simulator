@@ -273,4 +273,91 @@ describe("NODE_FORM_REGISTRY", () => {
       expect(bare).not.toHaveProperty("onBusy");
     });
   });
+
+  it("round-trips the lifecycle nodes and drops runtime fields (#654)", () => {
+    const forms: Array<[ScenarioNodeType, NodeFormData]> = [
+      [
+        ScenarioNodeType.NOTIFY,
+        { label: "N", kind: "logStatus", status: "Uploaded", requestId: 7 },
+      ],
+      [
+        ScenarioNodeType.NOTIFY,
+        {
+          label: "N",
+          kind: "signedFirmwareStatus",
+          status: "Installed",
+          requestId: { $from: "call.payload.requestId" },
+        },
+      ],
+      [
+        ScenarioNodeType.NOTIFY,
+        { label: "N", kind: "diagnosticsStatus", status: "Idle" },
+      ],
+      [
+        ScenarioNodeType.SWITCH,
+        {
+          label: "S",
+          value: { $from: "state.mode" },
+          cases: ["a", 1, true, null, { x: 1 }],
+        },
+      ],
+      [
+        ScenarioNodeType.CHOICE,
+        {
+          label: "C",
+          options: [{ weight: 3, label: "likely" }, { weight: 0.5 }, {}],
+        },
+      ],
+      [
+        ScenarioNodeType.SET_STATE,
+        { label: "T", key: "attempts_1", value: { $from: "call.action" } },
+      ],
+      [ScenarioNodeType.SET_STATE, { label: "T", key: "n", value: 0 }],
+    ];
+    for (const [type, formData] of forms) {
+      expectFormRoundTrip(type, formData);
+      expectUnknownFieldsDropped(
+        type,
+        NODE_FORM_REGISTRY[type].formToNodeData(formData),
+      );
+    }
+  });
+
+  it("keeps the delay extensions out of a plain delay (#654)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.DELAY];
+    const plain = entry.formToNodeData({
+      label: "D",
+      delaySeconds: 3,
+      until: "",
+    } as NodeFormData);
+    expect(plain).toEqual({ label: "D", delaySeconds: 3 });
+    expectFormRoundTrip(ScenarioNodeType.DELAY, {
+      label: "D",
+      delaySeconds: 3,
+      until: "2026-01-01T09:00:00Z",
+      jitterSeconds: 1.5,
+    });
+    expect(
+      entry.formToNodeData({
+        label: "D",
+        delaySeconds: 3,
+        jitterSeconds: -1,
+      } as NodeFormData),
+    ).not.toHaveProperty("jitterSeconds");
+  });
+
+  it("answers accepted / rejected with no payload, error or validation flag (#654)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.CALL_RESPONSE];
+    for (const kind of ["accepted", "rejected"]) {
+      const saved = entry.formToNodeData({
+        label: "R",
+        kind,
+        payload: { a: 1 },
+        errorCode: "GenericError",
+        skipValidation: true,
+      } as NodeFormData);
+      expect(saved).toEqual({ label: "R", kind });
+      expectFormRoundTrip(ScenarioNodeType.CALL_RESPONSE, { label: "R", kind });
+    }
+  });
 });

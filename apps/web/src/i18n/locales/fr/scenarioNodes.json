@@ -54,5 +54,13 @@
   "scenarioNodes.transaction.stop": "Arrêter",
   "scenarioNodes.transaction.tag": "Badge : {{value}}",
   "scenarioNodes.callResponse.noAnswer": "pas de réponse",
-  "scenarioNodes.useBehavior.disabled": "Désactivé pour cette exécution"
+  "scenarioNodes.useBehavior.disabled": "Désactivé pour cette exécution",
+  "scenarioNodes.title.notify": "Notification d'état",
+  "scenarioNodes.title.switch": "Aiguillage (switch)",
+  "scenarioNodes.title.choice": "Tirage (choice)",
+  "scenarioNodes.title.setState": "Définir l'état",
+  "scenarioNodes.switch.default": "default",
+  "scenarioNodes.choice.options_one": "{{count}} option",
+  "scenarioNodes.choice.options_other": "{{count}} options",
+  "scenarioNodes.choice.options_many": "{{count}} options"
 }

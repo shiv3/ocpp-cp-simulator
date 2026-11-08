@@ -1,3 +1,5 @@
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { WireVersion } from "./FakeCsms";
 import type { Rig, RigOptions } from "./rig";
@@ -35,6 +37,14 @@ const both = (
 ): GoldenCase[] => [c16(name, run, options), c201(name, run, options)];
 
 const settle = (rig: Rig) => rig.csms.settle();
+
+/** Select `default.firmware` params for the whole case (a code-owned layer). */
+const selectFirmware = (cp: ChargePoint, params: JsonObject): void =>
+  cp.engine.activateBehavior(
+    "default.firmware",
+    { kind: "code", behaviorId: "golden" },
+    params,
+  );
 
 async function charging(rig: Rig, tag = "TAG-1"): Promise<void> {
   rig.plugIn();
@@ -560,6 +570,88 @@ export const goldenCases: GoldenCase[] = [
     });
     rig.cp.sendLogStatusNotification("Uploading");
     rig.cp.sendLogStatusNotification("Uploaded");
+    await settle(rig);
+  }),
+
+  // --- opt-in lifecycles (#600, #601) ------------------------------------
+  c201(
+    "update-firmware-train",
+    async (rig) => {
+      // train on, a signature present: the whole 2.x train with requestId.
+      await rig.csms.call("UpdateFirmware", {
+        requestId: 9,
+        firmware: {
+          location: "https://fw.example.test/fw.bin",
+          retrieveDateTime: PAST,
+          signingCertificate: "cert",
+          signature: "sig",
+        },
+      });
+      await rig.csms.waitForCall("SecurityEventNotification", {
+        timeoutMs: 30_000,
+      });
+      await settle(rig);
+    },
+    { beforeConnect: (cp) => selectFirmware(cp, { train: true, stepMs: 40 }) },
+  ),
+  c201(
+    "update-firmware-train-invalid-signature",
+    async (rig) => {
+      await rig.csms.call("UpdateFirmware", {
+        requestId: 10,
+        firmware: {
+          location: "https://fw.example.test/fw.bin",
+          retrieveDateTime: PAST,
+          signingCertificate: "cert",
+          signature: "sig",
+        },
+      });
+      await rig.csms.waitForCall("SecurityEventNotification", {
+        timeoutMs: 30_000,
+      });
+      await settle(rig);
+    },
+    {
+      beforeConnect: (cp) =>
+        selectFirmware(cp, {
+          train: true,
+          stepMs: 40,
+          failAt: "InvalidSignature",
+        }),
+    },
+  ),
+  c16(
+    "update-firmware-reboot-before-installed",
+    async (rig) => {
+      await rig.csms.call("UpdateFirmware", {
+        location: "http://fw.example.test/fw.bin",
+        retrieveDate: PAST,
+      });
+      await rig.csms.waitForFrame(
+        (f) =>
+          f.dir === "CP>" &&
+          f.action === "FirmwareStatusNotification" &&
+          (f.payload as { status?: string }).status === "Installed",
+        { timeoutMs: 30_000 },
+      );
+      await settle(rig);
+    },
+    {
+      beforeConnect: (cp) =>
+        selectFirmware(cp, { reboot: "beforeInstalled", stepMs: 40 }),
+    },
+  ),
+  c201("get-log-replaced", async (rig) => {
+    const getLog = (requestId: number) =>
+      rig.csms.call("GetLog", {
+        logType: "DiagnosticsLog",
+        requestId,
+        log: { remoteLocation: rig.uploadUrl() },
+      });
+    await getLog(31);
+    await new Promise((r) => setTimeout(r, 300));
+    await getLog(32);
+    await new Promise((r) => setTimeout(r, 2600));
     await settle(rig);
   }),
 

@@ -95,6 +95,18 @@ export enum ScenarioNodeType {
   CALL_RESPONSE = "callResponse",
   // Schema 1.5 (#566): select a behavior loaded on the station by id.
   USE_BEHAVIOR = "useBehavior",
+  // Schema 1.6 (#654, step 3): the bounded set of new nodes. A verb the
+  // station already has on `ctx` (`ctx.notify`, `ctx.state`) or one of the
+  // listed decision nodes; see docs/concepts/scenario-format.md, "What the
+  // format will not do".
+  /** Send a status notification (`ctx.notify`), fire-and-forget. */
+  NOTIFY = "notify",
+  /** Branch on the equality of a value with JSON constants. */
+  SWITCH = "switch",
+  /** Branch on a seeded, weighted draw. */
+  CHOICE = "choice",
+  /** Store a JSON value in the run's state, read back through `$from`. */
+  SET_STATE = "setState",
 }
 
 /**
@@ -180,6 +192,13 @@ export type MeterValueNodeData = BaseNodeData & {
  */
 export type DelayNodeData = BaseNodeData & {
   delaySeconds: number;
+  /** Schema 1.6 (#654): ISO-8601 instant on the station's clock. The node
+   *  waits until then or for `delaySeconds`, whichever is longer; an instant
+   *  that has passed adds nothing. */
+  until?: string;
+  /** Schema 1.6 (#654): add a seeded draw of 0 to `jitterSeconds` (millisecond
+   *  resolution) to the wait. The same seed gives the same wait. */
+  jitterSeconds?: number;
 };
 
 /**
@@ -259,7 +278,10 @@ export type CsmsCallTriggerNodeData = BaseNodeData & {
  * value, resolved against the exchange of the branch.
  */
 export type CallResponseSpec = {
-  kind: "result" | "error" | "none";
+  /** `accepted` / `rejected` (schema 1.6, #654): the version-neutral answer of
+   *  the CALL's action, `ctx.accepted(action)` / `ctx.rejected(action)`; they
+   *  take no `payload`. */
+  kind: "result" | "error" | "none" | "accepted" | "rejected";
   payload?: Record<string, unknown>;
   errorCode?: string;
   errorDescription?: string;
@@ -276,6 +298,60 @@ export type CallResponseNodeData = BaseNodeData &
     /** Send `payload` without checking it against the response schema. */
     skipValidation?: boolean;
   };
+
+/** The kinds of status notification a `notify` node sends. */
+export const NOTIFY_KINDS = [
+  "firmwareStatus",
+  "signedFirmwareStatus",
+  "logStatus",
+  "diagnosticsStatus",
+] as const;
+export type NotifyKind = (typeof NOTIFY_KINDS)[number];
+
+/** A whole value read from a root: `{ "$from": "state.key" }` (schema 1.5, 1.6). */
+export type FromReference = { $from: string };
+
+/**
+ * Notify Node Data (schema 1.6, #654): `ctx.notify` as a node. Sends the
+ * status notification and goes on without waiting for the CSMS. `requestId`
+ * may be a `$from` reference; `signedFirmwareStatus` needs one.
+ */
+export type NotifyNodeData = BaseNodeData & {
+  kind: NotifyKind;
+  status: string;
+  requestId?: number | FromReference;
+};
+
+/**
+ * Switch Node Data (schema 1.6, #654): the run goes on along the edge whose
+ * `sourceHandle` is `case-<n>` for the first case equal to `value`, else along
+ * `default`; a branch with no such edge ends. Equality is JSON equality: it
+ * never converts (`1` is not `"1"`). `value` is a constant or a `$from`.
+ */
+export type SwitchNodeData = BaseNodeData & {
+  value: unknown;
+  cases: unknown[];
+};
+
+/**
+ * Choice Node Data (schema 1.6, #654): a seeded, weighted draw among
+ * `options`; the run goes on along the edge whose `sourceHandle` is
+ * `option-<n>`. `weight` defaults to 1. The same seed gives the same draw.
+ */
+export type ChoiceNodeData = BaseNodeData & {
+  options: Array<{ weight?: number; label?: string }>;
+};
+
+/**
+ * Set State Node Data (schema 1.6, #654): stores `value` (JSON; a whole value
+ * may be a `$from`) under `key` in the state of this run, which `$from`
+ * `state.<key>` reads back. The state lives for the run, shared by its
+ * parallel branches, and is not persisted.
+ */
+export type SetStateNodeData = BaseNodeData & {
+  key: string;
+  value: unknown;
+};
 
 /** Use Behavior Node Data (schema 1.5, #566; `params` and `mode` 1.6, #654):
  *  data only, the id of a behavior (loaded on the station, or a built-in
@@ -507,6 +583,10 @@ export type ScenarioNodeData =
   | OcppCallNodeData
   | CallResponseNodeData
   | UseBehaviorNodeData
+  | NotifyNodeData
+  | SwitchNodeData
+  | ChoiceNodeData
+  | SetStateNodeData
   | StartNodeData
   | ConnectionTriggerNodeData
   | BaseNodeData;
@@ -992,6 +1072,14 @@ export interface ScenarioExecutorCallbacks {
   /** #389: send an expert OCPP call; resolves with the CSMS's answer and
    *  rejects when the call is refused or gets no answer. */
   onSendOcppCall?: (request: OcppCallRequest) => Promise<OcppCallOutcome>;
+  /** Schema 1.6 (#654): send a status notification (`notify` node). */
+  onNotify?: (kind: NotifyKind, status: string, requestId?: number) => void;
+  /**
+   * Schema 1.6 (#654): the read-only `$from` roots that live on the station.
+   * `charger` is the station, `connector` the connector the scenario is bound
+   * to (undefined for a station-level scenario). A plain JSON object.
+   */
+  onReadStation?: (root: "charger" | "connector") => unknown;
   /** §4.3: send CP-initiated DataTransfer.req. */
   onSendDataTransfer?: (
     vendorId: string,

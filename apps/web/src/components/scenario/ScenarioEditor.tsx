@@ -71,6 +71,10 @@ import DataTransferNode from "./nodes/DataTransferNode";
 import OcppCallNode from "./nodes/OcppCallNode";
 import CallResponseNode from "./nodes/CallResponseNode";
 import UseBehaviorNode from "./nodes/UseBehaviorNode";
+import NotifyNode from "./nodes/NotifyNode";
+import SwitchNode from "./nodes/SwitchNode";
+import ChoiceNode from "./nodes/ChoiceNode";
+import SetStateNode from "./nodes/SetStateNode";
 import ConnectionTriggerNode from "./nodes/ConnectionTriggerNode";
 import { LiveMeterReadingContext } from "./nodes/liveMeterReading";
 
@@ -137,6 +141,10 @@ const nodeTypes: NodeTypes = {
   [ScenarioNodeType.OCPP_CALL]: OcppCallNode,
   [ScenarioNodeType.CALL_RESPONSE]: CallResponseNode,
   [ScenarioNodeType.USE_BEHAVIOR]: UseBehaviorNode,
+  [ScenarioNodeType.NOTIFY]: NotifyNode,
+  [ScenarioNodeType.SWITCH]: SwitchNode,
+  [ScenarioNodeType.CHOICE]: ChoiceNode,
+  [ScenarioNodeType.SET_STATE]: SetStateNode,
   [ScenarioNodeType.CONNECTION_TRIGGER]: ConnectionTriggerNode,
   [ScenarioNodeType.START]: StartScenarioNode,
   [ScenarioNodeType.END]: EndScenarioNode,
@@ -168,6 +176,10 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   [ScenarioNodeType.OCPP_CALL]: "#78716c",
   [ScenarioNodeType.CALL_RESPONSE]: "#78716c",
   [ScenarioNodeType.USE_BEHAVIOR]: "#78716c",
+  [ScenarioNodeType.NOTIFY]: "#0ea5e9",
+  [ScenarioNodeType.SWITCH]: "#8b5cf6",
+  [ScenarioNodeType.CHOICE]: "#8b5cf6",
+  [ScenarioNodeType.SET_STATE]: "#6b7280",
   [ScenarioNodeType.CERT_QUIRKS]: "#f59e0b",
 };
 
@@ -823,6 +835,26 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 label={t("scenarioEditor.palette.useBehavior")}
                 icon="🎭"
               />
+              <NodePaletteItem
+                type={ScenarioNodeType.NOTIFY}
+                label={t("scenarioEditor.palette.notify")}
+                icon="📣"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.SWITCH}
+                label={t("scenarioEditor.palette.switch")}
+                icon="🔀"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.CHOICE}
+                label={t("scenarioEditor.palette.choice")}
+                icon="🎲"
+              />
+              <NodePaletteItem
+                type={ScenarioNodeType.SET_STATE}
+                label={t("scenarioEditor.palette.setState")}
+                icon="💾"
+              />
             </div>
           </div>
 
@@ -1181,6 +1213,38 @@ function createNodeByType(
           label: "Use behavior",
           behaviorId: "",
         },
+      };
+    case ScenarioNodeType.NOTIFY:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Notify", kind: "firmwareStatus", status: "Idle" },
+      };
+    case ScenarioNodeType.SWITCH:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Switch",
+          value: { $from: "state.mode" },
+          cases: ["a", "b"],
+        },
+      };
+    case ScenarioNodeType.CHOICE:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Choice", options: [{}, {}] },
+      };
+    case ScenarioNodeType.SET_STATE:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Set state", key: "mode", value: "a" },
       };
     case ScenarioNodeType.START:
       return {

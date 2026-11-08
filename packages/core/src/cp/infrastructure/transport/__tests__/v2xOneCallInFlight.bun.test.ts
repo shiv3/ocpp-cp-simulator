@@ -20,8 +20,12 @@ const unanswered = (csms: MockCsms) =>
     (c) => c[2] !== "BootNotification" && !answered.has(c[1] as string),
   );
 
-async function boot(csms: MockCsms, version: string) {
+async function boot(csms: MockCsms, version: string, messageTimeout?: number) {
   const cp = stationFor(csms, "CP708", version, { connectors: 2 });
+  // Before connect: the first StatusNotification arms the slot timer at once.
+  if (messageTimeout !== undefined) {
+    cp.configuration.setRuntimeValue("MessageTimeout", messageTimeout);
+  }
   cp.connect();
   const bootCall = await csms.waitForCall("BootNotification");
   csms.replyCallResult(bootCall.messageId, {
@@ -86,9 +90,8 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
     // F01.FR.01 path does not authorize.
     it("an Authorize waiting for the slot does not time out before it is sent (#762)", async () => {
       const csms = startMockCsms({ answerStatusNotifications: false });
-      const cp = await boot(csms, version);
+      const cp = await boot(csms, version, 1);
       try {
-        cp.configuration.setRuntimeValue("MessageTimeout", 1);
         await csms.waitForFrame(callOf("StatusNotification"));
         // The unanswered StatusNotification holds the slot for ~1 s; the
         // caller's own timeout (300 ms) is shorter than that.
@@ -109,9 +112,8 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 
     it("an unanswered Authorize on the remote-start path is not authorized (F01.FR.01, #762)", async () => {
       const csms = startMockCsms({ answerStatusNotifications: false });
-      const cp = await boot(csms, version);
+      const cp = await boot(csms, version, 1);
       try {
-        cp.configuration.setRuntimeValue("MessageTimeout", 1);
         const outcome = cp.authorizeAndWait("TAG-762B", 100, undefined, {
           failClosed: true,
         });

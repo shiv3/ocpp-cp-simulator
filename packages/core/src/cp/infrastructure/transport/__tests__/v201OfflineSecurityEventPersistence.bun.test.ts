@@ -17,7 +17,13 @@ import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
 class FakeSocket {
   calls: Array<{ action: string; payload: unknown }> = [];
   connected = false;
-  setMessageHandler(): void {}
+  handler:
+    | ((type: number, id: string, action: string, payload: unknown) => void)
+    | null = null;
+  ids: string[] = [];
+  setMessageHandler(h: NonNullable<FakeSocket["handler"]>): void {
+    this.handler = h;
+  }
   onCloseTransaction(): void {}
   isConnected(): boolean {
     return this.connected;
@@ -26,13 +32,14 @@ class FakeSocket {
     return { gen: 1, closeCause: null };
   }
   sendAction(
-    _messageId: string,
+    messageId: string,
     action: string,
     payload: unknown,
     _gen: unknown,
     onSettled?: (s: { outcome: string }) => void,
   ): boolean {
     this.calls.push({ action, payload });
+    this.ids.push(messageId);
     onSettled?.({ outcome: "written" });
     return true;
   }
@@ -105,6 +112,16 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         const payload = after.socket.calls[0].payload as { type: string };
         expect(strictValidationErrors(SCHEMAS[version], payload)).toEqual([]);
         expect(payload.type).toBe("SecurityLogWasCleared");
+        // #664: the row stays until the CSMS answers.
+        expect(rows(db).map((r) => r.action)).toEqual([
+          "SecurityEventNotification",
+        ]);
+        after.socket.handler?.(
+          3,
+          after.socket.ids[0],
+          "SecurityEventNotification",
+          {},
+        );
         expect(rows(db)).toEqual([]);
       } finally {
         db.close();

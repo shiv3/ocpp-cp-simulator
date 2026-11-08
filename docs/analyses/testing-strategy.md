@@ -89,9 +89,14 @@ mechanism inside Bun is not established: the same cases run outside
 land in different shards. `test:bun:cli` deliberately runs **without**
 `--isolate` (see below).
 
-The Bun version comes from `.tool-versions` (`bun 1.4.3`). mise reads it, and
-so does `oven-sh/setup-bun` in every workflow through `bun-version-file`, so
-local runs, CI and the release builds use the same Bun. Before #803 CI pinned
+The Bun version comes from `.tool-versions` (`bun 1.4.3`). `oven-sh/setup-bun`
+reads it in every workflow through `bun-version-file`, so CI and the release
+builds use the same Bun. Locally, `bun` is 1.4.3 only when a version manager
+that reads `.tool-versions` (mise, asdf) is active; otherwise install 1.4.3
+and check `bun --version` before comparing a local run with CI. The Docker
+image does not follow the pin: the `Dockerfile` builds on
+`oven/bun:${BUN_VERSION}-alpine` with `BUN_VERSION=1`, the latest 1.x
+release. Before #803 CI pinned
 1.3.14 in `.bun-version`, which mise ignores, and the release workflows built
 with `latest`. 1.4.3 is pinned, not the newer 1.4.4: its WebSocket client
 breaks seven tests that pass on 1.4.3, and the files fail on their own as

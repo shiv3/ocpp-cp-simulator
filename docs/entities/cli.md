@@ -87,7 +87,7 @@ ocpp-cp-sim --daemon
 > supported: the web-console `dist/` is built at release time (not committed to
 > git), and bun does not install devDependencies for global packages so it
 > cannot run `vite build` on install. Use the prebuilt tarball URL above.
-> Release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags.
+> Release tarballs are produced by the `Release CLI` workflow on `v*` tags — the same tag that builds the desktop app, so the CLI, the app and the libraries share one version. (Releases up to `cli-v0.4.1` used a separate `cli-v*` train.)
 >
 > **npm registry.** The same workflow's `publish-npm` job publishes that
 > tarball to the npm registry as `ocpp-cp-simulator`, authenticated by
@@ -99,14 +99,14 @@ ocpp-cp-sim --daemon
 > reason #321 gives: a documented install command must resolve. The package
 > needs Bun at run time whichever way it is installed — the bin is
 > `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun`
-> shebang, and the daemon uses `bun:sqlite` and `Bun.serve`. A SemVer prerelease (`cli-v1.0.0-rc.1`) is published under
+> shebang, and the daemon uses `bun:sqlite` and `Bun.serve`. A SemVer prerelease (`v1.0.0-rc.1`) is published under
 > the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
 
 ### Why `cli-latest` and not `releases/latest`
 
 GitHub's own `releases/latest/download/…` is **not usable in this repository**
-and must not be reintroduced (#321). The repo has two independent tag trains —
-`v*` for the [desktop app](desktop-app.md) and `cli-v*` for the CLI — and
+and must not be reintroduced (#321). The repo had two independent tag trains —
+`v*` for the [desktop app](desktop-app.md) and `cli-v*` for the CLI (unified into `v*` after `cli-v0.4.1`) — and
 `releases/latest` resolves across both. Whenever the newest release is a
 desktop one, which is the case for roughly half of any release cycle, the URL
 redirects to a release that carries no `.tgz` and the install command fails

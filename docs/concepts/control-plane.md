@@ -209,6 +209,7 @@ one rather than restating a subset.
 | `autoConnect`                                     | boolean                          | Connect immediately after the call.                                                                                                                                                                                                                             |
 | `labels`                                          | object of string values          | Generic grouping metadata (`{ "site": "lyon-01", "env": "lab" }`) — see [Charge-point labels](#charge-point-labels).                                                                                                                                            |
 | `behaviors`                                       | array of strings                 | Ids of the loaded [behaviors](#behaviors) this charge point runs. Absent: every loaded behavior; `[]`: none. Ids only, never code. `cp.update` keeps an omitted list.                                                                                           |
+| `reservationAuthorizeIdTag`                       | boolean                          | OCPP 1.6: authorize the `idTag` of a ReserveNow before accepting it; default `false` (#595). `cp.update` without it keeps the current value. See [Default behaviors](../entities/default-behaviors.md).                                                         |
 
 Unknown properties are stripped, not rejected — so a misspelled field is
 accepted and ignored rather than reported.

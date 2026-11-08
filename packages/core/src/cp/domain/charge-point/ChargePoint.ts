@@ -296,6 +296,12 @@ export interface ChargePointTransportOptions {
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
+  /**
+   * OCPP 1.6 ReserveNow: authorize the reservation's idTag (local rules, then
+   * Authorize.req) before accepting; a tag that is not `Accepted` answers
+   * `Rejected` (#595). Default `false`.
+   */
+  readonly reservationAuthorizeIdTag?: boolean;
 }
 
 export class ChargePoint {
@@ -431,6 +437,17 @@ export class ChargePoint {
     this._inboundValidation = mode;
   }
 
+  private _reservationAuthorizeIdTag: boolean;
+
+  /** See {@link ChargePointTransportOptions.reservationAuthorizeIdTag}. */
+  get reservationAuthorizeIdTag(): boolean {
+    return this._reservationAuthorizeIdTag;
+  }
+
+  setReservationAuthorizeIdTag(enabled: boolean): void {
+    this._reservationAuthorizeIdTag = enabled;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -466,6 +483,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._inboundValidation =
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._reservationAuthorizeIdTag =
+      transportOptions.reservationAuthorizeIdTag ?? false;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -539,13 +558,21 @@ export class ChargePoint {
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEVSE);
-        } else if (!paused && connector.status === OCPPStatus.SuspendedEVSE) {
+        } else if (
+          !paused &&
+          connector.status === OCPPStatus.SuspendedEVSE &&
+          !connector.energyHeld
+        ) {
           this._logger.info(
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
         }
+      });
+      // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
+      connector.events.on("invalidIdEnergyExhausted", () => {
+        this.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
     }
@@ -1486,7 +1513,8 @@ export class ChargePoint {
     return this._webSocket.isConnected();
   }
 
-  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452):
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452) and
+   *  report a conflict with the Local Authorization List (#744):
    *  called by the Authorize / StartTransaction / StopTransaction result
    *  handlers. A no-op while the cache is disabled or for an identifier of
    *  the Local Authorization List (1.6 §3.5.3). */
@@ -1499,6 +1527,21 @@ export class ChargePoint {
         `Authorization cache updated: ${idToken} → ${result.status}`,
         LogType.TRANSACTION,
       );
+    }
+    // 1.6 §3.5.2: tell the CSMS when its verdict contradicts the Local
+    // Authorization List. 2.x has no such notification (its StatusNotification
+    // carries no errorCode).
+    if (
+      !isOcpp2Version(this._ocppVersion) &&
+      this._authorization.conflictsWithLocalList(idToken, result.status)
+    ) {
+      this._logger.warn(
+        `CSMS verdict ${result.status} for ${idToken} conflicts with the Local Authorization List; sending LocalListConflict`,
+        LogType.OCPP,
+      );
+      this.sendStatusNotificationRaw(0, this._status, {
+        errorCode: "LocalListConflict",
+      });
     }
   }
 
@@ -1708,6 +1751,35 @@ export class ChargePoint {
   /** #396: the answer to an incoming CSMS CALL is decided. */
   notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
     this._events.emit("incomingCallCompleted", completion);
+  }
+
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
+  holdEnergyOnInvalidId(connector: Connector): void {
+    const allowance = this._configuration.maxEnergyOnInvalidId();
+    if (connector.holdEnergyForInvalidId(allowance)) {
+      this.reportEnergyHeld(connector);
+    }
+  }
+
+  private reportEnergyHeld(connector: Connector): void {
+    if (!connector.hasRunningTransaction) return;
+    if (
+      connector.status === OCPPStatus.Charging ||
+      connector.status === OCPPStatus.Preparing ||
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.info(
+        `Connector ${connector.id} energy delivery stopped after a non-Accepted id → SuspendedEVSE`,
+        LogType.TRANSACTION,
+      );
+      this.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+    }
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf
@@ -2316,14 +2388,26 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  /** #734: the device has (re)started and has not reported it yet. */
+  private _startupEventPending = true;
+
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
-    if (
-      this._ocppVersion === "OCPP-1.6J" &&
-      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
-    ) {
-      void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+    if (this._ocppVersion === "OCPP-1.6J") {
+      // #734 A04.FR.02: events raised while the station could not send them
+      // (ResetOrReboot among them) go out first, with their own timestamps.
+      this._outbox.flushQueuedSecurityEvents();
+      // StartupOfTheDevice reports a start of the device: once per process
+      // start and once per reset, not per reconnect or triggered boot. It is
+      // consumed by the first Accepted boot either way, so a later change of
+      // the security profile does not report a startup that already passed.
+      if (this._startupEventPending) {
+        this._startupEventPending = false;
+        if ((this._configuration.getInteger("SecurityProfile") ?? 0) >= 1) {
+          void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+        }
+      }
     }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
@@ -2331,6 +2415,11 @@ export class ChargePoint {
     queueMicrotask(() => this._outbox.flushPendingQueue());
     // After the post-boot status fan-out, and with the gate already open.
     queueMicrotask(() => this.engine.bootAccepted());
+  }
+
+  /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
+  runTriggered<T>(fn: () => T): T {
+    return this._outbox.runTriggered(fn);
   }
 
   markBootPending(): void {
@@ -2632,6 +2721,14 @@ export class ChargePoint {
       }
     }
     this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
+    if (
+      this._ocppVersion === "OCPP-1.6J" &&
+      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
+    ) {
+      // #734: reported once the station is back with an Accepted boot.
+      this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
+    }
+    this._startupEventPending = true;
     if (type === "Hard") {
       this.reset();
     } else {
@@ -3027,6 +3124,17 @@ export class ChargePoint {
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);
       return;
+    }
+
+    // Energy held after a non-Accepted id (E05.FR.02): whichever path asks
+    // for Charging, the register is stopped, so report SuspendedEVSE.
+    if (
+      status === OCPPStatus.Charging &&
+      connector.energyHeld &&
+      connector.hasRunningTransaction
+    ) {
+      if (connector.status === OCPPStatus.SuspendedEVSE) return;
+      status = OCPPStatus.SuspendedEVSE;
     }
 
     this._engine.dispatch({

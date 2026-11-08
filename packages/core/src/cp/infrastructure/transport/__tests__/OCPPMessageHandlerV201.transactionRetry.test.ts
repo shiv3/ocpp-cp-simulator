@@ -304,20 +304,73 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("does not hold back the next transaction message while a retry waits", () => {
-    const { socket, tx, handler } = setup();
-    handler.sendTransactionEvent({
-      phase: "started",
-      transaction: tx,
-      connectorId: 1,
-    });
-    socket.callError(socket.last().messageId);
-    handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
-    expect(
+  describe("the next transaction message while a resend is pending (#565, E13.FR.04)", () => {
+    const eventTypes = (socket: ReturnType<typeof setup>["socket"]) =>
       socket
         .transactionEvents()
-        .map((c) => (c.payload as TransactionEventRequestV201).eventType),
-    ).toEqual(["Started", "Updated"]);
+        .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+
+    it("waits for the resend to be answered, then goes out", async () => {
+      const { socket, tx, handler } = setup();
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: tx,
+        connectorId: 1,
+      });
+      socket.callError(socket.last().messageId);
+      handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+      expect(eventTypes(socket)).toEqual(["Started"]);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(eventTypes(socket)).toEqual(["Started", "Started"]);
+      socket.callResult(socket.last().messageId, {});
+
+      expect(eventTypes(socket)).toEqual(["Started", "Started", "Updated"]);
+    });
+
+    it("goes out in order once the final attempt failed (E13.FR.04)", async () => {
+      const { socket, tx, handler, discarded } = setup({ attempts: 2 });
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: tx,
+        connectorId: 1,
+      });
+      socket.callError(socket.last().messageId);
+      handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+      handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      socket.callError(socket.last().messageId);
+
+      expect(discarded).toHaveLength(1);
+      expect(eventTypes(socket)).toEqual([
+        "Started",
+        "Started",
+        "Updated",
+        "Updated",
+      ]);
+    });
+
+    it("is queued with the older events when the socket closes, in creation order", () => {
+      const { socket, tx, handler } = setup();
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: tx,
+        connectorId: 1,
+      });
+      socket.callError(socket.last().messageId);
+      handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+
+      socket.connected = false;
+      handler.onWebSocketClosed();
+      socket.connected = true;
+      handler.flushPendingQueue();
+
+      const sent = socket
+        .transactionEvents()
+        .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+      expect(sent).toEqual(["Started", "Started", "Updated"]);
+    });
   });
 
   it("reads the settings at each CALLERROR", () => {

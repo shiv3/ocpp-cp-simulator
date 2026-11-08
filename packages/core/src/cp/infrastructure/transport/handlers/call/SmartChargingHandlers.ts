@@ -190,6 +190,7 @@ function applyProfileStatus(
   } else if (
     !paused &&
     connector.status === OCPPStatus.SuspendedEVSE &&
+    !connector.energyHeld &&
     connector.transaction != null
   ) {
     chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);
@@ -309,6 +310,9 @@ export class SetChargingProfileHandler implements CallHandler<
         RecurrencyKindType | undefined,
       validFrom: csChargingProfiles.validFrom,
       validTo: csChargingProfiles.validTo,
+      startSchedule: csChargingProfiles.chargingSchedule.startSchedule,
+      duration: csChargingProfiles.chargingSchedule.duration,
+      minChargingRate: csChargingProfiles.chargingSchedule.minChargingRate,
       chargingSchedulePeriods: periods,
     };
 
@@ -346,19 +350,19 @@ export class SetChargingProfileHandler implements CallHandler<
 }
 
 /**
- * §5.4 ClearChargingProfile.req
+ * §5.5 ClearChargingProfile.req, §6.13, §7.21
  *
- * Filter dimensions (id / purpose / stackLevel) compose with the
- * connector target the same way for both station and connector layers:
+ * Matching (errata 3.25, 3.26):
  *
- *   - `connectorId == null` → clear matching profiles from station store
- *     AND every connector.
- *   - `connectorId === 0` → station store only.
- *   - `connectorId > 0`   → that one connector.
+ *   - `id` present → that profile, wherever it is installed (station store or
+ *     any connector); every other field is ignored.
+ *   - Otherwise the given `connectorId`, `chargingProfilePurpose` and
+ *     `stackLevel` all have to match (logical AND); none given clears all.
+ *     `connectorId` absent searches the station store and every connector,
+ *     `0` the station store only, `> 0` that one connector.
  *
- * Spec note: returns Accepted as long as the request was understood,
- * even when zero profiles matched (this matches §5.4's "the CP MAY return
- * Accepted regardless of whether profiles were cleared").
+ * Answers `Unknown` ("No Charging Profile(s) were found matching the
+ * request", §7.21) when nothing was removed, `Accepted` otherwise.
  */
 export class ClearChargingProfileHandler implements CallHandler<
   ClearChargingProfileRequestV16,
@@ -375,14 +379,17 @@ export class ClearChargingProfileHandler implements CallHandler<
       LogType.OCPP,
     );
 
-    const criteria = {
-      profileId: payload.id,
-      purpose: payload.chargingProfilePurpose as
-        ChargingProfilePurposeType | undefined,
-      stackLevel: payload.stackLevel,
-    };
+    // An id overrides every other field (errata 3.26).
+    const byId = payload.id != null;
+    const criteria = byId
+      ? { profileId: payload.id }
+      : {
+          purpose: payload.chargingProfilePurpose as
+            ChargingProfilePurposeType | undefined,
+          stackLevel: payload.stackLevel,
+        };
     const cleared = context.chargePoint.clearChargingProfiles(
-      payload.connectorId ?? undefined,
+      byId ? undefined : (payload.connectorId ?? undefined),
       criteria,
       "ClearChargingProfile",
     );
@@ -413,6 +420,7 @@ export class ClearChargingProfileHandler implements CallHandler<
         "No profiles matched the clearing criteria",
         LogType.OCPP,
       );
+      return { status: "Unknown" };
     }
     return { status: "Accepted" };
   }
@@ -484,7 +492,6 @@ export class GetCompositeScheduleHandler implements CallHandler<
       scheduleStart: anchor.toISOString(),
       chargingSchedule: {
         duration,
-        startSchedule: anchor.toISOString(),
         chargingRateUnit: responseUnit,
         chargingSchedulePeriod,
       },

@@ -422,6 +422,26 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "name": "TxCtrlr",
           },
           "variable": {
+            "name": "MaxEnergyOnInvalidId",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+            "unit": "Wh",
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
             "name": "StopTxOnEVSideDisconnect",
           },
           "variableAttribute": [

@@ -530,6 +530,23 @@ An `Inoperative` availability change scheduled during a transaction remains
 `Unavailable` after the accepted reboot and continues to reject new local
 transaction starts.
 
+## OCPP 2.x BootNotification reason
+
+`BootNotificationRequest.reason` (B01.FR.09, `BootReasonEnumType`) carries the
+cause of the boot (#691). `ChargePoint.boot(reason)` remembers it until the
+boot is `Accepted`, so a retry after `Rejected` repeats it; an accepted boot
+falls back to `PowerUp`, which is also the reason of a plain (re)connect.
+
+| Cause                                                            | `reason`         |
+| ---------------------------------------------------------------- | ---------------- |
+| First boot, reconnect, renewed-certificate reconnect (A02.FR.08) | `PowerUp`        |
+| CSMS `Reset` (Immediate, or OnIdle with an idle target)          | `RemoteReset`    |
+| `Reset` OnIdle that was answered `Scheduled` and ran later       | `ScheduledReset` |
+| CSMS `TriggerMessage(BootNotification)`                          | `Triggered`      |
+| Control-plane reset (`cp.reset`, CLI / web console)              | `LocalReset`     |
+
+OCPP 1.6 has no `reason` field and is unchanged.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

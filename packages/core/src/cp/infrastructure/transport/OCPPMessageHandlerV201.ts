@@ -50,6 +50,7 @@ import type { Logger } from "../../shared/Logger";
 import { LogType } from "../../shared/Logger";
 import type {
   BootNotification,
+  BootReason,
   ChargePointErrorCode,
 } from "../../domain/types/OcppTypes";
 import {
@@ -1382,10 +1383,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     );
   }
 
-  public sendBootNotification(bootPayload: BootNotification): void {
+  public sendBootNotification(
+    bootPayload: BootNotification,
+    reason: BootReason = "PowerUp",
+  ): void {
     const messageId = this.generateMessageId();
     const payload: BootNotificationRequestV201 = {
-      reason: "PowerUp",
+      reason,
       chargingStation: {
         model: bootPayload.chargePointModel,
         vendorName: bootPayload.chargePointVendor,

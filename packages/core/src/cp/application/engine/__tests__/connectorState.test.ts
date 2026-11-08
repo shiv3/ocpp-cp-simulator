@@ -113,14 +113,14 @@ describe("connector state in the charger engine", () => {
     cp.updateConnectorStatus(1, OCPPStatus.Available);
     warnings.length = 0;
 
-    cp.updateConnectorStatus(1, OCPPStatus.Charging); // not listed after Available
+    cp.updateConnectorStatus(1, OCPPStatus.Finishing); // not listed after Available (A6)
 
-    expect(cp.getConnector(1)!.status).toBe(OCPPStatus.Charging);
+    expect(cp.getConnector(1)!.status).toBe(OCPPStatus.Finishing);
     expect(warnings).toEqual([
       expect.stringContaining("not an expected transition"),
     ]);
     warnings.length = 0;
-    cp.updateConnectorStatus(1, OCPPStatus.Finishing); // listed
+    cp.updateConnectorStatus(1, OCPPStatus.Available); // listed (F1)
     expect(warnings).toEqual([]);
   });
 

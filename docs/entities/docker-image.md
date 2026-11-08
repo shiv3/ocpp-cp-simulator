@@ -243,6 +243,19 @@ echo '{"id":1,"command":"status"}' | docker run -i --rm \
   --json --cp-id CP001 --ws-url ws://csms.example/ocpp/ --ocpp-version OCPP-1.6J
 ```
 
+CLI mode runs as the user the container was started as (root by default, or
+whatever `docker run --user` names): the entrypoint does not drop to `bun` and
+does not `chown` anything. A host directory mounted for `--trace-output`
+(`-v "$PWD/results:/trace"`) or a 0600 key / certificate file therefore works
+whatever its owner, which the daemon's `bun` user (uid 1000) cannot promise. The
+`HEALTHCHECK` passes without probing in CLI mode (the entrypoint leaves
+`/tmp/.ocpp-cli-mode`), since there is no daemon to ask.
+
+Behaviour change: before CLI mode, `--json` anywhere on the command line was
+ignored by the image, because the daemon wins in `main.ts`, and the container
+started the daemon. It now starts JSON mode, which exits 0 as soon as stdin is
+closed, so `docker run -d <image> --json …` without `-i` ends immediately.
+
 The container exits 0 when stdin reaches EOF. This is the supported way to
 drive the simulator from a test runner such as
 [open-ocpp-tck](https://github.com/juherr/open-ocpp-tck).

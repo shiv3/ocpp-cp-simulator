@@ -194,7 +194,8 @@ EXPOSE 9700
 #   3. Exec bun dist-cli/main.js as the non-root `bun` user.
 # When the first argument is `cli`, `analyze`, `export-k6` or `behavior`, or
 # `--json` is among the arguments, step 2 is skipped and the arguments go to
-# the CLI as they are (JSON mode over stdin, subcommands); #346.
+# the CLI as they are (JSON mode over stdin, subcommands), without su-exec so
+# the caller's identity (`--user`, mounted host directories) is kept; #346.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp
@@ -202,4 +203,4 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD []
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${HTTP_PORT}${HEALTH_PATH}" >/dev/null 2>&1 || exit 1
+  CMD [ -e /tmp/.ocpp-cli-mode ] || wget -qO- "http://127.0.0.1:${HTTP_PORT}${HEALTH_PATH}" >/dev/null 2>&1 || exit 1

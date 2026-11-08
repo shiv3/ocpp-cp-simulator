@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // The image's entrypoint decides between the daemon (server flags appended)
@@ -129,5 +132,34 @@ describe("docker/entrypoint.sh argument logic (#346)", () => {
     });
     expect(argv).toContain("--web-console");
     expect(argv.slice(-4)).toEqual(["--log-format", "json", "--cp-id", "cli"]);
+  });
+
+  it("runs the CLI as the calling user: bun is exec'd directly, never through su-exec", () => {
+    // Real run (no dry-run) with stub `bun` and `su-exec` on PATH. A host
+    // directory mounted for --trace-output belongs to the host user, and
+    // `--user` needs an entrypoint that does not require root.
+    const dir = mkdtempSync(join(tmpdir(), "entrypoint-"));
+    try {
+      writeFileSync(join(dir, "bun"), '#!/bin/sh\necho "bun $*"\n', {
+        mode: 0o755,
+      });
+      writeFileSync(join(dir, "su-exec"), "#!/bin/sh\necho SU-EXEC $*\nexit 9\n", {
+        mode: 0o755,
+      });
+      const proc = Bun.spawnSync(
+        ["sh", entrypoint, "--json", "--trace-output", "/trace/x.jsonl"],
+        {
+          env: { PATH: `${dir}:${process.env.PATH ?? ""}` },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(proc.stdout.toString().trim()).toBe(
+        "bun dist-cli/main.js --json --trace-output /trace/x.jsonl",
+      );
+      expect(proc.exitCode).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

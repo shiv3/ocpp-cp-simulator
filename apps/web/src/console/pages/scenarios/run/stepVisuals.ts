@@ -1,11 +1,6 @@
-import {
-  CircleDot,
-  Gauge,
-  Hourglass,
-  type LucideIcon,
-  Wrench,
-  Zap,
-} from "lucide-react";
+import type { ComponentType } from "react";
+import { CircleDot, Hourglass, Wrench } from "lucide-react";
+import { CarPlugged, ChargingSession } from "@evicons/react";
 
 import {
   NODE_FORM_REGISTRY,
@@ -34,24 +29,32 @@ export function nodeTitle(node: ScenarioNode): string {
   return entry ? t(entry.title) : (node.type ?? t("scenarioRun.step"));
 }
 
+/** A Lucide or an EVIcons component. */
+type TileIcon = ComponentType<{
+  className?: string;
+  strokeWidth?: number;
+}>;
+
 // One look per palette category of the editor's "add step" picker, so a type
 // reads the same in the picker, the step list and the run views. Full literal
 // class strings: Tailwind only sees class names written out in source.
-const CATEGORY_TILES: Record<string, { icon: LucideIcon; className: string }> =
-  {
-    Status: { icon: CircleDot, className: "bg-cx-emerald/14 text-cx-emerald" },
-    Transaction: { icon: Zap, className: "bg-cx-blue/14 text-cx-blue" },
-    "Meter & EV": { icon: Gauge, className: "bg-cx-amber/14 text-cx-amber" },
-    "Wait & Trigger": {
-      icon: Hourglass,
-      className: "bg-cx-purple/14 text-cx-purple",
-    },
-    Advanced: { icon: Wrench, className: "bg-cx-gray/14 text-cx-gray" },
-  };
+const CATEGORY_TILES: Record<string, { icon: TileIcon; className: string }> = {
+  Status: { icon: CircleDot, className: "bg-cx-emerald/14 text-cx-emerald" },
+  Transaction: {
+    icon: ChargingSession,
+    className: "bg-cx-blue/14 text-cx-blue",
+  },
+  "Meter & EV": { icon: CarPlugged, className: "bg-cx-amber/14 text-cx-amber" },
+  "Wait & Trigger": {
+    icon: Hourglass,
+    className: "bg-cx-purple/14 text-cx-purple",
+  },
+  Advanced: { icon: Wrench, className: "bg-cx-gray/14 text-cx-gray" },
+};
 
 /** The icon and colour classes of a step type's tile. */
 export function tileFor(node: ScenarioNode): {
-  icon: LucideIcon;
+  icon: TileIcon;
   className: string;
 } {
   const category = STEP_CATEGORIES.find((c) =>

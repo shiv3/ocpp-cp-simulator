@@ -152,6 +152,7 @@ describe("DashboardPage", () => {
     });
 
     expect(container.textContent).toContain("No charge points");
+    expect(container.querySelector("svg.evicon-charging-station")).toBeTruthy();
     const addButtons = Array.from(container.querySelectorAll("button")).filter(
       (b) => b.textContent?.includes("Add Charge Point"),
     );

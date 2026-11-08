@@ -80,6 +80,13 @@ describe("AppShell collapsible sidebar", () => {
     expect(scenarios!.getAttribute("title")).toBe("Scenarios");
     expect(scenarios!.getAttribute("aria-current")).toBe("page");
     expect(aside.querySelector('a[aria-label="Run History"]')).toBeTruthy();
+    // Charge Points is a domain entity: its icon comes from EVIcons, and the
+    // link keeps its name when only the icon is left.
+    expect(
+      aside.querySelector(
+        'a[aria-label="Charge Points"] svg.evicon-charging-station',
+      ),
+    ).toBeTruthy();
     // The version line lives in the footer, so folding the sidebar keeps it.
     expect(aside.textContent).not.toContain("ocpp-cp-simulator");
     expect(document.querySelector("footer")!.textContent).toContain(

@@ -15,7 +15,7 @@ const StepTile: React.FC<{ node: ScenarioNode }> = ({ node }) => {
         className,
       )}
     >
-      <Icon className="h-3.5 w-3.5" />
+      <Icon strokeWidth={2} className="h-3.5 w-3.5" />
     </span>
   );
 };

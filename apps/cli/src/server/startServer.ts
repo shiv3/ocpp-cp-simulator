@@ -793,6 +793,18 @@ export async function startServer(
     );
   }
   await forEachPaced(started, pacing, async ({ svc, init }) => {
+    // The service captured at registration may be gone by now: the item waited
+    // for a concurrency slot and, with `--start-delay`, for its scheduled
+    // offset (minutes, not milliseconds). A `cp.delete` has already torn it
+    // down, and a `cp.update` registered a replacement under the same id, so
+    // dialling this one would connect a charge point nobody owns or leave two
+    // connections for one cpId (#610).
+    if (registry.get(init.cpId) !== svc) {
+      serverLog(
+        `Skipping startup of ${init.cpId}: it was deleted or replaced before its turn`,
+      );
+      return;
+    }
     // Install BEFORE the dial, start after (#314). The two halves used to be
     // one call placed after `connect()`, and with a restored `--state-db`
     // that left the boot gate auto-starting the *previous* boot's copy of

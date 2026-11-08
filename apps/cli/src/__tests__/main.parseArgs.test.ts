@@ -1250,4 +1250,44 @@ describe("parseArgs startup pacing (#610)", () => {
     expect(noCp.status).toBe(1);
     expect(noCp.stderr).toContain("--start-delay needs a server mode");
   });
+
+  it("refuses the flags combined with a client mode, even next to --http-port", () => {
+    const result = runParseArgs([
+      "--http-port",
+      "9700",
+      "--send",
+      '{"method":"cp.list"}',
+      "--cp-id",
+      "CP",
+      "--start-delay",
+      "10",
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "--start-delay cannot be combined with a client mode",
+    );
+  });
+
+  it("refuses a schedule longer than a timer can hold, and accepts the largest one", () => {
+    const tooLong = runParseArgs([...DAEMON, "--start-delay", "200000000"]);
+    expect(tooLong.status).toBe(1);
+    expect(tooLong.stderr).toContain("must not exceed 2147483647 ms");
+    // (20 - 1) × 113025455 = 2147483645, plus a jitter of 2.
+    const edge = runParseArgs([
+      ...DAEMON,
+      "--start-delay",
+      "113025455",
+      "--start-jitter",
+      "2",
+    ]);
+    expect(edge.status).toBe(0);
+    const over = runParseArgs([
+      ...DAEMON,
+      "--start-delay",
+      "113025455",
+      "--start-jitter",
+      "3",
+    ]);
+    expect(over.status).toBe(1);
+  });
 });

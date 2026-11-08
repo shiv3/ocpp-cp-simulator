@@ -108,6 +108,16 @@ ocpp-cp-sim --daemon --http-host 0.0.0.0 \
 | `--oed-base-url <url\|none>`        | `OED_BASE_URL`, else public  | [Open EV Directory](open-ev-directory.md) API the console imports [vehicle profiles](../concepts/vehicle-profiles.md) through, with the daemon's key if any (#458). Default `https://evdb.juherr.dev`; `none` turns import off (`vehicle_catalog.*` answers `unavailable`).                                                                                                                                                                                                                                                                                                                     |
 | `--oed-api-key-file <path>`         | `OED_API_KEY_FILE`           | File holding the Open EV Directory API key (a Docker secret, say); else `OED_API_KEY_FILE`, else the key in `OED_API_KEY`. Unreadable or empty: exit 1. No flag takes the key itself (`ps` shows a command line).                                                                                                                                                                                                                                                                                                                                                                               |
 
+The four startup pacing flags (`--bootstrap-concurrency`, `--start-delay`,
+`--start-jitter`, `--start-seed`, #610) need `--cp-id` and a server mode, and
+are refused with exit code 1 next to a client mode (`--send`, `--stop`,
+`--events`), outside a server mode, or when `(--cp-count - 1) × --start-delay +
+--start-jitter` exceeds 2147483647 ms (the longest timer; a longer schedule
+would collapse silently). They pace only the charge points this command line
+bootstraps: charge points restored from `--state-db` are not paced. A charge
+point deleted (`cp.delete`) or replaced (`cp.update`) while it waits for its
+slot or offset is skipped, with a log line, rather than dialled.
+
 The full flag list, including the CP-bootstrap and startup-scenario flags, is
 in [CLI → CLI Options](cli.md#cli-options).
 

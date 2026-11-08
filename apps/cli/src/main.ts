@@ -995,6 +995,15 @@ export function parseArgs(argv: string[]): CLIOptions {
       process.exit(1);
     }
     pacingValues[flag] = value;
+    if (isClientMode) {
+      // `--http-port` satisfies the server-mode check below, so without this
+      // `--http-port 9700 --send … --start-delay 10` would be accepted and
+      // ignored, the hole --watch (#314) and --label (#472) already close.
+      process.stderr.write(
+        `Error: ${flag} cannot be combined with a client mode (--send, --stop or --events); it paces the charge points a server starts\n`,
+      );
+      process.exit(1);
+    }
     if (!isServerMode || !cpId) {
       process.stderr.write(
         `Error: ${flag} needs a server mode (--daemon, --http-port or --web-console) and --cp-id\n`,
@@ -1005,6 +1014,19 @@ export function parseArgs(argv: string[]): CLIOptions {
   if (startSeed !== undefined && startJitter === undefined) {
     process.stderr.write(
       "Error: --start-seed has no effect without --start-jitter\n",
+    );
+    process.exit(1);
+  }
+  // setTimeout fires after 1 ms when its delay exceeds 2^31-1 ms (about 24.8
+  // days), which would silently collapse the schedule for the later charge
+  // points, so the last scheduled offset must stay below that.
+  const MAX_TIMER_MS = 2 ** 31 - 1;
+  const lastOffsetMs =
+    (Math.max(cpCount, 1) - 1) * (pacingValues["--start-delay"] ?? 0) +
+    (pacingValues["--start-jitter"] ?? 0);
+  if (lastOffsetMs > MAX_TIMER_MS) {
+    process.stderr.write(
+      `Error: (--cp-count - 1) × --start-delay + --start-jitter must not exceed ${MAX_TIMER_MS} ms (about 24.8 days), got ${lastOffsetMs}\n`,
     );
     process.exit(1);
   }
@@ -1367,7 +1389,7 @@ Options:
                            starts of consecutive charge points (default: 0).
   --start-jitter <ms>      Server mode: push each start back by a seeded
                            random 0..ms-1 (default: 0).
-  --start-seed <n>         Seed of --start-jitter (default: 0); the same seed
+  --start-seed <n>         Server mode: seed of --start-jitter (default: 0); the same seed
                            gives the same schedule.
   --label <key=value>      Server mode: label every bootstrapped charge point.
                            Repeatable; split on the first '='. Requires

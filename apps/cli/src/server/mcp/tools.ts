@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
@@ -51,6 +52,49 @@ function errorResult(err: unknown): ToolCallResult {
     content: [{ type: "text", text: "internal" }],
     isError: true,
   };
+}
+
+export const TAIL_LOGS_DEFAULT_LINES = 50;
+export const TAIL_LOGS_MAX_LINES = 1000;
+
+const LOG_LEVEL_RANK: Record<string, number> = {
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3,
+};
+
+/** The last `lines` entries that pass the filters, oldest first. */
+export function tailLogEntries(
+  entries: unknown,
+  opts: { lines?: number; level?: string; type?: string; contains?: string },
+): unknown[] {
+  const all = Array.isArray(entries) ? entries : [];
+  const minRank = opts.level ? LOG_LEVEL_RANK[opts.level] : undefined;
+  const needle = opts.contains?.toLowerCase();
+  const kept = all.filter((e) => {
+    const entry = (e ?? {}) as Record<string, unknown>;
+    if (minRank !== undefined) {
+      // Stored entries carry the LogLevel number; accept the name as well.
+      const rank =
+        typeof entry.level === "number"
+          ? entry.level
+          : LOG_LEVEL_RANK[String(entry.level).toUpperCase()];
+      if (rank === undefined || rank < minRank) return false;
+    }
+    if (opts.type !== undefined && entry.type !== opts.type) return false;
+    if (needle !== undefined) {
+      if (
+        !String(entry.message ?? "")
+          .toLowerCase()
+          .includes(needle)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+  return kept.slice(-(opts.lines ?? TAIL_LOGS_DEFAULT_LINES));
 }
 
 export function registerTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
@@ -963,6 +1007,53 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           },
         });
         return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("tail_logs", {
+    description:
+      "Read the end of a charge point's log: the last `lines` entries " +
+      "(default 50, at most 1000), oldest first, so the final element is the " +
+      "newest. Optional filters are applied before the tail is taken: " +
+      "`level` keeps entries at that level or more severe, `type` keeps " +
+      "entries of one log type (e.g. OCPP, WebSocket), `contains` keeps " +
+      "entries whose message contains the text (case-insensitive). Use " +
+      "get_logs to page further back.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      lines: z
+        .number()
+        .int()
+        .min(1)
+        .max(TAIL_LOGS_MAX_LINES)
+        .optional()
+        .describe(
+          `Number of entries to return (default ${TAIL_LOGS_DEFAULT_LINES})`,
+        ),
+      level: z
+        .enum(["DEBUG", "INFO", "WARN", "ERROR"])
+        .optional()
+        .describe("Keep entries at this level or more severe"),
+      type: z
+        .enum(Object.values(LogType) as [LogType, ...LogType[]])
+        .optional()
+        .describe("Keep entries of this log type"),
+      contains: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Keep entries whose message contains this text"),
+    }),
+    handler: async (args) => {
+      try {
+        const entries = await runRpc(deps, {
+          method: "logs.get",
+          params: { cpId: args.cpId },
+        });
+        return successResult(tailLogEntries(entries, args));
       } catch (err) {
         return errorResult(err);
       }

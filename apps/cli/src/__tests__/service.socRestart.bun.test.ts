@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { CLIChargePointService } from "../service";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
 import type { ChargePointInitOptions } from "../types";
 import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type { Transaction } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";

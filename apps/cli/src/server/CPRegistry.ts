@@ -34,8 +34,8 @@ import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
 import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
-import { perChargePointTables } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
-import { buildUpsert } from "@ocpp-cp-simulator/core/cp/domain/persistence/upsert";
+import { perChargePointTables } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
+import { buildUpsert } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/upsert";
 import {
   labelsSchema,
   matchesLabelSelector,
@@ -43,15 +43,15 @@ import {
   type Labels,
 } from "@ocpp-cp-simulator/contracts/labels";
 import { transportConfigSchema } from "@ocpp-cp-simulator/contracts/transportConfig";
-import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRunRepository";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
 import type { ChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createChargingSessionRepository";
 import {
   InMemoryScenarioRepository,
   type ScenarioRepository,
-} from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
-import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRepository";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
+import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by

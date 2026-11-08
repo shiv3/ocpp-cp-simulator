@@ -2,8 +2,8 @@ import {
   MAX_VEHICLE_PROFILES,
   vehicleProfileSchema,
 } from "@ocpp-cp-simulator/contracts/vehicle";
-import type { VehicleProfile } from "../vehicle/VehicleProfile";
-import type { Database } from "./Database";
+import type { VehicleProfile } from "../../domain/vehicle/VehicleProfile";
+import type { Database } from "../../domain/persistence/Database";
 
 interface VehicleProfileRow {
   body: string;

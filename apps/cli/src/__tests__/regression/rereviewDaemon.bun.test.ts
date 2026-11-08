@@ -3,8 +3,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
 import { behaviorsOfModule } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorModule";
 import { EventBus } from "../../server/eventBus";
 import { CPRegistry } from "../../server/CPRegistry";

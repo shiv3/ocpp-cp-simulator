@@ -6,9 +6,9 @@ import {
   InMemoryChargingSessionRepository,
   MAX_SESSIONS_PER_CP,
   type ChargingSessionRepository,
-} from "../ChargingSessionRepository";
+} from "../../../domain/persistence/ChargingSessionRepository";
 import { SqliteChargingSessionRepository } from "../SqliteChargingSessionRepository";
-import type { ChargingSession } from "../../session/ChargingSession";
+import type { ChargingSession } from "../../../domain/session/ChargingSession";
 import {
   chargingSession,
   UNENDED,

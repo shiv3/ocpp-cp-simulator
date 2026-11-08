@@ -1,8 +1,8 @@
-import type { Database } from "./Database";
+import type { Database } from "../../domain/persistence/Database";
 import {
   InMemoryChargingSessionRepository,
   type ChargingSessionRepository,
-} from "./ChargingSessionRepository";
+} from "../../domain/persistence/ChargingSessionRepository";
 import { SqliteChargingSessionRepository } from "./SqliteChargingSessionRepository";
 
 /** The session history for a daemon (#447): the `charging_sessions` table on

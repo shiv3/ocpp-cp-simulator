@@ -2,7 +2,7 @@ import {
   fleetTemplateSchema,
   type FleetTemplate,
 } from "@ocpp-cp-simulator/contracts/index";
-import type { Database } from "./Database";
+import type { Database } from "../../domain/persistence/Database";
 
 interface FleetTemplateRow {
   id: string;

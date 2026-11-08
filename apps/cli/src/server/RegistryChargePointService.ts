@@ -57,14 +57,14 @@ import type {
   ChargingSessionQuery,
 } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
-import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
+import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
 import {
   PowerStateError,
   type PowerLossOptions,
   type PowerRestoreOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { clearStartupProvenance } from "./startupScenarioRows";
-import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/domain/persistence/resetState";
+import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/resetState";
 import type {
   OCPPAvailability,
   OCPPStatus,

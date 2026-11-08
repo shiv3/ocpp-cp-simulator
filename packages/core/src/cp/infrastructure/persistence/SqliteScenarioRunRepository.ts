@@ -1,5 +1,5 @@
 import type { ScenarioRunResult } from "../../application/verification/ScenarioAssertions";
-import type { Database, SqlParam } from "./Database";
+import type { Database, SqlParam } from "../../domain/persistence/Database";
 import { parseStoredJson } from "./parseStoredJson";
 import { buildUpsert } from "./upsert";
 import {
@@ -11,7 +11,7 @@ import {
 import {
   MAX_RUNS_PER_CP,
   type ScenarioRunRepository,
-} from "./ScenarioRunRepository";
+} from "../../application/verification/ScenarioRunRepository";
 
 /**
  * `scenario_runs`-backed run history (#388), for a daemon started with

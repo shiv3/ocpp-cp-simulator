@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import { ChargePoint } from "../../charge-point/ChargePoint";
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
-import { SqliteConnectorRuntimeRepository } from "../../persistence/SqliteConnectorRuntimeRepository";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
+import { SqliteConnectorRuntimeRepository } from "../../../infrastructure/persistence/SqliteConnectorRuntimeRepository";
 import { DefaultBootNotification, OCPPStatus } from "../../types/OcppTypes";
 import { Connector } from "../Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";

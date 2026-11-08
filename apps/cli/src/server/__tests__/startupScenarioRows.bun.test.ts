@@ -1,7 +1,7 @@
 // Runs under `bun test`: the daemon's state DB is `bun:sqlite`.
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { CLIChargePointService } from "../../service";

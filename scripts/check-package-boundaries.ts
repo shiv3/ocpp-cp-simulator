@@ -219,7 +219,7 @@ export const SPECIFIER_ALLOW_LIST: Readonly<
     { readonly specifiers: readonly string[]; readonly why: string }
   >
 > = {
-  "packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts": {
+  "packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts": {
     specifiers: ["bun:sqlite", "node:path", "node:fs"],
     why: "The Bun-only Database implementation behind the daemon's state file. Never reached from the browser bundle (browserBundleNoDaemonXml.bun.test.ts guards that); the web console uses SqlJsDatabase instead.",
   },
@@ -339,32 +339,6 @@ export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
     from: "packages/core/src/cp/domain/connector/Connector.ts",
     to: `packages/core/src/cp/${t}`,
     why: "Connector holds the scenario manager and its types; clears with the ChargePoint / Connector split (#575).",
-  })),
-  {
-    from: "packages/core/src/cp/domain/persistence/ScenarioRepository.ts",
-    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
-    why: "The repository port names the scenario types; clears when they move to domain (#573).",
-  },
-  ...[
-    "application/verification/ScenarioAssertions.ts",
-    "application/verification/ScenarioRunSummary.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/persistence/ScenarioRunRepository.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "The repository port names the run summary types; clears when they move to domain (#573).",
-  })),
-  {
-    from: "packages/core/src/cp/domain/persistence/SqliteScenarioRepository.ts",
-    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
-    why: "SQLite implementation lives in domain; clears when it moves to infrastructure (#573).",
-  },
-  ...[
-    "application/verification/ScenarioAssertions.ts",
-    "application/verification/ScenarioRunSummary.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/persistence/SqliteScenarioRunRepository.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "SQLite implementation lives in domain; clears when it moves to infrastructure (#573).",
   })),
 ];
 

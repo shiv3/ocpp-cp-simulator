@@ -9,7 +9,7 @@ import {
   InMemoryScenarioRunRepository,
   MAX_RUNS_PER_CP,
   type ScenarioRunRepository,
-} from "../ScenarioRunRepository";
+} from "../../../application/verification/ScenarioRunRepository";
 import { SqliteScenarioRunRepository } from "../SqliteScenarioRunRepository";
 import type { ScenarioRunResult } from "../../../application/verification/ScenarioAssertions";
 import { summarizeRun } from "../../../application/verification/ScenarioRunSummary";

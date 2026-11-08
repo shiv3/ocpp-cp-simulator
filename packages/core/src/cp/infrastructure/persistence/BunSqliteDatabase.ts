@@ -2,7 +2,11 @@ import { Database as BunDB } from "bun:sqlite";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 
-import type { Database, SqlParam, SqlRow } from "./Database";
+import type {
+  Database,
+  SqlParam,
+  SqlRow,
+} from "../../domain/persistence/Database";
 import { runMigrations } from "./schema";
 
 /**

@@ -1,4 +1,4 @@
-import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/VehicleProfileRepository";
+import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
@@ -45,20 +45,20 @@ import {
 } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 import type { AutoMeterValueSetting } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
-import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/domain/persistence/resetState";
+import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/resetState";
 import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { behaviorsOfModule } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorModule";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
-import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRunRepository";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
 } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import { appVersionString } from "../../lib/appBuildLabel";
-import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
 import type {
   BootNotification,
   OCPPStatus,
@@ -123,7 +123,7 @@ import type {
   ChargingSessionQuery,
   ChargingSessionRepository,
 } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createChargingSessionRepository";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,

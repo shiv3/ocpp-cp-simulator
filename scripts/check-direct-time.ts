@@ -301,34 +301,10 @@ export const EXEMPTIONS: readonly Exemption[] = [
   // behaviour, never on the wire, and the repositories are built outside a
   // charge point.
   {
-    file: "packages/core/src/cp/domain/persistence/BlueprintRepository.ts",
-    kind: "new Date()",
-    count: 1,
-    reason: "updated_at of a stored blueprint row",
-  },
-  {
-    file: "packages/core/src/cp/domain/persistence/ScenarioRepository.ts",
+    file: "packages/core/src/cp/application/scenario/ScenarioRepository.ts",
     kind: "new Date()",
     count: 1,
     reason: "updatedAt default of a stored scenario",
-  },
-  {
-    file: "packages/core/src/cp/domain/persistence/SqliteScenarioRepository.ts",
-    kind: "new Date()",
-    count: 1,
-    reason: "updatedAt default of a stored scenario",
-  },
-  {
-    file: "packages/core/src/cp/domain/persistence/SqliteConnectorRuntimeRepository.ts",
-    kind: "new Date()",
-    count: 1,
-    reason: "saved_at of a stored connector snapshot",
-  },
-  {
-    file: "packages/core/src/cp/domain/persistence/EngineStateRepository.ts",
-    kind: "new Date()",
-    count: 1,
-    reason: "updated_at stamp of the stored engine state row",
   },
   // Pure helpers whose `now` parameter defaults to the platform clock. Every
   // production caller (Connector, ChargePoint) passes the injected clock's

@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { CLIChargePointService } from "../../service";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
-import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
-import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
 import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";

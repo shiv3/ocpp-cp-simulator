@@ -10,8 +10,8 @@ import {
 } from "../schema";
 import { SqliteConnectorRuntimeRepository } from "../SqliteConnectorRuntimeRepository";
 import { legacyGeneratedBaseId } from "../legacyStartupInstances";
-import type { ConnectorRuntimeSnapshot } from "../ConnectorRuntimeRepository";
-import { OCPPStatus } from "../../types/OcppTypes";
+import type { ConnectorRuntimeSnapshot } from "../../../domain/persistence/ConnectorRuntimeRepository";
+import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 /** Names of the tables in `db`. */
 function tables(db: BunSqliteDatabase): string[] {

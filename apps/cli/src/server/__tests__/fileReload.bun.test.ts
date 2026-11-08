@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import {
   startMockCsms,

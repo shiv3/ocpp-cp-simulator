@@ -19,6 +19,7 @@ import {
   type RemoteHealth,
 } from "../data/hooks/useRemoteHealth";
 import ThemeToggle from "../components/ThemeToggle";
+import LanguageToggle from "../components/LanguageToggle";
 import AppBuildInfo from "../components/AppBuildInfo";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
 
@@ -228,7 +229,10 @@ const AppShell: React.FC = () => {
                   {isRemote ? "Remote mode" : "Local mode"}
                 </span>
               </span>
-              <ThemeToggle />
+              <div className="flex items-center">
+                <LanguageToggle />
+                <ThemeToggle />
+              </div>
             </div>
             {!collapsed && (
               <div

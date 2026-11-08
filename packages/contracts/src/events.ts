@@ -174,6 +174,9 @@ const simulatorConfigBaseSchema = z
     connectorNumber: z.number().int().min(0),
     tagID: STR_64K,
     ocppVersion: STR_64K,
+    // #550: browser local mode has one shared config, so the per-charge-point
+    // #347 option is shared there too. Absent means off.
+    txUpdatedMeterValues: z.boolean().optional(),
     basicAuthSettings: wireBasicAuthSettingsSchema,
     autoMeterValueSetting: z
       .object({

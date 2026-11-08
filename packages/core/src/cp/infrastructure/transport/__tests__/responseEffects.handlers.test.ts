@@ -52,6 +52,7 @@ function buildContext() {
       [1, { id: 1 }],
       [2, { id: 2 }],
     ]),
+    getConnector: (id: number) => (id === 1 || id === 2 ? { id } : undefined),
   };
 
   const realEngine = new ChargerEngine(chargePoint as unknown as ChargePoint);

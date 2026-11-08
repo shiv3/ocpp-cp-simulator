@@ -191,6 +191,27 @@ export const goldenCases: GoldenCase[] = [
       await settle(rig);
     }
   }),
+  // 1.6 section 5.17: a connector that does not exist is Rejected up front
+  // for the messages that need one; Heartbeat takes none and is still sent.
+  c16("trigger-message-unknown-connector", async (rig) => {
+    for (const requestedMessage of ["StatusNotification", "MeterValues"]) {
+      await rig.csms.call("TriggerMessage", {
+        requestedMessage,
+        connectorId: 99,
+      });
+      await settle(rig);
+      await rig.csms.call("ExtendedTriggerMessage", {
+        requestedMessage,
+        connectorId: 99,
+      });
+      await settle(rig);
+    }
+    await rig.csms.call("TriggerMessage", {
+      requestedMessage: "Heartbeat",
+      connectorId: 99,
+    });
+    await settle(rig);
+  }),
   ...both("trigger-message-unsupported", async (rig) => {
     await rig.csms.call("TriggerMessage", {
       requestedMessage: "NoSuchMessage",

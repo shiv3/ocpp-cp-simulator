@@ -30,6 +30,13 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
       LogType.OCPP,
     );
 
+    // #618: a target the capability profile leaves out is not implemented.
+    if (
+      !context.chargePoint.isTriggerTargetSupported(payload.requestedMessage)
+    ) {
+      return { status: "NotImplemented" };
+    }
+
     switch (payload.requestedMessage) {
       case "StatusNotification": {
         const response = { status: "Accepted" } as const;

@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -187,7 +187,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   tx_updated_meter_values INTEGER,
   -- #593: off | warn | enforce, the OCPP 1.6J inbound CALL validation mode.
   -- NULL (a row older than the column) is the default, warn.
-  inbound_validation TEXT
+  inbound_validation TEXT,
+  -- #618: JSON static capability profile; NULL is none.
+  capability_profile TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"
@@ -748,6 +750,15 @@ export function runMigrations(db: Database): void {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     if (!new Set(cols.map((c) => c.name)).has("inbound_validation")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN inbound_validation TEXT");
+    }
+  }
+
+  // v25 → v26 (#618): `charge_points.capability_profile` (JSON). Existing
+  // rows stay NULL, which restores as no profile.
+  if (stored < 26) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("capability_profile")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN capability_profile TEXT");
     }
   }
 

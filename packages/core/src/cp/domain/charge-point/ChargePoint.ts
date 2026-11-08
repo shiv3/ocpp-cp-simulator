@@ -3,6 +3,12 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
+import {
+  isActionDisabled,
+  isTriggerTargetSupported,
+  type ChargePointCapabilityProfile,
+} from "./CapabilityProfile";
+import { translatesCsmsActionNames } from "../types/csmsActionNames";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { setTimeoutAt } from "../../shared/timers";
 import { realClock } from "../../shared/clock";
@@ -274,6 +280,8 @@ export type InboundValidationMode = "off" | "warn" | "enforce";
 export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
 
 export interface ChargePointTransportOptions {
+  /** Static capability profile (#618). Absent: nothing is disabled. */
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** OCPP 1.6J only. Default `warn`. */
   readonly inboundValidation?: InboundValidationMode;
   readonly centralSystemUrl?: string;
@@ -416,6 +424,26 @@ export class ChargePoint {
   } | null = null;
 
   private _inboundValidation: InboundValidationMode;
+  private readonly _capabilityProfile: ChargePointCapabilityProfile | undefined;
+
+  /** See {@link ChargePointCapabilityProfile}. */
+  get capabilityProfile(): ChargePointCapabilityProfile | undefined {
+    return this._capabilityProfile;
+  }
+
+  /** Is the inbound `action` disabled by the capability profile (#618)? */
+  isActionDisabled(action: string): boolean {
+    return isActionDisabled(
+      this._capabilityProfile,
+      action,
+      translatesCsmsActionNames(this._ocppVersion),
+    );
+  }
+
+  /** May TriggerMessage request `target` under the capability profile (#618)? */
+  isTriggerTargetSupported(target: string): boolean {
+    return isTriggerTargetSupported(this._capabilityProfile, target);
+  }
 
   /** See {@link InboundValidationMode}. Read on every inbound CALL. */
   get inboundValidation(): InboundValidationMode {
@@ -461,6 +489,7 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._inboundValidation =
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.

@@ -12,6 +12,8 @@ import type { CallExchange } from "./CallExchange";
  * 1. `incomingCallReceived`, announced to the scenario layer and the control plane
  * 2. `inboundPolicy` (sticky): reply with a CALLERROR, or stay silent
  * 3. `responseOverride` (one-shot): reply `{ status }`
+ * 3b. the static capability profile (#618): reply CALLERROR `NotImplemented`
+ *    for a disabled action
  * 4. `BehaviorRegistry.resolve()`, synchronous
  * 5. otherwise: the default path, which the caller runs
  *
@@ -43,6 +45,8 @@ export interface InboundCallGatePorts {
    * not a `{ status }`, so the real handler answers.
    */
   takeOverride(action: string): { status: string } | "unhonoured" | null;
+  /** Step 3b: does the station's capability profile disable `action`? */
+  isDisabled?(action: string): boolean;
 }
 
 export interface InboundCallGateOptions {
@@ -121,6 +125,17 @@ export class InboundCallGate {
       return { kind: "settled" };
     }
 
+    if (ports.isDisabled?.(action)) {
+      // #618: the station is declared as lacking this feature. Below the
+      // sticky policy and the one-shot override (a scenario keeps
+      // precedence), above rules and handlers, which never see the CALL.
+      this.options.warn(
+        `${this.prefix}Capability profile: ${action} is not implemented, replied CallError(NotImplemented)`,
+      );
+      exchange.replyError("NotImplemented", "This action is not supported");
+      return { kind: "settled" };
+    }
+
     const connectorId = connectorIdOf(payload);
     const resolution = this.registry.resolve(
       {
@@ -164,8 +179,10 @@ export function ports16(chargePoint: {
   ): void;
   getInboundCallPolicy(action: string): InboundCallPolicy | undefined;
   consumeResponseOverride(action: string): string | null;
+  isActionDisabled?(action: string): boolean;
 }): InboundCallGatePorts {
   return {
+    isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => chargePoint.getInboundCallPolicy(action),
@@ -192,10 +209,12 @@ export function portsAliased(
     hasResponseOverride(action: string): boolean;
     consumeResponseOverride(action: string): string | null;
     clearResponseOverride(action: string): void;
+    isActionDisabled?(action: string): boolean;
   },
   statusless: ReadonlySet<string>,
 ): InboundCallGatePorts {
   return {
+    isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => {

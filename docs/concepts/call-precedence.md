@@ -1,7 +1,7 @@
 ---
 title: Who answers an inbound CALL
 type: concept
-summary: The order in which the five ways to answer a CSMS CALL are tried — inbound policy, response override, a running scenario, a code behavior, the default — and how the scenario parking of RemoteStart / RemoteStop relates to it.
+summary: The order in which the ways to answer a CSMS CALL are tried — inbound policy, response override, a running scenario, a code behavior, the default — and how the scenario parking of RemoteStart / RemoteStop relates to it.
 sources:
   - packages/core/src/cp/infrastructure/transport/inbound/InboundCallGate.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts
@@ -11,6 +11,9 @@ sources:
   - packages/core/src/test/behavior/precedence.bun.test.ts
   - packages/core/src/cp/application/behavior/__tests__/BehaviorRegistry.test.ts
   - "issue #566"
+  - "issue #618"
+  - packages/core/src/cp/domain/charge-point/CapabilityProfile.ts
+  - packages/core/src/cp/infrastructure/transport/__tests__/capabilityProfile.bun.test.ts
 related:
   - charger-engine.md
   - scenario-format.md
@@ -37,6 +40,7 @@ always, and a scenario never has to be told about a fleet-wide `--behavior` file
 | --- | ------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------- |
 | 1   | Inbound policy            | `inboundPolicy` scenario node, control plane                                                                  | Until cleared (sticky, survives a reconnect)   | everything below |
 | 2   | Response override         | `responseOverride` scenario node, control plane                                                               | One CALL (one-shot)                            | 3 to 6           |
+| 2b  | Capability profile        | `capabilityProfile` of `cp.create` / a blueprint (#618)                                                       | The charge point's life (static)               | 3 to 6           |
 | 3   | Scenario rule             | `csmsCallTrigger` with `behavior: "replace"` (schema 1.5)                                                     | Until its exchange is answered or the run ends | 4 to 6           |
 | 4   | Code behavior rule        | `onCall` of a loaded `Behavior` (mode `replace` or `extend`)                                                  | While the behavior is loaded                   | 5, 6             |
 | 5   | Default behavior          | [`default.*`](../entities/default-behaviors.md)                                                               | Always                                         | —                |
@@ -52,6 +56,29 @@ On OCPP 1.6J the payload of a CALL that reaches steps 5 and 6 is then validated 
 (`off` / `warn` / `enforce`, default `warn`; see
 [Inbound CALL validation on OCPP-J 1.6](ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16)).
 Policies and overrides are consulted before validation, as on 2.x, so a policy can answer a malformed CALL.
+
+### Capability profile
+
+A charge point can be declared as lacking features (#618) with `capabilityProfile` in `cp.create` (or in a
+blueprint's `params`, so `cp.create_many { blueprintId }` yields the partial station fleet-wide):
+
+- `disabledActions`: CSMS→CP action names. An inbound CALL for one is answered with a CALLERROR
+  `NotImplemented` ("This action is not supported"), the same answer an action with no handler gets
+  (OCPP-J 1.6 §4.2.3). On OCPP 2.x an action is matched under its 1.6 spelling too (`RemoteStartTransaction`
+  disables `RequestStartTransaction`); on 1.6 only the exact name counts, so disabling `TriggerMessage` leaves
+  `ExtendedTriggerMessage` working.
+- `triggerMessageTargets`: the `requestedMessage` values `TriggerMessage` and `ExtendedTriggerMessage` may
+  request; any other value is answered with the status `NotImplemented` (1.6 §5.17, 2.x F06). `[]` supports
+  none; absent leaves every target as it is.
+
+The profile is step 2b: below the sticky policy and the one-shot override, so **a scenario keeps precedence**
+(a policy refuses with its own error code, an override answers its status), and above scenario rules, code
+behaviors and handlers, which never see a disabled CALL. The `incomingCallReceived` event still fires. The
+profile is static: a scenario cannot change it. It is not consulted for OCPP-S 1.6 (SOAP), which does not pass
+through the gate either. No profile is the behavior before #618. It persists with `--state-db`
+(`charge_points.capability_profile`).
+
+Test: `packages/core/src/cp/infrastructure/transport/__tests__/capabilityProfile.bun.test.ts`.
 
 ### Within a step
 

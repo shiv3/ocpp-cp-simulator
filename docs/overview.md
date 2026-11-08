@@ -5,7 +5,7 @@ summary: Master summary of the OCPP CP Simulator — what it is, how the pieces 
 sources:
   - scripts/check-package-boundaries.ts
   - "issue #578"
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP CP Simulator — overview
@@ -138,6 +138,7 @@ Rules the check enforces:
 - Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
 - `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
 - A file under `packages/` or `apps/` that matches no `PACKAGE_MAP` entry fails the check, so a new workspace directory has to be registered on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
+- Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The imports that break the rule today are the `LAYER_EXEMPTIONS` list in the script (26 entries, each with the follow-up that clears it: [#573](sources/github-issues.md), [#575](sources/github-issues.md)); a new violation fails, and so does an entry that no longer matches, so the list only shrinks. The goal of the epic ([#577](sources/github-issues.md)) is an empty list.
 - A file under `packages/` or `apps/`, test files included, may not reach itself through static value imports, in one package or across several; there is no allow-list for this rule. `import`, a side-effect import, `export … from` (`export *` included, even of a types-only module) and `require` count; `import type`, `export type … from`, `import("x").T` and a dynamic `import()` do not ([#570](sources/github-issues.md)). The ESLint rule `@typescript-eslint/consistent-type-imports` makes an import used only as a type say so, or it would count here. `scripts/` and `e2e/` are not scanned.
 
 ## Where to read next
@@ -149,4 +150,4 @@ Rules the check enforces:
 | Writing a scenario                   | [Scenario format](concepts/scenario-format.md), [Scenario templates](entities/scenario-templates.md)           |
 | Deploying                            | [Docker image](entities/docker-image.md), [Access control](concepts/access-control.md)                         |
 | Debugging a session                  | [analyze](entities/analyze.md), [Log format](concepts/log-format.md), [Trace format](concepts/trace-format.md) |
-| Maintaining this wiki (human or LLM) | [Conventions](conventions.md), [`CLAUDE.md`](../CLAUDE.md), [Index](index.md), [Log](log.md)                   |
+| Maintaining this wiki (human or LLM) | [Conventions](conventions.md), [`CLAUDE.md`](../CLAUDE.md), [Index](index.md), [Log archive](log.md)           |

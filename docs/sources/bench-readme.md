@@ -737,7 +737,7 @@ sandboxes. See
 [Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
 for what to record once someone runs it, and
 [Roadmap → 5a](../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling)
-for how that number gates 5b (a worker model).
+for how that number feeds 5b (a worker model, under consideration in a separate issue; see the follow-up issue).
 
 ## engineScale.ts
 

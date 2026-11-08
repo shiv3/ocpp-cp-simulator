@@ -764,6 +764,9 @@ and changes nothing.
 
 ### Scenario run history
 
+(Local mode keeps the same history in the browser's sql.js database, #394;
+see [Local vs Remote mode](local-vs-remote-mode.md).)
+
 Every finished scenario run — natural end, error or operator stop — leaves its
 report (the object [`scenario_report`](#cp-command-methods) returns) in the
 daemon's run history (#388). A run that is still in flight when its scenario
@@ -801,7 +804,7 @@ without a verdict and leaves no report. One history serves the whole daemon:
 - **`stopped`** is `true` when an operator stopped the run; a report recorded
   before the field existed has none, which reads as not stopped.
 
-Local mode records no runs ([Local vs Remote mode](local-vs-remote-mode.md#consequences)).
+Local mode records the same runs in the browser database ([Local vs Remote mode](local-vs-remote-mode.md)).
 
 ### Vehicle profiles and catalog
 

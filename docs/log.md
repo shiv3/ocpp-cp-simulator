@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.

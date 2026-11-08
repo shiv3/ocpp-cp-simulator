@@ -8,6 +8,7 @@ sources:
   - packages/core/src/cp/domain/charge-point/ChargingProfileStore.ts
   - packages/core/src/cp/infrastructure/transport/handlers/call/SmartChargingHandlers.ts
   - "issue #723"
+  - "issue #729"
 related:
   - charging-sessions.md
   - charger-engine.md
@@ -61,3 +62,17 @@ schedule; `validFrom` / `validTo` only bound when the profile may apply.
 Selection itself is unchanged: on a connector a `TxProfile` outranks every
 `TxDefaultProfile` (connector-own and station-wide compete by `stackLevel`), and
 the station's `ChargePointMaxProfile` combines with the winner through `min`.
+
+## ClearChargingProfile (1.6)
+
+Matching follows 1.6 §5.5 and §6.13 with errata 3.25 and 3.26:
+
+| Request                          | Removes                                                                                                                                                     |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id` present                     | The profile with that id, in the station store or on any connector. `connectorId`, `chargingProfilePurpose` and `stackLevel` are ignored.                   |
+| no `id`, some of the other three | Every profile matching all the given fields (logical AND). `connectorId` absent searches the station store and every connector, `0` the station store only. |
+| no field at all                  | Every profile, station store and all connectors.                                                                                                            |
+
+The answer is `Accepted` when at least one profile was removed and `Unknown`
+(§7.21: "No Charging Profile(s) were found matching the request") when none
+was. The 2.x `ClearChargingProfile` is a separate handler and is unchanged.

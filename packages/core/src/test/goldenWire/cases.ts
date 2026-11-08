@@ -857,6 +857,32 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.call("ClearChargingProfile", { id: 1 });
     await settle(rig);
   }),
+  // 1.6 §7.21, errata 3.25 / 3.26: Unknown when nothing matched; an id
+  // overrides connectorId and stackLevel.
+  c16("clear-charging-profile-unknown", async (rig) => {
+    await charging(rig);
+    await rig.csms.call("ClearChargingProfile", { id: 99 });
+    await rig.csms.call("ClearChargingProfile", {});
+    await rig.csms.call("SetChargingProfile", {
+      connectorId: 1,
+      csChargingProfiles: {
+        chargingProfileId: 1,
+        stackLevel: 3,
+        chargingProfilePurpose: "TxDefaultProfile",
+        chargingProfileKind: "Absolute",
+        chargingSchedule: {
+          chargingRateUnit: "W",
+          chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+        },
+      },
+    });
+    await rig.csms.call("ClearChargingProfile", {
+      id: 1,
+      connectorId: 2,
+      stackLevel: 9,
+    });
+    await settle(rig);
+  }),
   // 1.6 §7.13 startSchedule/duration, errata 3.43: the ended stack-2 profile
   // yields to stack 0, then an Absolute profile counts from startSchedule.
   c16("smart-charging-start-schedule", async (rig) => {

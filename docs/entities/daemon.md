@@ -302,6 +302,13 @@ Authenticating those clients to a daemon started with
 `--web-console-basic-auth-*` is described in
 [Access control → Authenticating to a protected daemon](../concepts/access-control.md#authenticating-to-a-protected-daemon).
 
+The reconnect flags (`--reconnect-*`, `--boot-retry-limit`, [CLI](cli.md)) set the
+policy of the charge point started with the daemon. A charge point created over the
+control plane takes `transport.reconnect` on `cp.create` / `cp.update` (an update that
+omits `transport` keeps the current one); it is stored in `charge_points.transport_options`
+and restored with the charge point. Details and defaults:
+[Reconnect policy](../concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609).
+
 ## Security posture
 
 The default bind address is `127.0.0.1`. Exposing the daemon beyond loopback

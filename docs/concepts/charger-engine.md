@@ -490,7 +490,7 @@ carries on. Delivery is in the table above.
   whether `--watch-behaviors` is on, and `defaults`: the built-in behaviors with the actions each answers and
   their params.
 - **Params travel with the selection.** `behaviorParams` is a map of behavior id to a JSON object, accepted
-  wherever `behaviors` is, stored with the charge point (`charge_points.behavior_params`, schema v28; `NULL` =
+  wherever `behaviors` is, stored with the charge point (`charge_points.behavior_params`, schema v29; `NULL` =
   none) and restored with it. A key is a `default.*` id or one of the selected behaviors; a key that is neither,
   or a value that does not fit the schema, is `invalid_params` before anything is written. `cp.update` keeps the
   params when they are omitted and replaces them when given; `cp.behaviors.set` replaces the whole selection, so

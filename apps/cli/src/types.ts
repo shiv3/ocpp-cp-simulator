@@ -3,6 +3,7 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
@@ -246,6 +247,8 @@ export interface CLIOptions {
   readonly txUpdatedMeterValues?: boolean;
   /** `--inbound-validation` (#593). See ChargePointInitOptions. */
   readonly inboundValidation?: InboundValidationMode;
+  /** `--reconnect-*` and `--boot-retry-limit` (#609). */
+  readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
@@ -271,6 +274,8 @@ export interface ChargePointInitOptions {
   readonly urlDistribution?: UrlDistribution;
   /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
   readonly inboundValidation?: InboundValidationMode;
+  /** Transport settings (#609): reconnect policy. Persisted. */
+  readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /**
    * Resolved idTags this charge point draws from when a call names none. The

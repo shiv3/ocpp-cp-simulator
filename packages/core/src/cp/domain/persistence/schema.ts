@@ -190,6 +190,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   inbound_validation TEXT,
   -- #618: JSON static capability profile; NULL is none.
   capability_profile TEXT,
+  -- #609: the per-charge-point transport settings (reconnect policy, ...), a
+  -- JSON object. NULL: the built-in behaviour.
+  transport_options TEXT,
   -- #654: a JSON object of behavior id to params object; NULL (a row older
   -- than the column) is no params, every behavior runs with its defaults.
   behavior_params TEXT

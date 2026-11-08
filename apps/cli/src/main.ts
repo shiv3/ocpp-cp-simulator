@@ -8,6 +8,8 @@ import type {
 } from "./types";
 import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { CLIChargePointService } from "./service";
+import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
+import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
 import { resolveClientLocation } from "./clientLocation";
@@ -164,6 +166,41 @@ function parseSecurityProfile(
   process.exit(1);
 }
 
+/** A number flag (#609): `-1` is allowed for the counts that mean unlimited. */
+function requireNumberFlag(
+  flag: string,
+  value: string | undefined,
+  opts: { integer?: boolean; min: number },
+): number {
+  const text = requireFlagValue(flag, value);
+  const n = Number(text);
+  if (
+    !/^-?\d+(\.\d+)?$/.test(text) ||
+    !Number.isFinite(n) ||
+    n < opts.min ||
+    (opts.integer && !Number.isInteger(n))
+  ) {
+    process.stderr.write(
+      `Error: ${flag} must be ${opts.integer ? "an integer" : "a number"} >= ${opts.min}, got "${text}"\n`,
+    );
+    process.exit(1);
+  }
+  return n;
+}
+
+function parseTransportFlags(
+  reconnect: Record<string, number | string>,
+): TransportConfig {
+  const parsed = transportConfigSchema.safeParse({ reconnect });
+  if (!parsed.success) {
+    process.stderr.write(
+      `Error: invalid reconnect flags: ${parsed.error.issues[0].message}\n`,
+    );
+    process.exit(1);
+  }
+  return parsed.data;
+}
+
 function requireFlagValue(flag: string, value: string | undefined): string {
   if (!value || value.startsWith("--")) {
     process.stderr.write(`Error: ${flag} requires a value\n`);
@@ -303,6 +340,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
   let inboundValidation: InboundValidationMode | undefined;
+  // #609: reconnect flags collect here and are validated as one object below.
+  const reconnect: Record<string, number | string> = {};
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -854,6 +893,44 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       }
+      case "--reconnect-max-attempts":
+        reconnect.maxAttempts = requireNumberFlag(arg, next, {
+          integer: true,
+          min: -1,
+        });
+        i++;
+        break;
+      case "--reconnect-mode": {
+        const mode = requireFlagValue(arg, next);
+        if (mode !== "exponential" && mode !== "fixed") {
+          process.stderr.write(
+            'Error: --reconnect-mode must be "exponential" or "fixed"\n',
+          );
+          process.exit(1);
+        }
+        reconnect.mode = mode;
+        i++;
+        break;
+      }
+      case "--reconnect-base-delay-ms":
+        reconnect.baseDelayMs = requireNumberFlag(arg, next, { min: 0 });
+        i++;
+        break;
+      case "--reconnect-max-delay-ms":
+        reconnect.maxDelayMs = requireNumberFlag(arg, next, { min: 0 });
+        i++;
+        break;
+      case "--reconnect-jitter-ms":
+        reconnect.jitterMs = requireNumberFlag(arg, next, { min: 0 });
+        i++;
+        break;
+      case "--boot-retry-limit":
+        reconnect.bootRetryLimit = requireNumberFlag(arg, next, {
+          integer: true,
+          min: -1,
+        });
+        i++;
+        break;
       case "--tx-updated-meter-values":
         txUpdatedMeterValues = true;
         break;
@@ -1535,6 +1612,9 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(Object.keys(reconnect).length > 0
+      ? { transport: parseTransportFlags(reconnect) }
+      : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1643,6 +1723,28 @@ Options:
                            payload breaks the request schema. warn (default)
                            logs and traces the violation and runs the handler;
                            enforce answers a CALLERROR; off skips the check.
+  --reconnect-max-attempts <n>
+                           Reconnect attempts after a connection loss before
+                           giving up. -1 = unlimited (default), 0 = never
+                           reconnect. Giving up is a gave_up entry in the
+                           operational timeline.
+  --reconnect-mode <exponential|fixed>
+                           exponential (default) doubles the delay up to
+                           --reconnect-max-delay-ms; fixed waits
+                           --reconnect-base-delay-ms every time. OCPP 2.x
+                           follows OCPPCommCtrlr RetryBackOffWaitMinimum /
+                           RandomRange / RepeatTimes instead of the base
+                           delay and the jitter.
+  --reconnect-base-delay-ms <ms>
+                           Delay before the first attempt (default 1000).
+  --reconnect-max-delay-ms <ms>
+                           Cap of the exponential delay (default 30000).
+  --reconnect-jitter-ms <ms>
+                           Random extra delay in [0, ms] drawn from a stream
+                           seeded by the CP id (default 0).
+  --boot-retry-limit <n>   Automatic BootNotification re-sends after a
+                           Rejected answer before stopping. -1 = unlimited
+                           (default).
   --tx-updated-meter-values
                            OCPP 2.x: send the periodic meter samples taken
                            during a transaction as TransactionEvent(Updated,
@@ -2006,6 +2108,7 @@ export function buildBootstrap(
     ...(options.inboundValidation
       ? { inboundValidation: options.inboundValidation }
       : {}),
+    ...(options.transport ? { transport: options.transport } : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }
       : {}),

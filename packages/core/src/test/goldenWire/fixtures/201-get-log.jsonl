@@ -6,3 +6,5 @@
 {"d":"CSMS>","k":"result","id":"id-3","p":{}}
 {"d":"CSMS>","k":"call","id":"id-4","a":"GetLog","p":{"logType":"DiagnosticsLog","requestId":21,"log":{"remoteLocation":"http://127.0.0.1:<port>/upload"}}}
 {"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted","filename":"CP-GOLDEN-DiagnosticsLog-21.log"}}
+{"d":"CP>","k":"call","id":"id-5","a":"LogStatusNotification","p":{"status":"Uploading","requestId":21}}
+{"d":"CSMS>","k":"result","id":"id-5","p":{}}

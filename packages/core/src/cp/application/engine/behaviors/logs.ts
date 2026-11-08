@@ -13,11 +13,17 @@ const PARAMS: BehaviorParams = {
         minimum: 0,
         maximum: 3_600_000,
         title: "Upload time (ms)",
-        description: "Time between Uploading and Uploaded (OCPP 1.6 only)",
+        description: "Time between Uploading and Uploaded",
+      },
+      auto: {
+        type: "boolean",
+        title: "Automatic upload (OCPP 2.x)",
+        description:
+          "OCPP 2.x only: send Uploading and Uploaded after an accepted GetLog, and answer AcceptedCanceled to a GetLog that replaces an upload in progress (N01.FR.12). Off: acknowledge only, the control plane drives the notifications. OCPP 1.6 always uploads",
       },
     },
   },
-  defaults: { uploadMs: 2000 },
+  defaults: { uploadMs: 2000, auto: true },
 };
 
 interface GetLogRequest {
@@ -33,10 +39,15 @@ interface GetLogRequest {
  * and, two seconds later, `Uploaded`, both carrying `requestId`. There is no
  * real log to upload, so the sequence is timer-driven.
  *
- * OCPP 2.x (N01): the request is accepted with a file name and its
- * `requestId` remembered for the LogStatusNotification reports the control
- * plane drives; the station reports nothing on its own. A user behavior can
- * opt in to a sequence.
+ * OCPP 2.x (N01): the request is accepted with a file name and, once the
+ * answer settled, the station sends LogStatusNotification `Uploading` and,
+ * `uploadMs` later, `Uploaded`, both carrying the request's `requestId`
+ * (N01.FR.07 to FR.09; #601). A GetLog that arrives during an upload is
+ * answered `AcceptedCanceled`; the upload it replaces ends with a
+ * LogStatusNotification `AcceptedCanceled` for its own `requestId`
+ * (N01.FR.12, FR.20) and never reports `Uploaded`. With `auto` off the
+ * station reports nothing on its own and the control plane drives the
+ * notifications, as before #601.
  */
 export function logsBehavior(cp: ChargePoint): Behavior {
   return {
@@ -53,14 +64,50 @@ export function logsBehavior(cp: ChargePoint): Behavior {
               cp.noteLogRequest(req.requestId);
             }
             const logType = req.logType ?? "DiagnosticsLog";
+            const auto = ctx.params.auto === true;
+            const previous = ctx.state.uploadingRequestId;
+            const replaces =
+              auto && previous !== undefined && previous !== null;
             return {
               response: {
-                status: "Accepted",
+                status: replaces ? "AcceptedCanceled" : "Accepted",
                 // GetLogResponse.filename is bounded at 255 in the 2.0.1 schema.
                 filename: `${cp.id}-${logType}-${req.requestId ?? 0}.log`.slice(
                   -255,
                 ),
               },
+              after: auto
+                ? async (): Promise<void> => {
+                    const generation =
+                      (typeof ctx.state.uploadGeneration === "number"
+                        ? ctx.state.uploadGeneration
+                        : 0) + 1;
+                    ctx.state.uploadGeneration = generation;
+                    const requestId = req.requestId ?? 0;
+                    if (typeof previous === "number") {
+                      // N01.FR.20: the cancelled upload reports it.
+                      ctx.notify.logStatus("AcceptedCanceled", {
+                        requestId: previous,
+                      });
+                    }
+                    ctx.state.uploadingRequestId = requestId;
+                    try {
+                      ctx.notify.logStatus("Uploading", { requestId });
+                      await ctx.sleep(ctx.params.uploadMs as number);
+                      if (
+                        ctx.stopping ||
+                        ctx.state.uploadGeneration !== generation
+                      ) {
+                        return;
+                      }
+                      ctx.notify.logStatus("Uploaded", { requestId });
+                    } finally {
+                      if (ctx.state.uploadGeneration === generation) {
+                        ctx.state.uploadingRequestId = null;
+                      }
+                    }
+                  }
+                : undefined,
             };
           }
 

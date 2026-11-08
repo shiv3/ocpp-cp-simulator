@@ -493,6 +493,30 @@ describe("RemoteChargePointService socket.io rpc", () => {
         results: [{ sessions: [], total: 0 }],
       },
       {
+        name: "getConfigurationKeys",
+        invoke: (service) =>
+          service.getConfigurationKeys("cp-1", ["HeartbeatInterval"]),
+        expected: [
+          {
+            method: "cp.config_keys.get",
+            params: { cpId: "cp-1", keys: ["HeartbeatInterval"] },
+          },
+        ],
+        results: [{ keys: [], unknown: [] }],
+      },
+      {
+        name: "setConfigurationKey",
+        invoke: (service) =>
+          service.setConfigurationKey("cp-1", "HeartbeatInterval", "30"),
+        expected: [
+          {
+            method: "cp.config_keys.set",
+            params: { cpId: "cp-1", key: "HeartbeatInterval", value: "30" },
+          },
+        ],
+        results: [{ key: "HeartbeatInterval", status: "Accepted" }],
+      },
+      {
         name: "loadConfig",
         invoke: (service) => service.loadConfig(),
         expected: [{ method: "config.get", params: {} }],

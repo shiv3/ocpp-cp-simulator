@@ -1,3 +1,7 @@
+import type {
+  ConfigurationKeyList,
+  ConfigurationSetStatus,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/configurationAccess";
 import type { VehicleCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
 import type {
   AuthorizationCacheSeedEntry,
@@ -477,6 +481,22 @@ export interface ChargePointService {
     cpId: string,
     query?: Omit<ChargingSessionQuery, "cpId">,
   ): Promise<ChargingSessionPage>;
+
+  /** #612: a running charge point's OCPP configuration keys
+   *  (`cp.config_keys.get`); empty `keys` lists them all. Optional so a test
+   *  double need not implement it. */
+  getConfigurationKeys?(
+    cpId: string,
+    keys?: readonly string[],
+  ): Promise<ConfigurationKeyList>;
+  /** #612: write one key (`cp.config_keys.set`). Rejects with
+   *  `UnknownConfigurationKeyError` / `ConfigurationWriteRejectedError`
+   *  locally and `RpcFailure` (`not_found` / `invalid_params`) remotely. */
+  setConfigurationKey?(
+    cpId: string,
+    key: string,
+    value: string,
+  ): Promise<ConfigurationSetStatus>;
 
   // Saved vehicle profiles (#458). Local mode keeps them in the browser's
   // sql.js database, Remote mode on the daemon (`vehicle_profiles.*`). Both

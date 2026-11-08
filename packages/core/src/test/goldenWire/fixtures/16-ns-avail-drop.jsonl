@@ -9,5 +9,5 @@
 {"d":"CSMS>","k":"result","id":"id-5","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
 {"d":"CP>","k":"call","id":"id-6","a":"StatusNotification","p":{"connectorId":0,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-6","p":{}}
-{"d":"CP>","k":"call","id":"id-7","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
+{"d":"CP>","k":"call","id":"id-7","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Unavailable"}}
 {"d":"CSMS>","k":"result","id":"id-7","p":{}}

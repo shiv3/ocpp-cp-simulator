@@ -20,7 +20,7 @@
 {"d":"CSMS>","k":"result","id":"id-10","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
 {"d":"CP>","k":"call","id":"id-11","a":"StatusNotification","p":{"connectorId":0,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-11","p":{}}
-{"d":"CP>","k":"call","id":"id-12","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Finishing"}}
+{"d":"CP>","k":"call","id":"id-12","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-12","p":{}}
 {"d":"CP>","k":"call","id":"id-13","a":"Authorize","p":{"idTag":"NEW"}}
 {"d":"CSMS>","k":"result","id":"id-13","p":{"idTagInfo":{"status":"Accepted"}}}

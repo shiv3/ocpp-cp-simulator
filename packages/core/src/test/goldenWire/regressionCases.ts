@@ -377,6 +377,42 @@ c201(
   },
   two,
 );
+// #635: a Reset OnIdle answered Scheduled boots once the last targeted
+// transaction ended; nothing running answers Accepted and boots at once; an
+// Immediate reset drops the pending one.
+c201("reset-onidle-idle", async (r) => {
+  await r.csms.call("Reset", { type: "OnIdle" });
+  await wait(600);
+  await settle(r);
+});
+c201(
+  "reset-onidle-waits-for-last",
+  async (r) => {
+    await charging(r, "A", 1);
+    await charging(r, "B", 2);
+    await r.csms.call("Reset", { type: "OnIdle" });
+    await settle(r);
+    r.cp.stopTransaction(1);
+    await wait(600);
+    await settle(r);
+    r.cp.stopTransaction(2);
+    await wait(600);
+    await settle(r);
+  },
+  two,
+);
+c201("reset-onidle-then-immediate", async (r) => {
+  await charging(r);
+  await r.csms.call("Reset", { type: "OnIdle" });
+  await settle(r);
+  await r.csms.call("Reset", { type: "Immediate" });
+  await wait(600);
+  await settle(r);
+  await charging(r, "B");
+  r.cp.stopTransaction(1);
+  await wait(600);
+  await settle(r);
+});
 c201("reset-immediate-resume", async (r) => {
   await charging(r);
   await r.csms.call("Reset", { type: "ImmediateAndResume" });

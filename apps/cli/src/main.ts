@@ -6,6 +6,7 @@ import type {
   ChargePointInitOptions,
   SoapTunnelConfig,
 } from "./types";
+import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
@@ -275,6 +276,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
+  let inboundValidation: InboundValidationMode | undefined;
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -713,6 +715,18 @@ export function parseArgs(argv: string[]): CLIOptions {
         cpoName = requireFlagValue("--cpo-name", next);
         i++;
         break;
+      case "--inbound-validation": {
+        const value = requireFlagValue("--inbound-validation", next);
+        if (value !== "off" && value !== "warn" && value !== "enforce") {
+          process.stderr.write(
+            "Error: --inbound-validation must be off, warn or enforce\n",
+          );
+          process.exit(1);
+        }
+        inboundValidation = value;
+        i++;
+        break;
+      }
       case "--tx-updated-meter-values":
         txUpdatedMeterValues = true;
         break;
@@ -1313,6 +1327,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     authorizationKey,
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
+    ...(inboundValidation ? { inboundValidation } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1412,6 +1427,11 @@ Options:
                            --insecure-tls-key-perms is passed.
   --insecure-tls-key-perms Allow --tls-key files readable by group/other.
   --cpo-name <name>        CPO name for generated SignCertificate CSRs.
+  --inbound-validation <off|warn|enforce>
+                           OCPP 1.6J: what to do with an inbound CALL whose
+                           payload breaks the request schema. warn (default)
+                           logs and traces the violation and runs the handler;
+                           enforce answers a CALLERROR; off skips the check.
   --tx-updated-meter-values
                            OCPP 2.x: send the periodic meter samples taken
                            during a transaction as TransactionEvent(Updated,
@@ -1732,6 +1752,9 @@ export function buildBootstrap(
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...(options.inboundValidation
+      ? { inboundValidation: options.inboundValidation }
+      : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }
       : {}),

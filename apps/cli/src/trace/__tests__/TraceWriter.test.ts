@@ -136,4 +136,62 @@ describe("TraceWriter", () => {
       expect(warnSpy.mock.calls[0][0]).toContain(filePath);
     });
   });
+
+  it("attaches an inbound validation violation to the CALL record's meta (#593)", async () => {
+    const writer = new TraceWriter(filePath);
+    const logger = new Logger();
+    writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+
+    logger.info(
+      'Received: [2,"in-1","Reset",{"type":"Warm"}]',
+      LogType.WEBSOCKET,
+    );
+    logger.warn(
+      `Inbound validation: ${JSON.stringify({
+        messageId: "in-1",
+        action: "Reset",
+        mode: "warn",
+        errorCode: "PropertyConstraintViolation",
+        description:
+          "Inbound Reset: type must be equal to one of the allowed values",
+      })}`,
+      LogType.WEBSOCKET,
+    );
+    logger.info('Sent: [3,"in-1",{"status":"Accepted"}]', LogType.WEBSOCKET);
+    await Promise.resolve();
+
+    const records = readRecords(filePath);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      messageType: "CALL",
+      messageId: "in-1",
+      direction: "csms-to-cp",
+      meta: {
+        validation: {
+          mode: "warn",
+          errorCode: "PropertyConstraintViolation",
+        },
+      },
+    });
+    expect(records[1]).toMatchObject({ messageType: "CALLRESULT" });
+    expect((records[1] as { meta?: unknown }).meta).toBeUndefined();
+  });
+
+  it("writes an inbound CALL with no violation unchanged, in order", async () => {
+    const writer = new TraceWriter(filePath);
+    const logger = new Logger();
+    writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+    logger.info(
+      'Received: [2,"in-2","Reset",{"type":"Soft"}]',
+      LogType.WEBSOCKET,
+    );
+    logger.info('Sent: [3,"in-2",{"status":"Accepted"}]', LogType.WEBSOCKET);
+    await Promise.resolve();
+    const records = readRecords(filePath) as Array<{
+      messageType: string;
+      meta?: unknown;
+    }>;
+    expect(records.map((r) => r.messageType)).toEqual(["CALL", "CALLRESULT"]);
+    expect(records[0].meta).toBeUndefined();
+  });
 });

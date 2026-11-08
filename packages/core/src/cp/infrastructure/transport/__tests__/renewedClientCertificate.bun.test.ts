@@ -343,7 +343,7 @@ describe.skipIf(!canBindBunServe())(
       }, 20_000);
     });
 
-    it("waits for the certificate's notBefore before switching (2.0.1 A02.FR.08)", async () => {
+    it("rejects a certificate that is not valid yet and stays connected (2.0.1 A02.FR.06/07, #587)", async () => {
       const certs = await pki();
       const port = freePort();
       const both = [certs.operatorCa.pem, certs.renewalCa.pem];
@@ -361,10 +361,9 @@ describe.skipIf(!canBindBunServe())(
           // between 2 and 3 seconds from now.
           new Date(Date.now() + 3_000),
         ),
-      ).toEqual({ status: "Accepted" });
-      await Bun.sleep(1_000);
+      ).toEqual({ status: "Rejected" });
+      await Bun.sleep(3_500);
       expect(csms.openCount()).toBe(1);
-      await waitUntil(() => csms.openCount() === 2, 6_000);
     }, 20_000);
   },
 );

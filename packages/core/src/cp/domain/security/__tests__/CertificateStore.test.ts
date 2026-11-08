@@ -374,7 +374,7 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
     expect(store.listSignedChains()).toEqual([]);
   });
 
-  it("accepts a leaf that is not valid yet unless asked to refuse it", async () => {
+  it("rejects a leaf that is not valid yet and stores nothing (A02.FR.06)", async () => {
     const store = new CertificateStore();
     const root = await selfSignedRoot("01", "CSO Root");
     const csrPem = await store.generateNewCsr("CP-1", "Example CPO");
@@ -383,15 +383,9 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
     });
 
     expect(
-      await store.applySignedChain("ChargingStationCertificate", [future], {
-        rejectNotYetValid: true,
-      }),
+      await store.applySignedChain("ChargingStationCertificate", [future]),
     ).toEqual({ status: "NotYetValid" });
     expect(store.listSignedChains()).toEqual([]);
-    expect(
-      (await store.applySignedChain("ChargingStationCertificate", [future]))
-        .status,
-    ).toBe("Accepted");
   });
 
   it("tells a superseded CSR's chain from an expired one by the key first", async () => {

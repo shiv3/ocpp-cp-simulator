@@ -60,9 +60,6 @@ export interface CertificateWireMapping {
   readonly signedUseTo: (use: SignedCertificateUse) => string | undefined;
   /** The chains a `V2GCertificateChain` query lists (M03.FR.05). */
   readonly v2gChainUses: readonly SignedCertificateUse[];
-  /** 2.1 A02.FR.06: a leaf that is not valid yet is Rejected. 2.0.1 accepts
-   *  it and waits for its `notBefore` (A02.FR.08, #587). */
-  readonly rejectNotYetValid: boolean;
 }
 
 export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -72,7 +69,6 @@ export const V201_CERTIFICATE_MAPPING: CertificateWireMapping = {
   signedUseFrom: signedUseFromV201,
   signedUseTo: signedUseToV201,
   v2gChainUses: ["V2GCertificate"],
-  rejectNotYetValid: false,
 };
 
 export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
@@ -84,7 +80,6 @@ export const V21_CERTIFICATE_MAPPING: CertificateWireMapping = {
   // #537 M03.FR.05: 2.1 has no query value of its own for ISO 15118-20
   // certificates, so its V2G chains are listed under V2GCertificateChain.
   v2gChainUses: V2G_CERTIFICATE_USES,
-  rejectNotYetValid: true,
 };
 
 /** `childCertificateHashData` is 0..4 in both 2.0.1 and 2.1. */
@@ -406,7 +401,6 @@ async function certificateSigned(
     const outcome = await ctx.chargePoint.certificateStore.applySignedChain(
       use,
       pems,
-      { rejectNotYetValid: mapping.rejectNotYetValid },
     );
     if (outcome.status === "Accepted") {
       ctx.logger.info(

@@ -518,15 +518,16 @@ CALLERROR.
   valid (A02.FR.07, A02.FR.20, #587), after which no `SignCertificate` goes
   out until the CSMS sends a `TriggerMessage`.
   **Validity (A02.FR.06, #587).** The key is checked first. A leaf whose
-  `notAfter` has passed is `Rejected` on 2.0.1 and 2.1: the certificate is
-  discarded, nothing is stored or switched to, and an
-  `InvalidChargingStationCertificate` security event follows the answer
-  (A02.FR.07). A leaf whose `notBefore` is still ahead is `Rejected` the same
-  way on 2.1, whose A02.FR.06 asks for the current date to be within the
-  period; on 2.0.1 it is `Accepted` and the station switches at `notBefore`
-  (A02.FR.08, below). The Certificate Properties and the operator hierarchy
-  that A02.FR.06 also names are not checked; only the leaf's period is, not
-  that of the chain's other members. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
+  `notAfter` has passed, or whose `notBefore` is still ahead, is `Rejected`
+  on 2.0.1 and 2.1 alike: A02.FR.06 asks for the current date to be within
+  the certificate's validity period (the 2.0.1 ed4 and 2.1 ed2 texts are
+  identical), so the certificate is discarded, nothing is stored or switched
+  to, and an `InvalidChargingStationCertificate` security event follows the
+  answer (A02.FR.07). The Certificate Properties and the operator hierarchy
+  that A02.FR.06 also names are not checked (a leaf with the right key that
+  lies outside the hierarchy is `Accepted`, which 2.0.1 Part 6 TC_A_14_CS
+  would expect `Rejected`; tracked in the follow-up of #587), and only the
+  leaf's period is, not that of the chain's other members. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
   the same resend count, so a sequence that reached
   `CertSigningRepeatTimes` or ended does not start over on a reconnect. A
   request the close left unanswered was never accepted and starts no wait.
@@ -647,9 +648,10 @@ connected.
   The A02.FR.28 fallback below is the one exception: it presents the
   previous certificate with its key although the renewal already replaced
   that certificate's chain in the store. The spec imposes it.
-- 2.0.1 asks the station to switch once the certificate's `notBefore` has
-  passed; the simulator waits for it on 2.1 too, so a certificate not yet
-  valid is switched to at that time. A manual disconnect does not cancel
+- `CertificateSigned` refuses a certificate whose `notBefore` is ahead
+  (A02.FR.06, above), so the switch is never deferred to a later
+  `notBefore` through that message; the timer that would wait for one is a
+  guard only. A manual disconnect does not cancel
   that wait. A `cp.delete` does, and so does a `cp.update`, which replaces
   the charge point: the replacement holds no key, and presents
   `--tls-cert`, as after a restart. A second `CertificateSigned`

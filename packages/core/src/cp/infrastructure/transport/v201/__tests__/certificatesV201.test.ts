@@ -479,9 +479,9 @@ describe.each(VERSIONS)(
         expect(certificateRejected).not.toHaveBeenCalled();
       });
 
-      // #587: 2.1 A02.FR.06 refuses a leaf that is not valid yet, 2.0.1
-      // accepts it and waits for notBefore (A02.FR.08).
-      it("handles a leaf that is not valid yet as its version decides", async () => {
+      // #587: 2.0.1 ed4 and 2.1 ed2 A02.FR.06/07 both ask for the current
+      // date to be within the validity period.
+      it("rejects a leaf that is not valid yet, with the security event", async () => {
         const store = new CertificateStore();
         const root = await selfSignedRoot("01", "Root");
         const csr = await store.generateNewCsr("CP", "CPO");
@@ -497,16 +497,17 @@ describe.each(VERSIONS)(
           },
           ctx,
         );
-        if (handlers === v21) {
-          expect(result.response).toEqual({ status: "Rejected" });
-          expect(certificateRejected).toHaveBeenCalledTimes(1);
-          expect(store.listSignedChains()).toEqual([]);
-        } else {
-          expect(result.response).toEqual({ status: "Accepted" });
-          await result.afterResult?.();
-          expect(certificateInstalled).toHaveBeenCalledTimes(1);
-          expect(certificateRejected).not.toHaveBeenCalled();
-        }
+        expect(result.response).toEqual({ status: "Rejected" });
+        expect(certificateRejected).toHaveBeenCalledTimes(1);
+        expect(certificateInstalled).not.toHaveBeenCalled();
+        expect(store.listSignedChains()).toEqual([]);
+        await result.afterResult?.();
+        expect(ctx.sendCall).toHaveBeenCalledWith(
+          "SecurityEventNotification",
+          expect.objectContaining({
+            type: "InvalidChargingStationCertificate",
+          }),
+        );
       });
 
       // #564: the chain is handed on when it is stored, not when the answer

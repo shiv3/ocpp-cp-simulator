@@ -106,5 +106,17 @@
   "templates.smart-charging.name": "智能充电(AutoMeterValue)",
   "templates.smart-charging.description": "处于 Charging 时自动递增 MeterValue,到 Finishing 时停止",
   "templates.status-triggered-actions.name": "状态触发的自动动作",
-  "templates.status-triggered-actions.description": "状态变化时自动执行(Available 时循环发送 Heartbeat)"
+  "templates.status-triggered-actions.description": "状态变化时自动执行(Available 时循环发送 Heartbeat)",
+  "templates.resilience-authorization-rejected.name": "韧性：授权被拒绝",
+  "templates.resilience-authorization-rejected.description": "需运维人员预先准备：idTag RESIL-BLK 必须在 CSMS 上处于 Blocked 状态。插枪后用该 idTag 尝试启动，当 Authorize 得到 Blocked 应答、未启动交易、且拔枪后连接器恢复为 Available 时通过（运行会等待这一点；idTagInfo 检查采用 OCPP 1.6 的格式）。",
+  "templates.resilience-communication-loss-recovery.name": "韧性：通信中断恢复",
+  "templates.resilience-communication-loss-recovery.description": "由运维人员操作。在连接器处于 Available 时切断连接（使用带 manual-disconnect 规则的 network_sim.disconnect.trigger，或任意套接字断开）。运行会等待断开和重连，再等待 Available，然后发送 DataTransfer 探测（vendorId org.ocpp-cp-sim.resilience，messageId link-probe），当探测经恢复后的链路发出时通过。它不断言 BootNotification：OCPP-J 规定，除非启动数据发生变化，充电桩重连时不应（SHOULD NOT）发送，因此是否随后发送取决于 OCPP 版本和设置。与版本无关。",
+  "templates.resilience-connector-fault-recovery.name": "韧性：连接器故障恢复",
+  "templates.resilience-connector-fault-recovery.description": "自包含（OCPP 1.6 载荷检查）。以 errorCode GroundFailure 上报连接器为 Faulted，保持 3 秒，再以 Available/NoError 清除，当两条 StatusNotification 按此顺序发出时通过。",
+  "templates.resilience-ev-disconnect-recovery.name": "韧性：电动汽车断开恢复",
+  "templates.resilience-ev-disconnect-recovery.description": "自包含（OCPP 1.6 载荷检查）。启动会话，在充电中途拔枪，当交易以 reason EVDisconnected 停止（StopTransactionOnEVSideDisconnect=true，1.6 §4.10）且连接器恢复为 Available 时通过。",
+  "templates.resilience-power-loss-recovery.name": "韧性：断电恢复",
+  "templates.resilience-power-loss-recovery.description": "由运维人员操作，使用断电原语 (#455)。插枪并启动会话；然后触发 power.loss（交易在断电后保留）和 power.restore（或带 restoreAfterMs 的 power.loss）。当充电桩在断电后重新启动并上报其连接器状态时通过。交易的结局取决于所选的恢复方式（恢复，或以 PowerLoss 结束；见 docs/concepts/charging-sessions.md），因此判定结果与之无关。",
+  "templates.resilience-temporary-unavailable-recovery.name": "韧性：临时不可用恢复",
+  "templates.resilience-temporary-unavailable-recovery.description": "由运维人员操作。针对连接器先发送 ChangeAvailability(Inoperative)，再发送 ChangeAvailability(Operative)。当两次调用都已到达，且连接器先上报 Unavailable 再上报 Available 时通过（状态采用 OCPP 1.6 载荷检查）。"
 }

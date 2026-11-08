@@ -106,5 +106,17 @@
   "templates.smart-charging.name": "スマート充電 (AutoMeterValue)",
   "templates.smart-charging.description": "Charging の間は MeterValue を自動で加算し、Finishing で停止します",
   "templates.status-triggered-actions.name": "ステータス連動の自動アクション",
-  "templates.status-triggered-actions.description": "ステータス変更時に自動実行 (Available のとき Heartbeat をループ)"
+  "templates.status-triggered-actions.description": "ステータス変更時に自動実行 (Available のとき Heartbeat をループ)",
+  "templates.resilience-authorization-rejected.name": "レジリエンス: 認可拒否",
+  "templates.resilience-authorization-rejected.description": "オペレーター準備型: idTag RESIL-BLK を CSMS 側で Blocked にしておく必要があります。プラグを接続してその idTag で開始を試み、Authorize が Blocked で応答され、トランザクションが開始されず、ケーブルを抜いた後にコネクタが Available に戻ったときに合格します (実行はそこまで待機します。idTagInfo の確認は OCPP 1.6 の形式です)。",
+  "templates.resilience-communication-loss-recovery.name": "レジリエンス: 通信断からの復旧",
+  "templates.resilience-communication-loss-recovery.description": "オペレーター操作型。コネクタが Available の間に接続を切断します (manual-disconnect ルールを付けた network_sim.disconnect.trigger、または任意のソケット切断)。実行は切断と再接続を待ち、次に Available を待ってから DataTransfer プローブ (vendorId org.ocpp-cp-sim.resilience、messageId link-probe) を送信し、復旧した回線でプローブが送信されたときに合格します。BootNotification は検証しません: OCPP-J では、起動データが変わらない限り再接続時に送信すべきでない (SHOULD NOT) とされているため、後続するかどうかは OCPP バージョンと設定によって異なります。バージョン非依存です。",
+  "templates.resilience-connector-fault-recovery.name": "レジリエンス: コネクタ故障からの復旧",
+  "templates.resilience-connector-fault-recovery.description": "自己完結型 (OCPP 1.6 のペイロード検証)。errorCode GroundFailure でコネクタを Faulted と報告し、3 秒間保持してから Available/NoError で解除し、2 つの StatusNotification がこの順に送信されたときに合格します。",
+  "templates.resilience-ev-disconnect-recovery.name": "レジリエンス: EV 切断からの復旧",
+  "templates.resilience-ev-disconnect-recovery.description": "自己完結型 (OCPP 1.6 のペイロード検証)。セッションを開始し、充電中にケーブルを抜き、トランザクションが reason EVDisconnected で停止し (StopTransactionOnEVSideDisconnect=true、1.6 §4.10)、コネクタが Available に戻ったときに合格します。",
+  "templates.resilience-power-loss-recovery.name": "レジリエンス: 停電からの復旧",
+  "templates.resilience-power-loss-recovery.description": "オペレーター操作型で、停電プリミティブ (#455) を使用します。プラグを接続してセッションを開始し、続いて power.loss (トランザクションは存続します) と power.restore (または restoreAfterMs 付きの power.loss) を実行します。停電後にチャージポイントが再び起動し、コネクタの状態を報告したときに合格します。トランザクションの扱いは選んだ復旧方法 (再開、または PowerLoss での終了。docs/concepts/charging-sessions.md) によって異なりますが、判定はそれに依存しません。",
+  "templates.resilience-temporary-unavailable-recovery.name": "レジリエンス: 一時的な使用不可からの復旧",
+  "templates.resilience-temporary-unavailable-recovery.description": "オペレーター操作型。コネクタに対して ChangeAvailability(Inoperative) に続けて ChangeAvailability(Operative) を送信します。両方の呼び出しが届き、コネクタが Unavailable、続いて Available を報告したときに合格します (ステータスの確認は OCPP 1.6 のペイロード検証です)。"
 }

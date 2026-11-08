@@ -106,5 +106,17 @@
   "templates.smart-charging.name": "Smart Charging (Auto MeterValue)",
   "templates.smart-charging.description": "Auto-increment MeterValue when Charging, stop when Finishing",
   "templates.status-triggered-actions.name": "Status-Triggered Auto Actions",
-  "templates.status-triggered-actions.description": "Auto-execute on status change (Heartbeat loop when Available)"
+  "templates.status-triggered-actions.description": "Auto-execute on status change (Heartbeat loop when Available)",
+  "templates.resilience-authorization-rejected.name": "Resilience: Authorization Rejected",
+  "templates.resilience-authorization-rejected.description": "Operator-prepared: the idTag RESIL-BLK must be Blocked on the CSMS. Plugs in, tries to start with it, and passes when Authorize was answered Blocked, no transaction started, and the connector is Available again after the cable was pulled (the run waits for it; OCPP 1.6 shape for the idTagInfo check).",
+  "templates.resilience-communication-loss-recovery.name": "Resilience: Communication Loss Recovery",
+  "templates.resilience-communication-loss-recovery.description": "Operator-driven. Cut the connection (network_sim.disconnect.trigger with a manual-disconnect rule, or any socket drop) while the connector is Available. The run waits for the drop and the reconnect, then for Available, then sends a DataTransfer probe (vendorId org.ocpp-cp-sim.resilience, messageId link-probe) and passes when the probe went out over the recovered link. It does not assert a BootNotification: OCPP-J says a station SHOULD NOT send one when it reconnects unless its boot data changed, so whether one follows depends on the OCPP version and settings. Version-agnostic.",
+  "templates.resilience-connector-fault-recovery.name": "Resilience: Connector Fault Recovery",
+  "templates.resilience-connector-fault-recovery.description": "Self-contained (OCPP 1.6 payload checks). Reports a Faulted connector with errorCode GroundFailure, holds it for 3 s, clears it with Available/NoError, and passes when both StatusNotifications were sent in that order.",
+  "templates.resilience-ev-disconnect-recovery.name": "Resilience: EV Disconnect Recovery",
+  "templates.resilience-ev-disconnect-recovery.description": "Self-contained (OCPP 1.6 payload checks). Starts a session, pulls the cable mid-charge and passes when the transaction stopped with reason EVDisconnected (StopTransactionOnEVSideDisconnect=true, 1.6 §4.10) and the connector came back to Available.",
+  "templates.resilience-power-loss-recovery.name": "Resilience: Power Loss Recovery",
+  "templates.resilience-power-loss-recovery.description": "Operator-driven, uses the power-loss primitive (#455). Plugs in and starts a session; then trigger power.loss (the transaction survives it) and power.restore (or power.loss with restoreAfterMs). Passes when the charge point booted again after the loss and reported its connector status. What happens to the transaction depends on the recovery chosen (resume, or end with PowerLoss; docs/concepts/charging-sessions.md), so the verdict does not depend on it.",
+  "templates.resilience-temporary-unavailable-recovery.name": "Resilience: Temporary Unavailable Recovery",
+  "templates.resilience-temporary-unavailable-recovery.description": "Operator-driven. Send ChangeAvailability(Inoperative) then ChangeAvailability(Operative) for the connector. Passes when both calls arrived and the connector reported Unavailable and then Available (OCPP 1.6 payload checks for the statuses)."
 }

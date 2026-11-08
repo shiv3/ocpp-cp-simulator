@@ -23,6 +23,9 @@ export interface StepLink {
 
 export interface StepBranch {
   name: string;
+  /** `sourceHandle` of the fork edge into this branch: the lane a `switch`
+   *  (`case-<n>`, `default`) or `choice` (`option-<n>`) runs (schema 1.6). */
+  handle?: string;
   steps: ScenarioNode[];
 }
 
@@ -140,7 +143,11 @@ export function deriveStepLayout(
       }
       target = next;
     }
-    branches.push({ name: branchName(steps[0], index), steps });
+    branches.push({
+      name: branchName(steps[0], index),
+      ...(edge.sourceHandle ? { handle: edge.sourceHandle } : {}),
+      steps,
+    });
   }
 
   // A step no walk reaches (END may stand alone: nothing leads there).

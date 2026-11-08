@@ -40,6 +40,12 @@ interface FullBootNotification {
   imsi?: string;
 }
 
+/** Static capability profile (#618); see the `cp.create` parameter. */
+export interface WireCapabilityProfile {
+  disabledActions?: readonly string[];
+  triggerMessageTargets?: readonly string[];
+}
+
 interface FullCpConfig {
   wsUrl: string;
   centralSystemUrl?: string;
@@ -55,6 +61,7 @@ interface FullCpConfig {
   cpoName?: string;
   txUpdatedMeterValues?: boolean;
   inboundValidation?: "off" | "warn" | "enforce";
+  capabilityProfile?: WireCapabilityProfile;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -62,6 +69,8 @@ interface FullCpConfig {
   labels?: Labels;
   /** Ids of the loaded behaviors this charge point runs; absent: all of them. */
   behaviors?: readonly string[];
+  /** Params the selection sets on behaviors (#654), by behavior id. */
+  behaviorParams?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /**
@@ -90,12 +99,27 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
+    capabilityProfile: config.capabilityProfile
+      ? {
+          ...(config.capabilityProfile.disabledActions
+            ? { disabledActions: [...config.capabilityProfile.disabledActions] }
+            : {}),
+          ...(config.capabilityProfile.triggerMessageTargets
+            ? {
+                triggerMessageTargets: [
+                  ...config.capabilityProfile.triggerMessageTargets,
+                ],
+              }
+            : {}),
+        }
+      : undefined,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
     behaviors: config.behaviors ? [...config.behaviors] : undefined,
+    behaviorParams: config.behaviorParams,
   };
 }
 
@@ -134,12 +158,19 @@ export const wireCpConfigSchema = z
     cpoName: STR_64K.optional(),
     txUpdatedMeterValues: z.boolean().optional(),
     inboundValidation: z.enum(["off", "warn", "enforce"]).optional(),
+    capabilityProfile: z
+      .object({
+        disabledActions: z.array(STR_256).optional(),
+        triggerMessageTargets: z.array(STR_256).optional(),
+      })
+      .optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),
     bootNotification: bootNotificationWireSchema,
     labels: labelsSchema.optional(),
     behaviors: z.array(STR_256).optional(),
+    behaviorParams: z.record(STR_256, boundedObject(16_384)).optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;
@@ -177,6 +208,9 @@ const simulatorConfigBaseSchema = z
     connectorNumber: z.number().int().min(0),
     tagID: STR_64K,
     ocppVersion: STR_64K,
+    // #550: browser local mode has one shared config, so the per-charge-point
+    // #347 option is shared there too. Absent means off.
+    txUpdatedMeterValues: z.boolean().optional(),
     basicAuthSettings: wireBasicAuthSettingsSchema,
     autoMeterValueSetting: z
       .object({

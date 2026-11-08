@@ -157,5 +157,19 @@
   "scenarioEditor.callResponse.kindResult": "CALLRESULT (answer with a payload)",
   "scenarioEditor.callResponse.payload": "Payload (JSON)",
   "scenarioEditor.useBehavior.behaviorId": "Behavior id",
-  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "e.g., my-behavior"
+  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "e.g., my-behavior",
+  "scenarioEditor.useBehavior.mode": "Mode",
+  "scenarioEditor.useBehavior.modeUse": "Use (with params)",
+  "scenarioEditor.useBehavior.modeDisable": "Disable for this run",
+  "scenarioEditor.useBehavior.disableHelp": "While the run lasts, every CALL this behavior answers is answered with the plain accepted answer of the station's OCPP version, and nothing follows. It takes no params.",
+  "scenarioEditor.useBehavior.paramsJson": "Params (JSON)",
+  "scenarioEditor.useBehavior.paramsJsonPlaceholder": "{\"key\": \"value\"}",
+  "scenarioEditor.params.reset": "Reset to defaults",
+  "scenarioEditor.params.firmware.stepMs": "Step between statuses (ms)",
+  "scenarioEditor.params.firmware.failAt": "End with failure",
+  "scenarioEditor.params.firmware.startAt": "Start at",
+  "scenarioEditor.params.signedFirmware.stepMs": "Step between statuses (ms)",
+  "scenarioEditor.params.logs.uploadMs": "Upload time (ms)",
+  "scenarioEditor.params.reset.delayMs": "Delay before the reset (ms)",
+  "scenarioEditor.params.unlock.outcome": "Outcome"
 }

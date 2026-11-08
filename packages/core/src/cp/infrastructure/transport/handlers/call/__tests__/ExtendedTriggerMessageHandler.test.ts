@@ -14,6 +14,7 @@ function buildContext() {
     };
 
   const chargePoint = {
+    isTriggerTargetSupported: () => true,
     sendCurrentStatusNotification: record("sendCurrentStatusNotification"),
     sendHeartbeat: record("sendHeartbeat"),
     sendMeterValue: record("sendMeterValue"),

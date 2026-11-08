@@ -17,6 +17,13 @@ export interface LifecycleOptions {
   readonly pidPath: string | null;
   readonly registry: CPRegistry;
   readonly onShutdownStart?: () => void;
+  /**
+   * #622: runs first on a signal-driven or requested shutdown and is awaited
+   * before anything is torn down (stop the transactions, wait for the CSMS).
+   * A second shutdown request while it runs skips what is left of the wait.
+   * Errors are logged and do not stop the shutdown.
+   */
+  readonly beforeShutdown?: (skip: Promise<void>) => Promise<void>;
 }
 
 export function createLifecycle(opts: LifecycleOptions): Lifecycle {
@@ -28,11 +35,35 @@ export function createLifecycle(opts: LifecycleOptions): Lifecycle {
     fs.writeFileSync(opts.pidPath, String(process.pid), "utf-8");
   }
 
+  let skipWait: (() => void) | null = null;
+  const skipped = new Promise<void>((resolve) => {
+    skipWait = resolve;
+  });
+
   const requestShutdown = (exitCode = 0): void => {
-    if (shuttingDown) return;
+    if (shuttingDown) {
+      // A second SIGINT / SIGTERM while the graceful wait runs: stop waiting.
+      skipWait?.();
+      return;
+    }
     shuttingDown = true;
 
     process.stderr.write("[server] Shutting down...\n");
+    if (opts.beforeShutdown) {
+      opts
+        .beforeShutdown(skipped)
+        .catch((err: unknown) => {
+          process.stderr.write(
+            `[server] Graceful shutdown step failed: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        })
+        .then(() => teardown(exitCode));
+      return;
+    }
+    teardown(exitCode);
+  };
+
+  const teardown = (exitCode: number): void => {
     opts.onShutdownStart?.();
 
     for (const server of servers) {

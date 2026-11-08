@@ -19,17 +19,27 @@ export {
   cpLabelsSetParamsSchema,
   cpBehaviorsSetParamsSchema,
   behaviorIdsSchema,
+  behaviorParamsSchema,
+  behaviorParamsInfoSchema,
+  BEHAVIOR_PARAMS_MAX_BYTES,
   behaviorListResultSchema,
   behaviorReloadParamsSchema,
   behaviorReloadResultSchema,
   cpBulkParamsSchema,
   cpBulkResultSchema,
+  cpScenarioRunParamsSchema,
+  cpScenarioRunResultSchema,
   CP_BULK_ACTIONS,
   createManyParamsSchema,
   expandIdPattern,
   hasIdPatternPlaceholder,
   MAX_GENERATED_CP_ID_LENGTH,
   blueprintSchema,
+  FLEET_TEMPLATE_MAX_CPS,
+  fleetCreateParamsSchema,
+  fleetGroupSchema,
+  fleetMemberSchema,
+  fleetTemplateSchema,
   createManyFromBlueprintSchema,
   createManyToolSchema,
   authorizationCacheSeedSchema,
@@ -42,7 +52,15 @@ export {
   CHARGING_SESSIONS_PAGE_DEFAULT,
   CHARGING_SESSIONS_PAGE_MAX,
 } from "./methods";
-export type { Blueprint, CpBulkResult, ServerInfo } from "./methods";
+export type {
+  Blueprint,
+  CpBulkResult,
+  FleetGroup,
+  FleetMember,
+  FleetTemplate,
+  CpScenarioRunResult,
+  ServerInfo,
+} from "./methods";
 
 /** Every valid rpc method id. */
 export type RpcMethod = keyof typeof METHODS;

@@ -76,6 +76,15 @@ import cert16Tc023_3AuthorizeBlockedJson from "./scenarios/cert16-tc023-3-author
 // behaviors (RSA CSR, CRLF PEM, RSASSA-PKCS1-v1_5 only, hidden CpoName).
 import cert16OcttStrictnessProbeJson from "./scenarios/cert16-octt-strictness-probe.json";
 
+// Operational failure / recovery scenarios (issue #444, #455): assertion-driven,
+// each ends in a machine-readable run verdict.
+import resilienceCommunicationLossRecoveryJson from "./scenarios/resilience-communication-loss-recovery.json";
+import resilienceConnectorFaultRecoveryJson from "./scenarios/resilience-connector-fault-recovery.json";
+import resilienceEvDisconnectRecoveryJson from "./scenarios/resilience-ev-disconnect-recovery.json";
+import resilienceTemporaryUnavailableRecoveryJson from "./scenarios/resilience-temporary-unavailable-recovery.json";
+import resilienceAuthorizationRejectedJson from "./scenarios/resilience-authorization-rejected.json";
+import resiliencePowerLossRecoveryJson from "./scenarios/resilience-power-loss-recovery.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -239,6 +248,18 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   // OCPP 1.6 Certificate quirks scenarios (issue #247 Phase 3) —
   // emulate certification-tool behaviors.
   templateFromJson(cert16OcttStrictnessProbeJson as ScenarioDefinition),
+
+  // Operational failure / recovery scenarios (issue #444).
+  templateFromJson(
+    resilienceCommunicationLossRecoveryJson as ScenarioDefinition,
+  ),
+  templateFromJson(resilienceConnectorFaultRecoveryJson as ScenarioDefinition),
+  templateFromJson(resilienceEvDisconnectRecoveryJson as ScenarioDefinition),
+  templateFromJson(
+    resilienceTemporaryUnavailableRecoveryJson as ScenarioDefinition,
+  ),
+  templateFromJson(resilienceAuthorizationRejectedJson as ScenarioDefinition),
+  templateFromJson(resiliencePowerLossRecoveryJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

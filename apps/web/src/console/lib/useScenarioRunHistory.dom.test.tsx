@@ -310,11 +310,23 @@ describe("useScenarioRunHistory (#388)", () => {
     expect(hook.current().error).toContain("daemon down");
   });
 
-  it("does not ask in local mode, which records no runs", async () => {
-    const listScenarioRuns = vi.fn();
+  it("lists in local mode too: the browser keeps a run history (#394)", async () => {
+    const listScenarioRuns = vi.fn(async () => ({
+      runs: [summary("local-1")],
+      total: 1,
+    }));
     const service = createFakeChargePointService({ listScenarioRuns });
     const hook = await mount(service, {}, { mode: "local" });
-    expect(listScenarioRuns).not.toHaveBeenCalled();
+    expect(listScenarioRuns).toHaveBeenCalled();
+    expect(hook.current().supported).toBe(true);
+    expect(hook.current().page.total).toBe(1);
+  });
+
+  it("is unsupported for a service that cannot list runs", async () => {
+    const service = createFakeChargePointService();
+    (service as unknown as Record<string, unknown>).listScenarioRuns =
+      undefined;
+    const hook = await mount(service, {}, { mode: "local" });
     expect(hook.current().supported).toBe(false);
   });
 

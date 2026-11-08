@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Fleet, load and observability roadmap
@@ -37,8 +37,8 @@ criteria and a size. Per the [ingest rule](../../CLAUDE.md), the PR that ships
 an item updates its row here — status and issue number — in the same commit, so
 this page stays true as work lands.
 
-Issue provenance for every row below is indexed in
-[GitHub issues](../sources/github-issues.md).
+Issue numbers for provenance are cited inline in each row (the
+[GitHub issues](../sources/github-issues.md) table is a frozen archive).
 
 **Size key:** S = a few files, one RPC. M = a new subsystem behind an existing
 seam. L = crosses persistence, UI and the scenario schema, or changes the
@@ -309,6 +309,9 @@ AutoTrafficConfig {
   probabilityOfStart: number,      // 0..1, gate per attempt
   requireAuthorize: boolean,
   stopAfterSec?: number,
+  stopAt?: string,                 // absolute stop time, ISO 8601 (#603)
+  idTagStrategy?: IdTagDistribution, // default: the pool's own (#603)
+  cpIndex?: number,                // fleet position, mixed into the idTag draw (#603)
 }
 ```
 
@@ -321,9 +324,11 @@ CPs do not correlate.
 **Counters.** Expose per-connector attempted / started / rejected / skipped
 authorize, start and stop counts on connector status — that is the assertion
 surface. Phase 2 scrapes them **aggregated**, as
-`ocppcp_auto_traffic_sessions_total{outcome}` and
-`ocppcp_auto_traffic_skipped_total{reason}`: per-connector series would need a
-`cpId` label, which the cardinality rule forbids.
+`ocppcp_auto_traffic_cycles_total{result}` and
+`ocppcp_auto_traffic_steps_total{step,outcome}` (plus the consecutive-skip and
+first/last-run gauges, #603; the planned `sessions` / `skipped{reason}` names
+were not used, and there is no skip reason label): per-connector series would
+need a `cpId` label, which the cardinality rule forbids.
 
 **Interaction with scenarios — state the rule.** A scenario taking control of a
 connector suspends auto-traffic for that connector and resumes it on scenario

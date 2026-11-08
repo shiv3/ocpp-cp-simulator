@@ -56,6 +56,8 @@
   "settings.form.disableLegacyBasic": "禁用旧版 Basic 认证",
   "settings.form.noAuth": "未配置认证。如需启用 Basic 认证,请在上方将安全配置文件设为 1。",
   "settings.form.authKeyGoverned": "认证由上方“安全”部分中的授权密钥管理(安全配置文件 {{profile}})。",
+  "settings.form.txUpdatedMeterValues": "以 TransactionEvent (Updated) 发送周期性电表读数",
+  "settings.form.txUpdatedMeterValuesHint": "OCPP 2.x 交易进行期间，定时电表读数将以 TransactionEvent(Updated, MeterValuePeriodic) 发送，而不是 MeterValues。在 OCPP 1.x 上无效。",
   "settings.form.enableAutoMeter": "启用自动电表值",
   "settings.form.intervalSeconds": "间隔(秒)",
   "settings.form.incrementKwh": "增量值 (kWh)",

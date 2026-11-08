@@ -1,0 +1,48 @@
+{
+  "id": "operations-lab",
+  "name": "Operations lab",
+  "description": "Two sites with different hardware and behaviour; load it with --fleet-template and start it with fleet.create.",
+  "labels": { "env": "lab" },
+  "groups": [
+    {
+      "name": "site-a",
+      "labels": { "site": "a" },
+      "members": [
+        { "cpId": "CP001", "blueprintId": "ac-22kw" },
+        {
+          "cpId": "CP002",
+          "blueprintId": "ac-22kw",
+          "scenarioTemplateId": "full-charging-cycle",
+          "labels": { "role": "charging" }
+        },
+        {
+          "cpId": "CP003",
+          "blueprintId": "ac-22kw",
+          "labels": { "role": "flaky-link" },
+          "networkSimulation": {
+            "enabled": true,
+            "seed": 7,
+            "rules": { "lag": { "type": "latency", "delayMs": 300 } }
+          }
+        }
+      ]
+    },
+    {
+      "name": "site-b",
+      "labels": { "site": "b" },
+      "members": [
+        {
+          "cpId": "CP004",
+          "blueprintId": "dc-150kw",
+          "scenarioTemplateId": "smart-charging"
+        },
+        {
+          "cpId": "CP005",
+          "blueprintId": "dc-150kw",
+          "evSettings": { "maxChargingPowerKw": 60 },
+          "overrides": { "vendor": "Acme", "model": "FaultyDC" }
+        }
+      ]
+    }
+  ]
+}

@@ -19,6 +19,8 @@ function createHookHarness(): HookHarness {
     })),
     useContext: vi.fn(() => null),
     useMemo: (factory: () => unknown) => factory(),
+    useCallback: (fn: unknown) => fn,
+    useRef: (initial: unknown) => ({ current: initial }),
     useEffect: (effect: () => void | (() => void)) => {
       effects.push(effect);
     },

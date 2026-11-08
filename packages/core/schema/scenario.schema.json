@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
   "title": "ScenarioDefinition (scenario schema v1.5)",
-  "$comment": "Scenario file format v1.5 (csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "$comment": "Scenario file format v1.6 (useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -605,10 +605,12 @@
           "then": {
             "properties": {
               "data": {
-                "$comment": "v1.5 (#566). Selects a behavior loaded on the station by id. Data only: the code is loaded with the station, never by a scenario. Fails the run if no loaded behavior has that id.",
+                "$comment": "v1.5 (#566), params and mode v1.6 (#654). Selects a behavior by id (one loaded on the station, or a built-in default.*). Data only: the code is loaded with the station, never by a scenario. Fails the run if no such behavior exists. params are the behavior's knobs for the run: JSON only, validated at run time against the behavior's params schema (see behavior.list), refused rather than coerced. mode disable answers the behavior's CALLs with the version's accepted answer and nothing after, for the run, and takes no params.",
                 "required": ["behaviorId"],
                 "properties": {
-                  "behaviorId": { "type": "string", "minLength": 1 }
+                  "behaviorId": { "type": "string", "minLength": 1 },
+                  "mode": { "enum": ["use", "disable"] },
+                  "params": { "type": "object" }
                 }
               }
             }

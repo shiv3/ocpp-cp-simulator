@@ -39,16 +39,20 @@ import type {
   Transaction,
   TransactionUpdateOptions,
 } from "../../../domain/connector/Transaction";
+import { isRunningTransactionStartedBy } from "../../../domain/connector/Transaction";
+import type { TransactionMessageAction } from "../../../domain/charge-point/ChargePointEvents";
+import { MAX_TIMER_MS } from "../../../shared/timers";
+import { unrefTimerHandle } from "../../../shared/clock";
+import type { TimerHandle } from "../../../shared/clock";
 import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
 import type {
   BootNotification,
   ChargePointErrorCode,
-  OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 // OCPPStatus is a string enum: it must be a VALUE import so switch cases can
 // use enum members — string-literal cases do not narrow an enum-typed value.
-import { OCPPAction } from "../../../domain/types/OcppTypes";
+import { OCPPAction, OCPPStatus } from "../../../domain/types/OcppTypes";
 import {
   BootGate,
   type BootGateStatus,
@@ -438,6 +442,14 @@ function idTagInfoFromPayload(value: SoapParsedValue | undefined): IdTagInfo {
   };
 }
 
+/** What a failed exchange reports as `errorCode`: the SOAP Fault code, or the
+ *  HTTP status. */
+function faultCode(error: SoapFaultError | SoapHttpStatusError): string {
+  return error instanceof SoapFaultError
+    ? `SOAP Fault ${error.fault.code.replace(/^.*:/, "")}`
+    : `HTTP ${error.status}`;
+}
+
 function soapPayload(payload: object): SoapPayload {
   return payload as unknown as SoapPayload;
 }
@@ -736,10 +748,57 @@ const OCPP16_WIRE_PROFILE: ClientWireProfile = {
   },
 };
 
+/**
+ * An HTTP error status that carried no SOAP Fault. OCPP-S 1.6 errata 3.2
+ * treats it like a Fault: the CSMS answered, and failed to process the
+ * message (#585).
+ */
+class SoapHttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SoapHttpStatusError";
+  }
+}
+
+/**
+ * OCPP-S 1.6 errata 3.2 (#585): a transaction-related message a SOAP Fault
+ * or an HTTP error status answered is retried. The caller of `enqueueRequest`
+ * describes the message; `attempt` is the 1-based transmission.
+ */
+interface TransactionRetry {
+  readonly action: TransactionMessageAction;
+  readonly connectorId: number;
+  /** `"0"` for a StartTransaction.req, which has no CSMS id yet. */
+  readonly transactionId: string;
+  /** StartTransaction only: the transaction it started still runs on the
+   *  connector. The first failure marks it (as on OCPP-J, #527). */
+  readonly startedTransaction?: () => Transaction | null;
+  /** StartTransaction only: the request was discarded; the transaction goes
+   *  on without a StartTransaction.conf. */
+  readonly proceedWithoutConf?: () => void;
+}
+
+interface RetryEntry {
+  readonly operation: SoapOperation;
+  readonly payload: SoapPayload;
+  readonly onResponse: (envelope: ParsedSoapEnvelope) => void;
+  readonly retry: TransactionRetry;
+  /** Transmission number of the resend. */
+  readonly attempt: number;
+  readonly errorCode: string;
+}
+
 export class OCPPSoapHandler implements IChargePointMessageHandler {
   private readonly _dataTransferHandler = new DataTransferHandler();
   private readonly _bootGate: BootGate;
   private _requestChain: Promise<void> = Promise.resolve();
+  /** #585: resends waiting out `TransactionMessageRetryInterval`. */
+  private readonly _transactionRetries = new Map<TimerHandle, RetryEntry>();
+  /** Bumped on stop and dispose: a failure handled after it is not retried. */
+  private _retryEpoch = 0;
   private readonly _dialect: SoapDialect;
   private readonly _wireProfile: ClientWireProfile;
 
@@ -878,12 +937,23 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       );
       return;
     }
-    this.enqueueRequest("MeterValues", payload, (env) => {
-      new MeterValuesResultHandler(connectorId).handle(
-        env.payload as MeterValuesResponseV16,
-        this.handlerContext(),
-      );
-    });
+    this.enqueueRequest(
+      "MeterValues",
+      payload,
+      (env) => {
+        new MeterValuesResultHandler(connectorId).handle(
+          env.payload as MeterValuesResponseV16,
+          this.handlerContext(),
+        );
+      },
+      transactionId === undefined
+        ? undefined
+        : {
+            action: "MeterValues",
+            connectorId,
+            transactionId: String(transactionId),
+          },
+    );
   }
 
   /** SOAP envelopes are built per operation: there is no arbitrary-action
@@ -1079,6 +1149,19 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
 
   public onWebSocketClosed(): void {
     this._requestChain = Promise.resolve();
+    // #585: SOAP has no offline queue to salvage a waiting resend to, so a
+    // stop or dispose ends the retry, with a notice.
+    this._retryEpoch += 1;
+    const waiting = [...this._transactionRetries];
+    this._transactionRetries.clear();
+    for (const [timer, entry] of waiting) {
+      this._chargePoint.clock.clearTimeout(timer);
+      this.discardRetry(
+        entry,
+        entry.attempt - 1,
+        "the connection was closed during the retry interval",
+      );
+    }
   }
 
   public flushPendingQueue(): void {
@@ -1094,16 +1177,46 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       transaction,
       connectorId,
     );
-    this.enqueueRequest("StartTransaction", payload, (env) => {
-      new StartTransactionResultHandler(
+    const startedBy = {
+      idTag: transaction.tagId,
+      timestamp: transaction.startTime.toISOString(),
+    };
+    const startedTransaction = (): Transaction | null => {
+      const current = this._chargePoint.getConnector(connectorId)?.transaction;
+      return isRunningTransactionStartedBy(current, startedBy) ? current : null;
+    };
+    this.enqueueRequest(
+      "StartTransaction",
+      payload,
+      (env) => {
+        new StartTransactionResultHandler(
+          connectorId,
+          transaction.tagId,
+          transaction.startTime.toISOString(),
+        ).handle(
+          this.startTransactionResponseFromPayload(env.payload),
+          this.handlerContext(),
+        );
+      },
+      {
+        action: "StartTransaction",
         connectorId,
-        transaction.tagId,
-        transaction.startTime.toISOString(),
-      ).handle(
-        this.startTransactionResponseFromPayload(env.payload),
-        this.handlerContext(),
-      );
-    });
+        transactionId: "0",
+        startedTransaction,
+        proceedWithoutConf: () => {
+          const connector = this._chargePoint.getConnector(connectorId);
+          if (
+            connector?.status === OCPPStatus.Preparing &&
+            isRunningTransactionStartedBy(connector.transaction, startedBy)
+          ) {
+            this._chargePoint.updateConnectorStatus(
+              connectorId,
+              OCPPStatus.Charging,
+            );
+          }
+        },
+      },
+    );
   }
 
   private sendStopTransaction(
@@ -1149,18 +1262,29 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
             timestamp: transaction.stopTime.toISOString(),
             meterStop: transaction.meterStop,
           };
-    this.enqueueRequest("StopTransaction", soapPayload(payload), (env) => {
-      new StopTransactionResultHandler(connectorId, payload.idTag).handle(
-        this.stopTransactionResponseFromPayload(env.payload),
-        this.handlerContext(),
-      );
-    });
+    this.enqueueRequest(
+      "StopTransaction",
+      soapPayload(payload),
+      (env) => {
+        new StopTransactionResultHandler(connectorId, payload.idTag).handle(
+          this.stopTransactionResponseFromPayload(env.payload),
+          this.handlerContext(),
+        );
+      },
+      {
+        action: "StopTransaction",
+        connectorId,
+        transactionId: String(transaction.id),
+      },
+    );
   }
 
   private enqueueRequest(
     operation: SoapOperation,
     payload: SoapPayload,
     onResponse: (envelope: ParsedSoapEnvelope) => void,
+    retry?: TransactionRetry,
+    attempt = 1,
   ): void {
     const action = OPERATION_ACTION[operation];
     if (action && !this.isCallAllowed(action)) {
@@ -1171,6 +1295,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       return;
     }
 
+    const epoch = this._retryEpoch;
     const run = async () => {
       const response = await this.postSoap(operation, payload);
       onResponse(response);
@@ -1178,12 +1303,31 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     this._requestChain = this._requestChain
       .catch(() => undefined)
       .then(run)
-      .catch((error) => {
+      .catch(async (error) => {
         const message = error instanceof Error ? error.message : String(error);
         this._logger.error(
           `SOAP ${operation} failed: ${message}`,
           LogType.OCPP,
         );
+        if (
+          retry !== undefined &&
+          this._dialect.version === OCPP_1_6_SOAP &&
+          (error instanceof SoapFaultError ||
+            error instanceof SoapHttpStatusError)
+        ) {
+          await this.onTransactionMessageFailure(
+            {
+              operation,
+              payload,
+              onResponse,
+              retry,
+              attempt,
+              errorCode: faultCode(error),
+            },
+            epoch,
+          );
+          return;
+        }
         if (operation === "BootNotification") {
           // SOAP has no persistent connection, so there's no `onclose`
           // handler to fall back on the way the WebSocket path has —
@@ -1200,6 +1344,151 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
           });
         }
       });
+  }
+
+  /**
+   * #585, OCPP-S 1.6 errata 3.2: a SOAP Fault or an HTTP error status
+   * answered a transaction-related message (StartTransaction.req,
+   * StopTransaction.req, MeterValues.req of a transaction). The station
+   * "SHALL retry these a couple of times": it sends the message again,
+   * through the request chain, waiting `TransactionMessageRetryInterval`
+   * seconds times the number of transmissions so far, until
+   * `TransactionMessageAttempts` transmissions failed, then discards it
+   * with a notice. Errata 3.2 also has the station send a simple message
+   * (Heartbeat) to tell a failure to process from a connection issue: when
+   * the probe does not reach the CSMS the failure is a connection issue,
+   * which is not retried here (SOAP has no offline queue), as before.
+   *
+   * A StartTransaction.req whose transaction no longer runs is discarded
+   * instead of resent, as on OCPP-J (#527): a conf the station would ignore
+   * leaves a transaction open on the CSMS. The transaction itself stays as
+   * it is, running or ended, whatever the outcome.
+   *
+   * OCPP 1.2 and 1.5 are left as they are: only the 1.6 errata sheet was
+   * checked.
+   */
+  private async onTransactionMessageFailure(
+    failed: RetryEntry,
+    epoch: number,
+  ): Promise<void> {
+    const reachable = await this.probeCentralSystem();
+    if (epoch !== this._retryEpoch) return;
+    if (!reachable) {
+      this._logger.warn(
+        `${failed.retry.action} of transaction ${failed.retry.transactionId} not retried: the Heartbeat probe did not reach the Central System, so this is a connection issue, not a failure to process`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    const { retry, attempt, errorCode } = failed;
+    const started = retry.startedTransaction?.() ?? null;
+    if (started) {
+      this._chargePoint.getConnector(retry.connectorId)?.markStartCallError();
+    }
+    const report = {
+      connectorId: retry.connectorId,
+      transactionId: retry.transactionId,
+      action: retry.action,
+      reason: "callError" as const,
+      errorCode,
+    };
+    const config = this._chargePoint.configuration;
+    const attempts = Math.max(1, config.transactionMessageAttempts());
+    const startOutlived =
+      retry.startedTransaction !== undefined && started === null;
+    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
+    if (attempt >= attempts || startOutlived) {
+      this.discardRetry(
+        failed,
+        attempt,
+        startOutlived ? "its transaction no longer runs" : errorCode,
+      );
+      return;
+    }
+    const delayMs = Math.min(
+      Math.max(0, config.transactionMessageRetryInterval()) * attempt * 1000,
+      MAX_TIMER_MS,
+    );
+    this._logger.warn(
+      `${retry.action} of transaction ${retry.transactionId} answered with ${errorCode}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
+      LogType.TRANSACTION,
+    );
+    const resend: RetryEntry = { ...failed, attempt: attempt + 1 };
+    const timer = this._chargePoint.clock.setTimeout(() => {
+      this._transactionRetries.delete(timer);
+      this.resendTransactionMessage(resend);
+    }, delayMs);
+    unrefTimerHandle(timer);
+    this._transactionRetries.set(timer, resend);
+  }
+
+  /** A resend falls due: the transaction may have ended, or the limit been
+   *  lowered, while it waited. */
+  private resendTransactionMessage(resend: RetryEntry): void {
+    const { retry, attempt } = resend;
+    if (
+      retry.startedTransaction !== undefined &&
+      retry.startedTransaction() === null
+    ) {
+      this.discardRetry(resend, attempt - 1, "its transaction no longer runs");
+      return;
+    }
+    const limit = Math.max(
+      1,
+      this._chargePoint.configuration.transactionMessageAttempts(),
+    );
+    if (attempt > limit) {
+      this.discardRetry(
+        resend,
+        attempt - 1,
+        `TransactionMessageAttempts is now ${limit}`,
+      );
+      return;
+    }
+    this.enqueueRequest(
+      resend.operation,
+      resend.payload,
+      resend.onResponse,
+      retry,
+      attempt,
+    );
+  }
+
+  private discardRetry(
+    entry: RetryEntry,
+    attempts: number,
+    cause: string,
+  ): void {
+    const { retry } = entry;
+    this._logger.warn(
+      `${retry.action} of transaction ${retry.transactionId} discarded after ${attempts} attempt(s): ${cause}`,
+      LogType.TRANSACTION,
+    );
+    this._chargePoint.notifyTransactionMessageDiscarded({
+      connectorId: retry.connectorId,
+      transactionId: retry.transactionId,
+      action: retry.action,
+      reason: "callError",
+      errorCode: entry.errorCode,
+      attempts,
+    });
+    // After the discard's listeners ran: one may have stopped the
+    // transaction or started another, which waits for its own conf.
+    retry.proceedWithoutConf?.();
+  }
+
+  /** Errata 3.2: a Heartbeat tells a failure to process from a connection
+   *  issue. Any answer, a Fault or an HTTP error included, proves the
+   *  Central System is reachable. */
+  private async probeCentralSystem(): Promise<boolean> {
+    try {
+      await this.postSoap("Heartbeat", soapPayload({}));
+      return true;
+    } catch (error) {
+      return (
+        error instanceof SoapFaultError || error instanceof SoapHttpStatusError
+      );
+    }
   }
 
   private async postSoap(
@@ -1270,7 +1559,8 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
         `SOAP response ${operation}: ${responseText}`,
         LogType.OCPP,
       );
-      throw new Error(
+      throw new SoapHttpStatusError(
+        response.status,
         `HTTP ${response.status} ${response.statusText}: ${truncateForLog(responseText)}`,
       );
     }

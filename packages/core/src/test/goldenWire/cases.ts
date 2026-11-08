@@ -191,6 +191,23 @@ export const goldenCases: GoldenCase[] = [
       await settle(rig);
     }
   }),
+  // F06.FR.06: a triggered MeterValues holds the aligned measurands only and
+  // every sampledValue has context Trigger.
+  c201("trigger-meter-values-distinct-lists", async (rig) => {
+    rig.cp.configuration.applyChange(
+      "MeterValuesSampledData",
+      "Energy.Active.Import.Register",
+    );
+    rig.cp.configuration.applyChange(
+      "MeterValuesAlignedData",
+      "Power.Active.Import",
+    );
+    await rig.csms.call("TriggerMessage", {
+      requestedMessage: "MeterValues",
+      evse: { id: 1, connectorId: 1 },
+    });
+    await settle(rig);
+  }),
   ...both("trigger-message-unsupported", async (rig) => {
     await rig.csms.call("TriggerMessage", {
       requestedMessage: "NoSuchMessage",

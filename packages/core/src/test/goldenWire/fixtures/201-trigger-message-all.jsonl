@@ -22,7 +22,7 @@
 {"d":"CSMS>","k":"result","id":"id-11","p":{}}
 {"d":"CSMS>","k":"call","id":"id-12","a":"TriggerMessage","p":{"requestedMessage":"MeterValues","evse":{"id":1,"connectorId":1}}}
 {"d":"CP>","k":"result","id":"id-12","p":{"status":"Accepted"}}
-{"d":"CP>","k":"call","id":"id-13","a":"MeterValues","p":{"evseId":1,"meterValue":[{"timestamp":"<ts>","sampledValue":[{"value":0,"measurand":"Energy.Active.Import.Register","unitOfMeasure":{"unit":"Wh"},"context":"Sample.Periodic"},{"value":0,"measurand":"Power.Active.Import","unitOfMeasure":{"unit":"W"},"context":"Sample.Periodic"}]}]}}
+{"d":"CP>","k":"call","id":"id-13","a":"MeterValues","p":{"evseId":1,"meterValue":[{"timestamp":"<ts>","sampledValue":[{"value":0,"measurand":"Energy.Active.Import.Register","unitOfMeasure":{"unit":"Wh"},"context":"Trigger"},{"value":0,"measurand":"Power.Active.Import","unitOfMeasure":{"unit":"W"},"context":"Trigger"}]}]}}
 {"d":"CSMS>","k":"result","id":"id-13","p":{}}
 {"d":"CSMS>","k":"call","id":"id-14","a":"TriggerMessage","p":{"requestedMessage":"FirmwareStatusNotification"}}
 {"d":"CP>","k":"result","id":"id-14","p":{"status":"NotImplemented"}}

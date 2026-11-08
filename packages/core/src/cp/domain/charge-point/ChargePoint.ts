@@ -100,6 +100,7 @@ import type {
 } from "../connector/Transaction";
 import {
   reportedActivePowerW,
+  type MeterSampleOverrides,
   type ReadingContext,
 } from "../connector/MeterValueBuilder";
 import {
@@ -2765,7 +2766,11 @@ export class ChargePoint {
     connector.meterValue = value;
   }
 
-  sendMeterValue(connectorId: number, context?: ReadingContext): void {
+  sendMeterValue(
+    connectorId: number,
+    context?: ReadingContext,
+    overrides?: MeterSampleOverrides,
+  ): void {
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(
@@ -2778,6 +2783,7 @@ export class ChargePoint {
       connector.transaction?.id ?? undefined,
       connectorId,
       context,
+      overrides,
     );
   }
 
